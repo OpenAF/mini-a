@@ -41,6 +41,23 @@ help:
     desc     : A MCP connection object (or array of objects) using OpenAF's $mcp() function in SLON or JSON format
     example  : "(url: 'http://127.0.0.1:17879/mcp', type: remote, debug: false)"
     mandatory: false
+  - name     : capabilityselection
+    desc     : Deterministically select a bounded relevant subset of normalized capabilities before exposing MCP tools
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : capabilitylimit
+    desc     : Maximum capabilities exposed when capabilityselection=true
+    example  : "8"
+    mandatory: false
+  - name     : policy
+    desc     : Optional SLON/JSON centralized policy definition
+    example  : "(shell: deny, delegation: deny)"
+    mandatory: false
+  - name     : policyfile
+    desc     : Optional JSON file containing centralized policy definition
+    example  : "/path/to/policy.json"
+    mandatory: false
   - name     : mcplazy
     desc     : Initialize MCP connections lazily on first use instead of during startup
     example  : "true"
@@ -1234,6 +1251,10 @@ jobs:
       keyArg: goal
       args  :
         mcp            : mcp
+        capabilityselection: capabilityselection
+        capabilitylimit: capabilitylimit
+        policy         : policy
+        policyfile     : policyfile
         eval           : eval
         evalfile       : evalfile
         evalbaseline   : evalbaseline
@@ -1504,6 +1525,10 @@ jobs:
       evalwritebaseline: isString.default(__)
       evalout        : isString.default(__)
       mcp            : default(__)
+      capabilityselection: toBoolean.isBoolean.default(false)
+      capabilitylimit: toNumber.isNumber.default(8)
+      policy         : default(__)
+      policyfile     : isString.default(__)
       verbose        : toBoolean.isBoolean.default(false)
       rpm            : toNumber.isNumber.default(__)
       rtm            : toNumber.isNumber.default(__)

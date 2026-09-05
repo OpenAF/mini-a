@@ -1450,6 +1450,17 @@ mini-a runstatus=review-20260905
 
 State records run status, safe agent/plan snapshots, checkpoints, task-DAG-compatible task records, result metadata, and metrics. The trace records run start/end, planning, validation, replan, orchestration decisions, LLM/tool/shell/wiki activity, and checkpoints with timestamps and run IDs. Durable traces redact secret-like fields, shell commands, tool arguments, and full LLM prompts/responses; they are intended for operational reconstruction, not credential storage.
 
+## Capability selection and policy runtime
+
+Set `capabilityselection=true` to build a normalized registry from current MCP tools, skills, plugins, and available workers, then expose only the deterministic, bounded subset relevant to the goal. `capabilitylimit` defaults to `8`; existing `mcpdynamic=true` behavior remains available unchanged.
+
+Use `policy=` (SLON/JSON) or `policyfile=` (JSON) for centralized restrictions. The policy is allow-by-default for compatibility, but a configured deny is enforced before shell execution, MCP/plugin/proxy tool calls, delegation setup, and every mutating Wiki operation. Supported initial rules include `shell: deny`, `delegation: deny`, `mcp: deny`, `wiki: (write: deny)`, `filesystem: (write: deny)`, `deniedTools: ["tool_name"]`, and `network: (allowDomains: ["example.com"])`. An `approval` result uses the existing shell confirmation surface and is fail-closed for non-interactive tool calls. Policy decisions are emitted through the structured trace without including secrets or unrestricted arguments.
+
+```bash
+mini-a goal="Find customer records" usetools=true capabilityselection=true capabilitylimit=4
+mini-a goal="Inspect the repository" policy="(shell: deny, delegation: deny)"
+```
+
 ### How It Works
 
 Deep research mode runs a loop of research-validate-learn cycles:

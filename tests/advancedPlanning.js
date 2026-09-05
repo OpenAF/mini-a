@@ -66,6 +66,15 @@
     ow.test.assert(args.evidencegate, false, "Explicit evidencegate=false must remain unchanged")
   }
 
+  exports.testAutoOrchestrationRespectsModeOverrides = function() {
+    var agent = createAgent()
+    var args = { goal: "Refactor and validate the security pipeline", orchestration: "auto", useplanning: false, modelstrategy: "default", evidencegate: false, chatbotmode: false }
+    agent._applyOrchestration(args, { goal: args.goal, orchestration: "auto", useplanning: false, modelstrategy: "default", evidencegate: false, __explicitargkeys: { goal: true, orchestration: true }, __modeargkeys: { useplanning: true, modelstrategy: true, evidencegate: true } })
+    ow.test.assert(args.useplanning, false, "A mode-provided useplanning=false must override automatic orchestration")
+    ow.test.assert(args.modelstrategy, "default", "A mode-provided model strategy must remain unchanged")
+    ow.test.assert(args.evidencegate, false, "A mode-provided evidence-gate setting must remain unchanged")
+  }
+
   exports.testPlanningWithoutExternalPlanIsNotInvalid = function() {
     var agent = createAgent()
     var messages = []

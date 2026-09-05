@@ -32,6 +32,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testAutoOrchestrationRespectsExplicitOverrides
 
+- name: MiniA Tests::AutoOrchestrationRespectsModeOverrides
+  from: MiniA Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAutoOrchestrationRespectsModeOverrides
+
 - name: MiniA Tests::PlanningWithoutExternalPlan
   from: MiniA Tests::Init
   to  : oJob Test
@@ -76,6 +81,7 @@ todo:
 - MiniA Tests::GoalAssessmentEntityCount
 - MiniA Tests::AutoOrchestrationSelectsExistingControls
 - MiniA Tests::AutoOrchestrationRespectsExplicitOverrides
+- MiniA Tests::AutoOrchestrationRespectsModeOverrides
 - MiniA Tests::PlanningWithoutExternalPlan
 - MiniA Tests::SimplePlan
 - MiniA Tests::TreePlan

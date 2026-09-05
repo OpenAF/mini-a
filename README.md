@@ -676,6 +676,7 @@ Mini-A includes built-in security features:
 - **Shell Isolation** - Shell access disabled by default
 - **Sandboxing Support** - Use `usesandbox=...` presets for built-in host restrictions, or `shell=...` for Docker/Podman/custom sandboxes with stronger isolation
 - **Hook-based Guardrails** - Add `before_shell`/`after_shell` hooks to enforce organization-specific policy
+- **Centralized Policies** - Opt-in `policy=`/`policyfile=` rules consistently constrain shell, MCP tools, delegation, Wiki mutations, filesystem access, and HTTP domains; decisions are recorded in the run trace
 
 Built-in sandbox presets now report their real protection level:
 - `linux`: uses `bwrap` when available; otherwise Mini-A warns and runs unsandboxed.

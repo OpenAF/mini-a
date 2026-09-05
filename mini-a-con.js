@@ -261,6 +261,9 @@ try {
 
       var applied = []
       var skipped = []
+      // Mode values are configuration choices, not merely display defaults.
+      // Keep their provenance so automatic orchestration cannot overwrite them.
+      if (!isObject(args.__modeargkeys)) args.__modeargkeys = {}
       var paramsSource = resolvedPreset.params
       var applyParam = function(key, value) {
         if (isObject(value) || isArray(value)) value = af.toSLON(value)
@@ -271,6 +274,7 @@ try {
             return
           }
           args[key] = value
+          args.__modeargkeys[normalizedKey] = true
           applied.push(key)
         }
       }
@@ -316,6 +320,7 @@ try {
           objid: true,
           execid: true,
           "__modeapplied": true,
+          "__modeargkeys": true,
           "__unknownargsreported": true
         },
         logger: function(message) { logWarn(message) }
@@ -609,6 +614,10 @@ try {
     showseparator  : { type: "boolean", default: true, description: "Show a subtle separator line between interaction events (disable for a more compact view)" },
     nologtrunc     : { type: "boolean", default: false, description: "Disable truncation of long log output lines (show full content)" },
     usetools       : { type: "boolean", default: __, description: "Register MCP tools directly on the model" },
+    capabilityselection: { type: "boolean", default: false, description: "Select a bounded relevant subset of normalized capabilities before registering MCP tools" },
+    capabilitylimit: { type: "number", default: 8, description: "Maximum capabilities exposed when capabilityselection=true" },
+    policy         : { type: "string", description: "SLON/JSON policy definition for shell, tools, delegation, Wiki and network" },
+    policyfile     : { type: "string", description: "JSON file containing centralized policy definition" },
     usetoolslc     : { type: "boolean", default: __, description: "Register MCP tools directly only on the low-cost model" },
     useutils       : { type: "boolean", default: __, description: "Enable bundled Mini Utils Tool utilities" },
     useeditor      : { type: "boolean", default: false, description: "Compose each console goal in an external editor ($EDITOR or vi)" },
@@ -4213,6 +4222,7 @@ try {
   var _streamRenderer = __
   var _streamCueStopped = false
   var _streamNeedsTerminator = false
+  var _lastRenderedPlanSignature = ""
 
   function _printStreamMarkdown(text, kind, palette) {
     if (!isString(text) || text.length === 0) return
@@ -4434,6 +4444,73 @@ try {
     return format.withSideLine(renderedLines.join("\n"), termWidth, promptColor, textStyle, sideLineTheme)
   }
 
+  // Plans are structured state, not just a multiline log. Rendering their
+  // current snapshot as a table keeps long task descriptions readable while
+  // making completion and the active step easy to scan.
+  function _renderPlanEventMessage(messageText) {
+    var termWidth = _getConsoleRenderWidth()
+    var agent = isObject(activeAgent) ? activeAgent : __
+    var plan = isObject(agent) && isObject(agent._agentState) ? agent._agentState.plan : __
+    var items = isObject(agent) && isFunction(agent._normalizePlanItems) ? agent._normalizePlanItems(plan) : []
+    var safeMessage = __miniANormalizeConsoleEventText(messageText)
+    var isPlanSnapshot = /(^|\n)\s*\d+\.\s/.test(safeMessage) && /(^|\n)\s*Progress:\s*\d+%/i.test(safeMessage)
+
+    if (!isPlanSnapshot || !isArray(items) || items.length === 0) {
+      // A plan can emit ordinary status messages (or be announced before its
+      // first snapshot). Keep those as normal Markdown logs rather than
+      // replacing them with a stale table.
+      var markdown = __miniAMarkdownRender(safeMessage, termWidth - 3, { ansi: __conAnsi === true })
+      var planIcon = colorifyText("🗺️", "RESET," + eventPalette.plan) + "  "
+      return format.withSideLine(planIcon + markdown, termWidth, promptColor, hintColor + ",ITALIC", sideLineTheme)
+    }
+
+    var statusIcons = isFunction(agent._getStatusIcons) ? agent._getStatusIcons() : {}
+    var completed = items.filter(function(item) {
+      var status = item && (item.status || item.rawStatus)
+      return isFunction(agent._isStatusDone) ? agent._isStatusDone(status) : status === "done"
+    }).length
+    var total = items.length
+    var percent = Math.round((completed / total) * 100)
+    var currentStep = isObject(plan) ? Number(plan.currentStep) : NaN
+    var signature = stringify(items.map(function(item) {
+      return { id: item.id, title: item.title, status: item.status, rawStatus: item.rawStatus }
+    }), __, "") + "|" + currentStep
+    if (signature === _lastRenderedPlanSignature) return __
+    _lastRenderedPlanSignature = signature
+    var rows = []
+
+    for (var pi = 0; pi < items.length; pi++) {
+      var item = items[pi] || {}
+      var statusKey = String(item.status || item.rawStatus || "pending")
+      var statusInfo = statusIcons[statusKey] || statusIcons[item.rawStatus] || { icon: "•", label: statusKey }
+      var stepId = isDef(item.id) ? item.id : (pi + 1)
+      var state = (statusInfo.icon || "•") + " " + (statusInfo.label || statusKey)
+      var isDone = isFunction(agent._isStatusDone) ? agent._isStatusDone(statusKey) : statusKey === "done"
+      if (!isNaN(currentStep) && Number(stepId) === currentStep && !isDone) state += " · current"
+      rows.push({ Step: String(stepId), Status: state, Task: item.title || "(no description)" })
+    }
+
+    // The side-line takes three columns. Reserve a further three so the table
+    // and progress summary align with the indented body of ordinary log events.
+    var contentIndent = "   "
+    var tableWidth = Math.max(24, termWidth - 6)
+    var table = printTable(rows, tableWidth, false, __conAnsi === true, __conAnsi === true ? "utf" : "plain", __, true, false, true)
+      .split("\n")
+      .map(function(line) { return line.replace(/\s+$/, "") })
+      .join("\n")
+      .replace(/\s+$/, "")
+    var barWidth = Math.max(8, Math.min(32, tableWidth - 30))
+    var indicator = __conAnsi === true ? colorifyText("━", successColor) : "#"
+    var space = __conAnsi === true ? colorifyText("─", "FG(240)") : "-"
+    var bar = ow.format.string.progress(completed, total, 0, barWidth, indicator, space)
+    var summary = "Progress " + bar + " " + percent + "% (" + completed + "/" + total + " steps)"
+    if (!isNaN(currentStep) && currentStep > 0 && currentStep <= total) summary += " · Current step " + currentStep
+
+    var heading = colorifyText("🗺️  Plan", "BOLD," + eventPalette.plan) + colorifyText(" — " + completed + "/" + total + " steps", hintColor)
+    table = contentIndent + table.replace(/\n/g, "\n" + contentIndent)
+    return format.withSideLine(heading + "\n" + table + "\n" + contentIndent + summary, termWidth, promptColor, hintColor, sideLineTheme)
+  }
+
   function printEvent(type, icon, message, id) {
     // Handle streaming output
     if (type == "stream" || type == "planner_stream") {
@@ -4493,7 +4570,8 @@ try {
     }
     if (type == "delegate") inline = true
 
-    var _msg = _renderEventMessage(iconText, message, extra)
+    var _msg = type == "plan" ? _renderPlanEventMessage(message) : _renderEventMessage(iconText, message, extra)
+    if (isUnDef(_msg)) return
     // Optimized: extract previous line erase logic
     function _erasePrev() {
       if (!isDef(_prevEventRenderLines)) return
@@ -4771,6 +4849,7 @@ try {
   function runGoal(goalText, skillUsage) {
     _streamOutputStats.totalChars = 0
     _streamOutputStats.contentChars = 0
+    _lastRenderedPlanSignature = ""
     _resetStreamRenderState()
     _prevEventRenderLines = __
     _prevEventLastUpdate = 0

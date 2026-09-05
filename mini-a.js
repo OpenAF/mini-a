@@ -732,6 +732,8 @@ load("mini-a-response.js")
 load("mini-a-sandbox.js")
 load("mini-a-tool-selection.js")
 load("mini-a-orchestration.js")
+load("mini-a-capabilities.js")
+load("mini-a-policy.js")
 
 MiniA.prototype._stopAgentResources = function() {
   // This is invoked both by the console finalizer and by the OpenAF shutdown
@@ -1509,7 +1511,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   case "size"     : _e = "📏"; break
   case "rate"     : _e = "⏳"; break
   case "mcp"      : _e = "🤖"; break
-  case "plan"     : _e = "🗺️ "; break
+  case "plan"     : _e = "🗺️  "; break
   case "deepresearch": _e = "🔍"; break
   case "done"     : _e = "✅"; break
   case "error"    : _e = "❌"; break
@@ -1728,8 +1730,11 @@ MiniA.prototype._isExplicitArgument = function(name, rawArgs) {
   var normalized = isString(name) ? name.toLowerCase() : ""
   if (normalized.length === 0) return false
   var keys = rawArgs && rawArgs.__explicitargkeys
-  if (isArray(keys)) return keys.some(function(key) { return String(key).toLowerCase() === normalized })
-  if (isMap(keys)) return keys[normalized] === true || keys[name] === true
+  if (isArray(keys) && keys.some(function(key) { return String(key).toLowerCase() === normalized })) return true
+  if (isMap(keys) && (keys[normalized] === true || keys[name] === true)) return true
+  var modeKeys = rawArgs && rawArgs.__modeargkeys
+  if (isArray(modeKeys) && modeKeys.some(function(key) { return String(key).toLowerCase() === normalized })) return true
+  if (isMap(modeKeys) && (modeKeys[normalized] === true || modeKeys[name] === true)) return true
   return isMap(rawArgs) && Object.prototype.hasOwnProperty.call(rawArgs, name)
 }
 
@@ -13461,6 +13466,16 @@ MiniA.prototype._executeParallelToolBatch = function(batch, options) {
       return { toolName: toolName, result: { error: unknownMsg }, error: true }
     }
 
+    var policyUrl = isObject(params) ? (isString(params.url) ? params.url : (isString(params.uri) ? params.uri : params.endpoint)) : __
+    var toolAccess = /write|delete|create|update|modify|send|deploy|upload|remove/i.test(toolName) ? "write" : "read"
+    var isPluginTool = (isObject(parent._pluginToolNames) && parent._pluginToolNames[toolName] === true) || /^plugin[._:-]/i.test(toolName)
+    var policyDecision = parent._policyDecision({ type: "tool", name: toolName, url: policyUrl, access: toolAccess, plugin: isPluginTool })
+    if (policyDecision.decision !== "allow") {
+      var policyMsg = "Tool '" + toolName + "' " + (policyDecision.decision === "approval" ? "requires explicit approval" : "denied") + " by policy: " + policyDecision.reason
+      parent.fnI("warn", policyMsg)
+      parent._finalizeToolExecution({ toolName: toolName, params: params, observation: policyMsg, stepLabel: stepLabel, error: true, context: context, contextId: context.contextId })
+      return { toolName: toolName, result: { error: policyMsg, policy: policyDecision.decision }, error: true }
+    }
     var beforeToolResult = parent._runHook("before_tool", {
       MINI_A_TOOL       : toolName,
       MINI_A_TOOL_PARAMS: stringify(params, __, "")
@@ -13896,6 +13911,15 @@ MiniA.prototype._runCommand = function(args) {
     args.checkall   = _$(args.checkall,  "args.checkall").isBoolean().default(false)
     args.shellbatch = _$(args.shellbatch, "args.shellbatch").isBoolean().default(false)
 
+    var shellPolicy = this._policyDecision({ type: "shell", name: "shell", command: args.command })
+    if (shellPolicy.decision === "deny") {
+      args.output = "[blocked by policy] " + shellPolicy.reason
+      global.__mini_a_metrics.shell_commands_blocked.inc()
+      global.__mini_a_metrics.shell_commands_denied.inc()
+      return args
+    }
+    if (shellPolicy.decision === "approval") args.checkall = true
+
     var allowValue = isDef(args.shellallow) ? args.shellallow : this._shellAllowlist
     var extraBanValue = isDef(args.shellbanextra) ? args.shellbanextra : this._shellExtraBanned
     var allowPipesValue = isDef(args.shellallowpipes) ? args.shellallowpipes : this._shellAllowPipes
@@ -14280,14 +14304,19 @@ MiniA.prototype._applySystemInstructions = function(args) {
 MiniA.prototype._registerMcpToolsForGoal = function(args) {
   args = _$(args, "args").isMap().default({})
 
-  var useDynamicSelection = toBoolean(args.mcpdynamic)
+  var useCapabilitySelection = toBoolean(args.capabilityselection) === true
+  var useDynamicSelection = toBoolean(args.mcpdynamic) || useCapabilitySelection
   var selectedToolNames = []
   this._useToolsActualMain = false
   this._useToolsActualLC = false
 
   if (this._useTools && isArray(this.mcpTools) && this.mcpTools.length > 0) {
     if (useDynamicSelection && isString(args.goal) && args.goal.length > 0) {
-      selectedToolNames = this._selectMcpToolsDynamically(args.goal, this.mcpTools)
+      if (useCapabilitySelection) {
+        selectedToolNames = this._selectCapabilities(args.goal, args).selected.filter(function(item) { return item.type === "mcp-tool" }).map(function(item) { return item.name })
+      } else {
+        selectedToolNames = this._selectMcpToolsDynamically(args.goal, this.mcpTools)
+      }
     }
 
     var parent = this
@@ -14367,7 +14396,7 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
             .filter(function(tool) { return parent.mcpToolToConnection[tool.name] === connectionId })
             .map(function(tool) { return tool.name })
 
-          var hasDynamicSelection = useDynamicSelection && selectedToolNames.length > 0
+          var hasDynamicSelection = useDynamicSelection && (selectedToolNames.length > 0 || useCapabilitySelection)
           if (hasDynamicSelection) {
             var toolsForThisConnection = selectedToolNames.filter(function(name) {
               return connectionToolNames.indexOf(name) >= 0
@@ -14421,8 +14450,8 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
       if (isDef(rebuiltLowCostPair.working)) this.lc_llm = rebuiltLowCostPair.working
     }
 
-    var toolCountMsg = useDynamicSelection && selectedToolNames.length > 0
-      ? `${selectedToolNames.length} dynamically selected`
+    var toolCountMsg = useDynamicSelection
+      ? `${selectedToolNames.length} ${useCapabilitySelection ? "capability-selected" : "dynamically selected"}`
       : `${this.mcpTools.length}`
     var registeredTargets = []
     if (this._useToolsMain) registeredTargets.push("main")
@@ -14962,7 +14991,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "conversation", "shell", "usesandbox", "sandboxprofile", "sandboxnonetwork", "shellallow", "shellbanextra",
     "shelltimeout", "shellmaxbytes", "toolcachettl", "mcplazy", "mcpdynamic", "mcpproxy", "mcpproxythreshold", "toolargcheck", "toolargrepair",
     "mcpproxytoon", "contextguard", "contextguardbudget", "toolresultmaxinline", "readresultmaxmatches",
-    "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugvalch", "planfile",
+    "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugvalch", "capabilityselection", "capabilitylimit", "policy", "policyfile", "planfile",
     "planformat", "plancontent", "planstyle", "forceplanning", "saveplannotes", "outputfile", "updatefreq",
     "updateinterval", "forceupdates", "planlog", "nosetmcpwd", "noagentsmd", "utilsroot", "utilsallow", "utilsdeny",
     "useskills", "usestdutils", "mini-a-docs", "miniadocs",
@@ -15651,6 +15680,13 @@ MiniA.prototype.init = function(args) {
     this._savePlanNotes = args.saveplannotes
 
     // Initialize delegation and registration server as early as possible
+    this._initPolicyRuntime(args)
+    var delegationPolicy = this._policyDecision({ type: "delegation", name: "delegation" })
+    if (delegationPolicy.decision !== "allow") {
+      args.usedelegation = false
+      args.autodelegation = false
+      this.fnI("warn", "Delegation disabled by policy: " + delegationPolicy.reason)
+    }
     if (args.usedelegation === true && isUnDef(this._subtaskManager)) {
       try {
         if (isUnDef(global.SubtaskManager)) {
@@ -16114,6 +16150,7 @@ MiniA.prototype.init = function(args) {
       this.mcpTools = []
       this.mcpToolNames = []
       this.mcpToolToConnection = {}
+      this._pluginToolNames = {}
       this._mcpConnectionInfo = {}
       this._mcpConnectionAliases = {}
       this._mcpConnectionAliasToId = {}
@@ -16318,6 +16355,7 @@ MiniA.prototype.init = function(args) {
             this.mcpTools.push(tool)
             this.mcpToolNames.push(tool.name)
             this.mcpToolToConnection[tool.name] = id
+            if (isString(mcpConfig.id) && mcpConfig.id.indexOf("plugin:") === 0) this._pluginToolNames[tool.name] = true
             this._toolInfoByName[tool.name] = tool
             this._toolCacheSettings[tool.name] = this._computeToolCacheSettings(tool, this._toolCacheDefaultTtl)
           })
@@ -17316,6 +17354,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._routeHistory = {}
     this._configurePlanUpdates(args)
     this._sessionArgs = args
+    this._initPolicyRuntime(args)
     this._nologtrunc = args.nologtrunc === true
     sessionStartTime = isNumber(sessionStartTime) ? sessionStartTime : now()
 
@@ -20510,7 +20549,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               } else wkResult = af.toTOON(wkLint)
             } else if (wkOp === "write") {
               global.__mini_a_metrics.wiki_ops_write.inc()
-              if (args.wikiaccess !== "rw") {
+              var wikiPolicy = this._policyDecision({ type: "wiki_write", name: wkPath })
+              if (wikiPolicy.decision !== "allow") {
+                wkResult = "[ERROR] Wiki write denied by policy: " + wikiPolicy.reason
+              } else if (args.wikiaccess !== "rw") {
                 wkResult = "[ERROR] wiki write requires wikiaccess=rw"
               } else if (wkPath.length === 0) {
                 wkResult = "[ERROR] wiki write requires 'path'"
@@ -20525,7 +20567,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             } else if (wkOp === "move") {
               global.__mini_a_metrics.wiki_ops_write.inc()
               var wkTo = isString(wkParams.to) ? wkParams.to.trim() : ""
-              if (args.wikiaccess !== "rw") {
+              var wkMovePolicy = this._policyDecision({ type: "wiki_write", name: wkPath })
+              if (wkMovePolicy.decision !== "allow") {
+                wkResult = "[ERROR] Wiki move denied by policy: " + wkMovePolicy.reason
+              } else if (args.wikiaccess !== "rw") {
                 wkResult = "[ERROR] wiki move requires wikiaccess=rw"
               } else if (wkPath.length === 0 || wkTo.length === 0) {
                 wkResult = "[ERROR] wiki move requires 'path' and 'to'"
@@ -20535,7 +20580,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               }
             } else if (wkOp === "delete") {
               global.__mini_a_metrics.wiki_ops_delete.inc()
-              if (args.wikiaccess !== "rw") {
+              var wkDeletePolicy = this._policyDecision({ type: "wiki_write", name: wkPath })
+              if (wkDeletePolicy.decision !== "allow") {
+                wkResult = "[ERROR] Wiki delete denied by policy: " + wkDeletePolicy.reason
+              } else if (args.wikiaccess !== "rw") {
                 wkResult = "[ERROR] wiki delete requires wikiaccess=rw"
               } else if (wkPath.length === 0) {
                 wkResult = "[ERROR] wiki delete requires 'path'"
@@ -20545,7 +20593,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               }
             } else if (wkOp === "init") {
               global.__mini_a_metrics.wiki_ops_write.inc()
-              if (args.wikiaccess !== "rw") {
+              var wkInitPolicy = this._policyDecision({ type: "wiki_write", name: wkPath })
+              if (wkInitPolicy.decision !== "allow") {
+                wkResult = "[ERROR] Wiki init denied by policy: " + wkInitPolicy.reason
+              } else if (args.wikiaccess !== "rw") {
                 wkResult = "[ERROR] wiki init requires wikiaccess=rw"
               } else {
                 wkResult = af.toTOON(this._wikiManager.init(wkPath))
@@ -20582,7 +20633,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               }
             } else if (wkOp === "reindex") {
               global.__mini_a_metrics.wiki_ops_write.inc()
-              wkResult = af.toTOON(this._wikiManager.reindex())
+              var wkReindexPolicy = this._policyDecision({ type: "wiki_write", name: "reindex" })
+              wkResult = wkReindexPolicy.decision !== "allow" ? "[ERROR] Wiki reindex denied by policy: " + wkReindexPolicy.reason : af.toTOON(this._wikiManager.reindex())
             } else {
               wkResult = "[ERROR] Unknown wiki op: " + wkOp + ". Use retrieve, search, open, navigate, read, grep, related, context, list, tree, browse, backlinks, lint, mounts, attach, detach" + (args.wikiaccess === "rw" ? ", write, move, delete, init, reindex" : "")
             }
@@ -21269,7 +21321,9 @@ MiniA.prototype._runChatbotMode = function(options) {
                 var cbWkLint = this._wikiManager.lint(this._memoryManager, { staleDays: this._wikiLintStaleDays })
                 cbWkResult = af.toTOON(cbWkLint)
               } else if (cbWkOp === "write") {
-                if (args.wikiaccess !== "rw") { cbWkResult = "[ERROR] wiki write requires wikiaccess=rw" }
+                var cbWikiPolicy = this._policyDecision({ type: "wiki_write", name: cbWkPath })
+                if (cbWikiPolicy.decision !== "allow") { cbWkResult = "[ERROR] Wiki write denied by policy: " + cbWikiPolicy.reason }
+                else if (args.wikiaccess !== "rw") { cbWkResult = "[ERROR] wiki write requires wikiaccess=rw" }
                 else if (cbWkPath.length === 0) { cbWkResult = "[ERROR] wiki write requires 'path'" }
                 else if (cbWkContent.length === 0 && !cbWkWriteOpts.append) { cbWkResult = "[ERROR] wiki write requires 'content'" }
                 else {
@@ -21278,21 +21332,27 @@ MiniA.prototype._runChatbotMode = function(options) {
                 }
               } else if (cbWkOp === "move") {
                 var cbWkTo = isString(cbWkParams.to) ? cbWkParams.to.trim() : ""
-                if (args.wikiaccess !== "rw") { cbWkResult = "[ERROR] wiki move requires wikiaccess=rw" }
+                var cbWkMovePolicy = this._policyDecision({ type: "wiki_write", name: cbWkPath })
+                if (cbWkMovePolicy.decision !== "allow") { cbWkResult = "[ERROR] Wiki move denied by policy: " + cbWkMovePolicy.reason }
+                else if (args.wikiaccess !== "rw") { cbWkResult = "[ERROR] wiki move requires wikiaccess=rw" }
                 else if (cbWkPath.length === 0 || cbWkTo.length === 0) { cbWkResult = "[ERROR] wiki move requires 'path' and 'to'" }
                 else {
                   var cbWkMove = this._wikiManager.move(cbWkPath, cbWkTo, { leaveRedirect: cbWkParams.leaveRedirect === true || cbWkParams.redirect === true, overwrite: cbWkParams.overwrite === true })
                   cbWkResult = isObject(cbWkMove) && cbWkMove.ok ? af.toTOON(cbWkMove) : "[ERROR] " + (isObject(cbWkMove) ? cbWkMove.error : "move failed")
                 }
               } else if (cbWkOp === "delete") {
-                if (args.wikiaccess !== "rw") { cbWkResult = "[ERROR] wiki delete requires wikiaccess=rw" }
+                var cbWkDeletePolicy = this._policyDecision({ type: "wiki_write", name: cbWkPath })
+                if (cbWkDeletePolicy.decision !== "allow") { cbWkResult = "[ERROR] Wiki delete denied by policy: " + cbWkDeletePolicy.reason }
+                else if (args.wikiaccess !== "rw") { cbWkResult = "[ERROR] wiki delete requires wikiaccess=rw" }
                 else if (cbWkPath.length === 0) { cbWkResult = "[ERROR] wiki delete requires 'path'" }
                 else {
                   var cbWkDelete = this._wikiManager.delete(cbWkPath)
                   cbWkResult = isObject(cbWkDelete) && cbWkDelete.ok ? "Deleted " + cbWkPath : "[ERROR] " + (isObject(cbWkDelete) ? cbWkDelete.error : "delete failed")
                 }
               } else if (cbWkOp === "init") {
-                if (args.wikiaccess !== "rw") { cbWkResult = "[ERROR] wiki init requires wikiaccess=rw" }
+                var cbWkInitPolicy = this._policyDecision({ type: "wiki_write", name: cbWkPath })
+                if (cbWkInitPolicy.decision !== "allow") { cbWkResult = "[ERROR] Wiki init denied by policy: " + cbWkInitPolicy.reason }
+                else if (args.wikiaccess !== "rw") { cbWkResult = "[ERROR] wiki init requires wikiaccess=rw" }
                 else cbWkResult = af.toTOON(this._wikiManager.init(cbWkPath))
               } else {
                 cbWkResult = "[ERROR] Unknown wiki op: " + cbWkOp

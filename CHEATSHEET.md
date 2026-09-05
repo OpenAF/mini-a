@@ -976,6 +976,11 @@ Common folder names: `topics/`, `concepts/`, `entities/`, `comparisons/`. Use th
 | `wikigraphfalkoruser` | string | - | FalkorDB username |
 | `wikigraphfalkorpass` | string | - | FalkorDB password |
 
+| `capabilityselection` | boolean | `false` | Select a bounded, deterministic subset of registered capabilities for the goal |
+| `capabilitylimit` | number | `8` | Maximum capabilities exposed when selection is enabled |
+| `policy` | SLON/JSON | - | Centralized allow/deny rules for shell, MCP, delegation, Wiki, filesystem and network access |
+| `policyfile` | string | - | JSON file containing the centralized policy |
+
 Elasticsearch/OpenSearch backend mapping:
 
 | Mini-A parameter | Internal wiki config | Meaning |

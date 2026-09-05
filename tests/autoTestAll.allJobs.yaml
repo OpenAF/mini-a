@@ -3,6 +3,7 @@
 include:
 - tests/advancedPlanning.yaml
 - tests/agentPlugins.yaml
+- tests/capabilityPolicy.yaml
 - tests/coreFunctionality.yaml
 - tests/dreams.yaml
 - tests/eval.yaml
