@@ -311,6 +311,14 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedRefChannelSweepsExpiredEntries
 
+- name: MiniA Wiki Tests::McpWikiRestrictedRefChannelNamespacesIsolateWikis
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedRefChannelNamespacesIsolateWikis
+
+- name: MiniA Wiki Tests::McpWikiRestrictedDefaultWikiIdIsDeterministicAndSafe
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedDefaultWikiIdIsDeterministicAndSafe
+
 - name: MiniA Wiki Tests::McpWikiOpsMetadataIncludesOpsTools
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiOpsMetadataIncludesOpsTools
@@ -698,6 +706,8 @@ todo:
 - MiniA Wiki Tests::McpWikiRestrictedGraphHintsAreOptInOpaqueReferences
 - MiniA Wiki Tests::McpWikiRestrictedRefsAreSharedAcrossReplicasViaChannel
 - MiniA Wiki Tests::McpWikiRestrictedRefChannelSweepsExpiredEntries
+- MiniA Wiki Tests::McpWikiRestrictedRefChannelNamespacesIsolateWikis
+- MiniA Wiki Tests::McpWikiRestrictedDefaultWikiIdIsDeterministicAndSafe
 - MiniA Wiki Tests::McpWikiOpsMetadataIncludesOpsTools
 - MiniA Wiki Tests::FsBackendDelete
 - MiniA Wiki Tests::FsBackendDeleteNonExistent

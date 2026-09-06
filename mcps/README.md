@@ -130,11 +130,17 @@ ojob mcps/mcp-wiki-safe.yaml \
 By default the opaque references returned by `search` (and the per-page issuance cooldown) live only in that one process's memory — fine for a single instance, but a problem if `mcp-wiki-safe` runs as multiple replicas behind a load balancer (e.g. a Kubernetes `Deployment`): the `read` call that consumes a reference can land on a different replica than the `search` call that issued it, and would incorrectly see `invalid-or-expired-reference`. Set `wikirestrictrefch` to a SLON/JSON OpenAF channel definition (same conventions as `auditch`, see `github.com/openaf/docs/openaf.md`) to move that state out of the process, so any replica can consume a reference issued by any other one:
 
 ```sh
-ojob mcps/mcp-wiki-safe.yaml onport=8888 label="Team wiki" wikiroot=./wiki \
+ojob mcps/mcp-wiki-safe.yaml \
+  onport=8888 \
+  label="Engineering wiki" \
+  wikiroot=./wiki \
+  wikiid=engineering \
   wikirestrictrefch="(type: 'redis', options: (host: 'redis.svc', port: 6379))"
 ```
 
-Use a channel type with real per-key operations across concurrent writers for multi-replica deployments — `redis` or `mongo` are appropriate; `simple` (the default, in-memory) and `file` are single-writer stores, fine for one instance but unsafe shared by concurrent replicas (whole-ledger overwrite races). Entries (references and page cooldowns) are discarded once their TTL/cooldown elapses, via lazy expiry on read plus a background sweep rate-limited to roughly once per `wikirestrictrefttl` seconds. `wikirestrictstate` (usage/budget counters) is independent of `wikirestrictrefch` and remains a local, per-process ledger.
+`wikiid` is the logical wiki namespace. Every replica serving Engineering must use `wikiid=engineering`; a separate deployment may use `wikiid=customer-acme` with the same Redis infrastructure and will not share opaque references or page cooldowns. If omitted, Mini-A derives a deterministic `auto-...` identifier from safe effective backend identity (for example, the canonical filesystem root or S3 bucket/prefix), so existing single-wiki setups continue to work. Explicit IDs are recommended for replicated/containerized production deployments, where paths or deployment details may differ across replicas. The effective namespace is included once in restricted-retrieval startup output.
+
+Use a channel type with real per-key operations across concurrent writers for multi-replica deployments — `redis` or `mongo` are appropriate; `simple` (the default, in-memory) and `file` are single-writer stores, fine for one instance but unsafe shared by concurrent replicas (whole-ledger overwrite races). Entries (references and page cooldowns) are discarded once their TTL/cooldown elapses, via lazy expiry on read plus a background sweep rate-limited to roughly once per `wikirestrictrefttl` seconds. Sweeping only removes expired entries in the current `wikiid` namespace. `wikirestrictstate` (usage/budget counters) is independent of `wikirestrictrefch` and remains a local, per-process ledger. Pre-namespace shared-channel entries from older versions are not consumed and are allowed to expire naturally.
 
 #### mcp-wiki-ops
 

@@ -141,6 +141,51 @@ function __miniAMcpWikiChannelUnset(ch, key) {
   try { ch.set(key, __) } catch(ignoreClear) {}
 }
 
+// Shared restricted-retrieval channels can be used by more than one logical
+// wiki. Keep the namespace human-configurable, but make the fallback stable so
+// a standalone deployment needs no new setting.
+function __miniAMcpWikiSafeBackendId(value) {
+  if (!isString(value) || value.trim().length === 0) return ""
+  var s = value.trim()
+  try {
+    var u = new java.net.URI(s)
+    if (u.getScheme()) {
+      var port = u.getPort() >= 0 ? ":" + u.getPort() : ""
+      return String(u.getScheme()).toLowerCase() + "://" + (u.getHost() ? String(u.getHost()).toLowerCase() : "") + port + (u.getPath() || "")
+    }
+  } catch(ignoreUri) {}
+  // Configuration URLs sometimes are not URI-shaped. Never put likely
+  // credentials or query tokens into the fallback fingerprint.
+  return s.replace(/\/\/[^/@]*@/, "//").replace(/[?#].*$/, "")
+}
+
+function __miniAMcpWikiDefaultWikiId(cfg) {
+  cfg = isMap(cfg) ? cfg : {}
+  var backend = isString(cfg.backend) ? cfg.backend.toLowerCase() : "fs"
+  var identity
+  if (backend === "fs") {
+    var root = isString(cfg.root) && cfg.root.trim().length > 0 ? cfg.root.trim() : "."
+    try { root = String(new java.io.File(root).getCanonicalPath()) } catch(ignoreCanonicalRoot) {}
+    identity = "fs|" + root
+  } else if (backend === "s3" || backend === "s3fs") {
+    identity = backend + "|" + String(cfg.bucket || "").trim() + "|" + String(cfg.prefix || "").trim() + "|" + __miniAMcpWikiSafeBackendId(cfg.url)
+  } else if (backend === "es") {
+    identity = "es|" + __miniAMcpWikiSafeBackendId(cfg.esurl) + "|" + String(cfg.esindex || "").trim()
+  } else {
+    identity = backend + "|" + __miniAMcpWikiSafeBackendId(cfg.url)
+  }
+  return "auto-" + sha256(identity).substring(0, 24)
+}
+
+function __miniAMcpWikiWikiId(args, cfg) {
+  var supplied = isMap(args) && isString(args.wikiid) && args.wikiid.trim().length > 0 ? args.wikiid.trim().toLowerCase() : __
+  if (isDef(supplied)) {
+    if (!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(supplied)) throw "invalid wikiid: use 1-128 lowercase letters, numbers, dots, underscores, or hyphens"
+    return supplied
+  }
+  return __miniAMcpWikiDefaultWikiId(cfg)
+}
+
 function MiniAMcpWikiRestriction(args, cfg) {
   args = isMap(args) ? args : {}
   this.enabled = toBoolean(args.wikirestrict) === true
@@ -148,6 +193,7 @@ function MiniAMcpWikiRestriction(args, cfg) {
   this.cooldowns = {}
   this.audit = []
   this.stateId = sha1(nowNano() + "|" + genUUID())
+  this.wikiId = __miniAMcpWikiWikiId(args, cfg)
   this.maxEntries = 2048
   this.profile = __miniAMcpWikiRestrictionProfileName(args)
   this.policy = {}
@@ -207,12 +253,14 @@ MiniAMcpWikiRestriction.prototype._saveState = function() {
 }
 
 MiniAMcpWikiRestriction.prototype._sweepChannel = function(now) {
-  var ch = $ch(this.refChName)
+  var ch = $ch(this.refChName), wikiId = this.wikiId
   var keys = []
   try { keys = ch.getKeys() } catch(ignoreGetKeys) { return }
   keys.forEach(function(rawKey) {
     var key = __miniAMcpWikiParseChannelKey(rawKey)
-    if (!isMap(key)) return
+    // Do not touch legacy or another wiki's keys: old entries expire lazily,
+    // while active namespaces are exclusively owned by their wikiId.
+    if (!isMap(key) || key.wiki !== wikiId) return
     try {
       var value = ch.get(key)
       if (isMap(value) && Number(value.expires || 0) <= now) __miniAMcpWikiChannelUnset(ch, key)
@@ -267,7 +315,7 @@ MiniAMcpWikiRestriction.prototype.charge = function(kind, chars) {
 MiniAMcpWikiRestriction.prototype._cooldownActive = function(hash) {
   if (this.refChName) {
     var v
-    try { v = $ch(this.refChName).get({ kind: "cooldown", hash: hash }) } catch(ignoreGet) { return false }
+    try { v = $ch(this.refChName).get({ wiki: this.wikiId, kind: "cooldown", hash: hash }) } catch(ignoreGet) { return false }
     return isMap(v) && Number(v.expires || 0) > Date.now()
   }
   return isDef(this.cooldowns[hash]) && Number(this.cooldowns[hash]) > Date.now()
@@ -281,10 +329,10 @@ MiniAMcpWikiRestriction.prototype.issue = function(path) {
   var refExpires = Date.now() + this.policy.refTtl * 1000
   var cooldownExpires = Date.now() + this.policy.pageCooldown * 1000
   if (this.refChName) {
-    $ch(this.refChName).set({ kind: "ref", ref: ref }, { path: path, expires: refExpires })
-    $ch(this.refChName).set({ kind: "cooldown", hash: hash }, { expires: cooldownExpires })
+    $ch(this.refChName).set({ wiki: this.wikiId, kind: "ref", ref: ref }, { wiki: this.wikiId, path: path, expires: refExpires })
+    $ch(this.refChName).set({ wiki: this.wikiId, kind: "cooldown", hash: hash }, { wiki: this.wikiId, expires: cooldownExpires })
   } else {
-    this.refs[ref] = { path: path, expires: refExpires }
+    this.refs[ref] = { wiki: this.wikiId, path: path, expires: refExpires }
     this.cooldowns[hash] = cooldownExpires
   }
   return ref
@@ -295,14 +343,14 @@ MiniAMcpWikiRestriction.prototype.consume = function(ref) {
   if (!isString(ref)) return __
   var grant
   if (this.refChName) {
-    var ch = $ch(this.refChName), key = { kind: "ref", ref: ref }
+    var ch = $ch(this.refChName), key = { wiki: this.wikiId, kind: "ref", ref: ref }
     grant = ch.get(key)
     if (isMap(grant)) __miniAMcpWikiChannelUnset(ch, key)
   } else {
     grant = this.refs[ref]
     delete this.refs[ref]
   }
-  if (!isMap(grant)) return __
+  if (!isMap(grant) || grant.wiki !== this.wikiId) return __
   return Number(grant.expires) > Date.now() ? grant : __
 }
 
@@ -603,7 +651,7 @@ function __miniAMcpWikiInit(args, options) {
     logPrefix: logPrefix
   }
 
-  if (restricted) printErrnl("[" + logPrefix + "] restricted retrieval active (profile: " + restriction.profile + "; " + (restriction.statePath ? "persistent state" : "process-only state") + "; tools: search, read)")
+  if (restricted) printErrnl("[" + logPrefix + "] restricted retrieval active (profile: " + restriction.profile + "; wiki namespace: " + restriction.wikiId + "; " + (restriction.statePath ? "persistent state" : "process-only state") + "; tools: search, read)")
 
   return global.__miniAMcpWiki
 }

@@ -1376,7 +1376,7 @@
   exports.testMcpWikiRestrictedRefsAreSharedAcrossReplicasViaChannel = function() {
     var chDef = "(name: '_test_mcp_wiki_refs_" + genUUID().replace(/-/g, "") + "', type: 'simple')"
     var cfg = { backend: "fs", root: "." }
-    var baseArgs = { wikirestrict: true, wikirestrictminquerychars: 1, wikirestrictpagecooldown: 3600, wikirestrictrefch: chDef }
+    var baseArgs = { wikirestrict: true, wikiid: "wiki-a", wikirestrictminquerychars: 1, wikirestrictpagecooldown: 3600, wikirestrictrefch: chDef }
 
     // Each instance below stands in for one Kubernetes replica: they share nothing
     // with each other except the channel, so any cross-instance success here can
@@ -1400,16 +1400,64 @@
 
   exports.testMcpWikiRestrictedRefChannelSweepsExpiredEntries = function() {
     var chName = "_test_mcp_wiki_sweep_" + genUUID().replace(/-/g, "")
-    var r = new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictrefch: "(name: '" + chName + "', type: 'simple')" }, { backend: "fs", root: "." })
+    var chDef = "(name: '" + chName + "', type: 'simple')"
+    var r = new MiniAMcpWikiRestriction({ wikirestrict: true, wikiid: "wiki-a", wikirestrictrefch: chDef }, { backend: "fs", root: "." })
     var ref = r.issue("expiring-page.md")
     ow.test.assert(isString(ref), true, "reference should be issued")
 
-    // simulate the TTL having already elapsed and force an immediate sweep
-    $ch(chName).set({ kind: "ref", ref: ref }, { path: "expiring-page.md", expires: Date.now() - 1000 })
+    // Simulate an expired entry for this namespace and entries from another.
+    $ch(chName).set({ wiki: "wiki-a", kind: "ref", ref: ref }, { wiki: "wiki-a", path: "expiring-page.md", expires: Date.now() - 1000 })
+    $ch(chName).set({ wiki: "wiki-a", kind: "cooldown", hash: "valid-a" }, { wiki: "wiki-a", expires: Date.now() + 60000 })
+    $ch(chName).set({ wiki: "wiki-b", kind: "ref", ref: "expired-b" }, { wiki: "wiki-b", path: "other.md", expires: Date.now() - 1000 })
+    $ch(chName).set({ wiki: "wiki-b", kind: "cooldown", hash: "valid-b" }, { wiki: "wiki-b", expires: Date.now() + 60000 })
     r._lastSweep = 0
     r._purge()
 
-    ow.test.assert(isUnDef($ch(chName).get({ kind: "ref", ref: ref })), true, "an expired reference should be swept from the shared channel")
+    ow.test.assert(isUnDef($ch(chName).get({ wiki: "wiki-a", kind: "ref", ref: ref })), true, "an expired reference should be swept from this wiki namespace")
+    ow.test.assert(isMap($ch(chName).get({ wiki: "wiki-a", kind: "cooldown", hash: "valid-a" })), true, "a valid entry in this wiki namespace should remain")
+    ow.test.assert(isMap($ch(chName).get({ wiki: "wiki-b", kind: "ref", ref: "expired-b" })), true, "sweeping wiki-a must not remove another wiki's entries")
+    ow.test.assert(isMap($ch(chName).get({ wiki: "wiki-b", kind: "cooldown", hash: "valid-b" })), true, "sweeping wiki-a must not modify valid state in another namespace")
+  }
+
+  exports.testMcpWikiRestrictedRefChannelNamespacesIsolateWikis = function() {
+    var chName = "_test_mcp_wiki_namespaces_" + genUUID().replace(/-/g, "")
+    var chDef = "(name: '" + chName + "', type: 'simple')"
+    var cfg = { backend: "fs", root: "." }
+    var a = new MiniAMcpWikiRestriction({ wikirestrict: true, wikiid: "wiki-a", wikirestrictpagecooldown: 3600, wikirestrictrefch: chDef }, cfg)
+    var aReplica = new MiniAMcpWikiRestriction({ wikirestrict: true, wikiid: "wiki-a", wikirestrictpagecooldown: 3600, wikirestrictrefch: chDef }, cfg)
+    var b = new MiniAMcpWikiRestriction({ wikirestrict: true, wikiid: "wiki-b", wikirestrictpagecooldown: 3600, wikirestrictrefch: chDef }, cfg)
+    var refA = a.issue("docs/install.md")
+    ow.test.assert(isString(refA), true, "wiki-a should issue a reference")
+    ow.test.assert(isString(b.issue("docs/install.md")), true, "wiki-b must have an independent cooldown for an identical path")
+    ow.test.assert(isUnDef(b.consume(refA)), true, "a reference from wiki-a must not be consumable by wiki-b")
+    var grantA = aReplica.consume(refA)
+    ow.test.assert(isMap(grantA), true, "another replica with wiki-a should consume wiki-a's reference")
+
+    // A malformed/corrupt grant under wiki-a's key is still rejected unless its
+    // embedded grant binding agrees with the key's namespace.
+    var tampered = "tampered-reference"
+    $ch(chName).set({ wiki: "wiki-a", kind: "ref", ref: tampered }, { wiki: "wiki-b", path: "docs/install.md", expires: Date.now() + 60000 })
+    global.__miniAMcpWiki = { restriction: a }
+    ow.test.assert(__miniAMcpWikiRestrictedRead({ path: tampered }).error, "invalid-or-expired-reference", "a grant whose stored wiki differs from the current wiki must use the opaque-reference failure")
+  }
+
+  exports.testMcpWikiRestrictedDefaultWikiIdIsDeterministicAndSafe = function() {
+    var explicit = new MiniAMcpWikiRestriction({ wikirestrict: true, wikiid: "Engineering_Prod" }, { backend: "fs", root: "." })
+    ow.test.assert(explicit.wikiId, "engineering_prod", "explicit wiki IDs should be normalized to lowercase")
+    var invalidWikiId = false
+    try { new MiniAMcpWikiRestriction({ wikirestrict: true, wikiid: "bad wiki id" }, { backend: "fs", root: "." }) } catch(e) { invalidWikiId = String(e).indexOf("invalid wikiid") >= 0 }
+    ow.test.assert(invalidWikiId, true, "unsafe explicit wiki IDs should fail validation")
+    var fsA = new MiniAMcpWikiRestriction({ wikirestrict: true }, { backend: "fs", root: "." })
+    var fsB = new MiniAMcpWikiRestriction({ wikirestrict: true }, { backend: "fs", root: "./" })
+    var fsOther = new MiniAMcpWikiRestriction({ wikirestrict: true }, { backend: "fs", root: "tests" })
+    ow.test.assert(fsA.wikiId, fsB.wikiId, "equivalent filesystem roots should derive the same wiki namespace")
+    ow.test.assert(fsA.wikiId === fsOther.wikiId, false, "different filesystem roots should derive different wiki namespaces")
+    var s3A = new MiniAMcpWikiRestriction({ wikirestrict: true }, { backend: "s3", bucket: "docs", prefix: "public/", url: "https://key:secret@s3.example/?token=hidden" })
+    var s3B = new MiniAMcpWikiRestriction({ wikirestrict: true }, { backend: "s3", bucket: "docs", prefix: "public/", url: "https://other:password@s3.example/?token=different" })
+    var s3Other = new MiniAMcpWikiRestriction({ wikirestrict: true }, { backend: "s3", bucket: "docs", prefix: "customer/", url: "https://s3.example/" })
+    ow.test.assert(s3A.wikiId, s3B.wikiId, "credentials and URL tokens must not affect the default wiki namespace")
+    ow.test.assert(s3A.wikiId === s3Other.wikiId, false, "different S3 prefixes should derive different wiki namespaces")
+    ow.test.assert(s3A.wikiId.indexOf("secret") < 0 && s3A.wikiId.indexOf("hidden") < 0, true, "default wiki namespaces must not expose credentials or tokens")
   }
 
   exports.testMcpWikiOpsMetadataIncludesOpsTools = function() {

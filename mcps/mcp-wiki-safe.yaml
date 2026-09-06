@@ -124,8 +124,12 @@ help:
   - name     : wikirestrictstate
     desc     : Optional persistent restricted-retrieval ledger path outside wikiroot
     mandatory: false
+  - name     : wikiid
+    desc     : "Logical wiki namespace for shared restricted references and cooldowns. Use the same stable ID on replicas serving one wiki, and a different ID for each independent wiki. Default: a deterministic safe fingerprint of the effective wiki backend configuration. Explicit IDs are recommended for replicated/container deployments."
+    example  : "engineering"
+    mandatory: false
   - name     : wikirestrictrefch
-    desc     : "SLON/JSON OpenAF channel definition to store search-issued references and page cooldowns (default: this process's own memory only). Set this to share references across multiple mcp-wiki-safe replicas behind the same load balancer (e.g. Kubernetes), so a read call can consume a reference issued by a search call on a different replica. Use a channel with real per-key ops across writers, such as redis (`simple`/`file` are single-writer only, fine standalone but unsafe shared by concurrent replicas). Entries are discarded once their TTL/cooldown elapses."
+    desc     : "SLON/JSON OpenAF channel definition to store search-issued references and page cooldowns (default: this process's own memory only). State is namespaced by wikiid, so one Redis/channel can safely serve several wikis. Set this to share references across replicas of the same wiki behind a load balancer; those replicas must use the same wikiid. Use a channel with real per-key ops across writers, such as redis (`simple`/`file` are single-writer only, fine standalone but unsafe shared by concurrent replicas). Entries are discarded once their TTL/cooldown elapses."
     example  : "(type: 'redis', options: (host: 'redis.svc', port: 6379))"
     mandatory: false
   - name     : audit
@@ -279,6 +283,7 @@ jobs:
       wikirestrictwindow      : toNumber.isNumber.default(__)
       wikirestrictpagecooldown: toNumber.isNumber.default(__)
       wikirestrictstate       : isString.default(__)
+      wikiid                  : isString.default(__)
       wikirestrictrefch       : isString.default(__)
       label                   : isString.default("wiki")
       wikimounts              : isString.default(__)
