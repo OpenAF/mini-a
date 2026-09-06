@@ -2325,6 +2325,8 @@ MiniA.prototype._writeConversationPayload = function(path) {
     if (isObject(this._historyVm)) {
       payload.history_vm = {
         schemaVersion: this._historyVm.schemaVersion,
+        contextSchemaVersion: this._historyVm.contextSchemaVersion,
+        contextVirtualization: this._historyVm.contextVirtualization === true,
         active: this._historyVm.enabled === true && this._historyVm.degraded !== true,
         shadow: this._historyVm.shadow === true,
         store: this._historyVm.storePath,
@@ -2356,6 +2358,7 @@ MiniA.prototype._writeConversationPayload = function(path) {
 MiniA.prototype._initHistoryVm = function(args, existingPayload) {
   var enabled = isMap(args) && args.historyvm === true
   var shadow = isMap(args) && args.historyvmshadow === true
+  var contextVirtualization = isMap(args) && args.contextvirtualization === true
   if (isMap(args) && isString(args.historyvmmode) && args.historyvmmode.toLowerCase() !== "safe") {
     this.fnI("warn", "Unsupported historyvmmode='" + args.historyvmmode + "'; using safe mode.")
     args.historyvmmode = "safe"
@@ -2364,6 +2367,11 @@ MiniA.prototype._initHistoryVm = function(args, existingPayload) {
     this.fnI("warn", "historyvm=true takes precedence over historyvmshadow=true; shadow mode disabled.")
     shadow = false
     args.historyvmshadow = false
+  }
+  if (contextVirtualization && !enabled) {
+    this.fnI("warn", "contextvirtualization=true requires historyvm=true; context virtualization disabled.")
+    contextVirtualization = false
+    args.contextvirtualization = false
   }
   if (!enabled && !shadow) {
     this._historyVm = __
@@ -2374,15 +2382,17 @@ MiniA.prototype._initHistoryVm = function(args, existingPayload) {
     this.fnI("warn", "History VM v1 does not support remote S3 backing; using legacy conversation behavior.")
     args.historyvm = false
     args.historyvmshadow = false
+    args.contextvirtualization = false
     this._historyVm = __
     return __
   }
   var conversationPath = isString(args.conversation) ? args.conversation.trim() : ""
-  var initKey = conversationPath + "|" + enabled + "|" + shadow
+  var initKey = conversationPath + "|" + enabled + "|" + shadow + "|" + contextVirtualization
   if (isObject(this._historyVm) && this._historyVmInitKey === initKey) return this._historyVm
   this._historyVm = new MiniAHistoryVM({
     enabled: enabled,
     shadow: shadow,
+    contextVirtualization: contextVirtualization,
     mode: isString(args.historyvmmode) ? args.historyvmmode : "safe",
     conversationPath: conversationPath,
     conversationId: isMap(existingPayload) && isMap(existingPayload.history_vm) ? existingPayload.history_vm.conversationId : __,
@@ -2396,6 +2406,7 @@ MiniA.prototype._initHistoryVm = function(args, existingPayload) {
   if (isObject(this._historyVm) && this._historyVm.degraded) {
     args.historyvm = false
     args.historyvmshadow = false
+    args.contextvirtualization = false
   }
   return this._historyVm
 }
@@ -15215,7 +15226,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
   ;[
     "rpm", "tpm", "rtm", "maxsteps", "knowledge", "chatyouare", "youare", "homedir",
     "promptprofile", "systempromptbudget", "outfile", "outfileall", "libs", "model", "modellc", "modelval",
-    "conversation", "historyvm", "historyvmmode", "historyvmshadow", "shell", "usesandbox", "sandboxprofile", "sandboxnonetwork", "shellallow", "shellbanextra",
+    "conversation", "historyvm", "historyvmmode", "historyvmshadow", "contextvirtualization", "shell", "usesandbox", "sandboxprofile", "sandboxnonetwork", "shellallow", "shellbanextra",
     "shelltimeout", "shellmaxbytes", "toolcachettl", "mcplazy", "mcpdynamic", "mcpproxy", "mcpproxythreshold", "toolargcheck", "toolargrepair",
     "mcpproxytoon", "contextguard", "contextguardbudget", "toolresultmaxinline", "readresultmaxmatches",
     "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugvalch", "capabilityselection", "capabilitylimit", "policy", "policyfile", "planfile",
@@ -15656,6 +15667,7 @@ MiniA.prototype.init = function(args) {
       { name: "historyvm", type: "boolean", default: false },
       { name: "historyvmmode", type: "string", default: "safe" },
       { name: "historyvmshadow", type: "boolean", default: false },
+      { name: "contextvirtualization", type: "boolean", default: false },
       { name: "shell", type: "string", default: "" },
       { name: "usesandbox", type: "string", default: __ },
       { name: "sandboxprofile", type: "string", default: __ },
@@ -17240,6 +17252,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "historyvm", type: "boolean", default: false },
       { name: "historyvmmode", type: "string", default: "safe" },
       { name: "historyvmshadow", type: "boolean", default: false },
+      { name: "contextvirtualization", type: "boolean", default: false },
       { name: "maxcontext", type: "number", default: 0 },
       { name: "contextguard", type: "boolean", default: false },
       { name: "contextguardbudget", type: "number", default: 32000 },

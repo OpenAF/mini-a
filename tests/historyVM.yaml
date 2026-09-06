@@ -15,6 +15,21 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/historyVM.js").testAppendResumeAndDistinctEqualEvents
 
+- name: MiniA History VM Tests::Representations
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testMultiResolutionRepresentationsAndCache
+
+- name: MiniA History VM Tests::Hierarchy
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testHierarchicalContextObjectsSurviveRestart
+
+- name: MiniA History VM Tests::PhaseOneCompatibility
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testPhaseOneDoesNotCreateRepresentationCache
+
 - name: MiniA History VM Tests::RuntimeFlags
   from: MiniA History VM Tests::Init
   to  : oJob Test
@@ -73,6 +88,9 @@ jobs:
 todo:
 - MiniA History VM Tests::Disabled
 - MiniA History VM Tests::AppendResume
+- MiniA History VM Tests::Representations
+- MiniA History VM Tests::Hierarchy
+- MiniA History VM Tests::PhaseOneCompatibility
 - MiniA History VM Tests::RuntimeFlags
 - MiniA History VM Tests::LegacyImport
 - MiniA History VM Tests::SearchRead

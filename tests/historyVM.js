@@ -11,11 +11,12 @@
     file.delete()
   }
 
-  var withVm = function(fn) {
+  var withVm = function(fn, options) {
     var root = String(java.nio.file.Files.createTempDirectory("mini-a-history-vm-test-").toAbsolutePath())
     var conversation = root + "/conversation.json"
     try {
-      return fn(new MiniAHistoryVM({ enabled: true, conversationPath: conversation, conversationId: "test-conversation", sessionId: "test-session" }), conversation)
+      var opts = merge({ enabled: true, conversationPath: conversation, conversationId: "test-conversation", sessionId: "test-session" }, isMap(options) ? options : {}, true)
+      return fn(new MiniAHistoryVM(opts), conversation)
     } finally {
       removeTree(root)
     }
@@ -45,15 +46,20 @@
       ow.test.assert(isUnDef(agent._historyVm), true, "Disabled runtime mode must not initialize VM storage")
       ow.test.assert(isUnDef(agent._createHistoryVmMcpConfig(disabledArgs)), true, "Disabled runtime mode must not register retrieval tools")
 
+      var invalidPhase2Args = { historyvm: false, historyvmshadow: false, contextvirtualization: true, conversation: conversation }
+      agent._initHistoryVm(invalidPhase2Args)
+      ow.test.assert(invalidPhase2Args.contextvirtualization === false && isUnDef(agent._historyVm), true, "Phase 2 must not activate without Phase 1 History VM")
+
       var shadowArgs = { historyvm: false, historyvmshadow: true, historyvmmode: "safe", conversation: conversation }
       agent._initHistoryVm(shadowArgs)
       ow.test.assert(agent._historyVm.shadow === true, true, "Shadow mode should initialize canonical capture")
       ow.test.assert(isUnDef(agent._createHistoryVmMcpConfig(shadowArgs)), true, "Shadow mode must not register retrieval tools")
 
-      var enabledArgs = { historyvm: true, historyvmshadow: true, historyvmmode: "experimental", conversation: conversation }
+      var enabledArgs = { historyvm: true, historyvmshadow: true, historyvmmode: "experimental", contextvirtualization: true, conversation: conversation }
       agent._initHistoryVm(enabledArgs)
       var config = agent._createHistoryVmMcpConfig(enabledArgs)
       ow.test.assert(enabledArgs.historyvmshadow === false && enabledArgs.historyvmmode === "safe", true, "Enabled mode should take precedence and normalize the v1 policy")
+      ow.test.assert(agent._historyVm.contextVirtualization === true, true, "Explicit Phase 2 mode should extend the active History VM")
       ow.test.assert(isMap(config) && isFunction(config.options.fns.history_search) && isFunction(config.options.fns.history_get) && isFunction(config.options.fns.history_expand), true, "Enabled mode should expose all bounded retrieval tools")
       var large = new Array(10001).join("p")
       var rawConversation = [{ role: "assistant", content: large }, { role: "assistant", content: "one" }, { role: "assistant", content: "two" }, { role: "assistant", content: "three" }, { role: "assistant", content: "four" }]
@@ -78,6 +84,53 @@
       ow.test.assert(resumed.events.length === 2, true, "Committed journal events should resume")
       ow.test.assert(resumed.events[0].content === "same 😀", true, "Unicode content should round trip exactly")
       ow.test.assert(resumed.metrics.checkpoint_hits === 1, true, "Valid checkpoint should be used")
+    })
+  }
+
+  exports.testMultiResolutionRepresentationsAndCache = function() {
+    withVm(function(vm, conversation) {
+      var event = vm.registerContextObject("wiki", "architecture", new Array(1401).join("x"), { importance: 0.9, keywords: ["context"] })
+      var object = vm.objects[vm.objects.length - 1]
+      ow.test.assert(object.kind === "wiki" && object.handle.indexOf("wiki:w") === 0, true, "Generalized ContextObjects need stable logical handles")
+      ow.test.assert(object.representations.reference.level === "L0" && object.representations.full.level === "L4", true, "Phase 2 objects should advertise L0-L4 representations")
+
+      var reference = vm.getRepresentation(object.handle, "reference")
+      var detailed = vm.getRepresentation(object.id, "L3")
+      var exact = vm.getRepresentation(object.handle, "full")
+      ow.test.assert(reference.level === "L0" && reference.text.indexOf("[wiki:") === 0, true, "L0 should be a compact deterministic reference")
+      ow.test.assert(detailed.complete === false && detailed.text.indexOf("expand L4") >= 0, true, "L3 should remain bounded and point to exact expansion")
+      ow.test.assert(exact.exact === true && exact.content === event.content, true, "L4 must return exact canonical content without a cached copy")
+      ow.test.assert(io.fileExists(vm.representationCachePath) === true && vm.metrics.representation_cache_writes === 2, true, "Only derived representations should be cached lazily")
+
+      var resumed = new MiniAHistoryVM({ enabled: true, contextVirtualization: true, conversationPath: conversation, conversationId: "test-conversation" })
+      var reused = resumed.getRepresentation(object.handle, "L0")
+      ow.test.assert(reused.text === reference.text && resumed.metrics.representation_cache_hits === 1, true, "Versioned representations should be reused after restart")
+    }, { contextVirtualization: true })
+  }
+
+  exports.testHierarchicalContextObjectsSurviveRestart = function() {
+    withVm(function(vm, conversation) {
+      vm.registerContextObject("summary", "project", "Project context", { keywords: ["project"] })
+      var parent = vm.objects[vm.objects.length - 1]
+      vm.registerContextObject("decision", "architecture", "Use hierarchical virtualization", { parentId: parent.handle, dependencies: ["evidence:e42"] })
+      var child = vm.objects[vm.objects.length - 1]
+      var children = vm.getChildren(parent.handle)
+      ow.test.assert(children.total === 1 && children.results[0].handle === child.handle, true, "Parent objects should expose bounded child descriptors")
+      ow.test.assert(child.parentId === parent.handle && child.dependencies[0] === "evidence:e42", true, "Hierarchy and dependency metadata should remain attached to the child")
+
+      var resumed = new MiniAHistoryVM({ enabled: true, contextVirtualization: true, conversationPath: conversation, conversationId: "test-conversation" })
+      var rebuilt = resumed.getChildren(parent.handle)
+      ow.test.assert(rebuilt.total === 1 && rebuilt.results[0].handle === child.handle, true, "Hierarchy links should rebuild deterministically from canonical events")
+      ow.test.assert(resumed.metrics.hierarchy_roots === 1 && resumed.metrics.hierarchy_links === 1, true, "Hierarchy diagnostics should report roots and links")
+    }, { contextVirtualization: true })
+  }
+
+  exports.testPhaseOneDoesNotCreateRepresentationCache = function() {
+    withVm(function(vm) {
+      vm.captureUserMessage("phase one only")
+      ow.test.assert(vm.contextVirtualization === false && io.fileExists(vm.representationCachePath) === false, true, "Phase 1 should not pay Phase 2 cache overhead")
+      ow.test.assert(isUnDef(vm.objects[0].representations), true, "Phase 1 object shape should remain compatible")
+      ow.test.assert(isUnDef(vm.registerContextObject("wiki", "page", "not active")), true, "Phase 2 object registration should remain gated")
     })
   }
 

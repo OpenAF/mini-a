@@ -2691,6 +2691,8 @@ Mini-A writes append-only canonical events and checkpoints under `chat-history.j
 
 Use `historyvmshadow=true` first to capture and estimate savings without changing provider requests or adding retrieval tool schemas. If both flags are supplied, enabled mode takes precedence. The VM is independent of `usememory`; enabling it creates retained conversation data even when history listing is disabled. `/clear`, web expiry, and explicit conversation deletion remove the owned sidecar unless history retention is configured to keep the conversation. `/rewind` records a new branch and default retrieval excludes the abandoned branch rather than deleting its canonical events.
 
+Phase 2A can be enabled explicitly with `historyvm=true contextvirtualization=true`. It extends the same canonical journal with stable typed handles, parent/child metadata, and deterministic L0-L4 representation levels. L0-L3 views are generated and cached only when requested; L4 always reads the exact canonical object. This foundation does not yet replace the Phase 1 projection or retrieval policy, so enabling it alone does not claim additional input-token savings.
+
 Version 1 supports local conversation storage only. If S3 history mirroring is configured, Mini-A visibly disables the VM and continues with legacy history behavior. If the local journal cannot be written, it likewise keeps content inline and reports degraded persistence. `maxcontext=0` remains unchanged: virtualization can still reduce eligible old large messages, but Mini-A does not claim a verified hard context-window bound without an effective budget.
 
 ### Context Management

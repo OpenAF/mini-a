@@ -188,6 +188,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : contextvirtualization
+    desc     : Enable the experimental Phase 2 hierarchical ContextObject foundation (requires historyvm=true)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : chatyouare
     desc     : "Override the chatbot persona sentence (string or @file path, alias: chatYouAre) when running with chatbotmode=true"
     example  : "You are an enthusiastic travel concierge specialized in eco-friendly trips."
@@ -1314,6 +1319,7 @@ jobs:
         historyvm      : historyvm
         historyvmmode  : historyvmmode
         historyvmshadow: historyvmshadow
+        contextvirtualization: contextvirtualization
         format         : format
         raw            : raw
         showthinking   : showthinking
@@ -1590,6 +1596,7 @@ jobs:
       historyvm      : toBoolean.isBoolean.default(false)
       historyvmmode  : isString.default("safe")
       historyvmshadow: toBoolean.isBoolean.default(false)
+      contextvirtualization: toBoolean.isBoolean.default(false)
       format         : isString.default(__)
       raw            : toBoolean.isBoolean.default(false)
       showthinking   : toBoolean.isBoolean.default(false)

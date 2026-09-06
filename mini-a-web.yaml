@@ -75,6 +75,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : contextvirtualization
+    desc     : Enable the experimental Phase 2 hierarchical ContextObject foundation (requires historyvm=true)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : historykeepperiod
     desc     : Delete kept history files older than this many minutes
     example  : "1440"
@@ -1875,6 +1880,7 @@ jobs:
       historyvm       : toBoolean().isBoolean().default(false)
       historyvmmode   : isString().default("safe")
       historyvmshadow : toBoolean().isBoolean().default(false)
+      contextvirtualization: toBoolean().isBoolean().default(false)
       useattach       : toBoolean().isBoolean().default(false)
       historypath     : isString().default(".")
       historykeep     : toBoolean().isBoolean().default(false)
