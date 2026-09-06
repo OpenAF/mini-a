@@ -263,4 +263,4 @@ The old `SKILL.md` takes lower precedence than `SKILL.yaml` in the same folder, 
 - `mini-a --skill` — print the equivalent markdown skill starter template
 - `mini-a --skills` — print this YAML skill starter template
 - [USAGE.md](../USAGE.md) — full parameter catalog and command reference
-- [docs/SKILLS-ALT-FORMAT-PLAN.md](SKILLS-ALT-FORMAT-PLAN.md) — design and implementation notes
+- [docs/VIRTUAL-SKILLS.md](VIRTUAL-SKILLS.md) — virtual skill library reference

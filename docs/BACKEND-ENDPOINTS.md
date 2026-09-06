@@ -6,9 +6,10 @@ This document describes the backend endpoints that the web UI (`public/index.md`
 
 | Endpoint | Method | Purpose (UI) | Primary caller in UI |
 | --- | --- | --- | --- |
-| `/info` | GET | Discover feature flags (history, attachments). | `configureFeatureAvailability()` |
+| `/info` | GET | Discover feature flags (history, attachments, streaming). | `configureFeatureAvailability()` |
 | `/prompt` | POST | Submit a user prompt to start/resume a session. | `handleSubmit()`, `handleRetryLastAnswer()` |
 | `/result` | POST | Poll for streaming/finished results; stop a running session. | `startPolling()`, `ensureConversationContentForCopy()`, `refreshCurrentConversationView()`, `stopProcessing()` |
+| `/stream` | GET | Stream real-time Server-Sent Events (SSE) when `usestream=true`. | `EventSource` (`/stream?uuid=...&token=...`) |
 | `/md2html` | POST | Convert Markdown to static HTML for export. | `handleExportHtml()` |
 | `/load-history` | POST | Push local history into the server (resume/branch). | `sendHistoryToServer()` |
 | `/clear` | POST | Clear a session (and optionally force-delete history). | `handleClearClick()`, `handleHistoryEntryDelete()`, `handleClearHistoryStorage()` |
@@ -95,6 +96,27 @@ This document describes the backend endpoints that the web UI (`public/index.md`
 - Builds `content` by aggregating session events into a markdown/HTML stream.
 - Emits `status: "finished"` once a final answer is stored.
 - Responds with plan metadata for the plan panel UI.
+
+### `GET /stream`
+
+**Frontend usage**
+- When `usestream=true`, the UI connects via `EventSource` (`/stream?uuid=<uuid>`) to receive real-time streaming tokens and agent execution events via Server-Sent Events (SSE).
+
+**Query parameters**
+- `uuid` (required): Target session UUID.
+- `token` (optional): Authorization token when `token=` authentication is configured on the server.
+
+**SSE event types**
+- `event: ready` — Emitted upon successful stream connection (`{ "status": "ok", "uuid": "..." }`).
+- `event: stream` — Incremental token chunks streamed from the active model generation (`{ "message": "..." }`).
+- `event: planner_stream` — Incremental token chunks from the planner model (`{ "message": "..." }`).
+- `event: error` — Emitted on authorization error or invalid UUID (`{ "message": "..." }`).
+- Heartbeat comments (`: ping`) are emitted periodically to keep the HTTP connection alive.
+
+**Backend implementation notes**
+- Backed by OpenAF's `httpdSSE` handler.
+- Events are buffered in per-session queues (`global.__sseQueues[uuid]`) and dispatched asynchronously as the LLM generates output.
+- SSE queues are purged on goal completion or when `ssequeuetimeout` expires.
 
 ### `POST /md2html`
 

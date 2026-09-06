@@ -82,7 +82,7 @@ mini-a goal="..." \
 
 `mcp-wiki` exposes a Mini-A wiki through read-friendly tools. External clients should start with `tree` or `browse`, then call `read` only for specific pages. Folders with `index.md` act as section sub-wikis.
 
-Read tools are optimized for retrieval: `browse`, `read`, and `search`.
+Read and discovery tools include: `context` (compact overview), `search` (full-text search), `read` (page content and frontmatter), `open` (read with link validation), `navigate` (link-relative traversal), `grep` (regex search), `related` (related pages), `browse` (section structure), `tree` (full folder hierarchy), `backlinks` (incoming page links), and `list` (enumerate pages).
 
 `audit=true` (or `OJOB_MCP_AUDIT=true`) logs every MCP tool call (tool name plus its call arguments — page paths, search queries, and so on) via OpenAF's `log()` function. It is off by default. See [Auditing MCP tool calls](#auditing-mcp-tool-calls) below — this works the same way for every MCP in this catalog, not just `mcp-wiki`/`mcp-wiki-safe`.
 
@@ -148,11 +148,15 @@ Use a channel type with real per-key operations across concurrent writers for mu
 
 `mcp-wiki-ops` is a standalone companion server for wiki operations that are intentionally not part of the read-first `mcp-wiki` surface.
 
-It exposes a compact operations toolset:
+It exposes operations tools:
 
+- `context`: compact overview of wiki pages, sections, mounts, and operational stats.
 - `lint`: run wiki health checks (`broken_link`, `orphan`, `missing_index`, `index_missing_links`, `stale_index`, and related checks).
 - `edit`: full page write plus partial edit modes (`append`, `lineInsert`, `lineStart/lineEnd`, `section`).
 - `maintain`: structural operations `init`, `move`, and `delete`; `move` repairs internal links and supports redirect stubs.
+- `reindex`: rebuild the wiki Lucene search index.
+- `graph_build`: build or refresh the wiki knowledge graph (`graph.json`).
+- `graph_falkor`: sync or query wiki graph state with FalkorDB.
 
 `mcp-wiki-ops` defaults to writable mode. To force lint-only mode, set `wikiopsreadonly=true` (or `wikiaccess=ro` together with `wikiopsreadonly=true`).
 
@@ -376,6 +380,7 @@ Key tools include:
 - `random-choice`: Picks one or more elements from a provided array, with optional uniqueness guarantees.
 - `random-boolean`: Generates booleans with an optional bias probability for `true`.
 - `random-hex`: Builds hexadecimal strings of a specific length.
+- `random-password`: Generates secure random passwords with configurable length and character sets.
 
 #### mcp-ch
 
@@ -686,6 +691,7 @@ Primary tools:
 - `s3-get-object`: Retrieve object data with optional range reads or metadata fetches.
 - `s3-put-object`, `s3-delete-object`: Manage objects when `readwrite=true`.
 - `s3-presign-get`: Produce temporary GET URLs for sharing or ingestion pipelines.
+- `s3-select-object`: Query structured object content (CSV/JSON/Parquet) using SQL expressions.
 
 Example — list JSON reports under a prefix:
 

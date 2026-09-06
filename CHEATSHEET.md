@@ -14,12 +14,15 @@ A comprehensive quick reference for all Mini-A parameters, modes, and common usa
 - [Shell & Execution](#shell--execution)
 - [MCP Integration](#mcp-integration)
 - [Planning Features](#planning-features)
+- [Deep Research Mode](#deep-research-mode)
+- [Outer Loop Autonomous Coding](#outer-loop-autonomous-coding)
 - [Visual & Output](#visual--output)
 - [Knowledge & Context](#knowledge--context)
 - [Working Memory](#working-memory)
-- [Dreams (Sleep Pass)](#dreams-sleep-pass)
 - [Wiki Knowledge Base](#wiki-knowledge-base)
+- [Virtual Skill Library](#virtual-skill-library)
 - [Choosing Knowledge Features](#choosing-knowledge-features)
+- [Dreams (Sleep Pass)](#dreams-sleep-pass)
 - [Mode Presets](#mode-presets)
 - [Delegation](#delegation)
   - [Sub-agents, Forked Sub-agents & Auto-delegation](#sub-agents-forked-sub-agents--auto-delegation)
@@ -27,8 +30,10 @@ A comprehensive quick reference for all Mini-A parameters, modes, and common usa
   - [Web UI Parameters](#web-ui-parameters)
 - [Rate Limiting & Performance](#rate-limiting--performance)
 - [Security & Safety](#security--safety)
+- [Docker Usage](#docker-usage)
 - [Common Examples](#common-examples)
-- [Agent Files](#agent-files)
+- [Console Commands](#console-commands)
+- [Quick Tips](#quick-tips)
 
 ---
 
@@ -331,7 +336,7 @@ mini-a goal="inspect large logs safely" useshell=true shellmaxbytes=12000
 | `mcpprogcallbatchmax` | number | `10` | Maximum calls accepted by `/call-tools-batch` |
 | `toolcachettl` | number | `600000` | Default cache TTL in milliseconds for MCP tool results |
 | `useutils` | boolean | `false` | Auto-register Mini Utils Tool utilities as MCP connection. Tool names for `utilsallow`/`utilsdeny`: `init`, `filesystemQuery`, `filesystemModify`, `mathematics`, `timeUtilities`, `textUtilities`, `pathUtilities`, `filesystemBatch`, `validationUtilities`, `systemInfo`, `memoryStore`, `todoList`, `markdownFiles`, plus conditional `skills` (`useskills=true`) and console-only `userInput`, `showMessage` (`mini-a-con`) |
-| `usestdutils` | boolean | `true` | When `useutils=true`, expose standard Mini Utils aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names |
+| `usestdutils` | boolean | `false` | When `useutils=true`, expose standard Mini Utils aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names |
 | `utilsallow` | string | - | Comma-separated allowlist of Mini Utils Tool names to expose when `useutils=true` |
 | `utilsdeny` | string | - | Comma-separated denylist of Mini Utils Tool names to hide when `useutils=true`; applied after `utilsallow` |
 | `utilsroot` | string | - | Root path exposed to Mini Utils Tool file/document helpers (e.g. `markdownFiles`, `filesystemQuery`) |
@@ -1059,6 +1064,7 @@ The agent uses the `wiki` action:
 | `/wiki list [prefix]` | List pages; `/wiki list --meta` shows title+description |
 | `/wiki read <page.md>` | Print a page's front-matter and body |
 | `/wiki search <query>` | Full-text search across all pages and mounts |
+| `/wiki backlinks <path>` | List all pages that link to the specified path |
 | `/wiki browse [path]` | Navigate section structure |
 | `/wiki tree [path]` | Show full folder hierarchy |
 | `/wiki lint` | Run lint check and print report |
@@ -1373,12 +1379,15 @@ Modes can inherit from other modes using `include` (string, comma-separated stri
 | Mode | Description | Equivalent Parameters |
 |------|-------------|----------------------|
 | `shell` | Read-only shell access | `useshell=true` |
-| `shellrw` | Shell with write access | `useshell=true readwrite=true` |
-| `shellutils` | Shell + Mini Utils Tool | `useshell=true useutils=true mini-a-docs=true usetools=true` |
-| `chatbot` | Conversational mode | `chatbotmode=true` |
-| `internet` | Internet-focused MCP mode | `usetools=true mini-a-docs=true mcp=...` |
-| `web` | Browser UI optimized | `usetools=true mini-a-docs=true` |
-| `webfull` | Full-featured web UI | `usetools=true useutils=true usestream=true mcpproxy=true mini-a-docs=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true` |
+| `shellrw` | Shell with write access | `useshell=true readwrite=true useutils=true shellallowpipes=true shellbatch=true showexecs=true mini-a-docs=true` (includes `shell`) |
+| `utils` | Utilities mode | `useutils=true mini-a-docs=true usetools=true` |
+| `shellutils` | Shell + Mini Utils Tool | `useshell=true useutils=true mini-a-docs=true usetools=true` (includes `shell`) |
+| `internet` | Internet-focused MCP mode | `usetools=true mini-a-docs=true mcpproxy=true mcp=[mcp-time, mcp-web, mcp-weather, mcp-net]` |
+| `news` | News from the internet mode | `mcpproxy=true mcp=[mcp-time, mcp-web, mcp-rss]` (includes `internet`) |
+| `poweruser` | Power user mode | `useshell=true readwrite=true useutils=true useskills=true usestream=true mcpproxy=true mini-a-docs=true usehistory=true historykeep=true usedelegation=true usestdutils=true ...` |
+| `chatbot` | Conversational mode | `chatbotmode=true usestream=true` |
+| `web` | Browser UI optimized with tools | `usetools=true usediagrams=true usecharts=true usemaps=true usevectors=true usemath=true usehistory=true useattach=true mcpproxy=true mcp=[mcp-web, mcp-weather, mcp-time, mcp-net]` |
+| `webfull` | Full-featured web UI | `usestream=true historykeep=true useplanning=false useascii=false llmcomplexity=true mcp=[web, weather, rss, time, fin, net, oaf, oafp]` (includes `web`) |
 
 **Examples:**
 
@@ -1953,6 +1962,12 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 |---------|-------------|
 | `/show` | Display all current parameters |
 | `/show <prefix>` | Display parameters starting with prefix (e.g., `/show plan`) |
+| `/set <key> <value>` | Update a Mini-A parameter (use `"""` for multi-line values) |
+| `/toggle <key>` | Toggle boolean parameter |
+| `/unset <key>` | Clear a parameter |
+| `/reset` | Restore default parameters |
+| `/restore` | Restore a saved conversation like `resume=true` |
+| `/clear` | Reset the ongoing conversation and accumulated metrics |
 | `/context` | Show visual token usage breakdown (using internal estimates or API stats) |
 | `/context llm` or `/context analyze` | Analyze conversation tokens using LLM (prefers low-cost model if configured) |
 | `/stats memory` | Show working-memory statistics, keyed upserts, expirations, and validated-contract use for the active session |
@@ -1964,6 +1979,8 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 | `/rewind [n]` | Undo the last n exchanges and remove them from conversation history (default: 1); cancels any active subtasks |
 | `/last [md]` | Reprint the previous final answer (`md` emits raw Markdown) |
 | `/save <path>` | Save the last final answer to the provided file path |
+| `/history [n]` | Show the last n user goals (one per line) |
+| `/models` | List current main, low-cost, and validation models |
 | `/cls` | Clear the console screen |
 | `/<name> [args...]` | Execute slash template from `~/.openaf-mini-a/commands/<name>.md`, `~/.openaf-mini-a/skills/<name>.md`, or `~/.openaf-mini-a/skills/<name>/SKILL.md` |
 | `/help` | Show help information |
@@ -1985,7 +2002,7 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
   - `~/.openaf-mini-a/skills/<name>/SKILL.md` (Claude Code-style folder skill)
   - `~/.openaf-mini-a/skills/<name>.md` (legacy file skill)
 - Folders ending in `.disabled` are ignored during skill discovery
-- If both folders define the same name, `commands` takes precedence and the `skills` entry is ignored
+- If both folders define the same name, `skills` takes precedence over `commands`
 - Skills downloaded from sites like `skillsmp.com` can be copied as folders under `~/.openaf-mini-a/skills/` when each folder includes `SKILL.md` (or `skill.md`)
 - Use `extraskills=<path1>,<path2>` to load skills from additional directories (default dir wins on name conflicts)
 

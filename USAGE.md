@@ -418,12 +418,15 @@ Modes can now inherit from other modes using `include`. Use `include: <mode>` (o
 ### Built-in Presets
 
 - **`shell`** – Read-only shell access (`useshell=true`).
-- **`shellrw`** – Shell with write access enabled (`useshell=true readwrite=true`).
-- **`shellutils`** – Shell plus the Mini Utils Tool MCP utilities with docs-aware defaults (`useutils=true mini-a-docs=true usetools=true`).
-- **`chatbot`** – Lightweight conversational mode (`chatbotmode=true`).
-- **`internet`** – Tool mode with web-access MCP presets plus docs-aware utils (`usetools=true mini-a-docs=true mcp=...`).
-- **`web`** – Browser UI with tool registration and docs-aware utils (`usetools=true mini-a-docs=true`).
-- **`webfull`** – Web UI with history, attachments, diagrams, charts, ASCII sketches, and docs-aware utils enabled (`usetools=true useutils=true usestream=true mcpproxy=true mini-a-docs=true usediagrams=true usecharts=true useascii=true usemath=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` if you also want interactive map guidance in this preset.
+- **`shellrw`** – Shell with write access enabled (`useshell=true readwrite=true`, includes `shell`).
+- **`utils`** – Utilities mode (`useutils=true mini-a-docs=true usetools=true`).
+- **`shellutils`** – Shell plus the Mini Utils Tool MCP utilities with docs-aware defaults (`useutils=true mini-a-docs=true usetools=true`, includes `shell`).
+- **`internet`** – Tool mode with web-access MCP presets (time, web, weather, net) plus docs-aware utils (`usetools=true mini-a-docs=true mcpproxy=true mcp=...`).
+- **`news`** – News from the internet mode, inheriting `internet` with time, web, and RSS MCP tools (`mcpproxy=true mcp=...`).
+- **`poweruser`** – Power user mode enabling shell read-write, utils, skills, streaming, MCP proxying, history retention, advisor strategy, delegation, and standard utils (`useshell=true readwrite=true useutils=true useskills=true usestream=true ...`).
+- **`chatbot`** – Lightweight conversational mode (`chatbotmode=true usestream=true`).
+- **`web`** – Browser UI with tools, diagrams, charts, maps, vectors, math, history, attachments, and MCP proxying (`usetools=true usediagrams=true usecharts=true usemaps=true usevectors=true usemath=true usehistory=true useattach=true mcpproxy=true mcp=...`).
+- **`webfull`** – Web UI inheriting `web`, adding streaming, extended history retention, complexity estimation, and expanded MCPs (`rss`, `fin`, `oaf`, `oafp`), with planning and ASCII sketches explicitly disabled (`useplanning=false useascii=false usestream=true historykeep=true ...`).
 
 ### Creating Custom Presets
 
@@ -928,7 +931,7 @@ The `start()` method accepts various configuration options:
 - **`wikilintmaxpairs`** (number, default: `250000`): Cap near-duplicate comparisons during streaming lint.
 - **`wikimounts`** (SLON/JSON, optional): Read-only wiki mounts. Array of `{name, backend, root|bucket|prefix|url|accessKey|secret|region}`. An `fs` root may be a local directory or a local `.zip`/`.okt` archive; archives expose their entry root and are always read-only. Each mount's pages appear under `@<name>/path.md` in search, read, browse, and tree. Example: `wikimounts="[{name: 'reference', backend: 'fs', root: '/shared/reference.okt'}]"`.
 - **`usewikigraph`** (boolean, default: `false`): Enable wiki knowledge-graph layer and `graph` action. Also enabled automatically when `wikigraphfalkorhost` is set.
-- **`wikigraphsemantic`** (boolean, default: `false`): Enable semantic extraction during `graph op=build`. Inside a dream pass (`dream=true`), `dreamwikimode=apply`/`plan` default this to `true` whenever `usewikigraph=true` instead of leaving it opt-in — pass `wikigraphsemantic=false` explicitly to keep those two modes structural-only. See [Wiki dream internals](#dreams-sleep-pass).
+- **`wikigraphsemantic`** (boolean, default: `false`): Enable semantic extraction during `graph op=build`. Inside a dream pass (`dream=true`), `dreamwikimode=apply`/`plan` default this to `true` whenever `usewikigraph=true` instead of leaving it opt-in — pass `wikigraphsemantic=false` explicitly to keep those two modes structural-only. See [Wiki dream internals](#wiki-dream-internals).
 - **`wikigraphcommunity`** (string, default: `louvain`): Graph community detection algorithm.
 - **`wikigraphsearchhints`** (boolean, default: `true`): Add graph-related page hints to `wiki search`.
 - **`wikigraphmounts`** (boolean, default: `true`): Add graph-related hints from attached wikis when their cached `graph.json` is available.
@@ -1145,7 +1148,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
   - When running through `mini-a-con.js`, also exposes `userInput`, an interactive helper backed by OpenAF `ask*` functions (`ask`, `askEncrypt`, `ask1`, `askChoose`, `askChooseMultiple`, `askStruct`) so the model can request clarification directly from the console user
   - `filesystemQuery` read supports byte ranges (`byteStart`, `byteEnd`, `byteLength`), line windows (`lineStart`, `lineEnd`, `maxLines`, `lineSeparator`), and `countLines=true` for total line count
   - `markdownFiles` uses `operation='list'` to enumerate all `.md` files, `operation='read'` to fetch one by relative path, and `operation='search'` to grep across all docs
-- **`usestdutils`** (boolean, default: true): When `useutils=true`, expose standard Mini Utils aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names
+- **`usestdutils`** (boolean, default: false): When `useutils=true`, expose standard Mini Utils aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names
 - **`utilsroot`** (string, default: `.`): Root directory for Mini Utils Tool file operations (only when `useutils=true`)
 - **`utilsallow`** (string, optional): Comma-separated allowlist of Mini Utils Tool names to expose when `useutils=true`
 - **`utilsdeny`** (string, optional): Comma-separated denylist of Mini Utils Tool names to hide when `useutils=true`; applied after `utilsallow`
@@ -1164,13 +1167,16 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 
 #### Mode Presets
 - **`mode`** (string): Shortcut for loading a preset argument bundle from [`mini-a-modes.yaml`](mini-a-modes.yaml), `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` (custom modes override built-in ones, and the new path overrides the legacy one when both exist). Presets are merged before explicit flags, so command-line overrides always win. Bundled configurations include:
-  - `shell` – Enables read-only shell access.
-  - `shellrw` – Enables shell access with write permissions (`readwrite=true`).
-  - `shellutils` – Adds the Mini File Tool helpers as an MCP (`useutils=true mini-a-docs=true usetools=true`) exposing `init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`, and console-only `userInput` when launched through `mini-a-con`.
-  - `chatbot` – Switches to conversational mode (`chatbotmode=true`).
-  - `internet` – Registers internet-focused MCP presets with docs-aware utils (`usetools=true mini-a-docs=true mcp=...`).
-  - `web` – Optimizes for the browser UI with MCP tools registered and docs-aware utils (`usetools=true mini-a-docs=true`).
-  - `webfull` – Turns on diagrams, charts, ASCII sketches, attachments, history retention, planning, MCP proxying, streaming, and docs-aware utils for the web UI (`usetools=true useutils=true usestream=true mcpproxy=true mini-a-docs=true usediagrams=true usecharts=true useascii=true usemath=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` when you also want interactive maps baked into this preset.
+  - `shell` – Enables read-only shell access (`useshell=true`).
+  - `shellrw` – Enables shell access with write permissions (`useshell=true readwrite=true`, includes `shell`).
+  - `utils` – Enables utilities mode (`useutils=true mini-a-docs=true usetools=true`).
+  - `shellutils` – Adds the Mini File Tool helpers as an MCP (`useutils=true mini-a-docs=true usetools=true`, includes `shell`) exposing `init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`, and console-only `userInput` when launched through `mini-a-con`.
+  - `internet` – Registers internet-focused MCP presets with docs-aware utils (`usetools=true mini-a-docs=true mcpproxy=true mcp=...`).
+  - `news` – News from the internet mode, inheriting `internet` with time, web, and RSS MCP tools (`mcpproxy=true mcp=...`).
+  - `poweruser` – Power user mode enabling shell read-write, utils, skills, streaming, MCP proxying, history retention, advisor strategy, delegation, and standard utils.
+  - `chatbot` – Switches to conversational mode (`chatbotmode=true usestream=true`).
+  - `web` – Optimizes for the browser UI with tools, diagrams, charts, maps, vectors, math, history, attachments, and MCP proxying (`usetools=true usediagrams=true usecharts=true usemaps=true usevectors=true usemath=true usehistory=true useattach=true mcpproxy=true mcp=...`).
+  - `webfull` – Full web UI inheriting `web`, adding streaming, extended history retention, complexity estimation, and expanded MCPs (`rss`, `fin`, `oaf`, `oafp`), with planning and ASCII sketches explicitly disabled.
   - Modes may use `include` to inherit another preset (or multiple presets) and then override values locally.
 
 Extend or override these presets by editing the YAML file—Mini-A reloads it on each run.
@@ -2220,6 +2226,7 @@ agent.start({
 
 #### Pattern 3: MCP with Fallbacks
 
+```bash
 # Try primary MCP, fall back to backup
 mini-a goal="fetch data" \
   mcp="[(type: remote, url: 'https://primary-mcp.example.com/mcp'), (type: remote, url: 'https://backup-mcp.example.com/mcp')]" \

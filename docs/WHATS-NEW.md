@@ -147,7 +147,7 @@ mini-a ➤ /dream memory dryrun
 mini-a ➤ /dream wiki
 ```
 
-See [USAGE.md — Dreams](USAGE.md#dreams-sleep-pass) and [CHEATSHEET.md — Dreams](CHEATSHEET.md#dreams-sleep-pass) for full parameter reference.
+See [USAGE.md — Dreams](../USAGE.md#dreams-sleep-pass) and [CHEATSHEET.md — Dreams](../CHEATSHEET.md#dreams-sleep-pass) for full parameter reference.
 
 ---
 

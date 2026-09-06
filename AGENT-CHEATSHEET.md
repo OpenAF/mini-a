@@ -23,7 +23,7 @@ Quick reference for Mini-A `agent=` files.
 | `rules` | array/string | `rules=` (used when not already provided) |
 | `knowledge` | array/string | `knowledge=` |
 | `youare` | array/string | `youare=` |
-| `noagentsmd` | boolean | `false` | Disable automatic discovery and injection of the nearest `AGENTS.md` file |
+| `noagentsmd` | boolean | `noagentsmd=` (disable automatic AGENTS.md discovery) |
 | `mini-a` | map | Direct Mini-A arg overrides from the agent file — supports all params including `usewiki`, `wikiaccess`, `wikibackend`, `wikiroot`, `wikibucket`, `usememory`, `memoryuser`, etc. |
 
 ## Tools entries

@@ -436,7 +436,7 @@ Mini-A ships with complementary components:
 | `usetoolslc` | Register MCP tools only on the low-cost model | `false` |
 | `usejsontool` | Enable an optional compatibility `json` tool when `usetools=true` (helps with models that occasionally emit `json` tool calls instead of plain JSON action output) | `false` |
 | `useutils` | Auto-register Mini Utils Tool utilities as an MCP connection (`init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`, plus console-only helpers like `userInput` when running `mini-a-con`) | `false` |
-| `usestdutils` | When `useutils=true`, expose standard aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names | `true` |
+| `usestdutils` | When `useutils=true`, expose standard aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names | `false` |
 | `useskills` | Expose the Mini Utils `skills` operation; when `useutils=false`, only the skills tool is registered | `false` |
 | `utilsroot` | Root directory for Mini Utils Tool file operations (only when `useutils=true`) | `.` |
 | `utilsallow` | Comma-separated allowlist of Mini Utils Tool names to expose (only when `useutils=true`) | unset |
@@ -531,7 +531,7 @@ See [USAGE.md](USAGE.md#working-memory-structured-runtime-state) for the full me
 | `wikibackend` | Wiki backend: `fs`, `s3`, `s3fs`, `es`, or read-only `http` (`https` alias) | `fs` |
 | `wikiroot` | Filesystem wiki directory or local `.zip`/`.okt` archive when `wikibackend=fs`; archives are always read-only | `.` |
 | `wikibucket` | S3 bucket for `s3`/`s3fs` wiki backends | - |
-| `wikiprefix` | S3 key prefix for `s3`/`s3fs`, or Elasticsearch index name for `es` | - |
+| `wikiprefix` | S3 key prefix for `s3`/`s3fs`, or Elasticsearch index name for `es` | `wiki/` (S3) / `mini_a_wiki` (ES) |
 | `wikiurl` | S3 endpoint, Elasticsearch/OpenSearch base URL, or static page-server base URL when `wikibackend=http` | - |
 | `wikiaccesskey` | S3 access key, or Elasticsearch username when `wikibackend=es` | - |
 | `wikisecret` | S3 secret key, or Elasticsearch password when `wikibackend=es` | - |
