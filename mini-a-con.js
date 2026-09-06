@@ -743,6 +743,9 @@ try {
     knowledge      : { type: "string", description: "Extra knowledge or context" },
     libs           : { type: "string", description: "Comma-separated libraries to load" },
     conversation   : { type: "string", description: "Conversation history file" },
+    historyvm      : { type: "boolean", default: false, description: "Enable durable bounded virtual conversation history (requires conversation path)" },
+    historyvmmode  : { type: "string", default: "safe", description: "Virtual history policy mode" },
+    historyvmshadow: { type: "boolean", default: false, description: "Capture and measure virtual history without changing requests" },
     resume         : { type: "boolean", default: false, description: "Resume the last console conversation/history entry on startup." },
     usehistory     : { type: "boolean", default: false, description: "List previous console conversations from ~/.openaf-mini-a/history" },
     useattach      : { type: "boolean", default: false, description: "Enable file attachments in the web UI." },
@@ -3103,6 +3106,20 @@ try {
     }
   }
 
+  function printHistoryVmSummary(agentInstance) {
+    if (!isObject(agentInstance) || !isFunction(agentInstance.getHistoryVmDiagnostics)) {
+      print(colorifyText("History VM is disabled.", hintColor))
+      return
+    }
+    var vm = agentInstance.getHistoryVmDiagnostics()
+    print(colorifyText("History virtual memory", accentColor))
+    print(colorifyText("  Active: ", hintColor) + colorifyText(String(vm.active === true), vm.active === true ? successColor : errorColor) + colorifyText(" | Shadow: " + String(vm.shadow === true) + " | Mode: " + String(vm.mode || "safe"), hintColor))
+    if (isString(vm.storePath) && vm.storePath.length > 0) print(colorifyText("  Store: " + vm.storePath, hintColor))
+    if (isMap(vm.states)) print(colorifyText("  Objects: hot=" + (vm.states.hot || 0) + " warm=" + (vm.states.warm || 0) + " cold=" + (vm.states.cold || 0) + " frozen=" + (vm.states.frozen || 0), hintColor))
+    if (isMap(vm.metrics)) print(colorifyText("  Tokens: baseline~" + (vm.metrics.last_baseline_tokens || 0) + " projected~" + (vm.metrics.last_projected_tokens || 0) + " cumulative delta~" + (vm.metrics.estimated_tokens_saved || 0), hintColor))
+    if (vm.degraded === true) print(colorifyText("  Degraded: " + String(vm.degradedReason || "unknown backing-store failure"), errorColor))
+  }
+
   function truncateText(text, maxLen) {
     var str = isString(text) ? text : String(text || "")
     if (str.length <= maxLen) return str
@@ -3314,6 +3331,11 @@ try {
       return
     }
     try {
+      if (isObject(activeAgent) && isObject(activeAgent._historyVm)) {
+        try { activeAgent._historyVm.deleteOwnedStore() } catch(ignoreVmDelete) {}
+        activeAgent._historyVm = __
+        activeAgent._historyVmInitKey = ""
+      }
       if (io.fileExists(convoPath) && io.fileInfo(convoPath).isFile) io.rm(convoPath)
       deleteConversationSessionMemory(convoPath)
       // Also clear the in-memory conversation from the active agent
@@ -3408,9 +3430,15 @@ try {
     var removedCount = entries.length - newConversation.length
 
     try {
-      io.writeFileJSON(convoPath, { u: new Date(), c: newConversation }, "")
+      if (isObject(activeAgent) && isObject(activeAgent._historyVm)) {
+        activeAgent._historyVm.captureProviderConversation(entries)
+        activeAgent._historyVm.rewind(truncateAt)
+      }
       if (isObject(activeAgent) && isObject(activeAgent.llm) && typeof activeAgent.llm.getGPT === "function") {
         try { activeAgent.llm.getGPT().setConversation(newConversation) } catch (ignoreSetConversation) { }
+      }
+      if (!isObject(activeAgent) || !isFunction(activeAgent._writeConversationPayload) || activeAgent._writeConversationPayload(convoPath) !== true) {
+        io.writeFileJSON(convoPath, { u: new Date(), c: newConversation }, "")
       }
 
       if (newConversation.length > 0) {
@@ -3458,6 +3486,7 @@ try {
 
     var keepCount = isNumber(preserveCount) ? Math.max(1, Math.floor(preserveCount)) : 6
     var entries = stats.entries.slice()
+    if (isObject(activeAgent) && isObject(activeAgent._historyVm)) activeAgent._historyVm.captureProviderConversation(entries)
     // Always leave at least one older entry eligible for summarization when possible.
     var keepSize = Math.min(keepCount, Math.max(0, entries.length - 1))
     var keepTail = entries.slice(entries.length - keepSize)
@@ -3509,9 +3538,11 @@ try {
     }
 
     try {
-      io.writeFileJSON(convoPath, { u: new Date(), c: newConversation }, "")
       if (isObject(activeAgent) && isObject(activeAgent.llm) && typeof activeAgent.llm.getGPT === "function") {
         try { activeAgent.llm.getGPT().setConversation(newConversation) } catch (ignoreSetConversation) { }
+      }
+      if (!isObject(activeAgent) || !isFunction(activeAgent._writeConversationPayload) || activeAgent._writeConversationPayload(convoPath) !== true) {
+        io.writeFileJSON(convoPath, { u: new Date(), c: newConversation }, "")
       }
       var previousTokens = stats.totalTokens
       var updatedStats = refreshConversationStats(activeAgent)
@@ -3553,6 +3584,7 @@ try {
 
     var keepCount = isNumber(preserveCount) ? Math.max(1, Math.floor(preserveCount)) : 6
     var entries = stats.entries.slice()
+    if (isObject(activeAgent) && isObject(activeAgent._historyVm)) activeAgent._historyVm.captureProviderConversation(entries)
     // Always leave at least one older entry eligible for summarization when possible.
     var keepSize = Math.min(keepCount, Math.max(0, entries.length - 1))
     var keepTail = entries.slice(entries.length - keepSize)
@@ -3616,9 +3648,11 @@ try {
           return
         }
 
-        io.writeFileJSON(convoPath, { u: new Date(), c: newConversation }, "")
         if (isObject(activeAgent) && isObject(activeAgent.llm) && typeof activeAgent.llm.getGPT === "function") {
           try { activeAgent.llm.getGPT().setConversation(newConversation) } catch (ignoreSetConversation) { }
+        }
+        if (!isObject(activeAgent) || !isFunction(activeAgent._writeConversationPayload) || activeAgent._writeConversationPayload(convoPath) !== true) {
+          io.writeFileJSON(convoPath, { u: new Date(), c: newConversation }, "")
         }
 
         var previousTokens = stats.totalTokens
@@ -4824,15 +4858,18 @@ try {
       if (!isObject(agentRef.llm) || typeof agentRef.llm.getGPT !== "function") return
       var conversation = agentRef.llm.getGPT().getConversation()
       if (isArray(conversation)) {
+        var wroteWithAgent = isFunction(agentRef._writeConversationPayload) && agentRef._writeConversationPayload(convoPath) === true
         var existingPayload = loadConversationPayload(convoPath)
         var nowDate = new Date()
         var stamps = getConversationTimestamps(existingPayload, __)
-        var payload = {
-          u         : nowDate,
-          c         : conversation,
+        var payload = wroteWithAgent && isObject(existingPayload) ? existingPayload : {
+          u: nowDate,
+          c: conversation,
           created_at: isDate(stamps.createdAt) ? stamps.createdAt : nowDate,
           updated_at: nowDate
         }
+        payload.u = nowDate
+        payload.updated_at = nowDate
         if (isObject(existingPayload) && isObject(existingPayload.last)) payload.last = clone(existingPayload.last)
         if (isString(lastGoalPrompt) && lastGoalPrompt.trim().length > 0) {
           payload.last = payload.last || {}
@@ -6661,8 +6698,10 @@ try {
         var contextArg = command.substring(8).trim().toLowerCase()
         if (contextArg === "llm" || contextArg === "analyze") {
           printContextSummary(activeAgent, true)
+        } else if (contextArg === "vm") {
+          printHistoryVmSummary(activeAgent)
         } else {
-          print(colorifyText("Usage: /context [llm|analyze]", errorColor))
+          print(colorifyText("Usage: /context [llm|analyze|vm]", errorColor))
         }
         continue
       }

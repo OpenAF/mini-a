@@ -1,0 +1,86 @@
+include:
+- oJobTest.yaml
+
+jobs:
+- name: MiniA History VM Tests::Init
+  exec: true
+
+- name: MiniA History VM Tests::Disabled
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testDisabledCreatesNoStore
+
+- name: MiniA History VM Tests::AppendResume
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testAppendResumeAndDistinctEqualEvents
+
+- name: MiniA History VM Tests::RuntimeFlags
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testRuntimeFlagsAndToolRegistration
+
+- name: MiniA History VM Tests::LegacyImport
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testLegacyImportMarksCompletenessBoundary
+
+- name: MiniA History VM Tests::SearchRead
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testSearchAndExactPagedRead
+
+- name: MiniA History VM Tests::Projection
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testProjectionProtectsRequirementsAndCollapsesOldLargeOutput
+
+- name: MiniA History VM Tests::CorruptTail
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testCorruptTrailingWriteRebuildsSafely
+
+- name: MiniA History VM Tests::CorruptCheckpoint
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testCorruptCheckpointRebuildsFromJournal
+
+- name: MiniA History VM Tests::ConcurrentWriter
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testConcurrentWriterFailsClosed
+
+- name: MiniA History VM Tests::ExpansionTTL
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testExpansionIsBoundedAndExpires
+
+- name: MiniA History VM Tests::UnknownContent
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testUnknownStructuredContentStaysInline
+
+- name: MiniA History VM Tests::RewindBranch
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testRewindUsesNewBranchScope
+
+- name: MiniA History VM Tests::BackingFailure
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testUnavailableBackingDisablesCollapse
+
+todo:
+- MiniA History VM Tests::Disabled
+- MiniA History VM Tests::AppendResume
+- MiniA History VM Tests::RuntimeFlags
+- MiniA History VM Tests::LegacyImport
+- MiniA History VM Tests::SearchRead
+- MiniA History VM Tests::Projection
+- MiniA History VM Tests::CorruptTail
+- MiniA History VM Tests::CorruptCheckpoint
+- MiniA History VM Tests::ConcurrentWriter
+- MiniA History VM Tests::ExpansionTTL
+- MiniA History VM Tests::UnknownContent
+- MiniA History VM Tests::RewindBranch
+- MiniA History VM Tests::BackingFailure

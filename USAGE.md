@@ -2674,6 +2674,18 @@ mini-a usehistory=true historykeep=true resume=true
 
 Console history payloads now keep both `created_at` and `updated_at` timestamps in addition to the conversation entries, which makes retention and manual inspection easier.
 
+For long tool-heavy conversations, opt into history virtual memory with a writable conversation path:
+
+```bash
+mini-a conversation=chat-history.json historyvm=true goal="continue the investigation"
+```
+
+Mini-A writes append-only canonical events and checkpoints under `chat-history.json.historyvm/`. Older eligible large assistant/tool messages can then be represented by small `HISTORY_VM_REFERENCE` entries. The model receives `history_search`, `history_get`, and `history_expand` only while enabled, so it can recover exact archived text in bounded pages. User messages, system/developer instructions, recent exchanges, in-flight tool protocol data, and unknown multimodal shapes remain inline under the conservative `safe` policy. Use `/context vm` in the interactive console for object-state and token-delta diagnostics.
+
+Use `historyvmshadow=true` first to capture and estimate savings without changing provider requests or adding retrieval tool schemas. If both flags are supplied, enabled mode takes precedence. The VM is independent of `usememory`; enabling it creates retained conversation data even when history listing is disabled. `/clear`, web expiry, and explicit conversation deletion remove the owned sidecar unless history retention is configured to keep the conversation. `/rewind` records a new branch and default retrieval excludes the abandoned branch rather than deleting its canonical events.
+
+Version 1 supports local conversation storage only. If S3 history mirroring is configured, Mini-A visibly disables the VM and continues with legacy history behavior. If the local journal cannot be written, it likewise keeps content inline and reports degraded persistence. `maxcontext=0` remains unchanged: virtualization can still reduce eligible old large messages, but Mini-A does not claim a verified hard context-window bound without an effective budget.
+
 ### Context Management
 
 ```javascript

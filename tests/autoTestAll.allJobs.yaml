@@ -8,6 +8,7 @@ include:
 - tests/dreams.yaml
 - tests/eval.yaml
 - tests/graph.yaml
+- tests/historyVM.yaml
 - tests/mcpAuth.yaml
 - tests/miniAUtils.yaml
 - tests/outerLoop.yaml

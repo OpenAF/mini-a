@@ -453,6 +453,9 @@ Mini-A ships with complementary components:
 | `contextguardbudget` | Assumed smallest context window used by `contextguard` when `maxcontext=0` | `32000` |
 | `toolresultmaxinline` | Max inline bytes kept from large tool or `readresult` outputs before spill/truncation under `contextguard` | `4096` when `contextguard=true` |
 | `readresultmaxmatches` | Max matching regions returned by `proxy-dispatch` `readresult` `op='grep'` under `contextguard` | `20` when `contextguard=true` |
+| `historyvm` | Persist exact conversation events in a conversation-owned journal and replace eligible old large provider messages with bounded, retrievable references | `false` |
+| `historyvmmode` | History VM policy mode (`safe` is the v1 mode) | `safe` |
+| `historyvmshadow` | Capture canonical events and estimate projection savings while leaving model requests unchanged | `false` |
 | `mcpprogcall` | Start a per-session localhost HTTP bridge so generated scripts can list/search/call MCP tools programmatically; requires `useshell=true` for script execution | `false` |
 | `mcpprogcallport` | Port for the programmatic tool-calling bridge (`0` = auto-assign free port) | `0` |
 | `mcpprogcallmaxbytes` | Max inline JSON response size before storing oversized tool results under `/result/{id}` | `4096` |
@@ -607,6 +610,9 @@ Wiki folders become browsable sub-wikis when they contain `index.md`. Agents can
 | `contextguardbudget` | Assumed smallest context window used by `contextguard` when `maxcontext=0` | `32000` |
 | `toolresultmaxinline` | Max inline bytes kept from large tool or `readresult` outputs before spill/truncation under `contextguard` | `4096` when `contextguard=true` |
 | `readresultmaxmatches` | Max matching regions returned by `proxy-dispatch` `readresult` `op='grep'` under `contextguard` | `20` when `contextguard=true` |
+| `historyvm` | Enable durable bounded conversation history; requires a writable `conversation=` path | `false` |
+| `historyvmmode` | History VM policy mode | `safe` |
+| `historyvmshadow` | Measure the VM projection without changing requests or registering retrieval tools | `false` |
 | `compressgoal` | Automatically compress oversized goal text before execution | `false` |
 | `compressgoaltokens` | Estimated token threshold before goal compression is considered | `250` |
 | `compressgoalchars` | Character threshold before goal compression is considered | `1000` |

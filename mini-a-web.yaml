@@ -60,6 +60,21 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : historyvm
+    desc     : Enable durable bounded virtual history (creates retained per-conversation data even when history listing is off)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : historyvmmode
+    desc     : Virtual history policy mode
+    example  : "safe"
+    mandatory: false
+    options  : ["safe"]
+  - name     : historyvmshadow
+    desc     : Capture and estimate virtual history without changing provider requests
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : historykeepperiod
     desc     : Delete kept history files older than this many minutes
     example  : "1440"
@@ -1026,6 +1041,9 @@ todo:
           delete global.__res[ postData.uuid ]
         }
         if (isDef(global.__conversations[ postData.uuid ])) {
+          if (isObject(global.__conversations[ postData.uuid ]._historyVm)) {
+            try { global.__conversations[ postData.uuid ]._historyVm.deleteOwnedStore() } catch(ignoreClearHistoryVm) {}
+          }
           if (isFunction(global.__conversations[ postData.uuid ].clearSessionMemory)) {
             try { global.__conversations[ postData.uuid ].clearSessionMemory(postData.uuid) } catch(ignoreClearMemory) {}
           }
@@ -1128,7 +1146,7 @@ todo:
         }
 
         // If history is enabled, set the history file
-        var _hfile = global.__usehistory ? global.__historypath + "/c-" + uuid + ".json" : __
+        var _hfile = (global.__usehistory || global.maArgs.historyvm === true || global.maArgs.historyvmshadow === true) ? global.__historypath + "/c-" + uuid + ".json" : __
 
         // If conversation does not exist, create it
         if (isUnDef(global.__conversations[ uuid ])) {
@@ -1374,7 +1392,7 @@ todo:
             if (normalizedMemorySessionId.length > 0) startArgs.memorysessionid = normalizedMemorySessionId
           }
         }
-        if (global.__usehistory && isString(_hfile)) {
+        if ((global.__usehistory || startArgs.historyvm === true || startArgs.historyvmshadow === true) && isString(_hfile)) {
           startArgs.conversation = _hfile
         }
         // Only pass browser context for new conversations to avoid replacing in-memory session state
@@ -1733,6 +1751,9 @@ todo:
       }
 
       global.__res[ postData.uuid ] = sanitized
+      if (isObject(global.__conversations[ postData.uuid ]) && isObject(global.__conversations[ postData.uuid ]._historyVm)) {
+        try { global.__conversations[ postData.uuid ]._historyVm.deleteOwnedStore() } catch(ignoreLoadedHistoryVm) {}
+      }
       delete global.__conversations[ postData.uuid ]
       if (isDef(global.__subagentState) && isDef(global.__subagentState[ postData.uuid ])) delete global.__subagentState[ postData.uuid ]
       global.__lastActivity[ postData.uuid ] = Date.now()
@@ -1851,6 +1872,9 @@ jobs:
       lcjsonretries   : toNumber().isNumber().default(__)
       llmcomplexity   : toBoolean().isBoolean().default(false)
       usehistory      : toBoolean().isBoolean().default(false)
+      historyvm       : toBoolean().isBoolean().default(false)
+      historyvmmode   : isString().default("safe")
+      historyvmshadow : toBoolean().isBoolean().default(false)
       useattach       : toBoolean().isBoolean().default(false)
       historypath     : isString().default(".")
       historykeep     : toBoolean().isBoolean().default(false)
@@ -2427,6 +2451,19 @@ jobs:
       if (isString(localFile) && io.fileExists(localFile)) {
         try { io.rm(localFile) } catch(ignore) {}
       }
+      var vmDir = isString(localFile) ? localFile + ".historyvm" : __
+      if (isString(vmDir) && io.fileExists(vmDir)) {
+        try {
+          var removeVm = function(file) {
+            if (file.isDirectory()) {
+              var children = file.listFiles()
+              for (var vi = 0; isDef(children) && vi < children.length; vi++) removeVm(children[vi])
+            }
+            file.delete()
+          }
+          removeVm(new java.io.File(vmDir))
+        } catch(ignoreVmDir) {}
+      }
     }
 
     global._mini_a_web_saveFile = (aFile, aMap) => {
@@ -2529,12 +2566,16 @@ jobs:
     }
     for (var i = 0; i < toDelete.length; i++) {
       var uuid = toDelete[i]
+      var staleAgent = global.__conversations[ uuid ]
+      if (!global.__historykeep && isObject(staleAgent) && isObject(staleAgent._historyVm)) {
+        try { staleAgent._historyVm.deleteOwnedStore() } catch(ignoreStaleVm) {}
+      }
       delete global.__lastActivity[ uuid ]
       delete global.__res[ uuid ]
       delete global.__conversations[ uuid ]
       if (isDef(global.__planState) && isDef(global.__planState[ uuid ])) delete global.__planState[ uuid ]
       if (isDef(global.__subagentState) && isDef(global.__subagentState[ uuid ])) delete global.__subagentState[ uuid ]
-      if (global.__usehistory && !global.__historykeep && isFunction(global._mini_a_web_deleteHistory)) {
+      if ((global.__usehistory || global.maArgs.historyvm === true || global.maArgs.historyvmshadow === true) && !global.__historykeep && isFunction(global._mini_a_web_deleteHistory)) {
         try {
           global._mini_a_web_deleteHistory(uuid)
         } catch(cleanErr) {

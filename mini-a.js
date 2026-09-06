@@ -8,6 +8,7 @@ loadLib("mini-a-router.js")
 loadLib("mini-a-memory.js")
 loadLib("mini-a-wiki.js")
 loadLib("mini-a-wiki-knowledge.js")
+loadLib("mini-a-history-vm.js")
 
 // Shared thinking-tag list and normalizer used across streaming filter,
 // block extraction, and tag stripping.
@@ -118,6 +119,8 @@ var MiniA = function() {
   this._metricschRegistered = false
   this._initialSkillActivations = []
   this._initialSkillActivationKeys = {}
+  this._historyVm = __
+  this._historyVmInitKey = ""
 
   // Escalation history for outcome-based feedback loop (Issue 4)
   this._escalationHistory = []
@@ -2111,6 +2114,7 @@ MiniA.prototype.getMetrics = function() {
             session_sections: memorySnapshot.sessionSections,
             global_sections: memorySnapshot.globalSections
         },
+        history_vm: this.getHistoryVmDiagnostics(),
         tool_selection: {
             dynamic_used: global.__mini_a_metrics.tool_selection_dynamic_used.get(),
             keyword: global.__mini_a_metrics.tool_selection_keyword.get(),
@@ -2309,9 +2313,25 @@ MiniA.prototype._writeConversationPayload = function(path) {
     }
 
     var nowDate = new Date()
+    var storedConversation = this.llm.getGPT().getConversation()
+    if (isObject(this._historyVm) && !this._historyVm.degraded && isFunction(this._historyVm.materializeConversation)) {
+      storedConversation = this._historyVm.materializeConversation(storedConversation)
+    }
     var payload = {
       u : nowDate,
-      c : this.llm.getGPT().getConversation()
+      c : storedConversation
+    }
+
+    if (isObject(this._historyVm)) {
+      payload.history_vm = {
+        schemaVersion: this._historyVm.schemaVersion,
+        active: this._historyVm.enabled === true && this._historyVm.degraded !== true,
+        shadow: this._historyVm.shadow === true,
+        store: this._historyVm.storePath,
+        conversationId: this._historyVm.conversationId,
+        branchId: this._historyVm.branchId,
+        captureStartedAt: this._historyVm.events.length > 0 ? this._historyVm.events[0].createdAt : nowDate
+      }
     }
 
     if (isObject(existing) && isObject(existing.last)) payload.last = existing.last
@@ -2324,7 +2344,84 @@ MiniA.prototype._writeConversationPayload = function(path) {
     payload.updated_at = nowDate
 
     io.writeFileJSON(path, payload, "")
-  } catch(ignoreWriteConversation) { }
+    return true
+  } catch(ignoreWriteConversation) {
+    if (isObject(this._historyVm) && (this._historyVm.enabled || this._historyVm.shadow)) {
+      this._historyVm._fail("conversation envelope write failed: " + __miniAErrMsg(ignoreWriteConversation))
+    }
+    return false
+  }
+}
+
+MiniA.prototype._initHistoryVm = function(args, existingPayload) {
+  var enabled = isMap(args) && args.historyvm === true
+  var shadow = isMap(args) && args.historyvmshadow === true
+  if (isMap(args) && isString(args.historyvmmode) && args.historyvmmode.toLowerCase() !== "safe") {
+    this.fnI("warn", "Unsupported historyvmmode='" + args.historyvmmode + "'; using safe mode.")
+    args.historyvmmode = "safe"
+  }
+  if (enabled && shadow) {
+    this.fnI("warn", "historyvm=true takes precedence over historyvmshadow=true; shadow mode disabled.")
+    shadow = false
+    args.historyvmshadow = false
+  }
+  if (!enabled && !shadow) {
+    this._historyVm = __
+    this._historyVmInitKey = ""
+    return __
+  }
+  if (isString(args.historys3bucket) && args.historys3bucket.trim().length > 0) {
+    this.fnI("warn", "History VM v1 does not support remote S3 backing; using legacy conversation behavior.")
+    args.historyvm = false
+    args.historyvmshadow = false
+    this._historyVm = __
+    return __
+  }
+  var conversationPath = isString(args.conversation) ? args.conversation.trim() : ""
+  var initKey = conversationPath + "|" + enabled + "|" + shadow
+  if (isObject(this._historyVm) && this._historyVmInitKey === initKey) return this._historyVm
+  this._historyVm = new MiniAHistoryVM({
+    enabled: enabled,
+    shadow: shadow,
+    mode: isString(args.historyvmmode) ? args.historyvmmode : "safe",
+    conversationPath: conversationPath,
+    conversationId: isMap(existingPayload) && isMap(existingPayload.history_vm) ? existingPayload.history_vm.conversationId : __,
+    branchId: isMap(existingPayload) && isMap(existingPayload.history_vm) ? existingPayload.history_vm.branchId : __,
+    agentId: this._id,
+    estimateTokens: this._estimateTokens.bind(this),
+    logFn: this.fnI.bind(this)
+  })
+  this._historyVmInitKey = initKey
+  if (isObject(this._historyVm) && !this._historyVm.degraded && isMap(existingPayload)) this._historyVm.importLegacy(existingPayload)
+  if (isObject(this._historyVm) && this._historyVm.degraded) {
+    args.historyvm = false
+    args.historyvmshadow = false
+  }
+  return this._historyVm
+}
+
+MiniA.prototype._prepareHistoryVmProjection = function(currentStep) {
+  var vm = this._historyVm
+  if (!isObject(vm) || vm.degraded || (!vm.enabled && !vm.shadow) || !isObject(this.llm) || !isFunction(this.llm.getGPT)) return false
+  try {
+    var conversation = this.llm.getGPT().getConversation()
+    if (!isArray(conversation)) return false
+    vm.captureProviderConversation(conversation)
+    if (vm.degraded) return false
+    var projected = vm.projectConversation(conversation, { currentStep: currentStep })
+    if (vm.enabled && !vm.shadow) {
+      this.llm.getGPT().setConversation(projected)
+      if (this._use_lc && isObject(this.lc_llm)) this._copyConversationBetweenLlms(this.llm, this.lc_llm)
+    }
+    return true
+  } catch(e) {
+    vm._fail("provider projection failed: " + __miniAErrMsg(e))
+    return false
+  }
+}
+
+MiniA.prototype.getHistoryVmDiagnostics = function() {
+  return isObject(this._historyVm) ? this._historyVm.diagnostics() : { active: false, shadow: false, reason: "history VM is disabled" }
 }
 
 MiniA.prototype._copyConversationBetweenLlms = function(sourceLLM, targetLLM) {
@@ -3648,6 +3745,7 @@ MiniA.prototype._extractAssistantAnswerFromConversationEntry = function(entry) {
 }
 
 MiniA.prototype._buildConversationCarryoverContext = function(currentGoal) {
+    if (isObject(this._historyVm) && this._historyVm.enabled === true && this._historyVm.degraded !== true) return ""
     if (!isObject(this.llm) || !isFunction(this.llm.getGPT)) return ""
     var conversation = __
     try {
@@ -8563,6 +8661,9 @@ MiniA.prototype._buildToolObservation = function(toolName, params, rawResult, ob
 MiniA.prototype._recordShellObservation = function(command, output, stepLabel, args) {
   var cmd = isString(command) ? command : ""
   var out = (isString(output) ? output : "(no output)").trim()
+  if (isObject(this._historyVm) && !this._historyVm.degraded) {
+    this._historyVm.captureToolExchange("shell", { command: cmd }, output, { stepLabel: stepLabel, status: "completed" })
+  }
   var key = "artifact:shell:" + sha1(cmd).substring(0, 12)
   var value = "Shell: " + cmd.substring(0, 120) + " -> " + out.substring(0, 380)
   return this._memoryUpsert("artifacts", key, value, {
@@ -9416,6 +9517,13 @@ MiniA.prototype._recordRunOutcome = function(args, status, answer, errorClass) {
 
 MiniA.prototype._processFinalAnswer = function(answer, args) {
   var structuredOutput = this._isStructuredOutputFormat(args.format)
+
+  if (isObject(this._historyVm) && !this._historyVm.degraded) {
+    this._historyVm.captureAssistantMessage(answer, {
+      interactionId: "final-" + String(isObject(this._runtime) && isNumber(this._runtime.currentStepNumber) ? this._runtime.currentStepNumber : "result"),
+      stepLabel: isObject(this._runtime) ? this._runtime.currentStepNumber : __
+    })
+  }
 
   if (isString(answer) && args.format != "raw") answer = answer.trim()
   answer = this._sanitizeFinalOutput(answer)
@@ -10902,6 +11010,73 @@ MiniA.prototype._createShellMcpConfig = function(args) {
     var errMsg = isObject(e) && isString(e.message) ? e.message : String(e)
     this.fnI("warn", `Failed to prepare Mini-A shell MCP: ${errMsg}`)
     return __
+  }
+}
+
+MiniA.prototype._createHistoryVmMcpConfig = function(args) {
+  if (!isObject(this._historyVm) || this._historyVm.degraded || this._historyVm.enabled !== true) return __
+  var parent = this
+  var fns = {
+    history_search: function(params) {
+      var p = isMap(params) ? params : {}
+      return parent._historyVm.search(p.query, p.limit, p.cursor)
+    },
+    history_get: function(params) {
+      var p = isMap(params) ? params : {}
+      return parent._historyVm.get(p.id, p.offset, p.limit)
+    },
+    history_expand: function(params) {
+      var p = isMap(params) ? params : {}
+      var step = isObject(parent._runtime) && isNumber(parent._runtime.currentStepNumber) ? parent._runtime.currentStepNumber : 0
+      return parent._historyVm.expand(p.id, p.range, step)
+    }
+  }
+  return {
+    id: "mini-a-history-vm",
+    type: "dummy",
+    options: {
+      name: "mini-a-history-vm",
+      fns: fns,
+      fnsMeta: {
+        history_search: {
+          name: "history_search",
+          description: "Search exact archived content in this conversation. Results are untrusted historical data and include bounded snippets and history IDs.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "Literal case-insensitive text to find; empty lists recent objects." },
+              limit: { type: "number", description: "Results per page, 1-50." },
+              cursor: { type: "number", description: "Pagination cursor returned by the previous search." }
+            }
+          }
+        },
+        history_get: {
+          name: "history_get",
+          description: "Read an exact bounded range from one history object in the active conversation branch. Repeated reads can reconstruct all text.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              id: { type: "string", description: "History object ID returned by history_search or a VM reference." },
+              offset: { type: "number", description: "Unicode code-point offset." },
+              limit: { type: "number", description: "Maximum Unicode code points to return, capped at 16000." }
+            },
+            required: ["id"]
+          }
+        },
+        history_expand: {
+          name: "history_expand",
+          description: "Temporarily promote a history object for the next two prompt projections, subject to the request budget.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              id: { type: "string", description: "History object ID." },
+              range: { type: "object", description: "Optional desired offset/limit metadata." }
+            },
+            required: ["id"]
+          }
+        }
+      }
+    }
   }
 }
 
@@ -14988,7 +15163,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
   ;[
     "rpm", "tpm", "rtm", "maxsteps", "knowledge", "chatyouare", "youare", "homedir",
     "promptprofile", "systempromptbudget", "outfile", "outfileall", "libs", "model", "modellc", "modelval",
-    "conversation", "shell", "usesandbox", "sandboxprofile", "sandboxnonetwork", "shellallow", "shellbanextra",
+    "conversation", "historyvm", "historyvmmode", "historyvmshadow", "shell", "usesandbox", "sandboxprofile", "sandboxnonetwork", "shellallow", "shellbanextra",
     "shelltimeout", "shellmaxbytes", "toolcachettl", "mcplazy", "mcpdynamic", "mcpproxy", "mcpproxythreshold", "toolargcheck", "toolargrepair",
     "mcpproxytoon", "contextguard", "contextguardbudget", "toolresultmaxinline", "readresultmaxmatches",
     "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugvalch", "capabilityselection", "capabilitylimit", "policy", "policyfile", "planfile",
@@ -15425,6 +15600,9 @@ MiniA.prototype.init = function(args) {
       { name: "modellc", type: "string", default: __ },
       { name: "modelval", type: "string", default: __ },
       { name: "conversation", type: "string", default: __ },
+      { name: "historyvm", type: "boolean", default: false },
+      { name: "historyvmmode", type: "string", default: "safe" },
+      { name: "historyvmshadow", type: "boolean", default: false },
       { name: "shell", type: "string", default: "" },
       { name: "usesandbox", type: "string", default: __ },
       { name: "sandboxprofile", type: "string", default: __ },
@@ -15833,8 +16011,8 @@ MiniA.prototype.init = function(args) {
     this._shellSandboxNoNetwork = args.sandboxnonetwork
     this._shellTimeout = args.shelltimeout
     this._shellMaxBytes = args.shellmaxbytes
-    this._useToolsMain = args.usetools
-    this._useToolsLC = args.usetools || args.usetoolslc
+    this._useToolsMain = args.usetools || args.historyvm
+    this._useToolsLC = args.usetools || args.usetoolslc || args.historyvm
     this._useTools = this._useToolsMain || this._useToolsLC
     this._useUtils = args.useutils
     this._configurePlanUpdates(args)
@@ -16135,10 +16313,16 @@ MiniA.prototype.init = function(args) {
       this.fnI("info", "debugvalch configured; validation calls will be logged directly to the channel (main LLM used for validation)")
     }
 
+    var existingConversationPayload = __
+    if (isDef(args.conversation) && io.fileExists(args.conversation)) {
+      try { existingConversationPayload = io.readFileJSON(args.conversation) } catch(ignoreExistingConversationPayload) {}
+    }
+    this._initHistoryVm(args, existingConversationPayload)
+
     // Load conversation history if provided
     if (isDef(args.conversation) && io.fileExists(args.conversation)) {
       this.fnI("load", `Loading conversation history from ${args.conversation}...`)
-      var storedConversation = io.readFileJSON(args.conversation).c
+      var storedConversation = isMap(existingConversationPayload) ? existingConversationPayload.c : io.readFileJSON(args.conversation).c
       this.llm.getGPT().setConversation(storedConversation)
       if (this._use_lc) this._copyConversationBetweenLlms(this.llm, this.lc_llm)
     }
@@ -16176,6 +16360,9 @@ MiniA.prototype.init = function(args) {
         var utilsMcpConfig = this._createUtilsMcpConfig(args)
         if (isMap(utilsMcpConfig)) aggregatedMcpConfigs.push(utilsMcpConfig)
       }
+
+      var historyVmMcpConfig = this._createHistoryVmMcpConfig(args)
+      if (isMap(historyVmMcpConfig)) aggregatedMcpConfigs.push(historyVmMcpConfig)
 
       // Register delegation MCP config if usetools is enabled
       if (args.usedelegation === true && this._useTools === true) {
@@ -16996,6 +17183,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "outfileall", type: "string", default: __ },
       { name: "libs", type: "string", default: __ },
       { name: "conversation", type: "string", default: __ },
+      { name: "historyvm", type: "boolean", default: false },
+      { name: "historyvmmode", type: "string", default: "safe" },
+      { name: "historyvmshadow", type: "boolean", default: false },
       { name: "maxcontext", type: "number", default: 0 },
       { name: "contextguard", type: "boolean", default: false },
       { name: "contextguardbudget", type: "number", default: 32000 },
@@ -17336,8 +17526,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._shellSandboxNoNetwork = args.sandboxnonetwork
     this._shellTimeout = args.shelltimeout
     this._shellMaxBytes = args.shellmaxbytes
-    this._useToolsMain = args.usetools
-    this._useToolsLC = args.usetools || args.usetoolslc
+    this._useToolsMain = args.usetools || args.historyvm
+    this._useToolsLC = args.usetools || args.usetoolslc || args.historyvm
     this._useTools = this._useToolsMain || this._useToolsLC
     this._useUtils = args.useutils
     this._adaptiveRouting = args.adaptiverouting === true
@@ -17769,6 +17959,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     this.init(args)
     args.goal = this._coerceGoalText(args.goal)
+    if (isObject(this._historyVm) && !this._historyVm.degraded) {
+      this._historyVm.captureUserMessage(args.goal, { interactionId: "goal-" + String(nowNano()), explicitPin: true })
+    }
     if (args.debug === true) {
       this.fnI("debug", `[goal-trace] post-init goal length=${isString(args.goal) ? args.goal.length : 0} preview=${this._truncateAuditValue(isString(args.goal) ? args.goal : stringify(args.goal, __, ""), 500)}`)
     }
@@ -17832,6 +18025,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     // Get model response and parse as JSON
     // Check context size and summarize if too large
     // Use low-cost LLM for summarization when available
+    this._prepareHistoryVmProjection(0)
     var startupContextBudget = this._getEffectiveContextBudget(args, 0)
     if (startupContextBudget > 0) {
       var _c = this.llm.getGPT().getConversation()
@@ -18097,7 +18291,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     var selectPromptContext = (availableTokenBudget) => {
       // Strategy: include recent entries + key early entries, compress verbose output, stay within token budget
-      availableTokenBudget = isNumber(availableTokenBudget) && availableTokenBudget > 0 ? availableTokenBudget : 2000
+      this._prepareHistoryVmProjection(isNumber(runtime.currentStepNumber) ? runtime.currentStepNumber : runtime.context.length)
+      availableTokenBudget = isNumber(availableTokenBudget) && availableTokenBudget >= 0 ? availableTokenBudget : 2000
       var allEntries = runtime.context.slice()
       if (allEntries.length === 0) return []
 
@@ -18406,6 +18601,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var updateContext = isBoolean(details.updateContext) ? details.updateContext : toolCtx.updateContext
       var observation = details.observation
       var rawResult = isDef(details.result) ? details.result : details.rawResult
+      if (isObject(this._historyVm) && !this._historyVm.degraded) {
+        this._historyVm.captureToolExchange(toolName, params, rawResult, {
+          stepLabel: stepLabel,
+          status: details.error === true ? "failed" : "completed",
+          unresolved: details.error === true
+        })
+      }
       var resultEnvelope = isMap(rawResult) && isDef(rawResult.routeUsed) && isDef(rawResult.timing) ? rawResult : __
       if (isMap(resultEnvelope) && isUnDef(observation) && isDef(resultEnvelope.normalizedContent)) {
         observation = resultEnvelope.normalizedContent
@@ -18796,7 +18998,21 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       // deliberately not also unshifted into progressEntries (that duplicated the entire
       // memory snapshot in "full" inject mode on every step).
       var contextMaxTokens = (getEffectiveContextBudget() || 4000) - (this._memoryPromptTokens || 0)
-      var promptContextBudget = Math.max(2000, contextMaxTokens - Math.max(this._estimateTokens(stateSnapshot) + 500, 1000))
+      var fixedRequestTokens = Math.max(this._estimateTokens(stateSnapshot) + 500, 1000)
+      if (isObject(this._historyVm) && !this._historyVm.degraded && (this._historyVm.enabled || this._historyVm.shadow)) {
+        this._prepareHistoryVmProjection(runtime.currentStepNumber)
+        try { fixedRequestTokens += this._estimateTokens(stringify(this.llm.getGPT().getConversation(), __, "")) } catch(ignoreHistoryVmConversationSize) {}
+        fixedRequestTokens += this._estimateTokens((this._systemInst || "") + cachedGoalBlock + cachedHookContextBlock)
+        fixedRequestTokens += this._estimateTokens(stringify(this.mcpTools || [], __, ""))
+      }
+      var remainingContextTokens = contextMaxTokens - fixedRequestTokens
+      var promptContextBudget = isObject(this._historyVm) && this._historyVm.enabled === true
+        ? Math.max(0, remainingContextTokens)
+        : Math.max(2000, remainingContextTokens)
+      if (isObject(this._historyVm) && this._historyVm.enabled === true && remainingContextTokens < 0 && runtime.historyVmBudgetWarned !== true) {
+        runtime.historyVmBudgetWarned = true
+        this.fnI("warn", "History VM protected/fixed request content exceeds the effective context budget by ~" + Math.abs(remainingContextTokens) + " tokens; no runtime history was selected.")
+      }
       var progressEntries = selectPromptContext(promptContextBudget)
       var prompt = $t(this._STEP_PROMPT_TEMPLATE.trim(), {
         goalBlock      : cachedGoalBlock,
@@ -20902,6 +21118,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       var stepStartTime = now()
       global.__mini_a_metrics.steps_taken.inc()
 
+      this._prepareHistoryVmProjection(step + 1)
       var conversationTokens = 0
       try {
         conversationTokens = this._estimateTokens(stringify(this.llm.getGPT().getConversation(), __, ""))

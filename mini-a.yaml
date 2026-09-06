@@ -173,6 +173,21 @@ help:
     desc     : Conversation history file to provide to the agent
     example  : "/path/to/conversation.json"
     mandatory: false
+  - name     : historyvm
+    desc     : Enable durable bounded virtual history for this conversation (requires conversation path; default false)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : historyvmmode
+    desc     : Virtual history policy mode (safe is the only v1 mode)
+    example  : "safe"
+    mandatory: false
+    options  : ["safe"]
+  - name     : historyvmshadow
+    desc     : Capture and estimate virtual history savings without changing provider requests
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : chatyouare
     desc     : "Override the chatbot persona sentence (string or @file path, alias: chatYouAre) when running with chatbotmode=true"
     example  : "You are an enthusiastic travel concierge specialized in eco-friendly trips."
@@ -1296,6 +1311,9 @@ jobs:
         modellc        : modellc
         modelval       : modelval
         conversation   : conversation
+        historyvm      : historyvm
+        historyvmmode  : historyvmmode
+        historyvmshadow: historyvmshadow
         format         : format
         raw            : raw
         showthinking   : showthinking
@@ -1569,6 +1587,9 @@ jobs:
       modellc        : default(__)
       modelval       : default(__)
       conversation   : isString.default(__)
+      historyvm      : toBoolean.isBoolean.default(false)
+      historyvmmode  : isString.default("safe")
+      historyvmshadow: toBoolean.isBoolean.default(false)
       format         : isString.default(__)
       raw            : toBoolean.isBoolean.default(false)
       showthinking   : toBoolean.isBoolean.default(false)
