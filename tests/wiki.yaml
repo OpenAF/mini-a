@@ -513,6 +513,10 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMountSearchFanout
 
+- name: MiniA Wiki Tests::WikiSelectionRoutesOnlyChosenMounts
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testWikiSelectionRoutesOnlyChosenMounts
+
 - name: MiniA Wiki Tests::SearchScanBudgetCountCutoff
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testSearchScanBudgetCountCutoff

@@ -1615,10 +1615,32 @@ MiniUtilsTool.prototype.wiki = function(params) {
       return wm.detach(detachName)
     }
 
+    // MCP's wiki selector is resolved by the manager, not by individual tool
+    // implementations.  Legacy @mount/path remains authoritative unless a
+    // conflicting selector was supplied.
+    var routeWikiPath = function(path, requiresOne) {
+      if (isUnDef(params.wiki)) return { ok: true, manager: wm, path: path, wiki: "primary", legacy: true }
+      var selected = wm.resolveWikiSelection(params.wiki)
+      if (!selected.ok) return selected
+      if (requiresOne !== false && selected.targets.length !== 1) return { ok: false, error: "ambiguous-wiki-selection", message: op + " requires exactly one wiki when wiki is provided" }
+      var target = selected.targets[0]
+      var p = isString(path) ? path.trim() : ""
+      if (p.startsWith("@")) {
+        var mounted = wm._resolveMountPath(p)
+        if (!mounted || !mounted.mount) return { ok: false, error: "unknown-wiki", wiki: mounted ? mounted.name : p, available: selected.available }
+        if (!target || target.name !== mounted.name) return { ok: false, error: "conflicting-wiki-selection", message: "path mount and wiki selector differ" }
+        p = mounted.localPath
+      }
+      return { ok: true, manager: target.manager, path: p, wiki: target.name, targets: selected.targets }
+    }
+
     if (op === "list") {
       var prefix = isString(params.path) ? params.path : ""
+      var listRoute = routeWikiPath(prefix)
+      if (!listRoute.ok) return listRoute
       var listOpts = { withMeta: params.withMeta === true || params.withMeta === "true", limit: isNumber(params.limit) ? params.limit : 1000 }
-      var pages = wm.list(prefix, listOpts)
+      var pages = listRoute.manager.list(listRoute.path, listOpts)
+      if (!listRoute.legacy && listRoute.wiki !== "primary") pages = pages.map(function(p) { return isString(p) ? "@" + listRoute.wiki + "/" + p : merge({}, p, { path: "@" + listRoute.wiki + "/" + p.path, wiki: listRoute.wiki }) })
       if (listOpts.withMeta) return { count: pages.length, pages: pages }
       if (params.compact === true) return { count: pages.length, pages: pages }
       return { count: pages.length, pages: pages }
@@ -1626,8 +1648,11 @@ MiniUtilsTool.prototype.wiki = function(params) {
 
     if (op === "tree") {
       var treePath = isString(params.path) ? params.path : ""
+      var treeRoute = routeWikiPath(treePath)
+      if (!treeRoute.ok) return treeRoute
       var treeDepth = isNumber(params.depth) ? params.depth : 3
-      var tree = wm.tree(treePath, treeDepth)
+      var tree = treeRoute.manager.tree(treeRoute.path, treeDepth)
+      if (!treeRoute.legacy) tree.wiki = treeRoute.wiki
       if (params.compact === true) {
         return {
           path: tree.path,
@@ -1643,7 +1668,11 @@ MiniUtilsTool.prototype.wiki = function(params) {
     }
 
     if (op === "browse") {
-      return wm.browse(isString(params.path) ? params.path : "")
+      var browseRoute = routeWikiPath(isString(params.path) ? params.path : "")
+      if (!browseRoute.ok) return browseRoute
+      var browsed = browseRoute.manager.browse(browseRoute.path)
+      if (isObject(browsed) && !browseRoute.legacy) browsed.wiki = browseRoute.wiki
+      return browsed
     }
 
     // Agentic retrieval is intentionally a separate view, so legacy `read`
@@ -1674,6 +1703,8 @@ MiniUtilsTool.prototype.wiki = function(params) {
 
     if (op === "read") {
       if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path is required for read"
+      var readRoute = routeWikiPath(params.path)
+      if (!readRoute.ok) return readRoute
       var readOpts = {
         lineStart : isNumber(params.lineStart) ? params.lineStart : __,
         lineEnd   : isNumber(params.lineEnd)   ? params.lineEnd   : __,
@@ -1681,8 +1712,9 @@ MiniUtilsTool.prototype.wiki = function(params) {
         countLines: params.countLines === true,
         section   : isString(params.section)   ? params.section   : __
       }
-      var page = (params.agentic === true || this._wikiAgenticRetrieval === true) ? wm.agenticRead(params.path.trim(), merge({}, readOpts, { maxChars: isNumber(params.maxChars) ? params.maxChars : __ })) : wm.read(params.path.trim(), readOpts)
+      var page = (params.agentic === true || this._wikiAgenticRetrieval === true) ? readRoute.manager.agenticRead(readRoute.path, merge({}, readOpts, { maxChars: isNumber(params.maxChars) ? params.maxChars : __ })) : readRoute.manager.read(readRoute.path, readOpts)
       if (!isObject(page)) return "[ERROR] Page not found: " + params.path
+      if (!readRoute.legacy) { page.wiki = readRoute.wiki; if (readRoute.wiki !== "primary") page.path = "@" + readRoute.wiki + "/" + page.path }
       if (params.compact === true) {
         var compactPage = { path: page.path, title: isString(page.meta && page.meta.title) ? page.meta.title : page.path, body: page.body }
         if (isDef(page[wm._sourceField])) compactPage[wm._sourceField] = page[wm._sourceField]
@@ -1701,14 +1733,22 @@ MiniUtilsTool.prototype.wiki = function(params) {
         searchIn    : isString(params.searchIn) ? params.searchIn : "all",
         compact     : params.compact !== false
       }
-      if (params.agentic === true || this._wikiAgenticRetrieval === true) return wm.agenticSearch(params.query.trim(), searchOpts)
-      var hits = wm.search(params.query.trim(), searchOpts)
+      searchOpts.wiki = params.wiki
+      if (params.agentic === true || this._wikiAgenticRetrieval === true) {
+        if (isDef(params.wiki)) return wm.agenticSearch(params.query.trim(), searchOpts)
+        return wm.agenticSearch(params.query.trim(), searchOpts)
+      }
+      var hits = wm.searchSelected(params.query.trim(), searchOpts)
+      if (!isArray(hits)) return hits
       return { count: hits.length, results: hits }
     }
 
     if (op === "backlinks") {
       if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path is required for backlinks"
-      var links = wm.backlinks(params.path.trim())
+      var backlinksRoute = routeWikiPath(params.path)
+      if (!backlinksRoute.ok) return backlinksRoute
+      var links = backlinksRoute.manager.backlinks(backlinksRoute.path)
+      if (!backlinksRoute.legacy) links.wiki = backlinksRoute.wiki
       if (params.compact === true) return { target: links.target, count: links.count, pages: links.backlinks.map(function(b) { return { path: b.path, title: b.title } }) }
       return links
     }

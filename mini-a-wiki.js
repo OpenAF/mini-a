@@ -1620,6 +1620,67 @@ MiniAWikiManager.prototype._resolveMountPath = function(path) {
   return { mount: null, localPath: localPath, name: name }
 }
 
+// Resolve the public MCP/wiki selector in one place.  This deliberately only
+// returns direct mounts: a mounted manager's own mounts are never implicitly
+// inherited by its parent federation.
+MiniAWikiManager.prototype.resolveWikiSelection = function(selector) {
+  var mounts = isArray(this._mounts) ? this._mounts : []
+  var available = ["primary"].concat(mounts.map(function(m) { return m.name }))
+  var values = isUnDef(selector) || selector === null ? ["*"] : (isArray(selector) ? selector : [selector])
+  var seen = {}, selected = [], unknown = []
+  for (var i = 0; i < values.length; i++) {
+    if (!isString(values[i])) return { ok: false, error: "invalid-wiki", available: available }
+    var name = values[i].trim().replace(/^@/, "")
+    if (name === "*") {
+      available.forEach(function(n) { if (!seen[n]) { seen[n] = true; selected.push(n) } })
+      continue
+    }
+    if (seen[name]) return { ok: false, error: "duplicate-wiki", wiki: name, available: available }
+    if (available.indexOf(name) < 0) { unknown.push(name); continue }
+    seen[name] = true; selected.push(name)
+  }
+  if (unknown.length > 0) return { ok: false, error: "unknown-wiki", wiki: unknown[0], available: available }
+  if (selected.length === 0) return { ok: false, error: "invalid-wiki", available: available }
+  return {
+    ok: true,
+    available: available,
+    targets: selected.map(function(name) {
+      if (name === "primary") return { name: "primary", manager: this, mounted: false }
+      var mount = mounts.filter(function(m) { return m.name === name })[0]
+      return { name: name, manager: mount.manager, mounted: true, mount: mount }
+    }, this)
+  }
+}
+
+MiniAWikiManager.prototype._withWikiIdentity = function(results, name) {
+  return (isArray(results) ? results : []).map(function(hit) {
+    var out = merge({}, hit)
+    out.wiki = name
+    if (name !== "primary" && !String(out.path || "").startsWith("@")) out.path = "@" + name + "/" + out.path
+    return out
+  })
+}
+
+// Search only the resolved managers.  Each manager supplies enough candidates;
+// the single global cap is applied after the stable merge. Lucene scores remain
+// native (and are not normalized across independent indexes).
+MiniAWikiManager.prototype.searchSelected = function(query, options) {
+  var opts = isObject(options) ? options : {}
+  var selection = this.resolveWikiSelection(opts.wiki)
+  if (!selection.ok) return selection
+  var limit = isNumber(opts.limit) && opts.limit > 0 ? opts.limit : 20
+  var all = []
+  selection.targets.forEach(function(target) {
+    var localOpts = merge({}, opts, { limit: limit, __wikiNoMounts: true })
+    delete localOpts.wiki
+    var hits = target.manager.search(query, localOpts)
+    all = all.concat(this._withWikiIdentity(hits, target.name))
+  }, this)
+  var out = all.slice(0, limit)
+  if (all.truncated === true) out.truncated = true
+  return out
+}
+
 // ── Citation URLs (wikisourceurl) ──────────────────────────────────────────
 // Renders this manager's compiled wikisourceurl template for a wiki-relative path.
 // Returns __ when no template is configured (feature off) or rendering fails (a bad
@@ -3004,12 +3065,15 @@ MiniAWikiManager.prototype._agenticLog = function(name, details) {
 MiniAWikiManager.prototype.agenticSearch = function(query, options) {
   var opts = isObject(options) ? options : {}
   var limit = isNumber(opts.limit) && opts.limit > 0 ? Math.min(Math.floor(opts.limit), 20) : 8
-  var hits = this.search(query, merge({}, opts, { limit: limit, compact: true, contextLines: 0 }))
+  var searchOptions = merge({}, opts, { limit: limit, compact: true, contextLines: 0 })
+  var hits = isDef(opts.wiki) ? this.searchSelected(query, searchOptions) : this.search(query, searchOptions)
+  if (!isArray(hits)) return hits
   var self = this
   var results = hits.map(function(hit) {
     var out = { ref: this._agenticRef(hit.path), path: hit.path, title: hit.title || hit.path, summary: hit.description || "" }
     if (isDef(hit.score)) out.score = hit.score // native Lucene relevance; scan results intentionally have none
     if (isDef(hit.mount)) out.mount = hit.mount
+    if (isDef(hit.wiki)) out.wiki = hit.wiki
     if (isDef(hit[self._sourceField])) out[self._sourceField] = hit[self._sourceField] // hits already decorated by search()
     return out
   }.bind(this))
@@ -3570,7 +3634,7 @@ MiniAWikiManager.prototype.search = function(query, options) {
         }).filter(function(r) { return isString(r.path) && r.path.length > 0 && !self._isSearchExcludedPath(r.path) })
         if (validHits.length > 0) {
           // Fan out to mounts after primary results
-          var mountResults = this._searchMounts(query, opts, compact, limit - validHits.length, scanState)
+          var mountResults = opts.__wikiNoMounts === true ? [] : this._searchMounts(query, opts, compact, limit - validHits.length, scanState)
           var luceneOut = this._withGraphHints(validHits.concat(mountResults), opts)
           if (scanState.truncated === true) { luceneOut.truncated = true; luceneOut.scanned = scanState.scanned; luceneOut.scanBudget = scanState.budget }
           // Decorated before knowledgeRank (not after): knowledgeRank's own re-ranked
@@ -3580,7 +3644,12 @@ MiniAWikiManager.prototype.search = function(query, options) {
           this._applyInlineSource(luceneOut, "description")
           if (isFunction(this.knowledgeRank)) luceneOut = this.knowledgeRank(query, luceneOut, opts.debug === true)
           if (isFunction(this.knowledgeRecordTelemetry)) this.knowledgeRecordTelemetry(query, luceneOut, toBoolean(this._config.wikitelemetry) === true)
-          return luceneOut
+          var taggedLuceneOut = luceneOut.map(function(hit) {
+            if (!isString(hit.wiki)) hit.wiki = isString(hit.mount) ? hit.mount : "primary"
+            return hit
+          })
+          if (luceneOut.truncated === true) { taggedLuceneOut.truncated = true; taggedLuceneOut.scanned = luceneOut.scanned; taggedLuceneOut.scanBudget = luceneOut.scanBudget }
+          return taggedLuceneOut
         }
       }
     } catch(le) {
@@ -3678,14 +3747,19 @@ MiniAWikiManager.prototype.search = function(query, options) {
     }
   }
 
-  var mountResults = this._searchMounts(query, opts, compact, limit - results.length, scanState)
+  var mountResults = opts.__wikiNoMounts === true ? [] : this._searchMounts(query, opts, compact, limit - results.length, scanState)
   var out = this._withGraphHints(results.concat(mountResults), opts)
   if (scanState.truncated === true) { out.truncated = true; out.scanned = scanState.scanned; out.scanBudget = scanState.budget }
   this._decorateEntries(out)
   this._applyInlineSource(out, "description")
   if (isFunction(this.knowledgeRank)) out = this.knowledgeRank(query, out, opts.debug === true)
   if (isFunction(this.knowledgeRecordTelemetry)) this.knowledgeRecordTelemetry(query, out, toBoolean(this._config.wikitelemetry) === true)
-  return out
+  var taggedOut = out.map(function(hit) {
+    if (!isString(hit.wiki)) hit.wiki = isString(hit.mount) ? hit.mount : "primary"
+    return hit
+  })
+  if (out.truncated === true) { taggedOut.truncated = true; taggedOut.scanned = out.scanned; taggedOut.scanBudget = out.scanBudget }
+  return taggedOut
 }
 
 // _scanPageForMatches: shared per-page match logic used by both the sequential and
@@ -3751,6 +3825,7 @@ MiniAWikiManager.prototype._searchMounts = function(query, opts, compact, remain
         var prefixed = merge({}, h)
         prefixed.path = "@" + m.name + "/" + h.path
         prefixed.mount = m.name
+        prefixed.wiki = m.name
         combined.push(prefixed)
       })
     } catch(e) {
@@ -4388,7 +4463,7 @@ MiniAWikiManager.prototype.attach = function(name, config) {
   try {
     var manager = new MiniAWikiManager(cfg, this._logFn, this._auditFn)
     var count   = manager._safeListPages("").length
-    this._mounts.push({ name: name, manager: manager, prefix: "@" + name + "/" })
+    this._mounts.push({ name: name, manager: manager, prefix: "@" + name + "/", label: isString(cfg.label) ? cfg.label : name, description: isString(cfg.description) ? cfg.description : "" })
     return { ok: true, name: name, pages: count }
   } catch(e) {
     return { ok: false, error: __miniAErrMsg(e) }
@@ -4414,7 +4489,7 @@ MiniAWikiManager.prototype.mounts = function() {
   this._mounts = isArray(this._mounts) ? this._mounts : []
   return this._mounts.map(function(m) {
     var count = 0; try { count = m.manager._safeListPages("").length } catch(e) {}
-    return { name: m.name, prefix: m.prefix, pages: count }
+    return { name: m.name, prefix: m.prefix, pages: count, label: m.label || m.name, description: m.description || "" }
   })
 }
 
@@ -4453,8 +4528,10 @@ MiniAWikiManager.prototype.context = function(options) {
       var idx = m.manager.read("index.md")
       if (isObject(idx) && isObject(idx.meta) && isString(idx.meta.description)) desc = idx.meta.description
     } catch(e) {}
-    return { name: m.name, pages: count, description: desc }
+    return { name: m.name, pages: count, label: isString(m.label) ? m.label : m.name, description: isString(m.description) && m.description.length > 0 ? m.description : desc }
   })
+  var catalog = [{ name: "primary", label: isString(this._config.label) ? this._config.label : "wiki", primary: true, readOnly: this._access !== "rw", pageCount: pages.length, description: isString(this._config.description) ? this._config.description : "" }]
+  mountList.forEach(function(m) { catalog.push({ name: m.name, label: m.label, primary: false, readOnly: true, pageCount: m.pages, description: m.description }) })
 
   // Retrieval capability: tells the agent up-front whether search is index-backed or a full scan,
   // and whether a knowledge graph is available as an entry point.
@@ -4480,6 +4557,7 @@ MiniAWikiManager.prototype.context = function(options) {
     pages    : pages.length,
     sections : sections,
     mounts   : mountList,
+    wikis    : catalog,
     recent   : recent,
     access   : this._access,
     retrieval: {

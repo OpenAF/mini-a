@@ -20,6 +20,10 @@ The console supports `/wiki list`, `read`, `search`, `write`, `delete`, `move`, 
 
 Use `tree` and `browse` for hierarchy, `backlinks` before moving a page, and `lint` before publishing structural changes. `mcp-wiki.yaml` exposes the read-oriented MCP surface; `mcp-wiki-safe.yaml` adds bounded, opaque-reference retrieval for untrusted clients. Mounts (`wikimounts`) attach other read-only wiki configurations under `@name/`.
 
+### MCP multi-wiki selection
+
+Call `context()` once to discover the compact `wikis` catalog. In `mcp-wiki.yaml`, `wiki` is optional: omitted or `"*"` searches primary plus every mount; `"primary"` selects the main wiki; a mount name selects that source; and `["linux", "kubernetes"]` selects a subset. For example, `{query: "OIDC", wiki: "kubernetes"}` routes only to that mounted manager. A selected mount accepts mount-local paths (`{wiki: "reference", path: "guides/setup.md"}`), while legacy `@reference/guides/setup.md` remains supported. Unknown, duplicate, ambiguous, and conflicting selectors are rejected. `mcp-wiki-safe.yaml` intentionally exposes none of this topology.
+
 All three MCP servers (`mcp-wiki.yaml`, `mcp-wiki-safe.yaml`, `mcp-wiki-ops.yaml`) accept `audit=true` (or `OJOB_MCP_AUDIT`) to log every tool call. For `s3`, `http`, and `es` backends this also logs each page actually fetched — backend, resolved location (`s3://bucket/key`, the joined URL, or `es:index/path`), and byte count — including internal fetches made while serving `search`, `lint`, `list`, or `reindex`, not just the top-level tool call. Local `fs` reads are not covered. `mcp-wiki-safe.yaml` only ever logs the resolved location, never the opaque reference exposed to restricted-mode callers.
 
 ## Agentic retrieval

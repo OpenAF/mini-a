@@ -2827,5 +2827,25 @@
     } finally { cleanupTestDir(dir) }
   }
 
+  exports.testWikiSelectionRoutesOnlyChosenMounts = function() {
+    var primary = createTestDir(), a = createTestDir(), b = createTestDir()
+    try {
+      writePage(primary, "primary.md", "# Primary\ncommon-selector-keyword")
+      writePage(a, "a.md", "# A\ncommon-selector-keyword")
+      writePage(b, "b.md", "# B\ncommon-selector-keyword")
+      var wm = new MiniAWikiManager({ backend: "fs", root: primary, access: "ro" })
+      wm.attach("wikiA", { backend: "fs", root: a, label: "A docs", description: "A corpus" })
+      wm.attach("wikiB", { backend: "fs", root: b })
+      var onlyA = wm.searchSelected("common-selector-keyword", { wiki: "wikiA", limit: 10 })
+      ow.test.assert(onlyA.length, 1, "single selected mount should be the only searched manager")
+      ow.test.assert(onlyA[0].path, "@wikiA/a.md", "selected mounted paths retain their legacy prefix")
+      ow.test.assert(onlyA[0].wiki, "wikiA", "results identify their selected source")
+      var subset = wm.searchSelected("common-selector-keyword", { wiki: ["wikiA", "wikiB"], limit: 1 })
+      ow.test.assert(subset.length, 1, "selection limit remains global")
+      ow.test.assert(wm.resolveWikiSelection("missing").error, "unknown-wiki", "unknown selectors must not fall back")
+      ow.test.assert(wm.context().wikis.length, 3, "context exposes a safe primary plus mounts catalog")
+    } finally { cleanupTestDir(primary); cleanupTestDir(a); cleanupTestDir(b) }
+  }
+
   return exports
 })()

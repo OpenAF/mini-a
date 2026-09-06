@@ -89,8 +89,8 @@ help:
     example  : "Team wiki"
     mandatory: true
   - name     : wikimounts
-    desc     : "SLON/JSON array of read-only wiki mounts: [{name, backend, root|bucket|prefix|url|...}]"
-    example  : "[{name: 'team', backend: 'fs', root: './team-wiki'}]"
+    desc     : "SLON/JSON array of read-only wiki mounts: [{name, label?, description?, backend, root|bucket|prefix|url|...}]. name is the stable MCP wiki selector."
+    example  : "[{name: 'team', label: 'Team docs', description: 'Curated team knowledge', backend: 'fs', root: './team-wiki'}]"
     mandatory: false
   - name     : usewikigraph
     desc     : "Enable the wiki knowledge graph. Also enabled automatically when `wikigraphfalkorhost` is provided. Search transparently appends related-page hints."
@@ -168,7 +168,7 @@ todo:
     ((fnsMeta)): &MCPFNSMETA
       context:
         name       : context
-        description: "[ORIENTATION] Get a compact overview of {{label}}: page count, sections, mounts, and recent changes. Call this once at the start of any wiki task before searching or reading."
+        description: "[ORIENTATION] Get a compact overview of {{label}}, including available wiki names for the wiki selector. Call once before searching when the relevant knowledge source is unknown."
         inputSchema:
           type      : object
           properties: {}
@@ -179,7 +179,7 @@ todo:
 
       search:
         name       : search
-        description: "[START HERE] Search {{label}} pages. This is lexical keyword retrieval, not semantic question answering: use specific keywords, names, aliases, and short phrases. A compatible Lucene index is used when available; otherwise the wiki is scanned. When enabled, graph-related pages may be appended as supplemental hints. Always call this before read. Returns path+title+description per match (no full page content). Then call read() with the most relevant path.{{#if ($wikiHasSourceUrl)}} Each result also carries a {{$wikiSourceField}} URL, that page's canonical citation source; cite it when you use the page's content.{{/if}}"
+        description: "[START HERE] Search {{label}} pages. context() lists wiki names. Omit wiki or use '*' for all wikis; use 'primary', a mount name, or an array for selected sources. Mounted paths remain @name/path.md. Returns compact lexical matches, then read the best path."
         inputSchema:
           type      : object
           properties:
@@ -205,6 +205,11 @@ todo:
             path:
               type       : string
               description: Optional single page path to scope the search.
+            wiki:
+              oneOf:
+              - { type: string }
+              - { type: array, items: { type: string } }
+              description: "Knowledge source: omitted/'*'=all, primary=main wiki, mount name=one mounted wiki, or an array of mount names."
           required  : [ query ]
         annotations:
           title         : search
@@ -220,6 +225,9 @@ todo:
             path:
               type       : string
               description: "Wiki page path to read. Use @name/path.md for mounted wikis."
+            wiki:
+              type: string
+              description: "Optional primary or mount selector; with a mount, path is mount-local. Must not conflict with @name/path."
             startLine:
               type       : integer
               description: Optional 1-based start line to read from.
@@ -494,6 +502,7 @@ jobs:
       withMeta: toBoolean.isBoolean.default(false)
       limit   : toNumber.isNumber.default(200)
       compact : toBoolean.isBoolean.default(false)
+      wiki    : default(__)
   exec : | #js
     return global.__wikiTool.wiki({
       operation: "list",
@@ -501,6 +510,7 @@ jobs:
       withMeta : args.withMeta,
       limit    : args.limit,
       compact  : args.compact
+      wiki     : args.wiki
     })
 
 - name : Wiki tree
@@ -509,12 +519,14 @@ jobs:
       path   : isString.default("")
       depth  : toNumber.isNumber.default(3)
       compact: toBoolean.isBoolean.default(true)
+      wiki   : default(__)
   exec : | #js
     return global.__wikiTool.wiki({
       operation: "tree",
       path     : args.path,
       depth    : args.depth,
       compact  : args.compact
+      wiki     : args.wiki
     })
 
 - name : Wiki browse section
@@ -522,11 +534,13 @@ jobs:
     in:
       path   : isString.default("")
       compact: toBoolean.isBoolean.default(true)
+      wiki   : default(__)
   exec : | #js
     return global.__wikiTool.wiki({
       operation: "browse",
       path     : args.path,
       compact  : args.compact
+      wiki     : args.wiki
     })
 
 - name : Wiki read page
@@ -538,6 +552,7 @@ jobs:
       section   : isString.default(__)
       countLines: toBoolean.isBoolean.default(false)
       compact   : toBoolean.isBoolean.default(false)
+      wiki      : default(__)
   exec : | #js
     return global.__wikiTool.wiki({
       operation : "read",
@@ -547,6 +562,7 @@ jobs:
       section   : args.section,
       countLines: args.countLines,
       compact   : args.compact
+      wiki      : args.wiki
     })
 
 - name : Wiki search pages
@@ -558,6 +574,7 @@ jobs:
       regex        : toBoolean.isBoolean.default(false)
       contextLines : toNumber.isNumber.default(0)
       path         : isString.default("")
+      wiki         : default(__)
   exec : | #js
     return global.__wikiTool.wiki({
       operation    : "search",
@@ -568,6 +585,7 @@ jobs:
       contextLines : args.contextLines,
       path         : args.path,
       compact      : args.contextLines === 0
+      wiki         : args.wiki
     })
 
 - name : Wiki backlinks
@@ -575,9 +593,11 @@ jobs:
     in:
       path   : isString
       compact: toBoolean.isBoolean.default(true)
+      wiki   : default(__)
   exec : | #js
     return global.__wikiTool.wiki({
       operation: "backlinks",
       path     : args.path,
       compact  : args.compact
+      wiki     : args.wiki
     })

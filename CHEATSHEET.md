@@ -960,7 +960,9 @@ Common folder names: `topics/`, `concepts/`, `entities/`, `comparisons/`. Use th
 | `wikilintstaleddays` | number | `90` | Days before a page without a recent update is flagged stale in lint |
 | `wikilintstreamthreshold` | number | `2000` | Switch lint into streaming mode above this many pages |
 | `wikilintmaxpairs` | number | `250000` | Max near-duplicate comparisons during streaming lint |
-| `wikimounts` | SLON/JSON | - | Read-only wiki mounts: `[{name: 'team', backend: 'fs', root: '/path'}]` — mounts appear as `@name/path.md` |
+| `wikimounts` | SLON/JSON | - | Read-only wiki mounts: `[{name: 'team', label: 'Team docs', description: '...', backend: 'fs', root: '/path'}]` — mounts appear as `@name/path.md` |
+
+For `mcp-wiki.yaml`, call `context()` to discover names, then use `wiki`: omitted/`"*"` searches all, `"primary"` selects the main wiki, a name selects one mount, and `["a","b"]` selects a subset. `mcp-wiki-safe.yaml` deliberately does not reveal mount names.
 | `usewikigraph` | boolean | `false` | Enable the wiki knowledge graph layer (auto-enabled when `wikigraphfalkorhost` is set) |
 | `wikigraphsemantic` | boolean | `false` | Enable semantic graph extraction when running graph build |
 | `wikigraphcommunity` | string | `louvain` | Community detection algorithm |

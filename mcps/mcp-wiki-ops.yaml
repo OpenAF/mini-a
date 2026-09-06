@@ -127,7 +127,7 @@ todo:
     ((fnsMeta)): &MCPFNSMETA
       context:
         name       : context
-        description: "[ORIENTATION] Get a compact overview of {{label}}: page count, sections, mounts, and recent changes. Call this once at the start of any wiki task."
+        description: "[ORIENTATION] Get a compact overview of {{label}}, including available wiki names for the wiki selector."
         inputSchema:
           type      : object
           properties: {}
@@ -159,6 +159,9 @@ todo:
             page:
               type       : string
               description: Optional page-path filter.
+            wiki:
+              oneOf: [ { type: string }, { type: array, items: { type: string } } ]
+              description: "Optional primary, mount name, '*', or selected array. Mounted lint is read-only."
         annotations:
           title         : lint
           readOnlyHint  : true
@@ -173,6 +176,7 @@ todo:
             path:
               type       : string
               description: "Target markdown page path. Must not start with @mount/ (mounts are read-only)."
+            wiki: { type: string, description: "Optional explicit target; only primary can be modified." }
             content:
               type       : string
               description: Page content or partial content for edit modes.
@@ -225,6 +229,7 @@ todo:
               type       : boolean
               description: Allow move target overwrite.
               default    : false
+            wiki: { type: string, description: "Optional explicit target; only primary can be modified." }
           required  : [ op ]
         annotations:
           title         : maintain
@@ -233,9 +238,11 @@ todo:
 
       reindex:
         name       : reindex
-        description: "Trigger a full wiki reindex in {{label}} (search indexes plus wiki graph; syncs FalkorDB when configured)."
+        description: "Trigger a full primary-wiki reindex in {{label}}. Mounted wikis are read-only and are not reindexed by this server."
         inputSchema:
           type      : object
+          properties:
+            wiki: { type: string, description: "Optional primary only; mount selectors are rejected." }
         annotations:
           title         : reindex
           readOnlyHint  : false
@@ -344,12 +351,16 @@ jobs:
       severity : isString.default("")
       type     : isString.default("")
       page     : isString.default("")
+      wiki     : default(__)
   exec : | #js
-    var report = global.__wikiTool.wiki({
-      operation: "lint",
-      staleDays: args.staleDays,
-      compact  : false
+    var selected = isDef(args.wiki) ? global.__wikiManager.resolveWikiSelection(args.wiki) : global.__wikiManager.resolveWikiSelection("*")
+    if (!selected.ok) return selected
+    var reports = selected.targets.map(function(target) {
+      var report = target.manager.lint(__, { staleDays: args.staleDays })
+      if (isObject(report) && isArray(report.issues)) report.issues.forEach(function(issue) { issue.wiki = target.name })
+      return report
     })
+    var report = reports.length === 1 ? reports[0] : { summary: {}, issues: [].concat.apply([], reports.map(function(r) { return isArray(r.issues) ? r.issues : [] })) }
     if (isString(report)) return report
     if (args.compact !== true) return report
     var issues = isArray(report.issues) ? report.issues : []
@@ -378,7 +389,12 @@ jobs:
       lineEnd   : toNumber.isNumber.default(__)
       section   : isString.default("")
       raw       : toBoolean.isBoolean.default(false)
+      wiki      : default(__)
   exec : | #js
+    var selected = isDef(args.wiki) ? global.__wikiManager.resolveWikiSelection(args.wiki) : { ok: true, targets: [{ name: "primary", manager: global.__wikiManager }] }
+    if (!selected.ok) return selected
+    if (selected.targets.length !== 1) return { ok: false, error: "ambiguous-wiki-selection", message: "edit requires exactly one wiki when wiki is provided" }
+    if (selected.targets[0].name !== "primary") return { ok: false, error: "wiki-read-only", wiki: selected.targets[0].name }
     var opts = {
       append    : args.append === true,
       lineInsert: isNumber(args.lineInsert) && args.lineInsert > 0 ? args.lineInsert : __,
@@ -407,7 +423,12 @@ jobs:
       to           : isString.default("")
       leaveRedirect: toBoolean.isBoolean.default(false)
       overwrite    : toBoolean.isBoolean.default(false)
+      wiki         : default(__)
   exec : | #js
+    var selected = isDef(args.wiki) ? global.__wikiManager.resolveWikiSelection(args.wiki) : { ok: true, targets: [{ name: "primary", manager: global.__wikiManager }] }
+    if (!selected.ok) return selected
+    if (selected.targets.length !== 1) return { ok: false, error: "ambiguous-wiki-selection", message: "maintain requires exactly one wiki when wiki is provided" }
+    if (selected.targets[0].name !== "primary") return { ok: false, error: "wiki-read-only", wiki: selected.targets[0].name }
     var op = String(args.op).toLowerCase().trim()
     if (op === "init") {
       return global.__wikiTool.wiki({ operation: "init", path: args.path })
@@ -427,7 +448,13 @@ jobs:
     return { ok: false, error: "unknown op: " + op + ". use init|move|delete" }
 
 - name : Wiki reindex
+  check:
+    in:
+      wiki: default(__)
   exec : | #js
+    var selected = isDef(args.wiki) ? global.__wikiManager.resolveWikiSelection(args.wiki) : { ok: true, targets: [{ name: "primary", manager: global.__wikiManager }] }
+    if (!selected.ok) return selected
+    if (selected.targets.length !== 1 || selected.targets[0].name !== "primary") return { ok: false, error: "wiki-read-only", wiki: selected.targets.length === 1 ? selected.targets[0].name : "*" }
     return global.__wikiTool.wiki({ operation: "reindex" })
 
 - name : Wiki graph build
