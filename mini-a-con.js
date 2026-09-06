@@ -3113,6 +3113,12 @@ try {
     if (!isString(text)) return __
     var normalized = text.replace(/\r\n/g, "\n").trim()
     if (normalized.length === 0) return __
+
+    var untrustedMatch = normalized.match(/BEGIN_UNTRUSTED_GOAL\s*\n([\s\S]*?)\nEND_UNTRUSTED_GOAL/)
+    if (isArray(untrustedMatch) && isString(untrustedMatch[1]) && untrustedMatch[1].trim().length > 0) {
+      return untrustedMatch[1].trim()
+    }
+
     var goalMatch = normalized.match(/(?:^|\n)GOAL:\s*([\s\S]*?)(?:\n\s*CURRENT STATE:|$)/i)
     if (!isArray(goalMatch) || goalMatch.length < 2) return normalized
     var extracted = goalMatch[1].trim()
