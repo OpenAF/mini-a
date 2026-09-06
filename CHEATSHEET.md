@@ -908,7 +908,7 @@ agent.clearSessionMemory("my-session-id")
 ---
 
 ## Wiki Knowledge Base
-- **OKF Compatibility**: Mini-A wiki now supports Open Knowledge Format (OKF) for enhanced wiki interoperability with external knowledge bases
+- **OKF compatibility shims**: `type` front matter defaults to `concept` when omitted, `timestamp` is accepted as an alias for `updated`, and bundle-root-relative absolute links are resolved OKF-style — small conventions borrowed from Open Knowledge Format, not a general import/export or interop feature
 
 
 Mini-A implements an LLM wiki pattern (inspired by Karpathy's "LLM knowledge base"): the agent distils knowledge from each session into structured Markdown pages, then retrieves and extends that knowledge in future sessions. The wiki lives in a filesystem folder or S3 prefix — any agent with the same `wikiroot` (or `wikibucket`) shares the same pages.
@@ -2019,7 +2019,7 @@ mini-a ➤ Follow these instructions @docs/guide.md and apply rules from @polici
 - **Email**: openaf@openaf.io
 # Wiki
 
-`mini-a ingest=true ingestsource=./docs usewiki=true wikiaccess=rw ingestmode=auto`
+`ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=/tmp/wiki ingestmode=auto`
 
 `mini-a dream=true usewiki=true dreamwikimode=plan` — estimates only; never calls a model.
 # Evaluation

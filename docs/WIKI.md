@@ -386,7 +386,7 @@ normalized without a model call. Use `normalize` or `raw` to guarantee no LLM us
 `wikidreambudget`, and `wikimaxprompttokens` defer work rather than dropping it.
 
 ```sh
-mini-a ingest=true ingestsource=./docs usewiki=true wikiaccess=rw ingestmode=auto
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=/tmp/wiki ingestmode=auto
 mini-a dream=true usewiki=true dreamwikimode=plan
 ```
 
