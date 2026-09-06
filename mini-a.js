@@ -8018,6 +8018,50 @@ MiniA.prototype._initWiki = function(args) {
   }
 }
 
+// Virtual skill library (docs/VIRTUAL-SKILLS.md). Reuses the same MiniAWikiManager
+// as usewiki when no dedicated skillwiki* config is given -- a wiki can hold
+// ordinary knowledge pages and skill pages side by side. A dedicated backend/root/
+// mounts is only constructed when the caller explicitly asks for one, e.g. to point
+// at a separate skill-only library while still using usewiki for team knowledge.
+MiniA.prototype._initSkillWiki = function(args) {
+  this._skillWikiManager = __
+  if (toBoolean(args.useskillwiki) !== true) return
+  try {
+    var hasDedicatedConfig = isString(args.skillwikiroot) || isString(args.skillwikibackend) || isDef(args.skillwikimounts)
+    if (!hasDedicatedConfig && isObject(this._wikiManager)) {
+      this._skillWikiManager = this._wikiManager
+      this.fnI("info", "🧩 [skills] virtual skill library enabled (reusing usewiki's wiki)")
+      return
+    }
+    if (typeof MiniAWikiManager !== "function") loadLib("mini-a-wiki.js")
+    var cfg = {
+      access : "ro",
+      backend: isString(args.skillwikibackend) ? args.skillwikibackend : "fs",
+      root   : isString(args.skillwikiroot) && args.skillwikiroot.trim().length > 0 ? args.skillwikiroot.trim() : "."
+    }
+    this._skillWikiManager = new MiniAWikiManager(cfg, function(level, msg) {
+      this.fnI(level || "info", "[skills] " + msg)
+    }.bind(this))
+    if (isString(args.skillwikimounts) && args.skillwikimounts.trim().length > 0) {
+      try {
+        var mountsList = af.fromJSSLON(args.skillwikimounts)
+        if (!isArray(mountsList)) mountsList = [mountsList]
+        var self = this
+        mountsList.forEach(function(mc) {
+          if (!isMap(mc) || !isString(mc.name)) return
+          self._skillWikiManager.attach(mc.name, merge({ access: "ro" }, mc))
+        })
+      } catch(mountErr) {
+        this.fnI("warn", "[skills] skillwikimounts parse error: " + __miniAErrMsg(mountErr))
+      }
+    }
+    this.fnI("info", `🧩 [skills] virtual skill library enabled (backend=${cfg.backend})`)
+  } catch(e) {
+    this.fnI("warn", `[skills] failed to initialize skill wiki: ${__miniAErrMsg(e)}`)
+    this._skillWikiManager = __
+  }
+}
+
 MiniA.prototype._getDefaultMemoryWriteManager = function() {
   if (this._memoryScope === "global") return isObject(this._globalMemoryManager) ? this._globalMemoryManager : this._sessionMemoryManager
   if (this._memoryScope === "session") return isObject(this._sessionMemoryManager) ? this._sessionMemoryManager : this._globalMemoryManager
@@ -10504,6 +10548,11 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       }
     }
     if (isObject(this._wikiManager)) fileTool._wikiManager = this._wikiManager
+    if (isObject(this._skillWikiManager)) {
+      fileTool._skillWikiManager = this._skillWikiManager
+      fileTool._skillsMaxLoaded = isNumber(args.skillsmaxloaded) ? args.skillsmaxloaded : 3
+      fileTool._skillsMaxChars = isNumber(args.skillsmaxchars) ? args.skillsmaxchars : 12000
+    }
 
     var metadataByFn = {}
     if (isFunction(MiniUtilsTool.getMetadataByFn)) {
@@ -10550,6 +10599,9 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     }
     if (toBoolean(args.usewiki) !== true || !isObject(this._wikiManager)) {
       methodNames = methodNames.filter(function(name) { return name !== "wiki" })
+    }
+    if (toBoolean(args.useskillwiki) !== true || !isObject(this._skillWikiManager)) {
+      methodNames = methodNames.filter(function(name) { return name !== "skillwiki" })
     }
     var utilsAllow = this._normalizeUtilsToolList(args.utilsallow, useStdUtils)
     if (utilsAllow.length > 0) {
@@ -15203,7 +15255,8 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
     "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "wikisourceurl", "wikisourcefield", "wikisourceinline", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphmounts", "wikimountgraphttlms", "wikigraphcross", "wikigraphcrossjoin", "wikigraphcrosscap", "wikigraphcrossdepth", "wikigraphcrossmaxdf", "wikigraphcrossminkeylen", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
     "dreamwikimode", "dreammemorymode", "dreamwikidryrun", "dreamwikiapproval", "dreamwikireorg",
-    "dreamwikiminpages", "dreamwikimaxdepth", "dreamwikilintresultlimit", "dreamwikisurgical", "wikilintresultlimit", "dreamreport"
+    "dreamwikiminpages", "dreamwikimaxdepth", "dreamwikilintresultlimit", "dreamwikisurgical", "wikilintresultlimit", "dreamreport",
+    "useskillwiki", "skillwikibackend", "skillwikiroot", "skillwikimounts", "skillsautosearch", "skillsautolimit", "skillsmaxloaded", "skillsmaxchars"
   ].forEach(function(name) {
     if (!isDef(name)) return
     var normalized = String(name).trim().toLowerCase()
@@ -16017,6 +16070,7 @@ MiniA.prototype.init = function(args) {
     this._useUtils = args.useutils
     this._configurePlanUpdates(args)
     this._initWiki(args)
+    this._initSkillWiki(args)
 
     // Normalize format argument based on outfile
     if (isDef(args.outfile) && isUnDef(args.format)) args.format = "json"
@@ -17401,6 +17455,19 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (args.memorysearchbudget < 1) args.memorysearchbudget = 1200
     args.memorypersistevery = _$(args.memorypersistevery, "args.memorypersistevery").isNumber().default(1)
     if (args.memorypersistevery < 1) args.memorypersistevery = 1
+    args.useskillwiki = _$(toBoolean(args.useskillwiki), "args.useskillwiki").isBoolean().default(false)
+    args.skillwikibackend = _$(args.skillwikibackend, "args.skillwikibackend").isString().default(__)
+    args.skillwikiroot = _$(args.skillwikiroot, "args.skillwikiroot").isString().default(__)
+    args.skillsautosearch = _$(toBoolean(args.skillsautosearch), "args.skillsautosearch").isBoolean().default(false)
+    var _skillsAutoLimit = isNumber(args.skillsautolimit) ? args.skillsautolimit : Number(args.skillsautolimit)
+    if (isNaN(_skillsAutoLimit)) _skillsAutoLimit = __
+    args.skillsautolimit = _$(_skillsAutoLimit, "args.skillsautolimit").isNumber().default(5)
+    var _skillsMaxLoaded = isNumber(args.skillsmaxloaded) ? args.skillsmaxloaded : Number(args.skillsmaxloaded)
+    if (isNaN(_skillsMaxLoaded)) _skillsMaxLoaded = __
+    args.skillsmaxloaded = _$(_skillsMaxLoaded, "args.skillsmaxloaded").isNumber().default(3)
+    var _skillsMaxChars = isNumber(args.skillsmaxchars) ? args.skillsmaxchars : Number(args.skillsmaxchars)
+    if (isNaN(_skillsMaxChars)) _skillsMaxChars = __
+    args.skillsmaxchars = _$(_skillsMaxChars, "args.skillsmaxchars").isNumber().default(12000)
     args.usewiki = _$(toBoolean(args.usewiki), "args.usewiki").isBoolean().default(false)
     args.wikiaccess = _$(args.wikiaccess, "args.wikiaccess").isString().default("ro")
     if (["ro", "rw"].indexOf(String(args.wikiaccess).toLowerCase().trim()) < 0) args.wikiaccess = "ro"

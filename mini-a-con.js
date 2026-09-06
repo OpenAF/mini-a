@@ -680,6 +680,14 @@ try {
     wikigraphfalkorgraph: { type: "string", description: "FalkorDB graph name for wiki graph." },
     wikigraphfalkoruser: { type: "string", description: "FalkorDB username for wiki graph." },
     wikigraphfalkorpass: { type: "string", description: "FalkorDB password for wiki graph." },
+    useskillwiki   : { type: "boolean", default: false, description: "Enable the virtual skill library (docs/VIRTUAL-SKILLS.md). Reuses usewiki's wiki when no skillwiki* config is given." },
+    skillwikibackend: { type: "string", description: "Skill library backend: fs, s3, s3fs, es, or http. Defaults to fs. Only needed for a dedicated skill wiki separate from usewiki." },
+    skillwikiroot  : { type: "string", description: "Root directory for a dedicated skill library (fs backend). Only needed when not reusing usewiki's wiki." },
+    skillwikimounts: { type: "string", description: "SLON/JSON array of read-only skill-library mounts, same shape as wikimounts. Only used with a dedicated skill wiki." },
+    skillsautosearch: { type: "boolean", default: false, description: "Allow mini-a to consult the skill library automatically during planning (opt-in, bounded by skillsautolimit/skillsmaxloaded/skillsmaxchars)." },
+    skillsautolimit: { type: "number", default: 5, description: "Maximum results per automatic skill search." },
+    skillsmaxloaded: { type: "number", default: 3, description: "Maximum distinct skills opened per agent run." },
+    skillsmaxchars : { type: "number", default: 12000, description: "Maximum skill-body characters read per agent run." },
     planmode       : { type: "boolean", default: false, description: "Run in plan-only mode without executing actions" },
     validateplan   : { type: "boolean", default: false, description: "Validate a plan using LLM-based critique and structure validation" },
     convertplan    : { type: "boolean", default: false, description: "Convert plan to requested format and exit" },
@@ -1525,6 +1533,33 @@ try {
       } catch(ignoreWikiMountInitError) {}
       return wm
     } catch(ignoreWikiInitError) {
+      return __
+    }
+  }
+
+  function getConsoleSkillWikiManager() {
+    var swm = isObject(activeAgent) && isObject(activeAgent._skillWikiManager) ? activeAgent._skillWikiManager : __
+    if (isObject(swm)) return swm
+    if (toBoolean(sessionOptions.useskillwiki) !== true) return __
+    var hasDedicated = isString(sessionOptions.skillwikiroot) || isString(sessionOptions.skillwikibackend) || isDef(sessionOptions.skillwikimounts)
+    if (!hasDedicated) return getConsoleWikiManager()
+    try {
+      var cfg = {
+        access : "ro",
+        backend: isString(sessionOptions.skillwikibackend) ? sessionOptions.skillwikibackend : "fs",
+        root   : isString(sessionOptions.skillwikiroot) && sessionOptions.skillwikiroot.trim().length > 0 ? sessionOptions.skillwikiroot.trim() : "."
+      }
+      var swm2 = new MiniAWikiManager(cfg)
+      if (isString(sessionOptions.skillwikimounts) && sessionOptions.skillwikimounts.trim().length > 0) {
+        var mountsList = af.fromJSSLON(sessionOptions.skillwikimounts)
+        if (!isArray(mountsList)) mountsList = [mountsList]
+        mountsList.forEach(function(mc) {
+          if (!isMap(mc) || !isString(mc.name)) return
+          swm2.attach(mc.name, merge({ access: "ro" }, mc))
+        })
+      }
+      return swm2
+    } catch(ignoreSkillWikiInitError) {
       return __
     }
   }
@@ -6014,7 +6049,76 @@ try {
     print( ow.format.withSideLine( lines.join("\n"), __, promptColor, hintColor, ow.format.withSideLineThemes().openCurvedRect) )
   }
 
+  var __skillWikiSubcommands = { search: true, remote: true, recommend: true, open: true, read: true, related: true, context: true }
+
+  function printRemoteSkills(subcmdRaw) {
+    var swm = getConsoleSkillWikiManager()
+    if (!isObject(swm)) {
+      print(colorifyText("Skill library is not enabled. Start with useskillwiki=true (reuses usewiki's wiki, or set skillwikiroot=<path>).", hintColor))
+      return
+    }
+    if (typeof __miniASkillSearch !== "function") loadLib("mini-a-skills.js")
+    var parts = isString(subcmdRaw) ? subcmdRaw.trim().split(/\s+/) : []
+    var sub  = parts.length > 0 ? parts[0].toLowerCase() : "search"
+    var rest = parts.slice(1).join(" ").trim()
+    if (sub === "remote") { sub = "search"; } // "/skills remote <query>" is an alias for "/skills search <query>"
+
+    try {
+      if (sub === "context") {
+        print(colorifyText(stringify(__miniASkillContext(swm, {}), __, "  "), promptColor))
+      } else if (sub === "search") {
+        if (rest.length === 0) { print(colorifyText("Usage: /skills search <query>", errorColor)); return }
+        var hits = __miniASkillSearch(swm, { query: rest })
+        if (hits.length === 0) {
+          print(colorifyText("No skills found for: " + rest, hintColor))
+        } else {
+          print(colorifyText("Skills (" + hits.length + "):", accentColor))
+          hits.forEach(function(h) {
+            print("  " + colorifyText(h.ref, promptColor) + " — " + h.title + (h.risk ? " [" + h.risk + "]" : ""))
+            if (h.summary) print("    " + colorifyText(h.summary, hintColor))
+          })
+        }
+      } else if (sub === "recommend") {
+        if (rest.length === 0) { print(colorifyText("Usage: /skills recommend <task description>", errorColor)); return }
+        var recs = __miniASkillRecommend(swm, { task: rest })
+        if (recs.length === 0) {
+          print(colorifyText("No skills recommended for: " + rest, hintColor))
+        } else {
+          print(colorifyText("Recommended skills (" + recs.length + "):", accentColor))
+          recs.forEach(function(h) {
+            print("  " + colorifyText(h.ref, promptColor) + " — " + h.title + (h.risk ? " [" + h.risk + "]" : ""))
+          })
+        }
+      } else if (sub === "open") {
+        if (rest.length === 0) { print(colorifyText("Usage: /skills open <ref>", errorColor)); return }
+        print(colorifyText(stringify(__miniASkillOpen(swm, rest, {}), __, "  "), promptColor))
+      } else if (sub === "read") {
+        var readParts = rest.split(/\s+/)
+        var readRef = readParts.shift()
+        if (!isString(readRef) || readRef.length === 0) { print(colorifyText("Usage: /skills read <ref> [section...]", errorColor)); return }
+        var section = readParts.join(" ").trim()
+        var out = __miniASkillRead(swm, readRef, section.length > 0 ? { section: section } : {})
+        if (isString(out.body)) print(out.body)
+        else print(colorifyText(stringify(out, __, "  "), errorColor))
+      } else if (sub === "related") {
+        if (rest.length === 0) { print(colorifyText("Usage: /skills related <ref>", errorColor)); return }
+        print(colorifyText(stringify(__miniASkillRelated(swm, rest, {}), __, "  "), promptColor))
+      } else {
+        print(colorifyText("Usage: /skills search|recommend|open|read|related|context ...", errorColor))
+      }
+    } catch(e) {
+      print(colorifyText("[skills] " + __miniAErrMsg(e), errorColor))
+    }
+  }
+
   function printSkills(prefix) {
+    // Only intercept as a skill-wiki subcommand when a skill library is actually
+    // configured -- otherwise fall through to the legacy prefix-filtered local
+    // skill listing unchanged, so "/skills <name>" keeps working exactly as
+    // before for any local skill whose name happens to match one of these words.
+    var firstWord = isString(prefix) ? prefix.trim().split(/\s+/)[0].toLowerCase() : ""
+    if (__skillWikiSubcommands[firstWord] === true && isObject(getConsoleSkillWikiManager())) return printRemoteSkills(prefix)
+
     var normalizedPrefix = isString(prefix) ? prefix.trim().toLowerCase() : ""
     var skillNames = Object.keys(customSkillSlashCommands).sort().filter(function(name) {
       if (normalizedPrefix.length === 0) return true

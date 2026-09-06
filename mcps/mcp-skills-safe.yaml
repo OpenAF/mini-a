@@ -1,0 +1,362 @@
+# Author: Nuno Aguiar
+help:
+  text   : A standalone STDIO/HTTP MCP virtual skill-library server with restricted retrieval only (opaque references, bounded excerpts, budgeted; safe for untrusted clients). See docs/VIRTUAL-SKILLS.md.
+  expects:
+  - name     : onport
+    desc     : If defined starts an HTTP MCP server on this port; otherwise uses STDIO
+    example  : "8891"
+    mandatory: false
+  - name     : wikibackend
+    desc     : Wiki backend type (fs, s3, s3fs, es or http; https is an alias)
+    example  : "fs"
+    mandatory: false
+  - name     : wikiroot
+    desc     : "Base directory or local .zip/.okt archive holding skill pages for the fs backend (archives are always read-only)"
+    example  : "./skills"
+    mandatory: false
+  - name     : wikibucket
+    desc     : S3 bucket for s3 backend
+    mandatory: false
+  - name     : wikiprefix
+    desc     : S3 key prefix for s3/s3fs backend, or Elasticsearch index for es backend
+    example  : "skills/"
+    mandatory: false
+  - name     : wikiurl
+    desc     : S3 endpoint for s3/s3fs, Elasticsearch/OpenSearch base URL for es, or static base URL for http
+    mandatory: false
+  - name     : wikiaccesskey
+    desc     : S3 access key, or Elasticsearch username for es backend
+    mandatory: false
+  - name     : wikisecret
+    desc     : S3 secret key, or Elasticsearch password for es backend
+    mandatory: false
+  - name     : wikiregion
+    desc     : S3 region
+    mandatory: false
+  - name     : wikiuseversion1
+    desc     : Force S3 signature version 1
+    mandatory: false
+  - name     : wikiignorecertcheck
+    desc     : Ignore TLS cert validation on S3 endpoint
+    mandatory: false
+  - name     : wikis3artifactprefix
+    desc     : "Optional S3 prefix containing a published local Lucene cache. Downloaded to wikiindexdir at startup."
+    mandatory: false
+  - name     : s3artifactbundle
+    desc     : Use <prefix>/mini-a-wiki-index.zip instead of individual S3 artifact objects
+    mandatory: false
+  - name     : wikihttpindexurl
+    desc     : Optional HTTP artifact bundle URL (defaults to <wikiurl>/mini-a-wiki-index.zip)
+    mandatory: false
+  - name     : wikihttptimeout
+    desc     : HTTP request timeout in milliseconds (default 30000)
+    mandatory: false
+  - name     : wikiartifactrefreshsecs
+    desc     : Recheck an HTTP or bundled-S3 artifact cache after this many seconds between requests (0 disables; default 0)
+    mandatory: false
+  - name     : usewikigraph
+    desc     : "Opt in to graph-backed related() hints. Related entries remain opaque read references, never raw paths or relationship metadata."
+    mandatory: false
+  - name     : wikiindexdir
+    desc     : Local cache directory used for downloaded S3 Lucene artifacts
+    mandatory: false
+  - name     : wikilexical
+    desc     : "SLON/JSON Lucene lexical configuration. Defaults to {language: 'english'}."
+    mandatory: false
+  - name     : toolPrefix
+    desc     : Optional prefix prepended to all tool names (e.g. "skills-" -> skills-search, skills-read)
+    mandatory: false
+  - name     : label
+    desc     : Human-readable skill library label injected into templated tool descriptions
+    example  : "Engineering skill library"
+    mandatory: true
+  - name     : wikimounts
+    desc     : "SLON/JSON array of read-only skill-library mounts: [{name, backend, root|bucket|prefix|url|...}]"
+    mandatory: false
+  - name     : wikirestrictprofile
+    desc     : "Restricted retrieval default profile: tight, moderate, relaxed or off. Defaults to tight. 'off' disables restricted retrieval entirely (raw search/open/read/related, no opaque references, no budgets) -- equivalent to mcp-skills.yaml; only use it for trusted clients."
+    example  : "moderate"
+    mandatory: false
+  - name     : wikirestrictsearchlimit
+    desc     : "Maximum search results (default: 3; ceiling: 10)"
+    mandatory: false
+  - name     : wikirestrictminquerychars
+    desc     : "Minimum useful query length (default: 4)"
+    mandatory: false
+  - name     : wikirestrictmetachars
+    desc     : "Metadata character cap per result (default: 300)"
+    mandatory: false
+  - name     : wikirestrictreadlines
+    desc     : "Maximum excerpt lines (default: 40; ceiling: 100)"
+    mandatory: false
+  - name     : wikirestrictreadchars
+    desc     : "Maximum excerpt characters (default: 6000; ceiling: 16000)"
+    mandatory: false
+  - name     : wikirestrictrefttl
+    desc     : "Opaque reference lifetime in seconds (default: 120)"
+    mandatory: false
+  - name     : wikirestrictmaxsearches
+    desc     : "Searches per budget window (default: 30)"
+    mandatory: false
+  - name     : wikirestrictmaxreads
+    desc     : "Reads per budget window (default: 15)"
+    mandatory: false
+  - name     : wikirestrictmaxchars
+    desc     : "Total disclosed characters per budget window (default: 60000)"
+    mandatory: false
+  - name     : wikirestrictwindow
+    desc     : "Budget window in seconds (default: 3600)"
+    mandatory: false
+  - name     : wikirestrictpagecooldown
+    desc     : "Delay before a skill may receive another reference (default: 3600)"
+    mandatory: false
+  - name     : wikirestrictstate
+    desc     : Optional persistent restricted-retrieval ledger path outside wikiroot
+    mandatory: false
+  - name     : wikiid
+    desc     : "Logical library namespace for shared restricted references and cooldowns. Default: a deterministic fingerprint of the effective backend configuration."
+    mandatory: false
+  - name     : wikirestrictrefch
+    desc     : "SLON/JSON OpenAF channel definition to store issued references and cooldowns (default: this process's own memory only). Use a real per-key channel (e.g. redis) to share across replicas behind a load balancer using the same wikiid."
+    example  : "(type: 'redis', options: (host: 'redis.svc', port: 6379))"
+    mandatory: false
+  - name     : audit
+    desc     : "If true (or env OJOB_MCP_AUDIT), logs every MCP tool call plus every page fetched from a remote backend. Only resolved locations are logged, never opaque references."
+    mandatory: false
+
+todo:
+- Init
+- (if    ): "isDef(args.onport)"
+  ((then)):
+  - (httpdStart   ): "${onport:-8891}"
+  - (httpdHealthz ): "${onport:-8891}"
+  - (httpdMetrics ): "${onport:-8891}"
+  - (httpdMCP     ): "${onport:-8891}"
+    ((toolPrefix )): "${toolPrefix:-}"
+    ((tplDesc    )): true
+    ((description)): &MCPSERVER
+      serverInfo:
+        name   : mcp-skills-safe
+        title  : "{{label}}"
+        version: 1.0.0
+    ((fnsMeta)): &MCPFNSMETA
+      search:
+        name       : search
+        description: "[START HERE] Search {{label}} for a targeted skill. Lexical keyword retrieval, not semantic question answering. Returns bounded title+description+tags+risk metadata and an opaque, short-lived reference per match; never a real path or the skill body. Safe-mode policy caps result count and query breadth."
+        inputSchema:
+          type      : object
+          properties:
+            query:
+              type       : string
+              description: Lexical keyword query. Must meet the configured minimum length.
+            limit:
+              type       : integer
+              description: Maximum results requested; safe-mode policy applies its lower configured cap.
+              default    : 10
+            tags:
+              type       : array
+              items      : { type: string }
+              description: Only return skills carrying at least one of these tags.
+            appliesTo:
+              type       : array
+              items      : { type: string }
+              description: Only return skills applicable to at least one of these subjects/technologies.
+            compatibility:
+              type       : string
+              description: "Only return skills whose compatibility map has this key set to true."
+            maxRisk:
+              type       : string
+              enum       : [low, medium, high]
+              description: Exclude skills whose declared risk exceeds this level.
+          required  : [ query ]
+        annotations:
+          title         : search
+          readOnlyHint  : true
+          idempotentHint: true
+
+      open:
+        name       : open
+        description: "Inspect a skill cheaply using the opaque reference returned by search/related. Returns bounded metadata, headings, tags, requirements, risk and compatibility -- never the skill body. Consumes the reference and returns a fresh one-shot reference for the follow-up read()."
+        inputSchema:
+          type      : object
+          properties:
+            ref:
+              type       : string
+              description: "Opaque reference returned by search/related. \"reference\" is accepted as an alias."
+            reference:
+              type       : string
+              description: Alias for "ref".
+          required  : [ ref ]
+        annotations:
+          title         : open
+          readOnlyHint  : true
+          idempotentHint: true
+
+      read:
+        name       : read
+        description: "Read a bounded excerpt using the opaque reference returned by open (or search, if you skip inspection). References are single-use and short-lived. Use section= or a startLine/endLine range within the configured caps."
+        inputSchema:
+          type      : object
+          properties:
+            ref:
+              type       : string
+              description: "Opaque reference returned by search/open/related. \"reference\" is accepted as an alias."
+            reference:
+              type       : string
+              description: Alias for "ref".
+            section:
+              type       : string
+              description: Read only the body under this heading name, subject to the safe-mode excerpt caps.
+            startLine:
+              type       : integer
+            endLine:
+              type       : integer
+          required  : [ ref ]
+        annotations:
+          title         : read
+          readOnlyHint  : true
+          idempotentHint: true
+
+      related:
+        name       : related
+        description: "Discover skills related to a known skill via backlinks and the existing knowledge graph. Requires usewikigraph=true for graph entries. Returns bounded title metadata and fresh opaque references, never raw paths or relationship provenance."
+        inputSchema:
+          type      : object
+          properties:
+            ref:
+              type       : string
+              description: Opaque reference returned by search/open.
+            reference:
+              type       : string
+              description: Alias for "ref".
+          required  : [ ref ]
+        annotations:
+          title         : related
+          readOnlyHint  : true
+          idempotentHint: true
+
+    ((fns    )): &MCPFNS
+      search : Skills search
+      open   : Skills open
+      read   : Skills read
+      related: Skills related
+  ((else)):
+  - (stdioMCP  ): *MCPSERVER
+    ((toolPrefix)): "${toolPrefix:-}"
+    ((tplDesc   )): true
+    ((fnsMeta   )): *MCPFNSMETA
+    ((fns       )): *MCPFNS
+
+ojob:
+  opacks      :
+  - openaf     : 20250915
+  - oJob-common: 20250914
+  - mini-a     : 20260807
+  catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __, job.exec)
+  logToConsole: false
+  argsFromEnvs: true
+  daemon      : true
+  unique      :
+    pidFile     : .mcp-skills-safe.pid
+    killPrevious: true
+
+include:
+- oJobMCP.yaml
+
+jobs:
+- name : Init
+  check:
+    in:
+      wikibackend             : isString.default("fs")
+      wikiroot                : isString.default(__)
+      wikibucket              : isString.default(__)
+      wikiprefix              : isString.default("skills/")
+      wikiurl                 : isString.default("https://s3.amazonaws.com")
+      wikiaccesskey           : isString.default(__)
+      wikisecret              : isString.default(__)
+      wikiregion              : isString.default(__)
+      wikiuseversion1         : toBoolean.isBoolean.default(false)
+      wikiignorecertcheck     : toBoolean.isBoolean.default(false)
+      wikis3artifactprefix    : isString.default(__)
+      s3artifactbundle        : toBoolean.isBoolean.default(false)
+      wikihttpindexurl        : isString.default(__)
+      wikihttptimeout         : toNumber.isNumber.default(30000)
+      wikiartifactrefreshsecs : toNumber.isNumber.default(0)
+      wikiindexdir            : isString.default(__)
+      wikilexical             : isString.default(__)
+      usewikigraph            : toBoolean.isBoolean.default(false)
+      wikirestrictprofile     : isString.default("tight")
+      wikirestrictsearchlimit : toNumber.isNumber.default(__)
+      wikirestrictminquerychars: toNumber.isNumber.default(__)
+      wikirestrictmetachars   : toNumber.isNumber.default(__)
+      wikirestrictreadlines   : toNumber.isNumber.default(__)
+      wikirestrictreadchars   : toNumber.isNumber.default(__)
+      wikirestrictrefttl      : toNumber.isNumber.default(__)
+      wikirestrictmaxsearches : toNumber.isNumber.default(__)
+      wikirestrictmaxreads    : toNumber.isNumber.default(__)
+      wikirestrictmaxchars    : toNumber.isNumber.default(__)
+      wikirestrictwindow      : toNumber.isNumber.default(__)
+      wikirestrictpagecooldown: toNumber.isNumber.default(__)
+      wikirestrictstate       : isString.default(__)
+      wikiid                  : isString.default(__)
+      wikirestrictrefch       : isString.default(__)
+      label                   : isString.default("Skill library")
+      wikimounts              : isString.default(__)
+      audit                   : default(__)
+  exec : | #js
+    loadLib("mini-a-mcp-skills.js")
+    // Same "off" escape hatch as mcp-wiki-safe.yaml: restricted retrieval is the
+    // default and only supported mode otherwise.
+    var restrictOff = isString(args.wikirestrictprofile) && args.wikirestrictprofile.trim().toLowerCase() === "off"
+    args.wikirestrict = !restrictOff
+    var info = __miniAMcpSkillsInit(args, {
+      access                   : "ro",
+      readonly                 : true,
+      allowRestrictedGraphHints: args.usewikigraph === true,
+      logPrefix                : "mcp-skills-safe"
+    })
+    if (restrictOff) {
+      if (isMap(info.restriction) && info.restriction.enabled === true) throw "mcp-skills-safe: restricted retrieval failed to deactivate"
+      printErrnl("[mcp-skills-safe] WARNING: restricted retrieval disabled (profile: off) -- serving raw, unbounded search/open/read/related; only expose this to trusted clients")
+    } else {
+      if (!isMap(info.restriction) || info.restriction.enabled !== true) throw "mcp-skills-safe: restricted retrieval failed to activate"
+    }
+
+- name : Skills search
+  check:
+    in:
+      query        : isString
+      limit        : toNumber.isNumber.default(10)
+      tags         : default(__)
+      appliesTo    : default(__)
+      compatibility: isString.default(__)
+      maxRisk      : isString.default(__)
+  exec : | #js
+    return __miniAMcpSkillsRestrictedSearch(args)
+
+- name : Skills open
+  check:
+    in:
+      ref      : isString.default(__)
+      reference: isString.default(__)
+  exec : | #js
+    return __miniAMcpSkillsRestrictedOpen(args)
+
+- name : Skills read
+  check:
+    in:
+      ref      : isString.default(__)
+      reference: isString.default(__)
+      section  : isString.default(__)
+      startLine: toNumber.isNumber.default(__)
+      endLine  : toNumber.isNumber.default(__)
+  exec : | #js
+    return __miniAMcpSkillsRestrictedRead(args)
+
+- name : Skills related
+  check:
+    in:
+      ref      : isString.default(__)
+      reference: isString.default(__)
+  exec : | #js
+    return __miniAMcpSkillsRestrictedRelated(args)

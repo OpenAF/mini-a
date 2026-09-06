@@ -21,6 +21,8 @@
 | mcp-wiki   | Mini-A wiki knowledge base MCP with hierarchy navigation (discovery/read) | STDIO/HTTP | (included) | [mcp-wiki.yaml](mcp-wiki.yaml) |
 | mcp-wiki-safe | Mini-A wiki MCP restricted to opaque-reference search and bounded read excerpts (safe for untrusted clients) | STDIO/HTTP | (included) | [mcp-wiki-safe.yaml](mcp-wiki-safe.yaml) |
 | mcp-wiki-ops | Mini-A wiki maintenance MCP (lint and readwrite operations) | STDIO/HTTP | (included) | [mcp-wiki-ops.yaml](mcp-wiki-ops.yaml) |
+| mcp-skills | Virtual skill-library MCP (context/search/recommend/open/read/related over a wiki of skill documents) -- see [docs/VIRTUAL-SKILLS.md](../docs/VIRTUAL-SKILLS.md) | STDIO/HTTP | (included) | [mcp-skills.yaml](mcp-skills.yaml) |
+| mcp-skills-safe | Virtual skill-library MCP restricted to opaque-reference search/open/read/related (safe for untrusted clients) | STDIO/HTTP | (included) | [mcp-skills-safe.yaml](mcp-skills-safe.yaml) |
 | mcp-a2a    | A2A agent bridge MCP (consume external A2A agents as tools) | STDIO/HTTP | (included) | [mcp-a2a.yaml](mcp-a2a.yaml) |
 | mcp-aws-athena | AWS Athena query MCP (run queries sync or async, poll status, fetch results) | STDIO/HTTP | AWS | [mcp-aws-athena.yaml](mcp-aws-athena.yaml) |
 | mcp-proxy  | MCP proxy aggregating multiple downstream MCP connections | STDIO/HTTP | (included) | [mcp-proxy.yaml](mcp-proxy.yaml) |

@@ -2918,6 +2918,7 @@ The `estimatedUSD` field is reserved for future cost estimation integration and 
 - **[Delegation Guide](docs/DELEGATION.md)** - Hierarchical task decomposition with local and remote delegation
 - **[What's New](docs/WHATS-NEW.md)** - Latest performance improvements and migration guide
 - **[MCP Documentation](mcps/README.md)** - Built-in MCP servers catalog
+- **[Virtual Skills](docs/VIRTUAL-SKILLS.md)** - Wiki-backed skill library: search/recommend/open/read a large skill corpus without loading it into context (`useskillwiki`, `mcp-skills.yaml`)
 - **[Creating MCPs](mcps/CREATING.md)** - Build custom MCP integrations
 - **[External MCPs](mcps/EXTERNAL-MCPS.md)** - Community MCP servers
 - **[Contributing Guide](CONTRIBUTING.md)** - Join the project

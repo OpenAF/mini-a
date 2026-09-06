@@ -1798,6 +1798,79 @@ MiniUtilsTool.prototype.wiki = function(params) {
 
 /**
  * <odoc>
+ * <key>MiniUtilsTool.skillwiki(params) : Object|String</key>
+ * Search, inspect and consult the virtual skill library (docs/VIRTUAL-SKILLS.md), a
+ * wiki-backed collection of skill documents that stays out of the normal local
+ * skill list and is paged in on demand: search/recommend return compact metadata
+ * only, open() adds headings/requirements without the body, and read() returns one
+ * bounded section at a time. Requires useskillwiki=true.
+ * </odoc>
+ */
+MiniUtilsTool.prototype.skillwiki = function(params) {
+  params = params || {}
+  try {
+    this._ensureInitialized()
+    var wm = isObject(this._skillWikiManager) ? this._skillWikiManager : __
+    if (!isObject(wm)) return "[ERROR] Skill wiki is not configured. Set useskillwiki=true and skillwikiroot (or enable usewiki so the skill library can reuse that wiki)."
+    if (typeof MiniAWikiSkillProvider !== "function") loadLib("mini-a-skills.js")
+    if (!isObject(this._skillProvider) || this._skillProvider._wm !== wm) this._skillProvider = new MiniAWikiSkillProvider(wm, {})
+    var provider = this._skillProvider
+
+    var op = isString(params.operation) ? params.operation.toLowerCase().trim()
+      : (isString(params.op) ? params.op.toLowerCase().trim() : "search")
+    if (op === "find") op = "search"
+    if (op === "get" || op === "view" || op === "cat") op = "read"
+
+    if (op === "context")   return provider.context(params)
+    if (op === "search")    return provider.search(params)
+    if (op === "recommend") return provider.recommend(params)
+
+    var ref = isString(params.ref) ? params.ref : params.path
+    if ((op === "open" || op === "read" || op === "related" || op === "resolve") && (!isString(ref) || ref.length === 0)) {
+      return "[ERROR] ref is required for operation=" + op
+    }
+
+    if (op === "open") {
+      // Bounded, opt-in consultation (skillsmaxloaded): counts distinct skills
+      // opened in this agent run, not searches -- search/recommend stay unlimited
+      // since they only ever return compact metadata, never skill content.
+      var maxLoaded = isNumber(this._skillsMaxLoaded) ? this._skillsMaxLoaded : 3
+      this._skillsLoadedRefs = this._skillsLoadedRefs || {}
+      var alreadyLoaded = this._skillsLoadedRefs[ref] === true
+      if (!alreadyLoaded && Object.keys(this._skillsLoadedRefs).length >= maxLoaded) {
+        return { error: "skills-max-loaded-exceeded", limit: maxLoaded, message: "Already consulted " + maxLoaded + " skill(s) this run; skillsmaxloaded=" + maxLoaded + " reached." }
+      }
+      var opened = provider.open(ref, params)
+      if (isObject(opened) && !isDef(opened.error)) this._skillsLoadedRefs[ref] = true
+      return opened
+    }
+
+    if (op === "read") {
+      var maxChars = isNumber(this._skillsMaxChars) ? this._skillsMaxChars : 12000
+      this._skillsCharsLoaded = isNumber(this._skillsCharsLoaded) ? this._skillsCharsLoaded : 0
+      if (this._skillsCharsLoaded >= maxChars) {
+        return { error: "skills-max-chars-exceeded", limit: maxChars, message: "skillsmaxchars=" + maxChars + " already consumed this run." }
+      }
+      var readParams = merge({}, params)
+      if (!isNumber(readParams.maxChars) || readParams.maxChars > (maxChars - this._skillsCharsLoaded)) {
+        readParams.maxChars = Math.max(200, maxChars - this._skillsCharsLoaded)
+      }
+      var readOut = provider.read(ref, readParams)
+      if (isObject(readOut) && isNumber(readOut.chars)) this._skillsCharsLoaded += readOut.chars
+      return readOut
+    }
+
+    if (op === "related") return provider.related(ref, params)
+    if (op === "resolve")  return provider.resolve(ref, params)
+
+    return "[ERROR] Unknown skillwiki operation: " + op + ". Use context, search, recommend, open, read, related, resolve."
+  } catch (e) {
+    return "[ERROR] " + __miniAErrMsg(e)
+  }
+}
+
+/**
+ * <odoc>
  * <key>MiniUtilsTool.graph(params) : Object|String</key>
  * Interact with the optional wiki graph layer when `usewikigraph=true`.
  * </odoc>
@@ -4440,6 +4513,50 @@ MiniUtilsTool._metadataByFn = (function() {
           {
             if  : { required: ["operation"], properties: { operation: { enum: ["delete", "remove", "rm"] } } },
             then: { required: ["path"] }
+          }
+        ]
+      }
+    },
+    skillwiki: {
+      name       : "skillwiki",
+      description: "Search, inspect and consult the virtual skill library (requires useskillwiki=true). ALWAYS start with operation='context' or 'search'/'recommend' -- these return compact metadata only (name/title/summary/tags/risk/ref), never a full skill. Use 'open' to inspect a candidate's headings/requirements/risk before 'read'-ing one bounded section at a time (section=). 'related' finds connected skills via the wiki graph. Bounded by skillsmaxloaded/skillsmaxchars per run.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          operation: {
+            type       : "string",
+            description: "Operation to perform.",
+            enum       : ["context", "search", "recommend", "open", "read", "related", "resolve", "find", "get", "view", "cat"],
+            default    : "search"
+          },
+          ref          : { type: "string", description: "Skill reference returned by search/recommend/open/related. Required for open/read/related/resolve." },
+          query        : { type: "string", description: "Lexical keyword query for operation=search." },
+          task         : { type: "string", description: "Natural-language task description for operation=recommend." },
+          environment  : { type: "object", description: "Optional free-form environment hints for operation=recommend, e.g. {language: 'java', platform: 'kubernetes'}." },
+          capabilities : { type: "array", items: { type: "string" }, description: "Tool/capability names available, for operation=recommend." },
+          limit        : { type: "number", description: "Maximum results for search/recommend/related." },
+          wiki         : { description: "Skill-library selector: omitted/'*'=all, a mount name, or an array of mount names." },
+          tags         : { type: "array", items: { type: "string" }, description: "Only return skills carrying at least one of these tags." },
+          appliesTo    : { type: "array", items: { type: "string" }, description: "Only return skills applicable to at least one of these subjects." },
+          compatibility: { type: "string", description: "Only return skills whose compatibility map has this key set to true." },
+          maxRisk      : { type: "string", enum: ["low", "medium", "high"], description: "Exclude skills whose declared risk exceeds this level." },
+          section      : { type: "string", description: "Read only the body under this heading name, for operation=read." },
+          startLine    : { type: "number" },
+          endLine      : { type: "number" },
+          maxChars     : { type: "number", description: "Maximum characters returned by operation=read." }
+        },
+        allOf: [
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: ["open", "read", "get", "view", "cat", "related", "resolve"] } } },
+            then: { required: ["ref"] }
+          },
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: ["search", "find"] } } },
+            then: {}
+          },
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: ["recommend"] } } },
+            then: { required: ["task"] }
           }
         ]
       }

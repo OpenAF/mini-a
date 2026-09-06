@@ -6,6 +6,10 @@
 
 var __MINI_A_WIKI_AGENTS_VERSION = 5
 var __MINI_A_WIKI_LEXICAL_SCHEMA_VERSION = 1
+// Bumping this forces a one-time rebuild of any cached _metaFor() shard record
+// whose stamp doesn't match, so new fields lifted out of frontmatter here start
+// showing up in list(withMeta)/search decoration without a manual reindex.
+var __MINI_A_WIKI_META_RECORD_VERSION = 2
 var __MINI_A_WIKI_LEXICAL_LANGUAGES = [
   "arabic", "armenian", "basque", "bengali", "brazilian", "bulgarian", "catalan", "chinese", "cjk", "czech", "danish", "dutch", "english", "estonian", "finnish", "french", "galician", "german", "greek", "hindi", "hungarian", "indonesian", "irish", "italian", "latvian", "lithuanian", "norwegian", "persian", "polish", "portuguese", "romanian", "russian", "sorani", "spanish", "swedish", "tamil", "telugu", "thai", "turkish"
 ]
@@ -506,6 +510,12 @@ MiniAWikiManager.prototype._buildPageRecord = function(path, raw, parsed) {
     var m = String(lines[i] || "").match(/^(#{1,6})\s+(.+)$/)
     if (m) headings.push({ level: m[1].length, text: String(m[2] || "").trim() })
   }
+  // Skill-aware fields (mini-a.skill/v1-compatible frontmatter, see docs/VIRTUAL-SKILLS.md).
+  // These are lifted generically -- any wiki page carrying them (not just type:skill
+  // pages) gets them cached too, so a page authored before this metadata existed is
+  // indistinguishable from one that simply omits it (all fall back to "" / [] / {}).
+  var appliesToRaw = isDef(meta.applies_to) ? meta.applies_to : meta.appliesTo
+  var intentRaw    = isDef(meta.intent) ? meta.intent : meta.intents
   return {
     path: path,
     meta: meta,
@@ -513,6 +523,7 @@ MiniAWikiManager.prototype._buildPageRecord = function(path, raw, parsed) {
     raw: raw,
     links: this.extractLinks(body),
     record: {
+      _mv: __MINI_A_WIKI_META_RECORD_VERSION,
       hash: sha1(String(raw || "")),
       mtime: __,
       size: String(raw || "").length,
@@ -524,7 +535,17 @@ MiniAWikiManager.prototype._buildPageRecord = function(path, raw, parsed) {
       aliases: isArray(meta.aliases) ? clone(meta.aliases) : [],
       supersedes: isString(meta.supersedes) ? meta.supersedes : "",
       links: this.extractLinks(body),
-      headings: headings
+      headings: headings,
+      // ── skill-aware (additive; empty/absent on ordinary knowledge pages) ──
+      schema     : isString(meta.schema) ? meta.schema : "",
+      name       : isString(meta.name) ? meta.name : "",
+      intent     : isArray(intentRaw) ? clone(intentRaw) : (isString(intentRaw) ? [intentRaw] : []),
+      appliesTo  : isArray(appliesToRaw) ? clone(appliesToRaw) : (isString(appliesToRaw) ? [appliesToRaw] : []),
+      requires   : isMap(meta.requires) ? clone(meta.requires) : {},
+      compatibility: isMap(meta.compatibility) ? clone(meta.compatibility) : {},
+      risk       : isString(meta.risk) ? meta.risk.toLowerCase() : "",
+      trust      : isMap(meta.trust) ? clone(meta.trust) : {},
+      version    : isDef(meta.version) ? String(meta.version) : ""
     }
   }
 }
@@ -553,7 +574,8 @@ MiniAWikiManager.prototype._metaFor = function(path, rawOpt, parsedOpt) {
   var shard = this._loadMetaShard(shardKey)
   var fast = this._metaReadFastInfo(path)
   var cached = isMap(shard[path]) ? shard[path] : __
-  if (isMap(cached) && isMap(fast) && cached.mtime === fast.mtime && cached.size === fast.size) {
+  if (isMap(cached) && isMap(fast) && cached.mtime === fast.mtime && cached.size === fast.size
+      && cached._mv === __MINI_A_WIKI_META_RECORD_VERSION) {
     this._stats.metaHits++
     return cached
   }

@@ -1120,6 +1120,45 @@ mini-a ➤ /wiki context
 
 ---
 
+## Virtual Skill Library
+
+See [docs/VIRTUAL-SKILLS.md](docs/VIRTUAL-SKILLS.md) for the full picture. A skill
+library is a wiki whose pages carry `type: skill` front matter; it can be
+searched/inspected/consulted at any scale without loading the catalog into
+context. Reuses `usewiki`'s wiki by default -- a wiki can hold ordinary knowledge
+and skill pages side by side.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `useskillwiki` | boolean | `false` | Enable the virtual skill library (exposes the `skillwiki` tool and `/skills search\|recommend\|open\|read\|related` console subcommands) |
+| `skillwikibackend` | string | - | Backend for a *dedicated* skill wiki (fs/s3/s3fs/es/http); omit to reuse `usewiki`'s wiki |
+| `skillwikiroot` | string | - | Root for a dedicated skill wiki (fs backend) |
+| `skillwikimounts` | SLON/JSON | - | Read-only mounts for a dedicated skill wiki, same shape as `wikimounts` |
+| `skillsautosearch` | boolean | `false` | Reserved for future opt-in automatic skill consultation during planning |
+| `skillsautolimit` | number | `5` | Max results per automatic skill search |
+| `skillsmaxloaded` | number | `3` | Max distinct skills `open()`-ed per agent run |
+| `skillsmaxchars` | number | `12000` | Max skill-body characters `read()` may return per agent run |
+
+```bash
+# Reuse an existing wiki as the skill library
+mini-a.sh useskillwiki=true usewiki=true wikiroot=/shared/wiki goal="..."
+
+# Dedicated skill-only library
+mini-a.sh useskillwiki=true skillwikiroot=./skills goal="..."
+
+# Console
+mini-a ➤ /skills search postgres index tuning
+mini-a ➤ /skills recommend diagnose slow postgres queries
+mini-a ➤ /skills open wiki:postgres-index-review.md
+mini-a ➤ /skills read wiki:postgres-index-review.md Diagnosis
+
+# Standalone MCP server for external agents (Codex, Claude Code, OpenCode, ...)
+ojob mcps/mcp-skills.yaml label="Engineering Skill Library" wikiroot=./skills
+ojob mcps/mcp-skills-safe.yaml label="Public Skill Library" wikiroot=./skills wikirestrictprofile=moderate
+```
+
+---
+
 ## Choosing Knowledge Features
 
 Mini-A has two complementary knowledge persistence mechanisms.  Choose based on the scope, structure, and lifetime of the knowledge.

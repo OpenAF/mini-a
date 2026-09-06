@@ -1,0 +1,100 @@
+include:
+- oJobTest.yaml
+
+jobs:
+- name: MiniA Skills Tests::MetadataFullFrontmatterParses
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillMetadataFullFrontmatterParses
+
+- name: MiniA Skills Tests::MetadataMissingOptionalFieldsDefaultsGracefully
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillMetadataMissingOptionalFieldsDefaultsGracefully
+
+- name: MiniA Skills Tests::SearchDefaultTypeFilterExcludesOrdinaryPages
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillSearchDefaultTypeFilterExcludesOrdinaryPages
+
+- name: MiniA Skills Tests::SearchTagFiltering
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillSearchTagFiltering
+
+- name: MiniA Skills Tests::SearchAppliesToFiltering
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillSearchAppliesToFiltering
+
+- name: MiniA Skills Tests::SearchCompatibilityFiltering
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillSearchCompatibilityFiltering
+
+- name: MiniA Skills Tests::SearchMaxRiskFiltering
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillSearchMaxRiskFiltering
+
+- name: MiniA Skills Tests::RecommendIntentRankingPrefersMatchingSkill
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillRecommendIntentRankingPrefersMatchingSkill
+
+- name: MiniA Skills Tests::NormalizedObjectShape
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillNormalizedObjectShape
+
+- name: MiniA Skills Tests::OpenNeverReturnsBody
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillOpenNeverReturnsBody
+
+- name: MiniA Skills Tests::ReadSectionBounded
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillReadSectionBounded
+
+- name: MiniA Skills Tests::ContextReportsCompactSkillCount
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillContextReportsCompactSkillCount
+
+- name: MiniA Skills Tests::ProviderResolveProducesRenderableTemplate
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillProviderResolveProducesRenderableTemplate
+
+- name: MiniA Skills Tests::RiskRankOrdering
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillRiskRankOrdering
+
+- name: MiniA Skills Tests::SearchAcrossMounts
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillSearchAcrossMounts
+
+- name: MiniA Skills Tests::OpenReadAcrossMount
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillOpenReadAcrossMount
+
+- name: MiniA Skills Tests::RestrictedSearchNeverExposesPathAndIssuesOpaqueRef
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillRestrictedSearchNeverExposesPathAndIssuesOpaqueRef
+
+- name: MiniA Skills Tests::RestrictedOneShotRefCannotBeReused
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillRestrictedOneShotRefCannotBeReused
+
+- name: MiniA Skills Tests::RestrictedRejectsTooShortQuery
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillRestrictedRejectsTooShortQuery
+
+todo:
+- MiniA Skills Tests::MetadataFullFrontmatterParses
+- MiniA Skills Tests::MetadataMissingOptionalFieldsDefaultsGracefully
+- MiniA Skills Tests::SearchDefaultTypeFilterExcludesOrdinaryPages
+- MiniA Skills Tests::SearchTagFiltering
+- MiniA Skills Tests::SearchAppliesToFiltering
+- MiniA Skills Tests::SearchCompatibilityFiltering
+- MiniA Skills Tests::SearchMaxRiskFiltering
+- MiniA Skills Tests::RecommendIntentRankingPrefersMatchingSkill
+- MiniA Skills Tests::NormalizedObjectShape
+- MiniA Skills Tests::OpenNeverReturnsBody
+- MiniA Skills Tests::ReadSectionBounded
+- MiniA Skills Tests::ContextReportsCompactSkillCount
+- MiniA Skills Tests::ProviderResolveProducesRenderableTemplate
+- MiniA Skills Tests::RiskRankOrdering
+- MiniA Skills Tests::SearchAcrossMounts
+- MiniA Skills Tests::OpenReadAcrossMount
+- MiniA Skills Tests::RestrictedSearchNeverExposesPathAndIssuesOpaqueRef
+- MiniA Skills Tests::RestrictedOneShotRefCannotBeReused
+- MiniA Skills Tests::RestrictedRejectsTooShortQuery
