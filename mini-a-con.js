@@ -3016,6 +3016,43 @@ try {
     }
   }
 
+  function renderProportionBar(items, barWidth) {
+    var total = 0
+    items.forEach(function(item) { if (item.value > 0) total += item.value })
+    if (total <= 0) return ""
+
+    var segments = []
+    items.forEach(function(item) {
+      if (item.value > 0) {
+        var proportion = item.value / total
+        segments.push({ width: Math.max(1, Math.round(proportion * barWidth)), color: item.color, pattern: item.pattern })
+      }
+    })
+
+    var currentTotal = segments.reduce(function(sum, seg) { return sum + seg.width }, 0)
+    if (currentTotal !== barWidth && segments.length > 0) {
+      var largestIdx = 0
+      var largestWidth = 0
+      segments.forEach(function(seg, idx) {
+        if (seg.width > largestWidth) { largestWidth = seg.width; largestIdx = idx }
+      })
+      segments[largestIdx].width += (barWidth - currentTotal)
+    }
+
+    var barLine = ""
+    segments.forEach(function(seg) {
+      var segment = ""
+      for (var i = 0; i < seg.width; i++) segment += seg.pattern
+      barLine += colorifyText(segment, seg.color)
+    })
+    return barLine
+  }
+
+  function getBarWidth() {
+    var termWidth = (__conAnsi && isDef(__con)) ? __con.getTerminal().getWidth() : 80
+    return Math.max(40, termWidth - 4)
+  }
+
   function printContextSummary(agentInstance, useLLMAnalysis) {
     var stats = refreshConversationStats(agentInstance)
     if (!isObject(stats) || stats.messageCount === 0) {
@@ -3067,53 +3104,11 @@ try {
     print(colorifyText("Conversation context usage", accentColor))
     print()
 
-    // Calculate available width for the bar (reserve some space for borders and padding)
-    var termWidth = (__conAnsi && isDef(__con)) ? __con.getTerminal().getWidth() : 80
-    var barWidth = Math.max(40, termWidth - 4)  // Reserve 4 chars for borders/padding
-
-    // Build the horizontal bar
-    var barSegments = []
-    var totalTokens = stats.totalTokens > 0 ? stats.totalTokens : 1
-
-    stats.sections.forEach(function(section) {
-      if (section.tokens > 0) {
-        var proportion = section.tokens / totalTokens
-        var segmentWidth = Math.max(1, Math.round(proportion * barWidth))
-        var style = sectionStyles[section.section] || sectionStyles["Other"]
-
-        barSegments.push({
-          width: segmentWidth,
-          color: style.color,
-          pattern: style.pattern,
-          section: section
-        })
-      }
-    })
-
-    // Adjust widths to exactly match barWidth (handle rounding differences)
-    var currentTotal = barSegments.reduce(function(sum, seg) { return sum + seg.width }, 0)
-    if (currentTotal !== barWidth && barSegments.length > 0) {
-      // Adjust the largest segment
-      var largestIdx = 0
-      var largestWidth = 0
-      barSegments.forEach(function(seg, idx) {
-        if (seg.width > largestWidth) {
-          largestWidth = seg.width
-          largestIdx = idx
-        }
-      })
-      barSegments[largestIdx].width += (barWidth - currentTotal)
-    }
-
-    // Render the bar
-    var barLine = ""
-    barSegments.forEach(function(seg) {
-      var segment = ""
-      for (var i = 0; i < seg.width; i++) {
-        segment += seg.pattern
-      }
-      barLine += colorifyText(segment, seg.color)
-    })
+    var barWidth = getBarWidth()
+    var barLine = renderProportionBar(stats.sections.map(function(section) {
+      var style = sectionStyles[section.section] || sectionStyles["Other"]
+      return { value: section.tokens, color: style.color, pattern: style.pattern }
+    }), barWidth)
 
     print("  " + barLine)
     print()
@@ -3148,12 +3143,75 @@ try {
       return
     }
     var vm = agentInstance.getHistoryVmDiagnostics()
+
     print(colorifyText("History virtual memory", accentColor))
     print(colorifyText("  Active: ", hintColor) + colorifyText(String(vm.active === true), vm.active === true ? successColor : errorColor) + colorifyText(" | Shadow: " + String(vm.shadow === true) + " | Mode: " + String(vm.mode || "safe"), hintColor))
     if (isString(vm.storePath) && vm.storePath.length > 0) print(colorifyText("  Store: " + vm.storePath, hintColor))
-    if (isMap(vm.states)) print(colorifyText("  Objects: hot=" + (vm.states.hot || 0) + " warm=" + (vm.states.warm || 0) + " cold=" + (vm.states.cold || 0) + " frozen=" + (vm.states.frozen || 0), hintColor))
-    if (isMap(vm.metrics)) print(colorifyText("  Tokens: baseline~" + (vm.metrics.last_baseline_tokens || 0) + " projected~" + (vm.metrics.last_projected_tokens || 0) + " cumulative delta~" + (vm.metrics.estimated_tokens_saved || 0), hintColor))
     if (vm.degraded === true) print(colorifyText("  Degraded: " + String(vm.degradedReason || "unknown backing-store failure"), errorColor))
+    print()
+
+    var barWidth = getBarWidth()
+
+    // Object temperature: how much of the conversation graph is kept inline (hot),
+    // partially re-expanded (warm), collapsed to a reference (cold), or evicted (frozen).
+    var temperatureStyles = {
+      hot:    { color: "FG(203)", pattern: "█", label: "Hot"    },
+      warm:   { color: "FG(214)", pattern: "▓", label: "Warm"   },
+      cold:   { color: "FG(111)", pattern: "▒", label: "Cold"   },
+      frozen: { color: "FG(159)", pattern: "░", label: "Frozen" }
+    }
+    var states = isMap(vm.states) ? vm.states : {}
+    var temperatureKeys = ["hot", "warm", "cold", "frozen"]
+    var totalObjects = (states.hot || 0) + (states.warm || 0) + (states.cold || 0) + (states.frozen || 0)
+
+    print(colorifyText("Object temperature", accentColor))
+    if (totalObjects === 0) {
+      print(colorifyText("  No history objects tracked yet.", hintColor))
+    } else {
+      var temperatureBar = renderProportionBar(temperatureKeys.map(function(key) {
+        return { value: states[key] || 0, color: temperatureStyles[key].color, pattern: temperatureStyles[key].pattern }
+      }), barWidth)
+      print("  " + temperatureBar)
+      print()
+      temperatureKeys.forEach(function(key) {
+        var count = states[key] || 0
+        if (count === 0) return
+        var style = temperatureStyles[key]
+        var share = totalObjects > 0 ? (count / totalObjects * 100).toFixed(1) : "0.0"
+        var icon = colorifyText(style.pattern + style.pattern, style.color)
+        var label = colorifyText(style.label.padEnd(8), hintColor)
+        var tokens = colorifyText(String(count).padStart(6), numericColor)
+        var percentage = colorifyText((share + "%").padStart(6), hintColor)
+        print("  " + icon + " " + label + "  " + tokens + " objects " + percentage)
+      })
+    }
+    print()
+
+    // Tokens: baseline (raw conversation) vs projected (after virtualization) for the
+    // most recent projection pass, plus the cumulative delta saved across the session.
+    var metrics = isMap(vm.metrics) ? vm.metrics : {}
+    var baselineTokens = metrics.last_baseline_tokens || 0
+    var projectedTokens = metrics.last_projected_tokens || 0
+    var savedThisPass = Math.max(0, baselineTokens - projectedTokens)
+    var cumulativeSaved = metrics.estimated_tokens_saved || 0
+
+    print(colorifyText("Context tokens (last projection)", accentColor))
+    if (baselineTokens === 0) {
+      print(colorifyText("  No projection has run yet.", hintColor))
+    } else {
+      var tokensBar = renderProportionBar([
+        { value: projectedTokens, color: "FG(112)", pattern: "█" },
+        { value: savedThisPass, color: "FG(249)", pattern: "░" }
+      ], barWidth)
+      print("  " + tokensBar)
+      print()
+      var keptShare = baselineTokens > 0 ? (projectedTokens / baselineTokens * 100).toFixed(1) : "0.0"
+      var savedShare = baselineTokens > 0 ? (savedThisPass / baselineTokens * 100).toFixed(1) : "0.0"
+      print("  " + colorifyText("██", "FG(112)") + " " + colorifyText("Projected".padEnd(10), hintColor) + "  " + colorifyText(String(projectedTokens).padStart(7), numericColor) + " tokens " + colorifyText((keptShare + "%").padStart(6), hintColor) + colorifyText("  (kept in context)", "FG(249)"))
+      print("  " + colorifyText("░░", "FG(249)") + " " + colorifyText("Collapsed".padEnd(10), hintColor) + "  " + colorifyText(String(savedThisPass).padStart(7), numericColor) + " tokens " + colorifyText((savedShare + "%").padStart(6), hintColor) + colorifyText("  (referenced, not inline)", "FG(249)"))
+      print()
+      print(colorifyText("  Baseline: ", hintColor) + colorifyText(String(baselineTokens), numericColor) + colorifyText(" tokens | Projected: ", hintColor) + colorifyText(String(projectedTokens), numericColor) + colorifyText(" tokens | Cumulative delta: ", hintColor) + colorifyText("-" + String(cumulativeSaved), successColor) + colorifyText(" tokens saved", hintColor))
+    }
   }
 
   function truncateText(text, maxLen) {
