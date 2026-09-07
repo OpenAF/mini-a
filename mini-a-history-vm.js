@@ -33,6 +33,8 @@ var MiniAHistoryVM = function(options) {
   this.objectById = {}
   this.objectByHandle = {}
   this.representationCache = {}
+  this.contextIndexes = { L0: {}, L1: {}, L2: {}, L3: {}, L4: {} }
+  this.objectIndexTerms = {}
   this._pendingChildren = {}
   this.expansions = {}
   this._seq = 0
@@ -66,7 +68,18 @@ var MiniAHistoryVM = function(options) {
     representation_l3: 0,
     representation_l4: 0,
     hierarchy_roots: 0,
-    hierarchy_links: 0
+    hierarchy_links: 0,
+    hierarchy_searches: 0,
+    hierarchy_depth_total: 0,
+    context_objects_considered: 0,
+    context_objects_selected: 0,
+    context_candidate_tokens: 0,
+    context_expansions: 0,
+    context_expansion_tokens: 0,
+    index_updates: 0,
+    range_reads: 0,
+    section_reads: 0,
+    json_path_reads: 0
   }
 
   if (this.enabled || this.shadow) this._open()
@@ -375,6 +388,7 @@ MiniAHistoryVM.prototype._indexEvent = function(event) {
   this.objectById[object.id] = object
   this.objectByHandle[object.handle] = object
   if (this.contextVirtualization) this._linkHierarchyObject(object)
+  if (this.contextVirtualization) this._indexContextObject(object, serialized)
   if (event.branchId === this.branchId && event.sourceKind === "provider_message" && isMap(event.metadata) && isNumber(event.metadata.providerIndex)) {
     this._providerCaptureCount = Math.max(this._providerCaptureCount, event.metadata.providerIndex + 1)
   }
@@ -388,6 +402,8 @@ MiniAHistoryVM.prototype._rebuildObjects = function() {
   this.objects = []
   this.objectById = {}
   this.objectByHandle = {}
+  this.contextIndexes = { L0: {}, L1: {}, L2: {}, L3: {}, L4: {} }
+  this.objectIndexTerms = {}
   this._pendingChildren = {}
   this._providerCaptureCount = 0
   this.metrics.estimated_original_tokens = 0
@@ -404,6 +420,7 @@ MiniAHistoryVM.prototype._addChild = function(parent, childHandle) {
   if (!isMap(parent) || !isString(childHandle) || parent.children.indexOf(childHandle) >= 0) return false
   parent.children.push(childHandle)
   this.metrics.hierarchy_links++
+  this._indexContextObject(parent, __, ["L1", "L2"])
   return true
 }
 
@@ -427,14 +444,78 @@ MiniAHistoryVM.prototype._linkHierarchyObject = function(object) {
   }
 }
 
+MiniAHistoryVM.prototype._tokenizeIndexText = function(value) {
+  var parts = String(value || "").toLowerCase().split(/[^a-z0-9_:-]+/)
+  var unique = {}
+  for (var i = 0; i < parts.length; i++) if (parts[i].length > 1) unique[parts[i]] = true
+  return Object.keys(unique)
+}
+
+MiniAHistoryVM.prototype._removeContextIndexObject = function(object, levels) {
+  var previous = this.objectIndexTerms[object.handle]
+  if (!isMap(previous)) return
+  var selectedLevels = isArray(levels) ? levels : Object.keys(previous)
+  for (var l = 0; l < selectedLevels.length; l++) {
+    var terms = previous[selectedLevels[l]]
+    if (!isArray(terms)) continue
+    for (var t = 0; t < terms.length; t++) {
+      var posting = this.contextIndexes[selectedLevels[l]][terms[t]]
+      if (!isMap(posting)) continue
+      delete posting[object.handle]
+      if (Object.keys(posting).length === 0) delete this.contextIndexes[selectedLevels[l]][terms[t]]
+    }
+  }
+}
+
+MiniAHistoryVM.prototype._indexContextObject = function(object, serialized, requestedLevels) {
+  if (!this.contextVirtualization || !isMap(object)) return
+  var levels = isArray(requestedLevels) ? requestedLevels : ["L0", "L1", "L2", "L3", "L4"]
+  this._removeContextIndexObject(object, levels)
+  var extra = object.keywords.join(" ") + " " + object.entities.join(" ")
+  var texts = {}
+  if (levels.indexOf("L0") >= 0) texts.L0 = this._buildRepresentation(object, "L0").text + " " + extra
+  if (levels.indexOf("L1") >= 0) texts.L1 = this._buildRepresentation(object, "L1").text + " " + extra
+  if (levels.indexOf("L2") >= 0) texts.L2 = this._buildRepresentation(object, "L2").text + " " + extra
+  if (levels.indexOf("L3") >= 0 || levels.indexOf("L4") >= 0) {
+    var exact = isString(serialized) ? serialized : (isString(object.content) ? object.content : stringify(object.content, __, ""))
+    if (levels.indexOf("L3") >= 0) texts.L3 = this._contentCodePoints(exact).slice(0, 1200).join("") + " " + extra
+    if (levels.indexOf("L4") >= 0) texts.L4 = exact + " " + extra
+  }
+  var indexed = isMap(this.objectIndexTerms[object.handle]) ? this.objectIndexTerms[object.handle] : {}
+  for (var l = 0; l < levels.length; l++) {
+    var level = levels[l]
+    var terms = this._tokenizeIndexText(texts[level])
+    indexed[level] = terms
+    for (var t = 0; t < terms.length; t++) {
+      if (!isMap(this.contextIndexes[level][terms[t]])) this.contextIndexes[level][terms[t]] = {}
+      this.contextIndexes[level][terms[t]][object.handle] = true
+    }
+  }
+  this.objectIndexTerms[object.handle] = indexed
+  this.metrics.index_updates++
+}
+
 MiniAHistoryVM.prototype._representationLevel = function(level) {
   var value = isString(level) ? level.toLowerCase().trim() : "l2"
   var aliases = { l0: "L0", reference: "L0", l1: "L1", abstract: "L1", l2: "L2", summary: "L2", l3: "L3", detailed: "L3", detail: "L3", l4: "L4", full: "L4" }
   return aliases[value] || "L2"
 }
 
+MiniAHistoryVM.prototype._representationSourceHash = function(object, level) {
+  var source = object.sourceHash
+  if ((level === "L1" || level === "L2") && object.children.length > 0) {
+    var childVersions = []
+    for (var i = 0; i < object.children.length; i++) {
+      var child = this._resolveObject(object.children[i])
+      if (isMap(child)) childVersions.push(child.handle + ":" + child.version + ":" + child.sourceHash)
+    }
+    source = sha256(source + "|" + childVersions.join("|"))
+  }
+  return source
+}
+
 MiniAHistoryVM.prototype._representationCacheKey = function(object, level) {
-  return object.handle + ":" + level + ":v" + object.version + ":r" + this.representationVersion + ":" + object.sourceHash
+  return object.handle + ":" + level + ":v" + object.version + ":r" + this.representationVersion + ":" + this._representationSourceHash(object, level)
 }
 
 MiniAHistoryVM.prototype._buildRepresentation = function(object, level) {
@@ -448,8 +529,29 @@ MiniAHistoryVM.prototype._buildRepresentation = function(object, level) {
       text = text.substring(0, 96) + "..."
       complete = false
     }
+    if (object.children.length > 0) {
+      var childHandles = object.children.slice(0, 8)
+      text += " Children: " + childHandles.join(", ")
+      if (object.children.length > childHandles.length) text += " (and " + (object.children.length - childHandles.length) + " more)"
+    }
   }
-  if (level === "L2") text = object.summary
+  if (level === "L2") {
+    text = object.summary
+    if (object.children.length > 0) {
+      var childLines = []
+      for (var c = 0; c < object.children.length && c < 8; c++) {
+        var child = this._resolveObject(object.children[c])
+        if (isMap(child)) childLines.push("- [" + child.handle + "] " + child.summary)
+      }
+      if (childLines.length > 0) text += "\nChildren:\n" + childLines.join("\n")
+      if (object.children.length > childLines.length) text += "\n- ... " + (object.children.length - childLines.length) + " more children"
+      var summaryChars = this._contentCodePoints(text)
+      if (summaryChars.length > 1200) {
+        text = summaryChars.slice(0, 1200).join("") + "\n[" + object.handle + " child summary truncated]"
+        complete = false
+      }
+    }
+  }
   if (level === "L3") {
     var chars = this._contentCodePoints(serialized)
     text = chars.slice(0, 1200).join("")
@@ -463,6 +565,7 @@ MiniAHistoryVM.prototype._buildRepresentation = function(object, level) {
     text: text,
     estimatedTokens: this.estimateTokens(text),
     sourceHash: object.sourceHash,
+    representationSourceHash: this._representationSourceHash(object, level),
     objectVersion: object.version,
     representationVersion: this.representationVersion,
     generatedBy: "deterministic",
@@ -509,6 +612,221 @@ MiniAHistoryVM.prototype.getChildren = function(id, limit, cursor) {
     if (isMap(child) && child.branchId === this.branchId) children.push({ id: child.id, handle: child.handle, kind: child.kind, type: child.type, summary: child.summary })
   }
   return { parent: object.handle, results: children.slice(start, start + cap), nextCursor: start + cap < children.length ? start + cap : __, total: children.length }
+}
+
+MiniAHistoryVM.prototype._indexedCandidates = function(terms, levels) {
+  var scores = {}
+  var matchedLevels = {}
+  for (var l = 0; l < levels.length; l++) {
+    var level = levels[l]
+    var weight = level === "L0" ? 5 : (level === "L1" ? 4 : (level === "L2" ? 3 : (level === "L3" ? 2 : 1)))
+    for (var t = 0; t < terms.length; t++) {
+      var posting = this.contextIndexes[level][terms[t]]
+      if (!isMap(posting)) continue
+      Object.keys(posting).forEach(function(handle) {
+        scores[handle] = (scores[handle] || 0) + weight
+        if (!isString(matchedLevels[handle])) matchedLevels[handle] = level
+      })
+    }
+  }
+  return { scores: scores, matchedLevels: matchedLevels }
+}
+
+MiniAHistoryVM.prototype._contextPath = function(object) {
+  var path = []
+  var current = object
+  var seen = {}
+  while (isMap(current) && !seen[current.handle]) {
+    seen[current.handle] = true
+    path.unshift(current.handle)
+    current = isString(current.parentId) ? this._resolveObject(current.parentId) : __
+  }
+  return path
+}
+
+MiniAHistoryVM.prototype._collectDescendants = function(object, maxDepth, target, depths) {
+  var queue = [{ object: object, depth: 0 }]
+  var seen = {}
+  var targetCount = Object.keys(target).length
+  while (queue.length > 0 && targetCount < 200) {
+    var entry = queue.shift()
+    if (!isMap(entry.object) || seen[entry.object.handle]) continue
+    seen[entry.object.handle] = true
+    if (!isMap(target[entry.object.handle])) targetCount++
+    target[entry.object.handle] = entry.object
+    depths[entry.object.handle] = entry.depth
+    if (entry.depth >= maxDepth) continue
+    for (var i = 0; i < entry.object.children.length; i++) {
+      var child = this._resolveObject(entry.object.children[i])
+      if (isMap(child) && child.branchId === this.branchId) queue.push({ object: child, depth: entry.depth + 1 })
+    }
+  }
+}
+
+MiniAHistoryVM.prototype.contextSearch = function(query, limit, cursor, options) {
+  if (!this.contextVirtualization) return { error: "Context virtualization is not enabled." }
+  this.metrics.hierarchy_searches++
+  var opts = isMap(options) ? options : {}
+  var q = isString(query) ? query.toLowerCase().trim() : ""
+  var terms = this._tokenizeIndexText(q)
+  var cap = isNumber(limit) ? Math.max(1, Math.min(50, Math.floor(limit))) : 10
+  var start = isNumber(cursor) ? Math.max(0, Math.floor(cursor)) : 0
+  var maxDepth = isNumber(opts.maxDepth) ? Math.max(0, Math.min(8, Math.floor(opts.maxDepth))) : 3
+  var indexed = this._indexedCandidates(terms, ["L0", "L1", "L2"])
+  var stage = "coarse"
+  if (Object.keys(indexed.scores).length === 0 && terms.length > 0) {
+    indexed = this._indexedCandidates(terms, ["L3", "L4"])
+    stage = "detailed_fallback"
+  }
+  if (q.length > 0 && terms.length === 0) {
+    stage = "detailed_scan"
+    for (var e = this.objects.length - 1; e >= 0; e--) {
+      var exactObject = this.objects[e]
+      var exactText = isString(exactObject.content) ? exactObject.content : stringify(exactObject.content, __, "")
+      if (exactObject.branchId === this.branchId && exactText.toLowerCase().indexOf(q) >= 0) {
+        indexed.scores[exactObject.handle] = 1
+        indexed.matchedLevels[exactObject.handle] = "L4"
+      }
+    }
+  } else if (terms.length === 0) {
+    for (var r = this.objects.length - 1; r >= 0; r--) {
+      var root = this.objects[r]
+      if (root.branchId === this.branchId && (!isString(root.parentId) || root.parentId.length === 0)) indexed.scores[root.handle] = 1
+    }
+  }
+
+  var pool = {}
+  var depths = {}
+  var handles = Object.keys(indexed.scores).sort(function(a, b) { return indexed.scores[b] - indexed.scores[a] || a.localeCompare(b) })
+  for (var h = 0; h < handles.length && h < 50; h++) {
+    var candidate = this._resolveObject(handles[h])
+    if (isMap(candidate) && candidate.branchId === this.branchId) this._collectDescendants(candidate, maxDepth, pool, depths)
+  }
+
+  var ranked = []
+  var poolHandles = Object.keys(pool)
+  var candidateTokens = 0
+  for (var p = 0; p < poolHandles.length; p++) {
+    var object = pool[poolHandles[p]]
+    candidateTokens += object.estimatedOriginalTokens
+    var serialized = isString(object.content) ? object.content : stringify(object.content, __, "")
+    var lower = serialized.toLowerCase()
+    var exactMatch = q.length > 0 && lower.indexOf(q) >= 0
+    var termMatches = 0
+    for (var x = 0; x < terms.length; x++) if (lower.indexOf(terms[x]) >= 0) termMatches++
+    var score = indexed.scores[object.handle] || 0
+    if (exactMatch) score += 20
+    score += termMatches * 2
+    if (q.length === 0 || score > 0 || depths[object.handle] > 0) ranked.push({ object: object, score: score, exactMatch: exactMatch, depth: depths[object.handle] || 0, matchedLevel: indexed.matchedLevels[object.handle] || "branch" })
+  }
+  ranked.sort(function(a, b) { return b.score - a.score || a.depth - b.depth || b.object.event.seq - a.object.event.seq })
+  var selected = ranked.slice(start, start + cap)
+  this.metrics.context_objects_considered += ranked.length
+  this.metrics.context_objects_selected += selected.length
+  this.metrics.context_candidate_tokens += candidateTokens
+  for (var d = 0; d < selected.length; d++) this.metrics.hierarchy_depth_total += selected[d].depth
+  var results = selected.map(function(item) {
+    return {
+      id: item.object.id,
+      handle: item.object.handle,
+      kind: item.object.kind,
+      type: item.object.type,
+      summary: item.object.summary,
+      path: this._contextPath(item.object),
+      matchedLevel: item.matchedLevel,
+      exactMatch: item.exactMatch,
+      score: item.score,
+      estimatedTokens: item.object.estimatedOriginalTokens
+    }
+  }, this)
+  return { query: query || "", stage: stage, results: results, nextCursor: start + cap < ranked.length ? start + cap : __, totalMatches: ranked.length, objectsConsidered: ranked.length, candidateTokens: candidateTokens }
+}
+
+MiniAHistoryVM.prototype._boundedTextResult = function(object, mode, text, metadata) {
+  var chars = this._contentCodePoints(text)
+  var cap = 16000
+  var resultText = chars.slice(0, cap).join("")
+  var result = merge({
+    id: object.id,
+    handle: object.handle,
+    mode: mode,
+    content: resultText,
+    truncated: chars.length > cap,
+    estimatedTokens: this.estimateTokens(resultText),
+    provenance: "untrusted context object " + object.type
+  }, isMap(metadata) ? metadata : {}, true)
+  this.metrics.context_expansions++
+  this.metrics.context_expansion_tokens += result.estimatedTokens
+  object.accessCount++
+  object.lastAccess = new Date().toISOString()
+  return result
+}
+
+MiniAHistoryVM.prototype.readContext = function(id, request) {
+  if (!this.contextVirtualization) return { error: "Context virtualization is not enabled." }
+  var object = this._resolveObject(id)
+  if (!isMap(object) || object.branchId !== this.branchId) return { error: "Context object not found in the active conversation branch." }
+  var opts = isMap(request) ? request : {}
+  var serialized = isString(object.content) ? object.content : stringify(object.content, __, "")
+  var lines = serialized.split(/\r?\n/)
+
+  if (isMap(opts.lines)) {
+    this.metrics.range_reads++
+    var start = isNumber(opts.lines.start) ? Math.max(1, Math.floor(opts.lines.start)) : 1
+    var end = isNumber(opts.lines.end) ? Math.max(start, Math.floor(opts.lines.end)) : start + 99
+    end = Math.min(lines.length, start + 399, end)
+    return this._boundedTextResult(object, "lines", lines.slice(start - 1, end).join("\n"), { startLine: start, endLine: end, totalLines: lines.length })
+  }
+
+  if (isString(opts.section) && opts.section.trim().length > 0) {
+    this.metrics.section_reads++
+    var wanted = opts.section.toLowerCase().trim()
+    var sectionStart = -1
+    var sectionDepth = 7
+    var sectionEnd = lines.length
+    for (var i = 0; i < lines.length; i++) {
+      var heading = lines[i].match(/^(#{1,6})\s+(.+?)\s*#*\s*$/)
+      if (!heading) continue
+      if (sectionStart < 0 && heading[2].toLowerCase().trim() === wanted) {
+        sectionStart = i
+        sectionDepth = heading[1].length
+      } else if (sectionStart >= 0 && heading[1].length <= sectionDepth) {
+        sectionEnd = i
+        break
+      }
+    }
+    if (sectionStart < 0) return { error: "Section not found.", id: object.id, handle: object.handle }
+    return this._boundedTextResult(object, "section", lines.slice(sectionStart, sectionEnd).join("\n"), { section: opts.section, startLine: sectionStart + 1, endLine: sectionEnd })
+  }
+
+  if (isString(opts.jsonPath) && opts.jsonPath.trim().length > 0) {
+    this.metrics.json_path_reads++
+    var value
+    try { value = isString(object.content) ? jsonParse(object.content, __, __, true) : object.content } catch(ignoreInvalidJson) { return { error: "Context object does not contain valid JSON." } }
+    var normalizedPath = opts.jsonPath.replace(/\[(\d+)\]/g, ".$1")
+    var segments = normalizedPath.split(".").filter(function(segment) { return segment.length > 0 })
+    for (var s = 0; s < segments.length; s++) {
+      if (!segments[s].match(/^[A-Za-z0-9_$-]+$/)) return { error: "Invalid JSON path." }
+      if (!(isMap(value) || isArray(value)) || !Object.prototype.hasOwnProperty.call(value, segments[s])) return { error: "JSON path not found." }
+      value = value[segments[s]]
+    }
+    return this._boundedTextResult(object, "json_path", isString(value) ? value : stringify(value, __, ""), { jsonPath: opts.jsonPath })
+  }
+
+  if (isString(opts.query) && opts.query.length > 0) {
+    this.metrics.range_reads++
+    var needle = opts.query.toLowerCase()
+    var matches = []
+    for (var m = 0; m < lines.length && matches.length < 50; m++) if (lines[m].toLowerCase().indexOf(needle) >= 0) matches.push((m + 1) + ":" + lines[m])
+    return this._boundedTextResult(object, "grep", matches.join("\n"), { query: opts.query, matches: matches.length })
+  }
+
+  this.metrics.range_reads++
+  var offset = isNumber(opts.offset) ? Math.max(0, Math.floor(opts.offset)) : 0
+  var limit = isNumber(opts.limit) ? Math.max(1, Math.min(16000, Math.floor(opts.limit))) : 4000
+  var chars = this._contentCodePoints(serialized)
+  var endOffset = Math.min(chars.length, offset + limit)
+  return this._boundedTextResult(object, "range", chars.slice(offset, endOffset).join(""), { offset: offset, limit: limit, total: chars.length, nextCursor: endOffset < chars.length ? endOffset : __ })
 }
 
 MiniAHistoryVM.prototype._contentCodePoints = function(value) {
@@ -675,6 +993,15 @@ MiniAHistoryVM.prototype.projectConversation = function(conversation, options) {
 MiniAHistoryVM.prototype.diagnostics = function() {
   var states = { hot: 0, warm: 0, cold: 0, frozen: 0 }
   this.objects.forEach(function(object) { states[object.representation] = (states[object.representation] || 0) + 1 })
+  var metrics = merge({}, this.metrics, true)
+  metrics.hierarchy_depth_avg = metrics.context_objects_selected > 0 ? metrics.hierarchy_depth_total / metrics.context_objects_selected : 0
+  metrics.index_terms = {
+    L0: Object.keys(this.contextIndexes.L0).length,
+    L1: Object.keys(this.contextIndexes.L1).length,
+    L2: Object.keys(this.contextIndexes.L2).length,
+    L3: Object.keys(this.contextIndexes.L3).length,
+    L4: Object.keys(this.contextIndexes.L4).length
+  }
   return {
     active: this.enabled && !this.degraded,
     shadow: this.shadow,
@@ -688,7 +1015,7 @@ MiniAHistoryVM.prototype.diagnostics = function() {
     degraded: this.degraded,
     degradedReason: this.degradedReason,
     states: states,
-    metrics: merge({}, this.metrics, true)
+    metrics: metrics
   }
 }
 

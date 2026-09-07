@@ -134,6 +134,72 @@
     })
   }
 
+  exports.testHierarchicalSummariesInvalidateByChildVersion = function() {
+    withVm(function(vm) {
+      vm.registerContextObject("summary", "project", "Mini-A project")
+      var parent = vm.objects[vm.objects.length - 1]
+      var parentFullIndex = stringify(vm.objectIndexTerms[parent.handle].L4, __, "")
+      var before = vm.getRepresentation(parent.handle, "L2")
+      vm.registerContextObject("decision", "architecture", "Named wiki mounts were selected", { parentId: parent.handle })
+      var child = vm.objects[vm.objects.length - 1]
+      var after = vm.getRepresentation(parent.handle, "L2")
+      ow.test.assert(before.text.indexOf(child.handle) < 0 && after.text.indexOf(child.handle) >= 0, true, "Parent summaries should disclose new children")
+      ow.test.assert(before.representationSourceHash !== after.representationSourceHash, true, "A child change should deterministically invalidate the parent representation")
+      ow.test.assert(vm.metrics.representation_cache_misses === 2, true, "Changed hierarchy summaries should not reuse stale cache entries")
+      ow.test.assert(stringify(vm.objectIndexTerms[parent.handle].L4, __, "") === parentFullIndex, true, "Adding a child should refresh only hierarchy-sensitive parent index levels")
+    }, { contextVirtualization: true })
+  }
+
+  exports.testCoarseToFineContextSearch = function() {
+    withVm(function(vm) {
+      vm.registerContextObject("summary", "topic", "Storage architecture", { keywords: ["redis"] })
+      var parent = vm.objects[vm.objects.length - 1]
+      vm.registerContextObject("wiki", "page", "Named mounts isolate tenants", { parentId: parent.handle })
+      var child = vm.objects[vm.objects.length - 1]
+      var branch = vm.contextSearch("redis", 10, 0, { maxDepth: 2 })
+      var branchHandles = branch.results.map(function(item) { return item.handle })
+      ow.test.assert(branch.stage === "coarse" && branchHandles.indexOf(parent.handle) >= 0 && branchHandles.indexOf(child.handle) >= 0, true, "Coarse search should descend only into matching hierarchy branches")
+
+      var hidden = new Array(1301).join("x") + " uniquedeepneedle"
+      vm.registerContextObject("artifact", "log", hidden)
+      var fallback = vm.contextSearch("uniquedeepneedle", 5)
+      ow.test.assert(fallback.stage === "detailed_fallback" && fallback.results[0].kind === "artifact" && fallback.results[0].exactMatch === true, true, "Search should fall back to the exact index when cheap representations miss")
+      vm.registerContextObject("memory", "note", "ação")
+      var unicode = vm.contextSearch("ção", 5)
+      ow.test.assert(unicode.stage === "detailed_scan" && unicode.results[0].kind === "memory", true, "Queries outside the lightweight index alphabet should retain exact retrieval")
+      var diagnostics = vm.diagnostics()
+      ow.test.assert(diagnostics.metrics.hierarchy_searches === 3 && diagnostics.metrics.index_terms.L4 > 0, true, "Hierarchical and multi-resolution index work should be measurable")
+    }, { contextVirtualization: true })
+  }
+
+  exports.testSectionRangeAndJsonPathReads = function() {
+    withVm(function(vm) {
+      vm.registerContextObject("wiki", "document", "# Intro\nfirst\n## Architecture\nline one\nline two\n# End\nlast")
+      var document = vm.objects[vm.objects.length - 1]
+      var section = vm.readContext(document.handle, { section: "Architecture" })
+      var lines = vm.readContext(document.handle, { lines: { start: 2, end: 4 } })
+      ow.test.assert(section.content === "## Architecture\nline one\nline two", true, "Section reads should stop at the next peer or parent heading")
+      ow.test.assert(lines.content === "first\n## Architecture\nline one" && lines.startLine === 2 && lines.endLine === 4, true, "Line reads should use bounded one-based ranges")
+
+      vm.registerContextObject("artifact", "json", { repositories: [{ name: "one" }, { name: "two" }], total_count: 2 })
+      var jsonObject = vm.objects[vm.objects.length - 1]
+      var jsonValue = vm.readContext(jsonObject.handle, { jsonPath: "repositories[1].name" })
+      var grep = vm.readContext(document.handle, { query: "line" })
+      ow.test.assert(jsonValue.content === "two", true, "JSON path reads should retrieve a selected exact value without evaluating code")
+      ow.test.assert(grep.matches === 2 && grep.content.indexOf("4:line one") >= 0, true, "Context grep should return bounded line-numbered matches")
+      ow.test.assert(vm.metrics.context_expansions === 4 && vm.metrics.context_expansion_tokens > 0, true, "Range expansion cost should be tracked separately")
+    }, { contextVirtualization: true })
+  }
+
+  exports.testContextIndexesUpdateIncrementally = function() {
+    withVm(function(vm) {
+      for (var i = 0; i < 20; i++) vm.registerContextObject("memory", "note", "entry " + i)
+      var before = vm.metrics.index_updates
+      vm.registerContextObject("memory", "note", "one additional entry")
+      ow.test.assert(vm.metrics.index_updates === before + 1, true, "Appending an unrelated root should update only its index entries")
+    }, { contextVirtualization: true })
+  }
+
   exports.testLegacyImportMarksCompletenessBoundary = function() {
     withVm(function(vm) {
       vm.importLegacy({ c: [{ role: "assistant", content: "already summarized" }] })

@@ -30,6 +30,26 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/historyVM.js").testPhaseOneDoesNotCreateRepresentationCache
 
+- name: MiniA History VM Tests::HierarchicalSummaries
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testHierarchicalSummariesInvalidateByChildVersion
+
+- name: MiniA History VM Tests::CoarseToFineSearch
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testCoarseToFineContextSearch
+
+- name: MiniA History VM Tests::StructuredReads
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testSectionRangeAndJsonPathReads
+
+- name: MiniA History VM Tests::IncrementalIndex
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testContextIndexesUpdateIncrementally
+
 - name: MiniA History VM Tests::RuntimeFlags
   from: MiniA History VM Tests::Init
   to  : oJob Test
@@ -91,6 +111,10 @@ todo:
 - MiniA History VM Tests::Representations
 - MiniA History VM Tests::Hierarchy
 - MiniA History VM Tests::PhaseOneCompatibility
+- MiniA History VM Tests::HierarchicalSummaries
+- MiniA History VM Tests::CoarseToFineSearch
+- MiniA History VM Tests::StructuredReads
+- MiniA History VM Tests::IncrementalIndex
 - MiniA History VM Tests::RuntimeFlags
 - MiniA History VM Tests::LegacyImport
 - MiniA History VM Tests::SearchRead
