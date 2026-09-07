@@ -1713,9 +1713,28 @@ MiniAHistoryVM.prototype.projectConversation = function(conversation, options) {
       continue
     }
     var object = this._providerObjectForIndex(i)
-    var protectedEntry = role === "system" || role === "developer" || role === "user" || !isString(entry.content) || i >= conversation.length - 4 || isArray(entry.tool_calls) || isDef(entry.tool_call_id) && i >= conversation.length - 6
+    // Mini-A's own ReAct step loop re-sends a deterministic, fully reconstructible
+    // scaffolding prompt (SYSTEM REMINDER / BEGIN_UNTRUSTED_GOAL / CURRENT STATE /
+    // "What's your next step?") as a fresh "user" message every single step. That
+    // is not an ambiguous end-user requirement -- treating it the same as genuine
+    // free-form user content (which must stay protected, see the "unclassified
+    // user requirements" policy below) means the one thing responsible for most
+    // of a long run's growth can never be collapsed. Recognize it by its stable
+    // literal markers so real user messages remain fully protected.
+    var isSyntheticStepPrompt = role === "user" && isString(entry.content) &&
+      entry.content.indexOf("SYSTEM REMINDER:") >= 0 &&
+      entry.content.indexOf("BEGIN_UNTRUSTED_GOAL") >= 0 &&
+      entry.content.indexOf("CURRENT STATE:") >= 0
+    // Keep unclassified user messages intact (conservative policy); only the
+    // recognized synthetic step prompt above is exempt from that protection.
+    var protectedEntry = role === "system" || role === "developer" || (role === "user" && !isSyntheticStepPrompt) || !isString(entry.content) || i >= conversation.length - 4 || isArray(entry.tool_calls) || isDef(entry.tool_call_id) && i >= conversation.length - 6
     var expanded = isMap(object) && isMap(this.expansions[object.id]) && this.expansions[object.id].untilStep >= currentStep
-    var eligible = isMap(object) && object.estimatedOriginalTokens > 2000 && conversation.length - i > 2 && !protectedEntry && !expanded
+    // Synthetic step prompts are individually small (a few hundred tokens) but
+    // repeat every step, so the general 2000-token single-object floor (tuned for
+    // large tool results) would never trigger for them; use a much lower floor
+    // since the content is deterministic and safely reconstructible from live state.
+    var eligibleSizeFloor = isSyntheticStepPrompt ? 200 : 2000
+    var eligible = isMap(object) && object.estimatedOriginalTokens > eligibleSizeFloor && conversation.length - i > 2 && !protectedEntry && !expanded
     if (!eligible) {
       projected.push(entry)
       if (isMap(object)) object.representation = expanded ? "warm" : "hot"

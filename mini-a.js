@@ -5596,6 +5596,53 @@ MiniA.prototype._recordPlanActivity = function(reason, payload) {
   }
 }
 
+/**
+ * Record an executed action for repeated-action loop detection, replacing the
+ * three call sites that used to inline this bookkeeping. Detects both the
+ * coarse "same tool 3x in a window of 3" case (metric only) and an exact
+ * "identical tool+params repeated back-to-back" case, which sets a notice
+ * that _maybeInjectRepeatedActionWarning surfaces to the model so it stops
+ * blindly re-issuing an action that already failed to make progress (e.g.
+ * ignoring an obs-spill recovery instruction).
+ */
+MiniA.prototype._noteLastAction = function(runtime, actionEntry) {
+  if (!isObject(runtime) || !isArray(runtime.lastActions) || !isString(actionEntry) || actionEntry.length === 0) return
+  runtime.lastActions.push(actionEntry)
+  if (runtime.lastActions.length > 3) runtime.lastActions.shift()
+  runtime.repeatedActionNotice = __
+  if (runtime.lastActions.length < 3) return
+  var actionCounts = {}
+  runtime.lastActions.forEach(a => {
+    var actionType = a.split(':')[0]
+    actionCounts[actionType] = (actionCounts[actionType] || 0) + 1
+  })
+  if (Object.values(actionCounts).some(count => count >= 3) && isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.action_loops_detected)) {
+    global.__mini_a_metrics.action_loops_detected.inc()
+  }
+  var allIdentical = runtime.lastActions.every(a => a === runtime.lastActions[0])
+  if (allIdentical) {
+    runtime.repeatedActionStreak = (runtime.repeatedActionStreak || 0) + 1
+    var repeatedLabel = runtime.lastActions[0].split(':')[0]
+    runtime.repeatedActionNotice = "SYSTEM REMINDER: the exact same action (" + repeatedLabel + ") has now repeated " +
+      runtime.lastActions.length + " times in a row with no new information -- do not run it again unchanged. " +
+      "If a recent observation said a result was spilled to a temporary file, call result_stat/result_read/result_grep/result_head/result_tail/result_slice on that file now instead. Otherwise pick a genuinely different tool, command, or approach."
+  } else {
+    runtime.repeatedActionStreak = 0
+  }
+}
+
+/**
+ * Append any pending repeated-action notice (set by _noteLastAction) to the
+ * next step prompt so a model that ignores tool-recovery instructions (e.g.
+ * after an obs-spill notice) gets an explicit, escalating directive instead
+ * of silently looping.
+ */
+MiniA.prototype._maybeInjectRepeatedActionWarning = function(prompt, runtime) {
+  if (!isString(prompt) || prompt.length === 0 || !isObject(runtime)) return prompt
+  if (!isString(runtime.repeatedActionNotice) || runtime.repeatedActionNotice.length === 0) return prompt
+  return prompt + "\n\n" + runtime.repeatedActionNotice
+}
+
 MiniA.prototype._maybeInjectPlanReminder = function(prompt, stepNumber, maxSteps) {
   if (!this._enablePlanning || !isString(prompt) || prompt.length === 0) return prompt
   var config = this._planUpdateConfig || {}
@@ -18186,6 +18233,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       totalThoughts       : 0,
       stepsWithoutAction  : 0,
       lastActions         : [],
+      repeatedActionNotice: __,
+      repeatedActionStreak: 0,
+      historyVmBudgetOverflowStreak: 0,
       recentSimilarThoughts: [],
       hadErrorThisStep    : false,
       clearedConsecutiveErrors: false,
@@ -18832,19 +18882,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       if (isDef(toolName) && toolName.length > 0) {
         var actionEntry = `${toolName}${isDef(params) ? `: ${af.toSLON(params)}` : ""}`
-        runtime.lastActions.push(actionEntry)
-        if (runtime.lastActions.length > 3) runtime.lastActions.shift()
-
-        if (runtime.lastActions.length >= 3) {
-          var actionCounts = {}
-          runtime.lastActions.forEach(a => {
-            var actionType = a.split(':')[0]
-            actionCounts[actionType] = (actionCounts[actionType] || 0) + 1
-          })
-          if (Object.values(actionCounts).some(count => count >= 3)) {
-            global.__mini_a_metrics.action_loops_detected.inc()
-          }
-        }
+        this._noteLastAction(runtime, actionEntry)
 
         // Auto-delegation: if result is noisy, spawn a summarization sub-agent
         if (!hasError && isObject(parent._subtaskManager) && args.autodelegation === true && args._autoDelegate !== false &&
@@ -19112,9 +19150,34 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var promptContextBudget = isObject(this._historyVm) && this._historyVm.enabled === true
         ? Math.max(0, remainingContextTokens)
         : Math.max(2000, remainingContextTokens)
-      if (isObject(this._historyVm) && this._historyVm.enabled === true && remainingContextTokens < 0 && runtime.historyVmBudgetWarned !== true) {
-        runtime.historyVmBudgetWarned = true
-        this.fnI("warn", "History VM protected/fixed request content exceeds the effective context budget by ~" + Math.abs(remainingContextTokens) + " tokens; no runtime history was selected.")
+      // VM-PLAN.md #5: overflow recovery must report the unsatisfiable budget and
+      // must not endlessly retry the same oversized request. A single one-time
+      // warning previously left the agent silently starved (0 progress tokens)
+      // for the rest of the run, re-sending the identical oversized fixed/protected
+      // content every step. Track consecutive overflow steps and force a stop
+      // (with an IN_PROGRESS summary, same pattern as the other hard ceilings
+      // above) once retrying clearly cannot recover.
+      if (isObject(this._historyVm) && this._historyVm.enabled === true && remainingContextTokens < 0) {
+        runtime.historyVmBudgetOverflowStreak = (runtime.historyVmBudgetOverflowStreak || 0) + 1
+        if (runtime.historyVmBudgetWarned !== true) {
+          runtime.historyVmBudgetWarned = true
+          this.fnI("warn", "History VM protected/fixed request content exceeds the effective context budget by ~" + Math.abs(remainingContextTokens) + " tokens; no runtime history was selected.")
+        }
+        var historyVmOverflowHardLimit = 5
+        if (runtime.historyVmBudgetOverflowStreak >= historyVmOverflowHardLimit) {
+          runtime.context.push(`[OBS LIMIT] History VM protected/fixed request content has exceeded the effective context budget for ${runtime.historyVmBudgetOverflowStreak} consecutive steps (~${Math.abs(remainingContextTokens)} tokens over); stopping instead of retrying the same oversized request.`)
+          this._recordPlanActivity("step-limit", {
+            step       : runtime.currentStepNumber,
+            status     : "IN_PROGRESS",
+            description: "History VM budget unsatisfiable across consecutive steps",
+            result     : this._summarizeRecentContext(runtime),
+            force      : true
+          })
+          runtime.historyVmBudgetCeilingHit = true
+          break
+        }
+      } else {
+        runtime.historyVmBudgetOverflowStreak = 0
       }
       var progressEntries = selectPromptContext(promptContextBudget)
       var prompt = $t(this._STEP_PROMPT_TEMPLATE.trim(), {
@@ -19125,6 +19188,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       })
       prompt = this._maybeInjectPlanReminder(prompt, runtime.currentStepNumber, maxSteps)
       prompt = this._injectSimplePlanStepContext(prompt)
+      prompt = this._maybeInjectRepeatedActionWarning(prompt, runtime)
       var promptBuildMs = now() - promptBuildStart
       if (promptBuildMs > 0) global.__mini_a_metrics.step_prompt_build_ms.getAdd(promptBuildMs)
 
@@ -20267,10 +20331,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         if (runtime.hasEscalated) runtime.successfulStepsSinceEscalation++
         if (isArray(batchResults)) {
           batchResults.forEach(function(res) {
-            if (isObject(res) && isObject(res.entry)) runtime.lastActions.push(`shell: ${res.entry.command}`)
+            if (isObject(res) && isObject(res.entry)) parent._noteLastAction(runtime, `shell: ${res.entry.command}`)
           })
         }
-        if (runtime.lastActions.length > 3) runtime.lastActions = runtime.lastActions.slice(-3)
         checkAndSummarizeContext()
       }
       var flushAll = () => { flushParallelShellBatch(); flushToolActions() }
@@ -20583,8 +20646,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           runtime.successfulActionDetected = true
           if (runtime.hasEscalated) runtime.successfulStepsSinceEscalation++
 
-          runtime.lastActions.push(`shell: ${commandValue}`)
-          if (runtime.lastActions.length > 3) runtime.lastActions.shift()
+          this._noteLastAction(runtime, `shell: ${commandValue}`)
 
           var goalTextLower = isString(args.goal) ? args.goal.toLowerCase() : ""
           if (commandValue.trim() === "date" && (goalTextLower.indexOf("current time") >= 0 || goalTextLower.indexOf("what time") >= 0 || goalTextLower.indexOf("time is it") >= 0)) {
