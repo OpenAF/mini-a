@@ -87,6 +87,7 @@ The fuller shape, matching the existing `mini-a.skill/v1` conventions from
 ```markdown
 ---
 type: skill
+id: skill:postgres-index-review
 schema: mini-a.skill/v1
 name: postgres-index-review
 title: PostgreSQL Index Review
@@ -97,6 +98,12 @@ intent:
   - review indexing strategy
   - optimize database
 applies_to: [postgres]
+inputs:
+  repository:
+    required: true
+capabilities: [filesystem-read]
+depends_on:
+  - skill:inspect-repository
 requires:
   tools: [shell]
   capabilities: [filesystem-read]
@@ -145,6 +152,14 @@ existing wiki graph (`mini-a-graph.js`) and its cross-wiki join machinery, so
 `kubernetes-debug-pods` linking to `kubectl-basics` or sharing a `kubernetes` tag
 with `kubernetes-dns-debug` in another mount is discoverable without any
 skill-specific graph code.
+
+`depends_on` (also accepted as `dependsOn` or `dependencies`) is the explicit,
+ordered prerequisite list for a composed skill. Entries may be a stable
+`skill:name` identifier, a `wiki:` reference, or an exact skill name. The
+`compose()` operation returns only compact metadata for a bounded, one-level
+set of these prerequisites. It never recursively expands them, reads their
+bodies, invokes tools, or grants the `requires`/`capabilities` they declare.
+Those operations remain under Mini-A's normal permissions and approval policy.
 
 ## The normalized skill model
 
@@ -231,7 +246,7 @@ ojob mcps/mcp-skills.yaml \
 ```
 
 Tools exposed, regardless of corpus size: `context`, `search`, `recommend`,
-`open`, `read`, `related`. Every result is compact metadata; only `read()`
+`open`, `read`, `related`, `compose`. Every result is compact metadata; only `read()`
 returns skill text, and only the bounded section/range asked for.
 
 A generic MCP client (Claude Code, Codex, OpenCode, agy, or any other
@@ -271,7 +286,7 @@ mini-a.sh useskillwiki=true usewiki=true wikiroot=./team-wiki goal="..."
 ```
 
 This exposes a `skillwiki` tool to the LLM (operations: `context`, `search`,
-`recommend`, `open`, `read`, `related`, `resolve`) through the same in-process
+`recommend`, `open`, `read`, `related`, `compose`, `resolve`) through the same in-process
 `MiniUtilsTool` mechanism as the existing `wiki`/`graph` tools -- no MCP loopback
 required. Consultation is bounded per agent run:
 
@@ -287,6 +302,7 @@ From the console:
 /skills open wiki:postgres-index-review.md
 /skills read wiki:postgres-index-review.md Diagnosis
 /skills related wiki:postgres-index-review.md
+/skills compose wiki:postgres-index-review.md
 /skills context
 ```
 

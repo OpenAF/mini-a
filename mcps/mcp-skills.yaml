@@ -256,6 +256,30 @@ todo:
           readOnlyHint  : true
           idempotentHint: true
 
+      compose:
+        name       : compose
+        description: "Build a bounded, metadata-only prerequisite view from a skill's explicit depends_on/dependsOn declarations. It does not read dependency bodies, recursively expand them, invoke tools, or grant capabilities; normal agent policy remains in force."
+        inputSchema:
+          type      : object
+          properties:
+            ref:
+              type       : string
+              description: Skill reference from search/recommend/open.
+            limit:
+              type       : integer
+              description: Maximum explicit prerequisites to inspect (default 4; maximum 8).
+              default    : 4
+            wiki:
+              oneOf:
+              - { type: string }
+              - { type: array, items: { type: string } }
+              description: "Optional wiki selector when resolving logical skill: dependencies."
+          required  : [ ref ]
+        annotations:
+          title         : compose
+          readOnlyHint  : true
+          idempotentHint: true
+
     ((fns    )): &MCPFNS
       context  : Skills context overview
       search   : Skills search
@@ -263,6 +287,7 @@ todo:
       open     : Skills open
       read     : Skills read
       related  : Skills related
+      compose  : Skills compose
   ((else)):
   - (stdioMCP  ): *MCPSERVER
     ((toolPrefix)): "${toolPrefix:-}"
@@ -383,3 +408,12 @@ jobs:
       limit: toNumber.isNumber.default(10)
   exec : | #js
     return __miniAMcpSkillsRelated(args)
+
+- name : Skills compose
+  check:
+    in:
+      ref  : isString
+      limit: toNumber.isNumber.default(4)
+      wiki : default(__)
+  exec : | #js
+    return __miniAMcpSkillsCompose(args)

@@ -9,7 +9,7 @@ var __MINI_A_WIKI_LEXICAL_SCHEMA_VERSION = 1
 // Bumping this forces a one-time rebuild of any cached _metaFor() shard record
 // whose stamp doesn't match, so new fields lifted out of frontmatter here start
 // showing up in list(withMeta)/search decoration without a manual reindex.
-var __MINI_A_WIKI_META_RECORD_VERSION = 2
+var __MINI_A_WIKI_META_RECORD_VERSION = 3
 var __MINI_A_WIKI_LEXICAL_LANGUAGES = [
   "arabic", "armenian", "basque", "bengali", "brazilian", "bulgarian", "catalan", "chinese", "cjk", "czech", "danish", "dutch", "english", "estonian", "finnish", "french", "galician", "german", "greek", "hindi", "hungarian", "indonesian", "irish", "italian", "latvian", "lithuanian", "norwegian", "persian", "polish", "portuguese", "romanian", "russian", "sorani", "spanish", "swedish", "tamil", "telugu", "thai", "turkish"
 ]
@@ -538,6 +538,7 @@ MiniAWikiManager.prototype._buildPageRecord = function(path, raw, parsed) {
       headings: headings,
       // ── skill-aware (additive; empty/absent on ordinary knowledge pages) ──
       schema     : isString(meta.schema) ? meta.schema : "",
+      skillId    : isString(meta.id) ? meta.id : "",
       name       : isString(meta.name) ? meta.name : "",
       intent     : isArray(intentRaw) ? clone(intentRaw) : (isString(intentRaw) ? [intentRaw] : []),
       appliesTo  : isArray(appliesToRaw) ? clone(appliesToRaw) : (isString(appliesToRaw) ? [appliesToRaw] : []),

@@ -193,6 +193,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : contextvirtualizationshadow
+    desc     : Measure a Phase 2 working-set projection without changing the Phase 1 provider context (requires historyvm=true contextvirtualization=true)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : chatyouare
     desc     : "Override the chatbot persona sentence (string or @file path, alias: chatYouAre) when running with chatbotmode=true"
     example  : "You are an enthusiastic travel concierge specialized in eco-friendly trips."
@@ -1320,6 +1325,7 @@ jobs:
         historyvmmode  : historyvmmode
         historyvmshadow: historyvmshadow
         contextvirtualization: contextvirtualization
+        contextvirtualizationshadow: contextvirtualizationshadow
         format         : format
         raw            : raw
         showthinking   : showthinking
@@ -1597,6 +1603,7 @@ jobs:
       historyvmmode  : isString.default("safe")
       historyvmshadow: toBoolean.isBoolean.default(false)
       contextvirtualization: toBoolean.isBoolean.default(false)
+      contextvirtualizationshadow: toBoolean.isBoolean.default(false)
       format         : isString.default(__)
       raw            : toBoolean.isBoolean.default(false)
       showthinking   : toBoolean.isBoolean.default(false)

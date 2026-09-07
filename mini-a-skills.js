@@ -104,7 +104,8 @@ function __miniAComputeSkillScore(queryTerms, record, context) {
 // Counters only -- never skill body contents, per the "avoid context explosion"
 // / "no body logging by default" requirements.
 var __miniASkillMetrics = {
-  searches: 0, recommends: 0, opens: 0, reads: 0, sectionsRead: 0, related: 0, charsReturned: 0
+  searches: 0, recommends: 0, opens: 0, reads: 0, sectionsRead: 0, related: 0,
+  compositions: 0, compositionDependencies: 0, charsReturned: 0
 }
 
 function __miniASkillMetricsIncr(name, n) {
@@ -152,6 +153,37 @@ function __miniASkillIsSkillMeta(meta) {
   return false
 }
 
+function __miniASkillDependencyValues(meta) {
+  var values = []
+  var seen = {}
+  var add = function(value) {
+    if (!isString(value) || value.trim().length === 0) return
+    var normalized = value.trim()
+    if (seen[normalized] === true) return
+    seen[normalized] = true
+    values.push(normalized)
+  }
+  if (!isMap(meta)) return values
+  var fields = [meta.depends_on, meta.dependsOn, meta.dependencies]
+  for (var i = 0; i < fields.length; i++) {
+    var field = fields[i]
+    if (isString(field)) add(field)
+    else if (isArray(field)) for (var j = 0; j < field.length; j++) add(field[j])
+  }
+  return values
+}
+
+function __miniASkillValidation(meta) {
+  var issues = []
+  if (!__miniASkillIsSkillMeta(meta)) issues.push("type must be skill or schema must use mini-a.skill/*")
+  if (!isString(meta && meta.name) || meta.name.trim().length === 0) issues.push("name is required")
+  if (isDef(meta && meta.id) && (!isString(meta.id) || meta.id.trim().indexOf("skill:") !== 0)) issues.push("id must use the skill:<name> form")
+  if (isDef(meta && meta.inputs) && !isMap(meta.inputs)) issues.push("inputs must be an object when provided")
+  if (isDef(meta && meta.capabilities) && !isArray(meta.capabilities)) issues.push("capabilities must be an array when provided")
+  var dependencies = __miniASkillDependencyValues(meta)
+  return { valid: issues.length === 0, issues: issues, dependsOn: dependencies }
+}
+
 function __miniASkillRef(wikiName, localPath) {
   return (wikiName && wikiName !== "primary") ? ("wiki:@" + wikiName + "/" + localPath) : ("wiki:" + localPath)
 }
@@ -163,6 +195,7 @@ function __miniASkillNormalize(wikiName, localPath, record, extra) {
   var out = {
     schema       : __MINI_A_SKILL_SCHEMA,
     name         : isString(record.name) && record.name.length > 0 ? record.name : baseName,
+    skillId      : isString(record.skillId) && record.skillId.length > 0 ? record.skillId : "",
     title        : isString(record.title) && record.title.length > 0 ? record.title : baseName,
     summary      : isString(extra.summary) && extra.summary.length > 0 ? extra.summary : (isString(record.description) ? record.description : ""),
     type         : isString(record.type) ? record.type : "",
@@ -397,10 +430,13 @@ function __miniASkillOpen(wm, ref, options, logFn) {
   var descriptor = wm.open(ref, { maxHeadings: opts.maxHeadings })
   if (!isObject(descriptor)) return { error: "not-found", ref: ref }
   var fm = isMap(descriptor.frontmatter) ? descriptor.frontmatter : {}
+  if (!__miniASkillIsSkillMeta(fm)) return { error: "not-skill", ref: ref }
   var appliesToRaw = isDef(fm.applies_to) ? fm.applies_to : fm.appliesTo
   var intentRaw = isDef(fm.intent) ? fm.intent : fm.intents
+  var validation = __miniASkillValidation(fm)
   var out = {
     ref     : descriptor.ref,
+    skillId : isString(fm.id) ? fm.id : "",
     name    : isString(fm.name) && fm.name.length > 0 ? fm.name : String(descriptor.path || "").replace(/\.md$/i, "").split("/").pop(),
     title   : descriptor.title,
     summary : descriptor.description,
@@ -412,6 +448,10 @@ function __miniASkillOpen(wm, ref, options, logFn) {
     intents : isArray(intentRaw) ? intentRaw : (isString(intentRaw) ? [intentRaw] : []),
     appliesTo: isArray(appliesToRaw) ? appliesToRaw : (isString(appliesToRaw) ? [appliesToRaw] : []),
     requires: isMap(fm.requires) ? fm.requires : {},
+    inputs  : isMap(fm.inputs) ? fm.inputs : {},
+    capabilities: isArray(fm.capabilities) ? fm.capabilities : [],
+    dependsOn: validation.dependsOn,
+    validation: validation,
     compatibility: isMap(fm.compatibility) ? fm.compatibility : {},
     risk    : isString(fm.risk) ? fm.risk : "",
     trust   : isMap(fm.trust) ? fm.trust : {},
@@ -432,6 +472,9 @@ function __miniASkillOpen(wm, ref, options, logFn) {
 // caller explicitly raises maxChars.
 function __miniASkillRead(wm, ref, options, logFn) {
   var opts = isObject(options) ? options : {}
+  var descriptor = wm.open(ref, { maxHeadings: 0 })
+  if (!isObject(descriptor)) return { error: "not-found", ref: ref }
+  if (!__miniASkillIsSkillMeta(isMap(descriptor.frontmatter) ? descriptor.frontmatter : {})) return { error: "not-skill", ref: ref }
   var readOpts = {
     section  : opts.section,
     startLine: isDef(opts.startLine) ? opts.startLine : opts.lineStart,
@@ -455,6 +498,47 @@ function __miniASkillRead(wm, ref, options, logFn) {
   return out
 }
 
+function __miniASkillResolveDependency(wm, dependency, options, logFn) {
+  var opts = isMap(options) ? options : {}
+  if (dependency.indexOf("wiki:") === 0) {
+    var direct = __miniASkillOpen(wm, dependency, opts, logFn)
+    return isMap(direct) && !isDef(direct.error) ? direct : __
+  }
+  var identifier = dependency.indexOf("skill:") === 0 ? dependency.substring(6) : dependency
+  var candidates = __miniASkillSearch(wm, { query: identifier, wiki: opts.wiki, limit: 12 }, logFn)
+  var exact = candidates.filter(function(candidate) {
+    return candidate.name === identifier || candidate.skillId === dependency || candidate.skillId === "skill:" + identifier
+  })
+  if (exact.length !== 1) return __
+  return __miniASkillOpen(wm, exact[0].ref, opts, logFn)
+}
+
+// Composition is a bounded plan over explicitly declared prerequisites. It never
+// reads bodies, recursively expands dependencies, invokes tools, or grants the
+// declared requirements/capabilities; normal Mini-A policy still governs action.
+function __miniASkillCompose(wm, ref, options, logFn) {
+  var opts = isMap(options) ? options : {}
+  var root = __miniASkillOpen(wm, ref, opts, logFn)
+  if (!isMap(root) || isDef(root.error)) return isMap(root) ? root : { error: "not-found", ref: ref }
+  var limit = isNumber(opts.limit) ? Math.max(1, Math.min(8, Math.floor(opts.limit))) : 4
+  var dependencies = root.dependsOn.slice(0, limit)
+  var resolved = []
+  var unresolved = []
+  for (var i = 0; i < dependencies.length; i++) {
+    var dependency = __miniASkillResolveDependency(wm, dependencies[i], opts, logFn)
+    if (!isMap(dependency) || isDef(dependency.error)) {
+      unresolved.push(dependencies[i])
+      continue
+    }
+    resolved.push({ ref: dependency.ref, skillId: dependency.skillId, name: dependency.name, title: dependency.title, summary: dependency.summary, tags: dependency.tags, requires: dependency.requires, capabilities: dependency.capabilities, risk: dependency.risk, validation: dependency.validation })
+  }
+  var omitted = root.dependsOn.length - dependencies.length
+  __miniASkillMetricsIncr("compositions")
+  __miniASkillMetricsIncr("compositionDependencies", resolved.length)
+  __miniASkillLog(logFn, "composed " + root.ref + " -> " + resolved.length + " prerequisite(s)")
+  return { root: root, dependencies: resolved, unresolved: unresolved, truncated: omitted > 0, omitted: Math.max(0, omitted), execution: "knowledge-only; normal Mini-A tool policy and approvals still apply" }
+}
+
 // ── WikiSkillProvider (§15) ───────────────────────────────────────────────────
 // Minimal provider abstraction so mini-a's skill discovery/resolution can later be
 // generalized across LocalSkillProvider/PluginSkillProvider/WikiSkillProvider
@@ -474,6 +558,7 @@ MiniAWikiSkillProvider.prototype.recommend = function(opts) { return __miniASkil
 MiniAWikiSkillProvider.prototype.open = function(ref, opts) { return __miniASkillOpen(this._wm, ref, opts, this._logFn) }
 MiniAWikiSkillProvider.prototype.read = function(ref, opts) { return __miniASkillRead(this._wm, ref, opts, this._logFn) }
 MiniAWikiSkillProvider.prototype.related = function(ref, opts) { return __miniASkillRelated(this._wm, ref, opts, this._logFn) }
+MiniAWikiSkillProvider.prototype.compose = function(ref, opts) { return __miniASkillCompose(this._wm, ref, opts, this._logFn) }
 
 // resolve(): normalize a selected skill into a structure compatible with mini-a's
 // existing skill rendering machinery (__miniARenderSkillTemplate expects a

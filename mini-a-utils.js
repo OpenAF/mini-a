@@ -1826,7 +1826,7 @@ MiniUtilsTool.prototype.skillwiki = function(params) {
     if (op === "recommend") return provider.recommend(params)
 
     var ref = isString(params.ref) ? params.ref : params.path
-    if ((op === "open" || op === "read" || op === "related" || op === "resolve") && (!isString(ref) || ref.length === 0)) {
+    if ((op === "open" || op === "read" || op === "related" || op === "compose" || op === "resolve") && (!isString(ref) || ref.length === 0)) {
       return "[ERROR] ref is required for operation=" + op
     }
 
@@ -1861,9 +1861,10 @@ MiniUtilsTool.prototype.skillwiki = function(params) {
     }
 
     if (op === "related") return provider.related(ref, params)
+    if (op === "compose") return provider.compose(ref, params)
     if (op === "resolve")  return provider.resolve(ref, params)
 
-    return "[ERROR] Unknown skillwiki operation: " + op + ". Use context, search, recommend, open, read, related, resolve."
+    return "[ERROR] Unknown skillwiki operation: " + op + ". Use context, search, recommend, open, read, related, compose, resolve."
   } catch (e) {
     return "[ERROR] " + __miniAErrMsg(e)
   }
@@ -4519,17 +4520,17 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     skillwiki: {
       name       : "skillwiki",
-      description: "Search, inspect and consult the virtual skill library (requires useskillwiki=true). ALWAYS start with operation='context' or 'search'/'recommend' -- these return compact metadata only (name/title/summary/tags/risk/ref), never a full skill. Use 'open' to inspect a candidate's headings/requirements/risk before 'read'-ing one bounded section at a time (section=). 'related' finds connected skills via the wiki graph. Bounded by skillsmaxloaded/skillsmaxchars per run.",
+      description: "Search, inspect and consult the virtual skill library (requires useskillwiki=true). ALWAYS start with operation='context' or 'search'/'recommend' -- these return compact metadata only (name/title/summary/tags/risk/ref), never a full skill. Use 'open' to inspect a candidate's headings/requirements/risk before 'read'-ing one bounded section at a time (section=). 'compose' returns only explicitly declared prerequisite metadata and never executes it. Bounded by skillsmaxloaded/skillsmaxchars per run.",
       inputSchema: {
         type      : "object",
         properties: {
           operation: {
             type       : "string",
             description: "Operation to perform.",
-            enum       : ["context", "search", "recommend", "open", "read", "related", "resolve", "find", "get", "view", "cat"],
+            enum       : ["context", "search", "recommend", "open", "read", "related", "compose", "resolve", "find", "get", "view", "cat"],
             default    : "search"
           },
-          ref          : { type: "string", description: "Skill reference returned by search/recommend/open/related. Required for open/read/related/resolve." },
+          ref          : { type: "string", description: "Skill reference returned by search/recommend/open/related. Required for open/read/related/compose/resolve." },
           query        : { type: "string", description: "Lexical keyword query for operation=search." },
           task         : { type: "string", description: "Natural-language task description for operation=recommend." },
           environment  : { type: "object", description: "Optional free-form environment hints for operation=recommend, e.g. {language: 'java', platform: 'kubernetes'}." },
@@ -4547,7 +4548,7 @@ MiniUtilsTool._metadataByFn = (function() {
         },
         allOf: [
           {
-            if  : { required: ["operation"], properties: { operation: { enum: ["open", "read", "get", "view", "cat", "related", "resolve"] } } },
+            if  : { required: ["operation"], properties: { operation: { enum: ["open", "read", "get", "view", "cat", "related", "compose", "resolve"] } } },
             then: { required: ["ref"] }
           },
           {

@@ -49,6 +49,11 @@ function __miniAMcpSkillsRelated(args) {
   return __miniASkillRelated(global.__wikiManager, ref, args, __miniAMcpSkillsLogFn())
 }
 
+function __miniAMcpSkillsCompose(args) {
+  var ref = isString(args.ref) ? args.ref : args.reference
+  return __miniASkillCompose(global.__wikiManager, ref, args, __miniAMcpSkillsLogFn())
+}
+
 // ── restricted / safe-mode (mcp-skills-safe.yaml) ────────────────────────────
 // Reuses MiniAMcpWikiRestriction (mini-a-mcp-wiki.js) unmodified: opaque refs,
 // per-window search/read/char budgets, per-page cooldowns, optional shared

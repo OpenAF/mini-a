@@ -46,20 +46,21 @@
       ow.test.assert(isUnDef(agent._historyVm), true, "Disabled runtime mode must not initialize VM storage")
       ow.test.assert(isUnDef(agent._createHistoryVmMcpConfig(disabledArgs)), true, "Disabled runtime mode must not register retrieval tools")
 
-      var invalidPhase2Args = { historyvm: false, historyvmshadow: false, contextvirtualization: true, conversation: conversation }
+      var invalidPhase2Args = { historyvm: false, historyvmshadow: false, contextvirtualization: true, contextvirtualizationshadow: true, conversation: conversation }
       agent._initHistoryVm(invalidPhase2Args)
-      ow.test.assert(invalidPhase2Args.contextvirtualization === false && isUnDef(agent._historyVm), true, "Phase 2 must not activate without Phase 1 History VM")
+      ow.test.assert(invalidPhase2Args.contextvirtualization === false && invalidPhase2Args.contextvirtualizationshadow === false && isUnDef(agent._historyVm), true, "Phase 2 and its shadow must not activate without Phase 1 History VM")
 
       var shadowArgs = { historyvm: false, historyvmshadow: true, historyvmmode: "safe", conversation: conversation }
       agent._initHistoryVm(shadowArgs)
       ow.test.assert(agent._historyVm.shadow === true, true, "Shadow mode should initialize canonical capture")
       ow.test.assert(isUnDef(agent._createHistoryVmMcpConfig(shadowArgs)), true, "Shadow mode must not register retrieval tools")
 
-      var enabledArgs = { historyvm: true, historyvmshadow: true, historyvmmode: "experimental", contextvirtualization: true, conversation: conversation }
+      var enabledArgs = { historyvm: true, historyvmshadow: true, historyvmmode: "experimental", contextvirtualization: true, contextvirtualizationshadow: true, conversation: conversation }
       agent._initHistoryVm(enabledArgs)
       var config = agent._createHistoryVmMcpConfig(enabledArgs)
       ow.test.assert(enabledArgs.historyvmshadow === false && enabledArgs.historyvmmode === "safe", true, "Enabled mode should take precedence and normalize the v1 policy")
       ow.test.assert(agent._historyVm.contextVirtualization === true, true, "Explicit Phase 2 mode should extend the active History VM")
+      ow.test.assert(agent._historyVm.contextVirtualizationShadow === true, true, "Explicit Phase 2 shadow should extend, not replace, active History VM")
       ow.test.assert(isMap(config) && isFunction(config.options.fns.history_search) && isFunction(config.options.fns.history_get) && isFunction(config.options.fns.history_expand), true, "Enabled mode should expose all bounded retrieval tools")
       var large = new Array(10001).join("p")
       var rawConversation = [{ role: "assistant", content: large }, { role: "assistant", content: "one" }, { role: "assistant", content: "two" }, { role: "assistant", content: "three" }, { role: "assistant", content: "four" }]
@@ -69,10 +70,42 @@
       ow.test.assert(agent._writeConversationPayload(conversation) === true, true, "Runtime conversation persistence should succeed")
       var saved = io.readFileJSON(conversation)
       ow.test.assert(saved.c[0].content === large && isMap(saved.history_vm), true, "Runtime persistence must keep a VM-disabled-compatible snapshot and VM metadata")
+      var setCalls = 0
+      agent.llm = { getGPT: function() { return {
+        getConversation: function() { return rawConversation },
+        setConversation: function() { setCalls++ }
+      } } }
+      agent._prepareHistoryVmProjection(2)
+      ow.test.assert(setCalls === 1 && agent._historyVm.diagnostics().metrics.context_virtualization_shadow_assemblies === 1, true, "Runtime shadow projection should measure Phase 2 once while the normal Phase 1 setter remains the only provider mutation")
       agent._historyVm.deleteOwnedStore()
     } finally {
       removeTree(root)
     }
+  }
+
+  exports.testContextVirtualizationShadowProjectsWithoutMutatingInput = function() {
+    withVm(function(vm) {
+      var content = new Array(4001).join("architecture evidence ")
+      vm.registerContextObject("wiki", "architecture", content, { keywords: ["architecture", "evidence"], importance: 0.9 })
+      var sourceContext = [
+        { role: "system", content: "Keep all constraints." },
+        { role: "assistant", content: content }
+      ]
+      var before = stringify(sourceContext, __, "")
+      var result = vm.projectContextShadow({
+        consumer: "executor",
+        actualContext: sourceContext,
+        goal: "architecture evidence",
+        budget: 400,
+        outputReserve: 0,
+        includeRecent: false
+      })
+      var diagnostics = vm.diagnostics()
+      ow.test.assert(result.active === true && result.actualTokens > result.projectedTokens && result.expectedSavings === result.actualTokens - result.projectedTokens, true, "Phase 2 shadow should report a bounded projected working set")
+      ow.test.assert(stringify(sourceContext, __, "") === before, true, "Phase 2 shadow must not mutate the provider context it measures")
+      ow.test.assert(result.objectDifferences > 0 && diagnostics.contextVirtualizationShadowLast.expectedSavings === result.expectedSavings, true, "Shadow diagnostics should retain only projection measurements")
+      ow.test.assert(diagnostics.metrics.context_virtualization_shadow_assemblies === 1 && diagnostics.metrics.context_virtualization_shadow_actual_tokens === result.actualTokens, true, "Shadow metrics should distinguish actual and projected token estimates")
+    }, { contextVirtualization: true, contextVirtualizationShadow: true })
   }
 
   exports.testAppendResumeAndDistinctEqualEvents = function() {
@@ -230,6 +263,77 @@
     }, { contextVirtualization: true })
   }
 
+  exports.testConsumerSpecificContextViews = function() {
+    withVm(function(vm) {
+      var historyIds = []
+      for (var i = 0; i < 30; i++) {
+        vm.registerContextObject("history", "tool_exchange", "task history " + i + " " + new Array(101).join("h"))
+        historyIds.push(vm.objects[vm.objects.length - 1].handle)
+      }
+      var delegated = vm.assembleContext({ consumer: "delegate", candidateIds: historyIds, budget: 5000, outputReserve: 0, includeRecent: false })
+      var executed = vm.assembleContext({ consumer: "executor", candidateIds: historyIds, budget: 5000, outputReserve: 0, includeRecent: false })
+      ow.test.assert(delegated.objectsSelected === 25 && executed.objectsSelected === 30, true, "Delegated views should project a smaller task-specific working set than executor views")
+      ow.test.assert(delegated.objects.every(function(item) { return ["L0", "L1", "L2"].indexOf(item.level) >= 0 }), true, "Delegated history should remain bounded to summary detail even under a generous budget")
+      ow.test.assert(executed.objects.some(function(item) { return item.level === "L4" }), true, "Executor views should be able to materialize exact task history when budget permits")
+
+      vm.registerContextObject("artifact", "source", "shared planning input " + new Array(801).join("a"), { importance: 1 })
+      var artifact = vm.objects[vm.objects.length - 1]
+      vm.registerContextObject("decision", "architecture", "shared planning input " + new Array(801).join("d"), { importance: 1 })
+      var decision = vm.objects[vm.objects.length - 1]
+      var planned = vm.assembleContext({ consumer: "planner", candidateIds: [artifact.handle, decision.handle], budget: 5000, outputReserve: 0, includeRecent: false })
+      var plannedArtifact = planned.objects.filter(function(item) { return item.handle === artifact.handle })[0]
+      var plannedDecision = planned.objects.filter(function(item) { return item.handle === decision.handle })[0]
+      ow.test.assert(plannedArtifact.level === "L2" && plannedDecision.level === "L4", true, "Planner views should retain decision detail while bounding implementation artifacts")
+      ow.test.assert(planned.consumerPolicy.categoryWeights.plan > planned.consumerPolicy.categoryWeights.artifacts, true, "Consumer diagnostics should expose the applied category allocation policy")
+
+      var consumers = ["advisor", "validator", "summarizer", "dreamer"]
+      for (var c = 0; c < consumers.length; c++) {
+        var view = vm.assembleContext({ consumer: consumers[c], candidateIds: [], budget: 100, outputReserve: 10, includeRecent: false })
+        ow.test.assert(view.consumer === consumers[c] && vm.metrics["consumer_views_" + consumers[c]] === 1, true, "Each supported consumer should use and measure its own context policy")
+      }
+      var fallback = vm.assembleContext({ consumer: "unknown-consumer", candidateIds: [], budget: 100, outputReserve: 10, includeRecent: false })
+      ow.test.assert(fallback.consumer === "executor" && vm.metrics.consumer_policy_fallbacks === 1, true, "Unknown consumers should fail safely to the executor policy and remain observable")
+    }, { contextVirtualization: true })
+  }
+
+  exports.testContextDeltasAndStablePrefixReuse = function() {
+    withVm(function(vm) {
+      vm.registerContextObject("constraint", "user_requirement", "retain this exact requirement")
+      var constraint = vm.objects[vm.objects.length - 1]
+      vm.registerContextObject("wiki", "architecture", "virtual context design " + new Array(801).join("w"))
+      var wiki = vm.objects[vm.objects.length - 1]
+      var first = vm.assembleContext({ consumer: "executor", candidateIds: [wiki.handle], budget: 5000, outputReserve: 0, includeRecent: false })
+      var firstSerialized = vm.serializeContext(first)
+      var second = vm.assembleContext({ consumer: "executor", candidateIds: [wiki.handle], budget: 5000, outputReserve: 0, includeRecent: false })
+      var secondSerialized = vm.serializeContext(second)
+      ow.test.assert(first.delta.added.length === 2 && first.stablePrefixTokens > 0, true, "The first working-set assembly should report added mandatory and dynamic objects")
+      ow.test.assert(second.delta.unchanged.length === 2 && second.delta.added.length === 0, true, "Repeated assembly should identify an unchanged working set")
+      ow.test.assert(firstSerialized.cacheHit === false && secondSerialized.cacheHit === true, true, "Stable prefix serialization should be locally reused without provider delta assumptions")
+      ow.test.assert(firstSerialized.stablePrefix.indexOf(constraint.handle) >= 0 && firstSerialized.dynamicWorkingSet.indexOf(wiki.handle) >= 0, true, "Mandatory knowledge should form a stable prefix and task material should remain dynamic")
+
+      var removed = vm.assembleContext({ consumer: "executor", candidateIds: [], budget: 5000, outputReserve: 0, includeRecent: false })
+      ow.test.assert(removed.delta.removed.indexOf(wiki.handle) >= 0 && removed.delta.unchanged.indexOf(constraint.handle) >= 0, true, "Working-set deltas should distinguish removed dynamic context from retained stable context")
+    }, { contextVirtualization: true })
+
+    withVm(function(vm) {
+      vm.registerContextObject("wiki", "architecture", "representation pressure " + new Array(1601).join("x"))
+      var wiki = vm.objects[vm.objects.length - 1]
+      var low = vm.assembleContext({ candidateIds: [wiki.handle], budget: 20, outputReserve: 0, includeRecent: false })
+      var high = vm.assembleContext({ candidateIds: [wiki.handle], budget: 2000, outputReserve: 0, includeRecent: false })
+      var lowAgain = vm.assembleContext({ candidateIds: [wiki.handle], budget: 20, outputReserve: 0, includeRecent: false })
+      ow.test.assert(high.delta.promoted.indexOf(wiki.handle) >= 0 && lowAgain.delta.demoted.indexOf(wiki.handle) >= 0, true, "Delta tracking should classify representation promotions and demotions")
+    }, { contextVirtualization: true })
+
+    withVm(function(vm) {
+      vm.registerContextObject("summary", "project", "project hierarchy", {})
+      var parent = vm.objects[vm.objects.length - 1]
+      vm.assembleContext({ candidateIds: [parent.handle], budget: 200, outputReserve: 0, includeRecent: false, levelCeilings: { summary: "L1" } })
+      vm.registerContextObject("wiki", "section", "child section", { parentId: parent.handle })
+      var updated = vm.assembleContext({ candidateIds: [parent.handle], budget: 200, outputReserve: 0, includeRecent: false, levelCeilings: { summary: "L1" } })
+      ow.test.assert(updated.delta.modified.indexOf(parent.handle) >= 0, true, "Delta tracking should detect hierarchy-driven representation changes")
+    }, { contextVirtualization: true })
+  }
+
   exports.testDependencyPrefetchAndHardConstraintOverflow = function() {
     withVm(function(vm) {
       vm.registerContextObject("evidence", "conversation", "supporting evidence")
@@ -247,6 +351,67 @@
       var required = overflow.objects.filter(function(item) { return item.handle === constraint.handle })[0]
       ow.test.assert(overflow.overflow === true && isMap(required) && required.level === "L4", true, "Exact hard constraints should report an unsatisfied budget instead of being silently dropped")
       ow.test.assert(overflow.materializedTokens > overflow.budget.materialization && vm.metrics.budget_overflows === 1, true, "Protected-set overflow should remain visible in diagnostics")
+    }, { contextVirtualization: true })
+  }
+
+  exports.testTypedGraphTraversalAndHeatPropagation = function() {
+    withVm(function(vm) {
+      vm.registerContextObject("evidence", "test_result", "validation evidence", { provenance: { source: "test" } })
+      var evidence = vm.objects[vm.objects.length - 1]
+      vm.registerContextObject("decision", "architecture", "selected design", {
+        edges: [
+          { type: "derived_from", target: evidence.handle, confidence: 0.8, provenance: { event: "review" } },
+          { type: "not_allowed", target: evidence.handle }
+        ]
+      })
+      var decision = vm.objects[vm.objects.length - 1]
+      var related = vm.getRelated(decision.handle, { direction: "outgoing", edgeTypes: ["derived_from"], maxDepth: 1 })
+      ow.test.assert(related.results.length === 1 && related.results[0].handle === evidence.handle, true, "Typed graph traversal should resolve only requested edge types")
+      ow.test.assert(related.results[0].via.confidence === 0.8 && related.results[0].via.provenance.event === "review" && related.results[0].provenance.source === "test", true, "Graph results should retain edge and object provenance")
+      ow.test.assert(decision.edges.length === 1 && vm.metrics.graph_edges === 1, true, "Unknown graph edge types should be ignored deterministically")
+
+      var heatBefore = evidence.heat
+      vm.getRepresentation(decision.handle, "L1")
+      ow.test.assert(evidence.heat > heatBefore && vm.metrics.heat_propagations > 0, true, "Consumer access should propagate bounded decaying heat to graph neighbors")
+      ow.test.assert(vm.metrics.graph_retrievals === 1 && vm.metrics.graph_nodes_visited === 2, true, "Graph traversal cost should be measurable")
+    }, { contextVirtualization: true })
+  }
+
+  exports.testSupersessionSuppressesStaleContext = function() {
+    withVm(function(vm, conversation) {
+      vm.registerContextObject("decision", "architecture", "uniqueoldchoice architecture A")
+      var oldDecision = vm.objects[vm.objects.length - 1]
+      vm.registerContextObject("decision", "architecture", "architecture B is current", { supersedes: [oldDecision.handle] })
+      var currentDecision = vm.objects[vm.objects.length - 1]
+      ow.test.assert(oldDecision.obsolete === true && oldDecision.supersededBy === currentDecision.handle, true, "A supersedes edge should mark the older object obsolete without deleting it")
+
+      var search = vm.contextSearch("uniqueoldchoice", 5)
+      ow.test.assert(search.results.length === 1 && search.results[0].handle === currentDecision.handle, true, "Default context search should redirect stale matches to their current replacement")
+      var historical = vm.contextSearch("uniqueoldchoice", 5, 0, { includeObsolete: true })
+      ow.test.assert(historical.results[0].handle === oldDecision.handle && historical.results[0].obsolete !== false, true, "Historical reasoning should be able to request obsolete objects explicitly")
+      var assembled = vm.assembleContext({ goal: "uniqueoldchoice", budget: 100, outputReserve: 10, includeRecent: false })
+      ow.test.assert(assembled.objects[0].handle === currentDecision.handle, true, "Adaptive assembly should suppress superseded information by default")
+      var currentGraph = vm.getRelated(currentDecision.handle, { direction: "outgoing", edgeTypes: ["supersedes"], maxDepth: 1 })
+      ow.test.assert(currentGraph.results.length === 0, true, "Graph traversal should suppress obsolete nodes unless historical retrieval is explicit")
+
+      var resumed = new MiniAHistoryVM({ enabled: true, contextVirtualization: true, conversationPath: conversation, conversationId: "test-conversation" })
+      var resumedOld = resumed._resolveObject(oldDecision.handle)
+      ow.test.assert(resumedOld.obsolete === true && resumedOld.supersededBy === currentDecision.handle, true, "Supersession state should rebuild from canonical graph edges")
+      var graph = resumed.getRelated(currentDecision.handle, { direction: "outgoing", edgeTypes: ["supersedes"], includeObsolete: true, maxDepth: 1 })
+      ow.test.assert(graph.results.length === 1 && graph.results[0].handle === oldDecision.handle, true, "Supersession provenance should remain traversable after restart")
+    }, { contextVirtualization: true })
+  }
+
+  exports.testSupersessionDoesNotCrossBranches = function() {
+    withVm(function(vm) {
+      vm.registerContextObject("decision", "architecture", "decision on the original branch")
+      var original = vm.objects[vm.objects.length - 1]
+      vm.rewind(0)
+      vm.registerContextObject("decision", "architecture", "decision on the active branch", { supersedes: [original.handle] })
+      var active = vm.objects[vm.objects.length - 1]
+      ow.test.assert(original.branchId !== active.branchId, true, "The regression fixture should create decisions on separate branches")
+      ow.test.assert(original.obsolete === false && isUnDef(original.supersededBy), true, "Supersession must not mutate historical state across branch boundaries")
+      ow.test.assert(isUnDef(vm.supersededBy[original.handle]), true, "Cross-branch supersession must not enter the active replacement map")
     }, { contextVirtualization: true })
   }
 

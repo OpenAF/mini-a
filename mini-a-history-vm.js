@@ -8,10 +8,11 @@ var MiniAHistoryVM = function(options) {
   this.normalizerVersion = 1
   this.policyVersion = 1
   this.contextSchemaVersion = 2
-  this.representationVersion = 1
+  this.representationVersion = 2
   this.enabled = opts.enabled === true
   this.shadow = opts.shadow === true
   this.contextVirtualization = opts.contextVirtualization === true && this.enabled
+  this.contextVirtualizationShadow = opts.contextVirtualizationShadow === true && this.contextVirtualization
   this.mode = "safe"
   this.conversationPath = isString(opts.conversationPath) ? opts.conversationPath.trim() : ""
   this.conversationId = isString(opts.conversationId) && opts.conversationId.length > 0 ? opts.conversationId : sha256(this.conversationPath || String(nowNano())).substring(0, 24)
@@ -35,6 +36,11 @@ var MiniAHistoryVM = function(options) {
   this.representationCache = {}
   this.contextIndexes = { L0: {}, L1: {}, L2: {}, L3: {}, L4: {} }
   this.objectIndexTerms = {}
+  this.contextGraph = { outgoing: {}, incoming: {} }
+  this.supersededBy = {}
+  this.contextWorkingSets = {}
+  this.contextPrefixCache = {}
+  this.contextVirtualizationShadowLast = __
   this._pendingChildren = {}
   this.expansions = {}
   this._seq = 0
@@ -86,7 +92,36 @@ var MiniAHistoryVM = function(options) {
     effective_context_ratio: 0,
     context_budget_utilization: 0,
     dependency_prefetches: 0,
-    budget_overflows: 0
+    budget_overflows: 0,
+    graph_edges: 0,
+    graph_retrievals: 0,
+    graph_nodes_visited: 0,
+    superseded_objects: 0,
+    stale_suppressed: 0,
+    heat_propagations: 0,
+    consumer_views_executor: 0,
+    consumer_views_planner: 0,
+    consumer_views_advisor: 0,
+    consumer_views_validator: 0,
+    consumer_views_delegate: 0,
+    consumer_views_summarizer: 0,
+    consumer_views_dreamer: 0,
+    consumer_policy_fallbacks: 0,
+    context_deltas: 0,
+    context_delta_added: 0,
+    context_delta_removed: 0,
+    context_delta_promoted: 0,
+    context_delta_demoted: 0,
+    context_delta_modified: 0,
+    context_delta_unchanged: 0,
+    context_serialization_cache_hits: 0,
+    context_serialization_cache_misses: 0,
+    stable_prefix_tokens: 0,
+    context_virtualization_shadow_assemblies: 0,
+    context_virtualization_shadow_actual_tokens: 0,
+    context_virtualization_shadow_projected_tokens: 0,
+    context_virtualization_shadow_expected_savings: 0,
+    context_virtualization_shadow_object_differences: 0
   }
 
   if (this.enabled || this.shadow) this._open()
@@ -354,6 +389,7 @@ MiniAHistoryVM.prototype._indexEvent = function(event) {
     children: isArray(meta.children) ? meta.children.slice(0) : [],
     dependencies: isArray(meta.dependencies) ? meta.dependencies.slice(0) : (isArray(meta.dependencyRefs) ? meta.dependencyRefs.slice(0) : []),
     related: isArray(meta.related) ? meta.related.slice(0) : [],
+    edges: this._normalizeContextEdges(meta),
     keywords: isArray(meta.keywords) ? meta.keywords.slice(0) : [],
     entities: isArray(meta.entities) ? meta.entities.slice(0) : [],
     sourceRefs: [event.eventId],
@@ -388,6 +424,8 @@ MiniAHistoryVM.prototype._indexEvent = function(event) {
     lastAccess: __,
     provenance: isMap(meta.provenance) ? merge({}, meta.provenance, true) : { eventId: event.eventId, sourceHash: event.eventHash },
     version: isNumber(meta.version) ? meta.version : 1,
+    obsolete: false,
+    supersededBy: __,
     content: event.content,
     event: event
   }
@@ -396,6 +434,7 @@ MiniAHistoryVM.prototype._indexEvent = function(event) {
   this.objectByHandle[object.handle] = object
   if (this.contextVirtualization) this._linkHierarchyObject(object)
   if (this.contextVirtualization) this._indexContextObject(object, serialized)
+  if (this.contextVirtualization) this._indexGraphObject(object)
   if (event.branchId === this.branchId && event.sourceKind === "provider_message" && isMap(event.metadata) && isNumber(event.metadata.providerIndex)) {
     this._providerCaptureCount = Math.max(this._providerCaptureCount, event.metadata.providerIndex + 1)
   }
@@ -411,11 +450,17 @@ MiniAHistoryVM.prototype._rebuildObjects = function() {
   this.objectByHandle = {}
   this.contextIndexes = { L0: {}, L1: {}, L2: {}, L3: {}, L4: {} }
   this.objectIndexTerms = {}
+  this.contextGraph = { outgoing: {}, incoming: {} }
+  this.supersededBy = {}
+  this.contextWorkingSets = {}
+  this.contextPrefixCache = {}
   this._pendingChildren = {}
   this._providerCaptureCount = 0
   this.metrics.estimated_original_tokens = 0
   this.metrics.hierarchy_roots = 0
   this.metrics.hierarchy_links = 0
+  this.metrics.graph_edges = 0
+  this.metrics.superseded_objects = 0
   for (var i = 0; i < this.events.length; i++) this._indexEvent(this.events[i])
 }
 
@@ -423,12 +468,195 @@ MiniAHistoryVM.prototype._resolveObject = function(id) {
   return this.objectById[id] || this.objectByHandle[id]
 }
 
-MiniAHistoryVM.prototype._addChild = function(parent, childHandle) {
-  if (!isMap(parent) || !isString(childHandle) || parent.children.indexOf(childHandle) >= 0) return false
-  parent.children.push(childHandle)
-  this.metrics.hierarchy_links++
-  this._indexContextObject(parent, __, ["L1", "L2"])
+MiniAHistoryVM.prototype._normalizeContextEdges = function(metadata) {
+  var meta = isMap(metadata) ? metadata : {}
+  var allowed = ["depends_on", "derived_from", "supports", "contradicts", "supersedes", "produced", "references", "resolved_by", "parent_of", "related_to"]
+  var edges = []
+  var seen = {}
+  var add = function(type, target, details) {
+    var normalizedType = isString(type) ? type.toLowerCase().trim() : ""
+    if (allowed.indexOf(normalizedType) < 0 || !isString(target) || target.trim().length === 0) return
+    var normalizedTarget = target.trim()
+    var key = normalizedType + "|" + normalizedTarget
+    if (seen[key]) return
+    seen[key] = true
+    edges.push({
+      type: normalizedType,
+      target: normalizedTarget,
+      confidence: isMap(details) && isNumber(details.confidence) ? Math.max(0, Math.min(1, details.confidence)) : 1,
+      provenance: isMap(details) && isMap(details.provenance) ? merge({}, details.provenance, true) : __
+    })
+  }
+  if (isArray(meta.edges)) for (var e = 0; e < meta.edges.length; e++) if (isMap(meta.edges[e])) add(meta.edges[e].type, meta.edges[e].target, meta.edges[e])
+  var mappings = [
+    { keys: ["dependencies", "dependencyRefs"], type: "depends_on" },
+    { keys: ["related"], type: "related_to" },
+    { keys: ["derivedFrom", "derived_from"], type: "derived_from" },
+    { keys: ["supports"], type: "supports" },
+    { keys: ["contradicts"], type: "contradicts" },
+    { keys: ["supersedes"], type: "supersedes" },
+    { keys: ["produced"], type: "produced" },
+    { keys: ["references"], type: "references" },
+    { keys: ["resolvedBy", "resolved_by"], type: "resolved_by" }
+  ]
+  for (var m = 0; m < mappings.length; m++) for (var k = 0; k < mappings[m].keys.length; k++) {
+    var refs = meta[mappings[m].keys[k]]
+    if (isString(refs)) refs = [refs]
+    if (isArray(refs)) for (var r = 0; r < refs.length; r++) add(mappings[m].type, refs[r])
+  }
+  return edges
+}
+
+MiniAHistoryVM.prototype._addGraphEdge = function(source, edge) {
+  if (!isMap(source) || !isMap(edge) || !isString(edge.target)) return false
+  var targetObject = this._resolveObject(edge.target)
+  var target = isMap(targetObject) ? targetObject.handle : edge.target
+  var normalized = { type: edge.type, source: source.handle, target: target, confidence: edge.confidence, provenance: edge.provenance }
+  if (!isArray(this.contextGraph.outgoing[source.handle])) this.contextGraph.outgoing[source.handle] = []
+  var outgoing = this.contextGraph.outgoing[source.handle]
+  for (var i = 0; i < outgoing.length; i++) if (outgoing[i].type === normalized.type && outgoing[i].target === normalized.target) return false
+  outgoing.push(normalized)
+  if (!isArray(this.contextGraph.incoming[target])) this.contextGraph.incoming[target] = []
+  this.contextGraph.incoming[target].push(normalized)
+  this.metrics.graph_edges++
+  if (normalized.type === "supersedes" && (!isMap(targetObject) || targetObject.branchId === source.branchId)) {
+    this.supersededBy[target] = source.handle
+    if (isMap(targetObject) && !targetObject.obsolete) {
+      targetObject.obsolete = true
+      targetObject.supersededBy = source.handle
+      this.metrics.superseded_objects++
+    }
+  }
   return true
+}
+
+MiniAHistoryVM.prototype._indexGraphObject = function(object) {
+  if (!this.contextVirtualization || !isMap(object)) return
+  var replacement = this.supersededBy[object.handle] || this.supersededBy[object.id]
+  var replacementObject = this._resolveObject(replacement)
+  if (isString(replacement) && isMap(replacementObject) && replacementObject.branchId === object.branchId && !object.obsolete) {
+    object.obsolete = true
+    object.supersededBy = replacement
+    this.metrics.superseded_objects++
+  }
+  for (var i = 0; i < object.edges.length; i++) this._addGraphEdge(object, object.edges[i])
+}
+
+MiniAHistoryVM.prototype._graphEdgesForObject = function(object, direction, edgeTypes) {
+  var edges = []
+  var seen = {}
+  var accept = function(edge) {
+    if (!isMap(edge) || isArray(edgeTypes) && edgeTypes.length > 0 && edgeTypes.indexOf(edge.type) < 0) return
+    var key = edge.type + "|" + edge.source + "|" + edge.target
+    if (!seen[key]) { seen[key] = true; edges.push(edge) }
+  }
+  if (direction !== "incoming") {
+    var outgoing = this.contextGraph.outgoing[object.handle]
+    if (isArray(outgoing)) for (var o = 0; o < outgoing.length; o++) accept(outgoing[o])
+  }
+  if (direction !== "outgoing") {
+    var aliases = [object.handle, object.id]
+    for (var a = 0; a < aliases.length; a++) {
+      var incoming = this.contextGraph.incoming[aliases[a]]
+      if (isArray(incoming)) for (var i = 0; i < incoming.length; i++) accept(incoming[i])
+    }
+  }
+  return edges
+}
+
+MiniAHistoryVM.prototype.getRelated = function(id, options) {
+  if (!this.contextVirtualization) return { error: "Context virtualization is not enabled." }
+  var start = this._resolveObject(id)
+  if (!isMap(start) || start.branchId !== this.branchId) return { error: "Context object not found in the active conversation branch." }
+  var opts = isMap(options) ? options : {}
+  var direction = opts.direction === "incoming" || opts.direction === "outgoing" ? opts.direction : "both"
+  var edgeTypes = isArray(opts.edgeTypes) ? opts.edgeTypes.map(function(type) { return String(type).toLowerCase() }) : []
+  var maxDepth = isNumber(opts.maxDepth) ? Math.max(1, Math.min(4, Math.floor(opts.maxDepth))) : 2
+  var limit = isNumber(opts.limit) ? Math.max(1, Math.min(50, Math.floor(opts.limit))) : 20
+  var includeObsolete = opts.includeObsolete === true
+  var queue = [{ object: start, depth: 0, path: [start.handle] }]
+  var seen = {}
+  seen[start.handle] = true
+  var results = []
+  while (queue.length > 0 && results.length < limit) {
+    var current = queue.shift()
+    if (current.depth >= maxDepth) continue
+    var edges = this._graphEdgesForObject(current.object, direction, edgeTypes)
+    for (var e = 0; e < edges.length && results.length < limit; e++) {
+      var neighborRef = edges[e].source === current.object.handle ? edges[e].target : edges[e].source
+      var neighbor = this._resolveObject(neighborRef)
+      if (!isMap(neighbor) || neighbor.branchId !== this.branchId || seen[neighbor.handle]) continue
+      seen[neighbor.handle] = true
+      var path = current.path.concat([neighbor.handle])
+      if (!neighbor.obsolete || includeObsolete) {
+        results.push({
+          id: neighbor.id,
+          handle: neighbor.handle,
+          kind: neighbor.kind,
+          type: neighbor.type,
+          summary: neighbor.summary,
+          obsolete: neighbor.obsolete,
+          supersededBy: neighbor.supersededBy,
+          depth: current.depth + 1,
+          via: { type: edges[e].type, source: edges[e].source, target: edges[e].target, confidence: edges[e].confidence, provenance: edges[e].provenance },
+          path: path,
+          provenance: neighbor.provenance
+        })
+        queue.push({ object: neighbor, depth: current.depth + 1, path: path })
+      } else {
+        this.metrics.stale_suppressed++
+      }
+    }
+  }
+  this.metrics.graph_retrievals++
+  this.metrics.graph_nodes_visited += Object.keys(seen).length
+  this._touchObject(start, 0.5, 1)
+  return { id: start.id, handle: start.handle, direction: direction, edgeTypes: edgeTypes, results: results, truncated: queue.length > 0 }
+}
+
+MiniAHistoryVM.prototype._touchObject = function(object, amount, maxDepth) {
+  if (!isMap(object)) return
+  var base = isNumber(amount) ? Math.max(0, amount) : 1
+  var depthLimit = isNumber(maxDepth) ? Math.max(0, Math.min(2, Math.floor(maxDepth))) : 2
+  object.heat = Math.min(100, object.heat + base)
+  object.lastAccess = new Date().toISOString()
+  object.accessCount++
+  if (!this.contextVirtualization || depthLimit === 0 || base === 0) return
+  var queue = [{ object: object, depth: 0, heat: base }]
+  var seen = {}
+  seen[object.handle] = true
+  while (queue.length > 0) {
+    var current = queue.shift()
+    if (current.depth >= depthLimit) continue
+    var edges = this._graphEdgesForObject(current.object, "both", [])
+    for (var i = 0; i < edges.length; i++) {
+      var neighborRef = edges[i].source === current.object.handle ? edges[i].target : edges[i].source
+      var neighbor = this._resolveObject(neighborRef)
+      if (!isMap(neighbor) || neighbor.branchId !== this.branchId || neighbor.obsolete || seen[neighbor.handle]) continue
+      seen[neighbor.handle] = true
+      var propagated = current.heat * 0.5 * (isNumber(edges[i].confidence) ? edges[i].confidence : 1)
+      if (propagated <= 0) continue
+      neighbor.heat = Math.min(100, neighbor.heat + propagated)
+      this.metrics.heat_propagations++
+      queue.push({ object: neighbor, depth: current.depth + 1, heat: propagated })
+    }
+  }
+}
+
+MiniAHistoryVM.prototype._addChild = function(parent, childHandle) {
+  if (!isMap(parent) || !isString(childHandle)) return false
+  var added = parent.children.indexOf(childHandle) < 0
+  if (added) {
+    parent.children.push(childHandle)
+    this.metrics.hierarchy_links++
+  }
+  var parentEdge = { type: "parent_of", target: childHandle, confidence: 1, provenance: __ }
+  var hasParentEdge = false
+  for (var i = 0; i < parent.edges.length; i++) if (parent.edges[i].type === "parent_of" && parent.edges[i].target === childHandle) { hasParentEdge = true; break }
+  if (!hasParentEdge) parent.edges.push(parentEdge)
+  this._addGraphEdge(parent, parentEdge)
+  if (added || !hasParentEdge) this._indexContextObject(parent, __, ["L1", "L2"])
+  return added
 }
 
 MiniAHistoryVM.prototype._linkHierarchyObject = function(object) {
@@ -541,6 +769,7 @@ MiniAHistoryVM.prototype._buildRepresentation = function(object, level) {
       text += " Children: " + childHandles.join(", ")
       if (object.children.length > childHandles.length) text += " (and " + (object.children.length - childHandles.length) + " more)"
     }
+    if (object.edges.length > 0) text += " Links: " + object.edges.length
   }
   if (level === "L2") {
     text = object.summary
@@ -552,11 +781,17 @@ MiniAHistoryVM.prototype._buildRepresentation = function(object, level) {
       }
       if (childLines.length > 0) text += "\nChildren:\n" + childLines.join("\n")
       if (object.children.length > childLines.length) text += "\n- ... " + (object.children.length - childLines.length) + " more children"
-      var summaryChars = this._contentCodePoints(text)
-      if (summaryChars.length > 1200) {
-        text = summaryChars.slice(0, 1200).join("") + "\n[" + object.handle + " child summary truncated]"
-        complete = false
-      }
+    }
+    if (object.edges.length > 0) {
+      var edgeLines = []
+      for (var e = 0; e < object.edges.length && e < 8; e++) edgeLines.push("- " + object.edges[e].type + " -> " + object.edges[e].target)
+      text += "\nRelations:\n" + edgeLines.join("\n")
+      if (object.edges.length > edgeLines.length) text += "\n- ... " + (object.edges.length - edgeLines.length) + " more relations"
+    }
+    var summaryChars = this._contentCodePoints(text)
+    if (summaryChars.length > 1200) {
+      text = summaryChars.slice(0, 1200).join("") + "\n[" + object.handle + " summary truncated]"
+      complete = false
     }
   }
   if (level === "L3") {
@@ -586,8 +821,7 @@ MiniAHistoryVM.prototype.getRepresentation = function(id, level) {
   if (!isMap(object) || object.branchId !== this.branchId) return { error: "Context object not found in the active conversation branch." }
   var normalized = this._representationLevel(level)
   this.metrics["representation_" + normalized.toLowerCase()]++
-  object.lastAccess = new Date().toISOString()
-  object.accessCount++
+  this._touchObject(object, 1, 2)
   if (normalized === "L4") return { id: object.id, handle: object.handle, level: normalized, content: object.content, estimatedTokens: object.estimatedOriginalTokens, exact: true, canonicalRef: object.canonicalRef }
   var key = this._representationCacheKey(object, normalized)
   var representation = this.representationCache[key]
@@ -707,6 +941,18 @@ MiniAHistoryVM.prototype.contextSearch = function(query, limit, cursor, options)
   var handles = Object.keys(indexed.scores).sort(function(a, b) { return indexed.scores[b] - indexed.scores[a] || a.localeCompare(b) })
   for (var h = 0; h < handles.length && h < 50; h++) {
     var candidate = this._resolveObject(handles[h])
+    if (isMap(candidate) && candidate.obsolete && opts.includeObsolete !== true) {
+      var staleHandle = candidate.handle
+      var redirects = 0
+      while (isMap(candidate) && candidate.obsolete && redirects++ < 8) {
+        candidate = this._resolveObject(candidate.supersededBy)
+        this.metrics.stale_suppressed++
+      }
+      if (isMap(candidate) && candidate.handle !== staleHandle) {
+        indexed.scores[candidate.handle] = Math.max(indexed.scores[candidate.handle] || 0, indexed.scores[staleHandle] || 0)
+        indexed.matchedLevels[candidate.handle] = indexed.matchedLevels[staleHandle] || "supersession"
+      }
+    }
     if (isMap(candidate) && candidate.branchId === this.branchId) this._collectDescendants(candidate, maxDepth, pool, depths)
   }
 
@@ -715,6 +961,10 @@ MiniAHistoryVM.prototype.contextSearch = function(query, limit, cursor, options)
   var candidateTokens = 0
   for (var p = 0; p < poolHandles.length; p++) {
     var object = pool[poolHandles[p]]
+    if (object.obsolete && opts.includeObsolete !== true) {
+      this.metrics.stale_suppressed++
+      continue
+    }
     candidateTokens += object.estimatedOriginalTokens
     var serialized = isString(object.content) ? object.content : stringify(object.content, __, "")
     var lower = serialized.toLowerCase()
@@ -732,6 +982,7 @@ MiniAHistoryVM.prototype.contextSearch = function(query, limit, cursor, options)
   this.metrics.context_objects_selected += selected.length
   this.metrics.context_candidate_tokens += candidateTokens
   for (var d = 0; d < selected.length; d++) this.metrics.hierarchy_depth_total += selected[d].depth
+  for (var touch = 0; touch < selected.length; touch++) this._touchObject(selected[touch].object, 0.1, 1)
   var results = selected.map(function(item) {
     return {
       id: item.object.id,
@@ -739,6 +990,8 @@ MiniAHistoryVM.prototype.contextSearch = function(query, limit, cursor, options)
       kind: item.object.kind,
       type: item.object.type,
       summary: item.object.summary,
+      obsolete: item.object.obsolete,
+      supersededBy: item.object.supersededBy,
       path: this._contextPath(item.object),
       matchedLevel: item.matchedLevel,
       exactMatch: item.exactMatch,
@@ -764,8 +1017,7 @@ MiniAHistoryVM.prototype._boundedTextResult = function(object, mode, text, metad
   }, isMap(metadata) ? metadata : {}, true)
   this.metrics.context_expansions++
   this.metrics.context_expansion_tokens += result.estimatedTokens
-  object.accessCount++
-  object.lastAccess = new Date().toISOString()
+  this._touchObject(object, 1, 2)
   return result
 }
 
@@ -847,6 +1099,75 @@ MiniAHistoryVM.prototype._contextCategory = function(object) {
   return "other"
 }
 
+MiniAHistoryVM.prototype._contextConsumerPolicy = function(consumer) {
+  var name = isString(consumer) ? consumer.toLowerCase().trim() : "executor"
+  var profiles = {
+    executor: {
+      categoryWeights: { constraints: 5, plan: 3, memory: 2, history: 4, knowledge: 2, skills: 1, artifacts: 4, other: 1 },
+      kindUtility: { constraint: 1.4, plan: 1.2, recovery: 1.35, artifact: 1.35, attachment: 1.25, history: 1.15 },
+      recentLimit: 6,
+      maxObjects: 50,
+      candidateLimit: 100,
+      levelCeilings: {}
+    },
+    planner: {
+      categoryWeights: { constraints: 5, plan: 6, memory: 3, history: 2, knowledge: 4, skills: 2, artifacts: 1, other: 1 },
+      kindUtility: { constraint: 1.4, plan: 1.5, decision: 1.55, memory: 1.2, wiki: 1.2, summary: 1.2, artifact: 0.7, attachment: 0.6 },
+      recentLimit: 4,
+      maxObjects: 40,
+      candidateLimit: 80,
+      levelCeilings: { artifact: "L2", attachment: "L1" }
+    },
+    advisor: {
+      categoryWeights: { constraints: 5, plan: 5, memory: 4, history: 2, knowledge: 5, skills: 1, artifacts: 1, other: 1 },
+      kindUtility: { constraint: 1.45, decision: 1.55, memory: 1.35, evidence: 1.35, recovery: 1.25, history: 0.85, artifact: 0.7, attachment: 0.6 },
+      recentLimit: 4,
+      maxObjects: 40,
+      candidateLimit: 80,
+      levelCeilings: { artifact: "L2", attachment: "L1" }
+    },
+    validator: {
+      categoryWeights: { constraints: 5, plan: 3, memory: 1, history: 2, knowledge: 6, skills: 1, artifacts: 5, other: 1 },
+      kindUtility: { constraint: 1.4, decision: 1.3, evidence: 1.8, artifact: 1.55, recovery: 1.25, summary: 0.8, history: 0.9 },
+      recentLimit: 4,
+      maxObjects: 40,
+      candidateLimit: 80,
+      levelCeilings: {}
+    },
+    delegate: {
+      categoryWeights: { constraints: 6, plan: 5, memory: 2, history: 1, knowledge: 4, skills: 4, artifacts: 3, other: 1 },
+      kindUtility: { constraint: 1.55, plan: 1.45, skill: 1.5, wiki: 1.25, artifact: 1.2, history: 0.65, delegation: 0.7 },
+      recentLimit: 2,
+      maxObjects: 25,
+      candidateLimit: 50,
+      levelCeilings: { history: "L2", delegation: "L2", memory: "L2", attachment: "L1" }
+    },
+    summarizer: {
+      categoryWeights: { constraints: 4, plan: 3, memory: 2, history: 6, knowledge: 4, skills: 1, artifacts: 2, other: 1 },
+      kindUtility: { constraint: 1.3, history: 1.45, delegation: 1.35, recovery: 1.35, summary: 1.3, decision: 1.2 },
+      recentLimit: 8,
+      maxObjects: 60,
+      candidateLimit: 120,
+      levelCeilings: { artifact: "L3", attachment: "L2" }
+    },
+    dreamer: {
+      categoryWeights: { constraints: 4, plan: 4, memory: 6, history: 2, knowledge: 5, skills: 2, artifacts: 1, other: 1 },
+      kindUtility: { constraint: 1.3, memory: 1.55, summary: 1.45, wiki: 1.35, decision: 1.25, history: 0.8, artifact: 0.65 },
+      recentLimit: 3,
+      maxObjects: 35,
+      candidateLimit: 70,
+      levelCeilings: { history: "L2", delegation: "L2", artifact: "L2", attachment: "L1" }
+    }
+  }
+  if (!isMap(profiles[name])) {
+    name = "executor"
+    this.metrics.consumer_policy_fallbacks++
+  }
+  var policy = merge({}, profiles[name], true)
+  policy.consumer = name
+  return policy
+}
+
 MiniAHistoryVM.prototype._contextBudgetPolicy = function(totalBudget, outputReserve, candidates, options) {
   var fixed = {}
   var fixedTotal = 0
@@ -888,19 +1209,159 @@ MiniAHistoryVM.prototype._contextRepresentationCost = function(object, level) {
   return this._buildRepresentation(object, level).estimatedTokens
 }
 
+MiniAHistoryVM.prototype._contextAssemblyItemKey = function(item) {
+  var object = isMap(item) ? this._resolveObject(item.handle) : __
+  if (!isMap(object)) return ""
+  return object.handle + ":" + item.level + ":" + this._representationCacheKey(object, item.level)
+}
+
+MiniAHistoryVM.prototype._contextWorkingSetDelta = function(consumer, items) {
+  var scope = this.branchId + ":" + consumer
+  var previous = isMap(this.contextWorkingSets[scope]) ? this.contextWorkingSets[scope] : { items: {} }
+  var current = { items: {}, order: [] }
+  var delta = { added: [], removed: [], promoted: [], demoted: [], modified: [], unchanged: [] }
+  var levels = ["L0", "L1", "L2", "L3", "L4"]
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i]
+    var key = this._contextAssemblyItemKey(item)
+    current.items[item.handle] = { level: item.level, key: key, tokenCost: item.tokenCost }
+    current.order.push(item.handle)
+    var old = previous.items[item.handle]
+    if (!isMap(old)) delta.added.push(item.handle)
+    else if (levels.indexOf(item.level) > levels.indexOf(old.level)) delta.promoted.push(item.handle)
+    else if (levels.indexOf(item.level) < levels.indexOf(old.level)) delta.demoted.push(item.handle)
+    else if (old.key !== key) delta.modified.push(item.handle)
+    else delta.unchanged.push(item.handle)
+  }
+  Object.keys(previous.items).forEach(function(handle) {
+    if (!isMap(current.items[handle])) delta.removed.push(handle)
+  })
+  this.contextWorkingSets[scope] = current
+  this.metrics.context_deltas++
+  this.metrics.context_delta_added += delta.added.length
+  this.metrics.context_delta_removed += delta.removed.length
+  this.metrics.context_delta_promoted += delta.promoted.length
+  this.metrics.context_delta_demoted += delta.demoted.length
+  this.metrics.context_delta_modified += delta.modified.length
+  this.metrics.context_delta_unchanged += delta.unchanged.length
+  return delta
+}
+
+MiniAHistoryVM.prototype._serializeContextAssemblyItems = function(items) {
+  var lines = []
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i]
+    var representation = isMap(item.representation) ? item.representation : {}
+    var value = isString(representation.text) ? representation.text : (isDef(representation.content) ? (isString(representation.content) ? representation.content : stringify(representation.content, __, "")) : "")
+    lines.push("[" + item.handle + " " + item.level + "]\n" + value)
+  }
+  return lines.join("\n\n")
+}
+
+MiniAHistoryVM.prototype.serializeContext = function(assembly) {
+  if (!this.contextVirtualization) return { error: "Context virtualization is not enabled." }
+  if (!isMap(assembly) || !isArray(assembly.objects)) return { error: "A ContextAssembler result is required." }
+  var stable = []
+  var dynamic = []
+  for (var i = 0; i < assembly.objects.length; i++) (assembly.objects[i].stable === true ? stable : dynamic).push(assembly.objects[i])
+  var signature = isString(assembly.stablePrefixSignature) ? assembly.stablePrefixSignature : stable.map(function(item) { return this._contextAssemblyItemKey(item) }, this).join("|")
+  var prefix = this.contextPrefixCache[signature]
+  var cacheHit = isString(prefix)
+  if (cacheHit) this.metrics.context_serialization_cache_hits++
+  else {
+    prefix = this._serializeContextAssemblyItems(stable)
+    this.contextPrefixCache[signature] = prefix
+    this.metrics.context_serialization_cache_misses++
+  }
+  var dynamicText = this._serializeContextAssemblyItems(dynamic)
+  var text = prefix.length > 0 && dynamicText.length > 0 ? prefix + "\n\n--- DYNAMIC WORKING SET ---\n\n" + dynamicText : prefix + dynamicText
+  this.metrics.stable_prefix_tokens = isNumber(assembly.stablePrefixTokens) ? assembly.stablePrefixTokens : 0
+  return { stablePrefix: prefix, dynamicWorkingSet: dynamicText, text: text, stablePrefixTokens: this.metrics.stable_prefix_tokens, cacheHit: cacheHit }
+}
+
+// Build a Phase 2 working-set projection for diagnostics only. The caller keeps
+// ownership of its provider conversation; this method never serializes or changes it.
+MiniAHistoryVM.prototype.projectContextShadow = function(options) {
+  if (!this.contextVirtualizationShadow) return { active: false, reason: "Context virtualization shadow is not enabled." }
+  var opts = isMap(options) ? options : {}
+  var actualTokens = isNumber(opts.actualTokens) && opts.actualTokens >= 0
+    ? Math.floor(opts.actualTokens)
+    : this.estimateTokens(stringify(isDef(opts.actualContext) ? opts.actualContext : [], __, ""))
+  var assemblyOptions = merge({}, opts, true)
+  delete assemblyOptions.actualTokens
+  delete assemblyOptions.actualContext
+  var assembly = this.assembleContext(assemblyOptions)
+  if (!isMap(assembly) || !isArray(assembly.objects)) return { active: false, reason: isMap(assembly) ? assembly.error : "Context assembly failed." }
+  var delta = isMap(assembly.delta) ? assembly.delta : {}
+  var differences = ["added", "removed", "promoted", "demoted", "modified"].reduce(function(total, key) {
+    return total + (isArray(delta[key]) ? delta[key].length : 0)
+  }, 0)
+  var projectedTokens = isNumber(assembly.materializedTokens) ? assembly.materializedTokens : 0
+  var result = {
+    active: true,
+    consumer: assembly.consumer,
+    actualTokens: actualTokens,
+    projectedTokens: projectedTokens,
+    expectedSavings: actualTokens - projectedTokens,
+    objectDifferences: differences,
+    objectsConsidered: assembly.objectsConsidered,
+    objectsSelected: assembly.objectsSelected,
+    stablePrefixTokens: assembly.stablePrefixTokens,
+    effectiveContextRatio: assembly.effectiveContextRatio,
+    assembly: assembly
+  }
+  this.contextVirtualizationShadowLast = {
+    consumer: result.consumer,
+    actualTokens: result.actualTokens,
+    projectedTokens: result.projectedTokens,
+    expectedSavings: result.expectedSavings,
+    objectDifferences: result.objectDifferences,
+    objectsConsidered: result.objectsConsidered,
+    objectsSelected: result.objectsSelected,
+    stablePrefixTokens: result.stablePrefixTokens,
+    effectiveContextRatio: result.effectiveContextRatio
+  }
+  this.metrics.context_virtualization_shadow_assemblies++
+  this.metrics.context_virtualization_shadow_actual_tokens = actualTokens
+  this.metrics.context_virtualization_shadow_projected_tokens = projectedTokens
+  this.metrics.context_virtualization_shadow_expected_savings = result.expectedSavings
+  this.metrics.context_virtualization_shadow_object_differences = differences
+  return result
+}
+
 MiniAHistoryVM.prototype.assembleContext = function(options) {
   if (!this.contextVirtualization) return { error: "Context virtualization is not enabled." }
   var opts = isMap(options) ? options : {}
+  var consumerPolicy = this._contextConsumerPolicy(opts.consumer)
+  if (isNumber(opts.recentLimit)) consumerPolicy.recentLimit = Math.max(0, Math.min(50, Math.floor(opts.recentLimit)))
+  if (isNumber(opts.candidateLimit)) consumerPolicy.candidateLimit = Math.max(1, Math.min(500, Math.floor(opts.candidateLimit)))
+  if (isMap(opts.levelCeilings)) Object.keys(opts.levelCeilings).forEach(function(kind) {
+    var level = String(opts.levelCeilings[kind]).toUpperCase()
+    if (["L0", "L1", "L2", "L3", "L4"].indexOf(level) >= 0) consumerPolicy.levelCeilings[kind] = level
+  })
   var totalBudget = isNumber(opts.budget) ? Math.max(1, Math.floor(opts.budget)) : 32000
   var outputReserve = isNumber(opts.outputReserve) ? Math.max(0, Math.min(totalBudget, Math.floor(opts.outputReserve))) : Math.min(4096, Math.floor(totalBudget * 0.2))
   var goal = isString(opts.goal) ? opts.goal.toLowerCase().trim() : ""
   var goalTerms = this._tokenizeIndexText(goal)
   var pinned = {}
   if (isArray(opts.pinned)) for (var pi = 0; pi < opts.pinned.length; pi++) pinned[String(opts.pinned[pi])] = true
+  var stableIds = {}
+  if (isArray(opts.stableIds)) for (var sti = 0; sti < opts.stableIds.length; sti++) stableIds[String(opts.stableIds[sti])] = true
   var candidateMap = {}
   var candidateReasons = {}
   var addCandidate = function(object, reason) {
     if (!isMap(object) || object.branchId !== this.branchId) return
+    if (object.obsolete && opts.includeObsolete !== true) {
+      var redirects = 0
+      while (object.obsolete && redirects++ < 8) {
+        var replacement = this._resolveObject(object.supersededBy)
+        if (!isMap(replacement) || replacement.handle === object.handle) return
+        object = replacement
+        this.metrics.stale_suppressed++
+      }
+      if (object.obsolete) return
+      reason = "supersession_redirect"
+    }
     candidateMap[object.handle] = object
     if (!isArray(candidateReasons[object.handle])) candidateReasons[object.handle] = []
     if (candidateReasons[object.handle].indexOf(reason) < 0) candidateReasons[object.handle].push(reason)
@@ -912,7 +1373,7 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
     var indexed = this._indexedCandidates(goalTerms, ["L0", "L1", "L2"])
     if (Object.keys(indexed.scores).length === 0) indexed = this._indexedCandidates(goalTerms, ["L3", "L4"])
     var indexedHandles = Object.keys(indexed.scores).sort(function(a, b) { return indexed.scores[b] - indexed.scores[a] || a.localeCompare(b) })
-    for (var ih = 0; ih < indexedHandles.length && ih < 100; ih++) addCandidate(this._resolveObject(indexedHandles[ih]), "goal_match")
+    for (var ih = 0; ih < indexedHandles.length && ih < consumerPolicy.candidateLimit; ih++) addCandidate(this._resolveObject(indexedHandles[ih]), "goal_match")
   } else if (goal.length > 0) {
     for (var gi = this.objects.length - 1; gi >= 0; gi--) {
       var goalObject = this.objects[gi]
@@ -920,7 +1381,7 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
       if (goalObject.branchId === this.branchId && goalText.toLowerCase().indexOf(goal) >= 0) addCandidate(goalObject, "goal_match")
     }
   } else {
-    for (var ri = this.objects.length - 1; ri >= 0 && Object.keys(candidateMap).length < 50; ri--) {
+    for (var ri = this.objects.length - 1; ri >= 0 && Object.keys(candidateMap).length < consumerPolicy.candidateLimit; ri--) {
       var root = this.objects[ri]
       if (!isString(root.parentId) || root.parentId.length === 0) addCandidate(root, "root")
     }
@@ -934,7 +1395,7 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
   }
   if (opts.includeRecent !== false) {
     var recentAdded = 0
-    for (var recent = this.objects.length - 1; recent >= 0 && recentAdded < 6; recent--) {
+    for (var recent = this.objects.length - 1; recent >= 0 && recentAdded < consumerPolicy.recentLimit; recent--) {
       if (this.objects[recent].branchId === this.branchId) {
         addCandidate(this.objects[recent], "recent")
         recentAdded++
@@ -945,11 +1406,13 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
   var initialHandles = Object.keys(candidateMap)
   for (var dh = 0; dh < initialHandles.length; dh++) {
     var dependent = candidateMap[initialHandles[dh]]
-    for (var di = 0; di < dependent.dependencies.length; di++) {
-      var dependency = this._resolveObject(dependent.dependencies[di])
+    var prefetchEdges = this._graphEdgesForObject(dependent, "both", ["depends_on", "derived_from", "supports", "references", "resolved_by", "produced"])
+    for (var di = 0; di < prefetchEdges.length; di++) {
+      var dependencyRef = prefetchEdges[di].source === dependent.handle ? prefetchEdges[di].target : prefetchEdges[di].source
+      var dependency = this._resolveObject(dependencyRef)
       if (isMap(dependency)) {
         var wasCandidate = isMap(candidateMap[dependency.handle])
-        addCandidate(dependency, "dependency_prefetch")
+        addCandidate(dependency, "graph_prefetch")
         if (!wasCandidate) this.metrics.dependency_prefetches++
       }
     }
@@ -962,23 +1425,28 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
     var object = candidateMap[handles[h]]
     var reasons = candidateReasons[object.handle]
     var mandatory = reasons.indexOf("mandatory") >= 0
-    var prefetched = reasons.length === 1 && reasons[0] === "dependency_prefetch"
+    var prefetched = reasons.length === 1 && reasons[0] === "graph_prefetch"
     var relevance = goalTerms.length > 0 ? Math.min(1, (cheapScores[object.handle] || 0) / Math.max(1, goalTerms.length * 3)) : 0.5
     if (reasons.indexOf("goal_match") >= 0) relevance = Math.max(relevance, 0.6)
     if (reasons.indexOf("explicit_candidate") >= 0) relevance = Math.max(relevance, 0.8)
     if (reasons.indexOf("recent") >= 0) relevance = Math.max(relevance, 0.25)
     if (mandatory) relevance = Math.max(relevance, 0.75)
     if (prefetched) relevance = Math.max(relevance, 0.1)
-    candidates.push({ object: object, reasons: reasons, mandatory: mandatory, prefetched: prefetched, relevance: relevance, category: this._contextCategory(object), utility: this._contextUtility(object, relevance, mandatory) })
+    var utility = this._contextUtility(object, relevance, mandatory)
+    if (!mandatory && isNumber(consumerPolicy.kindUtility[object.kind])) utility *= consumerPolicy.kindUtility[object.kind]
+    candidates.push({ object: object, reasons: reasons, mandatory: mandatory, prefetched: prefetched, relevance: relevance, category: this._contextCategory(object), utility: utility })
   }
 
-  var policy = this._contextBudgetPolicy(totalBudget, outputReserve, candidates, opts)
+  var budgetOptions = merge({}, opts, true)
+  budgetOptions.categoryWeights = merge({}, consumerPolicy.categoryWeights, true)
+  if (isMap(opts.categoryWeights)) Object.keys(opts.categoryWeights).forEach(function(category) { budgetOptions.categoryWeights[category] = opts.categoryWeights[category] })
+  var policy = this._contextBudgetPolicy(totalBudget, outputReserve, candidates, budgetOptions)
   var selected = {}
   var used = 0
   var categoryUsage = {}
   var levels = ["L0", "L1", "L2", "L3", "L4"]
   var levelValue = { L0: 0.2, L1: 0.4, L2: 0.65, L3: 0.85, L4: 1 }
-  var maxObjects = isNumber(opts.maxObjects) ? Math.max(1, Math.min(200, Math.floor(opts.maxObjects))) : 50
+  var maxObjects = isNumber(opts.maxObjects) ? Math.max(1, Math.min(200, Math.floor(opts.maxObjects))) : consumerPolicy.maxObjects
 
   for (var m = 0; m < candidates.length; m++) {
     var forced = candidates[m]
@@ -1021,6 +1489,8 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
       if (item.prefetched || item.level === "L4") return
       var currentIndex = levels.indexOf(item.level)
       var nextLevel = levels[currentIndex + 1]
+      var ceiling = consumerPolicy.levelCeilings[item.object.kind]
+      if (isString(ceiling) && levels.indexOf(nextLevel) > levels.indexOf(ceiling)) return
       var nextCost = this._contextRepresentationCost(item.object, nextLevel)
       var deltaCost = nextCost - item.tokenCost
       var deltaUtility = item.utility * (levelValue[nextLevel] - levelValue[item.level])
@@ -1056,9 +1526,18 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
       mandatory: item.mandatory,
       prefetched: item.prefetched,
       reasons: item.reasons,
+      stable: item.mandatory || stableIds[item.object.id] === true || stableIds[item.object.handle] === true,
       representation: representation
     })
   }
+
+  var stablePrefixTokens = 0
+  var stablePrefixKeys = []
+  for (var sp = 0; sp < materialized.length; sp++) if (materialized[sp].stable === true) {
+    stablePrefixTokens += materialized[sp].tokenCost
+    stablePrefixKeys.push(this._contextAssemblyItemKey(materialized[sp]))
+  }
+  var delta = this._contextWorkingSetDelta(consumerPolicy.consumer, materialized)
 
   var addressableTokens = 0
   for (var at = 0; at < candidates.length; at++) addressableTokens += candidates[at].object.estimatedOriginalTokens
@@ -1073,9 +1552,12 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
   this.metrics.addressable_relevant_tokens = addressableTokens
   this.metrics.effective_context_ratio = effectiveRatio
   this.metrics.context_budget_utilization = utilization
+  this.metrics.stable_prefix_tokens = stablePrefixTokens
+  this.metrics["consumer_views_" + consumerPolicy.consumer]++
   if (overflow) this.metrics.budget_overflows++
   return {
-    consumer: isString(opts.consumer) ? opts.consumer : "executor",
+    consumer: consumerPolicy.consumer,
+    consumerPolicy: { recentLimit: consumerPolicy.recentLimit, maxObjects: maxObjects, candidateLimit: consumerPolicy.candidateLimit, categoryWeights: budgetOptions.categoryWeights, kindUtility: consumerPolicy.kindUtility, levelCeilings: consumerPolicy.levelCeilings },
     goal: isString(opts.goal) ? opts.goal : "",
     budget: policy,
     categoryUsage: categoryUsage,
@@ -1084,6 +1566,9 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
     effectiveContextRatio: effectiveRatio,
     utilization: utilization,
     overflow: overflow,
+    delta: delta,
+    stablePrefixTokens: stablePrefixTokens,
+    stablePrefixSignature: stablePrefixKeys.join("|"),
     objectsConsidered: candidates.length,
     objectsSelected: materialized.length,
     objects: materialized
@@ -1267,6 +1752,7 @@ MiniAHistoryVM.prototype.diagnostics = function() {
     active: this.enabled && !this.degraded,
     shadow: this.shadow,
     contextVirtualization: this.contextVirtualization,
+    contextVirtualizationShadow: this.contextVirtualizationShadow,
     contextSchemaVersion: this.contextSchemaVersion,
     representationVersion: this.representationVersion,
     mode: this.mode,
@@ -1276,6 +1762,7 @@ MiniAHistoryVM.prototype.diagnostics = function() {
     degraded: this.degraded,
     degradedReason: this.degradedReason,
     states: states,
+    contextVirtualizationShadowLast: isMap(this.contextVirtualizationShadowLast) ? merge({}, this.contextVirtualizationShadowLast, true) : __,
     metrics: metrics
   }
 }

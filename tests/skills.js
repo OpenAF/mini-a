@@ -22,7 +22,7 @@
 
   var basicSkillWiki = function(dir) {
     writePage(dir, "postgres-index-review.md", {
-      type: "skill", schema: "mini-a.skill/v1", name: "postgres-index-review",
+      type: "skill", schema: "mini-a.skill/v1", id: "skill:postgres-index-review", name: "postgres-index-review",
       title: "PostgreSQL Index Review",
       description: "Analyze PostgreSQL workloads and identify missing, redundant, or ineffective indexes.",
       tags: ["postgresql", "database", "performance"],
@@ -57,6 +57,13 @@
       title: "Just a normal knowledge page",
       description: "Not a skill, ordinary wiki content."
     }, "# Body\nNothing skill-related here.\n")
+
+    writePage(dir, "database-maintenance.md", {
+      type: "skill", id: "skill:database-maintenance", name: "database-maintenance",
+      title: "Database Maintenance", description: "Coordinate a bounded database maintenance review.",
+      risk: "medium",
+      depends_on: ["skill:postgres-index-review", "wiki:kafka-consumer-rebalance.md", "skill:missing-skill"]
+    }, "# Procedure\nInspect declared prerequisites before choosing an operation.\n")
   }
 
   // ── unit tests ────────────────────────────────────────────────────────────
@@ -143,7 +150,7 @@
       var low = __miniASkillSearch(wm, { query: "", maxRisk: "low" })
       ow.test.assert(low.length, 1, "maxRisk=low should exclude medium/high risk skills")
       var all = __miniASkillSearch(wm, { query: "", maxRisk: "high" })
-      ow.test.assert(all.length, 3, "maxRisk=high should include all three skill pages")
+      ow.test.assert(all.length, 4, "maxRisk=high should include all four skill pages")
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 
@@ -185,6 +192,32 @@
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 
+  exports.testSkillCompositionIsBoundedAndKnowledgeOnly = function() {
+    var dir = mkTmp()
+    try {
+      basicSkillWiki(dir)
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
+      var composition = __miniASkillCompose(wm, "wiki:database-maintenance.md", { limit: 2 })
+      ow.test.assert(composition.dependencies.length, 2, "composition should resolve only the requested bounded prerequisite set")
+      ow.test.assert(composition.unresolved.length, 0, "dependencies beyond the bounded limit should not be probed")
+      ow.test.assert(composition.truncated, true, "composition should visibly report omitted prerequisites")
+      ow.test.assert(composition.dependencies[0].name, "postgres-index-review", "skill:<name> dependencies should resolve through the skill index")
+      ow.test.assert(composition.execution.indexOf("normal Mini-A tool policy") >= 0, true, "composition must state that declared skill requirements do not grant execution authority")
+      var complete = __miniASkillCompose(wm, "wiki:database-maintenance.md", { limit: 8 })
+      ow.test.assert(complete.unresolved[0], "skill:missing-skill", "unresolved prerequisites should remain visible rather than guessed")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testSkillSurfaceRejectsOrdinaryWikiPages = function() {
+    var dir = mkTmp()
+    try {
+      basicSkillWiki(dir)
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
+      ow.test.assert(__miniASkillOpen(wm, "wiki:normal-note.md", {}).error, "not-skill", "skill open should reject ordinary wiki pages")
+      ow.test.assert(__miniASkillRead(wm, "wiki:normal-note.md", {}).error, "not-skill", "skill read should reject ordinary wiki pages")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
   exports.testSkillReadSectionBounded = function() {
     var dir = mkTmp()
     try {
@@ -202,7 +235,7 @@
       basicSkillWiki(dir)
       var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
       var ctx = __miniASkillContext(wm, { skillCountTtlMs: 0 })
-      ow.test.assert(ctx.skillCount, 3, "context should count exactly the 3 type=skill pages, not the ordinary page")
+      ow.test.assert(ctx.skillCount, 4, "context should count exactly the 4 type=skill pages, not the ordinary page")
       ow.test.assert(isArray(ctx.wikis), true, "context should list wikis")
       ow.test.assert(ctx.features.search, true, "context should advertise search capability")
     } finally { try { io.rm(dir) } catch(e) {} }

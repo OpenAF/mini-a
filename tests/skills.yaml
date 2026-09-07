@@ -42,6 +42,14 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/skills.js").testSkillOpenNeverReturnsBody
 
+- name: MiniA Skills Tests::CompositionBoundedKnowledgeOnly
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillCompositionIsBoundedAndKnowledgeOnly
+
+- name: MiniA Skills Tests::RejectsOrdinaryWikiPages
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillSurfaceRejectsOrdinaryWikiPages
+
 - name: MiniA Skills Tests::ReadSectionBounded
   to  : oJob Test
   exec: args.func = require("tests/skills.js").testSkillReadSectionBounded
@@ -89,6 +97,8 @@ todo:
 - MiniA Skills Tests::RecommendIntentRankingPrefersMatchingSkill
 - MiniA Skills Tests::NormalizedObjectShape
 - MiniA Skills Tests::OpenNeverReturnsBody
+- MiniA Skills Tests::CompositionBoundedKnowledgeOnly
+- MiniA Skills Tests::RejectsOrdinaryWikiPages
 - MiniA Skills Tests::ReadSectionBounded
 - MiniA Skills Tests::ContextReportsCompactSkillCount
 - MiniA Skills Tests::ProviderResolveProducesRenderableTemplate

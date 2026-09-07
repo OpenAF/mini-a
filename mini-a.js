@@ -2327,6 +2327,7 @@ MiniA.prototype._writeConversationPayload = function(path) {
         schemaVersion: this._historyVm.schemaVersion,
         contextSchemaVersion: this._historyVm.contextSchemaVersion,
         contextVirtualization: this._historyVm.contextVirtualization === true,
+        contextVirtualizationShadow: this._historyVm.contextVirtualizationShadow === true,
         active: this._historyVm.enabled === true && this._historyVm.degraded !== true,
         shadow: this._historyVm.shadow === true,
         store: this._historyVm.storePath,
@@ -2359,6 +2360,7 @@ MiniA.prototype._initHistoryVm = function(args, existingPayload) {
   var enabled = isMap(args) && args.historyvm === true
   var shadow = isMap(args) && args.historyvmshadow === true
   var contextVirtualization = isMap(args) && args.contextvirtualization === true
+  var contextVirtualizationShadow = isMap(args) && args.contextvirtualizationshadow === true
   if (isMap(args) && isString(args.historyvmmode) && args.historyvmmode.toLowerCase() !== "safe") {
     this.fnI("warn", "Unsupported historyvmmode='" + args.historyvmmode + "'; using safe mode.")
     args.historyvmmode = "safe"
@@ -2373,6 +2375,11 @@ MiniA.prototype._initHistoryVm = function(args, existingPayload) {
     contextVirtualization = false
     args.contextvirtualization = false
   }
+  if (contextVirtualizationShadow && (!enabled || !contextVirtualization)) {
+    this.fnI("warn", "contextvirtualizationshadow=true requires historyvm=true and contextvirtualization=true; context virtualization shadow disabled.")
+    contextVirtualizationShadow = false
+    args.contextvirtualizationshadow = false
+  }
   if (!enabled && !shadow) {
     this._historyVm = __
     this._historyVmInitKey = ""
@@ -2383,16 +2390,18 @@ MiniA.prototype._initHistoryVm = function(args, existingPayload) {
     args.historyvm = false
     args.historyvmshadow = false
     args.contextvirtualization = false
+    args.contextvirtualizationshadow = false
     this._historyVm = __
     return __
   }
   var conversationPath = isString(args.conversation) ? args.conversation.trim() : ""
-  var initKey = conversationPath + "|" + enabled + "|" + shadow + "|" + contextVirtualization
+  var initKey = conversationPath + "|" + enabled + "|" + shadow + "|" + contextVirtualization + "|" + contextVirtualizationShadow
   if (isObject(this._historyVm) && this._historyVmInitKey === initKey) return this._historyVm
   this._historyVm = new MiniAHistoryVM({
     enabled: enabled,
     shadow: shadow,
     contextVirtualization: contextVirtualization,
+    contextVirtualizationShadow: contextVirtualizationShadow,
     mode: isString(args.historyvmmode) ? args.historyvmmode : "safe",
     conversationPath: conversationPath,
     conversationId: isMap(existingPayload) && isMap(existingPayload.history_vm) ? existingPayload.history_vm.conversationId : __,
@@ -2407,6 +2416,7 @@ MiniA.prototype._initHistoryVm = function(args, existingPayload) {
     args.historyvm = false
     args.historyvmshadow = false
     args.contextvirtualization = false
+    args.contextvirtualizationshadow = false
   }
   return this._historyVm
 }
@@ -2420,6 +2430,17 @@ MiniA.prototype._prepareHistoryVmProjection = function(currentStep) {
     vm.captureProviderConversation(conversation)
     if (vm.degraded) return false
     var projected = vm.projectConversation(conversation, { currentStep: currentStep })
+    if (vm.contextVirtualizationShadow) {
+      var phaseOneTokens = vm.estimateTokens(stringify(projected, __, ""))
+      var configuredBudget = this._getEffectiveContextBudget(__, 0)
+      vm.projectContextShadow({
+        consumer: "executor",
+        actualTokens: phaseOneTokens,
+        budget: configuredBudget > 0 ? configuredBudget : phaseOneTokens,
+        outputReserve: 0,
+        includeRecent: true
+      })
+    }
     if (vm.enabled && !vm.shadow) {
       this.llm.getGPT().setConversation(projected)
       if (this._use_lc && isObject(this.lc_llm)) this._copyConversationBetweenLlms(this.llm, this.lc_llm)
@@ -15226,7 +15247,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
   ;[
     "rpm", "tpm", "rtm", "maxsteps", "knowledge", "chatyouare", "youare", "homedir",
     "promptprofile", "systempromptbudget", "outfile", "outfileall", "libs", "model", "modellc", "modelval",
-    "conversation", "historyvm", "historyvmmode", "historyvmshadow", "contextvirtualization", "shell", "usesandbox", "sandboxprofile", "sandboxnonetwork", "shellallow", "shellbanextra",
+    "conversation", "historyvm", "historyvmmode", "historyvmshadow", "contextvirtualization", "contextvirtualizationshadow", "shell", "usesandbox", "sandboxprofile", "sandboxnonetwork", "shellallow", "shellbanextra",
     "shelltimeout", "shellmaxbytes", "toolcachettl", "mcplazy", "mcpdynamic", "mcpproxy", "mcpproxythreshold", "toolargcheck", "toolargrepair",
     "mcpproxytoon", "contextguard", "contextguardbudget", "toolresultmaxinline", "readresultmaxmatches",
     "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugvalch", "capabilityselection", "capabilitylimit", "policy", "policyfile", "planfile",
@@ -15668,6 +15689,7 @@ MiniA.prototype.init = function(args) {
       { name: "historyvmmode", type: "string", default: "safe" },
       { name: "historyvmshadow", type: "boolean", default: false },
       { name: "contextvirtualization", type: "boolean", default: false },
+      { name: "contextvirtualizationshadow", type: "boolean", default: false },
       { name: "shell", type: "string", default: "" },
       { name: "usesandbox", type: "string", default: __ },
       { name: "sandboxprofile", type: "string", default: __ },
@@ -17253,6 +17275,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "historyvmmode", type: "string", default: "safe" },
       { name: "historyvmshadow", type: "boolean", default: false },
       { name: "contextvirtualization", type: "boolean", default: false },
+      { name: "contextvirtualizationshadow", type: "boolean", default: false },
       { name: "maxcontext", type: "number", default: 0 },
       { name: "contextguard", type: "boolean", default: false },
       { name: "contextguardbudget", type: "number", default: 32000 },
