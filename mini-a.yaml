@@ -503,8 +503,8 @@ help:
     example  : "get-url,web-search"
     mandatory: false
   - name     : mcpproxynative
-    desc     : Force native function calling for proxy-dispatch even for providers (e.g. Ollama) that would otherwise default to action-based JSON
-    example  : "false"
+    desc     : Enable native function calling for proxy-dispatch (defaults to true; set to false for action-based JSON)
+    example  : "true"
     mandatory: false
     options  : ["true", "false"]
   - name     : mcpprogcall

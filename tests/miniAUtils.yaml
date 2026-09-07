@@ -187,6 +187,21 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testShowMessageAcceptsPromptAlias
 
+- name: MiniA Utils Tests::PrintChartUsesArrayRenderer
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPrintChartUsesArrayRenderer
+
+- name: MiniA Utils Tests::PrintChartNormalizesObjectPointsAndLabels
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPrintChartNormalizesObjectPointsAndLabels
+
+- name: MiniA Utils Tests::PrintChartMultiSeriesObjects
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPrintChartMultiSeriesObjects
+
 - name: MiniA Utils Tests::StdUtilsCatalog
   from: MiniA Utils Tests::Init
   to  : oJob Test
@@ -242,5 +257,8 @@ todo:
 - MiniA Utils Tests::TimeOpsSleep
 - MiniA Utils Tests::EncodingAndAdvancedParams
 - MiniA Utils Tests::ShowMessageAcceptsPromptAlias
+- MiniA Utils Tests::PrintChartUsesArrayRenderer
+- MiniA Utils Tests::PrintChartNormalizesObjectPointsAndLabels
+- MiniA Utils Tests::PrintChartMultiSeriesObjects
 - MiniA Utils Tests::StdUtilsCatalog
 - MiniA Utils Tests::LegacyCatalog

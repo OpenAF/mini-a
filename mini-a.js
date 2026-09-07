@@ -1223,6 +1223,7 @@ MiniA.buildVisualKnowledge = function(options) {
       "Live ASCII/ANSI console visuals (tool-rendered):\n" +
       "  - The `printChart` tool is available: it renders an ASCII/ANSI chart straight to the console DURING execution, before the final answer is produced.\n" +
       "  - Default to calling `printChart` -- the same way you would default to a chart or diagram -- whenever you have numeric series, comparisons, distributions, progress, or status information worth showing while you work, not only at the end.\n" +
+      "  - When the user asks to plot, chart, or display a graph/plot, ALWAYS call the `printChart` tool during execution to render it to the console (do not merely describe it or generate text charts in the final answer).\n" +
       "  - Prefer this tool over describing numbers in prose while investigating: e.g. call `printChart` with type='bars'/'printbars'/'line'/'sparkline' to show interim metrics, type='heatmap'/'statusmatrix' for grids, or type='bullet'/'boxplot'/'timeline'/'scatter' for gauges, distributions, schedules, or correlations.\n" +
       "  - This is complementary to, not a replacement for, the final-answer chart/diagram guidance above: use `printChart` for live/interim visibility during the run, and still include a chart or diagram fence in the final answer when that guidance applies.\n" +
       "  - Keep each call focused on one clear insight; prefer several small, well-labeled charts over one overloaded call."
@@ -1341,7 +1342,7 @@ MiniA.buildVisualKnowledge = function(options) {
     nextIndex++
   }
   if (useAsciiViz) {
-    checklist += "\n" + nextIndex + ". Numeric series, comparisons, distributions, or progress worth showing WHILE working (not just in the final answer) -> call `printChart`."
+    checklist += "\n" + nextIndex + ". Numeric series, comparisons, distributions, or progress worth showing WHILE working (not just in the final answer), or whenever asked to plot/chart -> call `printChart`."
     nextIndex++
   }
   if (useMaps) {
@@ -11504,10 +11505,7 @@ MiniA.prototype._getModelConfigForTools = function(args, modelName) {
 MiniA.prototype._shouldUseNativeMcpProxyTools = function(args, modelName) {
   if (!isMap(args) || toBoolean(args.mcpproxy) !== true) return true
   if (toBoolean(args.mcpproxynative) === true) return true
-
-  var cfg = this._getModelConfigForTools(args, modelName)
-  var type = isMap(cfg) && isString(cfg.type) ? cfg.type.toLowerCase() : ""
-  if (type === "ollama") return false
+  if (isDef(args.mcpproxynative) && toBoolean(args.mcpproxynative) === false) return false
 
   return true
 }
@@ -12230,8 +12228,17 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           return { error: "MCP proxy is not initialized or has no active connections." }
         }
 
-        var helpers = global.__mcpProxyHelpers__ || {}
+        if (!isMap(params)) params = {}
+        if (isMap(params.params)) {
+          var nestedP = params.params
+          delete params.params
+          params = merge(nestedP, params)
+        }
         var action = (params.action || "").toLowerCase().trim()
+        if ((action === "" || action === "execute" || action === "run" || action === "invoke" || action === "call_tool") && isString(params.tool) && params.tool.trim().length > 0) {
+          action = "call"
+          params.action = "call"
+        }
         var connectionRef = isString(params.connection) ? params.connection.trim() : __
         var limit = isNumber(params.limit) && params.limit > 0 ? Math.floor(params.limit) : __
         var includeTools = params.includeTools !== false
@@ -12825,7 +12832,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         inputSchema: {
           type      : "object",
           properties: _proxyDispatchProps,
-          required  : [ "action" ]
+          required  : []
         }
       }
     }
@@ -15612,7 +15619,54 @@ MiniA.prototype._prepareToolArgs = function(schema, providedParams) {
       params = merge({}, params[wrapperKeys[0]])
       repairs.push("unwrapped '" + wrapperKeys[0] + "'")
     }
+    if (isMap(params.params)) {
+      var nestedP = params.params
+      delete params.params
+      params = merge(nestedP, params)
+      repairs.push("unwrapped nested 'params'")
+    } else if (isString(params.params)) {
+      try {
+        var parsedInner = jsonParse(params.params, __, __, true)
+        if (isMap(parsedInner)) {
+          delete params.params
+          params = merge(parsedInner, params)
+          repairs.push("unwrapped stringified 'params'")
+        }
+      } catch(ignoreParseErr) {}
+    }
     var validParams = Object.keys(schema.properties)
+    if (validParams.indexOf("tool") >= 0 && validParams.indexOf("action") >= 0) {
+      if (isString(params.tool) && params.tool.trim().length > 0) {
+        var currentAct = isString(params.action) ? params.action.toLowerCase().trim() : ""
+        if (currentAct === "" || currentAct === "execute" || currentAct === "run" || currentAct === "invoke" || currentAct === "call_tool") {
+          params.action = "call"
+          repairs.push("defaulted action to 'call' for tool '" + params.tool + "'")
+        }
+      }
+    }
+    if (isDef(params.useasciiviz) && validParams.indexOf("useasciiviz") < 0) {
+      delete params.useasciiviz
+      repairs.push("removed extraneous 'useasciiviz'")
+    }
+    if (validParams.indexOf("options") >= 0) {
+      if (!isMap(params.options)) params.options = {}
+      var xLabelVal = isDef(params.xlabel) ? params.xlabel : (isDef(params.x_axis) ? params.x_axis : params.xLabel)
+      if (isDef(xLabelVal) && validParams.indexOf("xlabel") < 0) {
+        if (isUnDef(params.options.xLabel)) params.options.xLabel = xLabelVal
+        delete params.xlabel
+        delete params.x_axis
+        delete params.xLabel
+        repairs.push("moved 'xlabel' to 'options.xLabel'")
+      }
+      var yLabelVal = isDef(params.ylabel) ? params.ylabel : (isDef(params.y_axis) ? params.y_axis : params.yLabel)
+      if (isDef(yLabelVal) && validParams.indexOf("ylabel") < 0) {
+        if (isUnDef(params.options.yLabel)) params.options.yLabel = yLabelVal
+        delete params.ylabel
+        delete params.y_axis
+        delete params.yLabel
+        repairs.push("moved 'ylabel' to 'options.yLabel'")
+      }
+    }
     Object.keys(params).forEach(function(key) {
       if (validParams.indexOf(key) >= 0) return
       var closest = MiniA.findClosestKnownArg(key, validParams)
@@ -16992,6 +17046,14 @@ MiniA.prototype.init = function(args) {
     // runs its body once, guarded by _isInitialized).
     var promptUseMcpProxy = hasProxyDispatchAction && toBoolean(args.mcpproxy) === true
     this._useMcpProxy = promptUseMcpProxy
+    if (promptUseMcpProxy) {
+      var useNativeMcpProxy = this._shouldUseNativeMcpProxyTools(args, "main")
+      this._useToolsActual = this._useToolsMain === true && useNativeMcpProxy
+    } else if (this._useToolsMain && isArray(this.mcpTools) && this.mcpTools.length > 0) {
+      this._useToolsActual = isDef(this.llm) && typeof this.llm.withMcpTools === "function"
+    } else {
+      this._useToolsActual = false
+    }
     var proxyToolsList = ""
     var proxyToolCount = this.mcpTools.length
     if (promptUseMcpProxy === true && isObject(global.__mcpProxyState__)) {
@@ -17510,7 +17572,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "usetoolslc", type: "boolean", default: false },
       { name: "toolfallback", type: "boolean", default: false },
       { name: "mcpproxy", type: "boolean", default: false },
-      { name: "mcpproxynative", type: "boolean", default: false },
+      { name: "mcpproxynative", type: "boolean", default: true },
       { name: "mcpproxythreshold", type: "number", default: 0 },
       { name: "mcpproxytoon", type: "boolean", default: false },
       { name: "mcpproxyallow", type: "string", default: __ },
@@ -17606,7 +17668,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.convertplan = _$(toBoolean(args.convertplan), "args.convertplan").isBoolean().default(false)
     args.resumefailed = _$(toBoolean(args.resumefailed), "args.resumefailed").isBoolean().default(false)
     args.mcpproxy = _$(toBoolean(args.mcpproxy), "args.mcpproxy").isBoolean().default(false)
-    args.mcpproxynative = _$(toBoolean(args.mcpproxynative), "args.mcpproxynative").isBoolean().default(false)
+    args.mcpproxynative = _$(toBoolean(args.mcpproxynative), "args.mcpproxynative").isBoolean().default(true)
     args.nologtrunc = _$(toBoolean(args.nologtrunc), "args.nologtrunc").isBoolean().default(false)
     args.format = _$(args.format, "args.format").isString().default(__)
     args.planfile = _$(args.planfile, "args.planfile").isString().default(__)
@@ -18235,6 +18297,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     // Set proxy mode flag early
     this._useMcpProxy = promptProxyMode
+    var useToolsMain = isDef(this._useToolsMain) ? this._useToolsMain : (toBoolean(args.usetools) || toBoolean(args.historyvm))
+    this._useToolsMain = useToolsMain
 
     if (promptProxyMode) {
       // MCP proxy mode: pre-set prompt mode for the main model only.

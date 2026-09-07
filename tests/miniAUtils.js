@@ -606,6 +606,108 @@
     }
   }
 
+  exports.testPrintChartUsesArrayRenderer = function() {
+    var originalPrintChartArray = global.printChartArray
+    var received
+    try {
+      global.printChartArray = function(data, unit, width, height, max, min, options) {
+        received = { data: data, unit: unit, width: width, height: height, max: max, min: min, options: options }
+        return "chart-array-output"
+      }
+
+      var tool = new MiniUtilsTool({ useasciiviz: true })
+      var result = tool.printChart({
+        type: "line",
+        data: [1.25, 2.5],
+        options: { unit: "dec2", width: 42, height: 9, min: 1, max: 3, colors: ["GREEN"] }
+      })
+
+      ow.test.assert(isMap(result) && result.displayed === true, true, "Line chart should be displayed")
+      ow.test.assert(isMap(received), true, "Line chart should use printChartArray when available")
+      ow.test.assert(stringify(received.data) === stringify([1.25, 2.5]), true, "printChartArray should receive the chart data")
+      ow.test.assert(received.unit === "dec2", true, "printChartArray should receive the requested unit")
+      ow.test.assert(received.width === 42 && received.height === 9, true, "printChartArray should receive the requested dimensions")
+      ow.test.assert(received.min === 1 && received.max === 3, true, "printChartArray should receive the requested bounds")
+      ow.test.assert(received.options.colors[0] === "GREEN", true, "printChartArray should receive renderer options")
+    } finally {
+      if (isDef(originalPrintChartArray)) {
+        global.printChartArray = originalPrintChartArray
+      } else {
+        delete global.printChartArray
+      }
+    }
+  }
+
+  exports.testPrintChartNormalizesObjectPointsAndLabels = function() {
+    var originalPrintChartArray = global.printChartArray
+    var received
+    try {
+      global.printChartArray = function(data, unit, width, height, max, min, options) {
+        received = { data: data, unit: unit, options: options }
+        return "chart-array-output"
+      }
+
+      var tool = new MiniUtilsTool({ useasciiviz: true })
+      var result = tool.printChart({
+        type: "line",
+        data: [{ x: 1, y: 10 }, { x: 2, y: 25 }, { x: 3, y: 15 }],
+        title: "Sample Chart",
+        xlabel: "Time",
+        ylabel: "Value"
+      })
+
+      ow.test.assert(isMap(result) && result.displayed === true, true, "Line chart should be displayed")
+      ow.test.assert(isMap(received), true, "printChartArray should be called")
+      ow.test.assert(stringify(received.data) === stringify([10, 25, 15]), true, "printChartArray should receive normalized numeric array")
+      ow.test.assert(received.options.xLabel === "Time", true, "xlabel should be mapped to options.xLabel")
+      ow.test.assert(received.options.yLabel === "Value", true, "ylabel should be mapped to options.yLabel")
+    } finally {
+      if (isDef(originalPrintChartArray)) {
+        global.printChartArray = originalPrintChartArray
+      } else {
+        delete global.printChartArray
+      }
+    }
+  }
+
+  exports.testPrintChartMultiSeriesObjects = function() {
+    var originalPrintChartArray = global.printChartArray
+    var received
+    try {
+      global.printChartArray = function(data, unit, width, height, max, min, options) {
+        received = { data: data, unit: unit, options: options }
+        return "chart-array-output"
+      }
+
+      var tool = new MiniUtilsTool({ useasciiviz: true })
+      var result = tool.printChart({
+        type: "line",
+        data: [
+          { date: "09-07", max: 24.3, min: 18.7 },
+          { date: "09-08", max: 23.6, min: 18.4 }
+        ],
+        title: "Temperature Forecast",
+        x_axis: "Date",
+        y_axis: "Temperature (°C)"
+      })
+
+      ow.test.assert(isMap(result) && result.displayed === true, true, "Line chart should be displayed")
+      ow.test.assert(isMap(received), true, "printChartArray should be called")
+      ow.test.assert(received.data.length === 2, true, "Should extract 2 series (max and min)")
+      ow.test.assert(stringify(received.data[0]) === stringify([24.3, 23.6]), true, "Series 0 should be max")
+      ow.test.assert(stringify(received.data[1]) === stringify([18.7, 18.4]), true, "Series 1 should be min")
+      ow.test.assert(stringify(received.options.seriesLabels) === stringify(["max", "min"]), true, "seriesLabels should be ['max', 'min']")
+      ow.test.assert(received.options.xLabel === "Date", true, "x_axis should be mapped to options.xLabel")
+      ow.test.assert(received.options.yLabel === "Temperature (°C)", true, "y_axis should be mapped to options.yLabel")
+    } finally {
+      if (isDef(originalPrintChartArray)) {
+        global.printChartArray = originalPrintChartArray
+      } else {
+        delete global.printChartArray
+      }
+    }
+  }
+
   exports.testPathSecurity = function() {
     var testDir = createTestDir()
     var outsideDir = createTestDir()

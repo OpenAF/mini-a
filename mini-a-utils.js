@@ -3470,7 +3470,7 @@ MiniUtilsTool.prototype._visualizationsGuard = function() {
  * A single tool covering multiple chart kinds via `type`, to keep the tool surface small. Every kind maps
  * to an OpenAF ow.format.print* renderer (see openaf/js/owrap.format.js) or, for type=printbars, the global
  * printBars helper (see openaf/js/openaf.js). The `data` shape depends on `type`:
- * - line      : array of numbers (one series) or array of arrays of numbers (multiple series) -- ow.format.string.lineChart
+ * - line      : array of numbers (one series) or array of arrays of numbers (multiple series) -- printChartArray
  * - bars      : array of numbers, or array of {value, color, label} -- built-in horizontal bar renderer
  * - printbars : a printBars-style format string, e.g. "int 42:red:CPU 87:yellow:Mem" (unit, then "value[:color[:label]]"
  *   tokens); values must be numeric literals -- the global printBars function's function-name-lookup feature is not
@@ -3484,7 +3484,8 @@ MiniUtilsTool.prototype._visualizationsGuard = function() {
  * - timeline  : array of {label,start,end,color,status} events -- ow.format.printTimeline
  * - statusmatrix: a matrix or {values,xLabels,yLabels} of statuses -- ow.format.printStatusMatrix
  * `options` is passed through to the underlying OpenAF renderer (width, height, min, max, colors, palette,
- * labels, unit, etc. -- see per-type docs); for type=bars, options.unit selects int/dec1/dec2/dec3/dec/bytes/si;
+ * labels, unit, etc. -- see per-type docs); for type=line, options.unit selects int/dec1/dec2/dec3/dec4/dec/bytes/si,
+ * while type=bars supports int/dec1/dec2/dec3/dec/bytes/si;
  * for type=printbars, options.max/min/indicator/space map to printBars' aMax/aMin/aIndicatorChar/aSpaceChar.
  * </odoc>
  */
@@ -3496,6 +3497,10 @@ MiniUtilsTool.prototype.printChart = function(params) {
   var type = isString(params.type) ? params.type.toLowerCase().trim() : "line"
   var data = params.data
   var options = isMap(params.options) ? params.options : {}
+  var xVal = isString(params.xlabel) ? params.xlabel : (isString(params.x_axis) ? params.x_axis : params.xLabel)
+  var yVal = isString(params.ylabel) ? params.ylabel : (isString(params.y_axis) ? params.y_axis : params.yLabel)
+  if (isString(xVal) && isUnDef(options.xLabel)) options.xLabel = xVal
+  if (isString(yVal) && isUnDef(options.yLabel)) options.yLabel = yVal
   var title = isString(params.title) ? params.title.trim() : ""
   var colorFn = (typeof ansiColor === "function") ? ansiColor : function(_, t) { return t }
 
@@ -3506,7 +3511,45 @@ MiniUtilsTool.prototype.printChart = function(params) {
     case "line":
     case "chart":
       if (!isArray(data)) return "[ERROR] data must be an array of numbers (or array of arrays) for type='line'."
-      out = ow.format.string.lineChart(data, options)
+      if (data.length > 0 && isMap(data[0])) {
+        if (isDef(data[0].y) || isDef(data[0].value) || isDef(data[0].val)) {
+          data = data.map(function(pt) {
+            if (isMap(pt)) {
+              if (isDef(pt.y)) return Number(pt.y)
+              if (isDef(pt.value)) return Number(pt.value)
+              if (isDef(pt.val)) return Number(pt.val)
+            }
+            return Number(pt)
+          })
+        } else {
+          var numKeys = Object.keys(data[0]).filter(function(k) {
+            var val = data[0][k]
+            return isNumber(val) || (isString(val) && val.trim().length > 0 && !isNaN(Number(val)))
+          })
+          if (numKeys.length === 1) {
+            data = data.map(function(pt) { return Number(pt[numKeys[0]]) })
+          } else if (numKeys.length > 1) {
+            var multiSeries = numKeys.map(function(k) {
+              return data.map(function(pt) { return Number(pt[k]) })
+            })
+            data = multiSeries
+            if (!isArray(options.seriesLabels)) options.seriesLabels = numKeys
+            if (!isArray(options.colors)) {
+              var defaultColors = ["RED", "BLUE", "GREEN", "YELLOW", "CYAN", "MAGENTA"]
+              options.colors = numKeys.map(function(_, idx) { return defaultColors[idx % defaultColors.length] })
+            }
+          }
+        }
+      }
+      var lineUnit = isString(options.unit) ? options.unit : "dec"
+      var lineUnits = ["int", "dec1", "dec2", "dec3", "dec4", "dec", "bytes", "si"]
+      if (lineUnits.indexOf(lineUnit) < 0) return "[ERROR] options.unit must be one of: int, dec1, dec2, dec3, dec4, dec, bytes, si for type='line'."
+      if (typeof printChartArray === "function") {
+        out = printChartArray(data, lineUnit, options.width, options.height, options.max, options.min, options)
+      } else {
+        // Keep older OpenAF runtimes usable while preferring the one-shot array API.
+        out = ow.format.string.lineChart(data, options)
+      }
       if (isArray(options.seriesLabels) && isArray(options.colors)) {
         try {
           var legend = ow.format.string.lineChartLegend(options.seriesLabels, options)
@@ -4429,7 +4472,7 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     printChart: {
       name       : "printChart",
-      description: "Render an ASCII/ANSI data visualization to the console DURING execution (not just in the final answer). Requires useasciiviz=true. One tool covers many chart kinds -- pick the kind with `type`; each maps 1:1 to an OpenAF ow.format.print* renderer (line->ow.format.string.lineChart, sparkline->ow.format.printSparkline, histogram->ow.format.printHistogram, heatmap->ow.format.printHeatmap, bullet->ow.format.printBullet, scatter->ow.format.printScatter, boxplot->ow.format.printBoxplot, timeline->ow.format.printTimeline, statusmatrix->ow.format.printStatusMatrix), plus two bar renderers: bars (array-based, built in) and printbars (format-string based, wraps the global printBars helper). The shape of `data` depends on `type` -- see its property description. Use `options` for renderer settings (width, height, min, max, colors, palette, labels, unit, ...), also documented per-type below.",
+      description: "Render an ASCII/ANSI data visualization to the console DURING execution (not just in the final answer). Requires useasciiviz=true. One tool covers many chart kinds -- pick the kind with `type`; each maps 1:1 to an OpenAF renderer (line->printChartArray, sparkline->ow.format.printSparkline, histogram->ow.format.printHistogram, heatmap->ow.format.printHeatmap, bullet->ow.format.printBullet, scatter->ow.format.printScatter, boxplot->ow.format.printBoxplot, timeline->ow.format.printTimeline, statusmatrix->ow.format.printStatusMatrix), plus two bar renderers: bars (array-based, built in) and printbars (format-string based, wraps the global printBars helper). The shape of `data` depends on `type` -- see its property description. Use `options` for renderer settings (width, height, min, max, colors, palette, labels, unit, ...), also documented per-type below.",
       inputSchema: {
         type      : "object",
         properties: {
@@ -4444,9 +4487,13 @@ MiniUtilsTool._metadataByFn = (function() {
           },
           options: {
             type       : "object",
-            description: "Renderer options passed through to the OpenAF chart function for the chosen type: width, height, min, max, colors, palette, label/labels, showMinMax, buckets, vertical, showOutliers, showValue, valueFormat apply broadly where relevant; unit (bars only: int/dec1/dec2/dec3/dec/bytes/si); indicator/space (bars and printbars -- bar-fill character and gap character); max/min (printbars -- axis bounds, same as bars); xLabel/yLabel (scatter); xAxis/yAxis/aggregate/legend (heatmap time-bucketed); seriesLabels (line legend, paired with colors)."
+            description: "Renderer options passed through to the OpenAF chart function for the chosen type: width, height, min, max, colors, palette, label/labels, showMinMax, buckets, vertical, showOutliers, showValue, valueFormat apply broadly where relevant; unit (line: int/dec1/dec2/dec3/dec4/dec/bytes/si, default dec; bars: int/dec1/dec2/dec3/dec/bytes/si); indicator/space (bars and printbars -- bar-fill character and gap character); max/min (printbars -- axis bounds, same as bars); xLabel/yLabel (scatter); xAxis/yAxis/aggregate/legend (heatmap time-bucketed); seriesLabels (line legend, paired with colors)."
           },
-          title  : { type: "string", description: "Optional bold header printed above the chart." }
+          title  : { type: "string", description: "Optional bold header printed above the chart." },
+          xlabel : { type: "string", description: "Optional X-axis label (mapped to options.xLabel)." },
+          ylabel : { type: "string", description: "Optional Y-axis label (mapped to options.yLabel)." },
+          x_axis : { type: "string", description: "Optional X-axis label (alias for xlabel)." },
+          y_axis : { type: "string", description: "Optional Y-axis label (alias for ylabel)." }
         },
         required: ["data"]
       }
