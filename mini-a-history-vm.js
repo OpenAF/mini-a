@@ -9,6 +9,10 @@ var MiniAHistoryVM = function(options) {
   this.policyVersion = 1
   this.contextSchemaVersion = 2
   this.representationVersion = 2
+  this.summarizerVersion = isString(opts.summarizerVersion) ? opts.summarizerVersion : "deterministic-v1"
+  this.semanticCompression = opts.semanticCompression === true && isFunction(opts.semanticCompressor)
+  this.semanticCompressor = this.semanticCompression ? opts.semanticCompressor : __
+  this.semanticCompressionMinTokens = isNumber(opts.semanticCompressionMinTokens) ? Math.max(500, Math.floor(opts.semanticCompressionMinTokens)) : 4000
   this.enabled = opts.enabled === true
   this.shadow = opts.shadow === true
   this.contextVirtualization = opts.contextVirtualization === true && this.enabled
@@ -41,6 +45,7 @@ var MiniAHistoryVM = function(options) {
   this.contextWorkingSets = {}
   this.contextPrefixCache = {}
   this.contextVirtualizationShadowLast = __
+  this.contextVirtualizationActiveLast = __
   this._pendingChildren = {}
   this.expansions = {}
   this._seq = 0
@@ -121,7 +126,19 @@ var MiniAHistoryVM = function(options) {
     context_virtualization_shadow_actual_tokens: 0,
     context_virtualization_shadow_projected_tokens: 0,
     context_virtualization_shadow_expected_savings: 0,
-    context_virtualization_shadow_object_differences: 0
+    context_virtualization_shadow_object_differences: 0,
+    context_virtualization_active_assemblies: 0,
+    context_virtualization_active_input_tokens: 0,
+    context_virtualization_active_output_tokens: 0,
+    context_virtualization_active_tokens_saved: 0,
+    context_virtualization_active_references: 0,
+    structural_compressions: 0,
+    structural_json_compressions: 0,
+    structural_code_compressions: 0,
+    structural_log_compressions: 0,
+    semantic_compressions: 0,
+    semantic_compression_failures: 0,
+    summary_reuse: 0
   }
 
   if (this.enabled || this.shadow) this._open()
@@ -306,6 +323,7 @@ MiniAHistoryVM.prototype.captureProviderConversation = function(conversation) {
     var entry = conversation[i]
     var text = isMap(entry) && isString(entry.content) ? entry.content : ""
     if (text.indexOf("[HISTORY_VM_REFERENCE ") === 0) continue
+    if (text.indexOf("[CONTEXT_OBJECT ") === 0) continue
     if (isMap(entry) && entry.__historyVmProjection === true) continue
     if (isDef(this.append("provider_message", entry, { providerIndex: i, role: isMap(entry) ? entry.role : __ }))) appended++
   }
@@ -750,7 +768,54 @@ MiniAHistoryVM.prototype._representationSourceHash = function(object, level) {
 }
 
 MiniAHistoryVM.prototype._representationCacheKey = function(object, level) {
-  return object.handle + ":" + level + ":v" + object.version + ":r" + this.representationVersion + ":" + this._representationSourceHash(object, level)
+  return object.handle + ":" + level + ":v" + object.version + ":r" + this.representationVersion + ":s" + this.summarizerVersion + ":" + this._representationSourceHash(object, level)
+}
+
+MiniAHistoryVM.prototype._structuralRepresentation = function(object, level, serialized) {
+  var type = isString(object.type) ? object.type.toLowerCase() : ""
+  var source = isString(serialized) ? serialized : ""
+  var parsed = __
+  var jsonLike = type.indexOf("json") >= 0 || source.match(/^\s*[\[{]/) && (object.kind === "artifact" || object.kind === "attachment" || type === "tool_exchange")
+  if (jsonLike) {
+    try { parsed = jsonParse(source, __, __, true) } catch(ignoreJson) {}
+    if (isMap(parsed) || isArray(parsed)) {
+      var root = isArray(parsed) ? "array[" + parsed.length + "]" : "object"
+      var values = isArray(parsed) ? parsed.slice(0, level === "L3" ? 3 : 1) : parsed
+      var keys = isMap(values) ? Object.keys(values).slice(0, level === "L3" ? 30 : 15) : []
+      var schema = []
+      for (var k = 0; k < keys.length; k++) {
+        var value = values[keys[k]]
+        schema.push(keys[k] + ": " + (isArray(value) ? "array[" + value.length + "]" : (isMap(value) ? "object{" + Object.keys(value).slice(0, 8).join(", ") + "}" : typeof value)))
+      }
+      var jsonText = "JSON " + object.handle + " " + root + (schema.length > 0 ? "\nSchema:\n- " + schema.join("\n- ") : "")
+      if (level === "L3" && isArray(parsed) && parsed.length > 0) jsonText += "\nRepresentative records:\n" + stringify(parsed.slice(0, 3), __, "")
+      return { kind: "json", text: jsonText }
+    }
+  }
+  var codeLike = type.indexOf("code") >= 0 || type.indexOf("source") >= 0 || source.match(/(?:^|\n)\s*(?:function|class|var|let|const|def|import|package|public|private)\b/)
+  if (codeLike) {
+    var codeLines = source.split(/\r?\n/)
+    var signatures = []
+    for (var c = 0; c < codeLines.length && signatures.length < (level === "L3" ? 40 : 20); c++) {
+      var line = codeLines[c].trim()
+      if (line.match(/^(?:import|package|class|interface|function|def|public\s+|private\s+|protected\s+|[A-Za-z_$][\w$]*\s*=\s*function\b)/)) signatures.push((c + 1) + ": " + line.substring(0, 240))
+    }
+    if (signatures.length > 0) return { kind: "code", text: "Code " + object.handle + " (" + codeLines.length + " lines)\nImports/signatures:\n- " + signatures.join("\n- ") }
+  }
+  var logLike = type.indexOf("log") >= 0 || source.match(/(?:^|\n).*(?:ERROR|WARN|FATAL|Exception)/)
+  if (logLike) {
+    var logLines = source.split(/\r?\n/)
+    var errors = [], warnings = []
+    for (var l = 0; l < logLines.length; l++) {
+      if (/(?:ERROR|FATAL|Exception)/i.test(logLines[l]) && errors.length < 12) errors.push((l + 1) + ": " + logLines[l].substring(0, 240))
+      else if (/WARN/i.test(logLines[l]) && warnings.length < 8) warnings.push((l + 1) + ": " + logLines[l].substring(0, 240))
+    }
+    var logText = "Log " + object.handle + " (" + logLines.length + " lines; errors=" + errors.length + "; warnings=" + warnings.length + ")"
+    var samples = errors.concat(level === "L3" ? warnings : []).slice(0, level === "L3" ? 20 : 8)
+    if (samples.length > 0) logText += "\nImportant events:\n- " + samples.join("\n- ")
+    return { kind: "log", text: logText }
+  }
+  return __
 }
 
 MiniAHistoryVM.prototype._buildRepresentation = function(object, level) {
@@ -772,7 +837,8 @@ MiniAHistoryVM.prototype._buildRepresentation = function(object, level) {
     if (object.edges.length > 0) text += " Links: " + object.edges.length
   }
   if (level === "L2") {
-    text = object.summary
+    var structuralSummary = this._structuralRepresentation(object, level, serialized)
+    text = isMap(structuralSummary) ? structuralSummary.text : object.summary
     if (object.children.length > 0) {
       var childLines = []
       for (var c = 0; c < object.children.length && c < 8; c++) {
@@ -795,12 +861,21 @@ MiniAHistoryVM.prototype._buildRepresentation = function(object, level) {
     }
   }
   if (level === "L3") {
-    var chars = this._contentCodePoints(serialized)
-    text = chars.slice(0, 1200).join("")
-    if (chars.length > 1200) {
-      text += "\n[" + object.handle + " detail truncated; expand L4 for exact content]"
-      complete = false
+    var structuralDetail = this._structuralRepresentation(object, level, serialized)
+    if (isMap(structuralDetail)) text = structuralDetail.text
+    else {
+      var chars = this._contentCodePoints(serialized)
+      text = chars.slice(0, 1200).join("")
+      if (chars.length > 1200) {
+        text += "\n[" + object.handle + " detail truncated; expand L4 for exact content]"
+        complete = false
+      }
     }
+  }
+  if (isMap(structuralSummary) || isMap(structuralDetail)) {
+    var structural = isMap(structuralDetail) ? structuralDetail : structuralSummary
+    if (this.estimateTokens(text) < object.estimatedOriginalTokens) complete = false
+    if (!complete || level !== "L4") text += "\nExact backing: " + object.handle
   }
   return {
     level: level,
@@ -811,6 +886,7 @@ MiniAHistoryVM.prototype._buildRepresentation = function(object, level) {
     objectVersion: object.version,
     representationVersion: this.representationVersion,
     generatedBy: "deterministic",
+    structuralKind: isMap(structuralSummary) || isMap(structuralDetail) ? structural.kind : __,
     complete: complete
   }
 }
@@ -827,9 +903,29 @@ MiniAHistoryVM.prototype.getRepresentation = function(id, level) {
   var representation = this.representationCache[key]
   if (isMap(representation)) {
     this.metrics.representation_cache_hits++
+    this.metrics.summary_reuse++
   } else {
     this.metrics.representation_cache_misses++
-    representation = this._buildRepresentation(object, normalized)
+    representation = __
+    if (this.semanticCompression && (normalized === "L2" || normalized === "L3") && object.estimatedOriginalTokens >= this.semanticCompressionMinTokens) {
+      try {
+        var semantic = this.semanticCompressor({ id: object.id, handle: object.handle, kind: object.kind, type: object.type, level: normalized, content: object.content, summary: object.summary, provenance: object.provenance })
+        var semanticText = isString(semantic) ? semantic : (isMap(semantic) && isString(semantic.text) ? semantic.text : "")
+        if (semanticText.trim().length > 0 && this.estimateTokens(semanticText) < object.estimatedOriginalTokens) {
+          representation = this._buildRepresentation(object, normalized)
+          representation.text = semanticText + "\nExact backing: " + object.handle
+          representation.estimatedTokens = this.estimateTokens(representation.text)
+          representation.generatedBy = "semantic"
+          representation.complete = false
+          this.metrics.semantic_compressions++
+        }
+      } catch(ignoreSemanticCompression) { this.metrics.semantic_compression_failures++ }
+    }
+    if (!isMap(representation)) representation = this._buildRepresentation(object, normalized)
+    if (isString(representation.structuralKind)) {
+      this.metrics.structural_compressions++
+      this.metrics["structural_" + representation.structuralKind + "_compressions"]++
+    }
     this.representationCache[key] = representation
     try {
       io.writeFileString(this.representationCachePath, stringify({ key: key, representation: representation }, __, "") + "\n", __, true)
@@ -1290,13 +1386,14 @@ MiniAHistoryVM.prototype.projectContextShadow = function(options) {
   var assemblyOptions = merge({}, opts, true)
   delete assemblyOptions.actualTokens
   delete assemblyOptions.actualContext
-  var assembly = this.assembleContext(assemblyOptions)
+  var dryRun = isArray(opts.actualContext) ? this.projectActiveContext(opts.actualContext, merge(assemblyOptions, { shadowProjection: true, projectionOnly: true }, true)) : __
+  var assembly = isMap(dryRun) && dryRun.active === true ? dryRun.assembly : this.assembleContext(assemblyOptions)
   if (!isMap(assembly) || !isArray(assembly.objects)) return { active: false, reason: isMap(assembly) ? assembly.error : "Context assembly failed." }
   var delta = isMap(assembly.delta) ? assembly.delta : {}
   var differences = ["added", "removed", "promoted", "demoted", "modified"].reduce(function(total, key) {
     return total + (isArray(delta[key]) ? delta[key].length : 0)
   }, 0)
-  var projectedTokens = isNumber(assembly.materializedTokens) ? assembly.materializedTokens : 0
+  var projectedTokens = isMap(dryRun) && dryRun.active === true && isNumber(dryRun.outputTokens) ? dryRun.outputTokens : (isNumber(assembly.materializedTokens) ? assembly.materializedTokens : 0)
   var result = {
     active: true,
     consumer: assembly.consumer,
@@ -1319,13 +1416,121 @@ MiniAHistoryVM.prototype.projectContextShadow = function(options) {
     objectsConsidered: result.objectsConsidered,
     objectsSelected: result.objectsSelected,
     stablePrefixTokens: result.stablePrefixTokens,
-    effectiveContextRatio: result.effectiveContextRatio
+    effectiveContextRatio: result.effectiveContextRatio,
+    addressableTokens: assembly.addressableTokens,
+    materializedTokens: assembly.materializedTokens,
+    categoryUsage: merge({}, assembly.categoryUsage, true),
+    budget: merge({}, assembly.budget, true)
   }
   this.metrics.context_virtualization_shadow_assemblies++
   this.metrics.context_virtualization_shadow_actual_tokens = actualTokens
   this.metrics.context_virtualization_shadow_projected_tokens = projectedTokens
   this.metrics.context_virtualization_shadow_expected_savings = result.expectedSavings
   this.metrics.context_virtualization_shadow_object_differences = differences
+  return result
+}
+
+MiniAHistoryVM.prototype.projectActiveContext = function(conversation, options) {
+  var opts = isMap(options) ? options : {}
+  if (!this.contextVirtualization || this.contextVirtualizationShadow && opts.shadowProjection !== true) return { active: false, reason: "Active context virtualization is not enabled.", conversation: conversation }
+  if (!isArray(conversation)) return { active: false, reason: "A provider conversation array is required.", conversation: conversation }
+  var recentCount = isNumber(opts.recentCount) ? Math.max(2, Math.min(20, Math.floor(opts.recentCount))) : 6
+  var protectedTokens = 0
+  var replaceable = {}
+  var isProtected = function(entry, index) {
+    if (!isMap(entry)) return true
+    var role = isString(entry.role) ? entry.role.toLowerCase() : ""
+    if (role === "system" || role === "developer" || role === "user" || role === "tool" || role === "function") return true
+    if (!isString(entry.content) || index >= conversation.length - recentCount) return true
+    if (isArray(entry.tool_calls) || isDef(entry.tool_call_id) || isDef(entry.function_call)) return true
+    return false
+  }
+  for (var i = 0; i < conversation.length; i++) {
+    if (isProtected(conversation[i], i)) protectedTokens += this.estimateTokens(stringify(conversation[i], __, ""))
+    else replaceable[i] = true
+  }
+  var totalBudget = isNumber(opts.budget) && opts.budget > 0 ? Math.floor(opts.budget) : Math.max(1, this.estimateTokens(stringify(conversation, __, "")))
+  var assemblyOptions = merge({}, opts, true)
+  assemblyOptions.budget = totalBudget
+  assemblyOptions.outputReserve = isNumber(opts.outputReserve) ? opts.outputReserve : 0
+  assemblyOptions.fixedTokens = merge(isMap(opts.fixedTokens) ? opts.fixedTokens : {}, { provider_protected: protectedTokens }, true)
+  delete assemblyOptions.recentCount
+  delete assemblyOptions.shadowProjection
+  delete assemblyOptions.projectionOnly
+  var assembly = this.assembleContext(assemblyOptions)
+  if (!isMap(assembly) || !isArray(assembly.objects)) return { active: false, reason: isMap(assembly) ? assembly.error : "Context assembly failed.", conversation: conversation }
+  var selected = {}
+  for (var s = 0; s < assembly.objects.length; s++) selected[assembly.objects[s].handle] = assembly.objects[s]
+  var output = []
+  var references = 0
+  for (var ci = 0; ci < conversation.length; ci++) {
+    var entry = conversation[ci]
+    if (replaceable[ci] !== true) {
+      output.push(entry)
+      continue
+    }
+    var object = this._providerObjectForIndex(ci)
+    if (!isMap(object) || object.branchId !== this.branchId) {
+      output.push(entry)
+      continue
+    }
+    var selectedItem = selected[object.handle]
+    var level = isMap(selectedItem) ? selectedItem.level : "L0"
+    if (level === "L4") {
+      output.push(entry)
+      continue
+    }
+    var representation = isMap(selectedItem) ? selectedItem.representation : this.getRepresentation(object.handle, level)
+    var value = isMap(representation) && isString(representation.text)
+      ? representation.text
+      : (isMap(representation) && isDef(representation.content) ? (isString(representation.content) ? representation.content : stringify(representation.content, __, "")) : object.summary)
+    var replacement = merge({}, entry, true)
+    replacement.content = "[CONTEXT_OBJECT " + object.handle + " " + level + "]\n" + value + "\nExact backing: " + object.handle + ". Use history_get for bounded exact reads."
+    if (this.estimateTokens(stringify(replacement, __, "")) >= this.estimateTokens(stringify(entry, __, ""))) {
+      output.push(entry)
+      continue
+    }
+    output.push(replacement)
+    references++
+  }
+  var inputTokens = this.estimateTokens(stringify(conversation, __, ""))
+  var outputTokens = this.estimateTokens(stringify(output, __, ""))
+  var result = {
+    active: true,
+    consumer: assembly.consumer,
+    inputTokens: inputTokens,
+    outputTokens: outputTokens,
+    tokensSaved: inputTokens - outputTokens,
+    references: references,
+    objectsConsidered: assembly.objectsConsidered,
+    objectsSelected: assembly.objectsSelected,
+    effectiveContextRatio: assembly.effectiveContextRatio,
+    assembly: assembly,
+    conversation: output
+  }
+  this.contextVirtualizationActiveLast = {
+    consumer: result.consumer,
+    inputTokens: inputTokens,
+    outputTokens: outputTokens,
+    tokensSaved: result.tokensSaved,
+    references: references,
+    objectsConsidered: result.objectsConsidered,
+    objectsSelected: result.objectsSelected,
+    effectiveContextRatio: result.effectiveContextRatio,
+    addressableTokens: assembly.addressableTokens,
+    materializedTokens: assembly.materializedTokens,
+    categoryUsage: merge({}, assembly.categoryUsage, true),
+    budget: merge({}, assembly.budget, true)
+  }
+  if (opts.projectionOnly !== true) {
+    this.metrics.context_virtualization_active_assemblies++
+    this.metrics.context_virtualization_active_input_tokens = inputTokens
+    this.metrics.context_virtualization_active_output_tokens = outputTokens
+    this.metrics.context_virtualization_active_tokens_saved += result.tokensSaved
+    this.metrics.context_virtualization_active_references = references
+  } else {
+    this.contextVirtualizationActiveLast = __
+  }
   return result
 }
 
@@ -1678,7 +1883,7 @@ MiniAHistoryVM.prototype.materializeConversation = function(conversation) {
       materialized.push(entry)
       continue
     }
-    var match = entry.content.match(/^\[HISTORY_VM_REFERENCE (h\d+)\]/) || entry.content.match(/\[HISTORY_VM_RANGE (h\d+) /)
+    var match = entry.content.match(/^\[HISTORY_VM_REFERENCE (h\d+)\]/) || entry.content.match(/\[HISTORY_VM_RANGE (h\d+) /) || entry.content.match(/^\[CONTEXT_OBJECT history:(h\d+) L[0-4]\]/)
     var object = match ? this.objectById[match[1]] : __
     if (isMap(object) && object.branchId === this.branchId && isMap(object.content)) materialized.push(merge({}, object.content, true))
     else materialized.push(entry)
@@ -1782,6 +1987,7 @@ MiniAHistoryVM.prototype.diagnostics = function() {
     degradedReason: this.degradedReason,
     states: states,
     contextVirtualizationShadowLast: isMap(this.contextVirtualizationShadowLast) ? merge({}, this.contextVirtualizationShadowLast, true) : __,
+    contextVirtualizationActiveLast: isMap(this.contextVirtualizationActiveLast) ? merge({}, this.contextVirtualizationActiveLast, true) : __,
     metrics: metrics
   }
 }

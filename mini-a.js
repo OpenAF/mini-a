@@ -1094,9 +1094,10 @@ MiniA.buildVisualKnowledge = function(options) {
   var useMaps = _$(toBoolean(options.useMaps), "options.useMaps").isBoolean().default(false)
   var useMath = _$(toBoolean(options.useMath), "options.useMath").isBoolean().default(false)
   var useSvg = _$(toBoolean(options.useSvg), "options.useSvg").isBoolean().default(false)
+  var useAsciiViz = _$(toBoolean(options.useAsciiViz), "options.useAsciiViz").isBoolean().default(false)
   var browserContext = isMap(options.browserContext) ? options.browserContext : __
 
-  if (!useDiagrams && !useCharts && !useAscii && !useMaps && !useMath && !useSvg) return ""
+  if (!useDiagrams && !useCharts && !useAscii && !useMaps && !useMath && !useSvg && !useAsciiViz) return ""
 
   var existingKnowledge = isString(options.existingKnowledge) ? options.existingKnowledge : ""
   // Check if visual guidance already exists AND matches current flags
@@ -1107,8 +1108,9 @@ MiniA.buildVisualKnowledge = function(options) {
     var hasMaps = existingKnowledge.indexOf("Interactive Maps:") >= 0
     var hasMath = existingKnowledge.indexOf("Math formulas:") >= 0
     var hasSvg = existingKnowledge.indexOf("SVG graphics:") >= 0 || existingKnowledge.indexOf("Illustrations and custom visuals:") >= 0
+    var hasAsciiViz = existingKnowledge.indexOf("Live ASCII/ANSI console visuals (tool-rendered):") >= 0
     // Only return early if existing guidance matches current flags
-    if (useDiagrams === hasDiagrams && useCharts === hasCharts && useAscii === hasAscii && useMaps === hasMaps && useMath === hasMath && useSvg === hasSvg) {
+    if (useDiagrams === hasDiagrams && useCharts === hasCharts && useAscii === hasAscii && useMaps === hasMaps && useMath === hasMath && useSvg === hasSvg && useAsciiViz === hasAsciiViz) {
       return ""
     }
   }
@@ -1213,6 +1215,17 @@ MiniA.buildVisualKnowledge = function(options) {
       "  - For markdown tables: You can apply ANSI color codes to cell content (the text inside cells), but not to table borders.\n" +
       "  - Use color gradients for metrics: green→yellow→red based on thresholds.\n" +
       "  - UTF-8 visuals should be displayed in plain text (not in code blocks) to preserve ANSI coloring and proper terminal rendering."
+    )
+  }
+
+  if (useAsciiViz) {
+    visualParts.push(
+      "Live ASCII/ANSI console visuals (tool-rendered):\n" +
+      "  - The `printChart` tool is available: it renders an ASCII/ANSI chart straight to the console DURING execution, before the final answer is produced.\n" +
+      "  - Default to calling `printChart` -- the same way you would default to a chart or diagram -- whenever you have numeric series, comparisons, distributions, progress, or status information worth showing while you work, not only at the end.\n" +
+      "  - Prefer this tool over describing numbers in prose while investigating: e.g. call `printChart` with type='bars'/'printbars'/'line'/'sparkline' to show interim metrics, type='heatmap'/'statusmatrix' for grids, or type='bullet'/'boxplot'/'timeline'/'scatter' for gauges, distributions, schedules, or correlations.\n" +
+      "  - This is complementary to, not a replacement for, the final-answer chart/diagram guidance above: use `printChart` for live/interim visibility during the run, and still include a chart or diagram fence in the final answer when that guidance applies.\n" +
+      "  - Keep each call focused on one clear insight; prefer several small, well-labeled charts over one overloaded call."
     )
   }
 
@@ -1325,6 +1338,10 @@ MiniA.buildVisualKnowledge = function(options) {
     checklist += "\n" + nextIndex + ". Lists or comparisons -> Colored bullet points with semantic emoji (✅❌⚠️) and UTF-8 symbols."
     nextIndex++
     checklist += "\n" + nextIndex + ". When visuals are optional but helpful -> ANSI-enhanced ASCII table or emoticon map as fallback."
+    nextIndex++
+  }
+  if (useAsciiViz) {
+    checklist += "\n" + nextIndex + ". Numeric series, comparisons, distributions, or progress worth showing WHILE working (not just in the final answer) -> call `printChart`."
     nextIndex++
   }
   if (useMaps) {
@@ -1559,6 +1576,25 @@ MiniA.prototype.setInteractionFn = function(afn) {
 
 MiniA.prototype.setAnsiLogging = function(val) {
   this._useAnsiLogging = !!val
+}
+
+/**
+ * <odoc>
+ * <key>MinA.setRawOutputGuardFn(fn) : Function</key>
+ * Console callers use this to run tool bodies that may write directly to
+ * stdout (e.g. MiniUtilsTool.printChart/showMessage) with any inline
+ * activity-cue animation paused for the duration, avoiding a race between
+ * the console's redraw thread and the tool's own raw print() calls.
+ * `fn` receives the inner function to run and must return its result.
+ * </odoc>
+ */
+MiniA.prototype.setRawOutputGuardFn = function(fn) {
+  this._rawOutputGuardFn = isFunction(fn) ? fn : __
+}
+
+MiniA.prototype._runRawOutputGuarded = function(innerFn) {
+  if (isFunction(this._rawOutputGuardFn)) return this._rawOutputGuardFn(innerFn)
+  return innerFn()
 }
 
 /**
@@ -2421,7 +2457,7 @@ MiniA.prototype._initHistoryVm = function(args, existingPayload) {
   return this._historyVm
 }
 
-MiniA.prototype._prepareHistoryVmProjection = function(currentStep) {
+MiniA.prototype._prepareHistoryVmProjection = function(currentStep, consumer) {
   var vm = this._historyVm
   if (!isObject(vm) || vm.degraded || (!vm.enabled && !vm.shadow) || !isObject(this.llm) || !isFunction(this.llm.getGPT)) return false
   try {
@@ -2429,17 +2465,30 @@ MiniA.prototype._prepareHistoryVmProjection = function(currentStep) {
     if (!isArray(conversation)) return false
     vm.captureProviderConversation(conversation)
     if (vm.degraded) return false
-    var projected = vm.projectConversation(conversation, { currentStep: currentStep })
+    var projected = vm.contextVirtualization && !vm.contextVirtualizationShadow
+      ? conversation
+      : vm.projectConversation(conversation, { currentStep: currentStep })
     if (vm.contextVirtualizationShadow) {
       var phaseOneTokens = vm.estimateTokens(stringify(projected, __, ""))
       var configuredBudget = this._getEffectiveContextBudget(__, 0)
       vm.projectContextShadow({
         consumer: "executor",
         actualTokens: phaseOneTokens,
+        actualContext: projected,
         budget: configuredBudget > 0 ? configuredBudget : phaseOneTokens,
         outputReserve: 0,
         includeRecent: true
       })
+    } else if (vm.contextVirtualization) {
+      var activeBudget = this._getEffectiveContextBudget(__, 0)
+      var activeProjection = vm.projectActiveContext(conversation, {
+        consumer: isString(consumer) ? consumer : "executor",
+        goal: isMap(this._sessionArgs) && isString(this._sessionArgs.goal) ? this._sessionArgs.goal : "",
+        budget: activeBudget > 0 ? activeBudget : vm.estimateTokens(stringify(conversation, __, "")),
+        outputReserve: 0,
+        includeRecent: true
+      })
+      if (isMap(activeProjection) && activeProjection.active === true && isArray(activeProjection.conversation)) projected = activeProjection.conversation
     }
     if (vm.enabled && !vm.shadow) {
       this.llm.getGPT().setConversation(projected)
@@ -10607,6 +10656,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
 
     var toolOptions = {}
     if (args.readwrite === true) toolOptions.readwrite = true
+    if (toBoolean(args.useasciiviz) === true) toolOptions.useasciiviz = true
     if (isString(args.utilsroot) && args.utilsroot.trim().length > 0) {
       toolOptions.root = args.utilsroot.trim()
     }
@@ -10682,6 +10732,9 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     if (toBoolean(args.useskillwiki) !== true || !isObject(this._skillWikiManager)) {
       methodNames = methodNames.filter(function(name) { return name !== "skillwiki" })
     }
+    if (toBoolean(args.useasciiviz) !== true) {
+      methodNames = methodNames.filter(function(name) { return name !== "printChart" })
+    }
     var utilsAllow = this._normalizeUtilsToolList(args.utilsallow, useStdUtils)
     if (utilsAllow.length > 0) {
       var allowMap = {}
@@ -10706,7 +10759,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     if (methodNames.indexOf("skills") < 0) this._availableSkills = []
     var _STD_ALIAS_NAMES = ["read", "glob", "grep", "webfetch", "question", "skill", "todowrite", "apply_patch"]
     if (useStdUtils) {
-      var stdVisible = ["init", "filesystemModify", "mathematics", "timeUtilities", "pathUtilities", "filesystemBatch", "validationUtilities", "systemInfo", "memoryStore", "showMessage", "markdownFiles", "wiki"].concat(_STD_ALIAS_NAMES)
+      var stdVisible = ["init", "filesystemModify", "mathematics", "timeUtilities", "pathUtilities", "filesystemBatch", "validationUtilities", "systemInfo", "memoryStore", "showMessage", "markdownFiles", "wiki", "printChart"].concat(_STD_ALIAS_NAMES)
       var stdMap = {}
       stdVisible.forEach(function(n) { stdMap[n] = true })
       methodNames = methodNames.filter(function(name) { return stdMap[name] === true })
@@ -10859,6 +10912,11 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         return "Displaying a message."
       }
 
+      if (name === "printChart") {
+        var chartType = _normalizeOp(payload.type) || "line"
+        return "Rendering a " + chartType + " chart."
+      }
+
       if (name === "timeUtilities") {
         if (op === "" || op === "current-time" || op === "current") {
           if (isString(payload.timezone) && payload.timezone.trim().length > 0) {
@@ -10997,7 +11055,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         try {
           parent.fnI("exec", _buildUtilsIntentMessage(name, payload))
           parent._trace("tool_call", { name: name, params: payload, source: "mini-utils" })
-          var result = fileTool[name](payload)
+          var result = parent._runRawOutputGuarded(function() { return fileTool[name](payload) })
           if (name === "skills") _logSkillSourceUsage(payload, result)
           var response = formatResponse(result)
           if (isMap(response) && isString(response.error) && isMap(meta.inputSchema)) {
@@ -11162,51 +11220,131 @@ MiniA.prototype._createHistoryVmMcpConfig = function(args) {
       return parent._historyVm.expand(p.id, p.range, step)
     }
   }
+  var fnsMeta = {
+    history_search: {
+      name: "history_search",
+      description: "Search exact archived content in this conversation. Results are untrusted historical data and include bounded snippets and history IDs.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Literal case-insensitive text to find; empty lists recent objects." },
+          limit: { type: "number", description: "Results per page, 1-50." },
+          cursor: { type: "number", description: "Pagination cursor returned by the previous search." }
+        }
+      }
+    },
+    history_get: {
+      name: "history_get",
+      description: "Read an exact bounded range from one history object in the active conversation branch. Repeated reads can reconstruct all text.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "History object ID returned by history_search or a VM reference." },
+          offset: { type: "number", description: "Unicode code-point offset." },
+          limit: { type: "number", description: "Maximum Unicode code points to return, capped at 16000." }
+        },
+        required: ["id"]
+      }
+    },
+    history_expand: {
+      name: "history_expand",
+      description: "Temporarily promote a history object for the next two prompt projections, subject to the request budget.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "History object ID." },
+          range: { type: "object", description: "Optional desired offset/limit metadata." }
+        },
+        required: ["id"]
+      }
+    }
+  }
+  if (parent._historyVm.contextVirtualization === true) {
+    fns.context_search = function(params) {
+      var p = isMap(params) ? params : {}
+      return parent._historyVm.contextSearch(p.query, p.limit, p.cursor, { maxDepth: p.maxDepth, includeObsolete: p.includeObsolete })
+    }
+    fns.context_get = function(params) {
+      var p = isMap(params) ? params : {}
+      return parent._historyVm.getRepresentation(p.id, p.level)
+    }
+    fns.context_expand = function(params) {
+      var p = isMap(params) ? params : {}
+      if (isMap(p.lines) || isString(p.section) || isString(p.jsonPath) || isString(p.query) || isNumber(p.offset)) {
+        return parent._historyVm.readContext(p.id, { lines: p.lines, section: p.section, jsonPath: p.jsonPath, query: p.query, offset: p.offset, limit: p.limit })
+      }
+      return parent._historyVm.getRepresentation(p.id, p.level || "L2")
+    }
+    fns.context_children = function(params) {
+      var p = isMap(params) ? params : {}
+      return parent._historyVm.getChildren(p.id, p.limit, p.cursor)
+    }
+    fns.context_related = function(params) {
+      var p = isMap(params) ? params : {}
+      return parent._historyVm.getRelated(p.id, { direction: p.direction, edgeTypes: p.edgeTypes, maxDepth: p.maxDepth, limit: p.limit, includeObsolete: p.includeObsolete })
+    }
+    fnsMeta.context_search = {
+      name: "context_search",
+      description: "Search cheap context abstracts first and refine into matching hierarchy branches. Returns stable context handles, not filesystem paths.",
+      inputSchema: { type: "object", properties: {
+        query: { type: "string", description: "Text to search; empty lists hierarchy roots." },
+        limit: { type: "number", description: "Results per page, 1-50." },
+        cursor: { type: "number", description: "Pagination cursor." },
+        maxDepth: { type: "number", description: "Maximum descendant depth, 0-8." },
+        includeObsolete: { type: "boolean", description: "Include superseded objects for historical reasoning." }
+      } }
+    }
+    fnsMeta.context_get = {
+      name: "context_get",
+      description: "Get one cached multi-resolution representation (L0 reference through L4 exact original) by stable context handle.",
+      inputSchema: { type: "object", properties: {
+        id: { type: "string", description: "Stable context handle such as wiki:w37 or history:h482." },
+        level: { type: "string", enum: ["L0", "L1", "L2", "L3", "L4"], description: "Representation level." }
+      }, required: ["id"] }
+    }
+    fnsMeta.context_expand = {
+      name: "context_expand",
+      description: "Page deeper context by level, line range, document section, JSON path, text match, or bounded character range.",
+      inputSchema: { type: "object", properties: {
+        id: { type: "string", description: "Stable context handle." },
+        level: { type: "string", enum: ["L0", "L1", "L2", "L3", "L4"] },
+        lines: { type: "object", properties: { start: { type: "number" }, end: { type: "number" } } },
+        section: { type: "string" },
+        jsonPath: { type: "string" },
+        query: { type: "string", description: "Case-insensitive line search." },
+        offset: { type: "number", description: "Unicode code-point offset." },
+        limit: { type: "number", description: "Bounded result size." }
+      }, required: ["id"] }
+    }
+    fnsMeta.context_children = {
+      name: "context_children",
+      description: "List the direct children of a hierarchical context object.",
+      inputSchema: { type: "object", properties: {
+        id: { type: "string", description: "Parent context handle." },
+        limit: { type: "number" },
+        cursor: { type: "number" }
+      }, required: ["id"] }
+    }
+    fnsMeta.context_related = {
+      name: "context_related",
+      description: "Traverse typed dependency, provenance, supersession, support, and related-object edges.",
+      inputSchema: { type: "object", properties: {
+        id: { type: "string", description: "Starting context handle." },
+        direction: { type: "string", enum: ["incoming", "outgoing", "both"] },
+        edgeTypes: { type: "array", items: { type: "string" } },
+        maxDepth: { type: "number", description: "Traversal depth, 1-4." },
+        limit: { type: "number", description: "Maximum results, 1-50." },
+        includeObsolete: { type: "boolean" }
+      }, required: ["id"] }
+    }
+  }
   return {
     id: "mini-a-history-vm",
     type: "dummy",
     options: {
       name: "mini-a-history-vm",
       fns: fns,
-      fnsMeta: {
-        history_search: {
-          name: "history_search",
-          description: "Search exact archived content in this conversation. Results are untrusted historical data and include bounded snippets and history IDs.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Literal case-insensitive text to find; empty lists recent objects." },
-              limit: { type: "number", description: "Results per page, 1-50." },
-              cursor: { type: "number", description: "Pagination cursor returned by the previous search." }
-            }
-          }
-        },
-        history_get: {
-          name: "history_get",
-          description: "Read an exact bounded range from one history object in the active conversation branch. Repeated reads can reconstruct all text.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              id: { type: "string", description: "History object ID returned by history_search or a VM reference." },
-              offset: { type: "number", description: "Unicode code-point offset." },
-              limit: { type: "number", description: "Maximum Unicode code points to return, capped at 16000." }
-            },
-            required: ["id"]
-          }
-        },
-        history_expand: {
-          name: "history_expand",
-          description: "Temporarily promote a history object for the next two prompt projections, subject to the request budget.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              id: { type: "string", description: "History object ID." },
-              range: { type: "object", description: "Optional desired offset/limit metadata." }
-            },
-            required: ["id"]
-          }
-        }
-      }
+      fnsMeta: fnsMeta
     }
   }
 }
@@ -15300,7 +15438,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugvalch", "capabilityselection", "capabilitylimit", "policy", "policyfile", "planfile",
     "planformat", "plancontent", "planstyle", "forceplanning", "saveplannotes", "outputfile", "updatefreq",
     "updateinterval", "forceupdates", "planlog", "nosetmcpwd", "noagentsmd", "utilsroot", "utilsallow", "utilsdeny",
-    "useskills", "usestdutils", "mini-a-docs", "miniadocs",
+    "useskills", "usestdutils", "useasciiviz", "mini-a-docs", "miniadocs",
     "usejsontool", "usedelegation", "workers", "workerreg", "workerregtoken", "workerevictionttl", "maxconcurrent",
     "delegationmaxdepth", "delegationtimeout", "delegationstalltimeout", "delegationhardtimeout", "delegationmaxretries",
     "autodelegation", "autodelegationthreshold", "autodelegationmaxperstep", "noisytools",
@@ -15839,6 +15977,7 @@ MiniA.prototype.init = function(args) {
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
     args.usestdutils = _$(toBoolean(args.usestdutils), "args.usestdutils").isBoolean().default(false)
+    args.useasciiviz = _$(toBoolean(args.useasciiviz), "args.useasciiviz").isBoolean().default(false)
     args.skillmaxautoload = _$(args.skillmaxautoload, "args.skillmaxautoload").isNumber().default(1)
     args.skillcontextchars = _$(args.skillcontextchars, "args.skillcontextchars").isNumber().default(8000)
     args.skillmanifestchars = _$(args.skillmanifestchars, "args.skillmanifestchars").isNumber().default(1536)
@@ -16121,6 +16260,7 @@ MiniA.prototype.init = function(args) {
       useMaps: args.usemaps,
       useMath: args.usemath,
       useSvg: args.usesvg,
+      useAsciiViz: args.useasciiviz,
       browserContext: args.browsercontext,
       existingKnowledge: baseKnowledge
     })
@@ -16844,7 +16984,14 @@ MiniA.prototype.init = function(args) {
     // case only the JSON compatibility shim is registered, so advertising a
     // proxy-dispatch action would give the model an action the dispatcher cannot run.
     var hasProxyDispatchAction = isObject(this.mcpToolToConnection) && isDef(this.mcpToolToConnection["proxy-dispatch"])
-    var promptUseMcpProxy = hasProxyDispatchAction && this._useMcpProxy === true
+    // Use args.mcpproxy directly rather than this._useMcpProxy: the latter is only
+    // preset inside _startInternal (before start() calls init() a second time), so
+    // callers that invoke init() directly first (e.g. the console) would otherwise
+    // build the system prompt while this._useMcpProxy still held its stale default,
+    // permanently baking a proxy-dispatch-less prompt into the session (init() only
+    // runs its body once, guarded by _isInitialized).
+    var promptUseMcpProxy = hasProxyDispatchAction && toBoolean(args.mcpproxy) === true
+    this._useMcpProxy = promptUseMcpProxy
     var proxyToolsList = ""
     var proxyToolCount = this.mcpTools.length
     if (promptUseMcpProxy === true && isObject(global.__mcpProxyState__)) {
@@ -17435,6 +17582,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
     args.usestdutils = _$(toBoolean(args.usestdutils), "args.usestdutils").isBoolean().default(false)
+    args.useasciiviz = _$(toBoolean(args.useasciiviz), "args.useasciiviz").isBoolean().default(false)
     args.skillmaxautoload = _$(args.skillmaxautoload, "args.skillmaxautoload").isNumber().default(1)
     args.skillcontextchars = _$(args.skillcontextchars, "args.skillcontextchars").isNumber().default(8000)
     args.skillmanifestchars = _$(args.skillmanifestchars, "args.skillmanifestchars").isNumber().default(1536)

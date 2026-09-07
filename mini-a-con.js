@@ -624,6 +624,7 @@ try {
     editor         : { type: "string", description: "External editor command used when useeditor=true (overrides $EDITOR)" },
     utilsallow     : { type: "string", description: "Comma-separated allowlist of Mini Utils Tool names to expose when useutils=true" },
     utilsdeny      : { type: "string", description: "Comma-separated denylist of Mini Utils Tool names to hide when useutils=true (applied after utilsallow)" },
+    useasciiviz    : { type: "boolean", default: false, description: "Expose the Mini Utils Tool printChart operation for rendering ASCII/ANSI charts during execution." },
     "mini-a-docs"  : { type: "boolean", default: false, description: "When true (with useutils=true), point utilsroot to the Mini-A opack path so the LLM can inspect Mini-A documentation files." },
     usediagrams    : { type: "boolean", default: false, description: "Encourage Mermaid diagrams in knowledge prompt" },
     usemermaid     : { type: "boolean", default: false, description: "Alias for usediagrams (Mermaid diagrams guidance)" },
@@ -3192,7 +3193,7 @@ try {
     var metrics = isMap(vm.metrics) ? vm.metrics : {}
     var baselineTokens = metrics.last_baseline_tokens || 0
     var projectedTokens = metrics.last_projected_tokens || 0
-    var savedThisPass = Math.max(0, baselineTokens - projectedTokens)
+    var savedThisPass = baselineTokens - projectedTokens
     var cumulativeSaved = metrics.estimated_tokens_saved || 0
 
     print(colorifyText("Context tokens (last projection)", accentColor))
@@ -3201,7 +3202,7 @@ try {
     } else {
       var tokensBar = renderProportionBar([
         { value: projectedTokens, color: "FG(112)", pattern: "█" },
-        { value: savedThisPass, color: "FG(249)", pattern: "░" }
+        { value: Math.max(0, savedThisPass), color: "FG(249)", pattern: "░" }
       ], barWidth)
       print("  " + tokensBar)
       print()
@@ -3210,7 +3211,34 @@ try {
       print("  " + colorifyText("██", "FG(112)") + " " + colorifyText("Projected".padEnd(10), hintColor) + "  " + colorifyText(String(projectedTokens).padStart(7), numericColor) + " tokens " + colorifyText((keptShare + "%").padStart(6), hintColor) + colorifyText("  (kept in context)", "FG(249)"))
       print("  " + colorifyText("░░", "FG(249)") + " " + colorifyText("Collapsed".padEnd(10), hintColor) + "  " + colorifyText(String(savedThisPass).padStart(7), numericColor) + " tokens " + colorifyText((savedShare + "%").padStart(6), hintColor) + colorifyText("  (referenced, not inline)", "FG(249)"))
       print()
-      print(colorifyText("  Baseline: ", hintColor) + colorifyText(String(baselineTokens), numericColor) + colorifyText(" tokens | Projected: ", hintColor) + colorifyText(String(projectedTokens), numericColor) + colorifyText(" tokens | Cumulative delta: ", hintColor) + colorifyText("-" + String(cumulativeSaved), successColor) + colorifyText(" tokens saved", hintColor))
+      var cumulativeLabel = (cumulativeSaved >= 0 ? "-" : "+") + String(Math.abs(cumulativeSaved))
+      print(colorifyText("  Baseline: ", hintColor) + colorifyText(String(baselineTokens), numericColor) + colorifyText(" tokens | Projected: ", hintColor) + colorifyText(String(projectedTokens), numericColor) + colorifyText(" tokens | Cumulative delta: ", hintColor) + colorifyText(cumulativeLabel, cumulativeSaved >= 0 ? successColor : errorColor) + colorifyText(" tokens", hintColor))
+    }
+
+    if (vm.contextVirtualization === true) {
+      var phase2Mode = vm.contextVirtualizationShadow === true ? "shadow" : "active"
+      var phase2 = vm.contextVirtualizationShadow === true ? vm.contextVirtualizationShadowLast : vm.contextVirtualizationActiveLast
+      print()
+      print(colorifyText("Hierarchical context virtualization (" + phase2Mode + ")", accentColor))
+      if (!isMap(phase2)) {
+        print(colorifyText("  No Phase 2 projection has run yet.", hintColor))
+      } else {
+        var phase2Input = vm.contextVirtualizationShadow === true ? phase2.actualTokens : phase2.inputTokens
+        var phase2Output = vm.contextVirtualizationShadow === true ? phase2.projectedTokens : phase2.outputTokens
+        var phase2Delta = vm.contextVirtualizationShadow === true ? phase2.expectedSavings : phase2.tokensSaved
+        var ratio = isNumber(phase2.effectiveContextRatio) ? phase2.effectiveContextRatio.toFixed(2) : "0.00"
+        print(colorifyText("  Addressable: ", hintColor) + colorifyText(String(phase2.addressableTokens || 0), numericColor) + colorifyText(" | Selected material: ", hintColor) + colorifyText(String(phase2.materializedTokens || 0), numericColor) + colorifyText(" | Effective ratio: ", hintColor) + colorifyText(ratio + ":1", numericColor))
+        print(colorifyText("  Provider projection: ", hintColor) + colorifyText(String(phase2Input || 0), numericColor) + colorifyText(" -> ", hintColor) + colorifyText(String(phase2Output || 0), numericColor) + colorifyText(" tokens | Difference: ", hintColor) + colorifyText(String(phase2Delta || 0), phase2Delta >= 0 ? successColor : errorColor))
+        print(colorifyText("  Objects: ", hintColor) + colorifyText(String(phase2.objectsSelected || 0), numericColor) + colorifyText(" selected / ", hintColor) + colorifyText(String(phase2.objectsConsidered || 0), numericColor) + colorifyText(" considered", hintColor))
+        var representationCounts = ["l0", "l1", "l2", "l3", "l4"].map(function(level) {
+          return level.toUpperCase() + "=" + String(metrics["representation_" + level] || 0)
+        }).join("  ")
+        print(colorifyText("  Representations: " + representationCounts, hintColor))
+        if (isMap(phase2.categoryUsage)) {
+          var categories = Object.keys(phase2.categoryUsage).sort().map(function(category) { return category + "=" + phase2.categoryUsage[category] }).join("  ")
+          if (categories.length > 0) print(colorifyText("  Categories: " + categories, hintColor))
+        }
+      }
     }
   }
 
@@ -4490,6 +4518,22 @@ try {
     }
   }
 
+  // Tool bodies (e.g. MiniUtilsTool.printChart/showMessage) can write raw
+  // lines straight to stdout. The activity-cue thread repaints the previous
+  // inline event line on a timer using relative cursor moves, unaware of
+  // those writes, which corrupts/interleaves the tool's own output if both
+  // happen concurrently. Pause the cue loop around the tool call so only one
+  // side is touching the terminal at a time.
+  function _rawOutputGuard(innerFn) {
+    var wasActive = _activityCueActive === true
+    if (wasActive) _stopActivityCueLoop()
+    try {
+      return innerFn()
+    } finally {
+      if (wasActive) _startActivityCueLoop()
+    }
+  }
+
   function _startActivityCueLoop() {
     _stopActivityCueLoop()
     _activityCueActive = true
@@ -5028,6 +5072,7 @@ try {
     })
     if (isFunction(agent.setTraceFn) && isFunction(traceSink)) agent.setTraceFn(traceSink)
     if (isFunction(agent.setAnsiLogging)) agent.setAnsiLogging(__conAnsi === true)
+    if (isFunction(agent.setRawOutputGuardFn)) agent.setRawOutputGuardFn(_rawOutputGuard)
     if (isFunction(agent.setHookFn)) {
       agent.setHookFn(function(event, contextVars) {
         return runHooks(event, contextVars)
@@ -5243,6 +5288,7 @@ try {
         })
       })
       if (isFunction(agent.setAnsiLogging)) agent.setAnsiLogging(__conAnsi === true)
+      if (isFunction(agent.setRawOutputGuardFn)) agent.setRawOutputGuardFn(_rawOutputGuard)
       agent.init(initArgs)
       if (isDef(agent._subtaskManager)) return true
       print(colorifyText("Delegation could not be initialized with current settings.", errorColor))
@@ -5273,6 +5319,7 @@ try {
         })
       })
       if (isFunction(agent.setAnsiLogging)) agent.setAnsiLogging(__conAnsi === true)
+      if (isFunction(agent.setRawOutputGuardFn)) agent.setRawOutputGuardFn(_rawOutputGuard)
       agent.init(initArgs)
     } catch (e) {
       var errMsg = isDef(e) && isDef(e.message) ? e.message : "" + e

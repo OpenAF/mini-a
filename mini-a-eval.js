@@ -24,6 +24,20 @@
     }
   }
 
+  MiniAEval.prototype._removeOwnedTree = function(path) {
+    if (!isString(path) || path.length === 0) return
+    var root = new java.io.File(path)
+    if (!root.exists()) return
+    var remove = function(file) {
+      if (file.isDirectory()) {
+        var children = file.listFiles()
+        for (var i = 0; children !== null && i < children.length; i++) remove(children[i])
+      }
+      if (!file.delete()) throw new Error("Unable to remove evaluation fixture " + String(file.getAbsolutePath()))
+    }
+    remove(root)
+  }
+
   MiniAEval.prototype.load = function(path) {
     var file = new java.io.File(path)
     if (!file.exists()) throw new Error("Evaluation definition not found: " + path)
@@ -74,12 +88,16 @@
     return out
   }
 
-  MiniAEval.prototype._normalizeMetrics = function(delta, elapsedMs) {
+  MiniAEval.prototype._normalizeMetrics = function(delta, elapsedMs, after) {
     var perf = delta.performance || {}
     var llm = delta.llm_calls || {}
     var actions = delta.actions || {}
     var delegation = delta.delegation || {}
     var wiki = delta.wiki || {}
+    var historyVmDelta = isMap(delta.history_vm) && isMap(delta.history_vm.metrics) ? delta.history_vm.metrics : {}
+    var historyVmAfter = isMap(after) && isMap(after.history_vm) ? after.history_vm : {}
+    var historyVmMetrics = isMap(historyVmAfter.metrics) ? historyVmAfter.metrics : {}
+    var historyVmRehydrations = (historyVmDelta.reads || 0) + (historyVmDelta.context_expansions || 0)
     return {
       elapsed_ms: elapsedMs,
       total_steps: perf.steps_taken,
@@ -95,6 +113,50 @@
       input_tokens: (perf.llm_normal_input_tokens || 0) + (perf.llm_lc_input_tokens || 0) + (perf.llm_val_input_tokens || 0),
       output_tokens: (perf.llm_normal_output_tokens || 0) + (perf.llm_lc_output_tokens || 0) + (perf.llm_val_output_tokens || 0),
       context_tokens: perf.max_context_tokens,
+      context_candidate_tokens: historyVmDelta.context_candidate_tokens || 0,
+      context_materialized_tokens: historyVmMetrics.context_materialized_tokens || 0,
+      effective_context_ratio: historyVmMetrics.effective_context_ratio || 0,
+      history_vm_rehydrations: historyVmRehydrations,
+      shadow_actual_tokens: historyVmMetrics.context_virtualization_shadow_actual_tokens || 0,
+      shadow_projected_tokens: historyVmMetrics.context_virtualization_shadow_projected_tokens || 0,
+      shadow_expected_savings: historyVmMetrics.context_virtualization_shadow_expected_savings || 0,
+      active_context_input_tokens: historyVmMetrics.context_virtualization_active_input_tokens || 0,
+      active_context_output_tokens: historyVmMetrics.context_virtualization_active_output_tokens || 0,
+      active_context_tokens_saved: historyVmDelta.context_virtualization_active_tokens_saved || 0,
+      history_vm: {
+        active: historyVmAfter.active === true,
+        shadow: historyVmAfter.shadow === true,
+        context_virtualization: historyVmAfter.contextVirtualization === true,
+        context_virtualization_shadow: historyVmAfter.contextVirtualizationShadow === true,
+        objects_considered: historyVmDelta.context_objects_considered || 0,
+        objects_selected: historyVmDelta.context_objects_selected || 0,
+        candidate_tokens: historyVmDelta.context_candidate_tokens || 0,
+        materialized_tokens: historyVmMetrics.context_materialized_tokens || 0,
+        effective_context_ratio: historyVmMetrics.effective_context_ratio || 0,
+        budget_utilization: historyVmMetrics.context_budget_utilization || 0,
+        rehydrations: historyVmRehydrations,
+        representation_levels: {
+          l0: historyVmDelta.representation_l0 || 0,
+          l1: historyVmDelta.representation_l1 || 0,
+          l2: historyVmDelta.representation_l2 || 0,
+          l3: historyVmDelta.representation_l3 || 0,
+          l4: historyVmDelta.representation_l4 || 0
+        },
+        shadow_projection: {
+          assemblies: historyVmDelta.context_virtualization_shadow_assemblies || 0,
+          actual_tokens: historyVmMetrics.context_virtualization_shadow_actual_tokens || 0,
+          projected_tokens: historyVmMetrics.context_virtualization_shadow_projected_tokens || 0,
+          expected_savings: historyVmMetrics.context_virtualization_shadow_expected_savings || 0,
+          object_differences: historyVmMetrics.context_virtualization_shadow_object_differences || 0
+        },
+        active_projection: {
+          assemblies: historyVmDelta.context_virtualization_active_assemblies || 0,
+          input_tokens: historyVmMetrics.context_virtualization_active_input_tokens || 0,
+          output_tokens: historyVmMetrics.context_virtualization_active_output_tokens || 0,
+          tokens_saved: historyVmDelta.context_virtualization_active_tokens_saved || 0,
+          references: historyVmMetrics.context_virtualization_active_references || 0
+        }
+      },
       estimated_cost_usd: __,
       raw: delta
     }
@@ -107,6 +169,31 @@
       return isArray(match) && match.length > 1 ? match[1] : __
     }
     return __
+  }
+
+  MiniAEval.prototype._expandVariants = function(scenarios) {
+    var expanded = []
+    ;(scenarios || []).forEach(function(scenario) {
+      if (!isMap(scenario) || !isArray(scenario.variants) || scenario.variants.length === 0) {
+        expanded.push(scenario)
+        return
+      }
+      scenario.variants.forEach(function(variant, index) {
+        if (!isMap(variant)) return
+        var item = merge({}, scenario, true)
+        delete item.variants
+        var variantName = isString(variant.name) && variant.name.trim().length > 0 ? variant.name.trim() : "variant-" + (index + 1)
+        item.scenarioName = scenario.name || scenario.goal
+        item.variant = variantName
+        item.name = item.scenarioName + " [" + variantName + "]"
+        item.args = merge(isMap(scenario.args) ? scenario.args : {}, isMap(variant.args) ? variant.args : {}, true)
+        ;["expected", "assertions", "limits", "maximum", "regression", "llm_judge", "setup"].forEach(function(key) {
+          if (isDef(variant[key])) item[key] = isMap(variant[key]) && isMap(item[key]) ? merge(item[key], variant[key], true) : variant[key]
+        })
+        expanded.push(item)
+      })
+    })
+    return expanded
   }
 
   MiniAEval.prototype._assert = function(answer, result, assertion) {
@@ -155,25 +242,44 @@
     var events = [{ version: 1, type: "eval_scenario_start", timestamp_ms: started, scenario: scenario.name || scenario.goal }]
     var agent = this.agentFactory(scenario)
     var before = this._metricSnapshot(agent)
-    var answer = __, error = __
+    var answer = __, error = __, fixtureRoot = __
     var runArgs = merge(merge({}, sharedArgs || {}, true), isMap(scenario.args) ? scenario.args : (isMap(scenario.mode) ? scenario.mode : {}), true)
     runArgs.goal = scenario.goal
     if (isMap(scenario.setup)) {
       if (isString(scenario.setup.context)) runArgs.knowledge = isString(runArgs.knowledge) ? runArgs.knowledge + "\n" + scenario.setup.context : scenario.setup.context
       if (isMap(scenario.setup.args)) runArgs = merge(runArgs, scenario.setup.args, true)
+      if (isArray(scenario.setup.conversation) || isMap(scenario.setup.conversation)) {
+        var fixtureConversation = isArray(scenario.setup.conversation)
+          ? { u: new Date(), c: scenario.setup.conversation }
+          : merge({}, scenario.setup.conversation, true)
+        if (!isArray(fixtureConversation.c)) throw new Error("setup.conversation must be an array or a conversation envelope with a c array")
+        fixtureRoot = String(java.nio.file.Files.createTempDirectory("mini-a-eval-conversation-").toAbsolutePath())
+        runArgs.conversation = fixtureRoot + "/conversation.json"
+        try {
+          io.writeFileJSON(runArgs.conversation, fixtureConversation, "")
+        } catch(fixtureError) {
+          try { this._removeOwnedTree(fixtureRoot) } catch(ignoreFixtureCleanup) {}
+          fixtureRoot = __
+          throw fixtureError
+        }
+      }
     }
     try {
       if (isFunction(agent.init)) agent.init(runArgs)
       answer = agent.start(runArgs)
     } catch(e) { error = String(e) }
     var elapsed = this.nowFn() - started
-    var metrics = this._normalizeMetrics(this._metricDelta(before, this._metricSnapshot(agent)), elapsed)
+    var after = this._metricSnapshot(agent)
+    if (isString(fixtureRoot)) {
+      try { this._removeOwnedTree(fixtureRoot) } catch(cleanupError) { if (isUnDef(error)) error = String(cleanupError) }
+    }
+    var metrics = this._normalizeMetrics(this._metricDelta(before, after), elapsed, after)
     metrics.model_usage = {
       main: { calls: metrics.model_calls.main, model: this._modelName(agent._oaf_model) },
       low_cost: { calls: metrics.model_calls.low_cost, model: this._modelName(agent._oaf_lc_model) },
       validation: { calls: metrics.model_calls.validation, model: this._modelName(agent._oaf_val_model) }
     }
-    var result = { version: 1, name: scenario.name || scenario.goal, goal: scenario.goal, answer: answer, error: error, metrics: metrics, assertions: [], events: events, regression: isMap(scenario.regression) ? scenario.regression : {} }
+    var result = { version: 1, name: scenario.name || scenario.goal, scenario: scenario.scenarioName || scenario.name || scenario.goal, variant: scenario.variant, goal: scenario.goal, answer: answer, error: error, metrics: metrics, assertions: [], events: events, regression: isMap(scenario.regression) ? scenario.regression : {} }
     this._buildAssertions(scenario).forEach(function(assertion) { result.assertions.push(this._assert(answer, result, assertion)) }, this)
     var limits = isMap(scenario.limits) ? scenario.limits : (isMap(scenario.maximum) ? scenario.maximum : {})
     var limitPaths = { cost: "metrics.estimated_cost_usd", tokens: "metrics.input_tokens", steps: "metrics.total_steps", time: "metrics.elapsed_ms" }
@@ -197,7 +303,7 @@
       var base = byName[item.name]
       if (!base) return
       var comparison = { name: item.name, success_changed: item.success !== base.success, metrics: {} }
-      ;["elapsed_ms", "total_steps", "llm_calls", "tool_calls", "failed_tool_calls", "input_tokens", "output_tokens"].forEach(function(key) {
+      ;["elapsed_ms", "total_steps", "llm_calls", "tool_calls", "failed_tool_calls", "input_tokens", "output_tokens", "context_candidate_tokens", "context_materialized_tokens", "effective_context_ratio", "history_vm_rehydrations", "shadow_actual_tokens", "shadow_projected_tokens", "shadow_expected_savings", "active_context_input_tokens", "active_context_output_tokens", "active_context_tokens_saved"].forEach(function(key) {
         comparison.metrics[key] = (item.metrics[key] || 0) - (base.metrics[key] || 0)
       })
       if (base.success && !item.success) regressions.push({ name: item.name, reason: "success regressed" })
@@ -213,8 +319,32 @@
   MiniAEval.prototype.run = function(scenarios, options) {
     options = isMap(options) ? options : {}
     var report = { version: 1, type: "mini-a-evaluation", started_at: new Date().toISOString(), scenarios: [], summary: {} }
-    ;(scenarios || []).forEach(function(scenario) { report.scenarios.push(this.runScenario(scenario, options.args || {})) }, this)
+    this._expandVariants(scenarios).forEach(function(scenario) { report.scenarios.push(this.runScenario(scenario, options.args || {})) }, this)
     return this._finishReport(report)
+  }
+
+  MiniAEval.prototype._variantComparisons = function(report) {
+    var groups = {}
+    ;(report.scenarios || []).forEach(function(item) {
+      if (!isString(item.variant)) return
+      var key = item.scenario || item.goal
+      if (!isArray(groups[key])) groups[key] = []
+      groups[key].push(item)
+    })
+    var metricKeys = ["elapsed_ms", "total_steps", "llm_calls", "tool_calls", "failed_tool_calls", "input_tokens", "output_tokens", "context_materialized_tokens", "effective_context_ratio", "history_vm_rehydrations", "shadow_projected_tokens", "active_context_output_tokens", "active_context_tokens_saved"]
+    var comparisons = []
+    Object.keys(groups).sort().forEach(function(key) {
+      var items = groups[key]
+      if (items.length < 2) return
+      var baseline = items.filter(function(item) { return item.variant === "phase1" || item.variant === "baseline" })[0] || items[0]
+      items.forEach(function(item) {
+        if (item === baseline) return
+        var deltas = {}
+        metricKeys.forEach(function(metric) { deltas[metric] = (item.metrics[metric] || 0) - (baseline.metrics[metric] || 0) })
+        comparisons.push({ scenario: key, baseline: baseline.variant, variant: item.variant, success_changed: item.success !== baseline.success, metrics: deltas })
+      })
+    })
+    return comparisons
   }
 
   MiniAEval.prototype._finishReport = function(report) {
@@ -226,6 +356,7 @@
       llm_calls: report.scenarios.reduce(function(total, item) { return total + (item.metrics.llm_calls || 0) }, 0),
       tool_failures: report.scenarios.reduce(function(total, item) { return total + (item.metrics.failed_tool_calls || 0) }, 0)
     }
+    report.variant_comparisons = this._variantComparisons(report)
     report.finished_at = new Date().toISOString()
     return report
   }
@@ -251,7 +382,7 @@
     var self = this
     var suite = isString(options.suite) ? options.suite : "Mini-A evaluations"
     var report = { version: 1, type: "mini-a-evaluation", started_at: new Date().toISOString(), scenarios: [], summary: {} }
-    scenarios.forEach(function(scenario, index) {
+    this._expandVariants(scenarios).forEach(function(scenario, index) {
       var name = isMap(scenario) ? (scenario.name || scenario.goal) : __
       name = isString(name) ? name : "Scenario " + (index + 1)
       ow.test.test(suite + "::" + name, function() {

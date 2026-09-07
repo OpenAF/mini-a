@@ -95,6 +95,21 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/historyVM.js").testContextVirtualizationShadowProjectsWithoutMutatingInput
 
+- name: MiniA History VM Tests::ActiveContextVirtualization
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testActiveContextVirtualizationPreservesProtocolAndExactBacking
+
+- name: MiniA History VM Tests::ActiveContextRuntime
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testRuntimeUsesActiveContextVirtualizationOnlyWhenNotShadowing
+
+- name: MiniA History VM Tests::Compression
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testStructuralAndOptionalSemanticCompression
+
 - name: MiniA History VM Tests::LegacyImport
   from: MiniA History VM Tests::Init
   to  : oJob Test
@@ -164,6 +179,9 @@ todo:
 - MiniA History VM Tests::BranchSupersession
 - MiniA History VM Tests::RuntimeFlags
 - MiniA History VM Tests::ContextVirtualizationShadow
+- MiniA History VM Tests::ActiveContextVirtualization
+- MiniA History VM Tests::ActiveContextRuntime
+- MiniA History VM Tests::Compression
 - MiniA History VM Tests::LegacyImport
 - MiniA History VM Tests::SearchRead
 - MiniA History VM Tests::Projection

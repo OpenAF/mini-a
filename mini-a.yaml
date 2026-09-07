@@ -397,6 +397,11 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : useasciiviz
+    desc     : Expose the Mini Utils Tool `printChart` operation for rendering ASCII/ANSI charts during execution
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : skillmaxautoload
     desc     : Maximum number of high-confidence matching skills to auto-load into bounded runtime context
     example  : "1"
@@ -1364,6 +1369,7 @@ jobs:
         useutils       : useutils
         usestdutils    : usestdutils
         useskills      : useskills
+        useasciiviz    : useasciiviz
         skillmaxautoload: skillmaxautoload
         skillcontextchars: skillcontextchars
         skillmanifestchars: skillmanifestchars
@@ -1642,6 +1648,7 @@ jobs:
       useutils       : toBoolean.isBoolean.default(__)
       usestdutils    : toBoolean.isBoolean.default(__)
       useskills      : toBoolean.isBoolean.default(false)
+      useasciiviz    : toBoolean.isBoolean.default(false)
       skillmaxautoload: toNumber.isNumber.default(1)
       skillcontextchars: toNumber.isNumber.default(8000)
       skillmanifestchars: toNumber.isNumber.default(1536)

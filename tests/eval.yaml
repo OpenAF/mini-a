@@ -22,6 +22,21 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testEvalYamlDefinitionLoads
 
+- name: MiniA Eval Tests::HistoryVmShadowMetrics
+  from: MiniA Eval Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEvalNormalizesHistoryVmShadowMetrics
+
+- name: MiniA Eval Tests::ConversationReplay
+  from: MiniA Eval Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEvalMaterializesAndCleansConversationReplay
+
+- name: MiniA Eval Tests::PhaseVariantMatrix
+  from: MiniA Eval Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEvalExpandsPhaseVariantMatrix
+
 include:
 - oJobTest.yaml
 
@@ -34,3 +49,6 @@ todo:
 - MiniA Eval Tests::FailuresAndJudge
 - MiniA Eval Tests::SuiteAndBaseline
 - MiniA Eval Tests::YamlLoad
+- MiniA Eval Tests::HistoryVmShadowMetrics
+- MiniA Eval Tests::ConversationReplay
+- MiniA Eval Tests::PhaseVariantMatrix

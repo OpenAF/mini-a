@@ -2691,9 +2691,11 @@ Mini-A writes append-only canonical events and checkpoints under `chat-history.j
 
 Use `historyvmshadow=true` first to capture and estimate savings without changing provider requests or adding retrieval tool schemas. If both flags are supplied, enabled mode takes precedence. The VM is independent of `usememory`; enabling it creates retained conversation data even when history listing is disabled. `/clear`, web expiry, and explicit conversation deletion remove the owned sidecar unless history retention is configured to keep the conversation. `/rewind` records a new branch and default retrieval excludes the abandoned branch rather than deleting its canonical events.
 
-Phase 2 can be enabled explicitly with `historyvm=true contextvirtualization=true`. It extends the same canonical journal with stable typed handles, parent/child metadata, deterministic L0-L4 representation levels, hierarchical summaries, coarse-to-fine internal retrieval, bounded line/section/JSON-path reads, adaptive utility-per-token assembly, typed provenance/supersession graphs, consumer-specific executor/planner/advisor/validator/delegate views, and per-consumer working-set deltas. Delegated views use smaller working sets and bounded history detail instead of copying the parent view. Stable-prefix serialization is local and opt-in; it reuses unchanged representations but does not imply provider prompt caching or delta-only transmission. Derived views are generated and cached only when requested; exact and obsolete historical content remains canonical and explicitly retrievable. The Phase 2A-2G assembler remains an internal projected view and does not yet replace the Phase 1 provider projection, so enabling it alone does not claim additional input-token savings.
+Phase 2 can be enabled explicitly with `historyvm=true contextvirtualization=true`. It extends the same canonical journal with stable typed handles, parent/child metadata, deterministic L0-L4 representations, structural compression, hierarchical summaries, coarse-to-fine retrieval, bounded line/section/JSON-path reads, adaptive utility-per-token assembly, typed provenance/supersession graphs, consumer-specific executor/planner/advisor/validator/delegate views, and per-consumer working-set deltas. The active provider projection preserves system, developer, user, tool-protocol, recent, and unknown-content messages; only eligible older plain assistant content is progressively replaced with stable context references. Exact canonical content is restored before conversation persistence and remains retrievable with `context_search`, `context_get`, `context_expand`, `context_children`, and `context_related`.
 
-Use `historyvm=true contextvirtualization=true contextvirtualizationshadow=true` to build that executor projection alongside the existing Phase 1 provider context. Diagnostics report the Phase 1 context token estimate, the projected Phase 2 materialization, object-set changes, and the expected difference. These are projections only: the flag never claims provider input-token savings or delta transmission, and it does not make Phase 2 selection active.
+Use `historyvm=true contextvirtualization=true contextvirtualizationshadow=true` to dry-run the exact same projection while continuing to send the Phase 1 provider context. Diagnostics compare complete provider-context token estimates, object-set changes, and expected differences. Shadow values are projections, not provider-billed savings. Stable-prefix serialization and context deltas avoid local recomputation but do not imply provider prompt caching or delta-only transmission.
+
+The compatibility modes are explicit: `historyvm=false` keeps legacy Mini-A, `historyvm=true contextvirtualization=false` selects Phase 1, and `historyvm=true contextvirtualization=true` selects Phase 2. Neither phase is silently enabled.
 
 Version 1 supports local conversation storage only. If S3 history mirroring is configured, Mini-A visibly disables the VM and continues with legacy history behavior. If the local journal cannot be written, it likewise keeps content inline and reports degraded persistence. `maxcontext=0` remains unchanged: virtualization can still reduce eligible old large messages, but Mini-A does not claim a verified hard context-window bound without an effective budget.
 
@@ -3431,10 +3433,35 @@ mini-a eval=true evalfile=evals/core.yaml
 ```
 
 Each scenario requires `goal` and may include `args` (normal Mini-A arguments),
-`setup.context`, `expected` answer/metric assertions, `assertions`, `llm_judge`,
+`setup.context`, `setup.conversation`, `expected` answer/metric assertions, `assertions`, `llm_judge`,
 and `limits` (`cost`, `tokens`, `steps`, `time`). The runner writes a versioned
 machine-readable report with scenario events and normalized metrics. It only
 reports provider token fields Mini-A received; unknown cost remains unset.
+
+A scenario may define a `variants` array. Each named variant merges its `args`
+over the scenario and may override setup, expectations, assertions, limits,
+regression policy, or judge settings. This makes one replay run as a Phase 1,
+Phase 2 shadow, and Phase 2 active matrix without duplicating the fixture. The
+report includes within-scenario `variant_comparisons`, using `phase1` or
+`baseline` as the comparison base when present.
+
+`setup.conversation` accepts either a provider-conversation array or an envelope
+containing a `c` array. The evaluator materializes it under a scenario-owned
+temporary directory, passes its path through the normal `conversation=` flow,
+captures final metrics, and removes the fixture plus any History VM sidecar.
+This supports reproducible long-context replays without committing generated
+conversation journals.
+
+When History VM is active, reports also include `metrics.history_vm` with
+ContextObjects considered/selected, L0-L4 selections, rehydrations, candidate
+and materialized tokens, budget utilization, effective-context ratio, and the
+latest Phase 2 shadow or active projection. Cumulative work is calculated from the run
+delta; latest projection gauges are read from the final snapshot. The flat
+`shadow_actual_tokens`, `shadow_projected_tokens`, and
+`shadow_expected_savings` fields make baseline comparisons convenient while
+remaining explicitly predicted rather than provider-billed token savings.
+Active reports separately expose `active_context_input_tokens`,
+`active_context_output_tokens`, and `active_context_tokens_saved`.
 
 Use `evalout=/tmp/eval.json` to save a report, `evalwritebaseline=evals/base.json`
 to create a baseline, and `evalbaseline=evals/base.json` to detect success or

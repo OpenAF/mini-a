@@ -55,16 +55,30 @@
       ow.test.assert(agent._historyVm.shadow === true, true, "Shadow mode should initialize canonical capture")
       ow.test.assert(isUnDef(agent._createHistoryVmMcpConfig(shadowArgs)), true, "Shadow mode must not register retrieval tools")
 
+      var phaseOneArgs = { historyvm: true, historyvmshadow: false, contextvirtualization: false, conversation: root + "/phase1.json" }
+      agent._initHistoryVm(phaseOneArgs)
+      var phaseOneConfig = agent._createHistoryVmMcpConfig(phaseOneArgs)
+      ow.test.assert(isFunction(phaseOneConfig.options.fns.history_search) && isUnDef(phaseOneConfig.options.fns.context_search), true, "Phase 1 must keep its existing tool surface without Phase 2 paging schemas")
+      agent._historyVm.deleteOwnedStore()
+
       var enabledArgs = { historyvm: true, historyvmshadow: true, historyvmmode: "experimental", contextvirtualization: true, contextvirtualizationshadow: true, conversation: conversation }
       agent._initHistoryVm(enabledArgs)
       var config = agent._createHistoryVmMcpConfig(enabledArgs)
       ow.test.assert(enabledArgs.historyvmshadow === false && enabledArgs.historyvmmode === "safe", true, "Enabled mode should take precedence and normalize the v1 policy")
       ow.test.assert(agent._historyVm.contextVirtualization === true, true, "Explicit Phase 2 mode should extend the active History VM")
       ow.test.assert(agent._historyVm.contextVirtualizationShadow === true, true, "Explicit Phase 2 shadow should extend, not replace, active History VM")
-      ow.test.assert(isMap(config) && isFunction(config.options.fns.history_search) && isFunction(config.options.fns.history_get) && isFunction(config.options.fns.history_expand), true, "Enabled mode should expose all bounded retrieval tools")
+      ow.test.assert(isMap(config) && isFunction(config.options.fns.history_search) && isFunction(config.options.fns.history_get) && isFunction(config.options.fns.history_expand), true, "Enabled mode should expose all bounded history retrieval tools")
+      ow.test.assert(isFunction(config.options.fns.context_search) && isFunction(config.options.fns.context_get) && isFunction(config.options.fns.context_expand) && isFunction(config.options.fns.context_children) && isFunction(config.options.fns.context_related), true, "Phase 2 should expose stable hierarchical context paging tools")
       var large = new Array(10001).join("p")
       var rawConversation = [{ role: "assistant", content: large }, { role: "assistant", content: "one" }, { role: "assistant", content: "two" }, { role: "assistant", content: "three" }, { role: "assistant", content: "four" }]
       agent._historyVm.captureProviderConversation(rawConversation)
+      var contextResults = config.options.fns.context_search({ query: "one", limit: 5 })
+      ow.test.assert(isArray(contextResults.results) && contextResults.results.length > 0, true, "Context tool should search virtualized provider history")
+      var contextRef = contextResults.results[0].handle
+      ow.test.assert(config.options.fns.context_get({ id: contextRef, level: "L0" }).level === "L0", true, "Context tool should retrieve a requested representation")
+      ow.test.assert(config.options.fns.context_expand({ id: contextRef, offset: 0, limit: 10 }).mode === "range", true, "Context tool should support bounded paging")
+      ow.test.assert(isArray(config.options.fns.context_children({ id: contextRef }).results), true, "Context tool should list hierarchical children")
+      ow.test.assert(isArray(config.options.fns.context_related({ id: contextRef }).results), true, "Context tool should traverse typed graph relations")
       var providerConversation = agent._historyVm.projectConversation(rawConversation, { currentStep: 1 })
       agent.llm = { getGPT: function() { return { getConversation: function() { return providerConversation } } } }
       ow.test.assert(agent._writeConversationPayload(conversation) === true, true, "Runtime conversation persistence should succeed")
@@ -89,8 +103,18 @@
       vm.registerContextObject("wiki", "architecture", content, { keywords: ["architecture", "evidence"], importance: 0.9 })
       var sourceContext = [
         { role: "system", content: "Keep all constraints." },
-        { role: "assistant", content: content }
+        { role: "assistant", content: content },
+        { role: "assistant", content: content + " second" },
+        { role: "assistant", content: content + " third" },
+        { role: "user", content: "Architecture evidence is relevant." },
+        { role: "assistant", content: "recent one" },
+        { role: "assistant", content: "recent two" },
+        { role: "assistant", content: "recent three" },
+        { role: "assistant", content: "recent four" },
+        { role: "assistant", content: "recent five" },
+        { role: "assistant", content: "recent six" }
       ]
+      vm.captureProviderConversation(sourceContext)
       var before = stringify(sourceContext, __, "")
       var result = vm.projectContextShadow({
         consumer: "executor",
@@ -106,6 +130,106 @@
       ow.test.assert(result.objectDifferences > 0 && diagnostics.contextVirtualizationShadowLast.expectedSavings === result.expectedSavings, true, "Shadow diagnostics should retain only projection measurements")
       ow.test.assert(diagnostics.metrics.context_virtualization_shadow_assemblies === 1 && diagnostics.metrics.context_virtualization_shadow_actual_tokens === result.actualTokens, true, "Shadow metrics should distinguish actual and projected token estimates")
     }, { contextVirtualization: true, contextVirtualizationShadow: true })
+  }
+
+  exports.testActiveContextVirtualizationPreservesProtocolAndExactBacking = function() {
+    withVm(function(vm) {
+      var large = new Array(5001).join("archived implementation output ")
+      var conversation = [
+        { role: "system", content: "System rule" },
+        { role: "assistant", content: large },
+        { role: "assistant", content: large + " second" },
+        { role: "assistant", content: large + " third" },
+        { role: "user", content: "Use architecture B." },
+        { role: "assistant", content: "recent one" },
+        { role: "assistant", content: "recent two" },
+        { role: "assistant", content: "recent three" },
+        { role: "assistant", content: "recent four" },
+        { role: "assistant", content: "recent five" },
+        { role: "assistant", content: "recent six" }
+      ]
+      vm.captureProviderConversation(conversation)
+      var result = vm.projectActiveContext(conversation, { goal: "architecture B", budget: 500, outputReserve: 0, recentCount: 6 })
+      ow.test.assert(result.active === true && result.references === 3 && result.tokensSaved > 0, true, "Active Phase 2 should replace only useful old assistant payloads under pressure")
+      ow.test.assert(isUnDef(result.conversation[1].__historyVmProjection), true, "Provider messages must not contain internal projection metadata")
+      ow.test.assert(result.conversation.length === conversation.length && result.conversation[0] === conversation[0] && result.conversation[4] === conversation[4], true, "System and user protocol positions must remain unchanged")
+      ow.test.assert(result.conversation[5].content === "recent one" && result.conversation[10].content === "recent six", true, "Recent messages must remain exact")
+      var materialized = vm.materializeConversation(result.conversation)
+      ow.test.assert(materialized[1].content === large && materialized[3].content === large + " third", true, "Persisted active projections must rehydrate exact canonical provider messages")
+      var diagnostics = vm.diagnostics()
+      ow.test.assert(diagnostics.metrics.context_virtualization_active_assemblies === 1 && diagnostics.contextVirtualizationActiveLast.references === 3, true, "Active materialization must be separately measurable")
+    }, { contextVirtualization: true })
+  }
+
+  exports.testStructuralAndOptionalSemanticCompression = function() {
+    withVm(function(vm) {
+      vm.registerContextObject("artifact", "json", { repositories: [{ name: "mini-a", owner: "openaf", language: "JavaScript", stars: 100 }], total_count: 312 })
+      var jsonObject = vm.objects[vm.objects.length - 1]
+      vm.registerContextObject("artifact", "source_code", "import lib\nclass ContextManager {\n  function assembleContext(goal) { return goal }\n}\n")
+      var codeObject = vm.objects[vm.objects.length - 1]
+      vm.registerContextObject("artifact", "log", "2026-09-07 INFO start\n2026-09-07 WARN slow\n2026-09-07 ERROR failed\n")
+      var logObject = vm.objects[vm.objects.length - 1]
+      var jsonView = vm.getRepresentation(jsonObject.handle, "L2")
+      var codeView = vm.getRepresentation(codeObject.handle, "L3")
+      var logView = vm.getRepresentation(logObject.handle, "L2")
+      ow.test.assert(jsonView.text.indexOf("repositories: array[1]") >= 0 && jsonView.text.indexOf("Exact backing: " + jsonObject.handle) >= 0, true, "JSON compression should expose shape and canonical handle")
+      ow.test.assert(codeView.text.indexOf("class ContextManager") >= 0 && codeView.text.indexOf("assembleContext") >= 0, true, "Code compression should retain signatures")
+      ow.test.assert(logView.text.indexOf("errors=1") >= 0 && logView.text.indexOf("ERROR failed") >= 0, true, "Log compression should retain counts and important events")
+      ow.test.assert(vm.metrics.structural_json_compressions === 1 && vm.metrics.structural_code_compressions === 1 && vm.metrics.structural_log_compressions === 1, true, "Structural compression types should be independently measurable")
+    }, { contextVirtualization: true })
+
+    var calls = 0
+    withVm(function(vm) {
+      vm.registerContextObject("wiki", "document", new Array(6001).join("semantic source material "))
+      var object = vm.objects[vm.objects.length - 1]
+      var first = vm.getRepresentation(object.handle, "L2")
+      var second = vm.getRepresentation(object.handle, "L2")
+      ow.test.assert(first.generatedBy === "semantic" && first.text.indexOf("decision and constraint summary") >= 0, true, "An explicit semantic compressor may provide a cheaper derived representation")
+      ow.test.assert(calls === 1 && second.text === first.text && vm.metrics.summary_reuse === 1, true, "Semantic summaries should be versioned and reused from the representation cache")
+      ow.test.assert(vm.getRepresentation(object.handle, "L4").content === object.content, true, "Semantic compression must never replace exact L4 backing")
+    }, {
+      contextVirtualization: true,
+      semanticCompression: true,
+      semanticCompressionMinTokens: 500,
+      summarizerVersion: "fake-v1",
+      semanticCompressor: function() { calls++; return "decision and constraint summary" }
+    })
+  }
+
+  exports.testRuntimeUsesActiveContextVirtualizationOnlyWhenNotShadowing = function() {
+    var root = String(java.nio.file.Files.createTempDirectory("mini-a-context-active-runtime-").toAbsolutePath())
+    try {
+      load("mini-a.js")
+      var agent = new MiniA()
+      agent.setInteractionFn(function() {})
+      var args = { historyvm: true, contextvirtualization: true, contextvirtualizationshadow: false, conversation: root + "/conversation.json", maxcontext: 500, goal: "architecture" }
+      agent._sessionArgs = args
+      agent._initHistoryVm(args)
+      var large = new Array(5001).join("archived architecture output ")
+      var conversation = [
+        { role: "assistant", content: large },
+        { role: "assistant", content: large + " second" },
+        { role: "assistant", content: large + " third" },
+        { role: "user", content: "Current requirement" },
+        { role: "assistant", content: "one" },
+        { role: "assistant", content: "two" },
+        { role: "assistant", content: "three" },
+        { role: "assistant", content: "four" },
+        { role: "assistant", content: "five" },
+        { role: "assistant", content: "six" }
+      ]
+      var sent = __
+      agent.llm = { getGPT: function() { return {
+        getConversation: function() { return conversation },
+        setConversation: function(value) { sent = value }
+      } } }
+      ow.test.assert(agent._prepareHistoryVmProjection(1) === true, true, "Runtime projection should complete")
+      ow.test.assert(isArray(sent) && sent[0].content.indexOf("[CONTEXT_OBJECT ") === 0, true, "Explicit active Phase 2 should send a multi-resolution provider projection")
+      ow.test.assert(agent._historyVm.metrics.collapses === 0 && agent._historyVm.metrics.context_virtualization_active_assemblies === 1, true, "Active Phase 2 should not also run the Phase 1 collapse policy")
+      agent._historyVm.deleteOwnedStore()
+    } finally {
+      removeTree(root)
+    }
   }
 
   exports.testAppendResumeAndDistinctEqualEvents = function() {
