@@ -50,6 +50,16 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/historyVM.js").testContextIndexesUpdateIncrementally
 
+- name: MiniA History VM Tests::AdaptiveBudget
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testAdaptiveBudgetAndRepresentationSelection
+
+- name: MiniA History VM Tests::DependencyPrefetch
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testDependencyPrefetchAndHardConstraintOverflow
+
 - name: MiniA History VM Tests::RuntimeFlags
   from: MiniA History VM Tests::Init
   to  : oJob Test
@@ -115,6 +125,8 @@ todo:
 - MiniA History VM Tests::CoarseToFineSearch
 - MiniA History VM Tests::StructuredReads
 - MiniA History VM Tests::IncrementalIndex
+- MiniA History VM Tests::AdaptiveBudget
+- MiniA History VM Tests::DependencyPrefetch
 - MiniA History VM Tests::RuntimeFlags
 - MiniA History VM Tests::LegacyImport
 - MiniA History VM Tests::SearchRead

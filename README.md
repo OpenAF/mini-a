@@ -456,7 +456,7 @@ Mini-A ships with complementary components:
 | `historyvm` | Persist exact conversation events in a conversation-owned journal and replace eligible old large provider messages with bounded, retrievable references | `false` |
 | `historyvmmode` | History VM policy mode (`safe` is the v1 mode) | `safe` |
 | `historyvmshadow` | Capture canonical events and estimate projection savings while leaving model requests unchanged | `false` |
-| `contextvirtualization` | Enable experimental Phase 2 multi-resolution ContextObjects, hierarchy, and coarse-to-fine internal retrieval; requires `historyvm=true` | `false` |
+| `contextvirtualization` | Enable experimental Phase 2 multi-resolution ContextObjects, hierarchical retrieval, and adaptive internal assembly; requires `historyvm=true` | `false` |
 | `mcpprogcall` | Start a per-session localhost HTTP bridge so generated scripts can list/search/call MCP tools programmatically; requires `useshell=true` for script execution | `false` |
 | `mcpprogcallport` | Port for the programmatic tool-calling bridge (`0` = auto-assign free port) | `0` |
 | `mcpprogcallmaxbytes` | Max inline JSON response size before storing oversized tool results under `/result/{id}` | `4096` |
@@ -614,7 +614,7 @@ Wiki folders become browsable sub-wikis when they contain `index.md`. Agents can
 | `historyvm` | Enable durable bounded conversation history; requires a writable `conversation=` path | `false` |
 | `historyvmmode` | History VM policy mode | `safe` |
 | `historyvmshadow` | Measure the VM projection without changing requests or registering retrieval tools | `false` |
-| `contextvirtualization` | Enable experimental lazy L0-L4 representations, stable handles, hierarchy, and structured bounded reads; requires `historyvm=true` | `false` |
+| `contextvirtualization` | Enable experimental lazy L0-L4 representations, hierarchy, structured reads, and utility-per-token budgeting; requires `historyvm=true` | `false` |
 | `compressgoal` | Automatically compress oversized goal text before execution | `false` |
 | `compressgoaltokens` | Estimated token threshold before goal compression is considered | `250` |
 | `compressgoalchars` | Character threshold before goal compression is considered | `1000` |

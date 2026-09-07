@@ -200,6 +200,56 @@
     }, { contextVirtualization: true })
   }
 
+  exports.testAdaptiveBudgetAndRepresentationSelection = function() {
+    withVm(function(vm) {
+      vm.registerContextObject("wiki", "architecture", "architecture " + new Array(1201).join("a"), { importance: 1 })
+      var relevant = vm.objects[vm.objects.length - 1]
+      vm.registerContextObject("artifact", "log", "unrelated " + new Array(1201).join("b"), { importance: 0.1 })
+      var unrelated = vm.objects[vm.objects.length - 1]
+
+      var focused = vm.assembleContext({ goal: "architecture", budget: 200, outputReserve: 20, fixedTokens: { system: 30, tools: 20 }, includeRecent: false })
+      var focusedHandles = focused.objects.map(function(item) { return item.handle })
+      ow.test.assert(focusedHandles.indexOf(relevant.handle) >= 0 && focusedHandles.indexOf(unrelated.handle) < 0, true, "Goal assembly should avoid unrelated objects before spending tokens")
+      ow.test.assert(focused.materializedTokens <= focused.budget.materialization && focused.overflow === false, true, "Optional representations should remain inside the materialization budget")
+      ow.test.assert(focused.budget.fixedTotal === 50 && focused.budget.materialization === 130, true, "ContextObject allocation should account for fixed system/tool tokens and output reserve")
+
+      vm.registerContextObject("memory", "note", "ação especial")
+      var unicodeObject = vm.objects[vm.objects.length - 1]
+      var unicodeGoal = vm.assembleContext({ goal: "ção", budget: 100, outputReserve: 10, includeRecent: false })
+      ow.test.assert(unicodeGoal.objects[0].handle === unicodeObject.handle, true, "Adaptive assembly should preserve exact matching for goals outside the lightweight index alphabet")
+
+      var pressured = vm.assembleContext({ candidateIds: [relevant.handle, unrelated.handle], budget: 40, outputReserve: 0, includeRecent: false })
+      var generous = vm.assembleContext({ candidateIds: [relevant.handle, unrelated.handle], budget: 1000, outputReserve: 100, includeRecent: false })
+      var order = { L0: 0, L1: 1, L2: 2, L3: 3, L4: 4 }
+      var pressuredRelevant = pressured.objects.filter(function(item) { return item.handle === relevant.handle })[0]
+      var generousRelevant = generous.objects.filter(function(item) { return item.handle === relevant.handle })[0]
+      ow.test.assert(order[generousRelevant.level] >= order[pressuredRelevant.level], true, "Representation detail should increase only when the budget permits")
+      ow.test.assert(isMap(generous.budget.categories) && generous.utilization <= 1, true, "Assembly should expose adaptive category allocations and utilization")
+      var selectedTokens = generous.objects.reduce(function(total, item) { return total + item.tokenCost }, 0)
+      ow.test.assert(selectedTokens === generous.materializedTokens, true, "Reported materialization must equal the selected representation costs")
+    }, { contextVirtualization: true })
+  }
+
+  exports.testDependencyPrefetchAndHardConstraintOverflow = function() {
+    withVm(function(vm) {
+      vm.registerContextObject("evidence", "conversation", "supporting evidence")
+      var evidence = vm.objects[vm.objects.length - 1]
+      vm.registerContextObject("decision", "architecture", "selected architecture", { dependencies: [evidence.handle], importance: 1 })
+      var decision = vm.objects[vm.objects.length - 1]
+      var assembled = vm.assembleContext({ candidateIds: [decision.handle], budget: 200, outputReserve: 20, includeRecent: false })
+      var prefetched = assembled.objects.filter(function(item) { return item.handle === evidence.handle })[0]
+      ow.test.assert(isMap(prefetched) && prefetched.prefetched === true && prefetched.level === "L0", true, "Dependencies should be prefetched as cheap addressable references")
+      ow.test.assert(vm.metrics.dependency_prefetches === 1, true, "Dependency-aware prefetch should be measurable")
+
+      vm.registerContextObject("constraint", "user_requirement", new Array(401).join("must "))
+      var constraint = vm.objects[vm.objects.length - 1]
+      var overflow = vm.assembleContext({ candidateIds: [], budget: 20, outputReserve: 5, includeRecent: false })
+      var required = overflow.objects.filter(function(item) { return item.handle === constraint.handle })[0]
+      ow.test.assert(overflow.overflow === true && isMap(required) && required.level === "L4", true, "Exact hard constraints should report an unsatisfied budget instead of being silently dropped")
+      ow.test.assert(overflow.materializedTokens > overflow.budget.materialization && vm.metrics.budget_overflows === 1, true, "Protected-set overflow should remain visible in diagnostics")
+    }, { contextVirtualization: true })
+  }
+
   exports.testLegacyImportMarksCompletenessBoundary = function() {
     withVm(function(vm) {
       vm.importLegacy({ c: [{ role: "assistant", content: "already summarized" }] })

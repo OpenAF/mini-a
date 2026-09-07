@@ -79,7 +79,14 @@ var MiniAHistoryVM = function(options) {
     index_updates: 0,
     range_reads: 0,
     section_reads: 0,
-    json_path_reads: 0
+    json_path_reads: 0,
+    context_assemblies: 0,
+    context_materialized_tokens: 0,
+    addressable_relevant_tokens: 0,
+    effective_context_ratio: 0,
+    context_budget_utilization: 0,
+    dependency_prefetches: 0,
+    budget_overflows: 0
   }
 
   if (this.enabled || this.shadow) this._open()
@@ -827,6 +834,260 @@ MiniAHistoryVM.prototype.readContext = function(id, request) {
   var chars = this._contentCodePoints(serialized)
   var endOffset = Math.min(chars.length, offset + limit)
   return this._boundedTextResult(object, "range", chars.slice(offset, endOffset).join(""), { offset: offset, limit: limit, total: chars.length, nextCursor: endOffset < chars.length ? endOffset : __ })
+}
+
+MiniAHistoryVM.prototype._contextCategory = function(object) {
+  if (object.kind === "constraint") return "constraints"
+  if (object.kind === "plan" || object.kind === "decision") return "plan"
+  if (object.kind === "memory") return "memory"
+  if (object.kind === "history" || object.kind === "delegation" || object.kind === "recovery") return "history"
+  if (object.kind === "wiki" || object.kind === "summary" || object.kind === "evidence") return "knowledge"
+  if (object.kind === "skill") return "skills"
+  if (object.kind === "artifact" || object.kind === "attachment") return "artifacts"
+  return "other"
+}
+
+MiniAHistoryVM.prototype._contextBudgetPolicy = function(totalBudget, outputReserve, candidates, options) {
+  var fixed = {}
+  var fixedTotal = 0
+  if (isMap(options.fixedTokens)) Object.keys(options.fixedTokens).forEach(function(category) {
+    if (isNumber(options.fixedTokens[category]) && options.fixedTokens[category] > 0) {
+      fixed[category] = Math.floor(options.fixedTokens[category])
+      fixedTotal += fixed[category]
+    }
+  })
+  var materializationBudget = Math.max(0, totalBudget - outputReserve - fixedTotal)
+  var weights = { constraints: 4, plan: 3, memory: 2, history: 3, knowledge: 3, skills: 1, artifacts: 2, other: 1 }
+  if (isMap(options.categoryWeights)) Object.keys(options.categoryWeights).forEach(function(category) {
+    if (isNumber(options.categoryWeights[category]) && options.categoryWeights[category] >= 0) weights[category] = options.categoryWeights[category]
+  })
+  var demand = {}
+  for (var i = 0; i < candidates.length; i++) demand[candidates[i].category] = (demand[candidates[i].category] || 0) + candidates[i].utility
+  var weighted = {}
+  var totalWeight = 0
+  Object.keys(weights).forEach(function(category) {
+    weighted[category] = weights[category] * (demand[category] > 0 ? 1 + Math.min(2, demand[category]) : 0.25)
+    totalWeight += weighted[category]
+  })
+  var budgets = {}
+  Object.keys(weighted).forEach(function(category) {
+    budgets[category] = totalWeight > 0 ? Math.floor(materializationBudget * weighted[category] / totalWeight) : 0
+  })
+  return { total: totalBudget, outputReserve: outputReserve, fixed: fixed, fixedTotal: fixedTotal, materialization: materializationBudget, categories: budgets }
+}
+
+MiniAHistoryVM.prototype._contextUtility = function(object, relevance, mandatory) {
+  var importance = isNumber(object.importance) ? Math.max(0, Math.min(1, object.importance)) : 0.5
+  var probability = Math.max(0.05, Math.min(1, 0.15 + relevance * 0.7 + Math.min(0.15, object.accessCount * 0.03)))
+  var confidence = isMap(object.event.metadata) && isNumber(object.event.metadata.confidence) ? Math.max(0, Math.min(1, object.event.metadata.confidence)) : 0.8
+  return (mandatory ? 10 : 0) + Math.max(0.001, relevance * importance * probability * confidence)
+}
+
+MiniAHistoryVM.prototype._contextRepresentationCost = function(object, level) {
+  if (level === "L4") return object.estimatedOriginalTokens
+  return this._buildRepresentation(object, level).estimatedTokens
+}
+
+MiniAHistoryVM.prototype.assembleContext = function(options) {
+  if (!this.contextVirtualization) return { error: "Context virtualization is not enabled." }
+  var opts = isMap(options) ? options : {}
+  var totalBudget = isNumber(opts.budget) ? Math.max(1, Math.floor(opts.budget)) : 32000
+  var outputReserve = isNumber(opts.outputReserve) ? Math.max(0, Math.min(totalBudget, Math.floor(opts.outputReserve))) : Math.min(4096, Math.floor(totalBudget * 0.2))
+  var goal = isString(opts.goal) ? opts.goal.toLowerCase().trim() : ""
+  var goalTerms = this._tokenizeIndexText(goal)
+  var pinned = {}
+  if (isArray(opts.pinned)) for (var pi = 0; pi < opts.pinned.length; pi++) pinned[String(opts.pinned[pi])] = true
+  var candidateMap = {}
+  var candidateReasons = {}
+  var addCandidate = function(object, reason) {
+    if (!isMap(object) || object.branchId !== this.branchId) return
+    candidateMap[object.handle] = object
+    if (!isArray(candidateReasons[object.handle])) candidateReasons[object.handle] = []
+    if (candidateReasons[object.handle].indexOf(reason) < 0) candidateReasons[object.handle].push(reason)
+  }.bind(this)
+
+  if (isArray(opts.candidateIds)) {
+    for (var ci = 0; ci < opts.candidateIds.length; ci++) addCandidate(this._resolveObject(opts.candidateIds[ci]), "explicit_candidate")
+  } else if (goalTerms.length > 0) {
+    var indexed = this._indexedCandidates(goalTerms, ["L0", "L1", "L2"])
+    if (Object.keys(indexed.scores).length === 0) indexed = this._indexedCandidates(goalTerms, ["L3", "L4"])
+    var indexedHandles = Object.keys(indexed.scores).sort(function(a, b) { return indexed.scores[b] - indexed.scores[a] || a.localeCompare(b) })
+    for (var ih = 0; ih < indexedHandles.length && ih < 100; ih++) addCandidate(this._resolveObject(indexedHandles[ih]), "goal_match")
+  } else if (goal.length > 0) {
+    for (var gi = this.objects.length - 1; gi >= 0; gi--) {
+      var goalObject = this.objects[gi]
+      var goalText = isString(goalObject.content) ? goalObject.content : stringify(goalObject.content, __, "")
+      if (goalObject.branchId === this.branchId && goalText.toLowerCase().indexOf(goal) >= 0) addCandidate(goalObject, "goal_match")
+    }
+  } else {
+    for (var ri = this.objects.length - 1; ri >= 0 && Object.keys(candidateMap).length < 50; ri--) {
+      var root = this.objects[ri]
+      if (!isString(root.parentId) || root.parentId.length === 0) addCandidate(root, "root")
+    }
+  }
+
+  for (var oi = 0; oi < this.objects.length; oi++) {
+    var active = this.objects[oi]
+    var isPinned = pinned[active.id] === true || pinned[active.handle] === true
+    var activePlan = active.kind === "plan" && isMap(active.event.metadata) && active.event.metadata.active === true
+    if (active.kind === "constraint" || active.explicitPin || active.unresolved || activePlan || isPinned) addCandidate(active, "mandatory")
+  }
+  if (opts.includeRecent !== false) {
+    var recentAdded = 0
+    for (var recent = this.objects.length - 1; recent >= 0 && recentAdded < 6; recent--) {
+      if (this.objects[recent].branchId === this.branchId) {
+        addCandidate(this.objects[recent], "recent")
+        recentAdded++
+      }
+    }
+  }
+
+  var initialHandles = Object.keys(candidateMap)
+  for (var dh = 0; dh < initialHandles.length; dh++) {
+    var dependent = candidateMap[initialHandles[dh]]
+    for (var di = 0; di < dependent.dependencies.length; di++) {
+      var dependency = this._resolveObject(dependent.dependencies[di])
+      if (isMap(dependency)) {
+        var wasCandidate = isMap(candidateMap[dependency.handle])
+        addCandidate(dependency, "dependency_prefetch")
+        if (!wasCandidate) this.metrics.dependency_prefetches++
+      }
+    }
+  }
+
+  var cheapScores = goalTerms.length > 0 ? this._indexedCandidates(goalTerms, ["L0", "L1", "L2"]).scores : {}
+  var candidates = []
+  var handles = Object.keys(candidateMap)
+  for (var h = 0; h < handles.length; h++) {
+    var object = candidateMap[handles[h]]
+    var reasons = candidateReasons[object.handle]
+    var mandatory = reasons.indexOf("mandatory") >= 0
+    var prefetched = reasons.length === 1 && reasons[0] === "dependency_prefetch"
+    var relevance = goalTerms.length > 0 ? Math.min(1, (cheapScores[object.handle] || 0) / Math.max(1, goalTerms.length * 3)) : 0.5
+    if (reasons.indexOf("goal_match") >= 0) relevance = Math.max(relevance, 0.6)
+    if (reasons.indexOf("explicit_candidate") >= 0) relevance = Math.max(relevance, 0.8)
+    if (reasons.indexOf("recent") >= 0) relevance = Math.max(relevance, 0.25)
+    if (mandatory) relevance = Math.max(relevance, 0.75)
+    if (prefetched) relevance = Math.max(relevance, 0.1)
+    candidates.push({ object: object, reasons: reasons, mandatory: mandatory, prefetched: prefetched, relevance: relevance, category: this._contextCategory(object), utility: this._contextUtility(object, relevance, mandatory) })
+  }
+
+  var policy = this._contextBudgetPolicy(totalBudget, outputReserve, candidates, opts)
+  var selected = {}
+  var used = 0
+  var categoryUsage = {}
+  var levels = ["L0", "L1", "L2", "L3", "L4"]
+  var levelValue = { L0: 0.2, L1: 0.4, L2: 0.65, L3: 0.85, L4: 1 }
+  var maxObjects = isNumber(opts.maxObjects) ? Math.max(1, Math.min(200, Math.floor(opts.maxObjects))) : 50
+
+  for (var m = 0; m < candidates.length; m++) {
+    var forced = candidates[m]
+    if (!forced.mandatory) continue
+    var minimumLevel = forced.object.kind === "constraint" ? "L4" : "L2"
+    var forcedCost = this._contextRepresentationCost(forced.object, minimumLevel)
+    selected[forced.object.handle] = merge({}, forced, true)
+    selected[forced.object.handle].level = minimumLevel
+    selected[forced.object.handle].tokenCost = forcedCost
+    used += forcedCost
+    categoryUsage[forced.category] = (categoryUsage[forced.category] || 0) + forcedCost
+  }
+
+  var baseOffers = []
+  for (var b = 0; b < candidates.length; b++) {
+    var base = candidates[b]
+    if (isMap(selected[base.object.handle])) continue
+    var baseCost = this._contextRepresentationCost(base.object, "L0")
+    baseOffers.push({ candidate: base, cost: baseCost, efficiency: base.utility * levelValue.L0 / Math.max(1, baseCost) })
+  }
+  baseOffers.sort(function(a, b) { return b.efficiency - a.efficiency || a.candidate.object.handle.localeCompare(b.candidate.object.handle) })
+  for (var pass = 0; pass < 2; pass++) {
+    for (var bo = 0; bo < baseOffers.length && Object.keys(selected).length < maxObjects; bo++) {
+      var offer = baseOffers[bo]
+      if (isMap(selected[offer.candidate.object.handle]) || used + offer.cost > policy.materialization) continue
+      var categoryRoom = (categoryUsage[offer.candidate.category] || 0) + offer.cost <= (policy.categories[offer.candidate.category] || 0)
+      if (pass === 0 && !categoryRoom) continue
+      selected[offer.candidate.object.handle] = merge({}, offer.candidate, true)
+      selected[offer.candidate.object.handle].level = "L0"
+      selected[offer.candidate.object.handle].tokenCost = offer.cost
+      used += offer.cost
+      categoryUsage[offer.candidate.category] = (categoryUsage[offer.candidate.category] || 0) + offer.cost
+    }
+  }
+
+  while (used <= policy.materialization) {
+    var upgradeOffers = []
+    Object.keys(selected).forEach(function(handle) {
+      var item = selected[handle]
+      if (item.prefetched || item.level === "L4") return
+      var currentIndex = levels.indexOf(item.level)
+      var nextLevel = levels[currentIndex + 1]
+      var nextCost = this._contextRepresentationCost(item.object, nextLevel)
+      var deltaCost = nextCost - item.tokenCost
+      var deltaUtility = item.utility * (levelValue[nextLevel] - levelValue[item.level])
+      upgradeOffers.push({ item: item, level: nextLevel, cost: nextCost, deltaCost: deltaCost, efficiency: deltaUtility / Math.max(1, deltaCost) })
+    }, this)
+    if (upgradeOffers.length === 0) break
+    upgradeOffers.sort(function(a, b) { return b.efficiency - a.efficiency || a.item.object.handle.localeCompare(b.item.object.handle) })
+    var accepted = __
+    for (var up = 0; up < upgradeOffers.length; up++) if (used + upgradeOffers[up].deltaCost <= policy.materialization) { accepted = upgradeOffers[up]; break }
+    if (!isMap(accepted)) break
+    used += accepted.deltaCost
+    categoryUsage[accepted.item.category] = (categoryUsage[accepted.item.category] || 0) + accepted.deltaCost
+    accepted.item.level = accepted.level
+    accepted.item.tokenCost = accepted.cost
+  }
+
+  var selectedItems = Object.keys(selected).map(function(handle) { return selected[handle] })
+  selectedItems.sort(function(a, b) { return a.object.event.seq - b.object.event.seq || a.object.handle.localeCompare(b.object.handle) })
+  var materialized = []
+  for (var si = 0; si < selectedItems.length; si++) {
+    var item = selectedItems[si]
+    var representation = this.getRepresentation(item.object.handle, item.level)
+    materialized.push({
+      id: item.object.id,
+      handle: item.object.handle,
+      kind: item.object.kind,
+      type: item.object.type,
+      category: item.category,
+      level: item.level,
+      tokenCost: item.tokenCost,
+      utility: item.utility,
+      efficiency: item.utility * levelValue[item.level] / Math.max(1, item.tokenCost),
+      mandatory: item.mandatory,
+      prefetched: item.prefetched,
+      reasons: item.reasons,
+      representation: representation
+    })
+  }
+
+  var addressableTokens = 0
+  for (var at = 0; at < candidates.length; at++) addressableTokens += candidates[at].object.estimatedOriginalTokens
+  var overflow = used > policy.materialization
+  var utilization = policy.materialization > 0 ? used / policy.materialization : (used > 0 ? 1 : 0)
+  var effectiveRatio = used > 0 ? addressableTokens / used : 0
+  this.metrics.context_assemblies++
+  this.metrics.context_objects_considered += candidates.length
+  this.metrics.context_objects_selected += materialized.length
+  this.metrics.context_candidate_tokens += addressableTokens
+  this.metrics.context_materialized_tokens = used
+  this.metrics.addressable_relevant_tokens = addressableTokens
+  this.metrics.effective_context_ratio = effectiveRatio
+  this.metrics.context_budget_utilization = utilization
+  if (overflow) this.metrics.budget_overflows++
+  return {
+    consumer: isString(opts.consumer) ? opts.consumer : "executor",
+    goal: isString(opts.goal) ? opts.goal : "",
+    budget: policy,
+    categoryUsage: categoryUsage,
+    materializedTokens: used,
+    addressableTokens: addressableTokens,
+    effectiveContextRatio: effectiveRatio,
+    utilization: utilization,
+    overflow: overflow,
+    objectsConsidered: candidates.length,
+    objectsSelected: materialized.length,
+    objects: materialized
+  }
 }
 
 MiniAHistoryVM.prototype._contentCodePoints = function(value) {
