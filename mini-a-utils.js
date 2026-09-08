@@ -16,6 +16,10 @@ var MiniUtilsTool = function(options) {
   this._rootWithSep = null
   this._readWrite = false
   this._visualizationsEnabled = false
+  this._chartRenderer = __
+  // Mini-A supplies this to route display-only output to its console. Without
+  // it, direct MiniUtilsTool users retain the historical print() behavior.
+  this._displayEventFn = __
   this._separator = String(java.io.File.separator)
   this._listNestedKeys = ["files", "dirs", "children", "items", "list", "entries", "content"]
   this._skillTemplateCandidates = ["SKILL.yaml", "SKILL.yml", "SKILL.json", "SKILL.md", "skill.md"]
@@ -62,6 +66,8 @@ MiniUtilsTool.prototype.init = function(options) {
     this._root = canonicalRoot
     this._readWrite = options.readwrite === true
     this._visualizationsEnabled = options.useasciiviz === true
+    this._chartRenderer = isFunction(options.chartRenderer) ? options.chartRenderer : __
+    this._displayEventFn = isFunction(options.displayEventFn) ? options.displayEventFn : __
     this._skillsRoots = this._resolveSkillsRoots(options)
     var sep = String(java.io.File.separator)
     this._separator = sep
@@ -3442,15 +3448,20 @@ MiniUtilsTool.prototype.showMessage = function(params) {
       lines.push(colorFn("BOLD", title))
     }
     lines.push("(" + prefix + ") " + renderedMessage)
-    print("")
-    var line = ow.format.withSideLine(lines.join("\n"), __, borderColor, textStyle, ow.format.withSideLineThemes().closedCurvedRect)
-    if (level === "error" || level === "warn") {
-      printErr(line)
+    var display = { kind: "message", message: message, level: level, title: title }
+    if (isFunction(this._displayEventFn)) {
+      this._displayEventFn(display)
     } else {
-      print(line)
+      print("")
+      var line = ow.format.withSideLine(lines.join("\n"), __, borderColor, textStyle, ow.format.withSideLineThemes().closedCurvedRect)
+      if (level === "error" || level === "warn") {
+        printErr(line)
+      } else {
+        print(line)
+      }
+      print("")
     }
-    print("")
-    return { operation: "showMessage", displayed: true, level: level, message: message }
+    return { operation: "showMessage", displayed: true, level: level }
   } catch(e) {
     return "[ERROR] " + __miniAErrMsg(e)
   }
@@ -3544,8 +3555,11 @@ MiniUtilsTool.prototype.printChart = function(params) {
       var lineUnit = isString(options.unit) ? options.unit : "dec"
       var lineUnits = ["int", "dec1", "dec2", "dec3", "dec4", "dec", "bytes", "si"]
       if (lineUnits.indexOf(lineUnit) < 0) return "[ERROR] options.unit must be one of: int, dec1, dec2, dec3, dec4, dec, bytes, si for type='line'."
-      if (typeof printChartArray === "function") {
-        out = printChartArray(data, lineUnit, options.width, options.height, options.max, options.min, options)
+      var chartRenderer = isFunction(this._chartRenderer)
+        ? this._chartRenderer
+        : (typeof printChartArray === "function" ? printChartArray : __)
+      if (isFunction(chartRenderer)) {
+        out = chartRenderer(data, lineUnit, options.width, options.height, options.max, options.min, options)
       } else {
         // Keep older OpenAF runtimes usable while preferring the one-shot array API.
         out = ow.format.string.lineChart(data, options)
@@ -3634,10 +3648,15 @@ MiniUtilsTool.prototype.printChart = function(params) {
       return "[ERROR] Unknown type '" + type + "'. Expected one of: line, bars, printbars, sparkline, histogram, heatmap, bullet, scatter, boxplot, timeline, statusmatrix."
     }
 
-    print("")
-    if (title.length > 0) print(colorFn("BOLD", title))
-    print(out)
-    print("")
+    var display = { kind: "chart", type: type, data: data, options: options, title: title }
+    if (isFunction(this._displayEventFn)) {
+      this._displayEventFn(display)
+    } else {
+      print("")
+      if (title.length > 0) print(colorFn("BOLD", title))
+      print(out)
+      print("")
+    }
     return { operation: "printChart", type: type, displayed: true }
   } catch (e) {
     return "[ERROR] " + __miniAErrMsg(e)

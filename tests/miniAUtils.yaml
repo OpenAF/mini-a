@@ -202,6 +202,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testPrintChartMultiSeriesObjects
 
+- name: MiniA Utils Tests::DisplayEventPayloadsAvoidDirectRendering
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDisplayEventPayloadsAvoidDirectRendering
+
 - name: MiniA Utils Tests::StdUtilsCatalog
   from: MiniA Utils Tests::Init
   to  : oJob Test
@@ -260,5 +265,6 @@ todo:
 - MiniA Utils Tests::PrintChartUsesArrayRenderer
 - MiniA Utils Tests::PrintChartNormalizesObjectPointsAndLabels
 - MiniA Utils Tests::PrintChartMultiSeriesObjects
+- MiniA Utils Tests::DisplayEventPayloadsAvoidDirectRendering
 - MiniA Utils Tests::StdUtilsCatalog
 - MiniA Utils Tests::LegacyCatalog

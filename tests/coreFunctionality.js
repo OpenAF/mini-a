@@ -1531,15 +1531,37 @@
   exports.testUtilsMcpConsoleOnlyToolsToggle = function() {
     var agent = createAgent()
 
-    var nonConsole = agent._createUtilsMcpConfig({ useutils: true, __interaction_source: "mini-a-web" })
+    var nonConsole = agent._createUtilsMcpConfig({ useutils: true, useasciiviz: true, __interaction_source: "mini-a-web" })
     ow.test.assert(isMap(nonConsole) && isMap(nonConsole.options), true, "Should build utils MCP config for non-console interactions")
     ow.test.assert(isUnDef(nonConsole.options.fns.userInput), true, "Should hide userInput outside console sessions")
     ow.test.assert(isUnDef(nonConsole.options.fns.showMessage), true, "Should hide showMessage outside console sessions")
+    ow.test.assert(isUnDef(nonConsole.options.fns.printChart), true, "Should hide printChart outside web sessions")
+    ow.test.assert(isUnDef(nonConsole.options.fnsMeta.printChart), true, "Should hide printChart metadata outside web sessions")
 
-    var consoleMode = agent._createUtilsMcpConfig({ useutils: true, __interaction_source: "mini-a-con" })
+    var consoleMode = agent._createUtilsMcpConfig({ useutils: true, useasciiviz: true, __interaction_source: "mini-a-con" })
     ow.test.assert(isMap(consoleMode) && isMap(consoleMode.options), true, "Should build utils MCP config for console interactions")
     ow.test.assert(isDef(consoleMode.options.fns.userInput), true, "Should expose userInput in console sessions")
     ow.test.assert(isDef(consoleMode.options.fns.showMessage), true, "Should expose showMessage in console sessions")
+    ow.test.assert(isDef(consoleMode.options.fns.printChart), true, "Should expose printChart in console sessions when enabled")
+  }
+
+  exports.testUtilsMcpEmitsCompactDisplayEvents = function() {
+    var events = []
+    var agent = createAgent()
+    agent.fnI = function(event, message) { events.push({ event: event, message: message }) }
+    var cfg = agent._createUtilsMcpConfig({ useutils: true, useasciiviz: true, __interaction_source: "mini-a-con" })
+    var originalPrintChartArray = global.printChartArray
+    try {
+      global.printChartArray = function() { return "chart" }
+      var messageResponse = cfg.options.fns.showMessage({ message: "Do not return this message", level: "info" })
+      var chartResponse = cfg.options.fns.printChart({ type: "line", data: [1, 2] })
+      ow.test.assert(events.filter(function(e) { return e.event === "tool_display" }).length === 2, true, "Should emit display events in tool-call order")
+      ow.test.assert(messageResponse.content[0].text.indexOf("Do not return this message") < 0, true, "Message acknowledgement should not include its body")
+      ow.test.assert(chartResponse.content[0].text === '{"operation":"printChart","type":"line","displayed":true}', true, "Chart acknowledgement should be compact")
+    } finally {
+      if (isDef(originalPrintChartArray)) global.printChartArray = originalPrintChartArray
+      else delete global.printChartArray
+    }
   }
 
   exports.testProxyDispatchPropagatesDownstreamToolErrors = function() {

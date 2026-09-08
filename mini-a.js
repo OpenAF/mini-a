@@ -10661,7 +10661,13 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
 
     var toolOptions = {}
     if (args.readwrite === true) toolOptions.readwrite = true
-    if (toBoolean(args.useasciiviz) === true) toolOptions.useasciiviz = true
+    var supportsConsoleDisplay = this._supportsConsoleUserInput(args) === true
+    if (toBoolean(args.useasciiviz) === true && supportsConsoleDisplay) toolOptions.useasciiviz = true
+    if (supportsConsoleDisplay) {
+      toolOptions.displayEventFn = function(display) {
+        parent.fnI("tool_display", display)
+      }
+    }
     if (isString(args.utilsroot) && args.utilsroot.trim().length > 0) {
       toolOptions.root = args.utilsroot.trim()
     }
@@ -10737,7 +10743,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     if (toBoolean(args.useskillwiki) !== true || !isObject(this._skillWikiManager)) {
       methodNames = methodNames.filter(function(name) { return name !== "skillwiki" })
     }
-    if (toBoolean(args.useasciiviz) !== true) {
+    if (toBoolean(args.useasciiviz) !== true || supportsConsoleDisplay !== true) {
       methodNames = methodNames.filter(function(name) { return name !== "printChart" })
     }
     var utilsAllow = this._normalizeUtilsToolList(args.utilsallow, useStdUtils)
@@ -16319,7 +16325,9 @@ MiniA.prototype.init = function(args) {
       useMaps: args.usemaps,
       useMath: args.usemath,
       useSvg: args.usesvg,
-      useAsciiViz: args.useasciiviz,
+      // ASCII renderer output is terminal-only; browser sessions retain their
+      // native final-answer visual guidance but never advertise printChart.
+      useAsciiViz: args.useasciiviz && args.__interaction_source === "mini-a-con",
       browserContext: args.browsercontext,
       existingKnowledge: baseKnowledge
     })

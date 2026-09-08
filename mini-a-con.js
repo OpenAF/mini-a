@@ -4519,12 +4519,7 @@ try {
     }
   }
 
-  // Tool bodies (e.g. MiniUtilsTool.printChart/showMessage) can write raw
-  // lines straight to stdout. The activity-cue thread repaints the previous
-  // inline event line on a timer using relative cursor moves, unaware of
-  // those writes, which corrupts/interleaves the tool's own output if both
-  // happen concurrently. Pause the cue loop around the tool call so only one
-  // side is touching the terminal at a time.
+  // Pause the activity cue while an atomic console display is being rendered.
   function _rawOutputGuard(innerFn) {
     var wasActive = _activityCueActive === true
     if (wasActive) _stopActivityCueLoop()
@@ -4719,6 +4714,30 @@ try {
       _flushStreamRemainder()
       print()
       _streamNeedsTerminator = false
+    }
+    // Mini Utils emits these only after a successful display call. Render them
+    // before normal event formatting so cue redraws cannot overwrite them.
+    if (type == "tool_display") {
+      _rawOutputGuard(function() {
+        if (isDef(_prevEventRenderLines)) {
+          _eraseRenderedLines(_prevEventRenderLines)
+          _prevEventRenderLines = __
+          _prevEventLastUpdate = 0
+          _prevEventAnimatedRenderer = __
+        }
+        var display = isMap(message) ? message : {}
+        try {
+          var displayTool = new MiniUtilsTool({ useasciiviz: display.kind === "chart" })
+          if (display.kind === "chart") {
+            displayTool.printChart({ type: display.type, data: display.data, options: display.options, title: display.title })
+          } else if (display.kind === "message") {
+            displayTool.showMessage({ message: display.message, level: display.level, title: display.title })
+          }
+        } catch(displayErr) {
+          printErr("[display error] " + (displayErr && displayErr.message ? displayErr.message : String(displayErr)))
+        }
+      })
+      return
     }
     // Ignore user events
     if (type == "user") return
