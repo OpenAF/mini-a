@@ -5696,6 +5696,19 @@
         const normalizedBase = normalizeRenderedConversationText(base);
         if (normalizedBase.indexOf(stream) !== -1) return base;
         if (base.indexOf(stream) !== -1) return base;
+
+        // The response endpoint returns the final answer as a Markdown suffix of
+        // the interaction log. Streaming chunks often differ only in whitespace
+        // (for example, a buffered newline between Markdown blocks), so an exact
+        // substring check above misses an already-present final answer and appends
+        // it a second time. Compare normalized suffixes before adding a preview.
+        const normalizeForStreamDedup = value => String(value || '')
+            .replace(/\r\n/g, '\n')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const comparableBase = normalizeForStreamDedup(normalizedBase);
+        const comparableStream = normalizeForStreamDedup(stream);
+        if (comparableStream && comparableBase.endsWith(comparableStream)) return base;
         return appendWithOverlap(base, stream);
     }
 

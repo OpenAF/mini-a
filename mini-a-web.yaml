@@ -1186,12 +1186,21 @@ todo:
           lma.setInteractionFn( (e, m) => {
             try {
               if (e == "stream") {
+                // Local child agents inherit this callback and prefix every
+                // interaction message with [subtask:id]. Do not mix their answer
+                // deltas into the parent SSE stream: the browser maintains one
+                // stream buffer and would otherwise append a child answer (and
+                // often the parent answer again) to the main transcript.
+                if (isString(global._mini_a_web_extractSubtaskId(m))) return
                 if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
                   global._mini_a_web_ssePush(uuid, "stream", { message: m })
                 }
                 return
               }
               if (e == "planner_stream") {
+                // Planner deltas from a delegated child are likewise private to
+                // that child and must not populate the parent planner preview.
+                if (isString(global._mini_a_web_extractSubtaskId(m))) return
                 if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
                   global._mini_a_web_ssePush(uuid, "planner_stream", { message: m })
                 }
@@ -1210,6 +1219,8 @@ todo:
               case "size"     : _e = "📏"; break
               case "rate"     : _e = "⏳"; break
               case "mcp"      : _e = "🤖"; break
+              case "subagent" : _e = "🤝"; break
+              case "delegate" : _e = "🤝"; break
               case "plan"     : _e = "🗺️"; break
               case "done"     : _e = "✅"; break
               case "error"    : _e = "❌"; break
@@ -1336,7 +1347,11 @@ todo:
                     if (_candidate.length > 0) _title = _candidate.substring(0, 120)
                   }
                   var _status = global._mini_a_web_statusFromSubtaskMessage(m)
-                  global._mini_a_web_upsertSubtaskEvent(uuid, _sid, _title, _status, m)
+                  // Child interaction callbacks carry their event kind separately
+                  // from the message. Preserve its mapped icon in the sub-agent
+                  // panel so thoughts (💭), tool work (⚙️), etc. remain legible.
+                  var _subtaskMessage = _e + (isString(m) && m.length > 0 ? " " + m : "")
+                  global._mini_a_web_upsertSubtaskEvent(uuid, _sid, _title, _status, _subtaskMessage)
                   if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
                     global._mini_a_web_ssePush(uuid, "subagents", { subagents: global.__subagentState[uuid] })
                   }
@@ -2257,7 +2272,9 @@ jobs:
 
     global._mini_a_web_summarizeSubtaskMessage = (message) => {
       if (!isString(message)) return ""
-      var out = message.replace(/\s+/g, " ").trim()
+      // The identifier is used for grouping, not display. Keep the event icon
+      // supplied by the interaction handler while hiding the transport marker.
+      var out = message.replace(/\[subtask:[a-z0-9]+\]\s*/ig, "").replace(/\s+/g, " ").trim()
       if (out.length > 180) out = out.substring(0, 177) + "..."
       return out
     }
