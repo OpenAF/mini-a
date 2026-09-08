@@ -16962,6 +16962,11 @@ MiniA.prototype.init = function(args) {
     var baseRules = rules
       .map(r => isDef(r) ? String(r).trim() : "")
       .filter(r => r.length > 0)
+    if (this._shouldEncourageWebMarkdownImages(args)) {
+      baseRules.push(
+        "The answer is rendered in a web page. When an image would materially improve the answer, include it using standard Markdown image syntax: ![concise descriptive alt text](https://reliable-image-url). Use images sparingly and only when relevant; never invent image URLs."
+      )
+    }
     var validatedContracts = this._buildValidatedToolContracts(args)
     if (validatedContracts.length > 0) {
       var contractText = validatedContracts.slice(0, 8).map(function(contract) {
@@ -17296,6 +17301,11 @@ MiniA.prototype._shouldIncludeNoUserInteractionRemark = function(args) {
   var source = args.__interaction_source.trim().toLowerCase()
   if (source === "mini-a-con") return this._supportsConsoleUserInput(args) !== true
   return source === "mini-a-web"
+}
+
+MiniA.prototype._shouldEncourageWebMarkdownImages = function(args) {
+  if (!isMap(args) || !isString(args.__interaction_source)) return false
+  return args.__interaction_source.trim().toLowerCase() === "mini-a-web" && args.format === "md"
 }
 
 MiniA.prototype._supportsConsoleUserInput = function(args) {

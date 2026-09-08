@@ -3906,6 +3906,22 @@
     ow.test.assert(MiniA.shouldWarnUnknownArgs({ exec: "/skill run", customflag: true }), false, "Template execution should suppress console-only unknown-arg warnings")
   }
 
+  exports.testWebMarkdownImageGuidanceOnlyAppliesToWebMarkdownResponses = function() {
+    var agent = createAgent()
+    ow.test.assert(agent._shouldEncourageWebMarkdownImages({ __interaction_source: "mini-a-web", format: "md" }), true, "Web Markdown responses should receive image guidance")
+    ow.test.assert(agent._shouldEncourageWebMarkdownImages({ __interaction_source: "mini-a-web", format: "json" }), false, "Structured web responses must preserve their requested format")
+    ow.test.assert(agent._shouldEncourageWebMarkdownImages({ __interaction_source: "mini-a-con", format: "md" }), false, "Console Markdown responses should not receive web-only image guidance")
+
+    agent.fnI = function() {}
+    agent.init({ goal: "Explain a historical event", __interaction_source: "mini-a-web", format: "md" })
+    ow.test.assert(agent._systemInst.indexOf("standard Markdown image syntax") >= 0, true, "Web Markdown system prompts should encourage relevant image embeds")
+
+    var structuredAgent = createAgent()
+    structuredAgent.fnI = function() {}
+    structuredAgent.init({ goal: "Return structured data", __interaction_source: "mini-a-web", format: "json" })
+    ow.test.assert(structuredAgent._systemInst.indexOf("standard Markdown image syntax") < 0, true, "Structured web system prompts should omit Markdown image guidance")
+  }
+
   exports.testInitSkipsUnknownArgWarningsForNonConsoleRuns = function() {
     var agent = createAgent()
     var warned = false

@@ -822,6 +822,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testShouldWarnUnknownArgsOnlyForConsoleMode
 
+- name: MiniA Core Tests::WebMarkdownImageGuidance
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWebMarkdownImageGuidanceOnlyAppliesToWebMarkdownResponses
+
 - name: MiniA Core Tests::InitSkipsUnknownArgWarningsForNonConsoleRuns
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -1153,6 +1158,7 @@ todo:
 - MiniA Core Tests::ProxyDispatchSchemaOmitsReadresultParamsWhenStdutilsEnabled
 - MiniA Core Tests::ResultAliasToolsBypassInlineLimitGuard
 - MiniA Core Tests::ShouldWarnUnknownArgsOnlyForConsoleMode
+- MiniA Core Tests::WebMarkdownImageGuidance
 - MiniA Core Tests::InitSkipsUnknownArgWarningsForNonConsoleRuns
 - MiniA Core Tests::InitKeepsUnknownArgWarningsForConsoleRuns
 - MiniA Core Tests::MalformedToolCallFallbackDisablesMainTools
