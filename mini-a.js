@@ -19102,7 +19102,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         this._noteLastAction(runtime, actionEntry)
 
         // Auto-delegation: if result is noisy, spawn a summarization sub-agent
-        if (!hasError && isObject(parent._subtaskManager) && args.autodelegation === true && args._autoDelegate !== false &&
+        // This finalizer is an arrow function, so `this` remains the active agent.
+        // Do not use the loop-local `parent`: native MCP callbacks can finalize a
+        // tool result before that variable is assigned later in this method.
+        if (!hasError && isObject(this._subtaskManager) && args.autodelegation === true && args._autoDelegate !== false &&
             isString(toolName) && toolName !== "delegate-subtask" && toolName !== "subtask-status") {
           var _isNoisyTool = isMap(args._noisyToolSet) && args._noisyToolSet[toolName.toLowerCase()] === true
           var _obsSize = isString(observation) ? observation.length : (isDef(rawResult) ? stringify(rawResult, __, "").length : 0)
@@ -19122,27 +19125,27 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               var _summaryOpts = { deadlineMs: _summaryDeadlineMs, maxAttempts: 1 }
               if (isNumber(args.delegationstalltimeout) && args.delegationstalltimeout > 0) _summaryOpts.stallTimeoutMs = args.delegationstalltimeout
               if (isNumber(args.delegationhardtimeout) && args.delegationhardtimeout > 0) _summaryOpts.hardTimeoutMs = args.delegationhardtimeout
-              var _memoryMap = isObject(parent._agentState) ? parent._agentState.workingMemory : __
+              var _memoryMap = isObject(this._agentState) ? this._agentState.workingMemory : __
               if (args.usememory === true && isObject(_memoryMap) && Object.keys(_memoryMap).length > 0) {
                 _summaryOpts.fork = true
-                _summaryOpts.forkState = parent._buildForkState(["memory"])
+                _summaryOpts.forkState = this._buildForkState(["memory"])
               }
-              var _summaryId = parent._subtaskManager.submitAndRun(_summaryGoal, { maxsteps: 5 }, _summaryOpts)
+              var _summaryId = this._subtaskManager.submitAndRun(_summaryGoal, { maxsteps: 5 }, _summaryOpts)
               global.__mini_a_metrics.autodelegation_triggered.inc()
               try {
-                var _summaryResult = isFunction(parent._subtaskManager.waitForActive)
-                  ? parent._subtaskManager.waitForActive(_summaryId, { waitMs: _summaryWaitMs })
-                  : parent._subtaskManager.waitFor(_summaryId, _summaryWaitMs)
+                var _summaryResult = isFunction(this._subtaskManager.waitForActive)
+                  ? this._subtaskManager.waitForActive(_summaryId, { waitMs: _summaryWaitMs })
+                  : this._subtaskManager.waitFor(_summaryId, _summaryWaitMs)
                 if (isString(_summaryResult.answer) && _summaryResult.answer.trim().length > 0) {
                   observation = "[auto-delegated summary] " + _summaryResult.answer.trim()
                 } else if (isMap(_summaryResult) && _summaryResult.pending === true) {
-                  parent.fnI("info", "[auto-delegation] Summary sub-agent still active after foreground wait; using original tool output.")
+                  this.fnI("info", "[auto-delegation] Summary sub-agent still active after foreground wait; using original tool output.")
                 }
               } catch(summaryWaitErr) {
-                parent.fnI("warn", "[auto-delegation] Summary sub-agent timeout or error: " + __miniAErrMsg(summaryWaitErr))
+                this.fnI("warn", "[auto-delegation] Summary sub-agent timeout or error: " + __miniAErrMsg(summaryWaitErr))
               }
             } catch(autoDelegErr) {
-              parent.fnI("warn", "[auto-delegation] Failed to spawn summary agent for tool '" + toolName + "': " + __miniAErrMsg(autoDelegErr))
+              this.fnI("warn", "[auto-delegation] Failed to spawn summary agent for tool '" + toolName + "': " + __miniAErrMsg(autoDelegErr))
             }
           }
         }
