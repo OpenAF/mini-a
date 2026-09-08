@@ -141,3 +141,119 @@ MiniA.prototype._stripThinkingTagsFromString = function(text) {
 MiniA.prototype._extractEmbeddedFinalAction = function(answerPayload) {
     return __miniAExtractEmbeddedFinalAction(answerPayload, this._cleanCodeBlocks.bind(this))
 }
+
+// Keep recovery calls consistent with the initial turn's provider constraints.
+MiniA.prototype._promptJsonRecovery = function(llm, prompt, args, modelConfig, noJsonPrompt) {
+  var jsonFlag = !noJsonPrompt && !this._shouldDisableStreamingForOllamaToolCallTurn(modelConfig, this._useToolsActual === true, !noJsonPrompt)
+  if (args.showthinking) {
+    if (jsonFlag && isFunction(llm.promptJSONWithStatsRaw)) return llm.promptJSONWithStatsRaw(prompt)
+    if (isFunction(llm.rawPromptWithStats)) return llm.rawPromptWithStats(prompt, __, __, jsonFlag)
+  }
+  if (jsonFlag && isFunction(llm.promptJSONWithStats)) return llm.promptJSONWithStats(prompt)
+  return llm.promptWithStats(prompt)
+}
+
+MiniA.prototype._buildJsonRetryPrompt = function(prompt) {
+  return prompt + '\n\n[JSON RETRY NOTE] The previous response could not be parsed. Return one complete JSON object only, with "thought" and one "action". For a final answer use {"thought":"done","action":"final","answer":"your answer"}. For a tool action use an available action name and an object in "params"; shell uses top-level "command". Include only fields needed for the chosen action. Escape quotes, backslashes and newlines inside strings. No trailing commas, markdown fences or extra prose. Keep the response concise.'
+}
+
+// This MCP accepts data only. Execution remains in the normal Mini-A dispatcher.
+MiniA.prototype._createReplyCaptureMcpConfig = function(args, capture) {
+  var actions = String(this._actionsList || "think | final").replace(/\s*\(.*$/, "").split("|").map(function(s) { return s.trim() }).filter(function(s) { return s.length > 0 })
+  if (args.useshell !== true) actions = actions.filter(function(s) { return s !== "shell" })
+  var props = {
+    thought: { type: "string" },
+    action: { type: "string", enum: actions },
+    answer: { type: "string" },
+    params: { type: "object" },
+    state: { type: "object" }
+  }
+  if (args.useshell === true) props.command = { type: "string" }
+  return { type: "dummy", shared: false, options: {
+    name: "mini-a-reply-capture",
+    fnsMeta: { submit_reply: { name: "submit_reply", description: "Submit one Mini-A reply. This tool does not execute actions.", inputSchema: {
+      type: "object", properties: props, required: ["thought", "action"], additionalProperties: false
+    } } },
+    fns: { submit_reply: function(payload) {
+      if (!isMap(payload) || !isString(payload.thought) || !isString(payload.action) || actions.indexOf(payload.action) < 0) throw new Error("Invalid reply action")
+      if (Object.keys(payload).some(function(k) { return !Object.prototype.hasOwnProperty.call(props, k) })) throw new Error("Unexpected reply field")
+      if (isDef(payload.params) && !isMap(payload.params)) throw new Error("Reply params must be an object")
+      if (isDef(payload.state) && !isMap(payload.state)) throw new Error("Reply state must be an object")
+      if (isDef(payload.answer) && !isString(payload.answer)) throw new Error("Reply answer must be a string")
+      if (isDef(payload.command) && !isString(payload.command)) throw new Error("Reply command must be a string")
+      if (payload.action === "final" && (!isString(payload.answer) || !payload.answer.trim())) throw new Error("Final reply needs an answer")
+      if (payload.action === "shell" && (!isString(payload.command) || !payload.command.trim())) throw new Error("Shell reply needs a command")
+      if (["think", "final", "shell"].indexOf(payload.action) < 0 && !isMap(payload.params)) throw new Error("Tool reply needs params")
+      if (capture.accepted) throw new Error("Only one reply is allowed")
+      capture.payload = jsonParse(stringify(payload, __, ""), __, __, true)
+      capture.accepted = true
+      return { content: [{ type: "text", text: "Reply captured." }] }
+    } }
+  } }
+}
+
+MiniA.prototype._promptLcReplyTool = function(prompt, args, modelConfig) {
+  // The adapter hook below is deliberately limited to the two inspected adapters.
+  // Return undefined before any request when unsupported, preserving text recovery.
+  if (!isMap(modelConfig) || ["openai", "ollama"].indexOf(modelConfig.type) < 0) return __
+  var config = jsonParse(stringify(modelConfig, __, ""), __, __, true)
+  config.params = isMap(config.params) ? config.params : {}
+  delete config.params.tools
+  delete config.params.response_format
+  config.params.stream = false
+  if (config.type === "openai") {
+    config.params.tool_choice = { type: "function", function: { name: "submit_reply" } }
+    config.params.parallel_tool_calls = false
+  } else {
+    delete config.params.tool_choice
+    delete config.params.format
+  }
+  var llm = this._createBareLlmInstance(config, this._debuglcchConfig, "__mini_a_lc_reply_debug", "LC reply recovery")
+  if (!isObject(llm) || !isFunction(llm.getGPT) || !isFunction(llm.withMcpTools) || !isFunction(llm.rawPromptWithStats)) return __
+  if (isString(this._systemInst) && isFunction(llm.withInstructions)) {
+    llm.withInstructions(this._systemInst + "\nFor this recovery turn, submit the reply through submit_reply instead of emitting JSON text. All existing goal and permission rules still apply.")
+  }
+  var adapter = llm.getGPT().model
+  if (!isObject(adapter) || !isFunction(adapter._request)) return __
+  var capture = { accepted: false }
+  var client = $mcp(this._createReplyCaptureMcpConfig(args, capture))
+  var request = adapter._request
+  var requested = false
+  try {
+    client.initialize()
+    llm.withMcpTools(client, ["submit_reply"])
+    // Intercept the raw response before OpenAF's automatic tool loop. Capture only
+    // a single named call, then hide tool calls from the isolated adapter so it
+    // records the original usage without issuing a follow-up model request.
+    adapter._request = function() {
+      if (requested) throw new Error("Reply recovery allows only one provider request")
+      requested = true
+      global.__mini_a_metrics.lc_reply_tool_attempts.inc()
+      var raw = request.apply(adapter, arguments)
+      var response = jsonParse(stringify(raw, __, ""), __, __, true)
+      var calls = []
+      if (config.type === "openai" && isMap(response) && isArray(response.choices)) {
+        response.choices.forEach(function(choice) {
+          if (isMap(choice.message) && isArray(choice.message.tool_calls)) calls = calls.concat(choice.message.tool_calls)
+          choice.message = { role: "assistant", content: "" }
+          choice.finish_reason = "stop"
+        })
+      } else if (config.type === "ollama" && isMap(response) && isMap(response.message)) {
+        if (isArray(response.message.tool_calls)) calls = response.message.tool_calls
+        response.message = { role: "assistant", content: "" }
+      }
+      if (calls.length === 1 && isMap(calls[0].function) && calls[0].function.name === "submit_reply") {
+        var payload = calls[0].function.arguments
+        if (isString(payload)) { try { payload = JSON.parse(payload) } catch(ignoreInvalidJson) { payload = __ } }
+        try { client.callTool("submit_reply", payload) } catch(ignoreInvalidReply) {}
+      }
+      return response
+    }
+    var result = llm.rawPromptWithStats(prompt + '\n\n[REPLY TOOL RECOVERY] Submit the next reply by calling submit_reply exactly once. Use one action, not an array. Do not execute tools or commands. Put the complete final answer in the answer string, or the chosen action inputs in params (shell uses command).', __, __, false)
+    if (capture.accepted) global.__mini_a_metrics.lc_reply_tool_successes.inc()
+    return { response: capture.accepted ? capture.payload : "", stats: result.stats }
+  } finally {
+    adapter._request = request
+    try { client.destroy() } catch(ignoreDestroy) {}
+  }
+}

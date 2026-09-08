@@ -189,6 +189,8 @@ var MiniA = function() {
     shell_commands_denied: $atomic(0, "long"),
     fallback_to_main_llm: $atomic(0, "long"),
     lc_json_retries: $atomic(0, "long"),
+    lc_reply_tool_attempts: $atomic(0, "long"),
+    lc_reply_tool_successes: $atomic(0, "long"),
     unknown_actions: $atomic(0, "long"),
     llm_normal_tokens: $atomic(0, "long"),
     llm_lc_tokens: $atomic(0, "long"),
@@ -363,18 +365,18 @@ var MiniA = function() {
 ## RESPONSE FORMAT
 {{#if usetoolsActual}}
 When you DO need an MCP tool, call it directly via function calling — do not return JSON that describes the intended tool call, and do not emit placeholder JSON or shell commands that merely narrate the call.
-When you do NOT need an MCP tool, respond with exactly one valid JSON object adhering to this schema:
+When you do NOT need an MCP tool, respond with one valid JSON response. Final-answer example:
 {{else}}
-Always respond with exactly one valid JSON object adhering to this schema:
+Always respond with one valid JSON response. Final-answer example:
 {{/if}}
-{
-    "thought": "brief next step (1 sentence max, keep it minimal)",
-    "action": "{{{actionFieldValues}}}",{{#if useshell}}
-    "command": "required when action=shell or action entry uses shell: POSIX command to execute",{{/if}}
-    "answer": "required when action=final (or action entry uses final): your complete answer {{#if isMachine}}as JSON{{else}}in markdown{{/if}}{{#if actionsList}}",
-    "params": "required when action=({{{actionsList}}}) (or action entry uses these actions): JSON object with action parameters{{/if}}",
-    "state": {"optional": "persist structured data for future steps"}
-}
+{"thought":"brief next step","action":"final","answer":"your complete answer"}
+Choose one action: {{{actionFieldValues}}}. Include only fields needed for that action.
+• "thought" is a short string. For a single action, "action" is one action name, not the list of alternatives.
+• "final" requires "answer"{{#if isMachine}} (a JSON value for machine output){{else}} (a string containing your complete Markdown answer){{/if}}.{{#if useshell}}
+• "shell" requires a top-level "command" string.{{/if}}{{#if actionsList}}
+• Tool actions require "params" as a JSON object, never a quoted JSON string. Example shape: {"thought":"read the file","action":"<available tool name>","params":{"path":"file.txt"}}.{{/if}}
+• Optional "state" is an object containing data to persist.
+• Escape quotes, backslashes and newlines inside JSON strings. No prose or code fences outside the JSON.
 
 {{#if actionsList}}
 ## AVAILABLE ACTIONS:
@@ -1973,7 +1975,9 @@ MiniA.prototype.getMetrics = function() {
             validation: llmValCalls,
             total: llmNormalCalls + llmLcCalls + llmValCalls + advisorCalls,
             fallback_to_main: global.__mini_a_metrics.fallback_to_main_llm.get(),
-            lc_json_retries: global.__mini_a_metrics.lc_json_retries.get()
+            lc_json_retries: global.__mini_a_metrics.lc_json_retries.get(),
+            lc_reply_tool_attempts: global.__mini_a_metrics.lc_reply_tool_attempts.get(),
+            lc_reply_tool_successes: global.__mini_a_metrics.lc_reply_tool_successes.get()
         },
         goals: {
             achieved: global.__mini_a_metrics.goals_achieved.get(),
@@ -15474,7 +15478,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "showdelegate", "usea2a", "modellock", "modelstrategy", "advisormaxuses", "advisorenable",
     "advisoronrisk", "advisoronambiguity", "advisoronharddecision", "advisorcooldownsteps",
     "advisorbudgetratio", "emergencyreserve", "harddecision", "evidencegate", "evidencegatestrictness",
-    "lcescalatedefer", "lcbudget", "lcjsonretries", "llmcomplexity",
+    "lcescalatedefer", "lcbudget", "lcjsonretries", "lcreplytool", "llmcomplexity",
     "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix", "wikiindexdir", "wikis3artifactprefix", "s3artifactbundle", "wikihttpindexurl", "wikihttptimeout", "wikiartifactrefreshsecs",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
     "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "wikisourceurl", "wikisourcefield", "wikisourceinline", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphmounts", "wikimountgraphttlms", "wikigraphcross", "wikigraphcrossjoin", "wikigraphcrosscap", "wikigraphcrossdepth", "wikigraphcrossmaxdf", "wikigraphcrossminkeylen", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
@@ -15648,6 +15652,15 @@ MiniA.prototype._prepareToolArgs = function(schema, providedParams) {
       delete params.useasciiviz
       repairs.push("removed extraneous 'useasciiviz'")
     }
+    Object.keys(schema.properties).forEach(function(key) {
+      var prop = schema.properties[key]
+      if (!isMap(prop) || ["object", "array"].indexOf(prop.type) < 0 || !isString(params[key])) return
+      var parsed = jsonParse(params[key], __, __, true)
+      if ((prop.type === "object" && isMap(parsed)) || (prop.type === "array" && isArray(parsed))) {
+        params[key] = parsed
+        repairs.push("parsed JSON for '" + key + "'")
+      }
+    })
     if (validParams.indexOf("options") >= 0) {
       if (!isMap(params.options)) params.options = {}
       var xLabelVal = isDef(params.xlabel) ? params.xlabel : (isDef(params.x_axis) ? params.x_axis : params.xLabel)
@@ -15676,15 +15689,7 @@ MiniA.prototype._prepareToolArgs = function(schema, providedParams) {
         repairs.push("renamed '" + key + "' to '" + closest.match + "'")
       }
     })
-    Object.keys(schema.properties).forEach(function(key) {
-      var prop = schema.properties[key]
-      if (!isMap(prop) || ["object", "array"].indexOf(prop.type) < 0 || !isString(params[key])) return
-      var parsed = jsonParse(params[key], __, __, true)
-      if ((prop.type === "object" && isMap(parsed)) || (prop.type === "array" && isArray(parsed))) {
-        params[key] = parsed
-        repairs.push("parsed JSON for '" + key + "'")
-      }
-    })
+
   }
   var details = MiniA._toolArgValidationDetails(schema, params)
   var reject = this._toolArgCheckEnabled !== false && (details.missing.length > 0 || (schema.additionalProperties === false && details.unrecognized.length > 0))
@@ -19659,7 +19664,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       try {
         responseWithStats = this._withExponentialBackoff(() => {
           addCall()
-          var jsonFlag = !noJsonPromptFlag
+          var jsonFlag = !noJsonPromptFlag && !isOllamaToolJsonConflict
           if (args.showthinking) {
             // Streaming not compatible with showthinking - use regular prompts
             if (jsonFlag && isDef(currentLLM.promptJSONWithStatsRaw)) {
@@ -19903,19 +19908,17 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             global.__mini_a_metrics.lc_json_retries.inc()
             global.__mini_a_metrics.retries.inc()
             this.fnI("retry", `Low-cost model produced invalid JSON; retrying low-cost model (attempt ${lcJsonRetryAttempt}/${lcJsonRetries}) with corrective note...`)
-            var lcRetryPrompt = prompt + "\n\n[JSON RETRY NOTE] Your previous response was not valid JSON. Reply with a SINGLE valid JSON object or array only: matching braces/brackets, quoted keys, no trailing commas, no markdown fences, no extra prose."
+            var lcRetryPrompt = this._buildJsonRetryPrompt(prompt)
 
             var lcRetryResponseWithStats
             try {
               lcRetryResponseWithStats = this._withExponentialBackoff(() => {
                 addCall()
-                var jsonFlag = !noJsonPromptFlag
-                if (args.showthinking) {
-                  if (jsonFlag && isDef(currentLLM.promptJSONWithStatsRaw)) return currentLLM.promptJSONWithStatsRaw(lcRetryPrompt)
-                  if (isDef(currentLLM.rawPromptWithStats)) return currentLLM.rawPromptWithStats(lcRetryPrompt, __, __, jsonFlag)
+                if (toBoolean(args.lcreplytool) === true) {
+                  var toolRetry = this._promptLcReplyTool(lcRetryPrompt, args, currentModelConfig)
+                  if (isDef(toolRetry)) return toolRetry
                 }
-                if (jsonFlag && isDef(currentLLM.promptJSONWithStats)) return currentLLM.promptJSONWithStats(lcRetryPrompt)
-                return currentLLM.promptWithStats(lcRetryPrompt)
+                return this._promptJsonRecovery(currentLLM, lcRetryPrompt, args, currentModelConfig, noJsonPromptFlag)
               }, this._llmRetryOptions("Low-cost JSON-retry model", { llmType: "low-cost", step: step + 1, reason: "json-retry" }, { maxDelay: 6000 }))
             } catch (lcRetryErr) {
               if (this.state == "stop" || (isObject(lcRetryErr) && lcRetryErr.miniAStop === true)) {
@@ -19959,24 +19962,24 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                 lcRetryRmsg = _lcRetryThinkStrip.cleaned
                 rmsg = lcRetryRmsg
               }
-              var lcRetryMsg = this._parseModelJsonResponse(lcRetryRmsg)
-              var lcRetryRecoveredMsgFromEnvelope = __
-              if (isObject(lcRetryResponseWithStats) && isMap(lcRetryResponseWithStats.response)) {
-                lcRetryRecoveredMsgFromEnvelope = this._recoverMessageFromProviderError(lcRetryResponseWithStats.response)
-              }
-              recoveredMsgFromEnvelope = lcRetryRecoveredMsgFromEnvelope
-              if ((isUnDef(lcRetryMsg) || !(isMap(lcRetryMsg) || isArray(lcRetryMsg))) && (isMap(lcRetryRecoveredMsgFromEnvelope) || isArray(lcRetryRecoveredMsgFromEnvelope))) {
-                lcRetryMsg = lcRetryRecoveredMsgFromEnvelope
-                recoveredFromEnvelopeApplied = true
-              }
-              if (isMap(lcRetryMsg) || isArray(lcRetryMsg)) {
-                msg = lcRetryMsg
-                this.fnI("output", `Low-cost model responded on retry ${lcJsonRetryAttempt}/${lcJsonRetries}. ${this._formatTokenStats(lcRetryStats)}`)
-              } else {
-                global.__mini_a_metrics.json_parse_failures.inc()
-                var lcRetryResponseSample = lcRetryRmsg.length > 200 ? lcRetryRmsg.substring(0, 200) + "..." : lcRetryRmsg
-                this.fnI("warn", `Low-cost model retry ${lcJsonRetryAttempt}/${lcJsonRetries} still produced invalid JSON. Response started with: ${lcRetryResponseSample}.`)
-              }
+            }
+            var lcRetryMsg = this._parseModelJsonResponse(lcRetryRmsg)
+            var lcRetryRecoveredMsgFromEnvelope = __
+            if (isObject(lcRetryResponseWithStats) && isMap(lcRetryResponseWithStats.response)) {
+              lcRetryRecoveredMsgFromEnvelope = this._recoverMessageFromProviderError(lcRetryResponseWithStats.response)
+            }
+            recoveredMsgFromEnvelope = lcRetryRecoveredMsgFromEnvelope
+            if ((isUnDef(lcRetryMsg) || !(isMap(lcRetryMsg) || isArray(lcRetryMsg))) && (isMap(lcRetryRecoveredMsgFromEnvelope) || isArray(lcRetryRecoveredMsgFromEnvelope))) {
+              lcRetryMsg = lcRetryRecoveredMsgFromEnvelope
+              recoveredFromEnvelopeApplied = true
+            }
+            if (isMap(lcRetryMsg) || isArray(lcRetryMsg)) {
+              msg = lcRetryMsg
+              this.fnI("output", `Low-cost model responded on retry ${lcJsonRetryAttempt}/${lcJsonRetries}. ${this._formatTokenStats(lcRetryStats)}`)
+            } else {
+              global.__mini_a_metrics.json_parse_failures.inc()
+              var lcRetryResponseSample = String(isString(lcRetryRmsg) ? lcRetryRmsg : stringify(lcRetryRmsg, __, "")).substring(0, 200)
+              this.fnI("warn", `Low-cost model retry ${lcJsonRetryAttempt}/${lcJsonRetries} still produced invalid JSON. Response started with: ${lcRetryResponseSample}.`)
             }
           }
 
@@ -19990,24 +19993,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           global.__mini_a_metrics.fallback_to_main_llm.inc()
           global.__mini_a_metrics.retries.inc()
           this._syncConversationForModelSwitch("main")
-            // Add explicit retry context about JSON formatting
-            runtime.context.push(`[RETRY ${step + 1}] (note) The low-cost model produced invalid JSON. Ensure your response is VALID JSON that can be parsed: single { or [ at start, matching braces/brackets, no trailing commas, quoted keys. Keep JSON concise and avoid extra text.`)
+          // Send the corrective instructions on the actual fallback call.
+          var fallbackPrompt = this._buildJsonRetryPrompt(prompt)
           var fallbackResponseWithStats
           try {
             fallbackResponseWithStats = this._withExponentialBackoff(() => {
               addCall()
-              var jsonFlag = runtime.forceNoJson !== true && !this._noJsonPrompt
-              if (args.showthinking) {
-                if (jsonFlag && isDef(this.llm.promptJSONWithStatsRaw)) {
-                  return this.llm.promptJSONWithStatsRaw(prompt)
-                } else if (isDef(this.llm.rawPromptWithStats)) {
-                  return this.llm.rawPromptWithStats(prompt, __, __, jsonFlag)
-                }
-              }
-              if (jsonFlag && isDef(this.llm.promptJSONWithStats)) {
-                return this.llm.promptJSONWithStats(prompt)
-              }
-              return this.llm.promptWithStats(prompt)
+              return this._promptJsonRecovery(this.llm, fallbackPrompt, args, this._oaf_model, runtime.forceNoJson === true || this._noJsonPrompt)
             }, this._llmRetryOptions("Main fallback model", { llmType: "main", reason: "fallback" }, { maxDelay: 6000 }))
           } catch (fallbackErr) {
             if (this.state == "stop" || (isObject(fallbackErr) && fallbackErr.miniAStop === true)) {
@@ -20075,7 +20067,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           var fallbackStats = isObject(fallbackResponseWithStats) ? fallbackResponseWithStats.stats : {}
           var fallbackTokenTotal = this._getTotalTokens(fallbackStats)
           registerCallUsage(fallbackTokenTotal)
-          this._recordLlmStatsMetrics(fallbackStats, "main", this._estimateTokens(prompt))
+          this._recordLlmStatsMetrics(fallbackStats, "main", this._estimateTokens(fallbackPrompt))
 
           // Attach actual token stats to conversation message for later accurate analysis
           this._attachTokenStatsToConversation(fallbackStats, this.llm)

@@ -558,9 +558,32 @@ function __miniACleanCodeBlocks(text) {
 function __miniARepairJsonString(jsonString) {
   if (!isString(jsonString)) return jsonString
 
-  var repaired = jsonString
-    .replace(/,(\s*[}\]])/g, "$1")
-    .replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)(\s*:)/g, '$1"$2"$3')
+  // Repair punctuation only outside strings: answer text and tool arguments
+  // may themselves contain snippets such as ",}" or "{key:value}".
+  var parts = []
+  var inString = false
+  var escaped = false
+  for (var i = 0; i < jsonString.length; i++) {
+    var ch = jsonString.charAt(i)
+    if (inString) {
+      parts.push(ch)
+      if (escaped) escaped = false
+      else if (ch === "\\") escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') { inString = true; parts.push(ch); continue }
+    if (ch === "," && /^\s*[}\]]/.test(jsonString.substring(i + 1))) continue
+    parts.push(ch)
+    if (ch === "{" || ch === ",") {
+      var key = jsonString.substring(i + 1).match(/^(\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)(\s*:)/)
+      if (key) {
+        parts.push(key[1] + '"' + key[2] + '"' + key[3])
+        i += key[0].length
+      }
+    }
+  }
+  var repaired = parts.join("")
 
   var parsed = jsonParse(repaired, __, __, true)
   if (isMap(parsed) || isArray(parsed)) return repaired

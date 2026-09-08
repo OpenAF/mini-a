@@ -32,11 +32,17 @@
 
 **Related parameters**: `memoryreflect`, `memoryreflectmodel`, `memoryreflectmin`, `memorycandidatedays`, `memorybudget`, `memorysearchbudget`, `memorysessionmaxdays`, `memorypersistevery`
 
+### Optional MCP tool capture for low-cost reply recovery
+
+Set `lcreplytool=true lcjsonretries=1` to use a `submit_reply` MCP call in place of the corrective text retry on OpenAI-compatible and Ollama adapters. The isolated tool captures one validated action for the normal dispatcher, without executing it or allowing an automatic model follow-up. Unsupported adapters retain text recovery. New `llm_calls` metrics: `lc_reply_tool_attempts` and `lc_reply_tool_successes`. This remains opt-in; live model success rates have not been measured. See [reply recovery details](REPLY-JSON.md).
+
 ### Low-cost model gets a JSON-retry before falling back to the main model
 
-**Change**: Previously, when the low-cost model's response failed to parse as valid JSON, Mini-A fell back to the main model immediately (zero retries). It now gives the low-cost model `lcjsonretries` (default: `1`) extra same-step attempts, re-prompted with a corrective note about valid JSON formatting, before escalating to the main model. Retries are "free" — they don't consume a step from `maxsteps` — and each retry attempt's token usage is tracked against `lcbudget` and the session's LC cost tracker like any other low-cost call. Set `lcjsonretries=0` to restore the previous immediate-fallback behavior.
+**Change**: Previously, when the low-cost model's response failed to parse as valid JSON, Mini-A fell back to the main model immediately (zero retries). It now gives the low-cost model `lcjsonretries` (default: `1`) extra same-step attempts, re-prompted with a corrective note about valid JSON formatting, before escalating to the main model. Retries do not consume a step from `maxsteps`, but do consume tokens and provider calls, and each retry attempt's token usage is tracked against `lcbudget` and the session's LC cost tracker like any other low-cost call. Set `lcjsonretries=0` to restore the previous immediate-fallback behavior.
 
-New metric: `lc_json_retries` (surfaced via `getMetrics().llm_calls.lc_json_retries`). `fallback_to_main_llm` now only increments once retries are exhausted.
+New metric: `lc_json_retries` (surfaced via `getMetrics().llm_calls.lc_json_retries`). `fallback_to_main_llm` increments if JSON recovery still requires the main model after the configured retry attempts.
+
+Recovery now accepts already-parsed object/array retries, sends the corrective prompt to the main fallback, and preserves the Ollama native-tools/JSON-mode restriction on retries and raw thinking calls. The reply prompt demonstrates object-valued tool parameters, and punctuation repair preserves text inside JSON strings. See [reply JSON troubleshooting](REPLY-JSON.md).
 
 **Related parameters**: `lcjsonretries`, `lcbudget`, `lcescalatedefer`, `modellock`
 

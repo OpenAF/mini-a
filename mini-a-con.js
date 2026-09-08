@@ -712,6 +712,7 @@ try {
     evidencegatestrictness: { type: "string", default: "medium", description: "Evidence gate strictness: low, medium, or high." },
     lcescalatedefer: { type: "boolean", default: true, description: "Defer low-cost escalation decisions when the LC tier is near a handoff." },
     lcbudget       : { type: "number", default: 0, description: "Maximum total low-cost model tokens for the session (0 disables)." },
+    lcreplytool    : { type: "boolean", default: false, description: "Use a capture-only MCP tool for LC JSON retries (OpenAI-compatible/Ollama)." },
     lcjsonretries  : { type: "number", default: 1, description: "Extra same-step low-cost model retries on invalid JSON before falling back to main model (0 disables)." },
     llmcomplexity  : { type: "boolean", default: false, description: "Use an extra low-cost complexity check for medium-complexity goals." },
     mcplazy        : { type: "boolean", default: false, description: "Defer MCP connection initialization" },

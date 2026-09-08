@@ -1669,7 +1669,7 @@ mini-a goal="investigate" adaptiverouting=true debug=true
 | `OAF_MINI_A_CON_HIST_SIZE` | Console history size (default: JLine default) |
 | `OAF_MINI_A_LIBS` | Comma-separated libraries to load automatically |
 | `OAF_MINI_A_NOJSONPROMPT` | Disable promptJSONWithStats for main model, force promptWithStats (default: false). Gemini main models auto-enable this behavior when unset |
-| `OAF_MINI_A_LCNOJSONPROMPT` | Disable promptJSONWithStats for low-cost model, force promptWithStats (default: false). Required for Gemini low-cost models |
+| `OAF_MINI_A_LCNOJSONPROMPT` | Disable promptJSONWithStats for low-cost model, force promptWithStats. Defaults to true for Gemini when unset; false otherwise |
 
 ```bash
 export OAF_MODEL="(type: openai, model: gpt-4, key: '...')"

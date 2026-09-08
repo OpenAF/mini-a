@@ -1357,7 +1357,7 @@
       useWikiGraph: true,
       actionFieldValues: "think | wiki | graph | final (string or array for chaining)"
     }, {})
-    ow.test.assert(withGraph.prompt.indexOf("\"action\": \"think | wiki | graph | final") >= 0, true, "Prompt schema action field should include graph when useWikiGraph is true")
+    ow.test.assert(withGraph.prompt.indexOf("Choose one action: think | wiki | graph | final") >= 0, true, "Prompt action choices should include graph when useWikiGraph is true")
     ow.test.assert(withGraph.prompt.indexOf("\"graph\" - Query the wiki knowledge graph") >= 0, true, "ACTION USAGE should describe the graph action when useWikiGraph is true")
 
     var withoutGraph = renderAgentPrompt(agent, {
@@ -4280,5 +4280,114 @@
   exports.testConsoleEventTextPreservesNewlines = function() {
     var normalized = __miniANormalizeConsoleEventText(" first\\nsecond\r\nthird ")
     ow.test.assert(normalized, "first\nsecond\nthird", "console events must render escaped and actual newlines as separate lines")
+  }
+
+  exports.testJsonRepairPreservesStringPayloads = function() {
+    var agent = createAgent()
+    var broken = '{action:"final", "answer":"Keep ,} and {key:value} and \\"quoted\\" text",}'
+    var parsed = agent._parseModelJsonResponse(broken)
+    ow.test.assert(parsed.answer, 'Keep ,} and {key:value} and "quoted" text', "Repair must not rewrite punctuation inside strings")
+    ow.test.assert(parsed.action, "final", "Unquoted keys and trailing commas should still recover")
+  }
+
+  exports.testJsonRecoveryRespectsProviderMode = function() {
+    var agent = createAgent()
+    agent._useToolsActual = true
+    var received
+    var llm = {
+      promptWithStats: function(p) { received = p; return "plain" },
+      promptJSONWithStats: function(p) { received = p; return "json" },
+      rawPromptWithStats: function(p, a, b, flag) { received = p; return flag ? "raw-json" : "raw-plain" }
+    }
+    var prompt = agent._buildJsonRetryPrompt("original goal")
+    ow.test.assert(prompt.indexOf("original goal"), 0, "Recovery must retain the goal")
+    ow.test.assert(prompt.indexOf('[JSON RETRY NOTE]') > 0, true, "Recovery must send the correction")
+    ow.test.assert(agent._promptJsonRecovery(llm, prompt, {}, { type: "ollama" }, false), "plain", "Ollama native tools must avoid JSON mode on retry")
+    ow.test.assert(received, prompt, "The actual provider call must receive the corrective prompt")
+    ow.test.assert(agent._promptJsonRecovery(llm, prompt, { showthinking: true }, { type: "ollama" }, false), "raw-plain", "Raw recovery must also respect the tools conflict")
+    agent._useToolsActual = false
+    ow.test.assert(agent._promptJsonRecovery(llm, prompt, {}, { type: "ollama" }, false), "json", "Action mode should retain JSON mode")
+    ow.test.assert(agent._promptJsonRecovery(llm, prompt, {}, { type: "gemini" }, true), "plain", "Explicit no-JSON mode must be respected")
+  }
+
+  exports.testJsonRetryAcceptsParsedResponses = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    // Exercise the actual loop's retry normalization with deterministic adapter outputs.
+    var source = io.readFileString("mini-a.js")
+    var begin = source.indexOf("            var lcRetryRmsg = lcRetryResponseWithStats.response")
+    var end = source.indexOf("\n          }\n\n          if (lcRetryStopRequested", begin)
+    ow.test.assert(begin >= 0 && end > begin, true, "Locate the loop retry normalization")
+    var normalize = new Function("lcRetryResponseWithStats", 'var args = { showthinking: true }, rmsg, responseWithStats, stats, msg, recoveredMsgFromEnvelope, recoveredFromEnvelopeApplied = false, lcRetryStats = {}, lcJsonRetryAttempt = 1, lcJsonRetries = 1;\n' + source.substring(begin, end) + '\nreturn msg;')
+    var final = { thought: "done", action: "final", answer: "ok" }
+    ow.test.assert(normalize.call(agent, { response: final }).answer, "ok", "An already-parsed retry must be accepted without main fallback")
+    ow.test.assert(normalize.call(agent, { response: [final] })[0].answer, "ok", "An array retry must be accepted")
+    ow.test.assert(normalize.call(agent, { response: stringify(final) }).answer, "ok", "A text retry must still be parsed")
+    ow.test.assert(isUnDef(normalize.call(agent, { response: "not json" })), true, "Invalid retries must still fall through to recovery")
+  }
+
+  exports.testReplyPromptUsesObjectParams = function() {
+    var prompt = renderAgentPrompt(createAgent(), {}, {}).prompt
+    ow.test.assert(prompt.indexOf('"params" as a JSON object') >= 0, true, "Reply instructions must show object params")
+    ow.test.assert(prompt.indexOf('"params": "required') < 0, true, "The example must not teach string params")
+    ow.test.assert(prompt.indexOf('{"thought":"brief next step","action":"final","answer":"your complete answer"}') >= 0, true, "Compact profiles must retain a valid concrete final example")
+  }
+
+  exports.testReplyToolRecoveryUsesOneProviderRequest = function() {
+    ["openai", "ollama"].forEach(function(type) {
+      var modes = ["valid", "missing", "multiple", "invalid"]
+      modes.forEach(function(mode) {
+        var agent = createAgent()
+        agent.fnI = function() {}
+        agent._systemInst = "Preserve the session rules."
+        agent._actionsList = "think | shell | final (string or array for chaining)"
+        var requests = 0, bodySeen, isolated
+        var payload = { thought: "done", action: "final", answer: "captured" }
+        agent._createBareLlmInstance = function(config) {
+          isolated = $llm(config)
+          isolated.getGPT().model._request = function(route, body) {
+            requests++
+            bodySeen = body
+            var call = { id: "call1", type: "function", function: { name: "submit_reply", arguments: type === "openai" ? stringify(payload) : payload } }
+            if (mode === "invalid") call.function.arguments = "{broken"
+            var calls = mode === "missing" ? [] : (mode === "multiple" ? [call, call] : [call])
+            if (type === "openai") return { choices: [{ finish_reason: "tool_calls", message: { role: "assistant", tool_calls: calls } }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }
+            return { message: { role: "assistant", tool_calls: calls }, done: true, prompt_eval_count: 10, eval_count: 5 }
+          }
+          return isolated
+        }
+        var result = agent._promptLcReplyTool("goal context", { useshell: false }, { type: type, model: "test-model", key: "test-only", url: "http://localhost:1" })
+        ow.test.assert(mode === "valid" ? result.response.answer : result.response, mode === "valid" ? "captured" : "", "Only one valid MCP call may become a reply")
+        ow.test.assert(requests, 1, "Native tool handling must not trigger a follow-up request")
+        ow.test.assert(agent._getTotalTokens(result.stats), 15, "Recovery must preserve provider token usage")
+        ow.test.assert(bodySeen.tools.length, 1, "Only the capture tool may be exposed")
+        ow.test.assert(stringify(bodySeen.messages).indexOf("Preserve the session rules.") >= 0, true, "Recovery must retain session instructions")
+        if (type === "openai") ow.test.assert(bodySeen.tool_choice.function.name, "submit_reply", "OpenAI recovery should force the capture tool")
+      })
+    })
+  }
+
+  exports.testReplyCaptureRejectsInvalidAndDuplicateActions = function() {
+    var agent = createAgent()
+    agent._actionsList = "think | shell | wiki | final (string or array for chaining)"
+    var capture = { accepted: false }
+    var fn = agent._createReplyCaptureMcpConfig({ useshell: false }, capture).options.fns.submit_reply
+    var invalidReplies = [ { thought: "x", action: "shell", command: "echo bad" }, { thought: "x", action: "final" }, { thought: "x", action: "wiki", params: "{}" }, { thought: "x", action: ["final"], answer: "x" } ]
+    invalidReplies.forEach(function(payload) {
+      var rejected = false
+      try { fn(payload) } catch(e) { rejected = true }
+      ow.test.assert(rejected, true, "Malformed or disabled actions must be rejected")
+      ow.test.assert(capture.accepted, false, "Rejected payload must not be captured")
+    })
+    fn({ thought: "x", action: "wiki", params: { op: "search", query: "x" } })
+    var rejected = false
+    try { fn({ thought: "x", action: "final", answer: "replace" }) } catch(e) { rejected = true }
+    ow.test.assert(rejected, true, "Duplicate submission must not replace the first action")
+    ow.test.assert(capture.payload.action, "wiki", "Capture must preserve the chosen action without executing it")
+    agent._runCommand = function() { throw new Error("Capture must never execute shell") }
+    var shellCapture = { accepted: false }
+    agent._createReplyCaptureMcpConfig({ useshell: true }, shellCapture).options.fns.submit_reply({ thought: "inspect", action: "shell", command: "pwd" })
+    ow.test.assert(shellCapture.payload.command, "pwd", "Enabled shell requests must only be captured")
+    ow.test.assert(isUnDef(agent._promptLcReplyTool("goal", {}, { type: "gemini" })), true, "Unsupported adapters should use ordinary JSON recovery")
   }
 })()

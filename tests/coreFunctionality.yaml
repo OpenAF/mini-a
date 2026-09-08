@@ -952,6 +952,36 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testFormatTierCacheTokensRendersOnlyNonZeroCounters
 
+- name: MiniA Core Tests::JsonRepairPreservesStringPayloads
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testJsonRepairPreservesStringPayloads
+
+- name: MiniA Core Tests::JsonRecoveryRespectsProviderMode
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testJsonRecoveryRespectsProviderMode
+
+- name: MiniA Core Tests::JsonRetryAcceptsParsedResponses
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testJsonRetryAcceptsParsedResponses
+
+- name: MiniA Core Tests::ReplyPromptUsesObjectParams
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testReplyPromptUsesObjectParams
+
+- name: MiniA Core Tests::ReplyToolRecoveryUsesOneProviderRequest
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testReplyToolRecoveryUsesOneProviderRequest
+
+- name: MiniA Core Tests::ReplyCaptureRejectsInvalidAndDuplicateActions
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testReplyCaptureRejectsInvalidAndDuplicateActions
+
 include:
 - oJobTest.yaml
 
@@ -1149,3 +1179,9 @@ todo:
 - MiniA Core Tests::KnownArgumentNamesIncludesLcJsonRetries
 - MiniA Core Tests::RecordTokenUsageTracksCacheTokensPerTier
 - MiniA Core Tests::FormatTierCacheTokensRendersOnlyNonZeroCounters
+- MiniA Core Tests::JsonRepairPreservesStringPayloads
+- MiniA Core Tests::JsonRecoveryRespectsProviderMode
+- MiniA Core Tests::JsonRetryAcceptsParsedResponses
+- MiniA Core Tests::ReplyPromptUsesObjectParams
+- MiniA Core Tests::ReplyToolRecoveryUsesOneProviderRequest
+- MiniA Core Tests::ReplyCaptureRejectsInvalidAndDuplicateActions

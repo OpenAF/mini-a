@@ -890,6 +890,11 @@ help:
     desc     : Maximum total LC token usage before permanently switching to the main model for the session (0 = unlimited)
     example  : "50000"
     mandatory: false
+  - name     : lcreplytool
+    desc     : Use a capture-only MCP tool for LC JSON retries (OpenAI-compatible and Ollama adapters)
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : lcjsonretries
     desc     : Extra same-step low-cost model retries on invalid JSON before falling back to the main model (0 disables)
     example  : "1"
@@ -1475,6 +1480,7 @@ jobs:
         evidencegatestrictness: evidencegatestrictness
         lcescalatedefer: lcescalatedefer
         lcbudget       : lcbudget
+        lcreplytool    : lcreplytool
         lcjsonretries  : lcjsonretries
         llmcomplexity  : llmcomplexity
         autodelegation : autodelegation
@@ -1754,6 +1760,7 @@ jobs:
       evidencegatestrictness: isString.default("medium")
       lcescalatedefer: toBoolean.isBoolean.default(true)
       lcbudget       : toNumber.isNumber.default(0)
+      lcreplytool    : toBoolean.isBoolean.default(false)
       lcjsonretries  : toNumber.isNumber.default(1)
       llmcomplexity  : toBoolean.isBoolean.default(false)
       autodelegation : toBoolean.isBoolean.default(false)
