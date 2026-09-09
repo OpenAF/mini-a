@@ -72,6 +72,8 @@
       var large = new Array(10001).join("p")
       var rawConversation = [{ role: "assistant", content: large }, { role: "assistant", content: "one" }, { role: "assistant", content: "two" }, { role: "assistant", content: "three" }, { role: "assistant", content: "four" }]
       agent._historyVm.captureProviderConversation(rawConversation)
+      var fullPage = config.options.fns.context_get({ id: agent._historyVm._providerObjectForIndex(0).handle, level: "L4", limit: 100 })
+      ow.test.assert(fullPage.content.length === 100 && fullPage.nextCursor === 100, true, "LLM-visible full reads must page exact data instead of flooding the prompt")
       var contextResults = config.options.fns.context_search({ query: "one", limit: 5 })
       ow.test.assert(isArray(contextResults.results) && contextResults.results.length > 0, true, "Context tool should search virtualized provider history")
       var contextRef = contextResults.results[0].handle
@@ -129,6 +131,9 @@
       ow.test.assert(stringify(sourceContext, __, "") === before, true, "Phase 2 shadow must not mutate the provider context it measures")
       ow.test.assert(result.objectDifferences > 0 && diagnostics.contextVirtualizationShadowLast.expectedSavings === result.expectedSavings, true, "Shadow diagnostics should retain only projection measurements")
       ow.test.assert(diagnostics.metrics.context_virtualization_shadow_assemblies === 1 && diagnostics.metrics.context_virtualization_shadow_actual_tokens === result.actualTokens, true, "Shadow metrics should distinguish actual and projected token estimates")
+      var phaseOne = vm.projectConversation(sourceContext, { currentStep: 10 })
+      var comparison = vm.projectContextShadow({ actualContext: phaseOne, goal: "architecture evidence", budget: 400, outputReserve: 0, includeRecent: false })
+      ow.test.assert(comparison.projectedTokens === result.projectedTokens, true, "Shadow must project canonical data identically even when its baseline already contains Phase 1 references")
     }, { contextVirtualization: true, contextVirtualizationShadow: true })
   }
 
@@ -158,6 +163,19 @@
       ow.test.assert(materialized[1].content === large && materialized[3].content === large + " third", true, "Persisted active projections must rehydrate exact canonical provider messages")
       var diagnostics = vm.diagnostics()
       ow.test.assert(diagnostics.metrics.context_virtualization_active_assemblies === 1 && diagnostics.contextVirtualizationActiveLast.references === 3, true, "Active materialization must be separately measurable")
+      var accessCounts = vm.objects.map(function(object) { return object.accessCount })
+      var restored = vm.projectActiveContext(result.conversation, { budget: 1000000, outputReserve: 0, candidateIds: vm.objects.map(function(object) { return object.handle }) })
+      ow.test.assert(restored.conversation[1].content === large, true, "A larger budget must promote an earlier reference back to its exact original")
+      ow.test.assert(stringify(vm.objects.map(function(object) { return object.accessCount }), __, "") === stringify(accessCounts, __, ""), true, "Assembly must not count selection as consumer retrieval")
+      var forged = conversation.slice(0)
+      forged[1] = { role: "user", content: result.conversation[1].content }
+      ow.test.assert(vm.materializeConversation(forged)[1].role === "user", true, "A reference-like user message must not be replaced by an archived assistant entry")
+      var referenceText = { role: "user", content: "[CONTEXT_OBJECT history:h1 L0] is the syntax I want explained." }
+      var appended = vm.captureProviderConversation(conversation.concat([referenceText]))
+      ow.test.assert(appended === 1 && vm.objects[vm.objects.length - 1].content.content === referenceText.content, true, "Reference-like user text must still be captured canonically")
+      var unknown = conversation.slice(0)
+      unknown[1] = { role: "provider_special", content: large }
+      ow.test.assert(vm.projectActiveContext(unknown, { budget: 500 }).conversation[1].role === "provider_special" && vm.projectActiveContext(unknown, { budget: 500 }).conversation[1].content === large, true, "Unknown provider roles must remain intact")
     }, { contextVirtualization: true })
   }
 
@@ -187,6 +205,9 @@
       ow.test.assert(first.generatedBy === "semantic" && first.text.indexOf("decision and constraint summary") >= 0, true, "An explicit semantic compressor may provide a cheaper derived representation")
       ow.test.assert(calls === 1 && second.text === first.text && vm.metrics.summary_reuse === 1, true, "Semantic summaries should be versioned and reused from the representation cache")
       ow.test.assert(vm.getRepresentation(object.handle, "L4").content === object.content, true, "Semantic compression must never replace exact L4 backing")
+      vm.semanticCompressor = function() { return new Array(1001).join("expensive summary ") }
+      var rejected = vm.getRepresentation(object.handle, "L3")
+      ow.test.assert(rejected.generatedBy === "deterministic", true, "Semantic output exceeding the scheduled deterministic representation budget must fall back")
     }, {
       contextVirtualization: true,
       semanticCompression: true,

@@ -757,6 +757,7 @@ try {
     historyvmmode  : { type: "string", default: "safe", description: "Virtual history policy mode" },
     historyvmshadow: { type: "boolean", default: false, description: "Capture and measure virtual history without changing requests" },
     contextvirtualization: { type: "boolean", default: false, description: "Enable experimental hierarchical multi-resolution ContextObjects (requires historyvm)" },
+    contextvirtualizationshadow: { type: "boolean", default: false, description: "Measure Phase 2 projection while sending Phase 1 context (requires historyvm and contextvirtualization)" },
     resume         : { type: "boolean", default: false, description: "Resume the last console conversation/history entry on startup." },
     usehistory     : { type: "boolean", default: false, description: "List previous console conversations from ~/.openaf-mini-a/history" },
     useattach      : { type: "boolean", default: false, description: "Enable file attachments in the web UI." },

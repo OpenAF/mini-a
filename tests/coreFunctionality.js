@@ -1918,6 +1918,7 @@
       subtasksfile: "startup.yaml",
       state: "(parent: true)",
       conversation: "conversation.md",
+      contextvirtualizationshadow: true,
       resume: true,
       resumefailed: true,
       usehistory: true,
@@ -1981,7 +1982,7 @@
 
     ;[
       "validationgoal", "valgoal", "deepresearch", "maxcycles", "subtasks", "subtasksfile",
-      "state", "conversation", "resume", "resumefailed", "usehistory", "historypath",
+      "state", "conversation", "contextvirtualizationshadow", "resume", "resumefailed", "usehistory", "historypath",
       "planfile", "plancontent", "planmode", "convertplan", "validateplan",
       "outfile", "outfileall", "outputfile",
       "mcp", "mcpconfig", "mcpdynamic", "mcpproxy", "mcpproxynative", "mcpproxythreshold",

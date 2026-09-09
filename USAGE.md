@@ -2699,6 +2699,13 @@ Use `historyvm=true contextvirtualization=true contextvirtualizationshadow=true`
 
 The compatibility modes are explicit: `historyvm=false` keeps legacy Mini-A, `historyvm=true contextvirtualization=false` selects Phase 1, and `historyvm=true contextvirtualization=true` selects Phase 2. Neither phase is silently enabled.
 
+Consumer profiles and generalized source APIs are currently module capabilities;
+they are not yet connected to every planner, advisor, validator, delegate, wiki,
+memory or skill invocation. The active provider projection currently covers
+history. See [implementation review](docs/VM-IMPLEMENTATION-REVIEW.md) for the
+remaining runtime and evaluation requirements. `context_get`/`context_expand`
+with L4 return bounded exact pages; use `nextCursor` as the next `offset`.
+
 Version 1 supports local conversation storage only. If S3 history mirroring is configured, Mini-A visibly disables the VM and continues with legacy history behavior. If the local journal cannot be written, it likewise keeps content inline and reports degraded persistence. `maxcontext=0` remains unchanged: virtualization can still reduce eligible old large messages, but Mini-A does not claim a verified hard context-window bound without an effective budget.
 
 ### Context Management

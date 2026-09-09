@@ -322,8 +322,9 @@ MiniAHistoryVM.prototype.captureProviderConversation = function(conversation) {
   for (var i = this._providerCaptureCount; i < conversation.length; i++) {
     var entry = conversation[i]
     var text = isMap(entry) && isString(entry.content) ? entry.content : ""
-    if (text.indexOf("[HISTORY_VM_REFERENCE ") === 0) continue
-    if (text.indexOf("[CONTEXT_OBJECT ") === 0) continue
+    var reference = text.match(/^\[HISTORY_VM_REFERENCE (h\d+)\]/) || text.match(/^\[CONTEXT_OBJECT history:(h\d+) L[0-4]\]/)
+    var archived = reference ? this._providerObjectForIndex(i) : __
+    if (isMap(archived) && archived.id === reference[1] && isMap(archived.content) && archived.content.role === entry.role) continue
     if (isMap(entry) && entry.__historyVmProjection === true) continue
     if (isDef(this.append("provider_message", entry, { providerIndex: i, role: isMap(entry) ? entry.role : __ }))) appended++
   }
@@ -891,13 +892,13 @@ MiniAHistoryVM.prototype._buildRepresentation = function(object, level) {
   }
 }
 
-MiniAHistoryVM.prototype.getRepresentation = function(id, level) {
+MiniAHistoryVM.prototype.getRepresentation = function(id, level, options) {
   if (!this.contextVirtualization) return { error: "Context virtualization is not enabled." }
   var object = this._resolveObject(id)
   if (!isMap(object) || object.branchId !== this.branchId) return { error: "Context object not found in the active conversation branch." }
   var normalized = this._representationLevel(level)
   this.metrics["representation_" + normalized.toLowerCase()]++
-  this._touchObject(object, 1, 2)
+  if (!isMap(options) || options.touch !== false) this._touchObject(object, 1, 2)
   if (normalized === "L4") return { id: object.id, handle: object.handle, level: normalized, content: object.content, estimatedTokens: object.estimatedOriginalTokens, exact: true, canonicalRef: object.canonicalRef }
   var key = this._representationCacheKey(object, normalized)
   var representation = this.representationCache[key]
@@ -909,11 +910,13 @@ MiniAHistoryVM.prototype.getRepresentation = function(id, level) {
     representation = __
     if (this.semanticCompression && (normalized === "L2" || normalized === "L3") && object.estimatedOriginalTokens >= this.semanticCompressionMinTokens) {
       try {
+        var deterministic = this._buildRepresentation(object, normalized)
         var semantic = this.semanticCompressor({ id: object.id, handle: object.handle, kind: object.kind, type: object.type, level: normalized, content: object.content, summary: object.summary, provenance: object.provenance })
         var semanticText = isString(semantic) ? semantic : (isMap(semantic) && isString(semantic.text) ? semantic.text : "")
-        if (semanticText.trim().length > 0 && this.estimateTokens(semanticText) < object.estimatedOriginalTokens) {
-          representation = this._buildRepresentation(object, normalized)
-          representation.text = semanticText + "\nExact backing: " + object.handle
+        var backedText = semanticText + "\nExact backing: " + object.handle
+        if (semanticText.trim().length > 0 && this.estimateTokens(backedText) <= deterministic.estimatedTokens && this.estimateTokens(backedText) < object.estimatedOriginalTokens) {
+          representation = deterministic
+          representation.text = backedText
           representation.estimatedTokens = this.estimateTokens(representation.text)
           representation.generatedBy = "semantic"
           representation.complete = false
@@ -1302,6 +1305,8 @@ MiniAHistoryVM.prototype._contextUtility = function(object, relevance, mandatory
 
 MiniAHistoryVM.prototype._contextRepresentationCost = function(object, level) {
   if (level === "L4") return object.estimatedOriginalTokens
+  var cached = this.representationCache[this._representationCacheKey(object, level)]
+  if (isMap(cached)) return cached.estimatedTokens
   return this._buildRepresentation(object, level).estimatedTokens
 }
 
@@ -1434,13 +1439,16 @@ MiniAHistoryVM.prototype.projectActiveContext = function(conversation, options) 
   var opts = isMap(options) ? options : {}
   if (!this.contextVirtualization || this.contextVirtualizationShadow && opts.shadowProjection !== true) return { active: false, reason: "Active context virtualization is not enabled.", conversation: conversation }
   if (!isArray(conversation)) return { active: false, reason: "A provider conversation array is required.", conversation: conversation }
+  // Always choose from exact backing: a previous disposable projection may be
+  // promoted again when the task or available budget changes.
+  conversation = this.materializeConversation(conversation)
   var recentCount = isNumber(opts.recentCount) ? Math.max(2, Math.min(20, Math.floor(opts.recentCount))) : 6
   var protectedTokens = 0
   var replaceable = {}
   var isProtected = function(entry, index) {
     if (!isMap(entry)) return true
     var role = isString(entry.role) ? entry.role.toLowerCase() : ""
-    if (role === "system" || role === "developer" || role === "user" || role === "tool" || role === "function") return true
+    if (role !== "assistant") return true
     if (!isString(entry.content) || index >= conversation.length - recentCount) return true
     if (isArray(entry.tool_calls) || isDef(entry.tool_call_id) || isDef(entry.function_call)) return true
     return false
@@ -1480,7 +1488,7 @@ MiniAHistoryVM.prototype.projectActiveContext = function(conversation, options) 
       output.push(entry)
       continue
     }
-    var representation = isMap(selectedItem) ? selectedItem.representation : this.getRepresentation(object.handle, level)
+    var representation = isMap(selectedItem) ? selectedItem.representation : this.getRepresentation(object.handle, level, { touch: false })
     var value = isMap(representation) && isString(representation.text)
       ? representation.text
       : (isMap(representation) && isDef(representation.content) ? (isString(representation.content) ? representation.content : stringify(representation.content, __, "")) : object.summary)
@@ -1565,6 +1573,7 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
         this.metrics.stale_suppressed++
       }
       if (object.obsolete) return
+      if (object.branchId !== this.branchId) return
       reason = "supersession_redirect"
     }
     candidateMap[object.handle] = object
@@ -1717,7 +1726,8 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
   var materialized = []
   for (var si = 0; si < selectedItems.length; si++) {
     var item = selectedItems[si]
-    var representation = this.getRepresentation(item.object.handle, item.level)
+    // Scheduling and shadow inspection must not manufacture access heat.
+    var representation = this.getRepresentation(item.object.handle, item.level, { touch: false })
     materialized.push({
       id: item.object.id,
       handle: item.object.handle,
@@ -1869,7 +1879,7 @@ MiniAHistoryVM.prototype._expandedProviderEntry = function(object, expansion) {
 MiniAHistoryVM.prototype._providerObjectForIndex = function(index) {
   for (var i = this.objects.length - 1; i >= 0; i--) {
     var object = this.objects[i]
-    if (object.event.sourceKind === "provider_message" && isMap(object.event.metadata) && object.event.metadata.providerIndex === index) return object
+    if (object.branchId === this.branchId && object.event.sourceKind === "provider_message" && isMap(object.event.metadata) && object.event.metadata.providerIndex === index) return object
   }
   return __
 }
@@ -1885,7 +1895,7 @@ MiniAHistoryVM.prototype.materializeConversation = function(conversation) {
     }
     var match = entry.content.match(/^\[HISTORY_VM_REFERENCE (h\d+)\]/) || entry.content.match(/\[HISTORY_VM_RANGE (h\d+) /) || entry.content.match(/^\[CONTEXT_OBJECT history:(h\d+) L[0-4]\]/)
     var object = match ? this.objectById[match[1]] : __
-    if (isMap(object) && object.branchId === this.branchId && isMap(object.content)) materialized.push(merge({}, object.content, true))
+    if (isMap(object) && object.branchId === this.branchId && object.event.sourceKind === "provider_message" && isMap(object.event.metadata) && object.event.metadata.providerIndex === i && isMap(object.content) && entry.role === object.content.role) materialized.push(merge({}, object.content, true))
     else materialized.push(entry)
   }
   return materialized
