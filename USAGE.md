@@ -2693,18 +2693,30 @@ Mini-A writes append-only canonical events and checkpoints under `chat-history.j
 
 Use `historyvmshadow=true` first to capture and estimate savings without changing provider requests or adding retrieval tool schemas. If both flags are supplied, enabled mode takes precedence. The VM is independent of `usememory`; enabling it creates retained conversation data even when history listing is disabled. `/clear`, web expiry, and explicit conversation deletion remove the owned sidecar unless history retention is configured to keep the conversation. `/rewind` records a new branch and default retrieval excludes the abandoned branch rather than deleting its canonical events.
 
-Phase 2 can be enabled explicitly with `historyvm=true contextvirtualization=true`. It extends the same canonical journal with stable typed handles, parent/child metadata, deterministic L0-L4 representations, structural compression, hierarchical summaries, coarse-to-fine retrieval, bounded line/section/JSON-path reads, adaptive utility-per-token assembly, typed provenance/supersession graphs, consumer-specific executor/planner/advisor/validator/delegate views, and per-consumer working-set deltas. The active provider projection preserves system, developer, user, tool-protocol, recent, and unknown-content messages; only eligible older plain assistant content is progressively replaced with stable context references. Exact canonical content is restored before conversation persistence and remains retrievable with `context_search`, `context_get`, `context_expand`, `context_children`, and `context_related`.
+Phase 2 can be enabled explicitly with `historyvm=true contextvirtualization=true`. It extends the same canonical journal with stable typed handles, parent/child metadata, deterministic L0-L4 representations, structural compression, hierarchical summaries, coarse-to-fine retrieval, bounded line/section/JSON-path reads, adaptive utility-per-token assembly, typed provenance/supersession graphs, consumer-specific executor/planner/advisor/validator/delegate views, and per-consumer working-set deltas. At model-call boundaries the active projection preserves system/developer instructions, real user constraints, recent exchanges and unknown content. Older assistant messages and Mini-A's synthetic step scaffolding can be summarized or omitted; completed native tool-call groups are preserved or frozen together. Exact canonical content is restored before conversation persistence and remains retrievable with `context_search`, `context_get`, `context_expand`, `context_children`, and `context_related`.
 
 Use `historyvm=true contextvirtualization=true contextvirtualizationshadow=true` to dry-run the exact same projection while continuing to send the Phase 1 provider context. Diagnostics compare complete provider-context token estimates, object-set changes, and expected differences. Shadow values are projections, not provider-billed savings. Stable-prefix serialization and context deltas avoid local recomputation but do not imply provider prompt caching or delta-only transmission.
 
 The compatibility modes are explicit: `historyvm=false` keeps legacy Mini-A, `historyvm=true contextvirtualization=false` selects Phase 1, and `historyvm=true contextvirtualization=true` selects Phase 2. Neither phase is silently enabled.
 
-Consumer profiles and generalized source APIs are currently module capabilities;
-they are not yet connected to every planner, advisor, validator, delegate, wiki,
-memory or skill invocation. The active provider projection currently covers
-history. See [implementation review](docs/VM-IMPLEMENTATION-REVIEW.md) for the
-remaining runtime and evaluation requirements. `context_get`/`context_expand`
-with L4 return bounded exact pages; use `nextCursor` as the next `offset`.
+Runtime projections include the active plan, selected memory, supplied knowledge,
+and authorized wiki/skill/tool results. Source snapshots are versioned and old
+versions remain retrievable. Auxiliary planner/advisor/validator/summarizer calls
+receive bounded consumer-specific excerpts without rebinding their independent
+provider histories. Delegates receive task-specific knowledge instead of the
+parent's full knowledge field; explicitly requested fork state remains explicit.
+Completed delegation results and session/period/project rollups retain provenance.
+These rollups are conversation-scoped, not a merged semantic-memory/wiki store.
+
+Configured budgets account for the serialized conversation, current prompt, tool
+schema estimates, a safety allowance and output reserve. Protected overflow stops
+the invocation rather than silently deleting constraints. Counts are application
+estimates; provider-internal tool rounds and billing remain provider-owned.
+Derived representation caches are bounded, and periodic index snapshots permit
+tail replay with journal fallback when the cache is invalid. See the
+[implementation review](docs/VM-IMPLEMENTATION-REVIEW.md) for verification and
+provider acceptance limits. `context_get`/`context_expand` with L4 return bounded
+exact pages; use `nextCursor` as the next `offset`.
 
 Version 1 supports local conversation storage only. If S3 history mirroring is configured, Mini-A visibly disables the VM and continues with legacy history behavior. If the local journal cannot be written, it likewise keeps content inline and reports degraded persistence. `maxcontext=0` remains unchanged: virtualization can still reduce eligible old large messages, but Mini-A does not claim a verified hard context-window bound without an effective budget.
 
@@ -3460,6 +3472,13 @@ temporary directory, passes its path through the normal `conversation=` flow,
 captures final metrics, and removes the fixture plus any History VM sidecar.
 This supports reproducible long-context replays without committing generated
 conversation journals.
+
+For generated long-history workloads, `setup.repeatHistory` accepts `count`
+(1–1000) and `messages`; `{{iteration}}` in those messages expands to the
+zero-based repetition number. Repeated messages precede `setup.conversation`.
+`setup.contextObjects` accepts source fixtures with `kind`, `key`, `content`,
+optional `metadata` and `count` (up to 1000). These populate only Phase 2's
+episodic source index after initialization, not durable wiki or semantic memory.
 
 When History VM is active, reports also include `metrics.history_vm` with
 ContextObjects considered/selected, L0-L4 selections, rehydrations, candidate

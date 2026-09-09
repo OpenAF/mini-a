@@ -253,6 +253,15 @@
           ? { u: new Date(), c: scenario.setup.conversation }
           : merge({}, scenario.setup.conversation, true)
         if (!isArray(fixtureConversation.c)) throw new Error("setup.conversation must be an array or a conversation envelope with a c array")
+        if (isMap(scenario.setup.repeatHistory)) {
+          var repeat = scenario.setup.repeatHistory
+          if (!isArray(repeat.messages) || !isNumber(repeat.count) || repeat.count < 1 || repeat.count > 1000) throw new Error("repeatHistory requires messages and a count from 1 to 1000")
+          var expandedHistory = []
+          for (var ri = 0; ri < Math.floor(repeat.count); ri++) repeat.messages.forEach(function(message) {
+            expandedHistory.push(jsonParse(stringify(message, __, "").replace(/\{\{iteration\}\}/g, String(ri)), __, __, true))
+          })
+          fixtureConversation.c = expandedHistory.concat(fixtureConversation.c)
+        }
         fixtureRoot = String(java.nio.file.Files.createTempDirectory("mini-a-eval-conversation-").toAbsolutePath())
         runArgs.conversation = fixtureRoot + "/conversation.json"
         try {
@@ -266,6 +275,13 @@
     }
     try {
       if (isFunction(agent.init)) agent.init(runArgs)
+      if (isMap(scenario.setup) && isArray(scenario.setup.contextObjects) && isObject(agent._historyVm) && agent._historyVm.contextVirtualization) {
+        scenario.setup.contextObjects.forEach(function(source) {
+          var count = isNumber(source.count) ? Math.max(1, Math.min(1000, Math.floor(source.count))) : 1
+          for (var ci = 0; ci < count; ci++) agent._historyVm.upsertContextSource(source.kind, String(source.key || "fixture") + ":" + ci, source.content, source.metadata)
+        })
+        agent._historyVm.rollupSession()
+      }
       answer = agent.start(runArgs)
     } catch(e) { error = String(e) }
     var elapsed = this.nowFn() - started

@@ -246,6 +246,14 @@ SubtaskManager.prototype._buildChildArgs = function(subtask) {
   mergedArgs._parentSubtaskId = subtask.parentId
   // Prevent auto-delegation cascades in child agents
   mergedArgs._autoDelegate = false
+  if (isObject(this.parentAgent) && isFunction(this.parentAgent._contextForDelegate)) {
+    var projectedContext = this.parentAgent._contextForDelegate(subtask.goal, 2048)
+    var contextVm = this.parentAgent._historyVm
+    if (projectedContext.length > 0 || isObject(contextVm) && contextVm.contextVirtualization && !contextVm.contextVirtualizationShadow && !contextVm.degraded) {
+      // Do not inherit the parent's full knowledge field along with the view.
+      mergedArgs.knowledge = (isString(explicitArgs.knowledge) ? explicitArgs.knowledge : "") + projectedContext
+    }
+  }
 
   if (subtask.fork === true && isMap(subtask.forkState)) {
     var forkStateStr = stringify(subtask.forkState, __, "")
@@ -1008,6 +1016,12 @@ SubtaskManager.prototype._completeSubtask = function(subtask, prefix, answer, me
     state: state
   }
   subtask.error = __
+
+  if (isObject(this.parentAgent) && isObject(this.parentAgent._historyVm) && this.parentAgent._historyVm.contextVirtualization) {
+    this.parentAgent._historyVm.upsertContextSource("delegation", subtask.id, {
+      goal: subtask.goal, result: answer, state: state, metrics: metrics
+    }, { type: "delegation_episode", provenance: { source: "delegated-result", child: subtask.id, coverage: "returned-result-only" } })
+  }
 
   var duration = isDef(subtask.startedAt) ? subtask.completedAt - subtask.startedAt : 0
   this.metrics.totalDurationMs += duration

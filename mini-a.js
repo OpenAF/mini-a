@@ -2470,9 +2470,9 @@ MiniA.prototype._prepareHistoryVmProjection = function(currentStep, consumer) {
     if (!isArray(conversation)) return false
     vm.captureProviderConversation(conversation)
     if (vm.degraded) return false
-    var projected = vm.contextVirtualization && !vm.contextVirtualizationShadow
-      ? conversation
-      : vm.projectConversation(conversation, { currentStep: currentStep })
+    // Active Phase 2 assembles at the final call boundary with the whole prompt.
+    if (vm.contextVirtualization && !vm.contextVirtualizationShadow) return true
+    var projected = vm.projectConversation(conversation, { currentStep: currentStep })
     if (vm.contextVirtualizationShadow) {
       var phaseOneTokens = vm.estimateTokens(stringify(projected, __, ""))
       var configuredBudget = this._getEffectiveContextBudget(__, 0)
@@ -2485,16 +2485,6 @@ MiniA.prototype._prepareHistoryVmProjection = function(currentStep, consumer) {
         outputReserve: 0,
         includeRecent: true
       })
-    } else if (vm.contextVirtualization) {
-      var activeBudget = this._getEffectiveContextBudget(__, 0)
-      var activeProjection = vm.projectActiveContext(conversation, {
-        consumer: isString(consumer) ? consumer : "executor",
-        goal: isMap(this._sessionArgs) && isString(this._sessionArgs.goal) ? this._sessionArgs.goal : "",
-        budget: activeBudget > 0 ? activeBudget : vm.estimateTokens(stringify(conversation, __, "")),
-        outputReserve: 0,
-        includeRecent: true
-      })
-      if (isMap(activeProjection) && activeProjection.active === true && isArray(activeProjection.conversation)) projected = activeProjection.conversation
     }
     if (vm.enabled && !vm.shadow) {
       this.llm.getGPT().setConversation(projected)
@@ -2509,6 +2499,93 @@ MiniA.prototype._prepareHistoryVmProjection = function(currentStep, consumer) {
 
 MiniA.prototype.getHistoryVmDiagnostics = function() {
   return isObject(this._historyVm) ? this._historyVm.diagnostics() : { active: false, shadow: false, reason: "history VM is disabled" }
+}
+
+MiniA.prototype._syncContextSources = function() {
+  var vm = this._historyVm
+  if (!isObject(vm) || !vm.contextVirtualization || vm.degraded) return
+  var args = isMap(this._sessionArgs) ? this._sessionArgs : {}
+  if (isObject(this._agentState) && isObject(this._agentState.plan)) vm.upsertContextSource("plan", "active", this._agentState.plan, { active: true, provenance: { source: "runtime-plan" } })
+  if (args.usememory === true && isFunction(this._buildRelevantMemoryBlock)) {
+    var memories = this._buildRelevantMemoryBlock(args)
+    if (isArray(memories) && memories.length > 0) vm.upsertContextSource("memory", "relevant", memories, { provenance: { source: "memory-selection", durablePromotion: false } })
+  }
+  if (isString(args.knowledge) && args.knowledge.length > 0) vm.upsertContextSource("evidence", "knowledge", args.knowledge, { provenance: { source: "provided-knowledge" } })
+}
+
+MiniA.prototype._captureContextToolResult = function(name, params, result) {
+  var vm = this._historyVm
+  if (!isObject(vm) || !vm.contextVirtualization || vm.degraded || isUnDef(result) || isMap(result) && isDef(result.error)) return
+  var tool = String(name || "").toLowerCase(), p = isMap(params) ? params : {}
+  var op = String(p.op || p.operation || "read").toLowerCase()
+  if (["write", "delete", "move", "attach", "detach", "invoke", "run", "init"].indexOf(op) >= 0) return
+  var kind = /wiki/.test(tool) ? (/skill/.test(tool) ? "skill" : "wiki") : (/skill/.test(tool) ? "skill" : "artifact")
+  vm.upsertContextSource(kind, tool + ":" + sha256(stringify(p, __, "")), result, {
+    provenance: { source: "authorized-tool-result", tool: tool, coverage: "returned-content-only" }, keywords: [tool, String(p.path || p.name || p.query || "")]
+  })
+}
+
+// The next exposed invocation is the paging boundary. Provider-internal rounds
+// remain intact. Counts here are application estimates, not billed usage.
+MiniA.prototype._prepareContextInvocation = function(llm, prompt, consumer) {
+  var vm = this._historyVm
+  if (!isObject(vm) || !vm.contextVirtualization || vm.degraded || !isObject(llm) || !isFunction(llm.getGPT)) return prompt
+  var gpt = llm.getGPT()
+  if (!isObject(gpt) || !isFunction(gpt.getConversation) || !isFunction(gpt.setConversation)) return prompt
+  var conversation = gpt.getConversation()
+  if (!isArray(conversation)) return prompt
+  if (consumer && consumer !== "executor" && isMap(this._contextAuxiliaryPrompts) && isMap(this._contextAuxiliaryPrompts[consumer]) && prompt === this._contextAuxiliaryPrompts[consumer].enriched) prompt = this._contextAuxiliaryPrompts[consumer].original
+  this._syncContextSources()
+  if (!consumer || consumer === "executor") vm.captureProviderConversation(conversation)
+  if (vm.degraded) return prompt
+  var configured = this._getEffectiveContextBudget(__, 0)
+  var args = isMap(this._sessionArgs) ? this._sessionArgs : {}
+  var model = llm === this.lc_llm ? this._oaf_lc_model : (llm === this.val_llm ? this._oaf_val_model : this._oaf_model)
+  var output = isMap(model) && isNumber(model.max_tokens) ? model.max_tokens : Math.min(4096, Math.floor((configured || 32000) * 0.15))
+  var fixed = { prompt: vm.estimateTokens(prompt), tools: vm.estimateTokens(stringify(this.mcpTools || [], __, "")), safety: 256 }
+  fixed.instructions = isString(this._systemInst) && !conversation.some(function(entry) { return isMap(entry) && (entry.role === "system" || entry.role === "developer") && entry.content === this._systemInst }, this) ? vm.estimateTokens(this._systemInst) : 0
+  var total = configured > 0 ? configured : vm.estimateTokens(stringify(vm.materializeConversation(conversation), __, "")) + fixed.prompt + fixed.tools + fixed.instructions + fixed.safety + output
+  var options = { consumer: consumer || "executor", goal: isString(args.goal) ? args.goal : String(prompt), budget: total,
+    outputReserve: output, fixedTokens: fixed, freezeUnselected: true, includeRecent: true }
+  if (consumer && consumer !== "executor") {
+    // Auxiliary models own independent provider histories. Add a task-specific
+    // source view without rebinding their message indexes to executor history.
+    var occupied = vm.estimateTokens(stringify(conversation, __, "")) + fixed.prompt + fixed.tools + fixed.instructions + fixed.safety + output
+    if (!vm.contextVirtualizationShadow && configured > 0 && occupied > total) {
+      var auxiliaryError = new Error("Context budget cannot fit protected " + consumer + " input and output reserve (estimated " + occupied + " > " + total + ").")
+      auxiliaryError.miniAStop = true
+      throw auxiliaryError
+    }
+    var available = Math.max(0, total - occupied)
+    var auxiliary = vm.assembleContext({ consumer: consumer, goal: String(prompt), budget: Math.max(1, available - 100), outputReserve: 0, includeRecent: false })
+    var extra = vm.serializeContext(auxiliary).text
+    var enriched = prompt + (extra.length > 0 ? "\nBEGIN_UNTRUSTED_CONTEXT\nRetrieved source data:\n" + extra + "\nEND_UNTRUSTED_CONTEXT" : "")
+    if (vm.contextVirtualizationShadow || auxiliary.overflow || vm.estimateTokens(enriched) - fixed.prompt > available) return prompt
+    if (!isMap(this._contextAuxiliaryPrompts)) this._contextAuxiliaryPrompts = {}
+    this._contextAuxiliaryPrompts[consumer] = { original: prompt, enriched: enriched }
+    return enriched
+  }
+  if (vm.contextVirtualizationShadow) {
+    vm.projectContextShadow(merge(options, { actualContext: conversation }, true))
+    return prompt
+  }
+  var projected = vm.projectActiveContext(conversation, options)
+  if (projected.overflow && configured > 0) {
+    var error = new Error("Context budget cannot fit protected instructions, current prompt, tools and output reserve (estimated " + projected.requestTokens + " > " + configured + "). Narrow the task or increase maxcontext.")
+    error.miniAStop = true
+    throw error
+  }
+  if (projected.active && isArray(projected.conversation)) gpt.setConversation(projected.conversation)
+  return prompt
+}
+
+MiniA.prototype._contextForDelegate = function(goal, budget) {
+  var vm = this._historyVm
+  if (!isObject(vm) || !vm.contextVirtualization || vm.contextVirtualizationShadow || vm.degraded) return ""
+  this._syncContextSources()
+  var assembly = vm.assembleContext({ consumer: "delegate", goal: goal, budget: Math.max(1, (budget || 2048) - 100), outputReserve: 0 })
+  if (assembly.overflow) return ""
+  return "\nBEGIN_UNTRUSTED_CONTEXT\nTask-specific source excerpts; follow normal tool permissions.\n" + vm.serializeContext(assembly).text + "\nEND_UNTRUSTED_CONTEXT"
 }
 
 MiniA.prototype._copyConversationBetweenLlms = function(sourceLLM, targetLLM) {
@@ -3729,6 +3806,7 @@ MiniA.prototype.summarizeText = function(ctx, options) {
                     ])
                 }
 
+                ctx = self._prepareContextInvocation(summarizeLLM, ctx, "summarizer")
                 // Perform summarization
                 if (isFunction(summarizeLLM.promptWithStats)) {
                     return summarizeLLM.promptWithStats(ctx)
@@ -6012,6 +6090,7 @@ MiniA.prototype._collectPlanningInsights = function(args, controls) {
       this.fnI("input", `Interacting with ${analyzerLLM === this.lc_llm ? "low-cost" : "main"} model (plan analysis)...`)
       var analysisResponse = this._withExponentialBackoff(() => {
         if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
+        analysisPrompt = this._prepareContextInvocation(analyzerLLM, analysisPrompt, "planner")
         if (isFunction(analyzerLLM.promptWithStats)) return analyzerLLM.promptWithStats(analysisPrompt)
         return analyzerLLM.prompt(analysisPrompt)
       }, this._llmRetryOptions("Plan analysis", { operation: "plan-analysis" }, { maxAttempts: 2, maxDelay: 2000 }))
@@ -6067,9 +6146,9 @@ MiniA.prototype._critiquePlanWithLLM = function(payload, args, controls) {
     var responseWithStats = this._withExponentialBackoff(() => {
       if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
       if (!this._noJsonPrompt && isFunction(validatorLLM.promptJSONWithStats)) {
-        return validatorLLM.promptJSONWithStats(critiquePrompt)
+        return validatorLLM.promptJSONWithStats(this._prepareContextInvocation(validatorLLM, critiquePrompt, "validator"))
       }
-      return validatorLLM.promptWithStats(critiquePrompt)
+      return validatorLLM.promptWithStats(this._prepareContextInvocation(validatorLLM, critiquePrompt, "validator"))
     }, this._llmRetryOptions("Plan critique", { operation: "plan-critique" }, { initialDelay: 400 }))
 
     var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
@@ -6393,6 +6472,7 @@ MiniA.prototype._runPlanningMode = function(args, controls) {
   this.fnI("input", "Interacting with main model (plan generation)...")
   var responseWithStats = this._withExponentialBackoff(() => {
     if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
+    prompt = this._prepareContextInvocation(plannerLLM, prompt, "planner")
     // Use JSON prompt for both json and yaml formats (yaml uses same structure as json)
     if (!this._noJsonPrompt && (targetFormat === "json" || targetFormat === "yaml") && isFunction(plannerLLM.promptJSONWithStats)) {
       return plannerLLM.promptJSONWithStats(prompt)
@@ -8110,7 +8190,8 @@ MiniA.prototype._initWiki = function(args) {
         var useVal = this._use_val && isObject(this.val_llm)
         var llmToUse = useVal ? this.val_llm : this.llm
         var prompt = "Extract relationships from wiki page and return JSON with keys: summary (string), relationships (array of {from,to,type,provenance,confidence}).\\nPage:\\n" + stringify(payload, __, "  ")
-        var rsp = this._withExponentialBackoff(function() {
+        var rsp = this._withExponentialBackoff(() => {
+          prompt = this._prepareContextInvocation(llmToUse, prompt, "validator")
           if (isFunction(llmToUse.promptJSONWithStats)) return llmToUse.promptJSONWithStats(prompt)
           var r = llmToUse.promptWithStats(prompt)
           return af.fromJson(isMap(r) && isString(r.response) ? r.response : String(r))
@@ -8841,6 +8922,7 @@ MiniA.prototype._recordShellObservation = function(command, output, stepLabel, a
   var out = (isString(output) ? output : "(no output)").trim()
   if (isObject(this._historyVm) && !this._historyVm.degraded) {
     this._historyVm.captureToolExchange("shell", { command: cmd }, output, { stepLabel: stepLabel, status: "completed" })
+    this._captureContextToolResult("shell", { command: cmd }, output)
   }
   var key = "artifact:shell:" + sha1(cmd).substring(0, 12)
   var value = "Shell: " + cmd.substring(0, 120) + " -> " + out.substring(0, 380)
@@ -9393,7 +9475,8 @@ MiniA.prototype._reflectRunMemory = function(args) {
 
   var responseWithStats
   try {
-    responseWithStats = this._withExponentialBackoff(function() {
+    responseWithStats = this._withExponentialBackoff(() => {
+      prompt = this._prepareContextInvocation(llm, prompt, "summarizer")
       if (!noJsonPrompt && isFunction(llm.promptJSONWithStats)) return llm.promptJSONWithStats(prompt)
       return llm.promptWithStats(prompt)
     }, this._llmRetryOptions("Memory reflection", { operation: "reflect" }, { maxAttempts: 2 }))
@@ -9703,6 +9786,7 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
     })
   }
 
+  if (isObject(this._historyVm) && !this._historyVm.degraded) this._historyVm.rollupSession()
   if (isString(answer) && args.format != "raw") answer = answer.trim()
   answer = this._sanitizeFinalOutput(answer)
 
@@ -11068,6 +11152,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
           parent.fnI("exec", _buildUtilsIntentMessage(name, payload))
           parent._trace("tool_call", { name: name, params: payload, source: "mini-utils" })
           var result = parent._runRawOutputGuarded(function() { return fileTool[name](payload) })
+          parent._captureContextToolResult(name, payload, result)
           if (name === "skills") _logSkillSourceUsage(payload, result)
           var response = formatResponse(result)
           if (isMap(response) && isString(response.error) && isMap(meta.inputSchema)) {
@@ -18044,6 +18129,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             addCall()
             var summarizer = summarizeLLM.withInstructions(isString(customInstructionText) ? customInstructionText : instructionText)
             var noJsonForSummarize = (summarizeLLM === self.lc_llm) ? self._noJsonPromptLC : self._noJsonPrompt
+            text = self._prepareContextInvocation(summarizer, text, "summarizer")
             if (!noJsonForSummarize && isFunction(summarizer.promptJSONWithStats)) return summarizer.promptJSONWithStats(text)
             return summarizer.promptWithStats(text)
           }, self._llmRetryOptions("Summarization", { operation: "summarize" }))
@@ -18993,6 +19079,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var updateContext = isBoolean(details.updateContext) ? details.updateContext : toolCtx.updateContext
       var observation = details.observation
       var rawResult = isDef(details.result) ? details.result : details.rawResult
+      this._captureContextToolResult(toolName, params, rawResult)
       if (isObject(this._historyVm) && !this._historyVm.degraded) {
         this._historyVm.captureToolExchange(toolName, params, rawResult, {
           stepLabel: stepLabel,
@@ -19244,6 +19331,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         this.fnI("input", "Interacting with main model (advisor consult)...")
         advisorResp = this._withExponentialBackoff(() => {
           addCall()
+          advisorPrompt = this._prepareContextInvocation(this.llm, advisorPrompt, "advisor")
           if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats)) return this.llm.promptJSONWithStats(advisorPrompt)
           return this.llm.promptWithStats(advisorPrompt)
         }, this._llmRetryOptions("Advisor model", { llmType: "advisor", step: runtime.currentStepNumber }, { maxDelay: 4000 }))
@@ -19384,6 +19472,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var fixedRequestTokens = Math.max(this._estimateTokens(stateSnapshot) + 500, 1000)
       if (isObject(this._historyVm) && !this._historyVm.degraded && (this._historyVm.enabled || this._historyVm.shadow)) {
         this._prepareHistoryVmProjection(runtime.currentStepNumber)
+        if (this._historyVm.contextVirtualization && !this._historyVm.contextVirtualizationShadow) {
+          this._prepareContextInvocation(this.llm, cachedGoalBlock + cachedHookContextBlock + stateSnapshot, "executor")
+        }
         try { fixedRequestTokens += this._estimateTokens(stringify(this.llm.getGPT().getConversation(), __, "")) } catch(ignoreHistoryVmConversationSize) {}
         fixedRequestTokens += this._estimateTokens((this._systemInst || "") + cachedGoalBlock + cachedHookContextBlock)
         fixedRequestTokens += this._estimateTokens(stringify(this.mcpTools || [], __, ""))
@@ -19689,6 +19780,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       try {
         responseWithStats = this._withExponentialBackoff(() => {
           addCall()
+          prompt = this._prepareContextInvocation(currentLLM, prompt, "executor")
           var jsonFlag = !noJsonPromptFlag && !isOllamaToolJsonConflict
           if (args.showthinking) {
             // Streaming not compatible with showthinking - use regular prompts
@@ -21110,6 +21202,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                 wkResult = "[ERROR] wiki read requires 'path'"
               } else {
                 var wkPage = this._wikiManager.agenticRead(wkPath, merge({}, wkReadOpts, { maxChars: wkParams.maxChars }))
+                this._captureContextToolResult("wiki", wkParams, wkPage)
                 wkResult = isObject(wkPage) ? af.toTOON(wkPage) : "[ERROR] Page not found: " + wkPath
               }
             } else if (wkOp === "grep") {
@@ -21397,6 +21490,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       this._trace("llm_prompt", { label: "FINAL_PROMPT", model: "main", content: finalPrompt })
       finalResponseWithStats = this._withExponentialBackoff(() => {
         addCall()
+        finalPrompt = this._prepareContextInvocation(finalLLM, finalPrompt, "executor")
         var jsonFlag = runtime.forceNoJson !== true && !this._noJsonPrompt
         if (args.showthinking) {
           if (jsonFlag && isDef(finalLLM.promptJSONWithStatsRaw)) {
@@ -21539,6 +21633,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       }
 
       var responseWithStats
+      pendingPrompt = this._prepareContextInvocation(this.llm, pendingPrompt, "executor")
       var chatbotNoJsonPromptFlag = runtime.forceNoJson === true || this._noJsonPrompt
       var chatbotStructuredOutput = !chatbotNoJsonPromptFlag && this._isStructuredOutputFormat(args.format)
       var canStream = args.usestream && runtime.forceNoStream !== true && this._supportsPromptStreamWithStatsCompat(this.llm, false)
@@ -21911,6 +22006,7 @@ MiniA.prototype._runChatbotMode = function(options) {
                 if (cbWkPath.length === 0) { cbWkResult = "[ERROR] wiki read requires 'path'" }
                 else {
                   var cbWkPage = this._wikiManager.agenticRead(cbWkPath, merge({}, cbWkReadOpts, { maxChars: cbWkParams.maxChars }))
+                  this._captureContextToolResult("wiki", cbWkParams, cbWkPage)
                   cbWkResult = isObject(cbWkPage) ? af.toTOON(cbWkPage) : "[ERROR] Page not found: " + cbWkPath
                 }
               } else if (cbWkOp === "grep") {
@@ -22057,6 +22153,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       beforeCall()
       this._trace("llm_prompt", { label: "CHATBOT_FALLBACK_PROMPT", model: "main", content: fallbackPrompt })
       var fallbackResponseWithStats
+      fallbackPrompt = this._prepareContextInvocation(this.llm, fallbackPrompt, "executor")
       if (!(runtime.forceNoJson === true || this._noJsonPrompt) && isDef(this.llm.promptJSONWithStats) && this._isStructuredOutputFormat(args.format)) {
         fallbackResponseWithStats = this.llm.promptJSONWithStats(fallbackPrompt)
       } else {
@@ -22387,9 +22484,9 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
   try {
     var responseWithStats = this._withExponentialBackoff(() => {
       if (!this._noJsonPrompt && isFunction(effectiveLLM.promptJSONWithStats)) {
-        return effectiveLLM.promptJSONWithStats(validationPrompt)
+        return effectiveLLM.promptJSONWithStats(this._prepareContextInvocation(effectiveLLM, validationPrompt, "validator"))
       }
-      return effectiveLLM.promptWithStats(validationPrompt)
+      return effectiveLLM.promptWithStats(this._prepareContextInvocation(effectiveLLM, validationPrompt, "validator"))
     }, this._llmRetryOptions("Research validation", { operation: "deep-research-validation" }, { initialDelay: 400 }))
 
     // Write prompt + response to debugvalch when main LLM handles validation (tools=false path)

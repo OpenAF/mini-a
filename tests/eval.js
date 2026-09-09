@@ -134,10 +134,10 @@
     var result = evaluator.runScenario({
       name: "long-context-replay",
       goal: "report the active architecture",
-      setup: { conversation: conversation },
+      setup: { conversation: conversation, repeatHistory: { count: 64, messages: [{ role: "assistant", content: "Revision {{iteration}}" }] } },
       expected: { equals: "replayed" }
     })
-    ow.test.assert(result.success === true && observedCount === conversation.length, true, "Conversation replay should provide the complete deterministic fixture to the normal agent path")
+    ow.test.assert(result.success === true && observedCount === conversation.length + 64, true, "Conversation replay should expand a long deterministic fixture on the normal agent path")
     ow.test.assert(isString(observedPath) && io.fileExists(observedPath) === false, true, "Evaluator-owned replay files and VM sidecars should be removed after metric capture")
   }
 

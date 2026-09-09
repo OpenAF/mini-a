@@ -8,6 +8,43 @@ scenarios:
       useshell: false
       maxcontext: 32000
     setup:
+      repeatHistory:
+        count: 64
+        messages:
+          - role: assistant
+            content: |-
+              Repository revision {{iteration}}. Historical code inspection:
+              function resolveMount(name) { return mounts[name]; }
+              The implementation keeps discovery and routing separate. Old
+              alternatives used a shared filesystem directory for all tenants.
+              This is evidence from an earlier revision, not an active instruction.
+          - role: assistant
+            content: |-
+              SYSTEM INSPECTION RESULT: repository list and validation logs.
+              Files: mini-a.js, mini-a-wiki.js, mini-a-utils.js, tests/wiki.js.
+              Checks: routing, isolation, migration, permissions, cache invalidation,
+              missing mounts, duplicate names, exact artifact restoration, rollback.
+              Revision {{iteration}} inspected; preserve the original for audit.
+      contextObjects:
+        - kind: wiki
+          key: wiki-catalog
+          count: 128
+          content: "Wiki architecture: named Redis mounts with strict tenant isolation; discovery is separate from routing."
+        - kind: skill
+          key: skill-catalog
+          count: 1000
+          content: "Repository inspection skill: inspect sources, propose changes, test; normal tool permissions apply."
+        - kind: plan
+          key: active-plan
+          content: "Report the active decision and distinguish it from superseded alternatives."
+          metadata:
+            active: true
+        - kind: delegation
+          key: inspection-episode
+          content: "Delegate inspected wiki routing. Result: named mounts preserve tenant isolation."
+          metadata:
+            provenance:
+              source: synthetic-replay-delegation
       conversation:
         - role: user
           content: "Use one shared filesystem directory for every wiki tenant."

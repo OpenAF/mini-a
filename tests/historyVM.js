@@ -22,6 +22,106 @@
     }
   }
 
+  exports.testLongRequestPaging = function() {
+    withVm(function(vm) {
+      var history = [{ role: "system", content: "Keep exact user constraints." }, { role: "user", content: "Use named Redis mounts with strict isolation." }]
+      for (var i = 0; i < 100; i++) history.push({ role: "assistant", content: "Inspection " + i + ": " + new Array(100).join("obsolete code and repository analysis ") })
+      history.push({ role: "assistant", content: "Current state." }, { role: "user", content: "Report the current decision." })
+      vm.captureProviderConversation(history)
+      var projected = vm.projectActiveContext(history, { freezeUnselected: true, budget: 3000, outputReserve: 500, fixedTokens: { prompt: 100, tools: 100 }, goal: "Redis isolation", recentCount: 2 })
+      ow.test.assert(projected.overflow, false, "Long history must fit the whole request")
+      ow.test.assert(projected.requestTokens <= 3000 && projected.conversation.length < 40, true, "Frozen history must not emit a stub for every object")
+      ow.test.assert(projected.conversation[1].content, history[1].content, "User constraints remain exact")
+      withVm(function(baseline) {
+        baseline.captureProviderConversation(history)
+        var phaseOne = baseline.projectConversation(history, { currentStep: 200 })
+        ow.test.assert(projected.outputTokens < baseline.estimateTokens(stringify(phaseOne, __, "")), true, "Long replay should reduce actual materialized input relative to Phase 1")
+        withVm(function(shadow) {
+          shadow.captureProviderConversation(history)
+          var comparison = shadow.projectContextShadow({ actualContext: phaseOne, freezeUnselected: true, budget: 3000, outputReserve: 500, fixedTokens: { prompt: 100, tools: 100 }, goal: "Redis isolation", recentCount: 2 })
+          ow.test.assert(comparison.projectedTokens, projected.outputTokens, "Shadow and active must predict the same long replay projection")
+          ow.test.assert(isUnDef(shadow._providerView), true, "Shadow must not commit a provider view")
+        }, { contextVirtualization: true, contextVirtualizationShadow: true })
+      })
+      ow.test.assert(stringify(vm.materializeConversation(projected.conversation), __, ""), stringify(history, __, ""), "Frozen projection must restore exact canonical history")
+      projected.conversation.push({ role: "assistant", content: "Fresh result." })
+      vm.captureProviderConversation(projected.conversation)
+      ow.test.assert(vm._providerObjectForIndex(history.length).content.content, "Fresh result.", "New provider tail must use canonical indexes")
+      var impossible = vm.projectActiveContext(projected.conversation, { freezeUnselected: true, budget: 10, outputReserve: 100 })
+      ow.test.assert(impossible.overflow, true, "Hard overflow must be explicit")
+      ow.test.assert(vm.materializeConversation(projected.conversation).length, history.length + 1, "Rejected projection must not replace the committed provider view")
+    }, { contextVirtualization: true })
+  }
+
+  exports.testSourceVersionsAndSnapshot = function() {
+    withVm(function(vm, conversation) {
+      var first = vm.upsertContextSource("wiki", "mounts", "named Redis mounts", { keywords: ["Redis"] })
+      ow.test.assert(vm.upsertContextSource("wiki", "mounts", "named Redis mounts", { keywords: ["Redis"] }).handle, first.handle, "Unchanged sources reuse identity")
+      var next = vm.upsertContextSource("wiki", "mounts", "named Redis mounts", { keywords: ["isolation"] })
+      ow.test.assert(next.version, 2, "Metadata changes invalidate source versions")
+      ow.test.assert(first.obsolete, true, "New source versions supersede old snapshots")
+      for (var i = 0; i < 270; i++) vm.upsertContextSource(i % 2 ? "skill" : "artifact", "fixture-" + i, { name: "fixture " + i, content: "repository inspection and validation" })
+      vm.rollupSession()
+      var resumed = new MiniAHistoryVM({ enabled: true, contextVirtualization: true, conversationPath: conversation, conversationId: "test-conversation", sessionId: "next-session" })
+      ow.test.assert(resumed.degraded, false, "Snapshot plus tail must resume")
+      ow.test.assert(resumed.metrics.index_snapshot_hits, 1, "Resume should reuse a validated index snapshot")
+      ow.test.assert(resumed.events.length, vm.events.length, "Snapshot replay preserves the exact event count")
+      ow.test.assert(resumed.objects.filter(function(object) { return object.type === "project_rollup" }).length, 1, "Project rollups survive restart")
+      ow.test.assert(resumed._resolveObject(next.handle).content, "named Redis mounts", "Exact source remains addressable")
+      io.writeFileString(resumed.indexSnapshotPath, "corrupt derived cache")
+      var rebuilt = new MiniAHistoryVM({ enabled: true, contextVirtualization: true, conversationPath: conversation, conversationId: "test-conversation" })
+      ow.test.assert(rebuilt.events.length, vm.events.length, "Invalid snapshot must fall back to canonical journal")
+      ow.test.assert(rebuilt.degraded, false, "Invalid cache must not disable healthy canonical data")
+    }, { contextVirtualization: true })
+  }
+
+  exports.testNativeToolPaging = function() {
+    withVm(function(vm) {
+      var history = [{ role: "assistant", content: "", tool_calls: [{ id: "a", type: "function", function: { name: "lookup", arguments: "{}" } }, { id: "b", type: "function", function: { name: "lookup", arguments: "{}" } }] },
+        { role: "tool", tool_call_id: "a", content: new Array(1000).join("Redis isolation ") },
+        { role: "tool", tool_call_id: "b", content: new Array(1000).join("unrelated output ") }]
+      for (var i = 0; i < 15; i++) history.push({ role: "assistant", content: "old unrelated note " + i })
+      history.push({ role: "user", content: "Explain Redis isolation" }, { role: "assistant", content: "Inspecting evidence." })
+      vm.captureProviderConversation(history)
+      var result = vm.projectActiveContext(history, { freezeUnselected: true, goal: "Redis isolation", budget: 1800, recentCount: 2 })
+      ow.test.assert(result.overflow, false, "Tool history must be pageable")
+      var calls = result.conversation.filter(function(entry) { return isArray(entry.tool_calls) })
+      var replies = result.conversation.filter(function(entry) { return entry.role === "tool" })
+      ow.test.assert(calls.length === 0 ? replies.length === 0 : replies.length === 2, true, "Parallel calls and results must be preserved or frozen as a complete group")
+      ow.test.assert(stringify(vm.materializeConversation(result.conversation), __, ""), stringify(history, __, ""), "Native tool originals must remain exact")
+    }, { contextVirtualization: true })
+  }
+
+  exports.testRuntimeSourceViewsAndDelegation = function() {
+    withVm(function(vm) {
+      load("mini-a.js")
+      load("mini-a-subtask.js")
+      var agent = new MiniA()
+      agent._historyVm = vm
+      agent._sessionArgs = { goal: "Redis isolation", knowledge: "Redis mounts isolate tenants." }
+      agent._agentState = { plan: { step: "Validate Redis isolation" } }
+      agent._getEffectiveContextBudget = function() { return 8000 }
+      agent._captureContextToolResult("wiki", { op: "read", path: "mounts" }, "Named Redis mounts preserve isolation.")
+      var setters = 0
+      var llm = { getGPT: function() { return { getConversation: function() { return [] }, setConversation: function() { setters++ } } } }
+      var enriched = agent._prepareContextInvocation(llm, "Validate Redis isolation", "validator")
+      ow.test.assert(enriched.indexOf("BEGIN_UNTRUSTED_CONTEXT") >= 0, true, "Auxiliary model must receive selected source knowledge")
+      ow.test.assert(agent._prepareContextInvocation(llm, enriched, "validator"), enriched, "Retries must not duplicate source context")
+      ow.test.assert(setters, 0, "Auxiliary histories must remain independently owned")
+      var manager = new SubtaskManager({ knowledge: "DO NOT COPY THE ENTIRE PARENT" }, {})
+      manager.parentAgent = agent
+      var child = manager._buildChildArgs({ goal: "Redis isolation", depth: 1, parentId: "root", args: {} })
+      ow.test.assert(child.knowledge.indexOf("DO NOT COPY THE ENTIRE PARENT") < 0 && child.knowledge.indexOf("BEGIN_UNTRUSTED_CONTEXT") >= 0, true, "Delegates must receive a bounded task projection instead of parent knowledge")
+      ow.test.assert(vm.estimateTokens(agent._contextForDelegate("Redis isolation", 2048)) <= 2048, true, "Delegate budget must include its wrapper")
+      agent._getEffectiveContextBudget = function() { return 10 }
+      var stopped = false
+      try { agent._prepareContextInvocation(llm, "Protected input", "validator") } catch(e) { stopped = e.miniAStop === true }
+      ow.test.assert(stopped, true, "Auxiliary hard overflow must stop before model dispatch")
+      vm.contextVirtualizationShadow = true
+      ow.test.assert(agent._prepareContextInvocation(llm, "Protected input", "validator"), "Protected input", "Shadow mode must not enforce projected overflow or alter input")
+    }, { contextVirtualization: true })
+  }
+
   exports.testDisabledCreatesNoStore = function() {
     var root = String(java.nio.file.Files.createTempDirectory("mini-a-history-vm-disabled-").toAbsolutePath())
     try {
@@ -245,7 +345,8 @@
         setConversation: function(value) { sent = value }
       } } }
       ow.test.assert(agent._prepareHistoryVmProjection(1) === true, true, "Runtime projection should complete")
-      ow.test.assert(isArray(sent) && sent[0].content.indexOf("[CONTEXT_OBJECT ") === 0, true, "Explicit active Phase 2 should send a multi-resolution provider projection")
+      agent._prepareContextInvocation(agent.llm, "Continue", "executor")
+      ow.test.assert(isArray(sent) && sent.length < conversation.length, true, "Explicit active Phase 2 should freeze old messages at the final invocation boundary")
       ow.test.assert(agent._historyVm.metrics.collapses === 0 && agent._historyVm.metrics.context_virtualization_active_assemblies === 1, true, "Active Phase 2 should not also run the Phase 1 collapse policy")
       agent._historyVm.deleteOwnedStore()
     } finally {

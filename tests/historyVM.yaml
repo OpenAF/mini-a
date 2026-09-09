@@ -160,7 +160,31 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/historyVM.js").testUnavailableBackingDisablesCollapse
 
+- name: MiniA History VM Tests::LongRequestPaging
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testLongRequestPaging
+
+- name: MiniA History VM Tests::SourceVersionsSnapshot
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testSourceVersionsAndSnapshot
+
+- name: MiniA History VM Tests::NativeToolPaging
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testNativeToolPaging
+
+- name: MiniA History VM Tests::RuntimeSourcesDelegation
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testRuntimeSourceViewsAndDelegation
+
 todo:
+- MiniA History VM Tests::RuntimeSourcesDelegation
+- MiniA History VM Tests::LongRequestPaging
+- MiniA History VM Tests::SourceVersionsSnapshot
+- MiniA History VM Tests::NativeToolPaging
 - MiniA History VM Tests::Disabled
 - MiniA History VM Tests::AppendResume
 - MiniA History VM Tests::Representations
