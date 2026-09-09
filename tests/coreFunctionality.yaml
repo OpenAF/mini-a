@@ -412,6 +412,21 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testSubtaskManagerCancelStopsLocalChildAgent
 
+- name: MiniA Core Tests::SubtaskCancellationWinsChildStopCompletion
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskCancellationWinsChildStopCompletion
+
+- name: MiniA Core Tests::SubtaskShutdownDoesNotStartQueuedWork
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskShutdownDoesNotStartQueuedWork
+
+- name: MiniA Core Tests::SubtaskCompletionPublishesResultBeforeTerminalState
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskCompletionPublishesResultBeforeTerminalState
+
 - name: MiniA Core Tests::SubtaskActivePastDeadline
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -1197,3 +1212,6 @@ todo:
 - MiniA Core Tests::ReplyPromptUsesObjectParams
 - MiniA Core Tests::ReplyToolRecoveryUsesOneProviderRequest
 - MiniA Core Tests::ReplyCaptureRejectsInvalidAndDuplicateActions
+- MiniA Core Tests::SubtaskCancellationWinsChildStopCompletion
+- MiniA Core Tests::SubtaskShutdownDoesNotStartQueuedWork
+- MiniA Core Tests::SubtaskCompletionPublishesResultBeforeTerminalState

@@ -90,17 +90,23 @@ SubtaskManager.prototype._touchSubtask = function(subtask, reason) {
   return true
 }
 
-SubtaskManager.prototype._claimTerminal = function(subtask, newStatus, nowValue, errorValue) {
+SubtaskManager.prototype._claimTerminal = function(subtask, newStatus, nowValue, errorValue, resultValue) {
   if (!isMap(subtask) || !isString(newStatus) || newStatus.length === 0) return false
   var claimed = false
   var parent = this
   sync(function() {
     if (__isTerminalSubtaskState(subtask.status) || subtask.status !== "running") return
-    subtask.status = newStatus
     subtask.completedAt = isNumber(nowValue) ? nowValue : new Date().getTime()
-    if (isDef(errorValue)) subtask.error = errorValue
+    if (newStatus === "completed") {
+      subtask.result = resultValue
+      subtask.error = __
+    } else if (isDef(errorValue)) {
+      subtask.error = errorValue
+    }
     parent.metrics.running--
     parent.runningCount--
+    // Polling parents must never see a terminal state before its result.
+    subtask.status = newStatus
     claimed = true
   }, this._transitionLock)
   return claimed
@@ -1008,14 +1014,12 @@ SubtaskManager.prototype._remoteGet = function(workerUrl, path, query) {
 
 SubtaskManager.prototype._completeSubtask = function(subtask, prefix, answer, metrics, state) {
   var completedAt = new Date().getTime()
-  if (!this._claimTerminal(subtask, "completed", completedAt, __)) return false
-  this._touchSubtask(subtask, "completed")
-  subtask.result = {
+  if (!this._claimTerminal(subtask, "completed", completedAt, __, {
     answer: answer,
     metrics: metrics,
     state: state
-  }
-  subtask.error = __
+  })) return false
+  this._touchSubtask(subtask, "completed")
 
   if (isObject(this.parentAgent) && isObject(this.parentAgent._historyVm) && this.parentAgent._historyVm.contextVirtualization) {
     this.parentAgent._historyVm.upsertContextSource("delegation", subtask.id, {
@@ -1512,12 +1516,29 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
     throw new Error("Subtask " + subtaskId + " not found")
   }
   
-  // Check if already terminal
-  if (__isTerminalSubtaskState(subtask.status)) {
-    return false
-  }
-  
-  var wasRunning = subtask.status === "running"
+  // Claim cancellation before stop callbacks or remote requests can complete
+  // the task. Read pending/running under the same lock used by start().
+  var cancelReason = reason || "Cancelled by user"
+  var wasRunning = false
+  var cancelled = false
+  var parent = this
+  sync(function() {
+    if (__isTerminalSubtaskState(subtask.status)) return
+    wasRunning = subtask.status === "running"
+    if (wasRunning) {
+      cancelled = parent._claimTerminal(subtask, "cancelled", new Date().getTime(), cancelReason)
+    } else if (subtask.status === "pending") {
+      subtask.completedAt = new Date().getTime()
+      subtask.error = cancelReason
+      subtask.status = "cancelled"
+      cancelled = true
+    }
+    if (!cancelled) return
+    var queueIndex = parent.pendingQueue.indexOf(subtaskId)
+    if (queueIndex >= 0) parent.pendingQueue.splice(queueIndex, 1)
+    parent.metrics.cancelled++
+  }, this._transitionLock)
+  if (!cancelled) return false
 
   if (wasRunning && this._running === true && this.remoteDelegation && isString(subtask.workerUrl) && isString(subtask.remoteTaskId)) {
     try {
@@ -1546,40 +1567,8 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
     } catch(ignoreLocalCancel) {}
   }
 
-  // Mark as cancelled
-  var cancelReason = reason || "Cancelled by user"
-  var claimedRunning = false
-  if (wasRunning) claimedRunning = this._claimTerminal(subtask, "cancelled", new Date().getTime(), cancelReason)
-  var cancelledPending = false
-  if (!wasRunning) {
-    var cancelledAt = new Date().getTime()
-    var parent = this
-    sync(function() {
-      if (__isTerminalSubtaskState(subtask.status) || subtask.status !== "pending") return
-      subtask.status = "cancelled"
-      subtask.completedAt = cancelledAt
-      subtask.error = cancelReason
-      var queueIndex = parent.pendingQueue.indexOf(subtaskId)
-      if (queueIndex >= 0) parent.pendingQueue.splice(queueIndex, 1)
-      cancelledPending = true
-    }, this._transitionLock)
-  }
-  
-  // Update metrics
-  if (wasRunning && !claimedRunning) return false
-  if (!wasRunning && !cancelledPending) return false
-  this.metrics.cancelled++
-
   if (wasRunning && isDef(subtask._executionPromise) && isFunction(subtask._executionPromise.cancel)) {
     try { subtask._executionPromise.cancel(reason || "Cancelled by user") } catch(ignoreExecutionCancel) {}
-  }
-  
-  // Remove from pending queue if present
-  if (wasRunning) {
-    var queueIndex = this.pendingQueue.indexOf(subtaskId)
-    if (queueIndex >= 0) {
-      this.pendingQueue.splice(queueIndex, 1)
-    }
   }
   
   var prefix = "[subtask:" + subtaskId.substring(0, 8) + "]"
@@ -1781,7 +1770,7 @@ SubtaskManager.prototype.getMetrics = function() {
  * </odoc>
  */
 SubtaskManager.prototype._processQueue = function() {
-  while (this.runningCount < this.maxConcurrent && this.pendingQueue.length > 0) {
+  while (this._running === true && this.runningCount < this.maxConcurrent && this.pendingQueue.length > 0) {
     var nextId = this.pendingQueue.shift()
     var subtask = this.subtasks[nextId]
     if (!isDef(subtask) || subtask.status !== "pending") continue

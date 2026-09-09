@@ -2065,6 +2065,70 @@
     manager.destroy()
   }
 
+  exports.testSubtaskCancellationWinsChildStopCompletion = function() {
+    var manager = new SubtaskManager({}, {})
+    var subtask = { id: "cancel-race", status: "running", startedAt: new Date().getTime() }
+    manager.subtasks[subtask.id] = subtask
+    manager.runningCount = manager.metrics.running = 1
+    var completionAccepted
+    subtask.childAgent = { requestStop: function() {
+      completionAccepted = manager._completeSubtask(subtask, "test", "partial answer", {}, {})
+    } }
+    try {
+      ow.test.assert(manager.cancel(subtask.id, "Stop requested"), true, "Cancellation must claim the task before stopping the child")
+      ow.test.assert(completionAccepted, false, "A stopping child must not publish success")
+      ow.test.assert(subtask.status, "cancelled", "Cancellation must remain terminal")
+      ow.test.assert(manager.metrics.completed, 0, "Cancelled work must not count as completed")
+      ow.test.assert(manager.metrics.cancelled, 1, "Cancellation must be counted once")
+      ow.test.assert(manager.runningCount, 0, "The running slot must be released once")
+      ow.test.assert(manager.cancel(subtask.id), false, "Repeated cancellation must be ignored")
+    } finally { manager.destroy() }
+  }
+
+  exports.testSubtaskShutdownDoesNotStartQueuedWork = function() {
+    var manager = new SubtaskManager({}, {})
+    var starts = 0
+    manager._startLocalSubtask = function() { starts++ }
+    manager.subtasks.active = { id: "active", status: "running" }
+    manager.subtasks.queued = { id: "queued", goal: "queued task", status: "pending" }
+    manager.pendingQueue.push("queued")
+    manager.runningCount = manager.metrics.running = 1
+    try {
+      manager.destroy()
+      ow.test.assert(starts, 0, "Shutdown must not launch queued work when cancelling a running task")
+      ow.test.assert(manager.subtasks.active.status, "cancelled", "Shutdown must cancel active work")
+      ow.test.assert(manager.subtasks.queued.status, "cancelled", "Shutdown must cancel queued work")
+      ow.test.assert(manager.pendingQueue.length, 0, "Cancelled work must be removed from the queue")
+      ow.test.assert(manager.metrics.cancelled, 2, "Both tasks must be counted as cancelled")
+      ow.test.assert(manager.runningCount, 0, "Shutdown must release the running slot")
+      manager.destroy()
+      ow.test.assert(manager.metrics.cancelled, 2, "Repeated shutdown must not count cancellations again")
+    } finally { manager.destroy() }
+  }
+
+  exports.testSubtaskCompletionPublishesResultBeforeTerminalState = function() {
+    var manager = new SubtaskManager({}, {})
+    var subtask = { id: "completion-race", status: "running", startedAt: new Date().getTime(), error: "previous attempt" }
+    manager.subtasks[subtask.id] = subtask
+    manager.runningCount = manager.metrics.running = 1
+    var claimTerminal = manager._claimTerminal
+    var observedResult
+    manager._claimTerminal = function() {
+      var claimed = claimTerminal.apply(this, arguments)
+      if (claimed) observedResult = this.waitFor(subtask.id, 0)
+      return claimed
+    }
+    try {
+      ow.test.assert(manager._completeSubtask(subtask, "test", "final answer", { tokens: 7 }, { done: true }), true, "Completion should succeed")
+      ow.test.assert(observedResult.answer, "final answer", "A waiter observing completion must receive the answer")
+      ow.test.assert(observedResult.metrics.tokens, 7, "Completion must publish metrics with the answer")
+      ow.test.assert(observedResult.state.done, true, "Completion must publish child state with the answer")
+      ow.test.assert(isUnDef(observedResult.error), true, "Successful retries must clear the previous error before completion")
+      ow.test.assert(manager._completeSubtask(subtask, "test", "duplicate", {}, {}), false, "Duplicate completion must be ignored")
+      ow.test.assert(manager.result(subtask.id).answer, "final answer", "Duplicate completion must not overwrite the result")
+    } finally { manager.destroy() }
+  }
+
   exports.testSubtaskManagerDoesNotTimeoutActiveSubtaskPastDeadline = function() {
     var manager = new SubtaskManager({}, { defaultStallTimeoutMs: 300000 })
     var now = new Date().getTime()
