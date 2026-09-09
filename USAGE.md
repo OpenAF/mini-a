@@ -1141,7 +1141,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
   - **Escape handling**: Properly processes escape sequences and closing quotes in streamed JSON responses
   - **Performance**: Reduces perceived latency by showing progress before the full response completes
   - **Compatibility**: Not compatible with `showthinking=true` mode (falls back to non-streaming)
-  - **SSE event types** (web UI): The SSE stream emits `stream` events for regular LLM token output and `planner_stream` events for tokens generated during the planning phase. Clients can use the event type to visually distinguish planner output from regular answer output. The console renders `planner_stream` tokens in a distinct color for the same reason.
+  - **SSE event types** (web UI): The SSE stream emits `stream` events for regular LLM token output and `planner_stream` events for tokens generated during the planning phase. The browser automatically shows `Planning…` while planner events are active and returns to the normal execution preview afterward. `/result` also reports the authoritative `phase` (`planning`, `execution`, or `finished`), so the transition remains visible when SSE is disabled or reconnecting. The console renders `planner_stream` tokens in a distinct color for the same reason.
 
 #### Libraries and Extensions
 - **`libs`** (string): Comma-separated list of additional OpenAF libraries to load

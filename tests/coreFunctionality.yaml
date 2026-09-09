@@ -777,6 +777,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testWebYamlExposesHomeAndSkillParameters
 
+- name: MiniA Core Tests::WebAutoPlanningPhaseLifecycle
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWebAutoPlanningPhaseLifecycle
+
 - name: MiniA Core Tests::WarnUnknownArgsSuggestsClosestMatch
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -1149,6 +1154,7 @@ todo:
 - MiniA Core Tests::WarnUnknownArgsAcceptsValidRuntimeParameters
 - MiniA Core Tests::WarnUnknownArgsAcceptsAdditionalValidParameters
 - MiniA Core Tests::WebYamlExposesHomeAndSkillParameters
+- MiniA Core Tests::WebAutoPlanningPhaseLifecycle
 - MiniA Core Tests::WarnUnknownArgsSuggestsClosestMatch
 - MiniA Core Tests::WikiToolNotVisibleWhenDisabled
 - MiniA Core Tests::WikiToolVisibleWhenEnabled

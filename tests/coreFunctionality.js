@@ -3881,6 +3881,18 @@
     ow.test.assert(text.indexOf("__gHDir = function() { return _hd }") >= 0, true, "Web launcher should apply homedir before MiniA init")
   }
 
+  exports.testWebAutoPlanningPhaseLifecycle = function() {
+    var webJob = io.readFileString("mini-a-web.yaml")
+    var webUi = io.readFileString("public/index.md")
+
+    ow.test.assert(webJob.indexOf('activeConversation._planningPhase == "planning"') >= 0, true, "Web results should expose the agent's authoritative planning phase")
+    ow.test.assert(webJob.indexOf('_res.phase = "finished"') >= 0, true, "Finished web results should close the planning phase")
+    ow.test.assert(webUi.indexOf("data.phase === 'planning'") >= 0, true, "Web polling should enter planning mode from the server phase")
+    ow.test.assert(webUi.indexOf("setPlanningMode(true);") >= 0, true, "Planner SSE should enter planning mode without waiting for a poll")
+    ow.test.assert(webUi.indexOf("setPlanningMode(false);") >= 0, true, "Execution and completion paths should leave planning mode automatically")
+    ow.test.assert(webUi.indexOf("'Planning…'") >= 0, true, "The loading preview should visibly label planning mode")
+  }
+
   exports.testWarnUnknownArgsSuggestsClosestMatch = function() {
     var warnings = []
     var args = {

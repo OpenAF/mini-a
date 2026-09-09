@@ -1351,6 +1351,10 @@
         display: block;
     }
 
+    .preview.planning-mode .preview-text {
+        font-weight: 500;
+    }
+
     @keyframes shimmer {
         0% { background-position: 0% 50%; }
         100% { background-position: -200% 50%; }
@@ -2000,6 +2004,7 @@
     let streamRenderTimer = null;
     let plannerStreamBuffer = '';
     let plannerRenderTimer = null;
+    let planningModeActive = false;
     let immediatePollTimer = null;
     let pollInFlight = false;
     let pollQueued = false;
@@ -5081,18 +5086,31 @@
         return lines[lines.length - 1];
     }
 
+    function setPlanningMode(active) {
+        planningModeActive = active === true;
+        const preview = document.getElementById(PREVIEW_ID);
+        if (preview) preview.classList.toggle('planning-mode', planningModeActive);
+        syncPreviewText();
+    }
+
     function syncPreviewText() {
         const preview = document.getElementById(PREVIEW_ID);
         if (!preview) return;
         const textNode = preview.querySelector('.preview-text');
         if (!textNode) return;
         const text = getPlannerPreviewText();
-        if (text.length > 0) {
+        if (planningModeActive) {
+            textNode.textContent = text.length > 0 ? `Planning · ${text}` : 'Planning…';
+            preview.classList.add('has-text');
+            preview.classList.add('planning-mode');
+        } else if (text.length > 0) {
             textNode.textContent = text;
             preview.classList.add('has-text');
+            preview.classList.remove('planning-mode');
         } else {
             textNode.textContent = '';
             preview.classList.remove('has-text');
+            preview.classList.remove('planning-mode');
         }
     }
 
@@ -5359,6 +5377,7 @@
         resetPlanPanel();
         resetSubagentPanel();
         updateCopyActionsVisibility();
+        setPlanningMode(false);
     }
 
     function stopProcessing(sendStopRequest = false) {
@@ -5378,6 +5397,7 @@
         }
 
         stopStream();
+        setPlanningMode(false);
         
         if (sendStopRequest && currentSessionUuid) {
             fetch(resolveAppUrl('result'), {
@@ -5573,6 +5593,8 @@
                     sawNonFinishedForActiveSubmission = true;
                 }
 
+                setPlanningMode(data && data.status !== 'finished' && data.phase === 'planning');
+
                 // Only update plan panel if conversation is not finished and hasn't been marked as finished
                 if (data && data.status !== 'finished' && !conversationFinished) {
                     updatePlanPanel(data.plan);
@@ -5612,6 +5634,7 @@
                     const finalStreamChunk = streamBuffer || '';
                     const finalContent = mergeFinalContentWithStream(contentForDisplay, finalStreamChunk);
                     conversationFinished = true;
+                    setPlanningMode(false);
                     stopStream();
                     lastRawContent = finalContent;
                     await renderRawContent(finalContent);
@@ -5805,6 +5828,7 @@
             try { payload = JSON.parse(event.data); } catch (e) { payload = {}; }
             const chunk = payload.message || '';
             if (!chunk) return;
+            setPlanningMode(false);
             streamBuffer += chunk;
             scheduleStreamRender();
         });
@@ -5814,6 +5838,7 @@
             try { payload = JSON.parse(event.data); } catch (e) { payload = {}; }
             const chunk = payload.message || '';
             if (!chunk) return;
+            setPlanningMode(true);
             plannerStreamBuffer += chunk;
             schedulePlannerRender();
         });
@@ -5821,6 +5846,7 @@
             if (!event || !event.data) return;
             try {
                 const payload = JSON.parse(event.data);
+                setPlanningMode(false);
                 if (payload && payload.plan) updatePlanPanel(payload.plan);
             } catch (e) { /* ignore */ }
         });
@@ -5837,6 +5863,7 @@
             scheduleImmediatePoll(10);
         });
         streamSource.addEventListener('done', () => {
+            setPlanningMode(false);
             const combined = mergeFinalContentWithStream(lastRawContent, streamBuffer);
             renderRawContent(combined).catch(() => { /* ignore */ });
             closeStreamConnectionKeepBuffers();

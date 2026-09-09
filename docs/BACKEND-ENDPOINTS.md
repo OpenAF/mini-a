@@ -79,6 +79,7 @@ This document describes the backend endpoints that the web UI (`public/index.md`
 {
   "content": "<html-or-markdown-content>",
   "status": "processing",
+  "phase": "planning",
   "history": [{ "event": "👤", "message": "..." }],
   "plan": {
     "active": true,
@@ -95,6 +96,7 @@ This document describes the backend endpoints that the web UI (`public/index.md`
 **Backend implementation notes**
 - Builds `content` by aggregating session events into a markdown/HTML stream.
 - Emits `status: "finished"` once a final answer is stored.
+- Reports `phase: "planning"` while the agent is generating or revising a plan, `phase: "execution"` otherwise while processing, and `phase: "finished"` with the final result. The web loading preview follows this field so `orchestration=auto` planning transitions are visible even without token streaming.
 - Responds with plan metadata for the plan panel UI.
 
 ### `GET /stream`
@@ -108,8 +110,8 @@ This document describes the backend endpoints that the web UI (`public/index.md`
 
 **SSE event types**
 - `event: ready` — Emitted upon successful stream connection (`{ "status": "ok", "uuid": "..." }`).
-- `event: stream` — Incremental token chunks streamed from the active model generation (`{ "message": "..." }`).
-- `event: planner_stream` — Incremental token chunks from the planner model (`{ "message": "..." }`).
+- `event: stream` — Incremental token chunks streamed from the active model generation (`{ "message": "..." }`); the UI leaves its transient planning state.
+- `event: planner_stream` — Incremental token chunks from the planner model (`{ "message": "..." }`); the UI enters its transient planning state immediately, before the next `/result` poll.
 - `event: error` — Emitted on authorization error or invalid UUID (`{ "message": "..." }`).
 - Heartbeat comments (`: ping`) are emitted periodically to keep the HTTP connection alive.
 

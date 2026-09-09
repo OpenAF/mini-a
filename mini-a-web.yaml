@@ -1502,7 +1502,7 @@ todo:
           }
         }
       }
-      var _res = { content: "", status: "processing", history: [] }
+      var _res = { content: "", status: "processing", phase: "execution", history: [] }
       var __attachmentLangMap = {
         md: 'markdown', markdown: 'markdown', json: 'json', yaml: 'yaml', yml: 'yaml',
         csv: 'csv', tsv: 'tsv', xml: 'xml', html: 'html', htm: 'html', css: 'css', scss: 'scss', less: 'less',
@@ -1566,6 +1566,10 @@ todo:
       if (isDef(global.__res[ postData.uuid ])) {
         // Update last activity
         global.__lastActivity[ postData.uuid ] = Date.now()
+        var activeConversation = isDef(global.__conversations) ? global.__conversations[ postData.uuid ] : __
+        if (isDef(activeConversation) && activeConversation._planningPhase == "planning") {
+          _res.phase = "planning"
+        }
         var planState = isDef(global.__planState) ? global.__planState[ postData.uuid ] : __
         var hasActivePlan = isDef(planState) && isArray(planState.items) && planState.items.length > 0
 
@@ -1579,7 +1583,10 @@ todo:
             _history.push(_h)
           }
           if (r.event == "final") {
-            if (i == global.__res[ postData.uuid ].length - 1) _res.status = "finished"
+            if (i == global.__res[ postData.uuid ].length - 1) {
+              _res.status = "finished"
+              _res.phase = "finished"
+            }
             _res.content += "\n" + r.message + "\n"
             //delete global.__res[ postData.uuid ]
             //break
