@@ -17056,7 +17056,7 @@ MiniA.prototype.init = function(args) {
       .filter(r => r.length > 0)
     if (this._shouldEncourageWebMarkdownImages(args)) {
       baseRules.push(
-        "The answer is rendered in a web page. When an image would materially improve the answer, include it using standard Markdown image syntax: ![concise descriptive alt text](https://reliable-image-url). Use images sparingly and only when relevant; never invent image URLs."
+        "The answer is rendered as Markdown to HTML in a web page, which can display existing external photographs and images using standard Markdown image syntax: ![concise descriptive alt text](https://reliable-image-url). This does not require image generation; diagrams, charts, maps, and SVG are not the only supported visuals. When relevant images would materially improve an answer, include a small number; when the user asks for pictures or photos, actively try to supply them. Keep follow-up image requests tied to the current conversation topic, rather than unrelated images or a site's main page. Use available search or URL-fetch tools to find topic-relevant images from reliable sources such as Wikipedia/Wikimedia Commons when you do not already have verified URLs. Use direct image URLs found in source/tool results or supplied by the user; never invent or guess image URLs. Put image Markdown directly in the answer, outside code fences unless the user explicitly requests Markdown source. Add a short caption and source link; do not claim a license unless verified. If retrieval is unavailable or fails, explain that specific limitation and provide a relevant source-page link when known; do not claim that the web page cannot display photographs or substitute a menu of unrelated visual capabilities."
       )
     }
     var validatedContracts = this._buildValidatedToolContracts(args)
@@ -17396,8 +17396,13 @@ MiniA.prototype._shouldIncludeNoUserInteractionRemark = function(args) {
 }
 
 MiniA.prototype._shouldEncourageWebMarkdownImages = function(args) {
-  if (!isMap(args) || !isString(args.__interaction_source)) return false
-  return args.__interaction_source.trim().toLowerCase() === "mini-a-web" && args.format === "md"
+  if (!isMap(args) || args.format !== "md") return false
+  if (isString(args.__interaction_source) && args.__interaction_source.trim().length > 0) {
+    return args.__interaction_source.trim().toLowerCase() === "mini-a-web"
+  }
+  if (toBoolean(args.workermode) === true) return false
+  var port = isNumber(args.onport) || isString(args.onport) ? Number(args.onport) : NaN
+  return isFinite(port) && Math.floor(port) === port && port > 0 && port <= 65535
 }
 
 MiniA.prototype._supportsConsoleUserInput = function(args) {

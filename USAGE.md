@@ -470,6 +470,8 @@ All of these behaviors are enabled by default. Use verbose or debug logging (`ve
 
 ## Web UI quick start
 
+Web Markdown responses encourage relevant photographs and images using `![alt text](image-url)` directly in the answer. For photo requests, the agent is instructed to retain the conversation topic, use available search or URL-fetch tools to find verified image URLs, and include captions and source links. Retrieval failures should be explained specifically instead of claiming photos cannot be displayed. This guidance applies only to web Markdown sessions (`mini-a-web` or `onport` startup); console sessions, headless workers, and structured output formats do not receive it.
+
 Mini‑A includes a simple web UI you can use from your browser. The static page lives in `public/index.md` and is served by a small HTTP server defined in `mini-a-web.yaml`.
 
 Quick steps:

@@ -4093,10 +4093,31 @@
     ow.test.assert(agent._shouldEncourageWebMarkdownImages({ __interaction_source: "mini-a-web", format: "md" }), true, "Web Markdown responses should receive image guidance")
     ow.test.assert(agent._shouldEncourageWebMarkdownImages({ __interaction_source: "mini-a-web", format: "json" }), false, "Structured web responses must preserve their requested format")
     ow.test.assert(agent._shouldEncourageWebMarkdownImages({ __interaction_source: "mini-a-con", format: "md" }), false, "Console Markdown responses should not receive web-only image guidance")
+    ow.test.assert(agent._shouldEncourageWebMarkdownImages({ onport: 12345, format: "md" }), true, "Web port startup should receive image guidance")
+    ow.test.assert(agent._shouldEncourageWebMarkdownImages({ onport: "12345", format: "md" }), true, "String web ports should receive image guidance")
+    ow.test.assert(agent._shouldEncourageWebMarkdownImages({ __interaction_source: "mini-a-con", onport: 12345, format: "md" }), false, "Explicit console source must take precedence over a web port")
+    ow.test.assert(agent._shouldEncourageWebMarkdownImages({ onport: 12345, format: "json" }), false, "Web ports must not enable image guidance for structured output")
+    ow.test.assert(agent._shouldEncourageWebMarkdownImages({ onport: 12345, workermode: true, format: "md" }), false, "Headless worker ports must not enable web image guidance")
+    ;[undefined, false, "", "invalid", 0, -1, 65536, 1.5].forEach(function(port) {
+      ow.test.assert(agent._shouldEncourageWebMarkdownImages({ onport: port, format: "md" }), false, "Missing or invalid web ports must not enable image guidance")
+    })
 
     agent.fnI = function() {}
     agent.init({ goal: "Explain a historical event", __interaction_source: "mini-a-web", format: "md" })
     ow.test.assert(agent._systemInst.indexOf("standard Markdown image syntax") >= 0, true, "Web Markdown system prompts should encourage relevant image embeds")
+    ;["does not require image generation", "current conversation topic", "available search or URL-fetch tools", "never invent or guess image URLs", "outside code fences", "do not claim a license unless verified", "explain that specific limitation"].forEach(function(instruction) {
+      ow.test.assert(agent._systemInst.indexOf(instruction) >= 0, true, "Web prompt should include: " + instruction)
+    })
+
+    var portAgent = createAgent()
+    portAgent.fnI = function() {}
+    portAgent.init({ goal: "Show relevant photos", onport: 12345, format: "md" })
+    ow.test.assert(portAgent._systemInst.indexOf("standard Markdown image syntax") >= 0, true, "Port-based web initialization should include the guidance")
+
+    var consoleAgent = createAgent()
+    consoleAgent.fnI = function() {}
+    consoleAgent.init({ goal: "Show relevant photos", __interaction_source: "mini-a-con", format: "md" })
+    ow.test.assert(consoleAgent._systemInst.indexOf("standard Markdown image syntax") < 0, true, "Console system prompts should omit web image guidance")
 
     var structuredAgent = createAgent()
     structuredAgent.fnI = function() {}
