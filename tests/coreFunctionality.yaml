@@ -2,6 +2,31 @@ jobs:
 - name: MiniA Core Tests::Init
   exec: args.tests = require("tests/coreFunctionality.js")
 
+- name: MiniA Core Tests::LargeSummaryChunksAndMergeStayBounded
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLargeSummaryChunksAndMergeStayBounded
+
+- name: MiniA Core Tests::SummaryRequestsAreIsolated
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSummaryRequestsAreIsolated
+
+- name: MiniA Core Tests::OverflowRecoveryResetsProviderHistories
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOverflowRecoveryResetsProviderHistories
+
+- name: MiniA Core Tests::SummaryMaintenanceUsesSafeBoundary
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSummaryMaintenanceUsesSafeBoundary
+
+- name: MiniA Core Tests::ContextTokenCacheRefreshesAfterTextReads
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testContextTokenCacheRefreshesAfterTextReads
+
 - name: MiniA Core Tests::CleanCodeBlocks
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -1215,3 +1240,8 @@ todo:
 - MiniA Core Tests::SubtaskCancellationWinsChildStopCompletion
 - MiniA Core Tests::SubtaskShutdownDoesNotStartQueuedWork
 - MiniA Core Tests::SubtaskCompletionPublishesResultBeforeTerminalState
+- MiniA Core Tests::SummaryRequestsAreIsolated
+- MiniA Core Tests::OverflowRecoveryResetsProviderHistories
+- MiniA Core Tests::SummaryMaintenanceUsesSafeBoundary
+- MiniA Core Tests::ContextTokenCacheRefreshesAfterTextReads
+- MiniA Core Tests::LargeSummaryChunksAndMergeStayBounded

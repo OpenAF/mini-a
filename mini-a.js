@@ -3762,6 +3762,34 @@ MiniA.prototype._createPlainStreamDeltaHandler = function() {
     }
 }
 
+// Auxiliary summaries must never inherit executor history or registered tools.
+// Construct a new adapter for each chunk/retry; withInstructions mutates its adapter.
+MiniA.prototype._promptIsolatedSummary = function(text, instructions, useLowCost) {
+  var config = useLowCost === true ? this._oaf_lc_model : this._oaf_model
+  var summarizer = this._createBareLlmInstance(config)
+  if (!isObject(summarizer)) throw new Error("Unable to create isolated summarizer")
+  summarizer.withInstructions(instructions)
+  var prompt = this._prepareContextInvocation(summarizer, text, "summarizer")
+  // Summaries are prose, not agent action JSON.
+  return summarizer.promptWithStats(prompt)
+}
+
+MiniA.prototype._resetProviderHistoryAfterOverflow = function(summary) {
+  var seen = []
+  ;[this.llm, this.lc_llm, this._llmNoTools, this._lcLlmNoTools].forEach(function(llm) {
+    if (!isObject(llm) || !isFunction(llm.getGPT)) return
+    var gpt = llm.getGPT()
+    if (!isObject(gpt) || seen.indexOf(gpt) >= 0 || !isFunction(gpt.getConversation) || !isFunction(gpt.setConversation)) return
+    seen.push(gpt)
+    var conversation = gpt.getConversation()
+    var policy = isArray(conversation) ? conversation.filter(function(entry) {
+      return isObject(entry) && (entry.role === "system" || entry.role === "developer")
+    }) : []
+    // Remove complete tool exchanges together so no orphaned tool responses remain.
+    gpt.setConversation(policy.concat([{ role: "assistant", content: "Recovered working context: " + summary }]))
+  })
+}
+
 /**
  * Summarize text using the LLM with retry logic and metrics tracking.
  * This method is designed to condense conversation history or agent notes.
@@ -3794,32 +3822,7 @@ MiniA.prototype.summarizeText = function(ctx, options) {
     try {
         this.fnI("input", `Interacting with ${llmType} model (summarizing)...`)
         summaryResponseWithStats = this._withExponentialBackoff(function() {
-            // Save current conversation to restore later
-            var gptInstance = summarizeLLM.getGPT()
-            var savedConversation = isObject(gptInstance) && isFunction(gptInstance.getConversation) ? gptInstance.getConversation() : __
-
-            try {
-                // Create a fresh conversation for summarization (avoiding tool conflicts)
-                if (isObject(gptInstance) && isFunction(gptInstance.setConversation)) {
-                    gptInstance.setConversation([
-                        { role: "system", content: instructionText }
-                    ])
-                }
-
-                ctx = self._prepareContextInvocation(summarizeLLM, ctx, "summarizer")
-                // Perform summarization
-                if (isFunction(summarizeLLM.promptWithStats)) {
-                    return summarizeLLM.promptWithStats(ctx)
-                }
-                // Fallback if promptWithStats is not available
-                var response = summarizeLLM.prompt(ctx)
-                return { response: response, stats: {} }
-            } finally {
-                // Restore original conversation
-                if (isObject(gptInstance) && isFunction(gptInstance.setConversation) && isDef(savedConversation)) {
-                    gptInstance.setConversation(savedConversation)
-                }
-            }
+            return self._promptIsolatedSummary(ctx, instructionText, false)
         }, self._llmRetryOptions("Summarization", { operation: "summarize" }))
     } catch (e) {
         var summaryError = this._categorizeError(e, { source: "llm", operation: "summarize" })
@@ -18127,11 +18130,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           self.fnI("input", `Interacting with ${llmType} model (summarizing)...`)
           summaryResponseWithStats = self._withExponentialBackoff(function() {
             addCall()
-            var summarizer = summarizeLLM.withInstructions(isString(customInstructionText) ? customInstructionText : instructionText)
-            var noJsonForSummarize = (summarizeLLM === self.lc_llm) ? self._noJsonPromptLC : self._noJsonPrompt
-            text = self._prepareContextInvocation(summarizer, text, "summarizer")
-            if (!noJsonForSummarize && isFunction(summarizer.promptJSONWithStats)) return summarizer.promptJSONWithStats(text)
-            return summarizer.promptWithStats(text)
+            return self._promptIsolatedSummary(text, isString(customInstructionText) ? customInstructionText : instructionText, summarizeLLM === self.lc_llm)
           }, self._llmRetryOptions("Summarization", { operation: "summarize" }))
         } catch (e) {
           var summaryError = self._categorizeError(e, { source: "llm", operation: "summarize" })
@@ -18160,6 +18159,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var responseText = isObject(summaryResponseWithStats) && isString(summaryResponseWithStats.response)
           ? summaryResponseWithStats.response
           : ""
+        // Bound verbose/non-compressing responses so merge passes also shrink.
+        var summaryCharLimit = Math.max(1200, Math.min(12000, Math.floor(text.length / 2)))
+        if (responseText.length > summaryCharLimit) responseText = responseText.substring(0, summaryCharLimit) + "\n[Summary truncated]"
         var finalTokens = self._estimateTokens(responseText)
         global.__mini_a_metrics.summaries_final_tokens.getAdd(finalTokens)
         global.__mini_a_metrics.summaries_tokens_reduced.getAdd(Math.max(0, originalTokens - finalTokens))
@@ -18216,9 +18218,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var inputTokens = this._estimateTokens(ctx)
       // Preflight: avoid one-shot summarization when payload is likely too large.
       var effectiveBudget = this._getEffectiveContextBudget(args, 0)
-      var chunkThreshold = effectiveBudget > 0 ? Math.max(4000, Math.floor(effectiveBudget * 0.45)) : 12000
-      var chunkBudget = Math.max(1500, Math.floor(chunkThreshold * 0.45))
-      var maxChunks = 24
+      var lcBudget = Number(args.lccontextlimit)
+      if (summarizeLLM === this.lc_llm && lcBudget > 0) effectiveBudget = effectiveBudget > 0 ? Math.min(effectiveBudget, lcBudget) : lcBudget
+      var chunkThreshold = effectiveBudget > 0 ? Math.max(800, Math.min(12000, Math.floor(effectiveBudget * 0.45))) : 12000
+      var chunkBudget = Math.max(800, Math.floor(chunkThreshold * 0.45))
+      var maxChunks = 128
 
       if (inputTokens <= chunkThreshold) return summarizeSingle(ctx, instructionText)
 
@@ -18238,6 +18242,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (chunkSummaries.length === 0) return "[SUMMARY FALLBACK] Unable to summarize context chunks."
 
       var merged = chunkSummaries.join("\n")
+      if (this._estimateTokens(merged) > chunkThreshold && merged.length < ctx.length) return summarize(merged)
       var mergedInstruction = instructionText + "\n4) Merge chunk summaries into a single concise result with no redundancy."
       var mergedSummary = summarizeSingle(merged, mergedInstruction)
       if (!isString(mergedSummary) || mergedSummary.trim().length === 0) {
@@ -18347,6 +18352,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
 
       runtime.context = [`[SUMMARY] Auto-recovery after provider context-window error: ${summarized}`]
+      this._resetProviderHistoryAfterOverflow(summarized)
       runtime.contextOverflowRecoveries = (runtime.contextOverflowRecoveries || 0) + 1
       this._clearRuntimeErrors(runtime, function(entry) {
         if (!isObject(entry)) return false
@@ -18729,20 +18735,18 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     var getCachedContextText = (separator) => {
       separator = isString(separator) ? separator : ""
-      if (runtime.contextTextDirty !== true && isString(runtime.lastContextText) && runtime.lastContextText.length > 0) {
+      if (runtime.contextTextDirty !== true && runtime.lastContextSeparator === separator && isString(runtime.lastContextText)) {
         return runtime.lastContextText
       }
       runtime.lastContextText = runtime.context.join(separator)
+      runtime.lastContextSeparator = separator
+      runtime.lastContextTokens = this._estimateTokens(runtime.lastContextText)
       runtime.contextTextDirty = false
       return runtime.lastContextText
     }
 
     var getCachedContextTokens = () => {
-      if (runtime.contextTextDirty !== true && runtime.lastContextTokens > 0) {
-        return runtime.lastContextTokens
-      }
-      runtime.lastContextTokens = this._estimateTokens(getCachedContextText(""))
-      runtime.contextTextDirty = false
+      getCachedContextText("\n")
       return runtime.lastContextTokens
     }
 
@@ -19273,7 +19277,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             runtime.context.push(`[OBS ${stepLabel}] (no output)`)
           }
           markContextDirty()
-          checkAndSummarizeContext()
+          // Tool callbacks can run concurrently inside a provider request. Defer
+          // LLM maintenance until the execution loop owns the conversation again.
         }
       }
 
@@ -19457,6 +19462,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         continue
       }
 
+      markContextDirty()
+      checkAndSummarizeContext()
       var stepStartTime = now()
       global.__mini_a_metrics.steps_taken.inc()
       var promptBuildStart = now()

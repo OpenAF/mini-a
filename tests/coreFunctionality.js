@@ -94,6 +94,111 @@
     return agent._buildSystemPromptWithBudget("chatbot-test", payload, agent._CHATBOT_SYSTEM_PROMPT, { args: args || {}, mode: "chatbot" })
   }
 
+  exports.testLargeSummaryChunksAndMergeStayBounded = function() {
+    var agent = createAgent(), source = io.readFileString("mini-a.js"), inputs = []
+    agent.fnI = function() {}
+    agent._use_lc = true; agent.lc_llm = {}; agent.llm = {}
+    agent._withExponentialBackoff = function(fn) { return fn() }
+    agent._promptIsolatedSummary = function(text, instructions, lc) {
+      ow.test.assert(lc, true, "Use the selected summary tier")
+      inputs.push(agent._estimateTokens(text))
+      // Force a verbose response so merge reduction is also exercised.
+      return { response: text, stats: {} }
+    }
+    var begin = source.indexOf("    var summarize = ctx => {")
+    var end = source.indexOf("    // Helper function to check and summarize context", begin)
+    var factory = new Function("args", "var runtime = {}, addCall = function() {}, registerCallUsage = function() {};\n" + source.substring(begin, end) + "\nreturn summarize;")
+    var summarize = factory.call(agent, { maxcontext: 200000, lccontextlimit: 16000 })
+    var original = new Array(667417).join("x")
+    var result = summarize(original)
+    ow.test.assert(inputs.length > 2, true, "Exercise chunk and merge passes")
+    ow.test.assert(Math.max.apply(Math, inputs) <= 7200, true, "Every request respects the smaller summary budget")
+    ow.test.assert(result.length < 12500, true, "Even an echoing model must produce bounded recovery context")
+  }
+
+  exports.testSummaryRequestsAreIsolated = function() {
+    ["openai", "ollama"].forEach(function(type) {
+      var agent = createAgent(), requests = [], instances = []
+      agent.fnI = function() {}
+      agent._oaf_model = { type: type, model: "test", key: "test-only", url: "http://localhost:1" }
+      agent._oaf_lc_model = agent._oaf_model
+      agent.llm = $llm(agent._oaf_model)
+      agent.llm.withInstructions("Executor policy")
+      agent.llm.getGPT().setConversation([{ role: "system", content: "Executor policy" }, { role: "user", content: "old tool output" }])
+      var original = stringify(agent.llm.getGPT().getConversation())
+      agent._createBareLlmInstance = function(config) {
+        var isolated = $llm(config)
+        instances.push(isolated)
+        isolated.getGPT().model._request = function(route, body) {
+          requests.push(jsonParse(stringify(body)))
+          if (requests.length === 3) throw new Error("simulated failure")
+          if (type === "openai") return { choices: [{ finish_reason: "stop", message: { role: "assistant", content: "compact notes" } }], usage: {} }
+          return { message: { role: "assistant", content: "compact notes" }, done: true }
+        }
+        return isolated
+      }
+      ow.test.assert(agent._promptIsolatedSummary("chunk one", "Summarize notes", false).response, "compact notes", "Return plain prose")
+      agent._promptIsolatedSummary("chunk two", "Summarize notes", true)
+      var failed = false
+      try { agent._promptIsolatedSummary("chunk three", "Summarize notes", false) } catch(e) { failed = true }
+      ow.test.assert(failed, true, "Propagate failure for caller fallback/retry")
+      ow.test.assert(instances.length, 3, "Each invocation gets a fresh adapter")
+      requests.forEach(function(body, index) {
+        ow.test.assert(isUnDef(body.tools) || body.tools.length === 0, true, "Summaries cannot execute tools")
+        var sent = stringify(body.messages)
+        ow.test.assert(sent.indexOf("old tool output") < 0, true, "Do not inherit executor history")
+        ow.test.assert(sent.indexOf("compact notes") < 0, true, "Do not accumulate previous chunks")
+      })
+      ow.test.assert(stringify(agent.llm.getGPT().getConversation()), original, "Success and failure leave executor untouched")
+    })
+  }
+
+  exports.testOverflowRecoveryResetsProviderHistories = function() {
+    var agent = createAgent()
+    function adapter() {
+      var history = [{ role: "system", content: "policy" }, { role: "developer", content: "constraints" }, { role: "assistant", tool_calls: [{ id: "c1" }] }, { role: "tool", tool_call_id: "c1", content: new Array(200001).join("x") }]
+      var gpt = { getConversation: function() { return history }, setConversation: function(c) { history = c } }
+      return { getGPT: function() { return gpt } }
+    }
+    agent.llm = adapter(); agent.lc_llm = adapter(); agent._llmNoTools = adapter(); agent._lcLlmNoTools = agent.lc_llm
+    agent._resetProviderHistoryAfterOverflow("source facts and decisions")
+    ;[agent.llm, agent.lc_llm, agent._llmNoTools].forEach(function(llm) {
+      var c = llm.getGPT().getConversation()
+      ow.test.assert(c.length, 3, "Replace full exchanges with one summary")
+      ow.test.assert(c[0].content, "policy", "Keep system policy")
+      ow.test.assert(c[1].content, "constraints", "Keep developer constraints")
+      ow.test.assert(c[2].content.indexOf("source facts") >= 0, true, "Retain working evidence")
+      ow.test.assert(stringify(c).length < 500, true, "Actual next provider history is compact")
+    })
+  }
+
+  exports.testSummaryMaintenanceUsesSafeBoundary = function() {
+    var source = io.readFileString("mini-a.js")
+    var begin = source.indexOf("    var finalizeToolExecution =")
+    var end = source.indexOf("    this._finalizeToolExecution = finalizeToolExecution", begin)
+    ow.test.assert(begin >= 0 && end > begin, true, "Locate tool finalizer")
+    ow.test.assert(source.substring(begin, end).indexOf("checkAndSummarizeContext()"), -1, "Concurrent callbacks must not invoke an LLM")
+    ow.test.assert(source.indexOf("markContextDirty()\n      checkAndSummarizeContext()\n      var stepStartTime") >= 0, true, "Execution boundary handles pending context")
+  }
+
+  exports.testContextTokenCacheRefreshesAfterTextReads = function() {
+    var agent = createAgent(), source = io.readFileString("mini-a.js")
+    var begin = source.indexOf("    var markContextDirty = () => {")
+    var end = source.indexOf("    var getEffectiveContextBudget", begin)
+    var factory = new Function("runtime", source.substring(begin, end) + "\nreturn { dirty: markContextDirty, text: getCachedContextText, tokens: getCachedContextTokens };")
+    var runtime = { context: [new Array(4001).join("x")], contextTextDirty: true }
+    var cache = factory.call(agent, runtime)
+    var before = cache.tokens()
+    runtime.context = ["short", "notes"]
+    cache.dirty()
+    ow.test.assert(cache.text(""), "shortnotes", "Read compact text first")
+    ow.test.assert(cache.tokens() < before, true, "Text read must not hide stale token count")
+    ow.test.assert(cache.text("\n"), "short\nnotes", "Cache must respect separator")
+    runtime.context = []
+    cache.dirty(); cache.text("")
+    ow.test.assert(cache.tokens(), agent._estimateTokens(""), "Empty history invalidates previous count")
+  }
+
   exports.testCleanCodeBlocks = function() {
     var agent = createAgent()
     var fenced = "```json\n{\"action\":\"final\"}\n```"

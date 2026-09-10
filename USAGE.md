@@ -1113,7 +1113,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 
 #### Knowledge and Context
 - **`knowledge`** (string): Additional context or knowledge for the agent (can be text or file path)
-- **`maxcontext`** (number): Approximate context budget in tokens; Mini-A auto-summarizes older history when the limit is exceeded
+- **`maxcontext`** (number): Approximate context budget in tokens; Mini-A auto-summarizes older history when the limit is exceeded. Summarization uses isolated, tool-free requests between execution steps. Provider overflow recovery also replaces main and low-cost provider histories with the compact context while retaining system/developer instructions.
 - **`compressgoal`** (boolean, default: false): Compress oversized rendered goal text before execution; when disabled, Mini-A preserves the original goal verbatim
 - **`compressgoaltokens`** (number, default: 250): Estimated token threshold above which goal compression is considered when `compressgoal=true`
 - **`compressgoalchars`** (number, default: 1000): Character threshold above which goal compression is considered when `compressgoal=true`
