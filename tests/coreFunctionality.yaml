@@ -1,4 +1,9 @@
 jobs:
+- name: MiniA Core Tests::ProxyToolThoughtDisplaysDownstreamTool
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testProxyToolThoughtDisplaysDownstreamTool
+
 - name: MiniA Core Tests::Init
   exec: args.tests = require("tests/coreFunctionality.js")
 
@@ -1245,3 +1250,4 @@ todo:
 - MiniA Core Tests::SummaryMaintenanceUsesSafeBoundary
 - MiniA Core Tests::ContextTokenCacheRefreshesAfterTextReads
 - MiniA Core Tests::LargeSummaryChunksAndMergeStayBounded
+- MiniA Core Tests::ProxyToolThoughtDisplaysDownstreamTool

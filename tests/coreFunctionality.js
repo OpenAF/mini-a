@@ -675,6 +675,25 @@
     ow.test.assert(events[1].message === "plan this next", true, "Counter-logged think events should be single-line and trimmed")
   }
 
+  exports.testProxyToolThoughtDisplaysDownstreamTool = function() {
+    var agent = createAgent()
+    var events = []
+    agent._fnI = function(event, message) { events.push({ event: event, message: message }) }
+    var params = { action: "call", tool: "http-request", arguments: { url: "https://example.com" } }
+    var extracted = agent._extractToolCallActions({ tool_calls: [
+      { function: { name: "proxy-dispatch", arguments: stringify(params, __, "") } }
+    ] }, ["proxy-dispatch"])
+    ow.test.assert(extracted[0].thought, "Use tool 'http-request'", "Native tool fallback should display the downstream tool")
+    ow.test.assert(extracted[0].action, "proxy-dispatch", "Display translation must preserve routing")
+    ow.test.assert(extracted[0].params.tool, "http-request", "Display translation must preserve downstream arguments")
+    agent._emitCanonicalThoughtEvent("proxy-dispatch", "Use tool 'proxy-dispatch'", "(no thought)", params)
+    ow.test.assert(events[0].message, "Use tool 'http-request'", "Action-mode thoughts should display the downstream tool")
+    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", params, "Fetch the page"), "Fetch the page", "Descriptive thoughts should be preserved")
+    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { action: "list" }, "Use tool 'proxy-dispatch'"), "Use tool 'proxy-dispatch'", "Management actions have no downstream tool")
+    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { action: "call", tool: "" }, "Use tool 'proxy-dispatch'"), "Use tool 'proxy-dispatch'", "Missing downstream names must not invent a tool")
+    ow.test.assert(agent._translateProxyToolThought("other-tool", params, "Use tool 'proxy-dispatch'"), "Use tool 'proxy-dispatch'", "Direct tools should remain unchanged")
+  }
+
   exports.testCanonicalThoughtEmitterSeparatesThoughtAndThink = function() {
     var agent = createAgent()
     var events = []

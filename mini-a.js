@@ -1435,12 +1435,20 @@ MiniA.prototype._logMessageWithCounter = function(type, message) {
   }
 }
 
+MiniA.prototype._translateProxyToolThought = function(actionName, params, thoughtValue) {
+  if (((actionName || "") + "").trim().toLowerCase() !== "proxy-dispatch" || !isMap(params)) return thoughtValue
+  if (params.action !== "call" || !isString(params.tool) || params.tool.trim().length === 0) return thoughtValue
+  if (!isString(thoughtValue)) return thoughtValue
+  var toolName = params.tool.trim()
+  return thoughtValue.replace(/\bproxy-dispatch\b/g, function() { return toolName })
+}
+
 /**
  * Emit the canonical thought/think events for a normalized action entry.
  * This keeps streamed and non-streamed execution paths equivalent by making
  * semantic thought logging depend on parsed actions rather than stream deltas.
  */
-MiniA.prototype._emitCanonicalThoughtEvent = function(actionName, thoughtValue, fallbackValue) {
+MiniA.prototype._emitCanonicalThoughtEvent = function(actionName, thoughtValue, fallbackValue, params) {
   var action = ((actionName || "") + "").trim().toLowerCase()
   var thoughtMessage = isDef(thoughtValue) ? thoughtValue : fallbackValue
 
@@ -1450,6 +1458,8 @@ MiniA.prototype._emitCanonicalThoughtEvent = function(actionName, thoughtValue, 
 
   thoughtMessage = ((isDef(thoughtMessage) ? thoughtMessage : "") + "").trim()
   if (this._isEmptyThoughtValue(thoughtMessage)) thoughtMessage = "(no thought)"
+
+  thoughtMessage = this._translateProxyToolThought(action, params, thoughtMessage)
 
   global.__mini_a_metrics.thoughts_made.inc()
 
@@ -7651,7 +7661,7 @@ MiniA.prototype._extractToolCallActions = function(payload, allowedTools, opts) 
         if (seen[key]) return
         seen[key] = true
         results.push({
-            thought: isString(source) && source.length > 0 ? source : `Use tool '${normalizedTool}'`,
+            thought: this._translateProxyToolThought(normalizedTool, normalizedArgs, isString(source) && source.length > 0 ? source : `Use tool '${normalizedTool}'`),
             action : normalizedTool,
             params : normalizedArgs
         })
@@ -20790,7 +20800,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var thoughtStr = this._emitCanonicalThoughtEvent(
           action,
           thoughtValue,
-          currentMsg.think || af.toSLON(currentMsg) || "(no thought)"
+          currentMsg.think || af.toSLON(currentMsg) || "(no thought)",
+          paramsValue
         )
 
         if (action != "final") {
@@ -21851,7 +21862,7 @@ MiniA.prototype._runChatbotMode = function(options) {
             break
           }
 
-          var thoughtMessage = this._emitCanonicalThoughtEvent(lowerAction, thoughtValue, "(no thought)")
+          var thoughtMessage = this._emitCanonicalThoughtEvent(lowerAction, thoughtValue, "(no thought)", isDef(currentMsg.params) ? currentMsg.params : currentMsg.arguments)
 
           if (toolNames.indexOf(actionName) >= 0) {
             var paramsValue = currentMsg.params
