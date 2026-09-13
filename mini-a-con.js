@@ -581,6 +581,7 @@ try {
 
   function unwrapSingleMarkdownCodeBlock(text) {
     if (!isString(text)) return text
+    if (__miniAHasConsoleChartFence(text)) return text
     var normalized = text.replace(/\r\n/g, "\n")
     var fencedMatch = normalized.match(/^\s*```[^\n]*\n([\s\S]*?)\n```[ \t]*\s*$/)
     if (!isArray(fencedMatch) || fencedMatch.length < 2) return text
@@ -624,7 +625,7 @@ try {
     editor         : { type: "string", description: "External editor command used when useeditor=true (overrides $EDITOR)" },
     utilsallow     : { type: "string", description: "Comma-separated allowlist of Mini Utils Tool names to expose when useutils=true" },
     utilsdeny      : { type: "string", description: "Comma-separated denylist of Mini Utils Tool names to hide when useutils=true (applied after utilsallow)" },
-    useasciiviz    : { type: "boolean", default: false, description: "Expose the Mini Utils Tool printChart operation for rendering ASCII/ANSI charts during execution." },
+    useasciiviz    : { type: "boolean", default: false, description: "Render oafPrintChart Markdown fences as console charts and expose printChart for interim charts." },
     "mini-a-docs"  : { type: "boolean", default: false, description: "When true (with useutils=true), point utilsroot to the Mini-A opack path so the LLM can inspect Mini-A documentation files." },
     usediagrams    : { type: "boolean", default: false, description: "Encourage Mermaid diagrams in knowledge prompt" },
     usemermaid     : { type: "boolean", default: false, description: "Alias for usediagrams (Mermaid diagrams guidance)" },
@@ -4391,13 +4392,28 @@ try {
   var _streamNeedsTerminator = false
   var _lastRenderedPlanSignature = ""
 
+  function _consoleChartsEnabled() {
+    return toBoolean(sessionOptions.useasciiviz) === true && toBoolean(sessionOptions.raw) !== true &&
+      (!isString(sessionOptions.format) || sessionOptions.format === "md")
+  }
+
+  function _renderConsoleAnswerMarkdown(text, kind) {
+    return __miniAMarkdownRender(text, _getConsoleRenderWidth(), {
+      ansi: __conAnsi === true, kind: kind,
+      useasciiviz: _consoleChartsEnabled(),
+      renderChart: function(params) {
+        return new MiniUtilsTool({ useasciiviz: true }).renderChart(params)
+      }
+    })
+  }
+
   function _printStreamMarkdown(text, kind, palette) {
     if (!isString(text) || text.length === 0) return
     // A leading cosmetic newline is not user-visible streamed content. Treating
     // it as such suppresses the final-answer fallback when a provider does not
     // actually deliver any stream deltas.
     if (text.replace(/\s/g, "").length > 0) _streamHasRendered = true
-    var rendered = __miniAMarkdownRender(text, _getConsoleRenderWidth(), { ansi: __conAnsi === true, kind: kind })
+    var rendered = _renderConsoleAnswerMarkdown(text, kind)
     if (isString(palette) && palette !== "RESET") rendered = colorifyText(rendered, palette)
     printnl(rendered)
   }
@@ -4437,6 +4453,7 @@ try {
     var palette = type === "planner_stream" ? eventPalette.planner_stream : eventPalette.stream
     if (!isDef(_streamRenderer)) {
       _streamRenderer = __miniAMarkdownStream({
+        useasciiviz: _consoleChartsEnabled(),
         onUnit: function(text, kind) { _clearStreamPreview(); _printStreamMarkdown(text, kind, palette) },
         onPreview: function(text) { _previewStreamMarkdown(text, palette) }
       })
@@ -5168,6 +5185,10 @@ try {
       // context even though _processFinalAnswer retained the answer. `/last`
       // already uses this raw value; use it for the live fallback as well.
       var displayResult = isDef(lastResult) ? lastResult : lastOrigResult
+      // Render charts from original Markdown before OpenAF output formatting.
+      if (_consoleChartsEnabled() && isString(lastOrigResult)) {
+        displayResult = lastOrigResult
+      }
       if (isObject(lastDebugTrace)) lastDebugTrace.status = "completed"
       persistConversationSnapshot(agent)
       refreshConversationStats(agent)
@@ -5181,7 +5202,7 @@ try {
           if (isObject(displayResult) || isArray(displayResult)) {
             print(_stringifyFinalResult(displayResult, true))
           } else if (isString(displayResult)) {
-            print(__miniAMarkdownRender(unwrapSingleMarkdownCodeBlock(displayResult), _getConsoleRenderWidth(), { ansi: __conAnsi === true }))
+            print(_renderConsoleAnswerMarkdown(unwrapSingleMarkdownCodeBlock(displayResult)))
           } else if (isDef(displayResult)) {
             print(_stringifyFinalResult(displayResult, false))
           }
@@ -5198,7 +5219,7 @@ try {
             if (isObject(displayResult) || isArray(displayResult)) {
               print(_stringifyFinalResult(displayResult, true))
             } else if (isString(displayResult)) {
-              print(__miniAMarkdownRender(unwrapSingleMarkdownCodeBlock(displayResult), _getConsoleRenderWidth(), { ansi: __conAnsi === true }))
+              print(_renderConsoleAnswerMarkdown(unwrapSingleMarkdownCodeBlock(displayResult)))
             } else {
               print(_stringifyFinalResult(displayResult, false))
             }
@@ -6847,7 +6868,7 @@ try {
         continue
       }
       if (commandLower === "last" || commandLower.indexOf("last ") === 0) {
-        if (isUnDef(lastResult) && isUnDef(lastGoalPrompt)) {
+        if (isUnDef(lastResult) && isUnDef(lastOrigResult) && isUnDef(lastGoalPrompt)) {
           print(colorifyText("No goal executed yet.", hintColor))
           continue
         }
@@ -6867,20 +6888,21 @@ try {
           print()
         }
 
-        if (isDef(lastResult)) {
+        if (isDef(lastResult) || isDef(lastOrigResult)) {
           print(colorifyText("Previous answer:", accentColor))
           if (printMarkdown) {
             var rawAnswerText = extractAnswerText(lastOrigResult, false)
             print(rawAnswerText)
           } else {
-            var renderedAnswerText = extractAnswerText(lastResult, true)
-            print(ow.format.withMD(renderedAnswerText))
+            var lastDisplayResult = _consoleChartsEnabled() && isDef(lastOrigResult) ? lastOrigResult : (isDef(lastResult) ? lastResult : lastOrigResult)
+            var renderedAnswerText = extractAnswerText(lastDisplayResult, true)
+            print(_renderConsoleAnswerMarkdown(renderedAnswerText))
           }
         }
         continue
       }
       if (commandLower === "save" || commandLower.indexOf("save ") === 0) {
-        if (isUnDef(lastResult)) {
+        if (isUnDef(lastResult) && isUnDef(lastOrigResult)) {
           print(colorifyText("No goal executed yet. Nothing to save.", hintColor))
           continue
         }

@@ -3500,7 +3500,7 @@ MiniUtilsTool.prototype._visualizationsGuard = function() {
  * for type=printbars, options.max/min/indicator/space map to printBars' aMax/aMin/aIndicatorChar/aSpaceChar.
  * </odoc>
  */
-MiniUtilsTool.prototype.printChart = function(params) {
+MiniUtilsTool.prototype._renderChart = function(params) {
   params = params || {}
   var guard = this._visualizationsGuard()
   if (isDef(guard)) return guard
@@ -3513,8 +3513,6 @@ MiniUtilsTool.prototype.printChart = function(params) {
   if (isString(xVal) && isUnDef(options.xLabel)) options.xLabel = xVal
   if (isString(yVal) && isUnDef(options.yLabel)) options.yLabel = yVal
   var title = isString(params.title) ? params.title.trim() : ""
-  var colorFn = (typeof ansiColor === "function") ? ansiColor : function(_, t) { return t }
-
   try {
     ow.loadFormat()
     var out
@@ -3648,17 +3646,34 @@ MiniUtilsTool.prototype.printChart = function(params) {
       return "[ERROR] Unknown type '" + type + "'. Expected one of: line, bars, printbars, sparkline, histogram, heatmap, bullet, scatter, boxplot, timeline, statusmatrix."
     }
 
-    var display = { kind: "chart", type: type, data: data, options: options, title: title }
+    return { text: String(out), display: { kind: "chart", type: type, data: data, options: options, title: title } }
+  } catch (e) {
+    return "[ERROR] " + __miniAErrMsg(e)
+  }
+}
+
+// Render without printing so Markdown answers and live tools share validation.
+MiniUtilsTool.prototype.renderChart = function(params) {
+  var rendered = this._renderChart(params)
+  if (isString(rendered)) return rendered
+  var title = rendered.display.title
+  return (title.length > 0 ? ansiColor("BOLD", title) + "\n" : "") + rendered.text
+}
+
+MiniUtilsTool.prototype.printChart = function(params) {
+  var rendered = this._renderChart(params)
+  if (isString(rendered)) return rendered
+  try {
     if (isFunction(this._displayEventFn)) {
-      this._displayEventFn(display)
+      this._displayEventFn(rendered.display)
     } else {
       print("")
-      if (title.length > 0) print(colorFn("BOLD", title))
-      print(out)
+      if (rendered.display.title.length > 0) print(ansiColor("BOLD", rendered.display.title))
+      print(rendered.text)
       print("")
     }
-    return { operation: "printChart", type: type, displayed: true }
-  } catch (e) {
+    return { operation: "printChart", type: rendered.display.type, displayed: true }
+  } catch(e) {
     return "[ERROR] " + __miniAErrMsg(e)
   }
 }

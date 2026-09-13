@@ -1223,13 +1223,14 @@ MiniA.buildVisualKnowledge = function(options) {
 
   if (useAsciiViz) {
     visualParts.push(
-      "Live ASCII/ANSI console visuals (tool-rendered):\n" +
-      "  - The `printChart` tool is available: it renders an ASCII/ANSI chart straight to the console DURING execution, before the final answer is produced.\n" +
-      "  - Default to calling `printChart` -- the same way you would default to a chart or diagram -- whenever you have numeric series, comparisons, distributions, progress, or status information worth showing while you work, not only at the end.\n" +
-      "  - When the user asks to plot, chart, or display a graph/plot, ALWAYS call the `printChart` tool during execution to render it to the console (do not merely describe it or generate text charts in the final answer).\n" +
-      "  - Prefer this tool over describing numbers in prose while investigating: e.g. call `printChart` with type='bars'/'printbars'/'line'/'sparkline' to show interim metrics, type='heatmap'/'statusmatrix' for grids, or type='bullet'/'boxplot'/'timeline'/'scatter' for gauges, distributions, schedules, or correlations.\n" +
-      "  - This is complementary to, not a replacement for, the final-answer chart/diagram guidance above: use `printChart` for live/interim visibility during the run, and still include a chart or diagram fence in the final answer when that guidance applies.\n" +
-      "  - Keep each call focused on one clear insight; prefer several small, well-labeled charts over one overloaded call."
+      "ASCII/ANSI console charts:\n" +
+      "  - Include charts in answers using fenced Markdown blocks tagged `oafPrintChart`. The console parses the JSON and renders the chart inline.\n" +
+      "  - Each fence contains ONLY strict JSON using printChart parameters: {type, data, options, title}; no JavaScript, comments, or callbacks.\n" +
+      "  - Example:\n```oafPrintChart\n{\"type\":\"line\",\"data\":[2,5,3,8],\"options\":{\"height\":8,\"unit\":\"int\"},\"title\":\"Trend\"}\n```\n" +
+      "  - Supported types: line, bars, printbars, sparkline, histogram, heatmap, bullet, scatter, boxplot, timeline, statusmatrix. Use the same data shapes and renderer options as printChart.\n" +
+      "  - When asked to plot or chart, include an oafPrintChart fence in the answer. Prefer these fences for numeric series, comparisons, distributions, progress, and status information worth visualizing.\n" +
+      "  - Keep printChart tool calls for useful live/interim charts DURING execution. A tool call does not replace an explicitly requested answer chart.\n" +
+      "  - Use clear titles and labels; keep each chart focused on one insight."
     )
   }
 
@@ -1345,7 +1346,7 @@ MiniA.buildVisualKnowledge = function(options) {
     nextIndex++
   }
   if (useAsciiViz) {
-    checklist += "\n" + nextIndex + ". Numeric series, comparisons, distributions, or progress worth showing WHILE working (not just in the final answer), or whenever asked to plot/chart -> call `printChart`."
+    checklist += "\n" + nextIndex + ". Numeric series, comparisons, distributions, or progress -> include an `oafPrintChart` JSON fence in the answer; use `printChart` for interim charts while working."
     nextIndex++
   }
   if (useMaps) {
@@ -9822,7 +9823,7 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
       var lang = (codeBlockMatch[1] || "").toLowerCase()
       var body = codeBlockMatch[2]
       // Preserve fences for visual languages in markdown mode so the UI can render them.
-      if (args.format == "md" && (lang === "chart" || lang === "chartjs" || lang === "chart.js" || lang === "mermaid" || lang === "leaflet")) {
+      if (args.format == "md" && (lang === "chart" || lang === "chartjs" || lang === "chart.js" || lang === "mermaid" || lang === "leaflet" || lang === "oafprintchart" || __miniAHasConsoleChartFence(trimmed))) {
         // keep original fenced block
         answer = trimmed
       } else {

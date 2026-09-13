@@ -28,7 +28,7 @@ function __miniANormalizeConsoleEventText(value) {
  */
 function __miniAMarkdownStream(opts) {
   opts = isObject(opts) ? opts : {}
-  var pending = "", inCode = false, code = "", inTable = false, table = "", header = ""
+  var pending = "", inCode = false, code = "", codeFence = "", codeFenceLength = 0, chartCode = false, inTable = false, table = "", header = ""
   var separator = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/
 
   function cellCount(line) {
@@ -48,19 +48,23 @@ function __miniAMarkdownStream(opts) {
     if (text.length > 0 && isFunction(opts.onUnit)) opts.onUnit(text, kind)
   }
   function preview() {
-    if (isFunction(opts.onPreview)) opts.onPreview(pending)
+    if (isFunction(opts.onPreview)) opts.onPreview(opts.useasciiviz === true && (chartCode || /^ {0,3}(?:`{1,}|~{1,})/.test(pending)) ? "" : pending)
   }
   function process(line) {
     var withNl = line + "\n"
     if (inCode) {
       code += withNl
-      if (line.trim() === "```") { emit(code, "code"); code = ""; inCode = false }
+      var closing = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/)
+      if (closing && closing[1].charAt(0) === codeFence && closing[1].length >= codeFenceLength) {
+        emit(code, "code"); code = ""; inCode = false; chartCode = false
+      }
       return
     }
-    if (line.trim().indexOf("```") === 0) {
+    var opening = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
+    if (opening) {
       if (inTable) { emit(table, "table"); table = ""; inTable = false }
       if (header.length > 0) { emit(header, "line"); header = "" }
-      inCode = true; code = withNl; return
+      inCode = true; code = withNl; codeFence = opening[1].charAt(0); codeFenceLength = opening[1].length; chartCode = opening[2].trim() === "oafPrintChart"; return
     }
     if (inTable) {
       if (isRow(line) && cellCount(line) === cellCount(table.split("\n")[0])) { table += withNl; return }
@@ -97,28 +101,81 @@ function __miniAMarkdownStream(opts) {
       if (code.length > 0) emit(code, "code")
       if (table.length > 0) emit(table, "table")
       if (header.length > 0) emit(header, "line")
-      inCode = false; code = ""; inTable = false; table = ""; header = ""
+      inCode = false; code = ""; chartCode = false; inTable = false; table = ""; header = ""
       preview()
     },
-    reset: function() { pending = ""; inCode = false; code = ""; inTable = false; table = ""; header = ""; preview() }
+    reset: function() { pending = ""; inCode = false; code = ""; chartCode = false; inTable = false; table = ""; header = ""; preview() }
   }
+}
+
+function __miniAHasConsoleChartFence(text) {
+  return isString(text) && /^ {0,3}(?:`{3,}|~{3,})oafPrintChart[ \t]*\r?$/m.test(text)
+}
+
+/** Extract only complete chart fences, keeping nested code examples literal. */
+function __miniAPreprocessConsoleCharts(text, opts) {
+  var lines = String(text).split(/\r?\n/), output = [], charts = []
+  var fence = "", fenceLength = 0, block = [], language = ""
+  function finish(complete) {
+    var original = block.join("\n")
+    if (complete && language === "oafPrintChart") {
+      try {
+        var params = JSON.parse(block.slice(1, -1).join("\n"))
+        if (!isMap(params)) throw "Chart parameters must be an object"
+        params.options = isMap(params.options) ? params.options : {}
+        if (isUnDef(params.options.width)) params.options.width = opts.width
+        var chart = opts.renderChart(params)
+        if (!isString(chart) || chart.indexOf("[ERROR]") === 0) throw chart
+        if (opts.ansi !== true) chart = chart.replace(/\x1b\[[0-9;]*m/g, "")
+        var marker = "MINIACHARTPLACEHOLDER" + charts.length + "END"
+        while (String(text).indexOf(marker) >= 0) marker += "X"
+        charts.push({ marker: marker, text: chart })
+        output.push(marker)
+      } catch(e) { output.push(original) }
+    } else output.push(original)
+    block = []; fence = ""; language = ""
+  }
+  lines.forEach(function(line) {
+    if (fence.length > 0) {
+      block.push(line)
+      var close = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/)
+      if (close && close[1].charAt(0) === fence && close[1].length >= fenceLength) finish(true)
+    } else {
+      var open = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
+      if (open) {
+        fence = open[1].charAt(0); fenceLength = open[1].length
+        language = open[2].trim(); block = [line]
+      } else output.push(line)
+    }
+  })
+  if (block.length > 0) finish(false)
+  return { text: output.join("\n"), charts: charts }
 }
 
 /** Render a complete Markdown unit without losing literal tags or list wraps. */
 function __miniAMarkdownRender(text, width, opts) {
   var value = isDef(text) ? String(text) : ""
   opts = isObject(opts) ? opts : {}
-  var ansi = opts.ansi === true || (typeof __conAnsi !== "undefined" && __conAnsi === true)
-  if (ansi !== true || value.length === 0) return value
+  var ansi = isDef(opts.ansi) ? opts.ansi === true : (typeof __conAnsi !== "undefined" && __conAnsi === true)
+  var prepared = { text: value, charts: [] }
+  if (opts.useasciiviz === true && isFunction(opts.renderChart)) {
+    prepared = __miniAPreprocessConsoleCharts(value, { width: width, ansi: ansi, renderChart: opts.renderChart })
+    value = prepared.text
+  }
+  function restore(rendered) {
+    prepared.charts.forEach(function(chart) { rendered = rendered.split(chart.marker).join(chart.text) })
+    return rendered
+  }
+  if (ansi !== true || value.length === 0) return restore(value)
   if (opts.kind !== "code" && opts.kind !== "table") value = value.replace(/^( {0,3})[-+]\s+/gm, "$1* ")
-  if (/<\?xml\b/i.test(value) || /^\s*<\/?[A-Za-z_][A-Za-z0-9_.:-]*(?:\s+[^<>]*?)?>\s*$/m.test(value)) return value
+  if (/<\?xml\b/i.test(value) || /^\s*<\/?[A-Za-z_][A-Za-z0-9_.:-]*(?:\s+[^<>]*?)?>\s*$/m.test(value)) return restore(value)
   // OpenAF's second withMD argument is an ANSI style, not a render width.
   // Passing a number here throws "defaultAnsi is not a string" mid-stream.
-  if (!isObject(__flags) || !isObject(__flags.WITHMD)) return ow.format.withMD(value)
+  if (!isObject(__flags) || !isObject(__flags.WITHMD)) return restore(ow.format.withMD(value))
   var oldHtmlFilter = __flags.WITHMD.htmlFilter
   try {
     __flags.WITHMD.htmlFilter = false
-    return ow.format.withMD(value)
+    return restore(ow.format.withMD(value))
   } finally {
     __flags.WITHMD.htmlFilter = oldHtmlFilter
   }
@@ -548,7 +605,7 @@ function __miniALoadLibraries(libsString, logFn, errFn) {
 function __miniACleanCodeBlocks(text) {
   if (!isString(text)) return text
   var trimmed = String(text).trim()
-  var isVisualBlock = trimmed.startsWith("```chart") || trimmed.startsWith("```mermaid") || trimmed.startsWith("```leaflet")
+  var isVisualBlock = trimmed.startsWith("```chart") || trimmed.startsWith("```mermaid") || trimmed.startsWith("```leaflet") || __miniAHasConsoleChartFence(trimmed)
   if (trimmed.startsWith("```") && trimmed.endsWith("```") && !isVisualBlock) {
     return trimmed.replace(/^```+[\w]*\n/, "").replace(/```+$/, "").trim()
   }

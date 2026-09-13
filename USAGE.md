@@ -3785,3 +3785,22 @@ A fully empty origin also requires `ingestallowemptyprune=true`. Force reprocess
 complete sources but never bypasses ownership, permissions or budgets. See
 [Safe repeated ingestion](docs/WIKI.md#safe-repeated-ingestion) for migration,
 conflicts, recovery and single-writer backend limits.
+
+### Inline console charts
+
+Use `opack exec mini-a useasciiviz=true` to enable charts in interactive console
+answers and `/last`, including streamed answers. Mini-A uses strict JSON inside
+an `oafPrintChart` Markdown fence:
+
+```oafPrintChart
+{"type":"line","data":[2,5,3,8],"options":{"height":8,"unit":"int"},"title":"Trend"}
+```
+
+The parameters match the `printChart` tool: `type`, `data`, `options`, `title`,
+and optional axis labels. Supported types are `line`, `bars`, `printbars`,
+`sparkline`, `histogram`, `heatmap`, `bullet`, `scatter`, `boxplot`, `timeline`,
+and `statusmatrix`. Omitted width uses available console width. The tool remains
+available for interim charts while Mini-A works. Invalid or incomplete blocks
+remain readable; `/last md` and saved Markdown retain the original JSON fences.
+This option defaults to false and inline chart rendering applies to the
+interactive console.

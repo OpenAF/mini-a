@@ -4499,6 +4499,68 @@
     resetMiniAMetrics()
   }
 
+  exports.testConsoleChartMarkdown = function() {
+    var fence = '```oafPrintChart\n{"type":"line","data":[1,2],"title":"Trend"}\n```'
+    var calls = [], chart = "  [label_*]\n  |  /\n  | /"
+    var render = function(params) { calls.push(params); return chart }
+    var fixture = "Before **bold**\n\n" + fence + "\n\nAfter\n" + fence
+    var plain = __miniAMarkdownRender(fixture, 40, { ansi: false, useasciiviz: true, renderChart: render })
+    ow.test.assert(calls.length, 2, "Every chart should render once")
+    ow.test.assert(calls[0].options.width, 40, "Default width follows console render width")
+    ow.test.assert(plain, fixture.split(fence).join(chart), "Charts retain their alignment and surrounding prose")
+    var ansi = __miniAMarkdownRender(fence, 40, { ansi: true, useasciiviz: true, renderChart: render })
+    ow.test.assert(ansi.indexOf(chart) >= 0, true, "Markdown must not interpret chart symbols or labels")
+    ow.test.assert(__miniAMarkdownRender(fence, 40, { ansi: false, renderChart: render }), fence, "Disabled charts stay literal")
+    ow.test.assert(__miniACleanCodeBlocks(fence), fence, "Chart-only answers keep their fence")
+    var invalid = ['```oafPrintChart\n{broken}\n```', '```oafPrintChart\n[]\n```', fence.slice(0, -3)]
+    invalid.forEach(function(value) {
+      ow.test.assert(__miniAMarkdownRender(value, 40, { ansi: false, useasciiviz: true, renderChart: render }), value, "Invalid and incomplete blocks remain readable")
+    })
+    ow.test.assert(__miniAMarkdownRender(fence, 40, { ansi: false, useasciiviz: true, renderChart: function() { return "[ERROR] unsupported" } }), fence, "Renderer failures preserve original JSON")
+    var nested = "````markdown example\n" + fence + "\n````"
+    ow.test.assert(__miniACleanCodeBlocks(nested), nested, "Cleanup must not expose nested chart examples")
+    var count = calls.length
+    ow.test.assert(__miniAMarkdownRender(nested, 40, { ansi: false, useasciiviz: true, renderChart: render }), nested, "Nested examples stay literal")
+    ow.test.assert(calls.length, count, "Nested charts must not invoke renderer")
+    ow.test.assert(__miniAMarkdownRender(fence, 40, { ansi: false, useasciiviz: true, renderChart: function() { return "\u001b[31mred\u001b[0m" } }), "red", "Plain charts omit ANSI color")
+  }
+
+  exports.testConsoleChartStreaming = function() {
+    var fence = '```oafPrintChart\n{"data":[1,2]}\n```'
+    ;[1, 3, 7, 50].forEach(function(size) {
+      var output = [], previews = [], calls = 0
+      var stream = __miniAMarkdownStream({ ansi: false, useasciiviz: true,
+        onUnit: function(text, kind) {
+          output.push(__miniAMarkdownRender(text, 40, { ansi: false, kind: kind, useasciiviz: true, renderChart: function() { calls++; return "CHART" } }))
+        },
+        onPreview: function(text) { previews.push(text) }
+      })
+      for (var i = 0; i < fence.length; i += size) stream.feed(fence.substring(i, i + size))
+      stream.end(); stream.end()
+      ow.test.assert(calls, 1, "Closed chart without final newline renders exactly once")
+      ow.test.assert(output.join(""), "CHART", "Streaming renders chart instead of JSON")
+      ow.test.assert(previews.join("").indexOf("data"), -1, "Chart JSON must not leak into previews")
+      output = []; calls = 0
+      stream.feed(fence.slice(0, -3)); stream.end()
+      ow.test.assert(calls, 0, "Incomplete chart never invokes renderer")
+      ow.test.assert(output.join(""), fence.slice(0, -3), "Incomplete stream preserves original block")
+    })
+  }
+
+  exports.testFinalAnswerPreservesConsoleChartFence = function() {
+    var agent = createAgent(), writes = [], originalWrite = io.writeFileString
+    var fence = '```oafPrintChart\n{"data":[1,2]}\n```'
+    agent.fnI = function() {}
+    agent._memoryAppend = agent._persistWorkingMemory = agent._persistSessionMemory = agent._recordPlanActivity = agent._logLcCostSummary = function() {}
+    agent._collectSessionKnowledgeForPlan = function() { return [] }
+    agent._memorysessionChEffective = __
+    try {
+      io.writeFileString = function(path, text) { writes.push(text) }
+      agent._processFinalAnswer(fence, { format: "md", outfile: "/tmp/chart.md", __interaction_source: "mini-a-con", useasciiviz: true })
+      ow.test.assert(writes[0], fence, "Final processing and saved Markdown retain chart fence")
+    } finally { io.writeFileString = originalWrite }
+  }
+
   exports.testMarkdownStreamIsChunkSizeInvariant = function() {
     var fixture = "A **bold value**, *italic*, `code`, and [link](https://example.test).\n- first item\n+ second item\n\n| one | two |\n| --- | --- |\n| a | b |\n\n```txt\npipe | and <tag>\n```\nprose x | y remains prose\n"
     var sizes = [1, 3, 7, 50]

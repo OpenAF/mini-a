@@ -1,4 +1,9 @@
 jobs:
+- name: MiniA Utils Tests::RenderChartDoesNotDisplay
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testRenderChartDoesNotDisplay
+
 - name: MiniA Utils Tests::Init
   exec: args.tests = require("tests/miniAUtils.js")
 
@@ -225,6 +230,7 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Utils Tests::RenderChartDoesNotDisplay
 - MiniA Utils Tests::InitTool
 - MiniA Utils Tests::ReadFile
 - MiniA Utils Tests::ReadFileRanges

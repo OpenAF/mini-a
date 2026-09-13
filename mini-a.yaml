@@ -401,7 +401,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : useasciiviz
-    desc     : Expose the Mini Utils Tool `printChart` operation for rendering ASCII/ANSI charts during execution
+    desc     : Render `oafPrintChart` Markdown fences as console charts and expose `printChart` for interim charts
     example  : "false"
     mandatory: false
     options  : ["true", "false"]

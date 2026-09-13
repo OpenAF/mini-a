@@ -1,4 +1,19 @@
 jobs:
+- name: MiniA Core Tests::ConsoleChartMarkdown
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testConsoleChartMarkdown
+
+- name: MiniA Core Tests::ConsoleChartStreaming
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testConsoleChartStreaming
+
+- name: MiniA Core Tests::FinalAnswerPreservesConsoleChartFence
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFinalAnswerPreservesConsoleChartFence
+
 - name: MiniA Core Tests::ProxyToolThoughtDisplaysDownstreamTool
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -1045,6 +1060,9 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Core Tests::ConsoleChartMarkdown
+- MiniA Core Tests::ConsoleChartStreaming
+- MiniA Core Tests::FinalAnswerPreservesConsoleChartFence
 - MiniA Core Tests::CleanCodeBlocks
 - MiniA Core Tests::ParseRulesArgumentSupportsPlainText
 - MiniA Core Tests::ParseRulesArgumentSupportsBulletLists

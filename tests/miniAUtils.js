@@ -629,6 +629,23 @@
     }
   }
 
+  exports.testRenderChartDoesNotDisplay = function() {
+    var events = [], received, originalPrint = print, prints = []
+    var tool = new MiniUtilsTool({ useasciiviz: true,
+      displayEventFn: function(event) { events.push(event) },
+      chartRenderer: function(data, unit, width) { received = width; return "CHART" }
+    })
+    try {
+      print = function(value) { prints.push(value) }
+      var chart = tool.renderChart({ data: [1, 2], title: "Trend", options: { width: 40 } })
+      ow.test.assert(chart.indexOf("Trend") >= 0 && chart.indexOf("CHART") >= 0, true, "Non-printing renderer includes title and chart")
+      ow.test.assert(received, 40, "Renderer forwards width")
+      ow.test.assert(prints.length + events.length, 0, "Rendering must neither print nor emit display events")
+      ow.test.assert(tool.renderChart({ type: "unknown" }).indexOf("[ERROR]"), 0, "Unknown charts preserve validation errors")
+      ow.test.assert(new MiniUtilsTool().renderChart({ data: [1] }).indexOf("[ERROR]"), 0, "Rendering retains opt-in guard")
+    } finally { print = originalPrint }
+  }
+
   exports.testPrintChartUsesArrayRenderer = function() {
     var received
     try {
