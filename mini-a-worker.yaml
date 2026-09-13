@@ -5,6 +5,9 @@
 help:
   text   : Mini-A headless worker API for programmatic agent delegation between processes/containers/hosts
   expects:
+  - name     : agentcomms
+    desc     : Opt-in communication grant ceiling (JSON/SLON); requires apitoken and a matching task declaration
+    mandatory: false
   - name     : onport
     desc     : API server port
     example  : "8080"
@@ -149,6 +152,7 @@ todo:
 
       var taskPayload = {
         goal: goal,
+        communication: isMap(postData.metadata) ? postData.metadata.communication : __,
         args: isMap(postData.metadata) ? postData.metadata.args : {},
         timeout: isMap(postData.configuration) ? postData.configuration.timeoutSeconds : __,
         metadata: {
@@ -274,6 +278,24 @@ todo:
   ((execURI   )): | #js
     var card = global.__worker_getAgentCard(true);
     return ow.server.httpd.reply(stringify(card, __, ""), __, ow.server.httpd.mimes.JSON);
+  ((error    )): true
+
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /comms
+  ((execPre   )): *authCheck
+  ((execURI   )): | #js
+    try {
+      var raw = request.files.postData || "";
+      if (String(raw).length > 65536) throw new Error("Exchange too large");
+      var data = jsonParse(raw);
+      var task = global.__worker_tasks[data.taskId];
+      if (!task || !task.comms || data.version !== 1 || data.token !== task.commsToken) {
+        return ow.server.httpd.reply(stringify({ error: "Communication unavailable" }), 403, ow.server.httpd.mimes.JSON);
+      }
+      return ow.server.httpd.reply(stringify(task.comms.exchange(data), __, ""), 200, ow.server.httpd.mimes.JSON);
+    } catch(e) {
+      return ow.server.httpd.reply(stringify({ error: "Invalid communication exchange" }), 400, ow.server.httpd.mimes.JSON);
+    }
   ((error    )): true
 
 - (httpdService): "${onport:-8888}"
@@ -424,6 +446,10 @@ jobs:
     // Set defaults
     args.onport = _$(args.onport, "args.onport").toNumber().isNumber().default(8080)
     args.apitoken = _$(args.apitoken, "args.apitoken").isString().default(__)
+    if (isDef(args.agentcomms)) {
+      args.agentcomms = MiniAComms.normalize(args.agentcomms)
+      if (MiniAComms.enabled(args.agentcomms) && (!isString(args.apitoken) || !args.apitoken.length)) throw "agentcomms requires apitoken"
+    }
     args.apiallow = _$(args.apiallow, "args.apiallow").isString().default(__)
     args.maxconcurrent = _$(args.maxconcurrent, "args.maxconcurrent").toNumber().isNumber().default(4)
     args.defaulttimeout = _$(args.defaulttimeout, "args.defaulttimeout").toNumber().isNumber().default(300000)
@@ -754,7 +780,7 @@ jobs:
         description: isString(wargs.workerdesc) ? wargs.workerdesc : "Mini-A worker API",
         url: baseUrl,
         preferredTransport: "HTTP+JSON",
-        additionalInterfaces: ["mini-a-worker-v1"],
+        additionalInterfaces: ["mini-a-worker-v1"].concat(isDef(wargs.agentcomms) && MiniAComms.enabled(MiniAComms.normalize(wargs.agentcomms)) && isString(wargs.apitoken) && wargs.apitoken.length > 0 ? ["agent-comms-v1"] : []),
         capabilities: {
           streaming: false,
           pushNotifications: false,
@@ -792,7 +818,7 @@ jobs:
         name: isString(wargs.workername) ? wargs.workername : "mini-a-worker",
         description: isString(wargs.workerdesc) ? wargs.workerdesc : "Mini-A worker API",
         version: "1.0.0",
-        capabilities: ["run-goal", "delegation", "planning", "a2a-http-json-rest"],
+        capabilities: ["run-goal", "delegation", "planning", "a2a-http-json-rest"].concat(isDef(wargs.agentcomms) && MiniAComms.enabled(MiniAComms.normalize(wargs.agentcomms)) && isString(wargs.apitoken) && wargs.apitoken.length > 0 ? ["agent-comms-v1"] : []),
         skills: global.__worker_getSkills().map(function(skill) {
           return {
             id: skill.id,
@@ -821,6 +847,15 @@ jobs:
       if (goalTrimmed.length > 10000) {
         return { error: { error: "Goal exceeds maximum length of 10000 characters" }, code: 400 }
       }
+      var communication = postData.communication || (isMap(postData.metadata) ? postData.metadata.communication : __)
+      if (communication) {
+        try {
+          if (!isString(wargs.apitoken) || !wargs.apitoken.length || !isDef(wargs.agentcomms) || communication.version !== 1 || !isString(communication.token) || communication.token.length < 16 || !isString(communication.id)) throw new Error("Communication disabled")
+          var workerCeiling = MiniAComms.normalize(wargs.agentcomms)
+          var requested = MiniAComms.normalize(communication.config)
+          if (!MiniAComms.subset(requested, workerCeiling) || (requested.delegate && !MiniAComms.subset(MiniAComms.normalize(requested.delegate), workerCeiling))) throw new Error("Excessive communication grants")
+        } catch(e) { return { error: { error: "Communication declaration rejected" }, code: 403 } }
+      }
       var taskArgs = postData.args || {}
       var allowedRemoteKeys = {
         goal: true, format: true, raw: true, chatbotmode: true, useplanning: true,
@@ -828,6 +863,7 @@ jobs:
         planmode: true, planformat: true, convertplan: true, maxsteps: true
       }
       var mergedArgs = merge({}, wargs)
+      delete mergedArgs.agentcomms
       Object.keys(taskArgs).forEach(function(key) {
         if (allowedRemoteKeys[key] === true) { mergedArgs[key] = taskArgs[key] }
       })
@@ -848,6 +884,7 @@ jobs:
       var now = new Date().getTime()
       var subtaskId = global.__worker_taskManager.submit(mergedArgs.goal, mergedArgs, {
         deadlineMs: timeout,
+        maxAttempts: communication ? 1 : __,
         metadata: postData.metadata || {}
       })
       global.__worker_tasks[taskId] = {
@@ -855,6 +892,14 @@ jobs:
         args: mergedArgs, createdAt: now, startedAt: __, completedAt: __,
         lastActivityAt: now, lastActivityReason: "created",
         events: [], metadata: postData.metadata || {}
+      }
+      if (communication) {
+        var adapter = new MiniAComms(requested)
+        var binding = adapter.register(communication.id, requested)
+        adapter.asRemote()
+        global.__worker_taskManager.subtasks[subtaskId].comms = binding
+        global.__worker_tasks[taskId].comms = adapter
+        global.__worker_tasks[taskId].commsToken = communication.token
       }
       global.__worker_subtaskToTaskId[subtaskId] = taskId
       global.__worker_subtaskShortToTaskId[subtaskId.substring(0, 8)] = taskId
@@ -903,6 +948,7 @@ jobs:
             var age = now - task.completedAt
             if (age > retention) {
               try {
+                if (task.comms) task.comms.close()
                 global.__worker_taskManager.cleanup(task.subtaskId)
               } catch(ignoreCleanup) {}
               if (isString(task.subtaskId) && task.subtaskId.length > 0) {

@@ -754,3 +754,10 @@ Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
 ## License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+### Inter-agent communication (opt-in)
+
+Use `agentcomms` to declare bounded parent relay, peer messages, topic subscriptions,
+and versioned shared state for local or remote delegated agents. Isolation remains
+the default. Communication reuses OpenAF channels, worker polling, and existing
+audit/metrics outputs. See [configuration, examples, limits and guarantees](USAGE.md#opt-in-inter-agent-communication).

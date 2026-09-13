@@ -3592,3 +3592,189 @@ constructor options still work. Programmatic oJobs can pass these functions in
 `evaluatorOptions` (for example from a setup job); plain YAML does not evaluate
 function strings. Run `ojob tests/evalOpenAF.yaml` for provider-free integration
 coverage and `ojob tests/eval.yaml` for the scenario engine tests.
+
+## Opt-in inter-agent communication
+
+`agentcomms` adds live coordination within one root goal's delegation tree. It uses
+private, in-memory OpenAF channels owned by the existing `SubtaskManager`. No broker
+service, parent HTTP listener, persistent storage, or additional model is required.
+Leave the argument unset (or use `profiles: [none]`) for existing isolation: no
+communication tools, channels, inbox observations, or remote exchange calls are added.
+Existing delegation results, progress events, fork snapshots, and memory channels
+keep their existing behavior. This feature requires `usetools=true` for sending
+messages and accessing state; use `usedelegation=true` to create collaborators.
+
+### Profiles and grants
+
+Profiles compose; they do not grant access by themselves. Each declaration contains
+`profiles`, `grants`, optional `alias`, optional `delegate`, and optional `limits`.
+JSON maps and SLON strings are accepted. Declarations are copied at registration.
+
+| Profile | Required grants | Behavior |
+| --- | --- | --- |
+| `none` | None | No communication; cannot combine with other profiles |
+| `parent-relay` | `send` / `receive` | Exchange intermediate information with the immediate parent or child |
+| `direct` | `send` / `receive` | Address peers through the runtime broker, without invoking the parent LLM |
+| `pubsub` | `publish` / `subscribe` | Fan out to active subscribers of an exact topic name |
+| `shared-state` | `read` / `write` | Access exact state namespaces with version-checked updates |
+
+`send` and `receive` are arrays of runtime IDs or declared aliases. The reserved
+name `parent` resolves to the immediate parent. Both endpoints must permit the
+relationship. Topics and namespaces are exact names; wildcards are rejected. Agents
+cannot discover or address agents in another root run. Aliases must be unique among
+active agents, contain only letters, digits, underscores or hyphens, and be at most
+64 characters. Retry attempts get new runtime IDs and may reuse their revoked alias.
+
+`delegate` is the ceiling for explicitly requested child declarations. Active grants
+are **not inherited**. An omitted child declaration is `none`, even when its parent
+can communicate. A child's own delegation allowance must also fit the parent's
+ceiling. Existing tool policy can further deny operations. Worker processes impose
+an additional operator-configured ceiling. These checks protect the communication
+API; they are not a sandbox for agents already granted arbitrary in-process code.
+
+### Example: relay an early finding
+
+Start the parent with this `agentcomms` map (serialize as JSON/SLON on the command line):
+
+```json
+{
+  "profiles": ["parent-relay"],
+  "alias": "coordinator",
+  "grants": {"send": ["researcher"], "receive": ["researcher"]},
+  "delegate": {
+    "profiles": ["parent-relay"],
+    "grants": {"send": ["parent"], "receive": ["parent"]}
+  }
+}
+```
+
+The parent calls the existing `delegate-subtask` tool with:
+
+```json
+{
+  "goal": "Investigate the failure; relay an early finding if it affects my next action.",
+  "waitForResult": false,
+  "agentcomms": {
+    "profiles": ["parent-relay"],
+    "alias": "researcher",
+    "grants": {"send": ["parent"], "receive": ["parent"]}
+  }
+}
+```
+
+Startup task files use the same declaration in each entry's `args.agentcomms`.
+The child can call `agent-comms` with
+`{"action":"send","to":"parent","payload":"The error occurs before the network request."}`.
+The parent receives an attributed observation before a subsequent model call.
+Use `waitForResult=false` for parent collaboration: the existing blocking default
+cannot answer questions while waiting for a child to finish. Messages do not wake
+completed agents, invoke an extra model, or wait for a reply. A child must be able to
+continue or finish without receiving an answer.
+
+For peer review, declare `direct` on both peers and reciprocal `send`/`receive`
+aliases. For shared research, declare `pubsub`, grant producers `publish:["findings"]`
+and consumers `subscribe:["findings"]`, then call
+`{"action":"publish","topic":"findings","payload":{"source":"...","finding":"..."}}`.
+Only currently registered, active subscribers receive the publication; there is no
+implicit replay to agents registered later. A saturated subscriber rejects the
+whole fanout, so the sender receives a clear failure instead of partial delivery.
+
+### Tools and state claims
+
+`agent-comms` exposes only granted actions: `send`, `publish`, and `receive`.
+Coordination tools are bound to the current agent and called directly even with
+`mcpproxy=true`; they are excluded from the shared proxy catalog and tool-result cache.
+Messages are drained at existing model-step boundaries; explicit `receive` shares
+the same drain, so observations are not inserted twice. Received text is attributed
+external data, never a permission grant or a trusted instruction.
+
+`agent-state` exposes `get` for readable namespaces and `put`/`delete` for writable
+namespaces. For example, two agents can try to claim a work item:
+
+```json
+{"action":"put","namespace":"work","key":"item-1","expectedVersion":0,"value":{"owner":"researcher"}}
+```
+
+Exactly one creation succeeds. The other receives `conflict`; it should read the
+current value or select other work. Updates require the returned version. Deletes
+retain a version tombstone until root shutdown, preventing a stale writer from
+recreating a deleted entry with version zero. Tombstones count toward the entry
+limit. This state is separate from `memorych`, `memorysessionch`, and forked memory.
+
+Outcomes include `accepted`, `ok`, `pending`, `denied`, `unavailable`, `conflict`,
+`full`, `too_large`, `rate_limited`, `invalid`, and `expired`. A successful send means
+admission to a queue, not that the recipient has acted on it. Optional
+`correlationId` connects an application reply to its request.
+
+### Remote workers
+
+Configure each worker with `apitoken` and an explicit `agentcomms` ceiling matching
+the profiles and grants it may execute. Without both, it does not advertise
+`agent-comms-v1`. A communication-enabled task cannot fall back to a worker lacking
+that capability. Ordinary tasks retain existing worker compatibility behavior.
+
+Legacy and A2A submission carry the same versioned declaration. The parent polls the
+worker's authenticated `/comms` endpoint as part of its existing execution loop.
+A runtime-generated per-task token additionally isolates exchanges. Tokens are not
+passed to model tools or included in fork state. No worker-to-worker connection is
+needed. Remote workers return `pending` and an `operationId`; the correlated result
+arrives at a later step. One operation is confirmed per exchange batch to bound
+potential shared-state read results, alongside bounded inbox deliveries. Latency
+therefore depends on the existing polling interval and queue depth.
+
+Transport retries reuse the outstanding batch, avoiding repeated writes after lost
+responses. State stays authoritative at the root. Worker-local descendants use the
+same exchange adapter. Remote communication task failures are retried by the parent
+with a new attempt identity, rather than independently replayed by the worker.
+Messages and pending operations are transient: cancellation, expiry, worker loss,
+and root shutdown can discard them. There is no restart recovery or exactly-once
+application-processing guarantee. Use normal delegation results for final answers.
+
+### Bounds and metrics
+
+The following `limits` keys default to these ceilings; configurations may lower them:
+
+| Key | Default |
+| --- | ---: |
+| `valueBytes` | 8192 UTF-8 bytes per operation |
+| `agentPending` / `rootPending` | 64 / 512 records |
+| `storageBytes` | 4194304 channel-record bytes |
+| `perMinute` / `operations` | 60 operations per agent per minute / 1000 per run |
+| `batchRecords` / `batchBytes` | 8 / 8192 bytes |
+| `ttlMs` | 300000 milliseconds, capped by the task lifetime |
+| `stateEntries` | 128, including deletion tombstones |
+
+Envelope bytes count toward delivery limits, so the largest deliverable payload is
+slightly smaller than `batchBytes`. Remote queues also reserve envelope space. Small
+limits may reject operations with `too_large` or `full`; no silent eviction occurs.
+Communication receipt does not reset task activity, and communication-only tool
+success does not reset the main loop's no-progress budget. Existing hard task and
+model-step limits remain in force.
+
+`getMetrics().communication` and existing `metricsch` snapshots include accepted
+operations, rejection counts by reason, delivered/consumed/expired messages,
+duplicates, state conflicts, bytes, queue depth/high-water mark, state entries,
+storage bytes, latency count/sum/max, remote exchanges/retries, and estimated context
+tokens. Root snapshots own delivery counts; do not sum root and worker mirrors.
+Latency measures enqueue-to-consumption acknowledgement, including polling delay.
+
+Existing `auditch` receives `comms` events with identities, message IDs, sequences,
+action, outcome and byte counts. Communication tool logs omit payloads for both
+direct and proxy calls. Existing explicitly enabled full model/debug traces can
+still contain messages because they are part of model context; treat those sinks
+accordingly. No new payload-log sink is introduced.
+
+Validation commands (no model credentials needed):
+
+```sh
+oaf -f tests/agentComms.js
+oaf -f tests/agentCommsTransport.js  # requires permission to bind localhost ports
+ojob tests/coreFunctionality.yaml
+```
+
+For goal-level evaluation, compare identical isolated and communicating runs using
+the existing evaluation reports: answer quality, repeated tool calls, total model
+calls/tokens, elapsed time, and communication context tokens. Useful cases are early
+finding relay, peer evidence reuse, and competing work claims. Communication is not
+an automatic quality or speed improvement; enable it where these measurements show
+that collaboration pays for its overhead.

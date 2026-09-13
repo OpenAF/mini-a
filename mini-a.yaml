@@ -12,6 +12,9 @@ help:
       ojob mini-a.yaml goal="..." mcp="[(cmd: 'docker run --rm -i mcp/dockerhub', timeout: 5000) | (cmd: 'docker run --rm -i mcp/wikipedia-mcp', timeout: 5000)]" rpm=20
       
   expects: 
+  - name     : agentcomms
+    desc     : Opt-in communication profiles, grants, delegation allowance and limits (JSON/SLON); see USAGE.md
+    mandatory: false
   - name     : goal
     desc     : Goal for the agent to achieve
     example  : aValueExample
