@@ -2093,3 +2093,18 @@ scenario schema and baseline workflow.
 `mini-a goal="..." orchestration=auto` enables deterministic selection of the
 existing planning, advisor, and evidence-gate controls. The default is
 `orchestration=manual`; explicit flags override automatic selections.
+
+### Reconcile ingestion-managed wiki pages
+
+```sh
+# Plan only: no wiki changes or model calls
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=./wiki ingestmode=normalize ingestprune=true ingestdryrun=true
+# Apply verified scoped removals
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=./wiki ingestmode=normalize ingestprune=true
+# Also authorize a completely observed empty folder
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=./wiki ingestmode=normalize ingestprune=true ingestallowemptyprune=true
+```
+
+Default `ingestprune=false` preserves disappeared sources. `ingestsourceid` keeps a
+logical origin stable across physical moves. `ingestforce` does not permit deletion
+or overwrite edited pages. See [safety and recovery limits](docs/WIKI.md#safe-repeated-ingestion).

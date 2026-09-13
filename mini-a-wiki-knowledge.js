@@ -3,7 +3,7 @@
 // Description: Wiki incremental knowledge primitives. Kept dependency-free so it can run
 //              on every Mini-A wiki backend; mutable state always lives in the index cache.
 
-var MINI_A_WIKI_KNOWLEDGE = { manifest: 1, chunker: 1, semantic: 1, prompt: 1, ranking: 1 }
+var MINI_A_WIKI_KNOWLEDGE = { manifest: 2, chunker: 2, semantic: 1, prompt: 1, ranking: 1 }
 
 var MiniAWikiKnowledgeBudget = function(args, scope) {
   args = isMap(args) ? args : {}
@@ -25,23 +25,34 @@ MiniAWikiKnowledgeBudget.prototype.reserve = function(candidate, input, output) 
 }
 MiniAWikiKnowledgeBudget.prototype.stats = function() { return { limit: this.limit, remaining: this.limit < 0 ? -1 : Math.max(0, this.limit - this.used), estimated_input_tokens: this.estimatedInput, estimated_output_tokens: this.estimatedOutput, calls_attempted: this.attempted, calls_executed: this.executed, calls_deferred: this.deferred.length, deferred: this.deferred } }
 
-MiniAWikiManager.prototype._knowledgeStatePath = function() { return this._ensureIndexRoot() + "/.mini-a-wiki-state/manifest.json" }
+MiniAWikiManager.prototype._knowledgeStatePath = function() { return this._getIndexRoot() + "/.mini-a-wiki-state/manifest.json" }
 MiniAWikiManager.prototype._knowledgeEmptyState = function() { return { version: MINI_A_WIKI_KNOWLEDGE.manifest, versions: MINI_A_WIKI_KNOWLEDGE, sources: {}, chunks: {}, pages: {}, dependencies: {}, facts: {}, summaries: { pages: {}, sections: {} }, telemetry: { queries: {}, zero_results: 0 }, updated: new Date().toISOString() } }
 MiniAWikiManager.prototype.knowledgeLoadState = function() {
   if (this._access !== "rw" && !io.fileExists(this._knowledgeStatePath())) return this._knowledgeEmptyState()
+  if (!io.fileExists(this._knowledgeStatePath())) return this._knowledgeEmptyState()
   try {
     var v = af.fromJson(io.readFileString(this._knowledgeStatePath()))
-    if (!isMap(v) || !isMap(v.sources)) return this._knowledgeEmptyState()
+    if (!isMap(v) || !isMap(v.sources) || isDef(v.chunks) && !isMap(v.chunks) || isDef(v.dependencies) && !isMap(v.dependencies)) throw new Error("invalid manifest")
     // Merge onto a fresh empty state so a manifest from an older schema version (missing
     // e.g. dependencies/telemetry/summaries) still has every key downstream code
     // dereferences without a guard (knowledgeDirtySet's state.dependencies[id], etc.).
     return merge(this._knowledgeEmptyState(), v)
-  } catch(e) { this._logFn("warn", "[wiki] manifest unreadable; starting with safe empty state: " + __miniAErrMsg(e)); return this._knowledgeEmptyState() }
+  } catch(e) { this._logFn("warn", "[wiki] manifest unreadable; starting with safe empty state: " + __miniAErrMsg(e)); var empty = this._knowledgeEmptyState(); empty._corrupt = true; return empty }
 }
 MiniAWikiManager.prototype.knowledgeSaveState = function(state) {
-  if (this._access !== "rw") return false
-  var p = this._knowledgeStatePath(), dir = p.substring(0, p.lastIndexOf("/")), tmp = p + ".tmp-" + new Date().getTime()
-  try { if (!io.fileExists(dir)) io.mkdir(dir); state.updated = new Date().toISOString(); io.writeFileString(tmp, stringify(state, __, "")); var f = new java.io.File(tmp), t = new java.io.File(p); if (!f.renameTo(t)) { io.writeFileString(p, io.readFileString(tmp)); f.delete() }; return true } catch(e) { try { new java.io.File(tmp).delete() } catch(ignore) {}; this._logFn("warn", "[wiki] manifest was not saved: " + __miniAErrMsg(e)); return false }
+  if (this._access !== "rw" || state._corrupt) return false
+  var p = this._knowledgeStatePath(), dir = p.substring(0, p.lastIndexOf("/")), tmp = p + ".tmp-" + java.util.UUID.randomUUID()
+  try {
+    if (!io.fileExists(dir)) io.mkdir(dir)
+    state.updated = new Date().toISOString()
+    io.writeFileString(tmp, stringify(state, __, ""))
+    java.nio.file.Files.move(new java.io.File(tmp).toPath(), new java.io.File(p).toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    return true
+  } catch(e) {
+    try { new java.io.File(tmp).delete() } catch(ignore) {}
+    this._logFn("warn", "[wiki] manifest was not saved atomically: " + __miniAErrMsg(e))
+    return false
+  }
 }
 MiniAWikiManager.prototype.knowledgeEstimateTokens = function(text) { return Math.max(1, Math.ceil(String(text || "").length / 4)) }
 MiniAWikiManager.prototype.knowledgeNormalize = function(text) {
@@ -52,8 +63,8 @@ MiniAWikiManager.prototype.knowledgeNormalize = function(text) {
 }
 MiniAWikiManager.prototype.knowledgeChunks = function(source, text, options) {
   options = isMap(options) ? options : {}; var max = Number(options.maxChars) > 0 ? Number(options.maxChars) : 24000
-  var body = this.knowledgeNormalize(text), lines = body.split("\n"), out = [], stack = [], cur = [], ordinal = 0, self = this
-  var emit = function(parts) { var x = parts.join("\n").trim(); if (!x) return; var section = stack.length ? stack.map(function(h) { return h.text }).join(" > ") : String(source); var anchor = stack.length ? stack[stack.length - 1].anchor : self._headingAnchor(String(source).replace(/\.[^.]+$/, "")); var add = function(t, suffix) { var n = self.knowledgeNormalize(t); if (!n.trim()) return; ordinal++; var ident = String(source) + "#" + anchor + (suffix ? "-" + suffix : ""); out.push({ id: sha1(ident), source: source, sourceId: sha1(String(source)), section: section, anchor: anchor, kind: "section", hash: sha1(t), normalizedHash: sha1(n), text: t, chars: t.length, estimatedTokens: self.knowledgeEstimateTokens(t), ordinal: ordinal, identity: ident, ancestry: stack.map(function(h) { return h.text }) }) }
+  var body = this.knowledgeNormalize(text), lines = body.split("\n"), out = [], stack = [], cur = [], ordinal = 0, occurrences = {}, self = this
+  var emit = function(parts) { var x = parts.join("\n").trim(); if (!x) return; var section = stack.length ? stack.map(function(h) { return h.text }).join(" > ") : String(source); var anchor = stack.length ? stack[stack.length - 1].anchor : self._headingAnchor(String(source).replace(/\.[^.]+$/, "")); var structural = stack.map(function(h) { return h.text }).join(" > ") || String(source); occurrences[structural] = (occurrences[structural] || 0) + 1; var occurrence = occurrences[structural]; var add = function(t, suffix) { var n = self.knowledgeNormalize(t); if (!n.trim()) return; ordinal++; var ident = String(options.namespace || source) + "#" + structural + "@" + occurrence + (suffix ? "-" + suffix : ""); out.push({ id: sha1(ident), source: source, sourceId: sha1(String(source)), section: section, anchor: anchor, kind: "section", hash: sha1(t), normalizedHash: sha1(n), text: t, chars: t.length, estimatedTokens: self.knowledgeEstimateTokens(t), ordinal: ordinal, identity: ident, ancestry: stack.map(function(h) { return h.text }) }) }
     if (x.length <= max) { add(x, ""); return }
     var paras = x.split(/\n\s*\n/), b = "", ix = 0
     paras.forEach(function(p) { if (b && b.length + p.length + 2 > max) { add(b, String(++ix)); b = p } else b += (b ? "\n\n" : "") + p })
@@ -89,4 +100,47 @@ MiniAWikiManager.prototype.knowledgeRank = function(query, hits, debug) {
   ranked.sort(function(a, b) { return b.score - a.score }); return ranked
 }
 MiniAWikiManager.prototype.knowledgeStats = function(resetTelemetry) { var s = this.knowledgeLoadState(); if (resetTelemetry === true && this._access === "rw") { s.telemetry = { queries: {}, zero_results: 0 }; this.knowledgeSaveState(s) }; return { versions: MINI_A_WIKI_KNOWLEDGE, sources: Object.keys(s.sources).length, chunks: Object.keys(s.chunks).length, facts: Object.keys(s.facts).length, summaries: Object.keys(s.summaries.pages).length, telemetry: s.telemetry } }
-MiniAWikiManager.prototype.assembleContext = function(query, options) { options = isMap(options) ? options : {}; var limit = Number(options.wikicontextchunks || options.chunks || 5), budget = Number(options.wikicontexttokens || options.tokens || 2400), hits = this.search(query, { limit: Math.max(limit * 4, 20), debug: true }), state = this.knowledgeLoadState(), out = [], used = 0, seen = {}; hits.forEach(function(h) { var cs = Object.keys(state.chunks).map(function(k) { return state.chunks[k] }).filter(function(c) { return c.page === h.path }); cs.forEach(function(c) { if (out.length >= limit || seen[c.normalizedHash] || used + c.estimatedTokens > budget) return; seen[c.normalizedHash] = true; used += c.estimatedTokens; out.push({ path: c.page, source: c.source, anchor: c.anchor, heading: c.section, text: c.text, estimatedTokens: c.estimatedTokens, score: h.score }) }) }); return { query: query, chunks: out, estimatedTokens: used, budget: budget } }
+MiniAWikiManager.prototype.assembleContext = function(query, options) {
+  options = isMap(options) ? options : {}
+  var limit = Number(options.wikicontextchunks || options.chunks || 5), budget = Number(options.wikicontexttokens || options.tokens || 2400)
+  var state = this.knowledgeLoadState(), out = [], used = 0, seen = {}, pending = {}, self = this
+  var journalPath = this._getIndexRoot() + "/.mini-a-wiki-ingest/journal.json"
+  try {
+    if (io.fileExists(journalPath)) {
+      var journal = af.fromJson(io.readFileString(journalPath))
+      if (journal.phase !== "complete") (journal.operations || []).forEach(function(op) { pending[op.path] = true })
+    }
+  } catch(e) { state._corrupt = true }
+  if (!state._corrupt) this.search(query, { limit: Math.max(limit * 4, 20), debug: true }).forEach(function(h) {
+    if (pending[h.path]) return
+    var raw = self._backend.read(h.path), page = isString(raw) ? self.parseFrontmatter(raw) : __
+    var cs = Object.keys(state.chunks).map(function(k) { return state.chunks[k] }).filter(function(c) { return c.page === h.path && self.knowledgeChunkActive(state, c) && (!c.sourceKey || page && page.meta.source_hash === state.sources[c.sourceKey].sourceHash && page.meta.ingest_source_key === c.sourceKey) })
+    cs.forEach(function(c) {
+      if (out.length >= limit || seen[c.normalizedHash] || used + c.estimatedTokens > budget) return
+      seen[c.normalizedHash] = true; used += c.estimatedTokens
+      out.push({ path: c.page, source: c.source, anchor: c.anchor, heading: c.section, text: c.text, estimatedTokens: c.estimatedTokens, score: h.score })
+    })
+  })
+  return { query: query, chunks: out, estimatedTokens: used, budget: budget }
+}
+
+// Legacy ingestion records are usable only when referenced by their complete source list.
+// Other producers retain their existing contract.
+MiniAWikiManager.prototype.knowledgeChunkActive = function(state, chunk) {
+  var key = chunk.sourceKey
+  if (!key) {
+    var owners = Object.keys(state.sources).filter(function(k) { return state.sources[k].page === chunk.page })
+    if (!owners.length) return true
+    return owners.some(function(k) { return (state.sources[k].chunks || []).some(function(c) { return c.id === chunk.id && c.hash === chunk.hash }) })
+  }
+  var source = state.sources[key]
+  return isMap(source) && source.active !== false && source.page === chunk.page && source.generation === chunk.generation && sha1(String(chunk.text || "")) === chunk.hash &&
+    (source.chunks || []).some(function(c) { return c.id === chunk.id && c.hash === chunk.hash })
+}
+
+// OpenAF load()/require() callers may hold a constructor from another library scope.
+// Install the shared primitives on that instance without opening another manager.
+global.__miniAWikiKnowledge = { versions: MINI_A_WIKI_KNOWLEDGE, Budget: MiniAWikiKnowledgeBudget, methods: {} }
+Object.keys(MiniAWikiManager.prototype).forEach(function(k) {
+  if (/^(knowledge|_knowledge|assembleContext)/.test(k)) global.__miniAWikiKnowledge.methods[k] = MiniAWikiManager.prototype[k]
+})

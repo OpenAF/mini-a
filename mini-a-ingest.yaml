@@ -4,7 +4,7 @@ help:
     Ingest knowledge into a Mini-A wiki from a documentation folder, a git repository
     (local checkout or clone URL) or a web page.
 
-    Discovery, filtering, chunking, the re-ingest ledger, writing and finalization are
+    Discovery, filtering, chunking, the versioned manifest, writing and finalization are
     deterministic; only the per-source distillation uses the LLM. One source produces one
     wiki page — cross-page dedup and reorganisation are left to '/dream wiki apply'.
 
@@ -48,10 +48,29 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : ingestforce
-    desc     : Re-ingest sources the ledger reports as unchanged
+    desc     : Reprocess present sources; does not enable prune or bypass conflicts/budgets
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : ingestprune
+    desc     : Remove verified missing scoped sources (default false; unsupported for URL sources)
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : ingestallowemptyprune
+    desc     : Additional authorization to prune a confirmed empty folder (default false)
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : ingestsourceid
+    desc     : Stable logical origin identifier, independent of the physical source path
+    mandatory: false
+  - name     : ingestmode
+    desc     : Complete-page processing mode (auto, normalize, distill, raw)
+    mandatory: false
+    options  : ["auto", "normalize", "distill", "raw"]
+  - name     : wikiaccess
+    desc     : Wiki access (explicit ro is honored; default rw)
+    mandatory: false
+    options  : ["ro", "rw"]
   - name     : ingestledger
     desc     : Override the ingest ledger file path
     mandatory: false
@@ -85,6 +104,11 @@ jobs:
       ingestmaxfilekb  : toNumber.isNumber.default(512)
       ingestconcurrency: toNumber.isNumber.default(4)
       ingestdryrun     : toBoolean.isBoolean.default(false)
+      ingestprune      : toBoolean.isBoolean.default(false)
+      ingestallowemptyprune: toBoolean.isBoolean.default(false)
+      ingestsourceid   : isString.default(__)
+      wikiaccess       : isString.default("rw")
+      ingestmode       : isString.default("auto")
       ingestforce      : toBoolean.isBoolean.default(false)
       ingestledger     : isString.default(__)
       model            : isString.default(__)
@@ -95,7 +119,7 @@ jobs:
 
     var ingestArgs = merge({}, args)
     ingestArgs.usewiki    = "true"
-    ingestArgs.wikiaccess = "rw"
+    ingestArgs.wikiaccess = isDef(args.wikiaccess) ? args.wikiaccess : "rw"
 
     var runner = new MiniAIngest(ingestArgs, function(msg) { log(msg) })
     var res    = runner.run()

@@ -113,7 +113,7 @@
     var src = makeSourceDir(), wiki = String(io.createTempDir("miniingest_wiki_"))
     try {
       var res = makeIngest(src, wiki).run()
-      ow.test.assert(res.ok, true, "ingest should succeed")
+      ow.test.assert(res.ok, true, "ingest should succeed: " + stringify(res))
       ow.test.assert(res.written.length, 3, "one page per source")
       ow.test.assert(res.failed.length, 0, "no distillation should fail")
 

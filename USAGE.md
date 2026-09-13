@@ -3778,3 +3778,10 @@ calls/tokens, elapsed time, and communication context tokens. Useful cases are e
 finding relay, peer evidence reuse, and competing work claims. Communication is not
 an automatic quality or speed improvement; enable it where these measurements show
 that collaboration pays for its overhead.
+
+Repeated wiki ingestion defaults to non-destructive upsert. Preview scoped removals
+with `ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=./wiki ingestmode=normalize ingestprune=true ingestdryrun=true`, then omit `ingestdryrun` to apply.
+A fully empty origin also requires `ingestallowemptyprune=true`. Force reprocesses
+complete sources but never bypasses ownership, permissions or budgets. See
+[Safe repeated ingestion](docs/WIKI.md#safe-repeated-ingestion) for migration,
+conflicts, recovery and single-writer backend limits.

@@ -79,6 +79,162 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wikiIngest.js").testIngestRequiresASource
 
+- name: MiniA Wiki Ingest Tests::FullDistillation
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testFullDistillation
+
+- name: MiniA Wiki Ingest Tests::DeterministicModes
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testDeterministicModes
+
+- name: MiniA Wiki Ingest Tests::BudgetDeferral
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testBudgetDeferral
+
+- name: MiniA Wiki Ingest Tests::MissingPageAndFingerprintRepair
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testMissingPageAndFingerprintRepair
+
+- name: MiniA Wiki Ingest Tests::PruneAndRemovalFinalization
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testPruneAndRemovalFinalization
+
+- name: MiniA Wiki Ingest Tests::EmptyOriginAuthorization
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testEmptyOriginAuthorization
+
+- name: MiniA Wiki Ingest Tests::MissingOriginNeverPrunes
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testMissingOriginNeverPrunes
+
+- name: MiniA Wiki Ingest Tests::IncompleteDiscoveryBlocksPrune
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testIncompleteDiscoveryBlocksPrune
+
+- name: MiniA Wiki Ingest Tests::PresentIneligibleSources
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testPresentIneligibleSources
+
+- name: MiniA Wiki Ingest Tests::ChangedFiltersBlockPrune
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testChangedFiltersBlockPrune
+
+- name: MiniA Wiki Ingest Tests::UrlPruneRejected
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testUrlPruneRejected
+
+- name: MiniA Wiki Ingest Tests::RenameReconciliation
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testRenameReconciliation
+
+- name: MiniA Wiki Ingest Tests::ChunkIdentityAndRetrieval
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testChunkIdentityAndRetrieval
+
+- name: MiniA Wiki Ingest Tests::OriginNamespacesAndNaming
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testOriginNamespacesAndNaming
+
+- name: MiniA Wiki Ingest Tests::ManualEditConflicts
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testManualEditConflicts
+
+- name: MiniA Wiki Ingest Tests::ManualUnownedPage
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testManualUnownedPage
+
+- name: MiniA Wiki Ingest Tests::SharedChunksAndDerivativeInvalidation
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testSharedChunksAndDerivativeInvalidation
+
+- name: MiniA Wiki Ingest Tests::CorruptManifestBlocksPrune
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testCorruptManifestBlocksPrune
+
+- name: MiniA Wiki Ingest Tests::LegacyMigration
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testLegacyMigration
+
+- name: MiniA Wiki Ingest Tests::AmbiguousLegacyPreserved
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testAmbiguousLegacyPreserved
+
+- name: MiniA Wiki Ingest Tests::LlmFailureKeepsAppliedVersion
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testLlmFailureKeepsAppliedVersion
+
+- name: MiniA Wiki Ingest Tests::FinalizeRecovery
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testFinalizeRecovery
+
+- name: MiniA Wiki Ingest Tests::DryRunNoDestinationMutation
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testDryRunNoDestinationMutation
+
+- name: MiniA Wiki Ingest Tests::BorrowedRemoteContractsAndFailures
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testBorrowedRemoteContractsAndFailures
+
+- name: MiniA Wiki Ingest Tests::ConcurrentManifestChange
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testConcurrentManifestChange
+
+- name: MiniA Wiki Ingest Tests::SourceChangesBlockPrune
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testSourceChangesBlockPrune
+
+- name: MiniA Wiki Ingest Tests::ReorderingAndRepeatedCycles
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testReorderingAndRepeatedCycles
+
+- name: MiniA Wiki Ingest Tests::ExistingWikiMoveBinding
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testExistingWikiMoveBinding
+
+- name: MiniA Wiki Ingest Tests::DryMigrationNoWrite
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testDryMigrationNoWrite
+
+- name: MiniA Wiki Ingest Tests::ReadOnlyEntryAndBorrowedManager
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testReadOnlyEntryAndBorrowedManager
+
+- name: MiniA Wiki Ingest Tests::WikiWriterLock
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testWikiWriterLock
+
+- name: MiniA Wiki Ingest Tests::DeleteBeforeManifestRecovery
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testDeleteBeforeManifestRecovery
+
+- name: MiniA Wiki Ingest Tests::PendingJournalSuppressesRetrieval
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testPendingJournalSuppressesRetrieval
+
+- name: MiniA Wiki Ingest Tests::CorruptLedgerBlocksApproximateMigration
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testCorruptLedgerBlocksApproximateMigration
+
+- name: MiniA Wiki Ingest Tests::AtomicJournalFailure
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testAtomicJournalFailure
+
+- name: MiniA Wiki Ingest Tests::SeparateUrlsDoNotPrune
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testSeparateUrlsDoNotPrune
+
+- name: MiniA Wiki Ingest Tests::LegacyEditsWithoutSignaturePreserved
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testLegacyEditsWithoutSignaturePreserved
+
+- name: MiniA Wiki Ingest Tests::ConcurrentChangesDuringApplication
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testConcurrentChangesDuringApplication
+
+- name: MiniA Wiki Ingest Tests::PreparedRecoveryWithIncompleteOrigin
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testPreparedRecoveryWithIncompleteOrigin
+
 todo:
 - MiniA Wiki Ingest Tests::IngestDiscoversMarkdownAndSkipsVendorDirs
 - MiniA Wiki Ingest Tests::IngestDryRunWritesNoPages
@@ -99,3 +255,42 @@ todo:
 - MiniA Wiki Ingest Tests::SourceTypeDetection
 - MiniA Wiki Ingest Tests::IngestRefusesReadOnlyWiki
 - MiniA Wiki Ingest Tests::IngestRequiresASource
+- MiniA Wiki Ingest Tests::FullDistillation
+- MiniA Wiki Ingest Tests::DeterministicModes
+- MiniA Wiki Ingest Tests::BudgetDeferral
+- MiniA Wiki Ingest Tests::MissingPageAndFingerprintRepair
+- MiniA Wiki Ingest Tests::PruneAndRemovalFinalization
+- MiniA Wiki Ingest Tests::EmptyOriginAuthorization
+- MiniA Wiki Ingest Tests::MissingOriginNeverPrunes
+- MiniA Wiki Ingest Tests::IncompleteDiscoveryBlocksPrune
+- MiniA Wiki Ingest Tests::PresentIneligibleSources
+- MiniA Wiki Ingest Tests::ChangedFiltersBlockPrune
+- MiniA Wiki Ingest Tests::UrlPruneRejected
+- MiniA Wiki Ingest Tests::RenameReconciliation
+- MiniA Wiki Ingest Tests::ChunkIdentityAndRetrieval
+- MiniA Wiki Ingest Tests::OriginNamespacesAndNaming
+- MiniA Wiki Ingest Tests::ManualEditConflicts
+- MiniA Wiki Ingest Tests::ManualUnownedPage
+- MiniA Wiki Ingest Tests::SharedChunksAndDerivativeInvalidation
+- MiniA Wiki Ingest Tests::CorruptManifestBlocksPrune
+- MiniA Wiki Ingest Tests::LegacyMigration
+- MiniA Wiki Ingest Tests::AmbiguousLegacyPreserved
+- MiniA Wiki Ingest Tests::LlmFailureKeepsAppliedVersion
+- MiniA Wiki Ingest Tests::FinalizeRecovery
+- MiniA Wiki Ingest Tests::DryRunNoDestinationMutation
+- MiniA Wiki Ingest Tests::BorrowedRemoteContractsAndFailures
+- MiniA Wiki Ingest Tests::ConcurrentManifestChange
+- MiniA Wiki Ingest Tests::SourceChangesBlockPrune
+- MiniA Wiki Ingest Tests::ReorderingAndRepeatedCycles
+- MiniA Wiki Ingest Tests::ExistingWikiMoveBinding
+- MiniA Wiki Ingest Tests::DryMigrationNoWrite
+- MiniA Wiki Ingest Tests::ReadOnlyEntryAndBorrowedManager
+- MiniA Wiki Ingest Tests::WikiWriterLock
+- MiniA Wiki Ingest Tests::DeleteBeforeManifestRecovery
+- MiniA Wiki Ingest Tests::PendingJournalSuppressesRetrieval
+- MiniA Wiki Ingest Tests::CorruptLedgerBlocksApproximateMigration
+- MiniA Wiki Ingest Tests::AtomicJournalFailure
+- MiniA Wiki Ingest Tests::SeparateUrlsDoNotPrune
+- MiniA Wiki Ingest Tests::LegacyEditsWithoutSignaturePreserved
+- MiniA Wiki Ingest Tests::ConcurrentChangesDuringApplication
+- MiniA Wiki Ingest Tests::PreparedRecoveryWithIncompleteOrigin

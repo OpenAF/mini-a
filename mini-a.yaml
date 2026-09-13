@@ -1123,6 +1123,17 @@ help:
     desc     : "Also append the rendered URL into search results' description text, for models that attend to prose more reliably than to sibling JSON keys"
     example  : "false"
     mandatory: false
+  - name     : ingestprune
+    desc     : Remove verified missing ingestion sources (default false)
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : ingestallowemptyprune
+    desc     : Allow pruning a completely observed empty source (default false)
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : ingestsourceid
+    desc     : Stable logical ingestion origin identity
+    mandatory: false
   - name     : ingestmode
     desc     : "Wiki ingestion mode: auto (deterministic first), normalize, distill or raw"
     example  : "auto"

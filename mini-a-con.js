@@ -883,6 +883,9 @@ try {
     ingestmaxfilekb: { type: "number", description: "Skip ingest sources larger than this many KB." },
     ingestconcurrency: { type: "number", description: "Number of parallel source distillations during ingest." },
     ingestdryrun   : { type: "boolean", default: false, description: "Report what would be ingested without writing." },
+    ingestprune    : { type: "boolean", default: false, description: "Remove verified missing sources within this ingestion scope." },
+    ingestallowemptyprune: { type: "boolean", default: false, description: "Allow pruning a confirmed empty source folder." },
+    ingestsourceid : { type: "string", description: "Stable logical ingestion origin identity." },
     ingestforce    : { type: "boolean", default: false, description: "Re-ingest sources the ledger reports as unchanged." },
     ingestledger   : { type: "string", description: "Override the ingest ledger file path." },
     workermode     : { type: "boolean", default: false, description: "Start in worker mode for delegated agent execution." },
@@ -6536,17 +6539,20 @@ try {
   // /ingest <source> [section] [dryrun|force]
   function printIngest(subcmdRaw) {
     var parts   = isString(subcmdRaw) ? subcmdRaw.trim().split(/\s+/).filter(function(p) { return p.length > 0 }) : []
-    var flags   = { dryrun: false, force: false }
+    var flags   = { dryrun: false, force: false, prune: false, allowemptyprune: false, sourceid: "" }
     var operands = []
     parts.forEach(function(p) {
       var lower = p.toLowerCase()
       if (lower === "dryrun") { flags.dryrun = true; return }
       if (lower === "force")  { flags.force  = true; return }
+      if (lower === "prune") { flags.prune = true; return }
+      if (lower === "allowemptyprune") { flags.allowemptyprune = true; return }
+      if (lower.indexOf("sourceid=") === 0) { flags.sourceid = p.substring(9); return }
       operands.push(p)
     })
 
     if (operands.length === 0) {
-      print(colorifyText("Usage: /ingest <folder|repo-url|page-url> [section] [dryrun] [force]", errorColor))
+      print(colorifyText("Usage: /ingest <folder|repo-url|page-url> [section] [dryrun] [force] [prune] [allowemptyprune] [sourceid=<id>]", errorColor))
       print(colorifyText("  Ingests a docs folder, git repo or web page into the active wiki.", hintColor))
       return
     }
@@ -6576,13 +6582,17 @@ try {
     if (operands.length > 1) ingestArgs.ingestsection = operands[1]
     if (flags.dryrun) ingestArgs.ingestdryrun = "true"
     if (flags.force)  ingestArgs.ingestforce  = "true"
+    if (flags.prune) ingestArgs.ingestprune = "true"
+    if (flags.allowemptyprune) ingestArgs.ingestallowemptyprune = "true"
+    if (flags.sourceid) ingestArgs.ingestsourceid = flags.sourceid
 
     try {
       var runner = new MiniAIngest(ingestArgs, function(msg) { print(colorifyText(msg, hintColor)) })
       var res    = runner.run()
       if (isMap(res) && res.ok === false) {
-        print(colorifyText("Ingest did not run: " + (isString(res.reason) ? res.reason : "unknown") +
+        print(colorifyText("Ingest " + String(res.status || "failed") + ": " + (isString(res.reason) ? res.reason : "see reported conflicts/failures") +
                            (isString(res.error) ? " — " + res.error : ""), errorColor))
+        print(printTree(res))
         return
       }
       print(printTree(res))

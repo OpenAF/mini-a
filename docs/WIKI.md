@@ -409,3 +409,97 @@ Optional bounds are `maxCandidates`, `maxInspected`, `maxGraphExpansion`, and
 on backlinks, graph neighbors, and eligible mounted Wiki relations. Native
 Lucene score is retained where available; structural relevance is shown
 separately, so selection remains deterministic and inspectable.
+
+## Safe repeated ingestion
+
+Ingestion is an upsert by default. `ingestprune=false` reports missing sources and
+preserves their pages; a successful upsert does not claim that the wiki mirrors the
+source. `ingestprune=true` reconciles only artifacts owned by the same destination,
+origin and section. Individual URL sources reject prune because they are not a site
+inventory. `ingestsourceid` supplies a stable logical origin when moving a folder;
+keep the destination section stable too. Repository commits are version information,
+not new origin identities.
+
+Preview, reconcile, and explicitly authorize a confirmed empty source:
+
+```sh
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=./wiki ingestmode=normalize ingestprune=true ingestdryrun=true
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=./wiki ingestmode=normalize ingestprune=true
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=./wiki ingestmode=normalize ingestprune=true ingestallowemptyprune=true
+```
+
+A missing/inaccessible folder is never an empty inventory. Listing errors, changed
+filters or size limits, local edits, failed writes and budget deferrals block prune.
+Present excluded, oversized, empty or unreadable files are preserved. The additional
+empty authorization applies only after complete discovery of an empty folder.
+Inventory revalidation detects changes before deletion; it does not make the source
+filesystem an atomic snapshot. Do not modify the source during reconciliation.
+
+All modes rebuild complete pages. `normalize`, `raw`, and structured `auto` use no
+model. Distillation receives every current source chunk, including after section
+removals or `ingestforce=true`. Prompt overhead counts toward `wikimaxprompttokens`
+and `wikiingestbudget`/`wikillmbudget`; oversized complete sources are deferred,
+never silently truncated. Force does not authorize deletion, bypass read-only
+access, override edits, or waive budgets.
+
+Mappings and meaningful page signatures protect manual edits and dream changes.
+Conflicts preserve pages, prevent destructive work, and return unsuccessful results.
+Resolve a conflict by reviewing and restoring the last ingestion-managed version,
+or preserve the edited page separately and remove the managed destination using wiki
+tools before retrying. Never discard the manifest to bypass ownership protection.
+Moved pages with a unique unchanged ingestion binding are located and rebound;
+rewritten content or multiple bindings remain conflicts. New naming collisions use
+deterministic suffixes; ingestion cannot occupy generated `index.md` pages.
+
+The versioned manifest is the applied-state authority. The old ledger is read only
+for conservative migration; it is not updated as a separate authority. Present legacy
+records migrate only when the old origin key, expected destination and page provenance
+match. Full-source reprocessing repairs partial legacy chunk lists. A pre-migration
+state copy is kept under `.mini-a-wiki-ingest/pre-migration.json`. Ambiguous legacy
+records remain unresolved and are never automatically deleted. Corrupt manifests
+fail closed: restore a verified backup and retry after review.
+
+A journal records prepared operations, page application, manifest commitment and
+pending finalization. Re-run ingestion after an interruption to retry safely;
+already applied replacements and absent deletions are recognized. Finalization
+failure is retried without redistilling committed sources. The journal contains source
+text and wiki metadata: protect it with the same filesystem access as the wiki.
+Do not edit managed pages or state while recovery is pending; changed preconditions
+cause a conflict rather than silently overwriting them. State replacement requires
+atomic rename support; unsupported filesystems return a persistence failure.
+
+Ingestion writers sharing the same local wiki/index directory are serialized with a
+filesystem lock, and manifest changes observed during planning are rejected. This is
+not distributed coordination: remote backends with independent index caches require
+one writer/operator. Ordinary wiki tools and external writers do not acquire this
+ingestion lock; do not run them concurrently with ingestion. Each page operation
+rechecks ownership, but there is no backend-wide transaction or distributed CAS.
+The console's existing manager is reused and never closed by ingestion.
+
+Dry-run reports `planned_writes`/`planned_removals`, conflicts and budget estimates;
+`written`/`removed` contain only applied operations. It calls no LLM and creates no
+filesystem destination files, logs, timestamps or migration state. Standalone remote
+dry-run requires an already supplied manager; it refuses to initialize a remote
+artifact cache. Temporary source clones/downloads are isolated and cleaned.
+
+Results expose `status` (`complete`, `noop`, `planned`, `partial`, `blocked`, `failed`),
+`ok`, `sync_complete`, scope, discovery completeness, missing sources, blocked prune,
+conflicts, deferrals, invalidated derivatives and recovery state. Wrappers return a
+nonzero exit status for unsuccessful requested work. Dry-run never claims applied
+synchronization. Explicit `wikiaccess=ro` is preserved by all entry points.
+
+Current chunk membership and generation checks prevent retired ingestion chunks from
+returning through context assembly. Pending journals suppress affected page chunks.
+Reference-aware cleanup preserves shared records. Known dependent summaries and facts
+are invalidated; graph page hooks clear page-owned semantic caches. Artifacts without
+sufficient provenance, manual links, and copied facts in legacy pages are preserved:
+this is not a guarantee of removing every historical semantic copy. No global semantic
+consolidation is launched to perform deterministic reconciliation.
+
+A legacy source hash proves source provenance, not the absence of later manual edits.
+Migration adopts a page signature only from a saved last-write signature or a complete
+reproducible deterministic page with matching generated metadata. Legacy distillations
+without such proof remain replacement conflicts. Review and preserve the legacy page
+separately, remove the old mapped destination with wiki tools, and retry to reconstruct
+from the complete source. This conservative conflict is necessary because historical
+LLM output cannot be reproduced reliably to prove ownership of its current contents.
