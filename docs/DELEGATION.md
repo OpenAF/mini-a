@@ -49,8 +49,8 @@ mini-a
 | `workerevictionttl` | number | `60000` | Heartbeat TTL (ms) before dynamic workers are auto-evicted |
 | `maxconcurrent` | number | `4` | Maximum concurrent child agents |
 | `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
-| `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
-| `delegationmaxretries` | number | `2` | Default retry count for failed subtasks |
+| `delegationtimeout` | number | `300000` | Default foreground wait and stall timeout (ms); activity extends execution unless a hard timeout is set |
+| `delegationmaxretries` | number | `2` | Maximum execution attempts for confirmed failures, including the initial attempt |
 
 When `workers` is set, Mini-A fetches each worker's `/.well-known/agent.json` (canonical A2A AgentCard, protocol 0.4.0+) at startup and routes delegated subtasks by matching A2A skills first. It scores workers using skill IDs, tags, names, and examples against the subtask goal. Worker `name` and `description` are secondary signals. If multiple workers share the same effective profile, Mini-A uses round-robin within that group. It falls back to the best compatible worker when no strong skill match exists.
 
@@ -167,7 +167,7 @@ Set `showdelegate=true` to display child agent events as separate console lines 
 - **Concurrency Control**: Limited by `maxconcurrent` (default 4); set `subtaskssequential=true` for one-at-a-time execution
 - **Depth Tracking**: Maximum nesting depth enforced (default 3)
 - **Automatic Retry**: Failed subtasks retry up to `maxAttempts` times with knowledge of previous failures
-- **Deadline Enforcement**: Tasks exceeding `deadlineMs` are marked as `timeout`
+- **Timeout Enforcement**: Local subtasks time out after inactivity unless `hardTimeoutMs` is set. Worker tasks also enforce their submitted total execution limit from the moment execution starts.
 - **Event Forwarding**: Child interaction events forwarded to parent with `[subtask:id]` prefix
 - **Auto-delegation guard**: Children never trigger auto-delegation themselves, preventing cascades
 
@@ -214,8 +214,8 @@ ojob mini-a-worker.yaml onport=8080 apitoken=your-secret-token
 | `apitoken` | string | (none) | Required bearer token for auth |
 | `apiallow` | string | (none) | Comma-separated IP allowlist |
 | `maxconcurrent` | number | `4` | Maximum concurrent tasks |
-| `defaulttimeout` | number | `300000` | Default task deadline (ms) |
-| `maxtimeout` | number | `600000` | Maximum allowed deadline (ms) |
+| `defaulttimeout` | number | `300000` | Default total worker execution limit (ms) |
+| `maxtimeout` | number | `600000` | Maximum accepted worker execution limit (ms) |
 | `taskretention` | number | `3600` | Seconds to keep completed results |
 | `workername` | string | `"mini-a-worker"` | Worker name reported by `/info` |
 | `workerdesc` | string | `"Mini-A worker API"` | Worker description reported by `/info` |

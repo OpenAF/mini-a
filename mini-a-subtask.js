@@ -64,6 +64,9 @@ var SubtaskManager = function(parentArgs, opts) {
     cancelled: 0,
     timedout: 0,
     retried: 0,
+    remotePollRetries: 0,
+    remoteOutcomeUnknown: 0,
+    remoteCancelFailures: 0,
     totalDurationMs: 0,
     maxDepthUsed: 0
   }
@@ -118,6 +121,14 @@ SubtaskManager.prototype._claimTerminal = function(subtask, newStatus, nowValue,
 SubtaskManager.prototype._getSubtaskTimeoutReason = function(subtask, now) {
   if (!isMap(subtask) || subtask.status !== "running") return __
   now = _$(now, "now").isNumber().default(new Date().getTime())
+
+  if (isNumber(subtask.totalDeadlineAt) && now >= subtask.totalDeadlineAt) {
+    return {
+      type: "total",
+      elapsed: now - subtask.startedAt,
+      message: "Total timeout exceeded (" + subtask.totalTimeoutMs + "ms)"
+    }
+  }
 
   if (isNumber(subtask.hardTimeoutMs) && subtask.hardTimeoutMs > 0 && isDef(subtask.startedAt)) {
     var elapsed = now - subtask.startedAt
@@ -991,10 +1002,11 @@ SubtaskManager.prototype._remoteCall = function(method, workerUrl, path, data) {
   }
 
   var response
+  var requestTimeoutMs = arguments.length > 4 && isNumber(arguments[4]) ? arguments[4] : 30000
   try {
     response = method === "GET"
-      ? $rest({ requestHeaders: headers }).get(url)
-      : $rest({ requestHeaders: headers }).post(url, data || {})
+      ? $rest({ requestHeaders: headers, timeout: requestTimeoutMs }).get(url)
+      : $rest({ requestHeaders: headers, timeout: requestTimeoutMs }).post(url, data || {})
   } catch (e) {
     var errMsg = isDef(e) && isString(e.message) ? e.message : stringify(e, __, "")
     throw new Error("Remote worker request failed (" + url + "): " + errMsg)
@@ -1011,12 +1023,24 @@ SubtaskManager.prototype._remoteCall = function(method, workerUrl, path, data) {
   return response
 }
 
-SubtaskManager.prototype._remoteRequest = function(workerUrl, path, payload) {
-  return this._remoteCall("POST", workerUrl, path, payload)
+SubtaskManager.prototype._remoteRequest = function(workerUrl, path, payload, timeoutMs) {
+  return this._remoteCall("POST", workerUrl, path, payload, timeoutMs)
 }
 
-SubtaskManager.prototype._remoteGet = function(workerUrl, path, query) {
-  return this._remoteCall("GET", workerUrl, path, query)
+SubtaskManager.prototype._remoteGet = function(workerUrl, path, query, timeoutMs) {
+  return this._remoteCall("GET", workerUrl, path, query, timeoutMs)
+}
+
+SubtaskManager.prototype._remoteObservationTimeoutMs = function(subtask) {
+  var timeoutMs = 30000
+  var now = new Date().getTime()
+  if (isMap(subtask) && isNumber(subtask.totalDeadlineAt)) {
+    timeoutMs = Math.min(timeoutMs, Math.max(1, subtask.totalDeadlineAt - now))
+  }
+  if (isMap(subtask) && isNumber(subtask.hardTimeoutMs) && subtask.hardTimeoutMs > 0 && isNumber(subtask.startedAt)) {
+    timeoutMs = Math.min(timeoutMs, Math.max(1, subtask.startedAt + subtask.hardTimeoutMs - now))
+  }
+  return Math.round(timeoutMs)
 }
 
 SubtaskManager.prototype._completeSubtask = function(subtask, prefix, answer, metrics, state) {
@@ -1039,6 +1063,32 @@ SubtaskManager.prototype._completeSubtask = function(subtask, prefix, answer, me
   this.metrics.completed++
 
   this.interactionFn("delegate", prefix + " ✅ Completed in " + Math.round(duration / 1000) + "s")
+  return true
+}
+
+SubtaskManager.prototype._cancelRemoteSubtask = function(subtask, reason) {
+  if (!this.remoteDelegation || !isMap(subtask) || !isString(subtask.workerUrl) || !isString(subtask.remoteTaskId)) return false
+  try {
+    if (this.useA2A) {
+      this._remoteRequest(subtask.workerUrl, "/tasks:cancel", { id: subtask.remoteTaskId, reason: reason }, 5000)
+    } else {
+      this._remoteRequest(subtask.workerUrl, "/cancel", { taskId: subtask.remoteTaskId, reason: reason }, 5000)
+    }
+    return true
+  } catch(ignoreRemoteCancel) {
+    this.metrics.remoteCancelFailures++
+    return false
+  }
+}
+
+SubtaskManager.prototype._failRemoteOutcomeUnknown = function(subtask, prefix, error) {
+  var message = "Remote outcome unknown: " + error
+  if (!this._claimTerminal(subtask, "failed", new Date().getTime(), message)) return false
+  this.metrics.failed++
+  this.metrics.remoteOutcomeUnknown++
+  if (isString(subtask.workerUrl) && subtask.workerUrl.length > 0) this._recordWorkerFailure(subtask.workerUrl, message)
+  this._cancelRemoteSubtask(subtask, message)
+  this.interactionFn("delegate", prefix + " ❌ " + message)
   return true
 }
 
@@ -1220,6 +1270,12 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
         }
         subtask.remoteTaskId = taskResponse.taskId
       }
+      // Cancellation can win while the submission request is in flight. Once
+      // the worker returns an ID, stop that late-accepted task before exiting.
+      if (subtask.status !== "running") {
+        parent._cancelRemoteSubtask(subtask, subtask.error || "Cancelled while remote task was submitted")
+        return
+      }
       parent.interactionFn("delegate", prefix + " Routed to worker: " + workerUrl)
       parent._touchSubtask(subtask, "routed to remote worker")
       if (isMap(parent._lastWorkerSelectionDetails) && parent._lastWorkerSelectionDetails.workerUrl === workerUrl) {
@@ -1230,6 +1286,7 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
         }
       }
 
+      var remotePollFailures = 0
       while (subtask.status === "running") {
         sleep(parent.remotePollIntervalMs, true)
         if (subtask.status !== "running") break
@@ -1241,8 +1298,9 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
         var status
         var remoteStatus = "running"
 
+        try {
         if (parent.useA2A) {
-          status = parent._remoteGet(workerUrl, "/tasks", { id: subtask.remoteTaskId })
+          status = parent._remoteGet(workerUrl, "/tasks", { id: subtask.remoteTaskId }, parent._remoteObservationTimeoutMs(subtask))
           if (isMap(status.task) && isMap(status.task.status) && isString(status.task.status.timestamp)) {
             try {
               var remoteTs = (new Date(status.task.status.timestamp)).getTime()
@@ -1254,10 +1312,10 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
           }
           var remoteState = isMap(status.task) && isMap(status.task.status) && isString(status.task.status.state) ? status.task.status.state.toUpperCase() : "TASK_STATE_WORKING"
           if (remoteState === "TASK_STATE_COMPLETED") remoteStatus = "completed"
-          if (remoteState === "TASK_STATE_FAILED") remoteStatus = "failed"
+          if (remoteState === "TASK_STATE_FAILED") remoteStatus = isMap(status.task) && isMap(status.task.status) && status.task.status.reason === "timeout" ? "timeout" : "failed"
           if (remoteState === "TASK_STATE_CANCELED" || remoteState === "TASK_STATE_CANCELLED") remoteStatus = "cancelled"
         } else {
-          status = parent._remoteRequest(workerUrl, "/status", { taskId: subtask.remoteTaskId })
+          status = parent._remoteRequest(workerUrl, "/status", { taskId: subtask.remoteTaskId }, parent._remoteObservationTimeoutMs(subtask))
           remoteStatus = isString(status.status) ? status.status.toLowerCase() : "running"
 
           if (isNumber(status.lastActivityAt) && (!isNumber(subtask.remoteLastActivityAt) || status.lastActivityAt > subtask.remoteLastActivityAt)) {
@@ -1278,6 +1336,18 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
             subtask.remoteEventIndex = status.events.length
           }
         }
+        remotePollFailures = 0
+        } catch(pollError) {
+          remotePollFailures++
+          parent.metrics.remotePollRetries++
+          if (remotePollFailures < 3 && subtask.status === "running") {
+            parent.interactionFn("delegate", prefix + " ⚠️ Remote status request failed; retrying observation (" + remotePollFailures + "/3)")
+            continue
+          }
+          var pollMessage = isDef(pollError) && isString(pollError.message) ? pollError.message : stringify(pollError, __, "")
+          parent._failRemoteOutcomeUnknown(subtask, prefix, "could not observe task " + subtask.remoteTaskId + ": " + pollMessage)
+          return
+        }
 
         if (remoteStatus === "queued" || remoteStatus === "running") continue
 
@@ -1288,7 +1358,7 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
           // /status can flip to completed slightly before /result is available.
           for (var attempt = 0; attempt < 5; attempt++) {
             try {
-              resultPayload = parent._remoteRequest(workerUrl, "/result", { taskId: subtask.remoteTaskId })
+              resultPayload = parent._remoteRequest(workerUrl, "/result", { taskId: subtask.remoteTaskId }, parent._remoteObservationTimeoutMs(subtask))
               if (isMap(resultPayload) && isMap(resultPayload.result)) break
             } catch (resultErr) {
               resultErrMsg = isDef(resultErr) && isString(resultErr.message) ? resultErr.message : stringify(resultErr, __, "")
@@ -1297,14 +1367,16 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
           }
 
           if (!(isMap(resultPayload) && isMap(resultPayload.result))) {
-            throw new Error("Remote task completed but result is not available yet" + (isString(resultErrMsg) ? ": " + resultErrMsg : ""))
+            parent._failRemoteOutcomeUnknown(subtask, prefix, "task completed but its result is unavailable" + (isString(resultErrMsg) ? ": " + resultErrMsg : ""))
+            return
           }
 
           var remoteResult = isMap(resultPayload) && isMap(resultPayload.result) ? resultPayload.result : {}
           var remoteError = isDef(remoteResult.error) ? String(remoteResult.error) : __
 
           if (isString(remoteError) && remoteError.length > 0) {
-            throw new Error(remoteError)
+            parent._failOrRetrySubtask(subtask, prefix, remoteError)
+            return
           }
 
           parent._completeSubtask(
@@ -1320,22 +1392,29 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
 
         resultPayload = __
         try {
-          resultPayload = parent._remoteRequest(workerUrl, "/result", { taskId: subtask.remoteTaskId })
+          resultPayload = parent._remoteRequest(workerUrl, "/result", { taskId: subtask.remoteTaskId }, parent._remoteObservationTimeoutMs(subtask))
         } catch(ignoreResultErr) {}
 
         var failedMsg = "Remote subtask ended with status: " + remoteStatus
         if (isMap(resultPayload) && isMap(resultPayload.result) && isDef(resultPayload.result.error)) {
           failedMsg = String(resultPayload.result.error)
         }
-        throw new Error(failedMsg)
+        if (remoteStatus === "timeout") {
+          if (parent._claimTerminal(subtask, "timeout", new Date().getTime(), failedMsg)) parent.metrics.timedout++
+          return
+        }
+        if (remoteStatus === "cancelled") {
+          if (parent._claimTerminal(subtask, "cancelled", new Date().getTime(), failedMsg)) parent.metrics.cancelled++
+          return
+        }
+        parent._failOrRetrySubtask(subtask, prefix, failedMsg)
+        return
       }
     } catch (e) {
       if (subtask.status === "running") {
         var error = isDef(e) && isString(e.message) ? e.message : stringify(e, __, "")
-        if (isString(subtask.workerUrl) && subtask.workerUrl.length > 0) {
-          parent._recordWorkerFailure(subtask.workerUrl, error)
-        }
-        parent._failOrRetrySubtask(subtask, prefix, error)
+        if (isString(subtask.remoteTaskId) && subtask.remoteTaskId.length > 0) parent._failRemoteOutcomeUnknown(subtask, prefix, error)
+        else parent._failOrRetrySubtask(subtask, prefix, error)
       }
     }
 
@@ -1399,6 +1478,8 @@ SubtaskManager.prototype.submit = function(goal, childArgs, opts) {
     deadlineMs: _$(opts.deadlineMs, "opts.deadlineMs").isNumber().default(this.defaultDeadlineMs),
     stallTimeoutMs: _$(opts.stallTimeoutMs, "opts.stallTimeoutMs").isNumber().default(this.defaultStallTimeoutMs),
     hardTimeoutMs: _$(opts.hardTimeoutMs, "opts.hardTimeoutMs").isNumber().default(this.defaultHardTimeoutMs),
+    totalTimeoutMs: _$(opts.totalTimeoutMs, "opts.totalTimeoutMs").isNumber().default(__),
+    totalDeadlineAt: __,
     lastActivityAt: now,
     lastActivityReason: "created",
     attempt: 0,
@@ -1451,6 +1532,9 @@ SubtaskManager.prototype.start = function(subtaskId) {
 
     subtask.status = "running"
     subtask.startedAt = new Date().getTime()
+    if (isNumber(subtask.totalTimeoutMs) && subtask.totalTimeoutMs > 0 && !isNumber(subtask.totalDeadlineAt)) {
+      subtask.totalDeadlineAt = subtask.startedAt + subtask.totalTimeoutMs
+    }
     manager._touchSubtask(subtask, "started")
     subtask.attempt++
     manager.runningCount++
@@ -1580,21 +1664,7 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
   }, this._transitionLock)
   if (!cancelled) return false
 
-  if (wasRunning && this._running === true && this.remoteDelegation && isString(subtask.workerUrl) && isString(subtask.remoteTaskId)) {
-    try {
-      if (this.useA2A) {
-        this._remoteRequest(subtask.workerUrl, "/tasks:cancel", {
-          id: subtask.remoteTaskId,
-          reason: reason || "Cancelled by user"
-        })
-      } else {
-        this._remoteRequest(subtask.workerUrl, "/cancel", {
-          taskId: subtask.remoteTaskId,
-          reason: reason || "Cancelled by user"
-        })
-      }
-    } catch(ignoreRemoteCancel) {}
-  }
+  if (wasRunning) this._cancelRemoteSubtask(subtask, cancelReason)
 
   if (wasRunning && isObject(subtask.childAgent)) {
     try {
@@ -1792,6 +1862,9 @@ SubtaskManager.prototype.getMetrics = function() {
     cancelled: this.metrics.cancelled,
     timedout: this.metrics.timedout,
     retried: this.metrics.retried,
+    remotePollRetries: this.metrics.remotePollRetries,
+    remoteOutcomeUnknown: this.metrics.remoteOutcomeUnknown,
+    remoteCancelFailures: this.metrics.remoteCancelFailures,
     avgDurationMs: avgDurationMs,
     maxDepthUsed: this.metrics.maxDepthUsed,
     workers: {

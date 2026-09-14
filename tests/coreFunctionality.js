@@ -2253,6 +2253,68 @@
     } finally { manager.destroy() }
   }
 
+  exports.testSubtaskShutdownCancelsRemoteTask = function() {
+    var manager = new SubtaskManager({}, {})
+    var calls = []
+    manager.remoteDelegation = true
+    manager._remoteRequest = function(workerUrl, path, payload, timeoutMs) {
+      calls.push({ workerUrl: workerUrl, path: path, payload: payload, timeoutMs: timeoutMs })
+      return {}
+    }
+    var subtask = { id: "remote-shutdown", status: "running", startedAt: new Date().getTime(), workerUrl: "http://worker", remoteTaskId: "task-1" }
+    manager.subtasks[subtask.id] = subtask
+    manager.runningCount = manager.metrics.running = 1
+    try {
+      manager.destroy()
+      ow.test.assert(subtask.status, "cancelled", "Shutdown must claim remote work as cancelled")
+      ow.test.assert(calls.length, 1, "Shutdown must request remote cancellation after disabling scheduling")
+      ow.test.assert(calls[0].path, "/cancel", "Legacy remote cancellation endpoint must be used")
+      ow.test.assert(calls[0].payload.taskId, "task-1", "Remote cancellation must target the submitted task")
+      ow.test.assert(calls[0].timeoutMs, 5000, "Remote cancellation must remain bounded during shutdown")
+    } finally { manager.destroy() }
+  }
+
+  exports.testSubtaskRemoteOutcomeUnknownDoesNotRetry = function() {
+    var manager = new SubtaskManager({}, {})
+    var calls = []
+    manager.remoteDelegation = true
+    manager._remoteRequest = function(workerUrl, path) { calls.push(path); return {} }
+    var subtask = { id: "remote-unknown", status: "running", startedAt: new Date().getTime(), workerUrl: "http://worker", remoteTaskId: "task-2", attempt: 1, maxAttempts: 2, metadata: {} }
+    manager.subtasks[subtask.id] = subtask
+    manager.runningCount = manager.metrics.running = 1
+    try {
+      ow.test.assert(manager._failRemoteOutcomeUnknown(subtask, "test", "status unavailable"), true, "Unknown remote outcome must become terminal")
+      ow.test.assert(subtask.status, "failed", "Unknown remote outcome must not return to the execution queue")
+      ow.test.assert(manager.pendingQueue.length, 0, "Unknown remote outcome must not resubmit the goal")
+      ow.test.assert(manager.metrics.retried, 0, "Unknown remote outcome must not count as an execution retry")
+      ow.test.assert(manager.metrics.remoteOutcomeUnknown, 1, "Unknown remote outcome must be metered")
+      ow.test.assert(calls[0], "/cancel", "Unknown remote outcome must attempt to stop the known task")
+    } finally { manager.destroy() }
+  }
+
+  exports.testSubtaskManagerEnforcesWorkerTotalTimeout = function() {
+    var manager = new SubtaskManager({}, { defaultStallTimeoutMs: 300000 })
+    var now = new Date().getTime()
+    var subtask = {
+      id: "worker-total-timeout",
+      status: "running",
+      startedAt: now - 600000,
+      totalTimeoutMs: 1000,
+      totalDeadlineAt: now - 1,
+      deadlineMs: 1000,
+      stallTimeoutMs: 300000,
+      lastActivityAt: now,
+      lastActivityReason: "remote event"
+    }
+    try {
+      var reason = manager._getSubtaskTimeoutReason(subtask, now)
+      ow.test.assert(isMap(reason), true, "Worker total deadline must override recent activity")
+      ow.test.assert(reason.type, "total", "Worker deadline must be categorized as a total timeout")
+      subtask.totalDeadlineAt = new Date().getTime() + 250
+      ow.test.assert(manager._remoteObservationTimeoutMs(subtask) <= 250, true, "Remote observation must not outlive the worker total deadline")
+    } finally { manager.destroy() }
+  }
+
   exports.testSubtaskManagerDoesNotTimeoutActiveSubtaskPastDeadline = function() {
     var manager = new SubtaskManager({}, { defaultStallTimeoutMs: 300000 })
     var now = new Date().getTime()

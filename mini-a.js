@@ -222,6 +222,9 @@ var MiniA = function() {
     delegation_cancelled: $atomic(0, "long"),
     delegation_timedout: $atomic(0, "long"),
     delegation_retried: $atomic(0, "long"),
+    delegation_remote_poll_retries: $atomic(0, "long"),
+    delegation_remote_outcome_unknown: $atomic(0, "long"),
+    delegation_remote_cancel_failures: $atomic(0, "long"),
     delegation_worker_hint_used: $atomic(0, "long"),
     delegation_worker_hint_matched: $atomic(0, "long"),
     delegation_worker_hint_fallthrough: $atomic(0, "long"),
@@ -2219,6 +2222,9 @@ MiniA.prototype.getMetrics = function() {
             cancelled: global.__mini_a_metrics.delegation_cancelled.get(),
             timedout: global.__mini_a_metrics.delegation_timedout.get(),
             retried: global.__mini_a_metrics.delegation_retried.get(),
+            remote_poll_retries: global.__mini_a_metrics.delegation_remote_poll_retries.get(),
+            remote_outcome_unknown: global.__mini_a_metrics.delegation_remote_outcome_unknown.get(),
+            remote_cancel_failures: global.__mini_a_metrics.delegation_remote_cancel_failures.get(),
             worker_hint_used: global.__mini_a_metrics.delegation_worker_hint_used.get(),
             worker_hint_matched: global.__mini_a_metrics.delegation_worker_hint_matched.get(),
             worker_hint_fallthrough: global.__mini_a_metrics.delegation_worker_hint_fallthrough.get(),
@@ -3028,6 +3034,9 @@ MiniA.prototype._syncDelegationMetrics = function() {
     if (isNumber(delegationMetrics.cancelled)) global.__mini_a_metrics.delegation_cancelled.set(Math.max(0, Math.round(delegationMetrics.cancelled)))
     if (isNumber(delegationMetrics.timedout)) global.__mini_a_metrics.delegation_timedout.set(Math.max(0, Math.round(delegationMetrics.timedout)))
     if (isNumber(delegationMetrics.retried)) global.__mini_a_metrics.delegation_retried.set(Math.max(0, Math.round(delegationMetrics.retried)))
+    if (isNumber(delegationMetrics.remotePollRetries)) global.__mini_a_metrics.delegation_remote_poll_retries.set(Math.max(0, Math.round(delegationMetrics.remotePollRetries)))
+    if (isNumber(delegationMetrics.remoteOutcomeUnknown)) global.__mini_a_metrics.delegation_remote_outcome_unknown.set(Math.max(0, Math.round(delegationMetrics.remoteOutcomeUnknown)))
+    if (isNumber(delegationMetrics.remoteCancelFailures)) global.__mini_a_metrics.delegation_remote_cancel_failures.set(Math.max(0, Math.round(delegationMetrics.remoteCancelFailures)))
   } catch(ignoreSync) {}
 }
 

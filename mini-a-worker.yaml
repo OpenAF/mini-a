@@ -192,7 +192,7 @@ todo:
     try {
       var toState = function(status) {
         if (status === "completed") return "TASK_STATE_COMPLETED";
-        if (status === "failed") return "TASK_STATE_FAILED";
+        if (status === "failed" || status === "timeout") return "TASK_STATE_FAILED";
         if (status === "cancelled") return "TASK_STATE_CANCELED";
         return "TASK_STATE_WORKING";
       };
@@ -203,7 +203,8 @@ todo:
           contextId: isMap(task.metadata) && isString(task.metadata.a2aContextId) ? task.metadata.a2aContextId : task.taskId,
           status: {
             state: toState(task.status),
-            timestamp: new Date(activityAt).toISOString()
+            timestamp: new Date(activityAt).toISOString(),
+            reason: task.status === "timeout" ? "timeout" : __
           }
         };
       };
@@ -884,6 +885,7 @@ jobs:
       var now = new Date().getTime()
       var subtaskId = global.__worker_taskManager.submit(mergedArgs.goal, mergedArgs, {
         deadlineMs: timeout,
+        totalTimeoutMs: timeout,
         maxAttempts: communication ? 1 : __,
         metadata: postData.metadata || {}
       })

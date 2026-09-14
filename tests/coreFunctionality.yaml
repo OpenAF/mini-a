@@ -472,6 +472,21 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testSubtaskCompletionPublishesResultBeforeTerminalState
 
+- name: MiniA Core Tests::SubtaskShutdownCancelsRemoteTask
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskShutdownCancelsRemoteTask
+
+- name: MiniA Core Tests::SubtaskRemoteOutcomeUnknownDoesNotRetry
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskRemoteOutcomeUnknownDoesNotRetry
+
+- name: MiniA Core Tests::SubtaskWorkerTotalTimeout
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskManagerEnforcesWorkerTotalTimeout
+
 - name: MiniA Core Tests::SubtaskActivePastDeadline
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -1263,6 +1278,9 @@ todo:
 - MiniA Core Tests::SubtaskCancellationWinsChildStopCompletion
 - MiniA Core Tests::SubtaskShutdownDoesNotStartQueuedWork
 - MiniA Core Tests::SubtaskCompletionPublishesResultBeforeTerminalState
+- MiniA Core Tests::SubtaskShutdownCancelsRemoteTask
+- MiniA Core Tests::SubtaskRemoteOutcomeUnknownDoesNotRetry
+- MiniA Core Tests::SubtaskWorkerTotalTimeout
 - MiniA Core Tests::SummaryRequestsAreIsolated
 - MiniA Core Tests::OverflowRecoveryResetsProviderHistories
 - MiniA Core Tests::SummaryMaintenanceUsesSafeBoundary
