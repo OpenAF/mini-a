@@ -1385,6 +1385,36 @@
         animation: streamFadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
+    .answer-activity {
+        margin: 0.75rem 0;
+        border: 1px solid var(--border);
+        border-radius: 0.6rem;
+        background: var(--panel-bg);
+        color: var(--text);
+    }
+    .answer-activity > summary {
+        cursor: pointer;
+        padding: 0.65rem 0.85rem;
+        font-size: 0.9rem;
+        color: #737373;
+        font-style: italic;
+    }
+    .activity-body {
+        color: #737373;
+    }
+    .answer-activity > summary:focus-visible {
+        outline: 2px solid currentColor;
+        outline-offset: 2px;
+    }
+    .activity-body { padding: 0 0.85rem 0.75rem; overflow-wrap: anywhere; }
+    .activity-event { margin: 0.35rem 0; }
+    .activity-event > span {
+        color: var(--text);
+        opacity: 0.60;
+        font-style: italic;
+    }
+    .activity-warning { margin-left: 0.5rem; font-size: 0.85em; }
+
     /* ========== PLAN PANEL ========== */
     .plan-panel {
         margin-top: 0.6rem;
@@ -1984,6 +2014,10 @@
     let lastSubmittedPrompt = '';
     let lastFinishedPrompt = '';
     let lastKnownHistory = [];
+    let activityDisclosureState = new Map();
+    let streamCompletedActivities = new Set();
+    let showExecsEnabled = false;
+    let resetActivityDisclosure = false;
     let activeHistoryId = null;
     let historyEnabled = true;
     let attachmentsEnabled = false;
@@ -2567,7 +2601,7 @@
     }
 
     function extractLastAnswerFromText(text) {
-        const allText = text || '';
+        const allText = (text || '').replace(/<details class="answer-activity"[\s\S]*?<\/details>/g, '');
         if (!allText) return '';
 
         const lines = allText.split('\n');
@@ -2620,7 +2654,10 @@
                 sourceText = extractPlainTextFromHtml(html);
             }
 
-            const lastAnswer = extractLastAnswerFromText(sourceText);
+            const finalEvent = getCurrentConversationEvents().slice().reverse().find(ev => ev.event === 'final');
+            const lastAnswer = finalEvent && typeof finalEvent.message === 'string'
+                ? (extractAssistantAnswerText(finalEvent.message) || finalEvent.message.trim())
+                : extractLastAnswerFromText(sourceText);
             if (!lastAnswer) {
                 throw new Error('No answer available to copy.');
             }
@@ -2884,6 +2921,80 @@
         }
     }
 
+    function captureActivityDisclosures() {
+        if (resetActivityDisclosure) {
+            activityDisclosureState.clear();
+            streamCompletedActivities.clear();
+            resetActivityDisclosure = false;
+            return;
+        }
+        resultsDiv.querySelectorAll('details.answer-activity').forEach(panel => {
+            if (panel.dataset.activityKey) {
+                activityDisclosureState.set(panel.dataset.activityKey, {
+                    open: panel.open, complete: panel.dataset.complete
+                });
+            }
+        });
+    }
+
+    function restoreActivityDisclosures() {
+        resultsDiv.querySelectorAll('details.answer-activity').forEach(panel => {
+            const key = `${currentSessionUuid || ''}:${panel.dataset.activityId}`;
+            const previous = activityDisclosureState.get(key);
+            if (streamCompletedActivities.has(key)) panel.dataset.complete = 'true';
+            // Completion closes the active section once; later renders retain the user's choice.
+            panel.open = previous && previous.complete === panel.dataset.complete
+                ? previous.open : panel.dataset.complete !== 'true';
+            panel.dataset.activityKey = key;
+        });
+    }
+
+    function completeStreamActivity(rawContent) {
+        captureActivityDisclosures();
+        // Mark by stable answer ID, including sections in a pending render.
+        for (const match of (rawContent || '').matchAll(/<details class="answer-activity" data-activity-id="(\d+)" data-complete="false"/g)) {
+            streamCompletedActivities.add(`${currentSessionUuid || ''}:${match[1]}`);
+        }
+        restoreActivityDisclosures();
+    }
+
+    // Older saved conversations contain events but predate activity markup.
+    function upgradeActivityTranscript(content, events) {
+        if (!Array.isArray(events) || !events.some(ev => ev.event === 'final')) return content || '';
+        let result = '';
+        let lines = [];
+        let warnings = 0;
+        let id = 0;
+        const flush = complete => {
+            if (!lines.length) {
+                warnings = 0;
+                return;
+            }
+            result += `\n\n<details class="answer-activity" data-activity-id="${id}" data-complete="${complete}"${complete ? '' : ' open'}><summary>Activity${warnings ? ` <span class="activity-warning">⚠ ${warnings} warning/error event(s)</span>` : ''}</summary><div class="activity-body">${lines.join('')}</div></details>\n\n`;
+            lines = [];
+            warnings = 0;
+        };
+        events.forEach((ev, index) => {
+            if (ev.event === 'final') {
+                flush(true);
+                id++;
+                result += '\n' + (ev.message || '') + '\n';
+            } else if (ev.event === '👤' || ev.event === 'user') {
+                flush(false);
+                id = index;
+                result += buildOptimisticUserPromptBlock(ev.message);
+            } else {
+                if (/^(⚠️|❌|❗|warn|warning|error)$/.test(ev.event) ||
+                    (ev.event === '🤝' && /❌|❗|⚠️|failed|timeout/i.test(ev.message || ''))) warnings++;
+                if (!['🧩', '💡', '💭', '🌀', '🛑', '⏳'].includes(ev.event) &&
+                    !(showExecsEnabled && ['⚙️', '🖥️'].includes(ev.event))) return;
+                lines.push(`<div class="activity-event">${escapeHtml(ev.event)} <span>${escapeHtml(ev.message).replace(/\n/g, '<br>')}</span></div>`);
+            }
+        });
+        flush(false);
+        return result;
+    }
+
     async function updateResultsContent(htmlContent) {
         if (!resultsDiv) return;
 
@@ -2901,8 +3012,10 @@
         const contentChanged = processedHtml !== lastRenderedHtml;
         const hadContent = lastRenderedHtml.length > 0;
 
+        captureActivityDisclosures();
         lastRenderedHtml = processedHtml;
         resultsDiv.innerHTML = processedHtml;
+        restoreActivityDisclosures();
 
         // Apply streaming class and animation
         if (isStreaming) {
@@ -4638,6 +4751,7 @@
             if (typeof data.showthinking === 'boolean') {
                 window.__mini_a_showthinking = data.showthinking;
             }
+            if (typeof data.showexecs === 'boolean') showExecsEnabled = data.showexecs;
             if (typeof data.usemath === 'boolean') {
                 shouldEnableMath = data.usemath;
             }
@@ -4850,6 +4964,7 @@
 
     async function loadConversationEntry(entry) {
         if (!entry) return;
+        resetActivityDisclosure = true;
 
         if (isProcessing) {
             stopProcessing(true);
@@ -4870,7 +4985,8 @@
 
         currentSessionUuid = entry.uuid;
 
-        const preprocessed = preprocessChartBlocks(preprocessSvgBlocks(entry.content || ''));
+        const savedContent = upgradeActivityTranscript(entry.content || '', lastKnownHistory);
+        const preprocessed = preprocessChartBlocks(preprocessSvgBlocks(savedContent));
         const htmlContent = converter.makeHtml(preprocessed);
         await updateResultsContent(htmlContent);
         resetPlanPanel();
@@ -4881,7 +4997,8 @@
         __refreshDarkMode();
         refreshHistoryPanel();
         closeHistoryPanel();
-        lastRawContent = entry.content || '';
+        lastRawContent = savedContent;
+        lastRenderedRaw = '';
     }
 
     async function refreshCurrentConversationView() {
@@ -5357,6 +5474,7 @@
 
     /* ========== PROCESSING STATE MANAGEMENT ========== */
     function startProcessing() {
+        streamCompletedActivities.clear();
         isProcessing = true;
         conversationFinished = false;
         pollErrorCount = 0;
@@ -5862,11 +5980,14 @@
             syncPreviewText();
             scheduleImmediatePoll(10);
         });
-        streamSource.addEventListener('done', () => {
+        streamSource.addEventListener('done', (event) => {
             setPlanningMode(false);
             const combined = mergeFinalContentWithStream(lastRawContent, streamBuffer);
-            renderRawContent(combined).catch(() => { /* ignore */ });
+            let payload = {};
+            try { payload = JSON.parse(event.data); } catch (e) { /* ignore malformed completion */ }
+            if (payload.status === 'finished') completeStreamActivity(combined);
             closeStreamConnectionKeepBuffers();
+            renderRawContent(combined).catch(() => { /* ignore */ });
             scheduleImmediatePoll(0);
         });
         streamSource.addEventListener('error', (event) => {
@@ -5935,6 +6056,7 @@
 
     /* ========== EVENT HANDLERS ========== */
     async function handleClearClick() {
+        resetActivityDisclosure = true;
         const uuidToClear = currentSessionUuid || 
             (typeof window !== 'undefined' ? window.mini_a_session_uuid : null);
 

@@ -1441,6 +1441,7 @@ MiniA.prototype._logMessageWithCounter = function(type, message) {
 }
 
 MiniA.prototype._translateProxyToolThought = function(actionName, params, thoughtValue) {
+  if (isString(thoughtValue)) thoughtValue = thoughtValue.replace(/^Use tool\b/, "Using tool")
   if (((actionName || "") + "").trim().toLowerCase() !== "proxy-dispatch" || !isMap(params)) return thoughtValue
   if (params.action !== "call" || !isString(params.tool) || params.tool.trim().length === 0) return thoughtValue
   if (!isString(thoughtValue)) return thoughtValue
@@ -7680,7 +7681,7 @@ MiniA.prototype._extractToolCallActions = function(payload, allowedTools, opts) 
         if (seen[key]) return
         seen[key] = true
         results.push({
-            thought: this._translateProxyToolThought(normalizedTool, normalizedArgs, isString(source) && source.length > 0 ? source : `Use tool '${normalizedTool}'`),
+            thought: this._translateProxyToolThought(normalizedTool, normalizedArgs, isString(source) && source.length > 0 ? source : `Using tool '${normalizedTool}'`),
             action : normalizedTool,
             params : normalizedArgs
         })
@@ -16894,7 +16895,14 @@ MiniA.prototype.init = function(args) {
                 if (isObject(parent._runtime)) {
                   parent._runtime.modelToolCallDetected = true
                 }
-                parent.fnI(MiniA._isCommsTool(t, a) ? "comms" : "exec", `Executing action '${t}' with parameters: ${MiniA._isCommsTool(t, a) ? "[payload omitted]" : parent._truncateAuditValue(af.toCSLON(a), 800)}`)
+                var proxyDisplayTool = t === "proxy-dispatch" && isMap(a) && a.action === "call" && isString(a.tool) && a.tool.trim().length > 0
+                  ? a.tool.trim() : __
+                parent._pendingProxyDisplayTool = proxyDisplayTool
+                try {
+                  parent.fnI(MiniA._isCommsTool(t, a) ? "comms" : "exec", `Executing action '${t}' with parameters: ${MiniA._isCommsTool(t, a) ? "[payload omitted]" : parent._truncateAuditValue(af.toCSLON(a), 800)}`)
+                } finally {
+                  parent._pendingProxyDisplayTool = __
+                }
                 parent._trace("tool_call", { name: t, params: a })
 
                 // Track per-tool call count

@@ -1183,6 +1183,7 @@ todo:
       
           // Initialize MiniA
           lma = new MiniA()
+          var pendingProxyThought = __
           lma.setInteractionFn( (e, m) => {
             try {
               if (e == "stream") {
@@ -1333,11 +1334,7 @@ todo:
               }
               var _subtaskId = global._mini_a_web_extractSubtaskId(m)
               if (e == "subagent" || isString(_subtaskId)) {
-                // Subtask/subagent events are always kept out of the main answer
-                // transcript (global.__res) so raw "[subtask:xxxx]" markers never
-                // leak into the web answer view. When showdelegate=true they are
-                // still tracked as separate lines in the dedicated subagent panel
-                // (global.__subagentState / _res.subagents) instead.
+                // Child events remain in the dedicated subagent panel.
                 if (global.__showdelegate) {
                   var _sid = isString(_subtaskId) ? _subtaskId : sha1(m || "").substring(0, 8)
                   var _title = "Sub-agent " + _sid
@@ -1358,6 +1355,23 @@ todo:
                 }
                 log("[" + uuid + "] 🤝 " + m)
                 return
+              }
+              var isGenericProxyThought = _e == "💭" && isString(m) && /^Using tool ['"]proxy-dispatch['"]\.?$/i.test(m.trim())
+              var isTranslatedProxyThought = _e == "💭" && isString(m) && /^Using tool ['"](?!proxy-dispatch['"])([^'"]+)['"]\.?$/i.test(m.trim())
+              if (isGenericProxyThought) {
+                // A streamed reasoning block can announce the proxy before its
+                // native function call exposes the downstream tool. Wait one
+                // event so the activity panel can show the useful tool name.
+                pendingProxyThought = m
+                return
+              }
+              if (isDef(pendingProxyThought)) {
+                if (_e == "⚙️" && isString(lma._pendingProxyDisplayTool)) {
+                  global.__res[uuid].push({ event: "💭", message: "Using tool '" + lma._pendingProxyDisplayTool + "'" })
+                } else if (!isTranslatedProxyThought) {
+                  global.__res[uuid].push({ event: "💭", message: pendingProxyThought })
+                }
+                pendingProxyThought = __
               }
               global.__res[uuid].push({ event: _e, message: m })
               if (global.__usestream && isFunction(global._mini_a_web_ssePush) && _e != "🗺️") {
@@ -1575,6 +1589,18 @@ todo:
 
         // Append all messages to content
         var _history = []
+        var activityLines = []
+        var activityWarnings = 0
+        var activityId = 0
+        function flushActivity(complete) {
+          if (activityLines.length == 0) {
+            activityWarnings = 0
+            return
+          }
+          _res.content += '\n\n<details class="answer-activity" data-activity-id="' + activityId + '" data-complete="' + complete + '"' + (complete ? '' : ' open') + '><summary>Activity' + (activityWarnings > 0 ? ' <span class="activity-warning">⚠ ' + activityWarnings + ' warning/error event(s)</span>' : '') + '</summary><div class="activity-body">' + activityLines.join('') + '</div></details>\n\n'
+          activityLines = []
+          activityWarnings = 0
+        }
         for (var i = 0; i < global.__res[ postData.uuid ].length; i++) {
           var r = global.__res[ postData.uuid ][i]
           if (isDef(r.event)) {
@@ -1583,6 +1609,8 @@ todo:
             _history.push(_h)
           }
           if (r.event == "final") {
+            flushActivity(true)
+            activityId++
             if (i == global.__res[ postData.uuid ].length - 1) {
               _res.status = "finished"
               _res.phase = "finished"
@@ -1591,16 +1619,19 @@ todo:
             //delete global.__res[ postData.uuid ]
             //break
           } else {
-            // Exclude planning (🗺️) messages from the content log; plan panel remains driven by __planState
-            if (r.event == "👤" || (r.event == "⚙️" && global.__showexecs) || (r.event == "🖥️" && global.__showexecs) || r.event == "🧩" || r.event == "💡" || r.event == "💭" || r.event == "🌀" || r.event == "🛑" || r.event == "⏳") {
-              if (r.event == "👤") {
-                _res.content += "<div style=\"text-align: right;\"><i><div style=\"display: inline-block; text-align: left;\">" + __formatUserMessage(r.message) + "</div> " + r.event + "</i>\n<br><br></div>"
-              } else {
-                _res.content += r.event + " <i><span style=\"color: var(--text); opacity: 0.60;\">" + __escapeHtml(r.message).replace(/\n/g, "<br>") + "</span></i>\n"
-              }
+            if (r.event == "👤" || r.event == "user") {
+              flushActivity(false)
+              activityId = i
+              _res.content += "<div style=\"text-align: right;\"><i><div style=\"display: inline-block; text-align: left;\">" + __formatUserMessage(r.message) + "</div> " + r.event + "</i>\n<br><br></div>"
+            } else if (isDef(r.event)) {
+              if (/^(⚠️|❌|❗|warn|warning|error)$/.test(r.event) || (r.event == "🤝" && /❌|❗|⚠️|failed|timeout/i.test(String(r.message)))) activityWarnings++
+              // Group only the messages that were visible before activity disclosures.
+              if (!(r.event == "🧩" || r.event == "💡" || r.event == "💭" || r.event == "🌀" || r.event == "🛑" || r.event == "⏳" || ((r.event == "⚙️" || r.event == "🖥️") && global.__showexecs))) continue
+              activityLines.push('<div class="activity-event">' + __escapeHtml(r.event) + ' <span>' + __escapeHtml(r.message).replace(/\n/g, '<br>') + '</span></div>')
             }
           }
         }
+        flushActivity(false)
         _res.history = _history
         if (hasActivePlan) {
           _res.plan = {

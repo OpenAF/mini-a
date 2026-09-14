@@ -1885,6 +1885,8 @@ Tokens appear incrementally with markdown formatting applied in real-time.
 
 The browser receives tokens via Server-Sent Events (SSE) and renders them progressively with debounced updates (80ms) for smooth display.
 
+In web mode (`onport=...`), each answer's activity stays expanded while work is in progress and collapses when the final answer finishes, with or without streaming. Successful SSE completion collapses it immediately, without waiting for the next results poll. **Activity** groups the same thought, execution, skill, summarization, stop, and rate messages previously displayed; it does not enable additional log messages. Execution visibility still follows `showexecs`, and plans/subagents retain their existing live panels. A warning/error indicator can appear on the summary without exposing additional logs. Your expansion choice survives UI refreshes, while reopening a saved conversation starts completed sections collapsed.
+
 **Benefits:**
 - Immediate visual feedback shows the agent is working
 - Faster perceived response time for long answers

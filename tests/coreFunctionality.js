@@ -683,15 +683,16 @@
     var extracted = agent._extractToolCallActions({ tool_calls: [
       { function: { name: "proxy-dispatch", arguments: stringify(params, __, "") } }
     ] }, ["proxy-dispatch"])
-    ow.test.assert(extracted[0].thought, "Use tool 'http-request'", "Native tool fallback should display the downstream tool")
+    ow.test.assert(extracted[0].thought, "Using tool 'http-request'", "Native tool fallback should display the downstream tool")
     ow.test.assert(extracted[0].action, "proxy-dispatch", "Display translation must preserve routing")
     ow.test.assert(extracted[0].params.tool, "http-request", "Display translation must preserve downstream arguments")
     agent._emitCanonicalThoughtEvent("proxy-dispatch", "Use tool 'proxy-dispatch'", "(no thought)", params)
-    ow.test.assert(events[0].message, "Use tool 'http-request'", "Action-mode thoughts should display the downstream tool")
+    ow.test.assert(events[0].message, "Using tool 'http-request'", "Action-mode thoughts should display the downstream tool")
     ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", params, "Fetch the page"), "Fetch the page", "Descriptive thoughts should be preserved")
-    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { action: "list" }, "Use tool 'proxy-dispatch'"), "Use tool 'proxy-dispatch'", "Management actions have no downstream tool")
-    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { action: "call", tool: "" }, "Use tool 'proxy-dispatch'"), "Use tool 'proxy-dispatch'", "Missing downstream names must not invent a tool")
-    ow.test.assert(agent._translateProxyToolThought("other-tool", params, "Use tool 'proxy-dispatch'"), "Use tool 'proxy-dispatch'", "Direct tools should remain unchanged")
+    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { action: "list" }, "Use tool 'proxy-dispatch'"), "Using tool 'proxy-dispatch'", "Management actions have no downstream tool")
+    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { action: "call", tool: "" }, "Use tool 'proxy-dispatch'"), "Using tool 'proxy-dispatch'", "Missing downstream names must not invent a tool")
+    ow.test.assert(agent._translateProxyToolThought("other-tool", params, "Use tool 'other-tool'"), "Using tool 'other-tool'", "Direct tool names should remain unchanged")
+    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", params, "Using tool 'proxy-dispatch'"), "Using tool 'http-request'", "Already normalized thoughts should translate too")
   }
 
   exports.testCanonicalThoughtEmitterSeparatesThoughtAndThink = function() {
