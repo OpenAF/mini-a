@@ -1,0 +1,8 @@
+{
+  "suite": "wiki",
+  "assertions": 1769,
+  "passedFunctions": 190,
+  "failures": [],
+  "runtimeSha1": "91b787af6ba5b36deda60a8384ca9349956d0c27",
+  "testSha1": "7522cdbf4df482ca794f90a13a525921d0ea4b58"
+}

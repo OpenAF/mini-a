@@ -68,6 +68,13 @@ help:
     desc     : Local cache directory used for downloaded S3 Lucene artifacts
     example  : "/var/cache/mini-a/wiki"
     mandatory: false
+  - name     : wikiretrievalv2
+    desc     : Opt-in versioned passage retrieval; requires compatible serving artifacts; build explicitly on writable FS/s3fs or hydrate a published bundle
+    example  : "false"
+    mandatory: false
+  - name     : wikiretrievalconfig
+    desc     : Validated SLON/JSON advanced passage, cache and artifact budgets
+    mandatory: false
   - name     : wikilexical
     desc     : "SLON/JSON Lucene lexical configuration. Defaults to {language: 'english'}; supports inline synonyms and an optional synonymsFile."
     example  : "{ language: 'english', synonymsFile: 'synonyms.txt' }"
@@ -129,7 +136,7 @@ help:
     example  : "engineering"
     mandatory: false
   - name     : wikirestrictrefch
-    desc     : "SLON/JSON OpenAF channel definition to store search-issued references and page cooldowns (default: this process's own memory only). State is namespaced by wikiid, so one Redis/channel can safely serve several wikis. Set this to share references across replicas of the same wiki behind a load balancer; those replicas must use the same wikiid. Use a channel with real per-key ops across writers, such as redis (`simple`/`file` are single-writer only, fine standalone but unsafe shared by concurrent replicas). Entries are discarded once their TTL/cooldown elapses."
+    desc     : "SLON/JSON OpenAF channel definition to store search-issued references and page cooldowns (default: this process's own memory only). State is namespaced by wikiid, so one Redis/channel can safely serve several wikis. Set this to share references across replicas of the same wiki behind a load balancer; those replicas must use the same wikiid. Quota/ref/cooldown transactions are coordinated within one writer JVM. Multiple writer JVMs require external coordination; per-key Redis/Mongo operations alone are insufficient. Use the same policy and wikiid for one namespace. Entries are discarded once their TTL/cooldown elapses."
     example  : "(type: 'redis', options: (host: 'redis.svc', port: 6379))"
     mandatory: false
   - name     : audit
@@ -155,7 +162,7 @@ todo:
     ((fnsMeta)): &MCPFNSMETA
       search:
         name       : search
-        description: "[START HERE] Search {{label}} for a targeted answer. This is lexical keyword retrieval, not semantic question answering: use specific keywords, names, aliases, and short phrases. A compatible Lucene index is used when available; otherwise the permitted wiki scope is scanned. When explicitly enabled, graph-related pages may be returned only as opaque supplemental references. Always call this before read. Returns bounded title+description metadata and an opaque, short-lived read reference per match; it never returns page paths or full content. Safe-mode policy caps results and disables broad/scoped/regex/context searches."
+        description: "[START HERE] Search {{label}} for a targeted answer. This is lexical keyword retrieval, not semantic question answering: use specific keywords, names, aliases, and short phrases. A compatible Lucene index is used when available; otherwise the permitted wiki scope is scanned. When explicitly enabled, graph-related pages may be returned only as opaque supplemental references. With opt-in passage artifacts, relevance selects the private excerpt used by read. Always call this before read. Returns bounded title+description metadata and an opaque, short-lived read reference per match; it never returns page paths or full content. V2 requires a compatible writable build and reports unavailable rather than scanning absent artifacts. Safe-mode policy caps results and disables broad/scoped/regex/context searches."
         inputSchema:
           type      : object
           properties:
@@ -189,7 +196,7 @@ todo:
 
       read:
         name       : read
-        description: "Read a bounded excerpt from {{label}} using the opaque reference returned by search. References are single-use and short-lived. For a focused excerpt, use section= or a valid startLine/endLine range; the configured line and character caps still apply."
+        description: "Read a bounded excerpt from {{label}} using the opaque reference returned by search. References are single-use and short-lived. In v2 the server selects passages and includes complete prerequisite/warning/header context when it fits the same disclosure caps; incomplete:true means required support was omitted. Legacy references may select a section or valid line range within the configured caps."
         inputSchema:
           type      : object
           properties:
@@ -214,7 +221,7 @@ todo:
               default    : false
             compact:
               type       : boolean
-              description: Accepted for compatibility; safe mode always returns its bounded content-only response.
+              description: Accepted for compatibility; safe mode returns bounded content, with incomplete:true when required v2 support cannot fit.
               default    : false
           required  : [ path ]
         annotations:
@@ -268,6 +275,8 @@ jobs:
       wikihttptimeout         : toNumber.isNumber.default(30000)
       wikiartifactrefreshsecs : toNumber.isNumber.default(0)
       wikiindexdir            : isString.default(__)
+      wikiretrievalv2: toBoolean.isBoolean.default(__)
+      wikiretrievalconfig: isString.default(__)
       wikilexical             : isString.default(__)
       usewikigraph            : toBoolean.isBoolean.default(false)
       wikirestrictprofile     : isString.default("tight")

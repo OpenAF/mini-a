@@ -1,0 +1,59 @@
+--- a/mini-a-wiki-retrieval.js
++++ b/mini-a-wiki-retrieval.js
+@@ -483,12 +483,26 @@
+   var L = Packages.org.apache.lucene
+   return new L.index.IndexWriter(directory, new L.index.IndexWriterConfig(analyzer))
+ }
++MiniAWikiRetrievalV2.prototype._forkCatalogue = function(source, generation, work) {
++  var catalog = {}, maps = ["pages", "passages", "reverseLinks", "moveReverse", "blockRefs"]
++  Object.keys(source).forEach(function(key) { catalog[key] = source[key] })
++  maps.forEach(function(name) {
++    if (!isMap(source[name])) return
++    var target = {}
++    Object.keys(source[name]).forEach(function(key) { target[key] = source[name][key]; work.catalogueKeysCopied++ })
++    catalog[name] = target
++  })
++  catalog.generation = generation
++  work.sharedPageRecords = Object.keys(source.pages).length
++  work.sharedPassageRecords = Object.keys(source.passages).length
++  return catalog
++}
+ MiniAWikiRetrievalV2.prototype.build = function(changes) {
+   var m = this.manager, self = this
+   if (this.capabilityError) return {ok:false,error:this.capabilityError}
+   if (m._access !== "rw") return { ok: false, error: "wiki is read-only" }
+   if (["fs", "s3fs"].indexOf(m._backendType) < 0 || m._archiveRoot) return { ok: false, error: "v2-backend-unsupported" }
+-  var work = { linkedFiles: 0, linkedBytes: 0, copiedFiles: 0, copiedBytes: 0, reusedChecksums: 0, reusedChecksumBytes: 0, reverseTargetsVisited: 0, legacyCataloguePagesVisited: 0 }, reused={}
++  var work = { linkedFiles: 0, linkedBytes: 0, copiedFiles: 0, copiedBytes: 0, reusedChecksums: 0, reusedChecksumBytes: 0, reverseTargetsVisited: 0, legacyCataloguePagesVisited: 0, catalogueKeysCopied: 0, sharedPageRecords: 0, sharedPassageRecords: 0 }, reused={}
+   var generation = String(java.util.UUID.randomUUID()), dir = this.root + "/" + generation, writer, directory, analyzer, old, snapshot, fileLock, channel, activated = false
+   try {
+     io.mkdir(this.root)
+@@ -498,7 +512,7 @@
+     this._publicationCheckpoint("staging-created", dir)
+     var catalog = { schema: 1, generation: generation, wikiId: sha1(m._getBackendIdentity()), pages: {}, passages: {}, reverseLinks: {}, moveReverse: {}, blockRefs: {} }
+     if (isArray(changes)) {
+-      old = this.acquire(); catalog = clone(old.catalog); catalog.generation = generation
++      old = this.acquire(); catalog = this._forkCatalogue(old.catalog, generation, work)
+       // Additive builder-only mapping for generations built before block postings.
+       if (!isMap(catalog.blockRefs)) {
+         catalog.blockRefs = {}
+@@ -605,8 +619,7 @@
+         if (resolved && page.moveTargets.indexOf(resolved) < 0) page.moveTargets.push(resolved)
+       })
+       if (isMap(catalog.moveReverse)) page.moveTargets.forEach(function(target) {
+-        if (!catalog.moveReverse[target]) catalog.moveReverse[target] = []
+-        catalog.moveReverse[target].push(path)
++        catalog.moveReverse[target] = (catalog.moveReverse[target] || []).concat([path])
+       })
+       catalog.pages[path] = page
+       catalog.blockRefs[locator] = (catalog.blockRefs[locator] || 0) + 1; affectedBlocks[locator] = true
+@@ -614,8 +627,7 @@
+       page.links.forEach(function(link) { if (!targets[link.resolved]) targets[link.resolved] = []; targets[link.resolved].push(link) })
+       Object.keys(targets).forEach(function(target) {
+         work.reverseTargetsVisited++
+-        if (!catalog.reverseLinks[target]) catalog.reverseLinks[target] = []
+-        catalog.reverseLinks[target].push({ path: path, title: page.title, links: targets[target] })
++        catalog.reverseLinks[target] = (catalog.reverseLinks[target] || []).concat([{ path: path, title: page.title, links: targets[target] }])
+       })
+     })
+     // Direct reference counts remove only newly retired immutable blocks.

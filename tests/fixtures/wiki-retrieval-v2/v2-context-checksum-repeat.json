@@ -1,0 +1,7 @@
+{
+  "suite": "wikiRetrievalV2",
+  "runs": 2,
+  "sameJvm": true,
+  "assertions": 962,
+  "failures": []
+}

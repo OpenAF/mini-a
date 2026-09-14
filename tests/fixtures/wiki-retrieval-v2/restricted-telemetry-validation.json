@@ -1,0 +1,26 @@
+{
+  "sources": {
+    "mini-a-wiki-retrieval.js": "8fc7302edbfee665761b08889e519bfcd69fc85a",
+    "mini-a-mcp-wiki.js": "f7805790f4a06050caa3db0cc28e3a3651b4847c",
+    "tests/wikiRetrievalV2.js": "c990006873b66aa7e2d5da995d3788f817676acc"
+  },
+  "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",
+  "wiki": {
+    "suite": "wiki",
+    "assertions": 2038,
+    "passedFunctions": 193,
+    "failures": []
+  },
+  "targeted": [
+    "RESTRICTED_TELEMETRY_READONLY_PASS",
+    "DISABLED_RESTRICTED_OBSERVER_PASS"
+  ],
+  "disabledObserverAssertions": 2,
+  "limitations": [
+    "Adapter outcomes only; no transport-before-job or skills event coverage",
+    "No complete backend physical/protocol I/O accounting",
+    "Read-only counters are in-memory only",
+    "No new performance or live-provider claim",
+    "Full-plan acceptance remains incomplete"
+  ]
+}

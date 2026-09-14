@@ -1,0 +1,6 @@
+{
+  "suite": "wikiRetrievalV2",
+  "assertions": 572,
+  "passedFunctions": 26,
+  "failures": []
+}

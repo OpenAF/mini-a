@@ -27,6 +27,41 @@
     f.initial = function() { f.write('a.md', '# A\n\n## One\n\nFIRST\n\n## Two\n\nSECOND\n\n## Three\n\nTHIRD'); f.write('b.md', '# B\n\nB remains'); return f.run() }
     try { fn(f) } finally { io.rm(src); io.rm(wiki) }
   }
+  exports.testLegacyContextProvenance = function() { fixture(function(f) {
+    f.write('a.md','# Original source\nSOURCE_ONLY_PARAMETER is original transformation input.')
+    var runner=f.runner({ingestmode:'distill'})
+    runner._setLlm({promptJSONWithStats:function(){return {response:{title:'Distilled page',description:'Distilled page',type:'reference',tags:[],body:'# Distilled\nDISTILLED_ONLY_PARAMETER is the wiki answer.'}}}})
+    assert(runner.run().ok,true,'simulated distillation publishes an owned complete-source page')
+    var wm=new MiniAWikiManager({backend:'fs',root:f.wiki,access:'ro',wikiretrievalv2:false},function(){})
+    try {
+      wm.assembleContext=wm._assembleContextPlaceholder
+      global.__miniAWikiKnowledge.install(wm)
+      assert(wm.assembleContext!==wm._assembleContextPlaceholder,true,'explicit installer replaces a core placeholder across module scopes')
+      var installedAssembly=wm.assembleContext, customAssembly=function(){return {custom:true}}
+      wm.assembleContext=customAssembly;global.__miniAWikiKnowledge.install(wm)
+      assert(wm.assembleContext===customAssembly,true,'installer preserves custom context implementations')
+      wm.assembleContext=installedAssembly
+      wm.search=function(){return [{path:'docs/a.md',score:1}]}
+      var context=wm.assembleContext('DISTILLED_ONLY_PARAMETER'), chunk=context.chunks[0], page=wm.read('docs/a.md')
+      assert(context.chunks.length,1,'legacy context keeps existing source-input selection')
+      assert(chunk.text.indexOf('SOURCE_ONLY_PARAMETER')>=0,true,'source chunk differs from distilled wiki answer')
+      assert(page.raw.indexOf('SOURCE_ONLY_PARAMETER')<0,true,'source text does not occupy wiki citation positions')
+      assert(chunk.origin,'original-source','owned ingestion input has explicit source origin')
+      assert(chunk.evidenceRole,'ingestion-input','source input is not advertised as wiki passage evidence')
+      assert(chunk.quotationStatus,'not-a-verbatim-wiki-quotation','legacy mapping does not impersonate a wiki quotation')
+      assert(chunk.sourceLocatorStatus,'unverified','legacy records do not invent a valid original-source locator')
+      assert(chunk.wikiPath,'docs/a.md','destination path is retained for navigation compatibility')
+      assert(chunk.scoreOrigin,'parent-wiki-page','legacy chunk score is explicitly inherited from its parent')
+      assert(isDef(chunk.lineStart)||isDef(chunk.revision)||isDef(chunk.citation),false,'source input inherits no wiki positions revisions or citations')
+      wm.search=function(){return {error:'invalid-query',outcome:'invalid-query'}}
+      var invalid=wm.assembleContext('title:(')
+      assert(invalid.ok,false,'legacy context propagates explicit search failure')
+      assert(invalid.error,'invalid-query','query failure is not flattened to empty successful context')
+      assert(invalid.chunks.length,0,'failure retains compatible empty chunk envelope')
+      wm.search=function(){return []}
+      assert(wm.assembleContext('unanswerable').chunks.length,0,'healthy legacy zero remains a successful empty context')
+    } finally {wm.close()}
+  }) }
   exports.testFullDistillation = function() { fixture(function(f) {
     f.initial(); f.write('a.md', '# A\n\n## One\n\nFIRST\n\n## Two\n\nCHANGED\n\n## Three\n\nTHIRD')
     var r = f.run({ ingestmode: 'distill' })

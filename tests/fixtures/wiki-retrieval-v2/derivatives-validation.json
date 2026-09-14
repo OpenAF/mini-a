@@ -1,0 +1,84 @@
+{
+  "increment": "passage-grounded-derivatives",
+  "measuredAt": "2026-09-14T14:15:11.321930+00:00",
+  "sourceSha1": {
+    "mini-a-wiki-knowledge.js": "801f5531e315367f5d72135380a47db1bcf17beb",
+    "mini-a-wiki-retrieval.js": "f14ace810abc9d9509869893ea2e26dec40eaa48",
+    "mini-a-ingest.js": "69f670f4501622bc26bb069d6ebc213d1b2c278b",
+    "tests/wikiRetrievalV2.js": "5d60406e6b25e5ac3e8158512ab07a06cf95f127",
+    "tests/wikiRetrievalV2.yaml": "d1fac981712f4e7b467e4253bfc3309b5fa1c3e9",
+    "tests/wiki.yaml": "3b2b01aaa0b0a06890f06eb9a87f1faebecb1c2e"
+  },
+  "assertionReports": {
+    "wikiRetrievalV2": {
+      "suite": "wikiRetrievalV2",
+      "assertions": 213,
+      "passedFunctions": 11,
+      "failures": []
+    },
+    "wiki": {
+      "suite": "wiki",
+      "assertions": 877,
+      "passedFunctions": 164,
+      "failures": [
+        {
+          "name": "testBootstrapCreatesAgentsAndIndexForEmptyWritableWiki",
+          "error": "AGENTS.md should link to index.md (got false but expected true)"
+        },
+        {
+          "name": "testLintOrphan",
+          "error": "should detect orphan page (got false but expected true)"
+        },
+        {
+          "name": "testLintHeadingHierarchy",
+          "error": "should detect h3 before h2 (got false but expected true)"
+        },
+        {
+          "name": "testMcpWikiMetadataIncludesHierarchyTools",
+          "error": "MCP metadata should expose move (got false but expected true)"
+        },
+        {
+          "name": "testMcpWikiSearchSchemasDescribeLexicalRetrieval",
+          "error": "search metadata should identify lexical retrieval (got false but expected true)"
+        },
+        {
+          "name": "testSearchReturnsLineNumbers",
+          "error": "result should have line number (got false but expected true)"
+        },
+        {
+          "name": "testDriftGuard",
+          "error": "mcp-wiki.yaml should define __miniAWikiAgentsTemplate (got false but expected true)"
+        }
+      ]
+    },
+    "wikiIngest": {
+      "suite": "wikiIngest",
+      "assertions": 218,
+      "passedFunctions": 58,
+      "failures": []
+    },
+    "dreams": {
+      "suite": "dreams",
+      "assertions": 173,
+      "passedFunctions": 44,
+      "failures": [
+        {
+          "name": "testBuildLlmUsesOAFModelFallback",
+          "error": "OAF_MODEL type should be parsed (got false but expected true)"
+        },
+        {
+          "name": "testBuildLlmPrefersModelArg",
+          "error": "model= should override OAF_MODEL type (got false but expected true)"
+        },
+        {
+          "name": "testDreamWikiPlanPreviewsGraphWithoutPersisting",
+          "error": "the preview should resolve the same apply/plan semantic default (got false but expected true)"
+        }
+      ]
+    }
+  },
+  "repeatedAssertions": 426,
+  "registeredJobFunctionsPassed": 11,
+  "liveProviderValidation": false,
+  "performanceMeasuredThisIncrement": false
+}

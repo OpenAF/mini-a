@@ -1,0 +1,33 @@
+{
+  "sources": {
+    "mini-a-mcp-wiki.js": "08ebd7617c9e6c8c63f2bc5e4cccb548e5f72b79",
+    "mini-a-wiki-retrieval.js": "8f167c489687e1f33d7f79180ae3020c770e35c9",
+    "mcps/mcp-wiki-safe.yaml": "d32386c5f05fa2129b69f22ce7370cfdd16bb467",
+    "tests/wikiRetrievalV2.js": "ceafc9e2a30e7fa3eda8fce9f49f421d34aa8b95"
+  },
+  "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",
+  "focused": {
+    "suite": "wikiRetrievalV2",
+    "assertions": 1286,
+    "passedFunctions": 32,
+    "failures": []
+  },
+  "wiki": {
+    "suite": "wiki",
+    "assertions": 2017,
+    "passedFunctions": 193,
+    "failures": []
+  },
+  "targeted": "RESTRICTED_SUPPORT_UTF16_PASS",
+  "changes": [
+    "Shared support-range selector",
+    "Opaque read support within unchanged character and line quotas",
+    "UTF-16 truncation without surrogate splitting",
+    "Zero remaining metadata allowance returns no text"
+  ],
+  "limitations": [
+    "Core/runtime regression; no new live listener/provider validation",
+    "Broader transport/concurrency/revocation stress remains incomplete",
+    "No new performance claim"
+  ]
+}

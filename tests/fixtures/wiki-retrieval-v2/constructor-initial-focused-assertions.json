@@ -1,0 +1,7 @@
+{
+  "suite": "wikiRetrievalV2",
+  "assertions": 1036,
+  "passedFunctions": 29,
+  "failures": [],
+  "scopeNote": "Initial Constructor fix, before later prototype-name and parser-v4 validation fixtures"
+}

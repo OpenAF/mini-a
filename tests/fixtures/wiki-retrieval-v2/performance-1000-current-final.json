@@ -1,0 +1,208 @@
+{
+  "mode": "v2",
+  "pages": 1000,
+  "samples": 10,
+  "backend": "local-fs",
+  "simulatedLatencyMs": 0,
+  "liveProvider": false,
+  "runtime": "20260913",
+  "jvm": "26.0.2",
+  "operations": {
+    "compactSearch": {
+      "coldMs": 238.899917,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "warm": {
+        "p50": 5.076375,
+        "p95": 6.767375,
+        "p99": 6.767375,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 67580
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0
+      }
+    },
+    "zeroSearch": {
+      "coldMs": 135.735541,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "warm": {
+        "p50": 1.080458,
+        "p95": 3.688209,
+        "p99": 3.688209,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 6510
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0
+      }
+    },
+    "retrieve": {
+      "coldMs": 142.478125,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "warm": {
+        "p50": 5.504166,
+        "p95": 8.955291,
+        "p99": 8.955291,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 30840
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0
+      }
+    },
+    "assembleContext": {
+      "coldMs": 131.375625,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "warm": {
+        "p50": 5.165958,
+        "p95": 7.835,
+        "p99": 7.835,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 31300
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0
+      }
+    },
+    "open": {
+      "coldMs": 107.477,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "warm": {
+        "p50": 0.239667,
+        "p95": 0.67025,
+        "p99": 0.67025,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 4550
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0
+      }
+    },
+    "navigate": {
+      "coldMs": 107.498292,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "warm": {
+        "p50": 0.259334,
+        "p95": 0.54175,
+        "p99": 0.54175,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 2120
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0
+      }
+    },
+    "backlinks": {
+      "coldMs": 184.991625,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "warm": {
+        "p50": 80.08475,
+        "p95": 84.261292,
+        "p99": 84.261292,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 1028810
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0
+      }
+    },
+    "federation": {
+      "coldMs": 117.939833,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "warm": {
+        "p50": 4.398625,
+        "p95": 5.920166,
+        "p99": 5.920166,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 20070
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0
+      }
+    }
+  },
+  "sourceSha1": {
+    "wiki": "3dfdfe471bf970818d7a03c262b9b1f359645fc6",
+    "knowledge": "dc0b786982d834d6e66a9b2cb24a8f5760f89fd6",
+    "retrieval": "f25c86ff78acdf851095e77581d135850d880180"
+  },
+  "initialBuild": {
+    "ms": 2007.501375,
+    "fixtureDiskBytes": 3466562
+  },
+  "incrementalUpdate": {
+    "ms": 635.815541,
+    "ok": true,
+    "updateWork": {
+      "linkedFiles": 0,
+      "linkedBytes": 0,
+      "copiedFiles": 1004,
+      "copiedBytes": 702661,
+      "reverseTargetsVisited": 1,
+      "legacyCataloguePagesVisited": 0
+    },
+    "parsedPages": 1
+  },
+  "fullPublication": {
+    "ms": 1235.073625,
+    "ok": true,
+    "fixtureDiskBytes": 9537969
+  },
+  "memoryUsed": 280619440
+}

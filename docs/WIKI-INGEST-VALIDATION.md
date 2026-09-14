@@ -128,3 +128,23 @@ finalization, never rewritten to conceal them. Concurrent state conflicts that l
 prepared journal require operator review before recovery can proceed; recovery never
 silently overwrites the competing state. Atomic rename support is required for state
 persistence; unsupported filesystems fail explicitly.
+
+## Opt-in passage retrieval
+
+`wikiretrievalv2=true` and `wikiretrievalconfig` reach the shared wiki manager.
+An explicit writable reindex builds local serving generations; existing ingestion
+journals, full-source reconstruction and protected pruning remain authoritative.
+Original ingestion chunks and summaries do not become wiki-range quotations.
+See [retrieval v2](WIKI-RETRIEVAL-V2.md) for effective capabilities, restricted
+presentation policy, rollout and outstanding requirements.
+
+### Retrieval v2 publication batching
+
+The retrieval regression suite now covers affected-page batching and journal-bound
+bundle export. Ingestion still reconstructs complete sources and retains its
+ownership/prune safeguards. V2 page hooks collect paths during `_applyJournal`,
+restore the batch scope in `finally`, and publish once through finalization.
+Pending/corrupt journals defer configured export and deny explicit export; completed
+journals permit it. `finalize.bundle` reports delivery errors separately from local
+transaction completion. Full index-page regeneration, lint and optional graph
+finalization still do global work; dependency-only finalization is not claimed.

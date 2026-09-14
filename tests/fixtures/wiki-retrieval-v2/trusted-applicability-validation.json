@@ -1,0 +1,8 @@
+{
+  "focused": {"suite": "wikiRetrievalV2", "assertions": 1054, "passedFunctions": 29, "failures": []},
+  "full": {"suite": "wiki", "assertions": 1785, "passedFunctions": 190, "failures": []},
+  "utilities": {"passedFunctions": 44, "assertions": null, "failures": [], "note": "oJob PASS labels counted; no new assertion instrumentation for this run"},
+  "targeted": "TRUSTED_APPLICABILITY_PASS",
+  "coreParse": "CORE_DISPATCH_COMPILES",
+  "limitations": ["core agent dispatch verified for parsing, not an end-to-end model run", "no new HTTP or STDIO listener validation in this increment", "no live provider validation", "no performance measurement in this increment"]
+}

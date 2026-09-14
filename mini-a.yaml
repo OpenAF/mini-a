@@ -1107,6 +1107,13 @@ help:
     desc     : Seconds between HTTP/S3 artifact-bundle metadata refresh checks (0 disables refresh)
     example  : "300"
     mandatory: false
+  - name     : wikiretrievalv2
+    desc     : Opt-in versioned passage retrieval; requires compatible serving artifacts; build explicitly on writable FS/s3fs or hydrate a published bundle
+    example  : "false"
+    mandatory: false
+  - name     : wikiretrievalconfig
+    desc     : Validated SLON/JSON advanced passage, cache and artifact budgets
+    mandatory: false
   - name     : wikilexical
     desc     : #SLON/JSON Lucene lexical configuration (default `{language: 'english'}`); supports language, explicit synonyms, shingles, ngrams, queryExpansion and pseudoRelevanceFeedback"
     example  : "{ language: 'english', synonyms: [['js', 'javascript']] }"
@@ -1547,6 +1554,8 @@ jobs:
         wikihttpindexurl: wikihttpindexurl
         wikihttptimeout: wikihttptimeout
         wikiartifactrefreshsecs: wikiartifactrefreshsecs
+        wikiretrievalv2: wikiretrievalv2
+        wikiretrievalconfig: wikiretrievalconfig
         wikilexical    : wikilexical
         wikisourceurl  : wikisourceurl
         wikisourcefield: wikisourcefield
@@ -1827,6 +1836,8 @@ jobs:
       wikihttpindexurl: isString.default(__)
       wikihttptimeout: toNumber.isNumber.default(__)
       wikiartifactrefreshsecs: toNumber.isNumber.default(__)
+      wikiretrievalv2: toBoolean.isBoolean.default(__)
+      wikiretrievalconfig: isString.default(__)
       wikilexical    : isString.default(__)
       wikisourceurl  : isString.default(__)
       wikisourcefield: isString.default(__)

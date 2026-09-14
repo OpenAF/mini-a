@@ -1701,7 +1701,7 @@ MiniUtilsTool.prototype.wiki = function(params) {
     if (op === "grep") {
       if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path or ref is required for grep"
       if (!isString(params.pattern) || params.pattern.length === 0) return "[ERROR] pattern is required for grep"
-      return wm.grep(params.path.trim(), params.pattern, { limit: isNumber(params.limit) ? params.limit : __, contextLines: isNumber(params.contextLines) ? params.contextLines : __, regex: params.regex === true, caseSensitive: params.caseSensitive === true })
+      return wm.grep(params.path.trim(), params.pattern, { cursor: params.cursor, offset: params.offset, limit: isNumber(params.limit) ? params.limit : __, contextLines: isNumber(params.contextLines) ? params.contextLines : __, maxChars: isNumber(params.maxChars) ? params.maxChars : __, regex: params.regex === true, caseSensitive: params.caseSensitive === true })
     }
 
     if (op === "related") {
@@ -1714,13 +1714,13 @@ MiniUtilsTool.prototype.wiki = function(params) {
       var readRoute = routeWikiPath(params.path)
       if (!readRoute.ok) return readRoute
       var readOpts = {
-        lineStart : isNumber(params.lineStart) ? params.lineStart : __,
-        lineEnd   : isNumber(params.lineEnd)   ? params.lineEnd   : __,
+        lineStart : isNumber(params.lineStart) ? params.lineStart : params.startLine,
+        lineEnd   : isNumber(params.lineEnd)   ? params.lineEnd   : params.endLine,
         maxLines  : isNumber(params.maxLines)  ? params.maxLines  : __,
         countLines: params.countLines === true,
         section   : isString(params.section)   ? params.section   : __
       }
-      var page = (params.agentic === true || this._wikiAgenticRetrieval === true) ? readRoute.manager.agenticRead(readRoute.path, merge({}, readOpts, { maxChars: isNumber(params.maxChars) ? params.maxChars : __ })) : readRoute.manager.read(readRoute.path, readOpts)
+      var page = (params.agentic === true || this._wikiAgenticRetrieval === true) ? readRoute.manager.agenticRead(readRoute.path, merge(readOpts, { maxChars: isNumber(params.maxChars) ? params.maxChars : __, charOffset: params.charOffset, revision: params.revision, charStart: params.charStart, charEnd: params.charEnd })) : readRoute.manager.read(readRoute.path, readOpts)
       if (!isObject(page)) return "[ERROR] Page not found: " + params.path
       if (!readRoute.legacy) { page.wiki = readRoute.wiki; if (readRoute.wiki !== "primary") page.path = "@" + readRoute.wiki + "/" + page.path }
       if (params.compact === true) {
@@ -1742,6 +1742,11 @@ MiniUtilsTool.prototype.wiki = function(params) {
         compact     : params.compact !== false
       }
       searchOpts.wiki = params.wiki
+      ;["maxQueries", "maxCandidates", "maxInspected", "maxMillis", "maxBytes"].forEach(function(key) { if (isDef(params[key])) searchOpts[key] = params[key] })
+      if (isDef(params.applicability)) {
+        if (!wm._retrievalV2) return { ok: false, error: "applicability-requires-v2" }
+        searchOpts.applicability = params.applicability
+      }
       if (params.agentic === true || this._wikiAgenticRetrieval === true) {
         if (isDef(params.wiki)) return wm.agenticSearch(params.query.trim(), searchOpts)
         return wm.agenticSearch(params.query.trim(), searchOpts)
@@ -4734,6 +4739,12 @@ MiniUtilsTool._metadataByFn = (function() {
           path     : { type: "string", description: "Page path for read/write/delete/backlinks/move operations, path prefix for list/tree, or folder path for browse/init." },
           to       : { type: "string", description: "Target page path for operation=move." },
           query    : { type: "string", description: "Search query for operation=search." },
+          applicability: { type: "object", additionalProperties: false, description: "V2 search filters; exact applicability and inclusive UTC validity date against current revisions.", properties: { product: {type:"string"}, version: {type:"string"}, platform: {type:"string"}, environment: {type:"string"}, validAt: {type:"string",pattern:"^\\d{4}-\\d{2}-\\d{2}$"} } },
+          maxQueries: {type:"integer",minimum:1,description:"V2 request-wide query budget."},
+          maxCandidates: {type:"integer",minimum:1,description:"V2 request-wide candidate budget."},
+          maxInspected: {type:"integer",minimum:1,description:"V2 request-wide inspection budget."},
+          maxMillis: {type:"integer",minimum:1,description:"V2 request deadline budget; blocking backend limitations apply."},
+          maxBytes: {type:"integer",minimum:1,description:"V2 returned UTF-8 byte budget including wrappers."},
           content  : { type: "string", description: "Raw markdown content for operation=write." },
           limit    : { type: "number", description: "Maximum results for search." },
           depth    : { type: "number", description: "Maximum child-section depth for operation=tree." },

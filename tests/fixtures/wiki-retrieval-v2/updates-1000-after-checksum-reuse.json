@@ -1,0 +1,168 @@
+{
+  "kind": "incremental-generations",
+  "mode": "after-checksum-reuse",
+  "backend": "local-fs",
+  "pages": 1000,
+  "samples": 10,
+  "runtime": "20260913",
+  "jvm": "26.0.2",
+  "sourceSha1": {
+    "wiki": "723d50264550090e153dd399b91e01e7b1113cfb",
+    "retrieval": "e76010213d99d9cced51834038bb78cbef00f66b"
+  },
+  "observations": [
+    {
+      "millis": 782.8892920017242,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1004,
+        "copiedBytes": 1458160,
+        "reusedChecksums": 1002,
+        "reusedChecksumBytes": 1456903,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    },
+    {
+      "millis": 674.0487089157104,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1008,
+        "copiedBytes": 1461301,
+        "reusedChecksums": 1005,
+        "reusedChecksumBytes": 1459646,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    },
+    {
+      "millis": 510.9831659793854,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1011,
+        "copiedBytes": 1464127,
+        "reusedChecksums": 1008,
+        "reusedChecksumBytes": 1462389,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    },
+    {
+      "millis": 510.0079171657562,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1014,
+        "copiedBytes": 1466953,
+        "reusedChecksums": 1011,
+        "reusedChecksumBytes": 1465132,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    },
+    {
+      "millis": 506.5034589767456,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1017,
+        "copiedBytes": 1469779,
+        "reusedChecksums": 1014,
+        "reusedChecksumBytes": 1467875,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    },
+    {
+      "millis": 498.76683378219604,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1020,
+        "copiedBytes": 1472605,
+        "reusedChecksums": 1017,
+        "reusedChecksumBytes": 1470618,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    },
+    {
+      "millis": 512.8052089214325,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1023,
+        "copiedBytes": 1475431,
+        "reusedChecksums": 1020,
+        "reusedChecksumBytes": 1473361,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    },
+    {
+      "millis": 528.6171250343323,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1026,
+        "copiedBytes": 1478257,
+        "reusedChecksums": 1002,
+        "reusedChecksumBytes": 1450526,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    },
+    {
+      "millis": 504.59149980545044,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1008,
+        "copiedBytes": 1456752,
+        "reusedChecksums": 1005,
+        "reusedChecksumBytes": 1455097,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    },
+    {
+      "millis": 489.4649579524994,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1011,
+        "copiedBytes": 1459578,
+        "reusedChecksums": 1008,
+        "reusedChecksumBytes": 1457840,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    }
+  ],
+  "buildMillis": 1559.4197919368744,
+  "latency": {
+    "p50": 510.0079171657562,
+    "p95": 782.8892920017242,
+    "p99": 782.8892920017242
+  },
+  "disk": {
+    "apparentBytes": 41013067,
+    "uniqueFileBytes": 41013067,
+    "files": 12218,
+    "estimator": "POSIX file identity and length; excludes allocation and metadata overhead"
+  },
+  "memoryUsed": 304835576
+}

@@ -388,3 +388,12 @@ not something this test suite runs in CI.
 | `mini-a-utils.js` | `MiniUtilsTool.prototype.skillwiki` (the LLM-facing tool) with bounded consultation. |
 | `mini-a-con.js` | `/skills search\|recommend\|open\|read\|related\|context` console subcommands. |
 | `tests/skills.js`, `tests/skills.yaml` | Unit + multi-mount integration tests, including safe-mode opaque-reference behavior. |
+
+## Opt-in passage retrieval
+
+`wikiretrievalv2=true` and `wikiretrievalconfig` reach the shared wiki manager.
+An explicit writable reindex builds local serving generations; existing ingestion
+journals, full-source reconstruction and protected pruning remain authoritative.
+Original ingestion chunks and summaries do not become wiki-range quotations.
+See [retrieval v2](WIKI-RETRIEVAL-V2.md) for effective capabilities, restricted
+presentation policy, rollout and outstanding requirements.

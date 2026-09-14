@@ -1,0 +1,316 @@
+{
+  "mode": "v2",
+  "pages": 100,
+  "samples": 10,
+  "backend": "local-fs",
+  "simulatedLatencyMs": 0,
+  "liveProvider": false,
+  "runtime": "20260913",
+  "jvm": "26.0.2",
+  "operations": {
+    "compactSearch": {
+      "managerConstructionMs": 36.100958,
+      "mountAttachMs": 30.902833,
+      "initializationValidationBlockReads": 0,
+      "initializationValidationBlockBytes": 0,
+      "coldMs": 138.165083,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "coldValidationBlockReads": 101,
+      "coldValidationBlockBytes": 43336,
+      "warm": {
+        "p50": 6.359292,
+        "p95": 8.802667,
+        "p99": 8.802667,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 72573,
+        "validationBlockReads": 0,
+        "validationBlockBytes": 0
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0,
+        "validationBlockReads": 100,
+        "validationBlockBytes": 43280,
+        "validationReusedPages": 0
+      }
+    },
+    "zeroSearch": {
+      "managerConstructionMs": 34.434208,
+      "mountAttachMs": 20.849792,
+      "initializationValidationBlockReads": 0,
+      "initializationValidationBlockBytes": 0,
+      "coldMs": 72.210292,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "coldValidationBlockReads": 101,
+      "coldValidationBlockBytes": 43336,
+      "warm": {
+        "p50": 1.946375,
+        "p95": 2.637375,
+        "p99": 2.637375,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 11397,
+        "validationBlockReads": 0,
+        "validationBlockBytes": 0
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0,
+        "validationBlockReads": 100,
+        "validationBlockBytes": 43280,
+        "validationReusedPages": 0
+      }
+    },
+    "retrieve": {
+      "managerConstructionMs": 35.137292,
+      "mountAttachMs": 28.773834,
+      "initializationValidationBlockReads": 0,
+      "initializationValidationBlockBytes": 0,
+      "coldMs": 77.933667,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "coldValidationBlockReads": 101,
+      "coldValidationBlockBytes": 43336,
+      "warm": {
+        "p50": 6.794416,
+        "p95": 8.4695,
+        "p99": 8.4695,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 36035,
+        "validationBlockReads": 0,
+        "validationBlockBytes": 0
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0,
+        "validationBlockReads": 100,
+        "validationBlockBytes": 43280,
+        "validationReusedPages": 0
+      }
+    },
+    "assembleContext": {
+      "managerConstructionMs": 34.452292,
+      "mountAttachMs": 24.566791,
+      "initializationValidationBlockReads": 0,
+      "initializationValidationBlockBytes": 0,
+      "coldMs": 61.859792,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "coldValidationBlockReads": 101,
+      "coldValidationBlockBytes": 43336,
+      "warm": {
+        "p50": 5.976084,
+        "p95": 6.565542,
+        "p99": 6.565542,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 36492,
+        "validationBlockReads": 0,
+        "validationBlockBytes": 0
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0,
+        "validationBlockReads": 100,
+        "validationBlockBytes": 43280,
+        "validationReusedPages": 0
+      }
+    },
+    "open": {
+      "managerConstructionMs": 33.470375,
+      "mountAttachMs": 21.080792,
+      "initializationValidationBlockReads": 0,
+      "initializationValidationBlockBytes": 0,
+      "coldMs": 49.8005,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "coldValidationBlockReads": 100,
+      "coldValidationBlockBytes": 43280,
+      "warm": {
+        "p50": 0.24125,
+        "p95": 0.468,
+        "p99": 0.468,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 4550,
+        "validationBlockReads": 0,
+        "validationBlockBytes": 0
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0,
+        "validationBlockReads": 100,
+        "validationBlockBytes": 43280,
+        "validationReusedPages": 0
+      }
+    },
+    "navigate": {
+      "managerConstructionMs": 34.15625,
+      "mountAttachMs": 21.189208,
+      "initializationValidationBlockReads": 0,
+      "initializationValidationBlockBytes": 0,
+      "coldMs": 56.69125,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "coldValidationBlockReads": 100,
+      "coldValidationBlockBytes": 43280,
+      "warm": {
+        "p50": 0.292583,
+        "p95": 0.605042,
+        "p99": 0.605042,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 2120,
+        "validationBlockReads": 0,
+        "validationBlockBytes": 0
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0,
+        "validationBlockReads": 100,
+        "validationBlockBytes": 43280,
+        "validationReusedPages": 0
+      }
+    },
+    "backlinks": {
+      "managerConstructionMs": 37.743833,
+      "mountAttachMs": 21.283625,
+      "initializationValidationBlockReads": 0,
+      "initializationValidationBlockBytes": 0,
+      "coldMs": 55.794792,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "coldValidationBlockReads": 100,
+      "coldValidationBlockBytes": 43280,
+      "warm": {
+        "p50": 8.623375,
+        "p95": 9.20725,
+        "p99": 9.20725,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 101800,
+        "validationBlockReads": 0,
+        "validationBlockBytes": 0
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0,
+        "validationBlockReads": 100,
+        "validationBlockBytes": 43280,
+        "validationReusedPages": 0
+      }
+    },
+    "federation": {
+      "managerConstructionMs": 36.820625,
+      "mountAttachMs": 23.399083,
+      "initializationValidationBlockReads": 0,
+      "initializationValidationBlockBytes": 0,
+      "coldMs": 62.834,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "coldValidationBlockReads": 101,
+      "coldValidationBlockBytes": 43336,
+      "warm": {
+        "p50": 5.19325,
+        "p95": 6.673917,
+        "p99": 6.673917,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 25233,
+        "validationBlockReads": 0,
+        "validationBlockBytes": 0
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0,
+        "validationBlockReads": 100,
+        "validationBlockBytes": 43280,
+        "validationReusedPages": 0
+      }
+    }
+  },
+  "sourceSha1": {
+    "wiki": "3b671f02a6fb0485207791156c4cefd692bb2e78",
+    "knowledge": "8e5d2828c94f7c640b31964d1bfa21934e5817ed",
+    "retrieval": "c952d4544256a6692e41258bb4765f0ba25f1ce4"
+  },
+  "lexical": {
+    "language": "english"
+  },
+  "zeroQuery": "neverpresentidentifier",
+  "initialBuild": {
+    "ms": 612.774834,
+    "fixtureDiskBytes": 354754
+  },
+  "incrementalUpdate": {
+    "ms": 135.530209,
+    "ok": true,
+    "updateWork": {
+      "linkedFiles": 0,
+      "linkedBytes": 0,
+      "copiedFiles": 104,
+      "copiedBytes": 78034,
+      "reusedChecksums": 102,
+      "reusedChecksumBytes": 77448,
+      "reverseTargetsVisited": 1,
+      "legacyCataloguePagesVisited": 0,
+      "catalogueKeysCopied": 402,
+      "sharedPageRecords": 100,
+      "sharedPassageRecords": 200,
+      "bindingBlockReads": 1,
+      "bindingReusedPages": 99
+    },
+    "parsedPages": 1
+  },
+  "fullPublication": {
+    "ms": 219.799958,
+    "ok": true,
+    "fixtureDiskBytes": 983779
+  },
+  "memoryUsed": 139358264,
+  "memory": {
+    "estimator": "MemoryMXBean aggregate heap sampled every 10 ms; shorter peaks may be missed",
+    "sampleIntervalMillis": 10,
+    "samples": 189,
+    "maxSampledHeapBytes": 271207024,
+    "heapAtEndBytes": 138309688,
+    "scope": "fixture/index construction, all operations, update and publication; excludes native/JVM non-heap memory"
+  },
+  "recordedHarnessSha1": "1ce5441248871ae753677b2877403a66d41a5387"
+}

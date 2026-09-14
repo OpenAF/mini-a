@@ -1,0 +1,35 @@
+{
+  "sources": {
+    "mini-a-wiki-knowledge.js": "cb0d4edd273eaa6a315b386896ebb28c71a09258",
+    "mini-a-wiki-retrieval.js": "de9e4980cb62eedf0e86e2e94165e4126f4aaa19",
+    "mcps/mcp-wiki-ops.yaml": "d587b0300fe4614bb53637e3c94f2ad1a48d5658",
+    "tests/wikiRetrievalV2.js": "698c30d0719af4038d4fe98390358c5987a6c3b4"
+  },
+  "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",
+  "focused": {
+    "assertions": 1259,
+    "functions": 31,
+    "failures": []
+  },
+  "wiki": {
+    "assertions": 1990,
+    "functions": 192,
+    "failures": []
+  },
+  "repeat": {
+    "runs": 2,
+    "assertions": 2518
+  },
+  "ojob": {
+    "command": "ojob tests/wiki.yaml",
+    "passEntries": 192,
+    "failEntries": 0,
+    "errorEntries": 0
+  },
+  "targeted": "STRUCTURAL_REPAIR_MCP_PASS",
+  "limitations": [
+    "Local core and actual MCP job execution, not live transport/provider validation",
+    "No source CAS; uncoordinated writers may race",
+    "Broader structural maintenance and corpus-scaled publication remain unfinished"
+  ]
+}

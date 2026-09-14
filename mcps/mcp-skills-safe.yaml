@@ -60,6 +60,13 @@ help:
   - name     : wikiindexdir
     desc     : Local cache directory used for downloaded S3 Lucene artifacts
     mandatory: false
+  - name     : wikiretrievalv2
+    desc     : Opt-in versioned passage retrieval; requires compatible serving artifacts; build explicitly on writable FS/s3fs or hydrate a published bundle
+    example  : "false"
+    mandatory: false
+  - name     : wikiretrievalconfig
+    desc     : Validated SLON/JSON advanced passage, cache and artifact budgets
+    mandatory: false
   - name     : wikilexical
     desc     : "SLON/JSON Lucene lexical configuration. Defaults to {language: 'english'}."
     mandatory: false
@@ -117,7 +124,7 @@ help:
     desc     : "Logical library namespace for shared restricted references and cooldowns. Default: a deterministic fingerprint of the effective backend configuration."
     mandatory: false
   - name     : wikirestrictrefch
-    desc     : "SLON/JSON OpenAF channel definition to store issued references and cooldowns (default: this process's own memory only). Use a real per-key channel (e.g. redis) to share across replicas behind a load balancer using the same wikiid."
+    desc     : "SLON/JSON OpenAF channel definition to store issued references and cooldowns (default: this process's own memory only). A real channel shares namespace-bound references, cooldowns and usage across managers. Concurrent quota consumption is serialized only within one JVM; replicas require external coordination or one writer."
     example  : "(type: 'redis', options: (host: 'redis.svc', port: 6379))"
     mandatory: false
   - name     : audit
@@ -283,6 +290,8 @@ jobs:
       wikihttptimeout         : toNumber.isNumber.default(30000)
       wikiartifactrefreshsecs : toNumber.isNumber.default(0)
       wikiindexdir            : isString.default(__)
+      wikiretrievalv2: toBoolean.isBoolean.default(__)
+      wikiretrievalconfig: isString.default(__)
       wikilexical             : isString.default(__)
       usewikigraph            : toBoolean.isBoolean.default(false)
       wikirestrictprofile     : isString.default("tight")

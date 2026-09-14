@@ -1,0 +1,35 @@
+{
+  "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",
+  "sources": {
+    "mini-a-wiki.js": "9b6c3666c87178fe498fe42c11c5c263b5118580",
+    "mini-a-wiki-retrieval.js": "6315659ddc1194730931563e554e8803a34f85be",
+    "tests/wikiRetrievalV2.js": "a4a80d82b28c1988dd740b100da89e05b0cd87cd"
+  },
+  "focused": {
+    "assertions": 1176,
+    "functions": 29,
+    "failures": []
+  },
+  "wiki": {
+    "assertions": 1907,
+    "functions": 190,
+    "failures": []
+  },
+  "repeat": {
+    "runs": 2,
+    "assertions": 2352
+  },
+  "targeted": "SOURCE_READ_SCOPE_RECOVERY_PASS",
+  "symlinks": "Actual JVM cycle, page alias, outside-root and hidden-derived target",
+  "limitations": [
+    "Injected body read failures, not live provider tests",
+    "No source-file transaction or performance claim",
+    "Publication remains corpus-scaled"
+  ],
+  "ojob": {
+    "command": "ojob tests/wiki.yaml",
+    "passEntries": 190,
+    "failEntries": 0,
+    "errorEntries": 0
+  }
+}

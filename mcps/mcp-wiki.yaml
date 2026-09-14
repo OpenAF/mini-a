@@ -64,6 +64,13 @@ help:
     desc     : Local cache directory used for downloaded S3 search and graph artifacts
     example  : "/var/cache/mini-a/wiki"
     mandatory: false
+  - name     : wikiretrievalv2
+    desc     : Opt-in versioned passage retrieval; requires compatible serving artifacts; build explicitly on writable FS/s3fs or hydrate a published bundle
+    example  : "false"
+    mandatory: false
+  - name     : wikiretrievalconfig
+    desc     : Validated SLON/JSON advanced passage, cache and artifact budgets
+    mandatory: false
   - name     : wikilexical
     desc     : "SLON/JSON Lucene lexical configuration. Defaults to {language: 'english'}; supports inline synonyms and an optional synonymsFile."
     example  : "{ language: 'english', synonymsFile: 'synonyms.txt' }"
@@ -179,7 +186,7 @@ todo:
 
       search:
         name       : search
-        description: "[START HERE] Search {{label}} pages. context() lists wiki names. Omit wiki or use '*' for all wikis; use 'primary', a mount name, or an array for selected sources. Mounted paths remain @name/path.md. Returns compact lexical matches, then read the best path."
+        description: "[START HERE] Search {{label}} pages. context() lists wiki names. Omit wiki or use '*' for all wikis; use 'primary', a mount name, or an array for selected sources. Mounted paths remain @name/path.md. Returns compact matches through lexical keyword retrieval, not semantic question answering. With legacy retrieval, explicitly enabled graph-related pages may be appended as supplemental hints. Then read the best path."
         inputSchema:
           type      : object
           properties:
@@ -202,6 +209,21 @@ todo:
               type       : integer
               description: "Number of context lines before/after each match (>0 enables full per-line snippet mode)."
               default    : 0
+            applicability:
+              type: object
+              additionalProperties: false
+              description: "V2 exact applicability filters against current revisions. validAt is an inclusive UTC calendar date; this does not open historical content. Requires wikiretrievalv2=true."
+              properties:
+                product: {type: string}
+                version: {type: string}
+                platform: {type: string}
+                environment: {type: string}
+                validAt: {type: string, pattern: '^\d{4}-\d{2}-\d{2}$'}
+            maxQueries: {type: integer, minimum: 1, description: "V2 request-wide query budget."}
+            maxCandidates: {type: integer, minimum: 1, description: "V2 request-wide candidate budget."}
+            maxInspected: {type: integer, minimum: 1, description: "V2 request-wide inspection budget."}
+            maxMillis: {type: integer, minimum: 1, description: "V2 request deadline budget; blocking backend limitations still apply."}
+            maxBytes: {type: integer, minimum: 1, description: "V2 returned UTF-8 byte budget including wrappers."}
             path:
               type       : string
               description: Optional single page path to scope the search.
@@ -245,6 +267,18 @@ todo:
               type       : boolean
               description: Return compact output (path/title/body only).
               default    : false
+            charStart:
+              type       : integer
+              description: Inclusive raw UTF-16 fragment start; copy from next.
+            charEnd:
+              type       : integer
+              description: Exclusive raw UTF-16 fragment end; copy from next.
+            charOffset:
+              type       : integer
+              description: UTF-16 character offset within the pinned selected range; copy from next.
+            revision:
+              type       : string
+              description: Revision from next; changed content returns stale-reference.
             maxChars:
               type       : integer
               description: Maximum characters returned by agentic MCP reads (default 8000; continuation is returned when exceeded).
@@ -301,6 +335,8 @@ todo:
             pattern: { type: string, description: "Literal match by default; set regex=true only when needed." }
             limit: { type: integer, default: 20 }
             contextLines: { type: integer, default: 1 }
+            maxChars: { type: integer, default: 8000, description: "UTF-16 character cap per matching-line fragment; copy next to resume a long line." }
+            cursor: { type: object, description: "Copy the cursor from next; binds scope, pattern, ordering and revision." }
             regex: { type: boolean, default: false }
             caseSensitive: { type: boolean, default: false }
           required  : [ path, pattern ]
@@ -408,8 +444,8 @@ todo:
       context  : Wiki context overview
       search   : Wiki search pages
       read     : Wiki read page
-      open     : Wiki inspect page structure
-      navigate : Wiki navigate structure
+      open     : Wiki open page
+      navigate : Wiki navigate content
       grep     : Wiki grep known content
       related  : Wiki related pages
       browse   : Wiki browse section
@@ -459,6 +495,8 @@ jobs:
       wikihttptimeout      : toNumber.isNumber.default(30000)
       wikiartifactrefreshsecs: toNumber.isNumber.default(0)
       wikiindexdir         : isString.default(__)
+      wikiretrievalv2: toBoolean.isBoolean.default(__)
+      wikiretrievalconfig: isString.default(__)
       wikilexical          : isString.default(__)
       wikisourceurl        : isString.default(__)
       wikisourcefield      : isString.default("sourceUrl")
@@ -509,7 +547,7 @@ jobs:
       path     : args.path,
       withMeta : args.withMeta,
       limit    : args.limit,
-      compact  : args.compact
+      compact  : args.compact,
       wiki     : args.wiki
     })
 
@@ -525,7 +563,7 @@ jobs:
       operation: "tree",
       path     : args.path,
       depth    : args.depth,
-      compact  : args.compact
+      compact  : args.compact,
       wiki     : args.wiki
     })
 
@@ -539,7 +577,7 @@ jobs:
     return global.__wikiTool.wiki({
       operation: "browse",
       path     : args.path,
-      compact  : args.compact
+      compact  : args.compact,
       wiki     : args.wiki
     })
 
@@ -553,15 +591,25 @@ jobs:
       countLines: toBoolean.isBoolean.default(false)
       compact   : toBoolean.isBoolean.default(false)
       wiki      : default(__)
+      charStart : toNumber.isNumber.default(__)
+      charEnd   : toNumber.isNumber.default(__)
+      charOffset: toNumber.isNumber.default(__)
+      revision  : isString.default(__)
+      maxChars  : toNumber.isNumber.default(__)
   exec : | #js
     return global.__wikiTool.wiki({
       operation : "read",
+      charStart : args.charStart,
+      charEnd   : args.charEnd,
+      charOffset: args.charOffset,
+      revision  : args.revision,
+      maxChars  : args.maxChars,
       path      : args.path,
       lineStart : args.startLine,
       lineEnd   : args.endLine,
       section   : args.section,
       countLines: args.countLines,
-      compact   : args.compact
+      compact   : args.compact,
       wiki      : args.wiki
     })
 
@@ -575,6 +623,12 @@ jobs:
       contextLines : toNumber.isNumber.default(0)
       path         : isString.default("")
       wiki         : default(__)
+      applicability: default(__)
+      maxQueries: default(__)
+      maxCandidates: default(__)
+      maxInspected: default(__)
+      maxMillis: default(__)
+      maxBytes: default(__)
   exec : | #js
     return global.__wikiTool.wiki({
       operation    : "search",
@@ -584,8 +638,14 @@ jobs:
       regex        : args.regex,
       contextLines : args.contextLines,
       path         : args.path,
-      compact      : args.contextLines === 0
-      wiki         : args.wiki
+      compact      : args.contextLines === 0,
+      wiki         : args.wiki,
+      applicability: args.applicability,
+      maxQueries: args.maxQueries,
+      maxCandidates: args.maxCandidates,
+      maxInspected: args.maxInspected,
+      maxMillis: args.maxMillis,
+      maxBytes: args.maxBytes
     })
 
 - name : Wiki backlinks
@@ -598,6 +658,44 @@ jobs:
     return global.__wikiTool.wiki({
       operation: "backlinks",
       path     : args.path,
-      compact  : args.compact
+      compact  : args.compact,
       wiki     : args.wiki
     })
+
+- name : Wiki open page
+  check:
+    in:
+      path: isString
+      maxHeadings: toNumber.isNumber.default(40)
+  exec : | #js
+    return global.__wikiTool.wiki(merge(args, {operation:"open"}))
+
+- name : Wiki navigate content
+  check:
+    in:
+      path: isString
+      section: isString.default(__)
+  exec : | #js
+    return global.__wikiTool.wiki(merge(args, {operation:"navigate"}))
+
+- name : Wiki grep known content
+  check:
+    in:
+      path: isString
+      pattern: isString
+      limit: toNumber.isNumber.default(20)
+      contextLines: toNumber.isNumber.default(1)
+      maxChars: toNumber.isNumber.default(8000)
+      regex: toBoolean.isBoolean.default(false)
+      caseSensitive: toBoolean.isBoolean.default(false)
+      cursor: default(__)
+  exec : | #js
+    return global.__wikiTool.wiki(merge(args, {operation:"grep"}))
+
+- name : Wiki related pages
+  check:
+    in:
+      path: isString
+      limit: toNumber.isNumber.default(10)
+  exec : | #js
+    return global.__wikiTool.wiki(merge(args, {operation:"related"}))

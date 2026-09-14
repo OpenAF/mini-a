@@ -46,11 +46,14 @@ var __miniAMcpWikiRestrictionOptionMap = {
 
 function __miniAMcpWikiSafeChars(value, max) {
   var s = isDef(value) ? String(value) : ""
-  if (!isNumber(max) || max < 1 || s.length <= max) return s
-  try {
-    var js = new java.lang.String(s)
-    return String(js.substring(0, js.offsetByCodePoints(0, Math.min(max, js.codePointCount(0, js.length())))))
-  } catch(e) { return s.substring(0, max) }
+  if (!isNumber(max) || !isFinite(max) || max < 1) return ""
+  max = Math.floor(max)
+  if (s.length <= max) return s
+  // The ledger charges String.length (UTF-16 units), not code points.
+  // Shorten by one unit if the cap would bisect a surrogate pair.
+  var last = s.charCodeAt(max - 1), next = s.charCodeAt(max)
+  if (last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) max--
+  return s.substring(0,max)
 }
 
 function __miniAMcpWikiRestrictedError(code) { return { ok: false, error: code } }
@@ -219,8 +222,9 @@ function MiniAMcpWikiRestriction(args, cfg) {
   // OpenAF channel definition (e.g. redis) so multiple replicas behind a load balancer
   // share one issue/consume ledger: a reference issued by one replica's search call can
   // be consumed by whichever replica later serves the matching read call. Channel-type
-  // choice matters: `simple`/`file` are single-writer stores (fine standalone, unsafe
-  // shared by concurrent replicas); `redis`/`mongo` do real per-key ops and are safe.
+  // choice matters: per-key channel operations do not make a multi-operation
+  // quota/reference transaction atomic across JVMs. Shared channels require one
+  // writer JVM unless the configured provider supplies external coordination.
   this.refChName = isString(args.wikirestrictrefch) && args.wikirestrictrefch.trim().length > 0
     ? __miniAMcpWikiCreateChannelFromDef(args.wikirestrictrefch, "_mini_a_wiki_restrict_refs", "simple")
     : __
@@ -235,6 +239,7 @@ MiniAMcpWikiRestriction.prototype._loadState = function() {
     if (!io.fileExists(this.statePath)) return
     var saved = af.fromJson(io.readFileString(this.statePath))
     if (!isMap(saved) || !isMap(saved.usage)) throw "invalid ledger"
+    if (isDef(saved.wiki) && saved.wiki !== this.wikiId) throw "namespace mismatch"
     this.usage = saved.usage
     if (!this.refChName) this.cooldowns = isMap(saved.cooldowns) ? saved.cooldowns : {}
   } catch(e) { throw "restricted state unavailable" }
@@ -247,7 +252,7 @@ MiniAMcpWikiRestriction.prototype._saveState = function() {
     if (!parent || (!parent.exists() && !parent.mkdirs())) throw "state directory unavailable"
     var temp = this.statePath + ".tmp-" + genUUID()
     // cooldowns move to the shared channel once configured; the local ledger keeps usage only
-    io.writeFileString(temp, stringify({ usage: this.usage, cooldowns: this.refChName ? {} : this.cooldowns }, __, ""))
+    io.writeFileString(temp, stringify({ wiki: this.wikiId, usage: this.usage, cooldowns: this.refChName ? {} : this.cooldowns }, __, ""))
     java.nio.file.Files.move(java.nio.file.Paths.get(temp), java.nio.file.Paths.get(this.statePath), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
   } catch(e) { throw "restricted state unavailable" }
 }
@@ -270,6 +275,13 @@ MiniAMcpWikiRestriction.prototype._sweepChannel = function(now) {
 
 MiniAMcpWikiRestriction.prototype._purge = function() {
   var now = Date.now(), self = this
+  if (this.refChName) {
+    var shared = $ch(this.refChName).get({ wiki: this.wikiId, kind: "usage" })
+    if (isMap(shared) && isMap(shared.usage) && Number(shared.expires) > now) {
+      if (shared.policy && shared.policy !== sha1(stringify(this.policy, __, ""))) throw "restricted policy mismatch"
+      this.usage = clone(shared.usage)
+    }
+  } else if (this.statePath) this._loadState()
   if (now - Number(this.usage.started || 0) >= this.policy.window * 1000) this.usage = { started: now, searches: 0, reads: 0, chars: 0 }
   if (this.audit.length > this.maxEntries) this.audit = this.audit.slice(-this.maxEntries)
   if (this.refChName) {
@@ -303,7 +315,10 @@ MiniAMcpWikiRestriction.prototype.charge = function(kind, chars) {
   if (kind === "search") this.usage.searches++
   if (kind === "read") this.usage.reads++
   this.usage.chars += Math.max(0, Number(chars || 0))
-  try { this._saveState() } catch(e) {
+  try {
+    this._saveState()
+    if (this.refChName) $ch(this.refChName).set({ wiki: this.wikiId, kind: "usage" }, { wiki: this.wikiId, expires: this.usage.started + this.policy.window * 1000, policy: sha1(stringify(this.policy, __, "")), usage: clone(this.usage) })
+  } catch(e) {
     // Roll back: a failed persist must not leave this charge counted in memory —
     // otherwise a denied call would still silently consume its slice of the budget.
     this.usage.searches = searchesBefore; this.usage.reads = readsBefore; this.usage.chars = charsBefore
@@ -315,24 +330,37 @@ MiniAMcpWikiRestriction.prototype.charge = function(kind, chars) {
 MiniAMcpWikiRestriction.prototype._cooldownActive = function(hash) {
   if (this.refChName) {
     var v
-    try { v = $ch(this.refChName).get({ wiki: this.wikiId, kind: "cooldown", hash: hash }) } catch(ignoreGet) { return false }
+    try { v = $ch(this.refChName).get({ wiki: this.wikiId, kind: "cooldown", hash: hash }) } catch(ignoreGet) { return true }
     return isMap(v) && Number(v.expires || 0) > Date.now()
   }
   return isDef(this.cooldowns[hash]) && Number(this.cooldowns[hash]) > Date.now()
 }
 
-MiniAMcpWikiRestriction.prototype.issue = function(path) {
+function __miniAMcpWikiPageCooldownHash(path) {
+  var manager = global.__wikiManager
+  if (!manager || !manager._retrievalV2 || manager._retrievalV2.closed) return sha1(String(path))
+  var local = path
+  if (String(path).startsWith("@")) { var resolved = manager._resolveMountPath(path); if (resolved && resolved.mount) { manager = resolved.mount.manager; local = resolved.localPath } }
+  return sha1(manager._getBackendIdentity() + "|" + local)
+}
+
+MiniAMcpWikiRestriction.prototype.issue = function(path, passage) {
   this._purge()
-  var hash = sha1(String(path))
+  var hash = __miniAMcpWikiPageCooldownHash(path), pinnedRevision = isMap(passage) ? passage.revision : __
+  if (global.__wikiManager && global.__wikiManager._retrievalV2 && !global.__wikiManager._retrievalV2.closed && !isMap(passage)) {
+    var revisionDescriptor = global.__wikiManager.open(path)
+    if (!revisionDescriptor || revisionDescriptor.error) return __
+    pinnedRevision = revisionDescriptor.revision
+  }
   if (this._cooldownActive(hash)) return __
   var ref = sha256(this.stateId + "|" + nowNano() + "|" + genUUID()).substring(0, 32)
   var refExpires = Date.now() + this.policy.refTtl * 1000
   var cooldownExpires = Date.now() + this.policy.pageCooldown * 1000
   if (this.refChName) {
-    $ch(this.refChName).set({ wiki: this.wikiId, kind: "ref", ref: ref }, { wiki: this.wikiId, path: path, expires: refExpires })
+    $ch(this.refChName).set({ wiki: this.wikiId, kind: "ref", ref: ref }, { wiki: this.wikiId, path: path, pageIdentity: hash, revision: pinnedRevision, passage: isMap(passage) ? clone(passage) : __, expires: refExpires })
     $ch(this.refChName).set({ wiki: this.wikiId, kind: "cooldown", hash: hash }, { wiki: this.wikiId, expires: cooldownExpires })
   } else {
-    this.refs[ref] = { wiki: this.wikiId, path: path, expires: refExpires }
+    this.refs[ref] = { wiki: this.wikiId, path: path, pageIdentity: hash, revision: pinnedRevision, passage: isMap(passage) ? clone(passage) : __, expires: refExpires }
     this.cooldowns[hash] = cooldownExpires
   }
   return ref
@@ -360,15 +388,44 @@ function __miniAMcpWikiDenyRestricted(operation) {
   return __
 }
 
-function __miniAMcpWikiRestrictedSearch(args) {
+function __miniAMcpWikiObserveRestricted(operation, implementation, args) {
+  var manager = global.__wikiManager, state = global.__miniAMcpWiki && global.__miniAMcpWiki.restriction
+  if (!state || !state.enabled || !manager || !manager._retrievalV2 || toBoolean(manager._config && manager._config.wikitelemetry) !== true) return implementation(args)
+  var started = Number(java.lang.System.nanoTime()), result
+  try { result = implementation(args); return result }
+  finally {
+    try {
+      var outcome = "error"
+      if (isMap(result)) {
+        if (result.error === "restricted-query-rejected") outcome = "rejected"
+        else if (result.error === "restricted-budget-exhausted") outcome = "quota"
+        else if (result.error === "invalid-or-expired-reference") outcome = "invalid_reference"
+        else if (result.error === "restricted-unavailable") outcome = "unavailable"
+        else if (result.incomplete === true) outcome = "incomplete"
+        else if (isArray(result.results)) outcome = result.results.length ? "success" : "zero"
+        else if (isString(result.content)) outcome = "success"
+      }
+      manager._retrievalV2._recordRestrictedTelemetry(operation,outcome,(Number(java.lang.System.nanoTime())-started)/1000000,global.MiniAWikiRetrievalV2.bytes(stringify(result || {},__,"")))
+    } catch(ignoreTelemetry) {}
+  }
+}
+function __miniAMcpWikiRestrictedSearch(args) { return __miniAMcpWikiObserveRestricted("search",__miniAMcpWikiRestrictedSearchImpl,args) }
+function __miniAMcpWikiRestrictedRead(args) { return __miniAMcpWikiObserveRestricted("read",__miniAMcpWikiRestrictedReadImpl,args) }
+function __miniAMcpWikiRestrictedSearchImpl(args) {
   var state = global.__miniAMcpWiki && global.__miniAMcpWiki.restriction
   if (!state || !state.enabled) return global.__wikiTool.wiki({ operation: "search", query: args.query, limit: args.limit, caseSensitive: args.caseSensitive, regex: args.regex, contextLines: args.contextLines, path: args.path, compact: args.contextLines === 0 })
   var q = isString(args.query) ? args.query.trim() : ""
   if (q.length < state.policy.minQueryChars || !/[A-Za-z0-9\u00c0-\uffff]/.test(q) || /[*?]{2,}|^\*|^\.$/.test(q)) return __miniAMcpWikiRestrictedError("restricted-query-rejected")
+  if (/(^|\s)(?:title|heading|prose|content|exact):/i.test(q) || /\s(?:AND|OR|NOT)\s/.test(q) && /[*?]/.test(q)) return __miniAMcpWikiRestrictedError("restricted-query-rejected")
   if (!state._can("search", 0)) return __miniAMcpWikiRestrictedBudgetError(state, "search", 0)
   state._event("search", q)
   var hits
-  try { hits = global.__wikiManager.search(q, { limit: state.policy.searchLimit, regex: false, caseSensitive: false, contextLines: 0, compact: true, path: "" }) } catch(e) { return __miniAMcpWikiRestrictedError("restricted-unavailable") }
+  try {
+    if (global.__wikiManager._retrievalV2) {
+      var improved = global.__wikiManager._retrievalV2.search(q, { limit: state.policy.searchLimit, evidenceChars: state.policy.readChars, evidenceLines: state.policy.readLines, __wikiSuppressSource: true })
+      if (!improved.ok || improved.outcome === "partial" && !improved.results.length) return __miniAMcpWikiRestrictedError("restricted-unavailable")
+      hits = improved.results
+    } else hits = global.__wikiManager.search(q, { limit: state.policy.searchLimit, regex: false, caseSensitive: false, contextLines: 0, compact: true, path: "" }) } catch(e) { return __miniAMcpWikiRestrictedError("restricted-unavailable") }
   // Two-phase on purpose: compute every candidate's title/description/char cost and charge
   // the aggregate BEFORE issuing any ref/cooldown. issue() has a side effect (it starts the
   // page's pageCooldown window) — issuing it per-hit inside the loop that decides the final
@@ -383,34 +440,41 @@ function __miniAMcpWikiRestrictedSearch(args) {
   for (var hi = 0; hi < hits.length && candidates.length < state.policy.searchLimit; hi++) {
     var hit = hits[hi]
     if (!isMap(hit) || !isString(hit.path)) continue
-    if (state._cooldownActive(sha1(String(hit.path)))) continue
-    var title = __miniAMcpWikiSafeChars(hit.title, state.policy.metaChars)
+    if (state._cooldownActive(__miniAMcpWikiPageCooldownHash(hit.path))) continue
+    var title = __miniAMcpWikiSafeChars(hit.title === hit.path ? "Wiki result" : hit.title, state.policy.metaChars)
     // Graph-derived hits are an explicit opt-in in mcp-wiki-safe. Keep their
     // relationship, provenance, digest, and underlying path private; callers
     // receive the same opaque reference flow as for a direct search result.
+    // Remove only generated source suffixes on the legacy adapter. Authored
+    // page descriptions remain content; generated URLs must not disclose paths.
+    var publicDescription = isString(hit.description) ? hit.description : "", sourceField = global.__wikiManager._sourceField
+    if (isString(hit[sourceField])) {
+      var suffix = " [" + sourceField + ": " + hit[sourceField] + "]"
+      while (publicDescription.endsWith(suffix)) publicDescription = publicDescription.substring(0, publicDescription.length - suffix.length)
+    }
     var isGraphHint = isString(hit.description) && hit.description.indexOf("[Related pages (graph") === 0
-    var description = isGraphHint ? "Related page" : __miniAMcpWikiSafeChars(hit.description, Math.max(0, state.policy.metaChars - title.length))
+    var description = __miniAMcpWikiSafeChars(isGraphHint ? "Related page" : publicDescription, Math.max(0, state.policy.metaChars - title.length))
     chars += title.length + description.length + REF_LEN
-    candidates.push({ path: hit.path, title: title, description: description })
+    candidates.push({ path: hit.path, title: title, description: description, passage: hit.passage })
   }
   if (!state.charge("search", chars)) return __miniAMcpWikiRestrictedBudgetError(state, "search", chars)
   var results = []
   candidates.forEach(function(c) {
-    var ref = state.issue(c.path)
+    var ref = state.issue(c.path, c.passage)
     if (!ref) return   // lost a race with a cooldown set between the check above and here
     results.push({ title: c.title, description: c.description, reference: ref })
   })
   return { results: results }
 }
 
-function __miniAMcpWikiRestrictedRead(args) {
+function __miniAMcpWikiRestrictedReadImpl(args) {
   // "reference" is an alias for "path": search results advertise the opaque token
   // under a "reference" field, so callers -- especially models without native
   // function-calling schemas, which never see the inputSchema's "path" property
   // name -- frequently send it back as "reference" instead. Accept either.
   if (isMap(args) && !isString(args.path) && isString(args.reference)) args.path = args.reference
   var state = global.__miniAMcpWiki && global.__miniAMcpWiki.restriction
-  if (!state || !state.enabled) return global.__wikiTool.wiki({ operation: "read", path: args.path, lineStart: args.startLine, lineEnd: args.endLine, section: args.section, countLines: args.countLines, compact: args.compact })
+  if (!state || !state.enabled) return global.__wikiTool.wiki({ operation: "read", path: args.path, lineStart: args.startLine, lineEnd: args.endLine, section: args.section, countLines: args.countLines, compact: args.compact, maxChars: args.maxChars, charOffset: args.charOffset, revision: args.revision, charStart: args.charStart, charEnd: args.charEnd })
   if (args.countLines === true) return __miniAMcpWikiRestrictedError("invalid-or-expired-reference")
   var grant = state.consume(args.path)
   if (!grant) return __miniAMcpWikiRestrictedError("invalid-or-expired-reference")
@@ -419,6 +483,36 @@ function __miniAMcpWikiRestrictedRead(args) {
   var page
   try { page = global.__wikiManager.read(grant.path) } catch(e) { page = __ }
   if (!isMap(page) || !isString(page.body)) return __miniAMcpWikiRestrictedError("invalid-or-expired-reference")
+  if (isMap(grant.passage)) {
+    if (grant.pageIdentity !== __miniAMcpWikiPageCooldownHash(grant.path)) return __miniAMcpWikiRestrictedError("invalid-or-expired-reference")
+    var pin = grant.passage, currentManager = global.__wikiManager, localPath = grant.path
+    if (grant.path.startsWith("@")) { var location = currentManager._resolveMountPath(grant.path); if (!location || !location.mount) return __miniAMcpWikiRestrictedError("invalid-or-expired-reference"); currentManager = location.mount.manager; localPath = location.localPath }
+    if (!currentManager._retrievalV2 || currentManager._retrievalV2.closed || currentManager._isSearchExcludedPath(localPath) || sha1(String(page.raw)) !== pin.revision || currentManager._retrievalV2._pending()._all || currentManager._retrievalV2._pending()[localPath]) return __miniAMcpWikiRestrictedError("invalid-or-expired-reference")
+    // No caller-controlled passage/range identifiers: the issued selection is private.
+    if (isDef(args.section) || isDef(args.startLine) || isDef(args.endLine)) return __miniAMcpWikiRestrictedError("invalid-or-expired-reference")
+    var serving, required, pinnedPage, pinnedPassage
+    try {
+      serving = currentManager._retrievalV2.acquire()
+      pinnedPage = serving.catalog.pages[localPath]; pinnedPassage = serving.catalog.passages[pin.passageId]
+      if (!pinnedPage || !pinnedPassage || pin.wikiId !== serving.catalog.wikiId || pinnedPage.revision !== pin.revision || pinnedPassage.path !== localPath || pinnedPassage.revision !== pin.revision || !isNumber(pin.charStart) || !isNumber(pin.charEnd) || !isFinite(pin.charStart) || !isFinite(pin.charEnd) || Math.floor(pin.charStart) !== pin.charStart || Math.floor(pin.charEnd) !== pin.charEnd || pin.charStart < pinnedPassage.charStart || pin.charEnd > pinnedPassage.charEnd || pin.charEnd <= pin.charStart || global.MiniAWikiRetrievalV2.retired(pinnedPage)) throw new Error("invalid-reference")
+      required = global.MiniAWikiRetrievalV2.supportRanges(pinnedPage, serving.catalog.passages, pinnedPassage, pin.charStart)
+    } catch(e) { return __miniAMcpWikiRestrictedError("invalid-or-expired-reference") }
+    finally { if (serving) currentManager._retrievalV2.release(serving) }
+    var selected = String(page.raw).substring(pin.charStart, pin.charEnd).split("\n").slice(0, state.policy.readLines).join("\n")
+    var content = __miniAMcpWikiSafeChars(selected, state.policy.readChars), incomplete = false, included = []
+    // Preserve the answer allocation. Complete support can use only remaining
+    // disclosure space; never truncate a header or obtain a separate page quota.
+    required.sort(function(a,b){return a.charStart-b.charStart}).forEach(function(range) {
+      if (range.charStart >= pin.charStart && range.charEnd <= pin.charEnd) return
+      var support = String(page.raw).substring(range.charStart,range.charEnd)
+      var proposed = included.concat([support]).join("\n") + "\n" + content
+      if (proposed.length > state.policy.readChars || proposed.split("\n").length > state.policy.readLines) { incomplete = true; return }
+      included.push(support)
+    })
+    if (included.length) content = __miniAMcpWikiSafeChars(included.join("\n") + "\n" + content, state.policy.readChars)
+    if (!state.charge("read", content.length)) return __miniAMcpWikiRestrictedBudgetError(state, "read", content.length)
+    return incomplete ? { content: content, incomplete: true } : { content: content }
+  }
   var lines = page.body.split("\n"), start = 0, end = Math.min(lines.length, state.policy.readLines)
   if (isString(args.section) && args.section.trim().length > 0) {
     var wanted = args.section.trim().toLowerCase(), found = -1, level = 7
@@ -458,6 +552,9 @@ function __miniAMcpWikiBuildConfig(args, options) {
     backend             : backend,
     indexdir            : isString(args.wikiindexdir) && args.wikiindexdir.trim().length > 0 ? args.wikiindexdir.trim() : __,
     wikilexical         : isDef(args.wikilexical) ? args.wikilexical : __,
+    wikiretrievalv2      : args.wikiretrievalv2,
+    wikitelemetry: args.wikitelemetry,
+    wikiretrievalconfig  : args.wikiretrievalconfig,
     s3artifactprefix    : isString(args.wikis3artifactprefix) && args.wikis3artifactprefix.trim().length > 0 ? args.wikis3artifactprefix.trim() : __,
     s3artifactbundle    : toBoolean(args.s3artifactbundle) === true,
     wikihttpindexurl    : isString(args.wikihttpindexurl) && args.wikihttpindexurl.trim().length > 0 ? args.wikihttpindexurl.trim() : __,
@@ -655,3 +752,17 @@ function __miniAMcpWikiInit(args, options) {
 
   return global.__miniAMcpWiki
 }
+
+// The Java object is shared across OpenAF library scopes in this JVM. It is not
+// a distributed lock; channel providers must not be advertised as CAS by inference.
+if (!global.__miniAWikiRestrictionLock) global.__miniAWikiRestrictionLock = new java.util.concurrent.locks.ReentrantLock()
+;["charge", "issue", "consume", "_can"].forEach(function(name) {
+  var implementation = MiniAMcpWikiRestriction.prototype[name]
+  MiniAMcpWikiRestriction.prototype[name] = function() {
+    var lock = global.__miniAWikiRestrictionLock
+    if (!lock.tryLock(1, java.util.concurrent.TimeUnit.SECONDS)) return name === "charge" || name === "_can" ? false : __
+    try { return implementation.apply(this, arguments) }
+    catch(e) { return name === "charge" || name === "_can" ? false : __ }
+    finally { lock.unlock() }
+  }
+})

@@ -1,0 +1,19 @@
+{
+  "suite": "dreams",
+  "assertions": 173,
+  "passedFunctions": 44,
+  "failures": [
+    {
+      "name": "testBuildLlmUsesOAFModelFallback",
+      "error": "OAF_MODEL type should be parsed (got false but expected true)"
+    },
+    {
+      "name": "testBuildLlmPrefersModelArg",
+      "error": "model= should override OAF_MODEL type (got false but expected true)"
+    },
+    {
+      "name": "testDreamWikiPlanPreviewsGraphWithoutPersisting",
+      "error": "the preview should resolve the same apply/plan semantic default (got false but expected true)"
+    }
+  ]
+}

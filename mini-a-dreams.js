@@ -198,12 +198,16 @@ MiniADreams.prototype._getEnv = function(name) {
   return getEnv(name)
 }
 
+MiniADreams.prototype._createLlm = function(config) {
+  return $llm(config)
+}
+
 MiniADreams.prototype._buildLlm = function() {
   if (isObject(this._llm)) return this._llm
   var modelCfg = this._parseModelConfig(this._args.model, "model parameter", true)
   if (!isMap(modelCfg)) modelCfg = this._parseModelConfig(this._getEnv("OAF_MODEL"), "OAF_MODEL environment variable", true)
   if (!isMap(modelCfg)) return __
-  try { return $llm(modelCfg) } catch(ignoreLlmCreate) { return __ }
+  try { return this._createLlm(modelCfg) } catch(ignoreLlmCreate) { return __ }
 }
 
 // _graphLlmExtract: the llmExtractFn MiniAWikiGraph.buildSemantic() calls per changed page when
@@ -692,20 +696,20 @@ MiniADreams.prototype.dreamWiki = function(opts) {
       defaultResult.repairs = self._repairWikiLint(wmDry, lintBeforeDry, { dryRun: true })
       defaultResult.issues_fixed = defaultResult.repairs.fixed.map(function(issue) { return issue.type + ":" + issue.page })
       proposal.repairs = defaultResult.repairs
-      // Preview-only graph build: same structural (+ semantic, if defaulted/enabled) pass apply
-      // would run, but buildStructural/buildSemantic skip _persist() when preview:true so the
-      // dry-run never touches graph.json.
+      // Preview the structural graph without model creation, extraction or persistence.
+      // Report the later semantic request separately from the work actually executed.
       if (self._wikiGraphEnabled()) {
         try {
           // Plan/dry-run is intentionally model-free. It reports semantic work as an
           // estimate below instead of invoking the graph extractor.
           var wantSemantic = false
-          proposal.graph_preview = { semantic: wantSemantic, result: wmDry.graph("build", { preview: true, semantic: wantSemantic }) }
+          proposal.graph_preview = { semantic: wantSemantic, semanticRequested: self._effectiveWikiGraphSemantic("plan"), semanticExecuted: false, semanticOmissionReason: "model-free-dry-run", result: wmDry.graph("build", { preview: true, semantic: wantSemantic }) }
         } catch(graphPreviewErr) {
           self._log("[dreams:wiki] Graph preview error: " + __miniAErrMsg(graphPreviewErr))
           proposal.graph_preview = { ok: false, error: __miniAErrMsg(graphPreviewErr) }
         }
       }
+      if (wmDry._retrievalV2) proposal.retrieval_maintenance = wmDry._retrievalV2.maintenance({ limit: 25 })
       defaultResult.proposal = proposal
       if (isFunction(wmDry.knowledgeDirtySet)) {
         var stateDry = wmDry.knowledgeLoadState()
@@ -1407,12 +1411,9 @@ MiniADreams.prototype._wikiGraphEnabled = function() {
          (isString(a.wikigraphfalkorhost) && a.wikigraphfalkorhost.trim().length > 0)
 }
 
-// _effectiveWikiGraphSemantic: wikigraphsemantic is opt-in everywhere except for the
-// deterministic apply/plan passes, where it defaults to true once usewikigraph is on
-// (an explicit wikigraphsemantic=false still overrides). apply/plan already spend the I/O
-// to walk every page for structural graph work, so folding in the LLM-driven semantic pass
-// there is cheap incremental value; reorg/graph stay opt-in since they're already
-// LLM-driven (reorg) or meant as a cheap structural-only rebuild (graph).
+// Resolve requested semantic work, including the existing apply/plan default.
+// Plan only reports this request and always executes a model-free structural preview.
+// An explicit wikigraphsemantic=false overrides the default; graph/reorg stay opt-in.
 MiniADreams.prototype._effectiveWikiGraphSemantic = function(mode) {
   if (isDef(this._args.wikigraphsemantic)) return toBoolean(this._args.wikigraphsemantic) === true
   return (mode === "apply" || mode === "plan") && this._wikiGraphEnabled()
@@ -1433,7 +1434,7 @@ MiniADreams.prototype._buildWikiConfig = function() {
   if (!toBoolean(a.usewiki)) return __
   var backend = this._argStr(a.wikibackend).length > 0 ? this._argStr(a.wikibackend).toLowerCase() : "fs"
   if (backend === "https") backend = "http"
-  var cfg = { access: "rw", backend: backend, indexdir: a.wikiindexdir, s3artifactprefix: a.wikis3artifactprefix, s3artifactbundle: toBoolean(a.s3artifactbundle) === true, wikihttpindexurl: a.wikihttpindexurl, wikihttptimeout: a.wikihttptimeout, wikiartifactrefreshsecs: a.wikiartifactrefreshsecs, wikilexical: a.wikilexical }
+  var cfg = { access: "rw", backend: backend, indexdir: a.wikiindexdir, s3artifactprefix: a.wikis3artifactprefix, s3artifactbundle: toBoolean(a.s3artifactbundle) === true, wikihttpindexurl: a.wikihttpindexurl, wikihttptimeout: a.wikihttptimeout, wikiartifactrefreshsecs: a.wikiartifactrefreshsecs, wikilexical: a.wikilexical, wikiretrievalv2: a.wikiretrievalv2, wikiretrievalconfig: a.wikiretrievalconfig, wikitelemetry: a.wikitelemetry }
   // carry graph settings so _finalizeWiki can rebuild the knowledge graph.
   // The user-facing arg is usewikigraph (usegraph is the wiki-manager config key).
   if (this._wikiGraphEnabled()) {

@@ -105,6 +105,10 @@ function __miniAMcpSkillsRestrictedOpen(args) {
   if (!state || !state.enabled) return __miniAMcpSkillsOpen(args)
   var grant = state.consume(args.ref)
   if (!grant) return __miniAMcpWikiRestrictedError("invalid-or-expired-reference")
+  if (grant.revision) {
+    var currentGrantView = global.__wikiManager.open(grant.path)
+    if (grant.pageIdentity !== __miniAMcpWikiPageCooldownHash(grant.path) || !currentGrantView || currentGrantView.error || currentGrantView.revision !== grant.revision) return __miniAMcpWikiRestrictedError("invalid-or-expired-reference")
+  }
   if (!state._can("read", 0)) return __miniAMcpWikiRestrictedBudgetError(state, "read", 0)
   state._event("open", grant.path)
   var descriptor
@@ -134,12 +138,16 @@ function __miniAMcpSkillsRestrictedRead(args) {
   if (!state || !state.enabled) return __miniAMcpSkillsRead(args)
   var grant = state.consume(args.ref)
   if (!grant) return __miniAMcpWikiRestrictedError("invalid-or-expired-reference")
+  if (grant.revision) {
+    var currentGrantView = global.__wikiManager.open(grant.path)
+    if (grant.pageIdentity !== __miniAMcpWikiPageCooldownHash(grant.path) || !currentGrantView || currentGrantView.error || currentGrantView.revision !== grant.revision) return __miniAMcpWikiRestrictedError("invalid-or-expired-reference")
+  }
   if (!state._can("read", 0)) return __miniAMcpWikiRestrictedBudgetError(state, "read", 0)
   state._event("read", grant.path)
   var out
   try {
     out = __miniASkillRead(global.__wikiManager, grant.path, {
-      section: args.section, startLine: args.startLine, endLine: args.endLine,
+      section: args.section, startLine: args.startLine, endLine: args.endLine, revision: grant.revision,
       maxChars: Math.min(isNumber(args.maxChars) ? args.maxChars : state.policy.readChars, state.policy.readChars),
       cacheTtlMs: 0
     })
@@ -161,6 +169,10 @@ function __miniAMcpSkillsRestrictedRelated(args) {
   if (!state || !state.enabled) return __miniAMcpSkillsRelated(args)
   var grant = state.consume(args.ref)
   if (!grant) return __miniAMcpWikiRestrictedError("invalid-or-expired-reference")
+  if (grant.revision) {
+    var currentGrantView = global.__wikiManager.open(grant.path)
+    if (grant.pageIdentity !== __miniAMcpWikiPageCooldownHash(grant.path) || !currentGrantView || currentGrantView.error || currentGrantView.revision !== grant.revision) return __miniAMcpWikiRestrictedError("invalid-or-expired-reference")
+  }
   if (!state._can("search", 0)) return __miniAMcpWikiRestrictedBudgetError(state, "search", 0)
   state._event("related", grant.path)
   var raw

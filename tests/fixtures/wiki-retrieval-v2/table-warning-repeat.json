@@ -1,0 +1,9 @@
+{
+  "assertions": 1552,
+  "runs": 2,
+  "functionsPerRun": 28,
+  "failures": [],
+  "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",
+  "parser": 4,
+  "scope": "same-JVM focused suite including combined table warning/header evidence and parser3 incompatibility"
+}

@@ -1,0 +1,28 @@
+{
+  "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",
+  "sources": {
+    "mini-a-wiki.js": "9c7c8623fdd5d018a68511698d29424b7a2b9bf1",
+    "mini-a-wiki-retrieval.js": "5494e227823f49845c364f8767c3eeb11689e36a",
+    "tests/wikiRetrievalV2.js": "d6e6569931d1357a90705b3458fc3f0a62b3ca7c"
+  },
+  "focused": {
+    "assertions": 1164,
+    "functions": 29,
+    "failures": []
+  },
+  "wiki": {
+    "assertions": 1895,
+    "functions": 190,
+    "failures": []
+  },
+  "repeat": {
+    "runs": 2,
+    "assertions": 2328
+  },
+  "targeted": "SOURCE_ENUMERATION_RECOVERY_PASS",
+  "limitations": [
+    "Earlier focused move failure remains unexplained; did not recur",
+    "No live provider or performance claim",
+    "Publication remains corpus-scaled"
+  ]
+}

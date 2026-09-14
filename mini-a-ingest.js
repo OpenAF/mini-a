@@ -407,7 +407,7 @@ MiniAIngest.prototype._invalidate = function(state, key, result) {
   var affected = function(id, record) {
     record = isMap(record) ? record : {}
     var refs = isArray(record.sourceKeys) ? record.sourceKeys : isArray(record.sources) ? record.sources : []
-    return seen[id] || record.sourceKey === key || seen[record.page] || refs.indexOf(key) >= 0 || (isArray(record.chunks) && record.chunks.some(function(c) { return seen[isMap(c) ? c.id : c] }))
+    return (isArray(record.passageSupports) && record.passageSupports.some(function(ref) { return isMap(ref) && ref.page === prev.page })) || seen[id] || record.sourceKey === key || seen[record.page] || refs.indexOf(key) >= 0 || (isArray(record.chunks) && record.chunks.some(function(c) { return seen[isMap(c) ? c.id : c] }))
   }
   Object.keys(state.facts || {}).forEach(function(id) {
     var f = state.facts[id]
@@ -415,9 +415,19 @@ MiniAIngest.prototype._invalidate = function(state, key, result) {
       f.invalidated = true; result.planned_derivatives_invalidated.push(id)
     }
   })
-  ;[state.summaries.pages, state.summaries.sections].forEach(function(map) {
-    Object.keys(map || {}).forEach(function(id) {
-      if (affected(id, map[id])) { delete map[id]; result.planned_derivatives_invalidated.push(id) }
+  ;[{ map: state.summaries.pages, kind: "page-summary" }, { map: state.summaries.sections, kind: "section-summary" }].forEach(function(summary) {
+    Object.keys(summary.map || {}).forEach(function(id) {
+      var record = summary.map[id]
+      if (!affected(id, record)) return
+      // Remove only this grounded summary's direct postings; preserve other edges.
+      if (isMap(record) && isArray(record.passageSupports) && isMap(state.derivativeRegistry) && isMap(state.derivativeRegistry.byPage)) record.passageSupports.forEach(function(ref) {
+        if (!isMap(ref) || !isString(ref.page)) return
+        var typed = summary.kind + ":" + id, postings = state.derivativeRegistry.byPage[ref.page] || []
+        postings = postings.filter(function(k) { return k !== typed })
+        if (postings.length) state.derivativeRegistry.byPage[ref.page] = postings; else delete state.derivativeRegistry.byPage[ref.page]
+        state.dependencies[ref.page] = (state.dependencies[ref.page] || []).filter(function(k) { return k !== typed })
+      })
+      delete summary.map[id]; result.planned_derivatives_invalidated.push(id)
     })
   })
 }
@@ -435,10 +445,27 @@ MiniAIngest.prototype._collectChunks = function(state, oldIds, scope) {
 // A prepared journal contains full replacement pages and their expected preconditions.
 // Replaying a write already applied is safe only when its resulting signature matches.
 MiniAIngest.prototype._applyJournal = function(wm, journal, path, result) {
+  var previous = wm._servingBatchChanges
+  try {
+    if (wm._retrievalV2) {
+      wm._servingBatchChanges = {}
+      journal.operations.forEach(function(op) { wm._servingBatchChanges[op.path] = true })
+    }
+    return this._applyJournalPages(wm, journal, path, result)
+  } finally { wm._servingBatchChanges = previous }
+}
+
+MiniAIngest.prototype._exportCompletedServing = function(wm, result) {
+  if (wm._retrievalV2 && wm._retrievalV2.config.bundlePath) result.finalize.bundle = wm._retrievalV2.exportBundle(wm._retrievalV2.config.bundlePath)
+}
+
+MiniAIngest.prototype._applyJournalPages = function(wm, journal, path, result) {
   var self = this
   if (journal.phase === "finalization-pending") {
     result.finalize = self._finalize(wm)
     if (!result.finalize || result.finalize.ok !== true || result.finalize.reindexed !== true || /^failed/.test(String(result.finalize.graph))) throw new Error("finalization failed during recovery")
+    journal.phase = "complete"; self._atomicJson(path, journal)
+    self._exportCompletedServing(wm, result)
     if (!new java.io.File(path).delete()) throw new Error("journal cleanup failed")
     return
   }
@@ -478,6 +505,7 @@ MiniAIngest.prototype._applyJournal = function(wm, journal, path, result) {
   result.finalize = self._finalize(wm)
   if (!isMap(result.finalize) || result.finalize.ok !== true || result.finalize.reindexed !== true || /^failed/.test(String(result.finalize.graph))) throw new Error("finalization failed")
   journal.phase = "complete"; self._atomicJson(path, journal)
+  self._exportCompletedServing(wm, result)
   if (!new java.io.File(path).delete()) throw new Error("journal cleanup failed")
 }
 MiniAIngest.prototype.run = function() {
@@ -523,7 +551,7 @@ MiniAIngest.prototype.run = function() {
       if (descriptor._backendType === "http" || descriptor._backendType === "fs" && new java.io.File(String(cfg.root)).isFile()) { result.reason = "wiki-read-only"; return result }
       acquireWriter(descriptor._getIndexRoot())
       wm = new MiniAWikiManager(cfg, function(level, msg) { self._log(msg) }); owns = true }
-    Object.keys(global.__miniAWikiKnowledge.methods).forEach(function(k) { if (!isFunction(wm[k])) wm[k] = global.__miniAWikiKnowledge.methods[k] })
+    global.__miniAWikiKnowledge.install(wm)
     if (!dry && wm._access !== "rw") { result.reason = "wiki-read-only"; return result }
     var journalPath = wm._getIndexRoot() + "/.mini-a-wiki-ingest/journal.json"
     if (!dry && !lock) acquireWriter(wm._getIndexRoot())

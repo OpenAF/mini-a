@@ -1,0 +1,93 @@
+{
+  "scope": "working increment; full plan not complete",
+  "assertions": {
+    "focused": {
+      "suite": "wikiRetrievalV2",
+      "assertions": 385,
+      "passedFunctions": 23,
+      "failures": []
+    },
+    "repeat": {
+      "repeatedAssertions": 770
+    },
+    "wiki": {
+      "suite": "wiki",
+      "assertions": 1099,
+      "passedFunctions": 183,
+      "failures": []
+    },
+    "ingestion": {
+      "suite": "wikiIngest",
+      "assertions": 218,
+      "passedFunctions": 58,
+      "failures": []
+    },
+    "skills": {
+      "suite": "skills",
+      "assertions": 61,
+      "passedFunctions": 21,
+      "failures": []
+    },
+    "dreams": {
+      "suite": "dreams",
+      "assertions": 173,
+      "passedFunctions": 44,
+      "failures": [
+        {
+          "name": "testBuildLlmUsesOAFModelFallback",
+          "error": "OAF_MODEL type should be parsed (got false but expected true)"
+        },
+        {
+          "name": "testBuildLlmPrefersModelArg",
+          "error": "model= should override OAF_MODEL type (got false but expected true)"
+        },
+        {
+          "name": "testDreamWikiPlanPreviewsGraphWithoutPersisting",
+          "error": "the preview should resolve the same apply/plan semantic default (got false but expected true)"
+        }
+      ]
+    },
+    "graph": {
+      "suite": "graph",
+      "assertions": 37,
+      "passedFunctions": 14,
+      "failures": []
+    },
+    "ingest": {
+      "suite": "wikiIngest",
+      "assertions": 218,
+      "passedFunctions": 58,
+      "failures": []
+    },
+    "utils": {
+      "assertions": 350,
+      "passedFunctions": 44,
+      "failures": []
+    }
+  },
+  "sourceSha1": {
+    "mini-a-wiki.js": "723d50264550090e153dd399b91e01e7b1113cfb",
+    "mini-a-wiki-retrieval.js": "f25c86ff78acdf851095e77581d135850d880180",
+    "mini-a-wiki-knowledge.js": "dc0b786982d834d6e66a9b2cb24a8f5760f89fd6",
+    "mini-a-ingest.js": "2843494bf25f81d26db4f9748f6faddf4f4e334a",
+    "mini-a-mcp-wiki.js": "2e5e759e7f1e0ee2f69f33f17704ad6b7735e369",
+    "tests/wikiRetrievalV2.js": "aab345246931b066fd6dcfbfb6d142e6378b8331",
+    "mini-a-utils.js": "4296b052b92a3ea3f5beb3233047abe6ab6c3d6b",
+    "mcps/mcp-wiki.yaml": "73f4ba47d6b902b7e8cbca1bd6eea25e065b6ca4",
+    "tests/wikiRetrievalContracts.js": "25c8972d693d5da5aba536dd29d56980beaf8914",
+    "tests/wiki.js": "da5e76705015b73bc96b363bfec1d36a0c41a105"
+  },
+  "commands": [
+    "WIKI_COUNT_SUITE=wikiRetrievalV2 oaf -f tests/wikiRetrievalAssertions.js",
+    "oaf -f tests/wikiRetrievalRepeat.js",
+    "ojob tests/wiki.yaml",
+    "WIKI_COUNT_SUITE=wiki oaf -f tests/wikiRetrievalAssertions.js",
+    "python3 tests/wikiRetrievalTransport.py"
+  ],
+  "limitations": [
+    "Full implementation plan is not complete; no external blocker accounts for remaining local engineering.",
+    "Configured v2 shingles/ngrams/PRF/query-expansion remain explicit unsupported build capabilities.",
+    "Structural prerequisite packing, complete stage telemetry, dependency-only ingestion finalization and the remaining durability/space failure matrix require implementation.",
+    "No live remote-provider validation; concurrent remote writers/replicated quotas require coordination."
+  ]
+}

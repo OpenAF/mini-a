@@ -1,0 +1,73 @@
+{
+  "results": [
+    {
+      "descriptor": "mcp-wiki.yaml",
+      "transport": "stdio",
+      "tools": [
+        "backlinks",
+        "browse",
+        "context",
+        "grep",
+        "list",
+        "navigate",
+        "open",
+        "read",
+        "related",
+        "search",
+        "tree"
+      ],
+      "searchPassed": true,
+      "readPassed": true,
+      "liveProvider": false,
+      "readContinuationPassed": true,
+      "navigationAndRelatedPassed": true,
+      "grepContinuationPassed": true
+    },
+    {
+      "descriptor": "mcp-wiki-safe.yaml",
+      "transport": "stdio",
+      "tools": [
+        "read",
+        "search"
+      ],
+      "searchPassed": true,
+      "readPassed": true,
+      "liveProvider": false
+    },
+    {
+      "descriptor": "mcp-wiki.yaml",
+      "transport": "http",
+      "tools": [
+        "backlinks",
+        "browse",
+        "context",
+        "grep",
+        "list",
+        "navigate",
+        "open",
+        "read",
+        "related",
+        "search",
+        "tree"
+      ],
+      "searchPassed": true,
+      "readPassed": true,
+      "liveProvider": false,
+      "readContinuationPassed": true,
+      "navigationAndRelatedPassed": true,
+      "grepContinuationPassed": true
+    },
+    {
+      "descriptor": "mcp-wiki-safe.yaml",
+      "transport": "http",
+      "tools": [
+        "read",
+        "search"
+      ],
+      "searchPassed": true,
+      "readPassed": true,
+      "liveProvider": false
+    }
+  ],
+  "liveProvider": false
+}

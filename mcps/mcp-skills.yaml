@@ -57,6 +57,13 @@ help:
   - name     : wikiindexdir
     desc     : Local cache directory used for downloaded S3 search and graph artifacts
     mandatory: false
+  - name     : wikiretrievalv2
+    desc     : Opt-in versioned passage retrieval; requires compatible serving artifacts; build explicitly on writable FS/s3fs or hydrate a published bundle
+    example  : "false"
+    mandatory: false
+  - name     : wikiretrievalconfig
+    desc     : Validated SLON/JSON advanced passage, cache and artifact budgets
+    mandatory: false
   - name     : wikilexical
     desc     : "SLON/JSON Lucene lexical configuration. Defaults to {language: 'english'}."
     mandatory: false
@@ -229,6 +236,10 @@ todo:
               type       : integer
             endLine:
               type       : integer
+            revision: { type: string, description: "Raw revision from the previous read." }
+            charOffset: { type: integer, description: "Copy next.charOffset to advance inside a fixed range." }
+            charStart: { type: integer }
+            charEnd: { type: integer }
             maxChars:
               type       : integer
               description: Maximum characters returned (default 4000; continuation cursor returned when exceeded).
@@ -331,6 +342,8 @@ jobs:
       wikihttptimeout      : toNumber.isNumber.default(30000)
       wikiartifactrefreshsecs: toNumber.isNumber.default(0)
       wikiindexdir         : isString.default(__)
+      wikiretrievalv2: toBoolean.isBoolean.default(__)
+      wikiretrievalconfig: isString.default(__)
       wikilexical          : isString.default(__)
       usewikigraph        : toBoolean.isBoolean.default(false)
       wikigraphfalkorhost : isString.default(__)
@@ -397,6 +410,10 @@ jobs:
       section  : isString.default(__)
       startLine: toNumber.isNumber.default(__)
       endLine  : toNumber.isNumber.default(__)
+      revision: isString.default(__)
+      charOffset: toNumber.isNumber.default(__)
+      charStart: toNumber.isNumber.default(__)
+      charEnd: toNumber.isNumber.default(__)
       maxChars : toNumber.isNumber.default(4000)
   exec : | #js
     return __miniAMcpSkillsRead(args)

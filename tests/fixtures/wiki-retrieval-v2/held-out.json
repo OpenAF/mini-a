@@ -1,0 +1,21 @@
+{
+  "split": "held-out",
+  "pages": [
+    {"path":"long.md","title":"Configuration","introRepeats":160,"body":"# Expiry\nSet wikirestrictrefttl to control opaque reference expiry."},
+    {"path":"language.md","title":"Workloads","body":"# Processing\nThe runners were running workloads efficiently."},
+    {"path":"old.md","title":"Version guidance","metadata":{"updated":"2020-01-01","applicability":{"version":"1"}},"body":"# Compatibility\ncompatibilityswitch version one requires legacy negotiation."},
+    {"path":"new.md","title":"Version guidance","metadata":{"updated":"2026-09-14","applicability":{"version":"2"}},"body":"# Compatibility\ncompatibilityswitch version two requires modern negotiation."},
+    {"path":"issuer.md","title":"Trust","body":"# Verification\nVerify issuer binding before accepting a credential."},
+    {"path":"audience.md","title":"Trust","body":"# Verification\nVerify audience binding before accepting a credential."},
+    {"path":"same.md","title":"General operations","body":"# Expiry\nReference expiry is useful."},
+    {"wiki":"last","path":"same.md","title":"Specific operations","body":"# Expiry\nlastmountparameter controls reference expiry precisely."}
+  ],
+  "queries": [
+    {"query":"wikirestrictrefttl","support":["Set wikirestrictrefttl to control opaque reference expiry"],"k":1},
+    {"query":"running workloads","support":["The runners were running workloads"],"k":1},
+    {"query":"compatibilityswitch","applicability":{"version":"1"},"support":["version one requires legacy negotiation"],"k":1},
+    {"query":"issuer audience credential","support":["Verify issuer binding","Verify audience binding"],"k":2},
+    {"query":"lastmountparameter reference expiry","support":["lastmountparameter controls reference expiry precisely"],"k":1,"wiki":"*"},
+    {"query":"genuineheldoutunanswerableidentifier","support":[],"k":2}
+  ]
+}

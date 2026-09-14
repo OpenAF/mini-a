@@ -1,0 +1,21 @@
+{
+  "sources": {
+    "mini-a-mcp-wiki.js": "bd1cf65618311ae7638a6e83fee3636c5e2afcbc",
+    "tests/wiki.js": "affcc367f7bc01378c6de7e9368665691be5bd87",
+    "USAGE.md": "6dea99fe70f3ee518fae2c6fea1c882aafa43fcd",
+    "docs/WIKI.md": "816e50eca6552c94e19ad33fa8f4ffd288717e96"
+  },
+  "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",
+  "wiki": {
+    "suite": "wiki",
+    "assertions": 2019,
+    "passedFunctions": 193,
+    "failures": []
+  },
+  "targeted": "RESTRICTED_GRAPH_METADATA_CAP_PASS",
+  "limitations": [
+    "Registered runtime fixtures, not new listener/provider validation",
+    "No performance claim",
+    "Full-plan acceptance remains incomplete"
+  ]
+}

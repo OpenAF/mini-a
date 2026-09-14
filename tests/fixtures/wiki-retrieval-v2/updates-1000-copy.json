@@ -1,0 +1,77 @@
+{
+  "kind": "incremental-generations",
+  "mode": "copy",
+  "backend": "local-fs",
+  "pages": 1000,
+  "samples": 10,
+  "runtime": "20260913",
+  "jvm": "26.0.2",
+  "observations": [
+    {
+      "millis": 877.2705421447754,
+      "parsedPages": 1,
+      "work": null
+    },
+    {
+      "millis": 762.7509579658508,
+      "parsedPages": 1,
+      "work": null
+    },
+    {
+      "millis": 693.9498341083527,
+      "parsedPages": 1,
+      "work": null
+    },
+    {
+      "millis": 638.4927079677582,
+      "parsedPages": 1,
+      "work": null
+    },
+    {
+      "millis": 618.4342079162598,
+      "parsedPages": 1,
+      "work": null
+    },
+    {
+      "millis": 633.851166009903,
+      "parsedPages": 1,
+      "work": null
+    },
+    {
+      "millis": 620.913125038147,
+      "parsedPages": 1,
+      "work": null
+    },
+    {
+      "millis": 638.0689589977264,
+      "parsedPages": 1,
+      "work": null
+    },
+    {
+      "millis": 620.569333076477,
+      "parsedPages": 1,
+      "work": null
+    },
+    {
+      "millis": 615.1317911148071,
+      "parsedPages": 1,
+      "work": null
+    }
+  ],
+  "buildMillis": 1708.3245000839233,
+  "latency": {
+    "p50": 633.851166009903,
+    "p95": 877.2705421447754,
+    "p99": 877.2705421447754
+  },
+  "disk": {
+    "apparentBytes": 39032124,
+    "uniqueFileBytes": 39032124,
+    "files": 12218,
+    "estimator": "POSIX file identity and length; excludes allocation and metadata overhead"
+  },
+  "memoryUsed": 174718496,
+  "linkImmutableFiles": false,
+  "moduleSha1": "cc96e711c19cdc08d909aa4e958706980cda9126",
+  "comparison": "pre-increment v2 versus current default and explicit hard-link option; local real Lucene"
+}

@@ -2,6 +2,9 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA Wiki Ingest Tests::LegacyContextProvenance
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testLegacyContextProvenance
 
 - name: MiniA Wiki Ingest Tests::IngestDiscoversMarkdownAndSkipsVendorDirs
   to  : oJob Test
@@ -236,6 +239,7 @@ jobs:
   exec: args.func = require("tests/wikiIngestReconcile.js").testPreparedRecoveryWithIncompleteOrigin
 
 todo:
+- MiniA Wiki Ingest Tests::LegacyContextProvenance
 - MiniA Wiki Ingest Tests::IngestDiscoversMarkdownAndSkipsVendorDirs
 - MiniA Wiki Ingest Tests::IngestDryRunWritesNoPages
 - MiniA Wiki Ingest Tests::IngestRespectsIncludeAndExclude

@@ -1,0 +1,8 @@
+{
+  "assertions": 1392,
+  "runs": 2,
+  "functionsPerRun": 28,
+  "failures": [],
+  "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",
+  "scope": "same-JVM focused suite; controlled insufficient-space exceptions, not physical-volume exhaustion or power-loss testing"
+}

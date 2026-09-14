@@ -238,7 +238,7 @@ function __miniASkillResolveHitMeta(wm, targetsByName, hit) {
   }
   if (!isString(localPath) || localPath.length === 0) return __
   var meta
-  try { meta = manager._metaFor(localPath) } catch(e) { meta = __ }
+  try { meta = manager._retrievalV2 ? manager.open(localPath).frontmatter : manager._metaFor(localPath) } catch(e) { meta = __ }
   if (!isMap(meta)) return __
   return { manager: manager, wikiName: wikiName, localPath: localPath, meta: meta }
 }
@@ -307,7 +307,7 @@ function __miniASkillContext(wm, options, logFn) {
   var base = wm.context(opts) || {}
   var cacheKey = __miniASkillWikiIdentity(wm)
   var now = new Date().getTime()
-  var ttl = isNumber(opts.skillCountTtlMs) && opts.skillCountTtlMs >= 0 ? opts.skillCountTtlMs : 30000
+  var ttl = wm._retrievalV2 ? 0 : (isNumber(opts.skillCountTtlMs) && opts.skillCountTtlMs >= 0 ? opts.skillCountTtlMs : 30000)
   var cached = ttl > 0 ? __miniASkillCacheGet(__miniASkillContextCache, cacheKey, ttl) : __
   var skillCount
   if (isNumber(cached)) {
@@ -341,6 +341,7 @@ function __miniASkillContext(wm, options, logFn) {
 // OR-of-terms lexical match while every match still comes from wm.search() itself
 // -- no parallel retrieval implementation.
 function __miniASkillRawHits(wm, query, opts, overFetch) {
+  if (wm._retrievalV2) return wm.searchSelected(query, { wiki: opts.wiki, limit: overFetch, maxCandidates: overFetch, compact: true })
   var terms = __miniASkillTokenize(query).filter(function(t) { return t.length >= 3 }).slice(0, 6)
   if (terms.length === 0 && query.length > 0) terms = [query]
   var byKey = {}
@@ -351,7 +352,7 @@ function __miniASkillRawHits(wm, query, opts, overFetch) {
     if (!isArray(raw)) return
     raw.forEach(function(hit) {
       var key = (isString(hit.wiki) ? hit.wiki : "primary") + "|" + hit.path
-      if (!byKey[key]) byKey[key] = merge({}, hit, { _termHits: 0, _termCount: terms.length })
+      if (!byKey[key]) byKey[key] = merge(hit, { _termHits: 0, _termCount: terms.length })
       byKey[key]._termHits++
       if (isNumber(hit.score) && (!isNumber(byKey[key].score) || hit.score > byKey[key].score)) byKey[key].score = hit.score
     })
@@ -380,7 +381,7 @@ function __miniASkillSearch(wm, options, logFn) {
     var meta = resolved.meta
     if (typeFilter !== "*" && typeFilter.length > 0 && String(meta.type || "").toLowerCase() !== typeFilter) return
     if (!__miniASkillPassesFilters(meta, opts)) return
-    var nativeScore = isNumber(hit.score) ? hit.score
+    var nativeScore = isNumber(hit.nativeScore) ? hit.nativeScore : isUnDef(hit.rankScore) && isNumber(hit.score) ? hit.score
       : (isNumber(hit._termHits) && isNumber(hit._termCount) && hit._termCount > 0 ? hit._termHits / hit._termCount : __)
     var score = __miniAComputeSkillScore(queryTerms, meta, {
       rank: idx, nativeScore: nativeScore, compatibilityKey: opts.compatibility, weights: opts.weights
@@ -421,7 +422,7 @@ function __miniASkillRecommend(wm, options, logFn) {
 // ── skills-open (§11) ─────────────────────────────────────────────────────────
 function __miniASkillOpen(wm, ref, options, logFn) {
   var opts = isObject(options) ? options : {}
-  var ttl = isNumber(opts.cacheTtlMs) && opts.cacheTtlMs >= 0 ? opts.cacheTtlMs : 15000
+  var ttl = wm._retrievalV2 ? 0 : (isNumber(opts.cacheTtlMs) && opts.cacheTtlMs >= 0 ? opts.cacheTtlMs : 15000)
   var cacheKey = __miniASkillWikiIdentity(wm) + "|" + String(ref)
   if (ttl > 0) {
     var cached = __miniASkillCacheGet(__miniASkillOpenCache, cacheKey, ttl)
@@ -429,6 +430,7 @@ function __miniASkillOpen(wm, ref, options, logFn) {
   }
   var descriptor = wm.open(ref, { maxHeadings: opts.maxHeadings })
   if (!isObject(descriptor)) return { error: "not-found", ref: ref }
+  if (descriptor.error) return descriptor
   var fm = isMap(descriptor.frontmatter) ? descriptor.frontmatter : {}
   if (!__miniASkillIsSkillMeta(fm)) return { error: "not-skill", ref: ref }
   var appliesToRaw = isDef(fm.applies_to) ? fm.applies_to : fm.appliesTo
@@ -474,14 +476,20 @@ function __miniASkillRead(wm, ref, options, logFn) {
   var opts = isObject(options) ? options : {}
   var descriptor = wm.open(ref, { maxHeadings: 0 })
   if (!isObject(descriptor)) return { error: "not-found", ref: ref }
+  if (descriptor.error) return descriptor
   if (!__miniASkillIsSkillMeta(isMap(descriptor.frontmatter) ? descriptor.frontmatter : {})) return { error: "not-skill", ref: ref }
   var readOpts = {
     section  : opts.section,
     startLine: isDef(opts.startLine) ? opts.startLine : opts.lineStart,
     endLine  : isDef(opts.endLine) ? opts.endLine : opts.lineEnd,
-    maxChars : isNumber(opts.maxChars) && opts.maxChars > 0 ? opts.maxChars : 4000
+    maxChars : isNumber(opts.maxChars) && opts.maxChars > 0 ? opts.maxChars : 4000,
+    revision : opts.revision,
+    charOffset: opts.charOffset,
+    charStart: opts.charStart,
+    charEnd: opts.charEnd
   }
-  var ttl = isNumber(opts.cacheTtlMs) && opts.cacheTtlMs >= 0 ? opts.cacheTtlMs : 15000
+  var ttl = wm._retrievalV2 ? 0 : (isNumber(opts.cacheTtlMs) && opts.cacheTtlMs >= 0 ? opts.cacheTtlMs : 15000)
+  if (isDef(opts.revision) || isDef(opts.charOffset) || isDef(opts.charStart)) ttl = 0
   var cacheKey = __miniASkillWikiIdentity(wm) + "|" + String(ref) + "|" + String(readOpts.section || "") + "|" +
     String(readOpts.startLine || "") + "-" + String(readOpts.endLine || "") + "|" + String(readOpts.maxChars)
   if (ttl > 0) {

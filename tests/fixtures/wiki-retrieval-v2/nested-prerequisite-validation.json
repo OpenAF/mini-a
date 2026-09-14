@@ -1,0 +1,26 @@
+{
+  "sources": {
+    "mini-a-wiki-retrieval.js": "936e33e2142fd43d423b64ba9da93da1d416fdec",
+    "tests/wikiRetrievalV2.js": "08541daa738fc17f4376e1cedc26a92d07fd9aee"
+  },
+  "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",
+  "targeted": "NESTED_PREREQUISITE_PASS",
+  "focused": {
+    "suite": "wikiRetrievalV2",
+    "assertions": 1274,
+    "passedFunctions": 32,
+    "failures": []
+  },
+  "wiki": {
+    "suite": "wiki",
+    "assertions": 2005,
+    "passedFunctions": 193,
+    "failures": []
+  },
+  "limitations": [
+    "Trusted shared-engine fixture; restricted support packing remains incomplete",
+    "Implicit prerequisite inference remains unsupported",
+    "64 outline-entry and 64 raw-line lookup bounds",
+    "No new performance claim"
+  ]
+}

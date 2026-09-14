@@ -1,0 +1,40 @@
+{
+  "kind": "verified-block-microbenchmark",
+  "samples": 1000,
+  "runtime": "20260913",
+  "jvm": "26.0.2",
+  "sourceSha1": "36e8efc8c63a30b9a5761ec1c9232a1e31117c7d",
+  "cases": [
+    {
+      "caseId": 0,
+      "bytes": 25,
+      "characters": 25,
+      "p50Millis": 0.06304192543029785,
+      "p95Millis": 0.21337485313415527,
+      "p99Millis": 0.3832089900970459,
+      "allocatedBytes": 166589784,
+      "allocatedBytesPerRead": 166589.784
+    },
+    {
+      "caseId": 1,
+      "bytes": 792,
+      "characters": 495,
+      "p50Millis": 0.05454206466674805,
+      "p95Millis": 0.08504199981689453,
+      "p99Millis": 0.10850000381469727,
+      "allocatedBytes": 167615320,
+      "allocatedBytesPerRead": 167615.32
+    },
+    {
+      "caseId": 2,
+      "bytes": 319992,
+      "characters": 199995,
+      "p50Millis": 0.5911250114440918,
+      "p95Millis": 0.6943750381469727,
+      "p99Millis": 0.8228747844696045,
+      "allocatedBytes": 1549394592,
+      "allocatedBytesPerRead": 1549394.592
+    }
+  ],
+  "allocationEstimator": "ThreadMXBean current-thread allocated Java heap bytes; includes harness, excludes native/non-heap and other threads; not peak memory"
+}

@@ -8168,6 +8168,9 @@ MiniA.prototype._initWiki = function(args) {
       wikihttptimeout: args.wikihttptimeout,
       wikiartifactrefreshsecs: args.wikiartifactrefreshsecs,
       wikilexical: args.wikilexical,
+      wikiretrievalv2: args.wikiretrievalv2,
+      wikitelemetry: args.wikitelemetry,
+      wikiretrievalconfig: args.wikiretrievalconfig,
       wikisourceurl: args.wikisourceurl,
       wikisourcefield: args.wikisourcefield,
       wikisourceinline: args.wikisourceinline,
@@ -15612,7 +15615,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "lcescalatedefer", "lcbudget", "lcjsonretries", "lcreplytool", "llmcomplexity",
     "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix", "wikiindexdir", "wikis3artifactprefix", "s3artifactbundle", "wikihttpindexurl", "wikihttptimeout", "wikiartifactrefreshsecs",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
-    "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "wikisourceurl", "wikisourcefield", "wikisourceinline", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphmounts", "wikimountgraphttlms", "wikigraphcross", "wikigraphcrossjoin", "wikigraphcrosscap", "wikigraphcrossdepth", "wikigraphcrossmaxdf", "wikigraphcrossminkeylen", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
+    "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "wikiretrievalv2", "wikiretrievalconfig", "wikisourceurl", "wikisourcefield", "wikisourceinline", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphmounts", "wikimountgraphttlms", "wikigraphcross", "wikigraphcrossjoin", "wikigraphcrosscap", "wikigraphcrossdepth", "wikigraphcrossmaxdf", "wikigraphcrossminkeylen", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
     "dreamwikimode", "dreammemorymode", "dreamwikidryrun", "dreamwikiapproval", "dreamwikireorg",
     "dreamwikiminpages", "dreamwikimaxdepth", "dreamwikilintresultlimit", "dreamwikisurgical", "wikilintresultlimit", "dreamreport",
     "useskillwiki", "skillwikibackend", "skillwikiroot", "skillwikimounts", "skillsautosearch", "skillsautolimit", "skillsmaxloaded", "skillsmaxchars"
@@ -21226,6 +21229,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             caseSensitive: wkParams.caseSensitive === true,
             contextLines: isNumber(wkParams.contextLines) ? wkParams.contextLines : 0,
             searchIn    : isString(wkParams.searchIn)     ? wkParams.searchIn     : "all",
+            wiki        : wkParams.wiki,
+            applicability: wkParams.applicability,
+            maxQueries: wkParams.maxQueries,
+            maxCandidates: wkParams.maxCandidates,
+            maxInspected: wkParams.maxInspected,
+            maxMillis: wkParams.maxMillis,
+            maxBytes: wkParams.maxBytes,
             path        : wkPath
           }
           var wkWriteOpts = {
@@ -21280,14 +21290,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               wkResult = wkPath.length === 0 ? "[ERROR] wiki related requires 'path'" : af.toTOON(this._wikiManager.related(wkPath, { limit: wkParams.limit }))
             } else if (wkOp === "retrieve") {
               global.__mini_a_metrics.wiki_ops_search.inc()
-              wkResult = wkQuery.length === 0 ? "[ERROR] wiki retrieve requires 'query'" : af.toTOON(this._wikiManager.retrieve(wkQuery, { maxCandidates: wkParams.maxCandidates, maxInspected: wkParams.maxInspected, maxGraphExpansion: wkParams.maxGraphExpansion, maxBytes: wkParams.maxBytes, expandGraph: wkParams.expandGraph === true }))
+              wkResult = wkQuery.length === 0 ? "[ERROR] wiki retrieve requires 'query'" : isDef(wkParams.applicability) && !this._wikiManager._retrievalV2 ? af.toTOON({ok:false,error:"applicability-requires-v2"}) : af.toTOON(this._wikiManager.retrieve(wkQuery, { wiki: wkParams.wiki, applicability: wkParams.applicability, maxQueries: wkParams.maxQueries, maxMillis: wkParams.maxMillis, maxCandidates: wkParams.maxCandidates, maxInspected: wkParams.maxInspected, maxGraphExpansion: wkParams.maxGraphExpansion, maxBytes: wkParams.maxBytes, expandGraph: wkParams.expandGraph === true }))
             } else if (wkOp === "search") {
               global.__mini_a_metrics.wiki_ops_search.inc()
               if (wkQuery.length === 0) {
                 wkResult = "[ERROR] wiki search requires 'query'"
               } else {
-                var wkHits = this._wikiManager.agenticSearch(wkQuery, wkSearchOpts)
-                wkResult = wkHits.results.length === 0 ? "No results for: " + wkQuery : af.toTOON(wkHits)
+                var wkHits = isDef(wkParams.applicability) && !this._wikiManager._retrievalV2 ? { ok:false, error:"applicability-requires-v2" } : this._wikiManager.agenticSearch(wkQuery, wkSearchOpts)
+                wkResult = isArray(wkHits.results) && wkHits.results.length === 0 && wkHits.ok !== false && wkHits.outcome !== "partial" ? "No results for: " + wkQuery : af.toTOON(wkHits)
                 if (wkHits.truncated === true) {
                   wkResult += "\n[NOTE] Search stopped early: scanned " + wkHits.scanned + " of the wiki's page budget (" + wkHits.scanBudget + "). Results may be incomplete; narrow the query or scope with path= to see more."
                 }
@@ -22048,6 +22058,13 @@ MiniA.prototype._runChatbotMode = function(options) {
               caseSensitive: cbWkParams.caseSensitive === true,
               contextLines: isNumber(cbWkParams.contextLines) ? cbWkParams.contextLines : 0,
               searchIn    : isString(cbWkParams.searchIn)     ? cbWkParams.searchIn     : "all",
+              wiki        : cbWkParams.wiki,
+              applicability: cbWkParams.applicability,
+              maxQueries: cbWkParams.maxQueries,
+              maxCandidates: cbWkParams.maxCandidates,
+              maxInspected: cbWkParams.maxInspected,
+              maxMillis: cbWkParams.maxMillis,
+              maxBytes: cbWkParams.maxBytes,
               path        : cbWkPath
             }
             var cbWkWriteOpts = {
@@ -22083,12 +22100,12 @@ MiniA.prototype._runChatbotMode = function(options) {
               } else if (cbWkOp === "related") {
                 cbWkResult = cbWkPath.length === 0 ? "[ERROR] wiki related requires 'path'" : af.toTOON(this._wikiManager.related(cbWkPath, { limit: cbWkParams.limit }))
               } else if (cbWkOp === "retrieve") {
-                cbWkResult = cbWkQuery.length === 0 ? "[ERROR] wiki retrieve requires 'query'" : af.toTOON(this._wikiManager.retrieve(cbWkQuery, { maxCandidates: cbWkParams.maxCandidates, maxInspected: cbWkParams.maxInspected, maxGraphExpansion: cbWkParams.maxGraphExpansion, maxBytes: cbWkParams.maxBytes, expandGraph: cbWkParams.expandGraph === true }))
+                cbWkResult = cbWkQuery.length === 0 ? "[ERROR] wiki retrieve requires 'query'" : isDef(cbWkParams.applicability) && !this._wikiManager._retrievalV2 ? af.toTOON({ok:false,error:"applicability-requires-v2"}) : af.toTOON(this._wikiManager.retrieve(cbWkQuery, { wiki: cbWkParams.wiki, applicability: cbWkParams.applicability, maxQueries: cbWkParams.maxQueries, maxMillis: cbWkParams.maxMillis, maxCandidates: cbWkParams.maxCandidates, maxInspected: cbWkParams.maxInspected, maxGraphExpansion: cbWkParams.maxGraphExpansion, maxBytes: cbWkParams.maxBytes, expandGraph: cbWkParams.expandGraph === true }))
               } else if (cbWkOp === "search") {
                 if (cbWkQuery.length === 0) { cbWkResult = "[ERROR] wiki search requires 'query'" }
                 else {
-                  var cbWkHits = this._wikiManager.agenticSearch(cbWkQuery, cbWkSearchOpts)
-                  cbWkResult = cbWkHits.results.length === 0 ? "No results for: " + cbWkQuery : af.toTOON(cbWkHits)
+                  var cbWkHits = isDef(cbWkParams.applicability) && !this._wikiManager._retrievalV2 ? { ok:false, error:"applicability-requires-v2" } : this._wikiManager.agenticSearch(cbWkQuery, cbWkSearchOpts)
+                  cbWkResult = isArray(cbWkHits.results) && cbWkHits.results.length === 0 && cbWkHits.ok !== false && cbWkHits.outcome !== "partial" ? "No results for: " + cbWkQuery : af.toTOON(cbWkHits)
                 }
               } else if (cbWkOp === "backlinks") {
                 if (cbWkPath.length === 0) { cbWkResult = "[ERROR] wiki backlinks requires 'path'" }

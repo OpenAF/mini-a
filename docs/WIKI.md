@@ -2,6 +2,11 @@
 
 Mini-A's wiki is a Markdown knowledge base shared by agent sessions, the console, and the `mcp-wiki` servers. Enable it with `usewiki=true`; `/wiki context` is the quickest way to inspect its access mode and available retrieval features.
 
+For opt-in versioned passages, enable `wikiretrievalv2=true` and explicitly build
+with writable Dream reindex. See [retrieval v2](WIKI-RETRIEVAL-V2.md) for supported
+local backends, migration, budget differences and [measured validation](WIKI-RETRIEVAL-V2-VALIDATION.md).
+Flag-off behavior retains the existing page engine with compatible contract repairs.
+
 ## Backends and access
 
 | Backend | Configuration | Read/write | Notes |
@@ -28,12 +33,12 @@ All three MCP servers (`mcp-wiki.yaml`, `mcp-wiki-safe.yaml`, `mcp-wiki-ops.yaml
 
 ## Agentic retrieval
 
-The agent-facing retrieval layer is a small, incremental protocol layered on the existing Lucene index, scan fallback, hierarchy, mounts, backends, backlinks, and optional graph. It does not create another index or document store. Its purpose is to keep irrelevant Markdown out of model context.
+The agent-facing retrieval layer is a small, incremental protocol layered on the existing Lucene index, scan fallback, hierarchy, mounts, backends, backlinks, and optional graph. With v2 disabled it uses the existing page index. V2 builds a separate derived passage index and immutable revision blocks; Markdown remains authoritative. Its purpose is to keep irrelevant Markdown out of model context.
 
-1. `search(query)` finds a small set of candidates. It returns metadata, a `wiki:path` reference, and the native Lucene `score` when Lucene supplied one; scan fallback deliberately does not invent a score.
+1. `search(query)` finds a small set of candidates. It returns metadata and a `wiki:path` reference. `nativeScore` identifies supplied engine relevance; `rankScore` identifies final ranking. The compatibility `score` depends on the surface: direct lexical adapters retain engine relevance, while knowledge-ranked and v2 results use final ranking. Scans never manufacture native lexical relevance.
 2. `open(path|ref)` returns cheap structure: front matter, title/description, byte size, links, headings, and deterministic line ranges. It never returns the Markdown body.
 3. `navigate(path|ref, section=...)` browses a directory through existing hierarchy logic, or describes a heading's parent, children, adjacent headings, and ranges.
-4. `read(path|ref, section|startLine/endLine)` returns the selected evidence. Agent reads default to a bounded character chunk and report `truncated` plus a deterministic `next.startLine` continuation instead of silently flooding context.
+4. `read(path|ref, section|startLine/endLine)` returns the selected evidence. Agent reads default to a bounded character chunk and report `truncated` plus a revision-bound `next` continuation with fixed line range and progressing `charOffset` instead of silently flooding context.
 5. `grep(path|ref, pattern)` searches one known page or directory and returns bounded matching lines with a little context.
 
 `related(path|ref)` is optional follow-up discovery: it preserves backlinks and uses graph neighbors only when graph state is available. It is useful after lexical retrieval leaves a real gap, not as a mandatory first step. `mcp-wiki-safe.yaml` remains intentionally restricted to its opaque, budgeted search/read contract and does not expose structural enumeration.
@@ -174,7 +179,7 @@ entry point for wiki maintenance. Built-in console commands like `/wiki reindex`
 | Fix lint issues (links, indexes, headings) | `/wiki lint` (report only) | `lint` | `dreamwikimode=repair` | No |
 | Full deterministic pass | — | — | `dreamwikimode=apply` (default) | Yes if `usewikigraph=true` (defaults `wikigraphsemantic=true`; pass `wikigraphsemantic=false` to opt out) — otherwise No |
 | Structural reorg (LLM agent) | — | — | `dreamwikimode=reorg` (requires `dreamwikireorg=true`) | Yes |
-| Dry-run proposal | — | — | `dreamwikimode=plan` | Preview only if `usewikigraph=true` — computes (but never persists) the same semantic stats `apply` would write; otherwise No |
+| Dry-run proposal | — | — | `dreamwikimode=plan` | Model-free structural preview only if `usewikigraph=true`; requested semantic work is reported separately and never executed |
 
 `repair`, `reindex`, `graph`, and `indexes` are the isolated building blocks that `apply` composes: `repair`
 fixes lint-flagged issues only; `reindex` rebuilds only the Lucene search index; `graph` rebuilds only the
@@ -204,16 +209,17 @@ See [`USAGE.md`](../USAGE.md#dreams-sleep-pass) for the full dream-mode referenc
 | `repair` | `lint()` findings | Only the pages lint flagged: broken-link targets get corrected, missing/stale index links get added, heading-hierarchy violations get fixed | Lucene search index, `.mini-a-wiki-graph/graph.json`, pages lint didn't flag |
 | `apply` (default) | Everything above | `repair`'s page-level fixes, then the deterministic finalize pass: full `index.md` regeneration, `reindex()`, and — when `usewikigraph=true` — a `graph build` that now defaults `wikigraphsemantic=true` (an explicit `wikigraphsemantic=false` still opts back out) | Nothing structural — `apply` never moves, merges, or deletes pages |
 | `reorg` | A full read/write agent loop over the whole wiki (hierarchy, backlinks, lint, near-duplicates) | Any page it moves, merges, deletes, or corrects, then the same finalize pass as `apply` — but `wikigraphsemantic` stays opt-in here (defaulting the finalize pass's semantic edges is only done for `apply`/`plan`, not the already-LLM-driven `reorg`) | Nothing — this is the only mode that performs structural moves/merges/deletes |
-| `plan` | Same reads as `repair` plus a graph preview when `usewikigraph=true` | Nothing on disk — dry-run only. The returned proposal now includes a graph preview (structural stats, and semantic stats when `wikigraphsemantic` would default/resolve to `true`) computed in memory and discarded; `graph.json` is never written | All wiki state, including `graph.json` and the Lucene index |
+| `plan` | Same reads as `repair` plus a structural graph preview when `usewikigraph=true` | Nothing on disk — model-free dry-run. The proposal records requested semantic work separately from executed structural work; `graph.json` is never written | All wiki state, including `graph.json` and the Lucene index |
 
 `wikigraphsemantic` (default `false`) gates the one LLM-touching part of graph rebuilds — extracting cross-page
 concept relationships via an LLM call per changed page. It stays strictly opt-in for `graph` and `reorg`. For
 `apply` and `plan`, it now defaults to `true` whenever `usewikigraph=true` (pass `wikigraphsemantic=false`
 explicitly to keep those two modes structural-only). This applies uniformly whether you invoke `apply`/`plan`
 from the CLI (`mini-a dream=true ...`) or from an interactive console's `/dream apply`/`/dream plan`. Note that
-`plan`'s preview still makes the real LLM calls to compute what it would extract — only the write to
-`graph.json` is skipped — so a `usewikigraph=true` plan run costs the same LLM calls as the `apply` run it's
-previewing.
+`plan` remains model-free regardless of that setting. Its `graph_preview.semantic`
+and `semanticExecuted` are false; `semanticRequested` records the effective
+apply/plan request, and `semanticOmissionReason: "model-free-dry-run"` explains
+why extraction was not executed. No model is created or called by the preview.
 
 The dream pass resolves its own LLM the same way `model=`/`OAF_MODEL` works for memory dreams (see
 [Parameters](../USAGE.md#dreams-sleep-pass)). If neither is set when a semantic pass runs, extraction silently
@@ -275,7 +281,7 @@ wikiroot=/shared/wiki dreamwikimode=reindex` for a cron job that only needs the 
 
 ## Search and graph state
 
-Writable wikis maintain a Lucene index in `.mini-a-wiki-lucene/` and can maintain graph data in `.mini-a-wiki-graph/`. The index powers lexical search; graph state powers backlinks, community information, and optional related-page search hints. `wikilexical` selects language and optional explicit enhancements. Lucene-backed search results also carry a numeric `score` field (Lucene's native relevance score); results served from the scan fallback (no index available) omit it.
+Writable wikis maintain a Lucene index in `.mini-a-wiki-lucene/` and can maintain graph data in `.mini-a-wiki-graph/`. The index powers lexical search; graph state powers community information and optional related-page search hints. V2 reverse-link postings support backlinks independently of the optional graph. `wikilexical` selects language and optional explicit enhancements. Consume `nativeScore`, `rankScore`, `scoreComponents` and `retrievalMethod` when available instead of assuming the compatibility `score` is native Lucene relevance. Scan fallback has no native lexical score. See [v2 score and capability contracts](WIKI-RETRIEVAL-V2.md).
 
 Read-only wikis consume an existing Lucene index without taking a writer lock. If no index is available, local backends can fall back to scanning page contents. Static HTTP has no directory listing, so it requires the published artifact bundle described below for catalog and search.
 
@@ -394,8 +400,17 @@ Dream plans are strictly zero-LLM: they report dirty/affected candidates and est
 and tokens. Runtime semantic extraction starts with title, headings, tags, links, identifiers,
 and section digests; it asks for selected context only when the extractor requests it. Search
 retains page compatibility while adding deterministic title/path/heading/recency score details
-with `debug=true`; `assembleContext()` returns token-bounded chunk context. Set
-`wikitelemetry=true` only to retain local aggregate query hashes/frequencies.
+with `debug=true`; `assembleContext()` returns token-bounded chunk context. With
+v2 off, these can be ingestion inputs rather than quotations from the distilled
+page: `origin`, `evidenceRole`, `quotationStatus` and `sourceLocatorStatus` make
+that boundary explicit. Legacy `path`/`anchor` remain navigation mappings, and
+`scoreOrigin` identifies the inherited parent-page score. No wiki line/revision
+citation is invented for source text. Search/state failures return an explicit
+failure envelope with `chunks: []`. V2 defaults to exact current wiki-page passages.
+Set
+`wikitelemetry=true` to retain separate aggregate search/result counters (no query hashes or text by
+default). V2 can explicitly opt into bounded question samples through its validated
+advanced configuration; see the retrieval v2 privacy and retention contract.
 # Bounded agentic retrieval
 
 `wiki op="retrieve" query="..."` composes the established Wiki primitives
@@ -503,3 +518,6 @@ without such proof remain replacement conflicts. Review and preserve the legacy 
 separately, remove the old mapped destination with wiki tools, and retry to reconstruct
 from the complete source. This conservative conflict is necessary because historical
 LLM output cannot be reproduced reliably to prove ownership of its current contents.
+
+
+See [retrieval v2 status](WIKI-RETRIEVAL-V2.md) for contract repairs and outstanding architecture work.

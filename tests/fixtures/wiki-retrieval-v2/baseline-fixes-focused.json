@@ -1,0 +1,7 @@
+{
+  "assertions": 35,
+  "passedFunctions": 7,
+  "failures": [],
+  "command": "oaf -c focused seven exported wiki test functions with ow.loadTest()",
+  "runtime": "20260913"
+}

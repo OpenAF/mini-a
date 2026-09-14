@@ -1,0 +1,6 @@
+{
+  "suite": "wiki",
+  "assertions": 1299,
+  "passedFunctions": 186,
+  "failures": []
+}

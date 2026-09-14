@@ -1,0 +1,10 @@
+{
+  "focused": {"assertions": 1109, "passedFunctions": 29, "failures": []},
+  "full": {"assertions": 1840, "passedFunctions": 190, "failures": []},
+  "repeat": {"assertions": 2218, "runs": 2, "sameJvm": true, "failures": []},
+  "targeted": "PUBLICATION_SYNCHRONIZATION_PASS",
+  "directoryForce": "DIRECTORY_FORCE_SUPPORTED",
+  "runtimeSha1": "ec6879a37ce2616e2a3c9d0ba5bbb51ddf92bf05",
+  "benchmark": {"pages": 1000, "samples": 10, "backend": "local-fs", "linkImmutableFiles": false, "beforeP50Millis": 503.45908403396606, "afterP50Millis": 566.974916934967, "beforeP95Millis": 657.5569159984589, "afterP95Millis": 670.7895829677582, "beforeRuntimeSha1": "55e2e6878d8868f0ca0d9308e4a9c1f1c3adb544"},
+  "limitations": ["serial identical-harness runs; ten samples provide weak tail evidence", "no physical power-loss validation", "no live provider or network filesystem validation", "hardware and filesystem must honor force and atomic rename", "end heap observations are not peak memory"]
+}

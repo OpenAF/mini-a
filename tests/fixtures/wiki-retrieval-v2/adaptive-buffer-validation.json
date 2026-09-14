@@ -1,0 +1,128 @@
+{
+  "sources": {
+    "before": {
+      "wiki": "9b6c3666c87178fe498fe42c11c5c263b5118580",
+      "knowledge": "8e5d2828c94f7c640b31964d1bfa21934e5817ed",
+      "retrieval": "36e8efc8c63a30b9a5761ec1c9232a1e31117c7d"
+    },
+    "after": {
+      "wiki": "9b6c3666c87178fe498fe42c11c5c263b5118580",
+      "knowledge": "8e5d2828c94f7c640b31964d1bfa21934e5817ed",
+      "retrieval": "62726e012f7da96e2cce992732b89c7a4519baab"
+    }
+  },
+  "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",
+  "focused": {
+    "assertions": 1243,
+    "functions": 30,
+    "failures": []
+  },
+  "wiki": {
+    "assertions": 1974,
+    "functions": 191,
+    "failures": []
+  },
+  "repeat": {
+    "runs": 2,
+    "assertions": 2486
+  },
+  "ojob": {
+    "command": "ojob tests/wiki.yaml",
+    "passEntries": 191,
+    "failEntries": 0,
+    "errorEntries": 0
+  },
+  "benchmark": {
+    "pages": 1000,
+    "warmSamples": 10,
+    "coldSamplesPerOperation": 1,
+    "beforeMemory": {
+      "estimator": "MemoryMXBean aggregate heap sampled every 10 ms; shorter peaks may be missed",
+      "sampleIntervalMillis": 10,
+      "samples": 780,
+      "maxSampledHeapBytes": 848570136,
+      "heapAtEndBytes": 848570136,
+      "scope": "fixture/index construction, all operations, update and publication; excludes native/JVM non-heap memory"
+    },
+    "afterMemory": {
+      "estimator": "MemoryMXBean aggregate heap sampled every 10 ms; shorter peaks may be missed",
+      "sampleIntervalMillis": 10,
+      "samples": 742,
+      "maxSampledHeapBytes": 902800256,
+      "heapAtEndBytes": 706533120,
+      "scope": "fixture/index construction, all operations, update and publication; excludes native/JVM non-heap memory"
+    }
+  },
+  "allocatedBytesPerRead": {
+    "before": [
+      {
+        "caseId": 0,
+        "bytes": 25,
+        "characters": 25,
+        "p50Millis": 0.06304192543029785,
+        "p95Millis": 0.21337485313415527,
+        "p99Millis": 0.3832089900970459,
+        "allocatedBytes": 166589784,
+        "allocatedBytesPerRead": 166589.784
+      },
+      {
+        "caseId": 1,
+        "bytes": 792,
+        "characters": 495,
+        "p50Millis": 0.05454206466674805,
+        "p95Millis": 0.08504199981689453,
+        "p99Millis": 0.10850000381469727,
+        "allocatedBytes": 167615320,
+        "allocatedBytesPerRead": 167615.32
+      },
+      {
+        "caseId": 2,
+        "bytes": 319992,
+        "characters": 199995,
+        "p50Millis": 0.5911250114440918,
+        "p95Millis": 0.6943750381469727,
+        "p99Millis": 0.8228747844696045,
+        "allocatedBytes": 1549394592,
+        "allocatedBytesPerRead": 1549394.592
+      }
+    ],
+    "after": [
+      {
+        "caseId": 0,
+        "bytes": 25,
+        "characters": 25,
+        "p50Millis": 0.06570816040039062,
+        "p95Millis": 0.2035841941833496,
+        "p99Millis": 0.361375093460083,
+        "allocatedBytes": 35716408,
+        "allocatedBytesPerRead": 35716.408
+      },
+      {
+        "caseId": 1,
+        "bytes": 792,
+        "characters": 495,
+        "p50Millis": 0.046500205993652344,
+        "p95Millis": 0.08208298683166504,
+        "p99Millis": 0.11874985694885254,
+        "allocatedBytes": 38271320,
+        "allocatedBytesPerRead": 38271.32
+      },
+      {
+        "caseId": 2,
+        "bytes": 319992,
+        "characters": 199995,
+        "p50Millis": 0.5509579181671143,
+        "p95Millis": 0.6491668224334717,
+        "p99Millis": 0.7253329753875732,
+        "allocatedBytes": 1549543264,
+        "allocatedBytesPerRead": 1549543.264
+      }
+    ]
+  },
+  "limitations": [
+    "Mixed timings and increased sampled heap do not establish end-to-end improvement",
+    "Thread-local allocated bytes are not peak or total process memory",
+    "Cold validation and publication remain corpus-scaled",
+    "No live-provider validation"
+  ]
+}

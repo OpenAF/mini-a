@@ -203,3 +203,12 @@ Use small testable changes: A reproduce partial distillation/stale chunks; B com
 Do not postpone integrity fixes for future chunk optimization. Complete only when updated pages match current complete sources; removed content cannot return from stale chunks/caches; prune removes only verified eligible managed artifacts; partial failures never cause unsafe deletions; dry-run preserves destination; migration/recovery are tested; results/exit codes describe actual outcomes.
 
 Delivery: summarize corrected defects/compatibility decisions, changed files, parameters/behavior, executed tests/results, and remaining limitations without presenting them as implemented guarantees.
+
+## Opt-in passage retrieval
+
+`wikiretrievalv2=true` and `wikiretrievalconfig` reach the shared wiki manager.
+An explicit writable reindex builds local serving generations; existing ingestion
+journals, full-source reconstruction and protected pruning remain authoritative.
+Original ingestion chunks and summaries do not become wiki-range quotations.
+See [retrieval v2](WIKI-RETRIEVAL-V2.md) for effective capabilities, restricted
+presentation policy, rollout and outstanding requirements.

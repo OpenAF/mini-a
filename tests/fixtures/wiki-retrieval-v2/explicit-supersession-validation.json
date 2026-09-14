@@ -1,0 +1,38 @@
+{
+  "sources": {
+    "mini-a-wiki-knowledge.js": "4ccb56f13414f6891740d700171910b9ee69d341",
+    "mini-a-wiki-retrieval.js": "cc204b7806e2f9f5354628c141ae87f357458b3b",
+    "tests/wikiRetrievalV2.js": "3d17da1222556ff1b8fcf56d478e668dfcb9dd00",
+    "tests/wikiRetrievalV2.yaml": "6e897d35dc71176ccc9f0e3af6f00b343553e2c8",
+    "tests/wiki.yaml": "16ff6933c3e11d0587de24d2276821945b8acaec"
+  },
+  "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",
+  "focused": {
+    "suite": "wikiRetrievalV2",
+    "assertions": 1268,
+    "passedFunctions": 32,
+    "failures": []
+  },
+  "wiki": {
+    "suite": "wiki",
+    "assertions": 1999,
+    "passedFunctions": 193,
+    "failures": []
+  },
+  "targeted": "EXPLICIT_SUPERSESSION_PASS",
+  "limitations": [
+    "Explicit retirement only; no automatic reverse supersedes interpretation",
+    "No replacement-target traversal",
+    "Broader full-plan acceptance remains unfinished"
+  ],
+  "repeat": {
+    "runs": 2,
+    "assertions": 2536
+  },
+  "ojob": {
+    "command": "ojob tests/wiki.yaml",
+    "passEntries": 193,
+    "failEntries": 0,
+    "errorEntries": 0
+  }
+}

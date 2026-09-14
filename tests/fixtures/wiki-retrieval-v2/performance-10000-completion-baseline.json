@@ -1,0 +1,145 @@
+{
+  "mode": "legacy",
+  "pages": 10000,
+  "samples": 5,
+  "backend": "local-fs",
+  "simulatedLatencyMs": 0,
+  "liveProvider": false,
+  "runtime": "20260913",
+  "jvm": "26.0.2",
+  "operations": {
+    "compactSearch": {
+      "coldMs": 866.726,
+      "coldSourceReads": 40,
+      "coldSourceBytes": 17440,
+      "warm": {
+        "p50": 678.022333,
+        "p95": 693.388708,
+        "p99": 693.388708,
+        "sourceReads": 200,
+        "sourceBytes": 87200,
+        "outputBytes": 10680
+      },
+      "servingMetrics": null
+    },
+    "zeroSearch": {
+      "coldMs": 761.437,
+      "coldSourceReads": 1000,
+      "coldSourceBytes": 436772,
+      "warm": {
+        "p50": 727.119041,
+        "p95": 745.612083,
+        "p99": 745.612083,
+        "sourceReads": 5000,
+        "sourceBytes": 2183860,
+        "outputBytes": 375
+      },
+      "servingMetrics": null
+    },
+    "retrieve": {
+      "coldMs": 697.447292,
+      "coldSourceReads": 18,
+      "coldSourceBytes": 7818,
+      "warm": {
+        "p50": 672.354792,
+        "p95": 747.645667,
+        "p99": 747.645667,
+        "sourceReads": 90,
+        "sourceBytes": 39090,
+        "outputBytes": 13830
+      },
+      "servingMetrics": null
+    },
+    "assembleContext": {
+      "coldMs": 695.958375,
+      "coldSourceReads": 60,
+      "coldSourceBytes": 26160,
+      "warm": {
+        "p50": 666.277084,
+        "p95": 674.377667,
+        "p99": 674.377667,
+        "sourceReads": 300,
+        "sourceBytes": 130800,
+        "outputBytes": 360
+      },
+      "servingMetrics": null
+    },
+    "open": {
+      "coldMs": 6.024166,
+      "coldSourceReads": 1,
+      "coldSourceBytes": 431,
+      "warm": {
+        "p50": 0.662334,
+        "p95": 0.81125,
+        "p99": 0.81125,
+        "sourceReads": 5,
+        "sourceBytes": 2155,
+        "outputBytes": 1615
+      },
+      "servingMetrics": null
+    },
+    "navigate": {
+      "coldMs": 1.513459,
+      "coldSourceReads": 1,
+      "coldSourceBytes": 431,
+      "warm": {
+        "p50": 0.337833,
+        "p95": 0.378917,
+        "p99": 0.378917,
+        "sourceReads": 5,
+        "sourceBytes": 2155,
+        "outputBytes": 1060
+      },
+      "servingMetrics": null
+    },
+    "backlinks": {
+      "coldMs": 1297.865584,
+      "coldSourceReads": 10000,
+      "coldSourceBytes": 4367780,
+      "warm": {
+        "p50": 1271.927958,
+        "p95": 1348.810709,
+        "p99": 1348.810709,
+        "sourceReads": 50000,
+        "sourceBytes": 21838900,
+        "outputBytes": 5239150
+      },
+      "servingMetrics": null
+    },
+    "federation": {
+      "coldMs": 745.106625,
+      "coldSourceReads": 1000,
+      "coldSourceBytes": 436772,
+      "warm": {
+        "p50": 723.433958,
+        "p95": 729.016541,
+        "p99": 729.016541,
+        "sourceReads": 5000,
+        "sourceBytes": 2183860,
+        "outputBytes": 1735
+      },
+      "servingMetrics": null
+    }
+  },
+  "sourceSha1": {
+    "wiki": "bf875021ca082ad754765b22c0bbf844654f0fff",
+    "knowledge": "ef1f83011062bed51fa6341ddb169ecf26fc2474",
+    "retrieval": null
+  },
+  "initialBuild": {
+    "ms": 137298.011083,
+    "fixtureDiskBytes": 10397804
+  },
+  "incrementalUpdate": {
+    "ms": 38.102083,
+    "ok": true,
+    "updateWork": null,
+    "parsedPages": null
+  },
+  "fullPublication": {
+    "ms": 139611.375083,
+    "ok": true,
+    "fixtureDiskBytes": 10535187
+  },
+  "memoryUsed": 316611288
+}

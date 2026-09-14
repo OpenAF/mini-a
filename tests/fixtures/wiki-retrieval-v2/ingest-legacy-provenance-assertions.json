@@ -1,0 +1,6 @@
+{
+  "suite": "wikiIngest",
+  "assertions": 235,
+  "passedFunctions": 59,
+  "failures": []
+}

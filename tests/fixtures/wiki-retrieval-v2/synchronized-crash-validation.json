@@ -1,0 +1,10 @@
+{
+  "focused": {"assertions": 1141, "passedFunctions": 29, "failures": []},
+  "full": {"assertions": 1872, "passedFunctions": 190, "failures": []},
+  "repeat": {"assertions": 2282, "runs": 2, "sameJvm": true, "failures": []},
+  "targeted": ["SYNCHRONIZED_PUBLICATION_CRASH_PASS", "POST_RENAME_FAILURE_PASS"],
+  "runtimeSha1": "b5dc9e909d3257e344eb0690e8c5de67eb72c251",
+  "checkpoints": ["staging-created", "writer-open", "writer-closed", "manifest-written", "artifacts-validated", "searcher-verified", "generation-synchronized", "pointer-written", "pointer-synchronized", "pointer-renamed", "activation-directory-synchronized", "pointer-activated"],
+  "method": "Actual abrupt JVM halt and fresh recovery JVM at every checkpoint, plus three post-rename injected exception cases",
+  "limitations": ["process crashes, not hardware power loss", "not live provider or network filesystem validation", "not a new performance benchmark", "Markdown and journal durability contracts unchanged"]
+}

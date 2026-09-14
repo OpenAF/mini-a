@@ -1,0 +1,195 @@
+{
+  "mode": "v2",
+  "pages": 1000,
+  "samples": 10,
+  "backend": "local-fs",
+  "runtime": "20260913",
+  "jvm": "26.0.2",
+  "operations": {
+    "compactSearch": {
+      "coldMs": 180.812083,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "warm": {
+        "p50": 4.626709,
+        "p95": 9.422833,
+        "p99": 9.422833,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 63420
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0
+      }
+    },
+    "zeroSearch": {
+      "coldMs": 125.511292,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "warm": {
+        "p50": 0.983209,
+        "p95": 4.717042,
+        "p99": 4.717042,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 6580
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0
+      }
+    },
+    "retrieve": {
+      "coldMs": 137.149625,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "warm": {
+        "p50": 4.307458,
+        "p95": 5.634834,
+        "p99": 5.634834,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 26570
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 20,
+        "cacheMisses": 2,
+        "bodyReads": 2,
+        "bytesRead": 862,
+        "parsedPages": 0
+      }
+    },
+    "assembleContext": {
+      "coldMs": 128.866167,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "warm": {
+        "p50": 4.165792,
+        "p95": 5.106333,
+        "p99": 5.106333,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 25070
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 20,
+        "cacheMisses": 2,
+        "bodyReads": 2,
+        "bytesRead": 862,
+        "parsedPages": 0
+      }
+    },
+    "open": {
+      "coldMs": 108.366458,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "warm": {
+        "p50": 0.209667,
+        "p95": 0.289917,
+        "p99": 0.289917,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 4550
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0
+      }
+    },
+    "navigate": {
+      "coldMs": 103.932959,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "warm": {
+        "p50": 0.229208,
+        "p95": 0.429208,
+        "p99": 0.429208,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 2120
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0
+      }
+    },
+    "backlinks": {
+      "coldMs": 188.610417,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "warm": {
+        "p50": 67.046167,
+        "p95": 71.998834,
+        "p99": 71.998834,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 1028810
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0
+      }
+    },
+    "federation": {
+      "coldMs": 124.464917,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "warm": {
+        "p50": 3.32875,
+        "p95": 5.235667,
+        "p99": 5.235667,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 17790
+      },
+      "servingMetrics": {
+        "readerOpens": 1,
+        "cacheHits": 0,
+        "cacheMisses": 0,
+        "bodyReads": 0,
+        "bytesRead": 0,
+        "parsedPages": 0
+      }
+    }
+  },
+  "initialBuild": {
+    "ms": 1784.987875,
+    "fixtureDiskBytes": 3261694
+  },
+  "incrementalUpdate": {
+    "ms": 794.210666,
+    "ok": true,
+    "parsedPages": 1
+  },
+  "fullPublication": {
+    "ms": 1199.722208,
+    "ok": true,
+    "fixtureDiskBytes": 8923433
+  },
+  "memoryUsed": 110081504,
+  "comparison": "same modified checkout, flag-off versus flag-on; sequential measured runs",
+  "machine": "macOS local developer workspace"
+}

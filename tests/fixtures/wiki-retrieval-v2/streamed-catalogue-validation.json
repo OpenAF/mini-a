@@ -1,0 +1,55 @@
+{
+  "focused": {
+    "assertions": 1180,
+    "functions": 29,
+    "failures": []
+  },
+  "wiki": {
+    "assertions": 1911,
+    "functions": 190,
+    "failures": []
+  },
+  "repeat": {
+    "runs": 2,
+    "assertions": 2360
+  },
+  "benchmark": {
+    "pages": 1000,
+    "samples": 10,
+    "backend": "local-fs",
+    "before": {
+      "p50": 530.3798341751099,
+      "p95": 663.7879159450531,
+      "p99": 663.7879159450531
+    },
+    "after": {
+      "p50": 541.1032500267029,
+      "p95": 670.3754169940948,
+      "p99": 670.3754169940948
+    }
+  },
+  "limitations": [
+    "Ten samples provide weak tails; end heap is not peak",
+    "Catalogue traversal and artifact processing remain corpus-scaled",
+    "Mid-stream/close fault coverage needs expansion"
+  ],
+  "sources": {
+    "before": {
+      "wiki": "9b6c3666c87178fe498fe42c11c5c263b5118580",
+      "retrieval": "6315659ddc1194730931563e554e8803a34f85be"
+    },
+    "after": {
+      "wiki": "9b6c3666c87178fe498fe42c11c5c263b5118580",
+      "retrieval": "8bb8b8b4fb32375a1523f019fed0c3291e190058"
+    }
+  },
+  "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",
+  "ojob": {
+    "command": "ojob tests/wiki.yaml",
+    "passEntries": 190,
+    "failEntries": 0,
+    "errorEntries": 0
+  },
+  "registeredTestSha1": "b98cb0278c434b01f0f1b2b712ac0c0a815a0f0d",
+  "sourceArchive": "streamed-catalogue-runtime-snapshot.zip"
+}

@@ -394,9 +394,9 @@
     }
 
     var captured = __
-    var origLlm = $llm
+    var origLlm = runner._createLlm
     try {
-      $llm = function(cfg) {
+      runner._createLlm = function(cfg) {
         captured = cfg
         return { prompt: function() { return "{}" } }
       }
@@ -405,7 +405,7 @@
       ow.test.assert(isMap(captured) && captured.type === "ollama", true, "OAF_MODEL type should be parsed")
       ow.test.assert(isMap(captured) && captured.model === "test-dream-model", true, "OAF_MODEL model should be parsed")
     } finally {
-      $llm = origLlm
+      runner._createLlm = origLlm
     }
   }
 
@@ -416,9 +416,9 @@
     }
 
     var captured = __
-    var origLlm = $llm
+    var origLlm = runner._createLlm
     try {
-      $llm = function(cfg) {
+      runner._createLlm = function(cfg) {
         captured = cfg
         return { prompt: function() { return "{}" } }
       }
@@ -427,7 +427,7 @@
       ow.test.assert(isMap(captured) && captured.type === "openai", true, "model= should override OAF_MODEL type")
       ow.test.assert(isMap(captured) && captured.model === "arg-model", true, "model= should override OAF_MODEL model")
     } finally {
-      $llm = origLlm
+      runner._createLlm = origLlm
     }
   }
 
@@ -844,7 +844,9 @@
       var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "reindex", wikilexical: "(language: english, ngrams: true)" }, function() {}).dreamWiki()
       ow.test.assert(res.ok, true, "reindex mode should succeed")
       ow.test.assert(res.mode, "reindex", "mode should be reindex")
-      var manifest = af.fromJson(io.readFileString(dir + "/.mini-a-wiki-lucene/mini-a-lexical.json"))
+      var inspector = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" }, function() {})
+      var manifest
+      try { manifest = af.fromJson(io.readFileString(inspector._getLuceneIndexPath() + "/mini-a-lexical.json")) } finally { inspector.close() }
       ow.test.assert(manifest.lexical.ngrams, true, "reindex mode should preserve the requested lexical configuration")
 
       var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" }, function() {})
@@ -911,11 +913,17 @@
     var dir = seedWiki(makeWikiDir())
     try {
       var runner = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "plan", usewikigraph: "true" }, function() {})
-      runner._setLlm(makeStubLlm(_stubGraphExtractResponse()))
+      var modelCalls = 0
+      runner._setLlm({ promptJSONWithStats: function() { modelCalls++; throw new Error("dry-run must not invoke a model") } })
+      runner._createLlm = function() { modelCalls++; throw new Error("dry-run must not construct a model") }
       var res = runner.dreamWiki()
       ow.test.assert(res.mode, "plan", "mode should be plan")
       ow.test.assert(isMap(res.proposal.graph_preview), true, "plan should include a graph preview when usewikigraph is enabled")
-      ow.test.assert(res.proposal.graph_preview.semantic, true, "the preview should resolve the same apply/plan semantic default")
+      ow.test.assert(res.proposal.graph_preview.semantic, false, "dry-run preview executes structural work only")
+      ow.test.assert(res.proposal.graph_preview.semanticRequested, true, "preview records the apply/plan semantic request without executing it")
+      ow.test.assert(res.proposal.graph_preview.semanticExecuted, false, "preview does not advertise semantic execution")
+      ow.test.assert(res.proposal.graph_preview.semanticOmissionReason, "model-free-dry-run", "preview explains why semantic work was omitted")
+      ow.test.assert(modelCalls, 0, "dry-run neither creates nor calls a model")
       ow.test.assert(io.fileExists(dir + "/.mini-a-wiki-graph/graph.json"), false, "plan must never persist graph.json")
     } finally { try { io.rm(dir) } catch(e) {} }
   }
