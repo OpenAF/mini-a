@@ -44,6 +44,15 @@
     })
     ow.test.assert(parsed.passages.some(function(p) { return p.kind === "fragment" }), true, "oversized structures explicitly fragmented")
     ow.test.assert(parsed.passages[parsed.passages.length - 1].charEnd, raw.length, "last fragment reaches EOF without newline")
+    var mergedSupport = global.MiniAWikiRetrievalV2.mergeSupportRanges([
+      { kind: "instruction-context", charStart: 8, charEnd: 24, startLine: 2, endLine: 4 },
+      { kind: "table-context", charStart: 16, charEnd: 32, startLine: 3, endLine: 5 },
+      { kind: "table-header", charStart: 40, charEnd: 48, startLine: 6, endLine: 6 }
+    ])
+    ow.test.assert(mergedSupport.length, 2, "overlapping structural ranges are served once")
+    ow.test.assert(mergedSupport[0].charStart + ":" + mergedSupport[0].charEnd, "8:32", "overlapping support retains the complete raw union")
+    ow.test.assert(mergedSupport[0].kind, "structural-context", "multi-purpose support does not pretend to have one role")
+    ow.test.assert(mergedSupport[0].kinds.join(","), "instruction-context,table-context", "multi-purpose support preserves every required role")
   }
   exports.testBoundedContextPostings = function() {
     var parser=global.MiniAWikiRetrievalV2
@@ -81,6 +90,30 @@
       } finally {io.writeFileString(pin.dir+"/catalog.json",originalCatalog)}
       ow.test.assert(failure,"invalid-passage-order","rechecksummed unsorted postings cannot invalidate binary range lookup")
     } finally {if(pin)wm._retrievalV2.release(pin);if(wm)wm.close();io.rm(dir)}
+  }
+  exports.testOverlappingStructuralSupport = function() {
+    var dir=temporary(), wm, originalRanges=global.MiniAWikiRetrievalV2.supportRanges
+    try {
+      wm=make(dir)
+      wm.write("overlap.md",{title:"Overlap"},"# Apply\nWarning: retain both selection reasons.\n\n```sh\noverlapcontextparameter --apply\n```")
+      ow.test.assert(wm.reindex().ok,true,"overlapping support fixture builds")
+      global.MiniAWikiRetrievalV2.supportRanges=function(page, passages, record) {
+        var start=Math.max(0,record.charStart-48), end=record.charStart
+        return global.MiniAWikiRetrievalV2.mergeSupportRanges([
+          {kind:"instruction-context",charStart:start,charEnd:end,startLine:1,endLine:4},
+          {kind:"table-context",charStart:start+8,charEnd:end,startLine:2,endLine:4}
+        ])
+      }
+      var out=wm.retrieve("overlapcontextparameter",{chunks:1,maxBytes:12000}), support=out.evidence[0].supportingContext
+      ow.test.assert(support.length,1,"overlapping required support is materialized only once")
+      ow.test.assert(support[0].role,"structural-context","merged support does not discard a required role")
+      ow.test.assert(support[0].roles.join(","),"instruction-context,table-context","merged support discloses every selected role")
+      ow.test.assert(support[0].content.indexOf("retain both selection reasons")>=0,true,"merged support retains its exact raw union")
+    } finally {
+      global.MiniAWikiRetrievalV2.supportRanges=originalRanges
+      if(wm)wm.close()
+      io.rm(dir)
+    }
   }
   exports.testStructuralContext = function() {
     var dir=temporary(), wm, portugueseManager
@@ -154,6 +187,12 @@
       var instructionRaw=wm.read("instructions.md").raw
       ;[instruction].concat(instruction.supportingContext).forEach(function(c){ow.test.assert(c.content,instructionRaw.substring(c.charStart,c.charEnd),"instruction and prerequisite evidence match exact CRLF raw range");ow.test.assert(c.revision,sha1(instructionRaw),"instruction context remains bound to cited revision")})
       ow.test.assert(instruction.supportingContext.every(function(c){return c.role==="instruction-context"}),true,"context is labelled as instruction support rather than a table header")
+      wm.write("admonition.md",{title:"Admonition"},"# Apply\n> [!WARNING]\n> Stop the previous worker before applying this command.\n\n```sh\nadmonitionwarningparameter --apply\n```")
+      var admonition=wm.retrieve("admonitionwarningparameter",{chunks:1,maxBytes:12000}).evidence[0]
+      ow.test.assert(admonition.content.indexOf("admonitionwarningparameter")>=0,true,"GitHub-style admonition keeps the selected code answer")
+      ow.test.assert(admonition.supportingContext.map(function(c){return c.content}).join("").indexOf("[!WARNING]")>=0,true,"GitHub-style warning marker is retained as exact structural support")
+      ow.test.assert(admonition.supportingContext.map(function(c){return c.content}).join("").indexOf("Stop the previous worker")>=0,true,"GitHub-style warning body accompanies the instruction")
+      ow.test.assert(admonition.supportingContext.every(function(c){return c.role==="instruction-context"}),true,"admonition is labelled as instruction support")
       var noContextBudget=wm.retrieve("launchparameter",{chunks:1,maxQueries:1})
       ow.test.assert(noContextBudget.evidence[0].contextOmitted,"structural-context-budget-or-unavailable","missing prerequisite context is explicit under exhausted budget")
       ow.test.assert(noContextBudget.budget.used.queries,1,"prerequisite lookup never resets request query budget")
@@ -1050,8 +1089,35 @@
       var savedPointer=io.readFileString(engine.root+"/current.json")
       io.writeFileString(engine.root+"/current.json",pointer)
       var corrupt=make(dir,{access:"ro"}), rejected
-      try {rejected=corrupt.retrieve("recoveryparameter");ow.test.assert(rejected.outcome,"partial","checksum failure is unavailable rather than healthy zero");ow.test.assert(rejected.evidence.length,0,"corrupt generation never returns unvalidated evidence")} finally {corrupt.close();io.writeFileString(block,raw);io.writeFileString(engine.root+"/current.json",savedPointer)}
+      try {
+        rejected=corrupt.retrieve("recoveryparameter")
+        ow.test.assert(rejected.evidence.length,1,"checksum failure selects the validated predecessor rather than corrupted evidence")
+        var recoveredPin=corrupt._retrievalV2.acquire()
+        try {ow.test.assert(recoveredPin.recoveredPointer,true,"corrupt generation never becomes a healthy serving snapshot")} finally {corrupt._retrievalV2.release(recoveredPin)}
+      } finally {corrupt.close();io.writeFileString(block,raw);io.writeFileString(engine.root+"/current.json",savedPointer)}
     } finally {if(pin)wm._retrievalV2.release(pin);if(wm)wm.close();io.rm(dir)}
+  }
+  exports.testPreviousGenerationPointerFallback = function() {
+    var dir=temporary(), writer, reader, currentPath
+    try {
+      writer=make(dir)
+      writer.write("guide.md",{title:"Guide"},"# Guide\npointerfallbackparameter is supported.")
+      ow.test.assert(writer.reindex().ok,true,"initial generation builds for pointer fallback")
+      writer.write("guide.md",{title:"Guide"},"# Guide\npointerfallbackparameter is still supported after an update.")
+      ow.test.assert(writer.reindex().ok,true,"updated generation preserves a previous pointer")
+      currentPath=writer._retrievalV2.root+"/current.json"
+      ow.test.assert(io.fileExists(writer._retrievalV2.root+"/previous.json"),true,"activation retains one durable prior pointer")
+      var corrupt=io.readFileString(currentPath)
+      io.writeFileString(currentPath,"{not valid json")
+      reader=make(dir,{access:"ro"})
+      var result=reader.retrieve("pointerfallbackparameter",{chunks:1})
+      ow.test.assert(result.evidence.length,1,"corrupt active pointer falls back to the validated previous generation")
+      var fallbackPin=reader._retrievalV2.acquire()
+      try {ow.test.assert(fallbackPin.recoveredPointer,true,"fallback serves a validated prior generation rather than malformed activation state")} finally {reader._retrievalV2.release(fallbackPin)}
+      ow.test.assert(io.readFileString(currentPath),"{not valid json","reader fallback never rewrites the corrupt activation pointer")
+      reader.close();reader=__
+      io.writeFileString(currentPath,corrupt)
+    } finally {if(reader)reader.close();if(writer)writer.close();io.rm(dir)}
   }
   exports.testDirectDerivedPostings = function() {
     var dir=temporary(), wm
@@ -1387,6 +1453,69 @@
       ow.test.assert(isUnDef(other.consume(a.issue("isolated.md"))), true, "reference cannot cross logical namespace")
     } finally { global.__wikiManager = old; if ($ch().list().indexOf(chName) >= 0) $ch(chName).destroy() }
   }
+  exports.testSourceRevocationBeforeMaterialization = function() {
+    var dir=temporary(), wm
+    try {
+      wm=make(dir)
+      wm.write("answer.md",{title:"Answer"},"# Answer\nrevocationboundaryparameter must never be disclosed after access is revoked.")
+      ow.test.assert(wm.reindex().ok,true,"revocation-boundary fixture creates a validated serving generation")
+      var existsCalls=0, reads=0, raw=wm.read("answer.md").raw
+      wm._backendType="es"
+      wm._backend={
+        exists:function(path){existsCalls++;return existsCalls===1&&path==="answer.md"},
+        read:function(){reads++;return raw},
+        close:function(){}
+      }
+      var result=wm.retrieve("revocationboundaryparameter",{chunks:1,maxCandidates:2})
+      ow.test.assert(existsCalls>=2,true,"source permission is rechecked before materializing a selected remote candidate")
+      ow.test.assert(reads,0,"revoked source cannot reach a remote body read after candidate selection")
+      ow.test.assert(result.evidence.length,0,"revoked source cannot disclose indexed or cached evidence")
+      ow.test.assert(result.outcome,"partial","mid-request revocation remains explicit rather than a false zero result")
+      ow.test.assert(result.stopReasons.indexOf("stale-or-revoked-evidence")>=0,true,"revocation is retained as the bounded partial-result reason")
+    } finally {if(wm)wm.close();io.rm(dir)}
+  }
+  exports.testSharedBlockStore = function() {
+    var dir=temporary(), wm, fresh, first, second, oldPin
+    try {
+      wm=make(dir,{wikiretrievalconfig:{passageChars:128,sharedBlockStore:true}})
+      wm.write("a.md",{title:"A"},"# A\nsharedblockstoreparameter remains immutable.")
+      wm.write("b.md",{title:"B"},"# A\nsharedblockstoreparameter remains immutable.")
+      first=wm.reindex();ow.test.assert(first.ok,true,"shared block store creates an initial generation")
+      var firstPin=wm._retrievalV2.acquire(), locator=firstPin.catalog.pages["a.md"].locator, sibling=firstPin.catalog.pages["b.md"].locator, store=wm._retrievalV2._sharedBlockPath(locator)
+      try {
+        ow.test.assert(io.fileExists(store),true,"shared block store persists the revision-addressed block")
+        ow.test.assert(sibling,locator,"equal revisions across pages share one immutable block locator")
+        ow.test.assert(firstPin.catalog.blockRefs[locator],2,"shared revision retains both page references in the generation catalogue")
+        ow.test.assert(java.nio.file.Files.isSameFile(new java.io.File(store).toPath(),new java.io.File(firstPin.dir+"/"+sibling).toPath()),true,"both generation paths materialize the shared store inode")
+      } finally {wm._retrievalV2.release(firstPin)}
+      second=wm._retrievalV2.build(["a.md"])
+      ow.test.assert(second.ok,true,"unchanged shared-block update publishes a new generation")
+      ow.test.assert(second.updateWork.linkedFiles>0,true,"shared block store hard-links retained immutable content on supported local storage")
+      var current=wm._retrievalV2.acquire()
+      try {ow.test.assert(java.nio.file.Files.isSameFile(new java.io.File(store).toPath(),new java.io.File(current.dir+"/"+locator).toPath()),true,"generation artifact remains self-contained through the shared immutable inode")} finally {wm._retrievalV2.release(current)}
+      ow.test.assert(wm.retrieve("sharedblockstoreparameter").evidence.length,1,"shared block store preserves current retrieval evidence")
+      oldPin=wm._retrievalV2.acquire()
+      wm.write("a.md",{title:"A"},"# A\nsharedblockstorechangedparameter is a new immutable revision.")
+      var changed=wm._retrievalV2.build(["a.md"])
+      ow.test.assert(changed.ok,true,"changed page writes and activates a distinct shared revision")
+      try {
+        ow.test.assert(oldPin.catalog.pages["a.md"].locator,locator,"pinned old reader retains its original generation block")
+        ow.test.assert(new java.io.File(oldPin.dir+"/"+locator).exists(),true,"pinned old reader keeps a self-contained old block after activation")
+      } finally {wm._retrievalV2.release(oldPin);oldPin=__}
+      wm.close();wm=__
+      fresh=make(dir,{wikiretrievalconfig:{passageChars:128,sharedBlockStore:true}})
+      ow.test.assert(fresh.retrieve("sharedblockstorechangedparameter").evidence.length,1,"fresh process validates and serves the changed shared-store generation")
+      wm=fresh;fresh=__
+      var pointer=io.readFileString(wm._retrievalV2.root+"/current.json")
+      var active=wm._retrievalV2.acquire(), activeStore=wm._retrievalV2._sharedBlockPath(active.catalog.pages["a.md"].locator)
+      wm._retrievalV2.release(active)
+      io.writeFileString(activeStore,"corrupt shared store")
+      var corrupt=wm._retrievalV2.build(["a.md"])
+      ow.test.assert(corrupt.ok,false,"corrupt shared block cannot publish a new generation")
+      ow.test.assert(["generation-integrity-failure","page-revision-binding-failure"].indexOf(corrupt.error)>=0,true,"staged shared-block validation rejects checksum or semantic corruption")
+      ow.test.assert(io.readFileString(wm._retrievalV2.root+"/current.json"),pointer,"corrupt shared store preserves the prior activation pointer")
+    } finally {if(oldPin&&wm)wm._retrievalV2.release(oldPin);if(fresh)fresh.close();if(wm)wm.close();io.rm(dir)}
+  }
   exports.testServingBundlesAndRemoteEvidence = function() {
     var dir = temporary(), builder, client, oldPin
     try {
@@ -1394,6 +1523,7 @@
       var archive = dir + "/serving.zip"
       builder = make(dir + "/source", { wikiretrievalconfig: { passageChars: 256, bundlePath: archive } })
       builder.write("answer.md", { title: "Answer" }, "# Answer\nremoterevisionparameter is verified.")
+      ow.test.assert(builder.reindex().ok, true, "initial generation creates a predecessor candidate for bundle export")
       var published = builder.reindex()
       ow.test.assert(published.bundle.ok, true, "supported reindex streams a serving bundle")
       ow.test.assert(io.fileExists(archive), true, "bundle publication artifact exists")
@@ -1407,11 +1537,19 @@
       ow.test.assert(reads, 0, "remote compact ranking reads no candidate Markdown bodies")
       var answer = client.retrieve("remoterevisionparameter").evidence[0]
       ow.test.assert(current.substring(answer.charStart, answer.charEnd), answer.content, "remote quotation matches verified raw revision")
-      ow.test.assert(reads, 1, "remote evidence conditionally validates current source once")
+      ow.test.assert(reads, 0, "static HTTP evidence uses the validated immutable bundle without a nonexistent page endpoint")
+      var servingRoot=client._retrievalV2.root, activeServingPointer=io.readFileString(servingRoot+"/current.json")
+      ow.test.assert(io.fileExists(servingRoot+"/previous.json"),true,"published bundle carries the validated predecessor pointer")
+      io.writeFileString(servingRoot+"/current.json","{invalid pointer")
+      var fallbackPin=client._retrievalV2.acquire()
+      try {ow.test.assert(fallbackPin.recoveredPointer,true,"hydrated bundle reader can recover through its validated predecessor")} finally {client._retrievalV2.release(fallbackPin);io.writeFileString(servingRoot+"/current.json",activeServingPointer)}
       allowed = false
-      ow.test.assert(client.agenticSearch("remoterevisionparameter").results.length, 0, "permission revocation is checked on subsequent requests despite suppression cache")
-      ow.test.assert(client.retrieve("remoterevisionparameter").evidence.length, 0, "retained block cache cannot bypass source revocation")
+      ow.test.assert(client.agenticSearch("remoterevisionparameter").results.length, 1, "static HTTP search remains bound to the hydrated bundle rather than a page probe")
+      ow.test.assert(client.retrieve("remoterevisionparameter").evidence.length, 1, "static HTTP evidence remains available until its authenticated artifact refresh changes")
       allowed = true
+      // Exercise the separately supported remote-source validation path. Static
+      // HTTP bundles intentionally have no per-page GET/HEAD contract.
+      client._backendType = "es"
       ow.test.assert(client.agenticSearch("remoterevisionparameter").results.length, 1, "restored source access is not negatively cached across requests")
       remainingTime = []
       var readsBefore = reads, backendMeasured = client.retrieve("remoterevisionparameter", {maxMillis:1000})
@@ -1461,6 +1599,88 @@
       ow.test.assert(io.fileExists(dir + "/cache/.mini-a-wiki-bundles/escape.md"), false, "traversal writes no escaped file")
     } finally { if (oldPin && client) client._retrievalV2.release(oldPin); if (client) client.close(); if (builder) builder.close(); io.rm(dir) }
   }
+  exports.testS3BundleHydrationRefresh = function() {
+    var dir=temporary(), builder, reader, archive, etag="one", denied=false
+    try {
+      io.mkdir(dir+"/source");io.mkdir(dir+"/cache");archive=dir+"/serving.zip"
+      builder=make(dir+"/source",{wikiretrievalconfig:{bundlePath:archive}})
+      builder.write("answer.md",{title:"Answer"},"# Answer\ns3bundleparameter is verified.")
+      ow.test.assert(builder.reindex().ok,true,"S3 bundle fixture creates initial generation")
+      ow.test.assert(builder.reindex().bundle.ok,true,"S3 bundle fixture exports a validated generation")
+      reader=make(dir+"/cache",{access:"ro"})
+      reader._backendType="s3"
+      reader._config.indexdir=dir+"/cache";reader._config.bucket="fixtures";reader._config.s3artifactprefix="serving";reader._config.s3artifactbundle=true
+      var metadataCalls=0,downloadCalls=0
+      var audits=[];reader._auditFn=function(event){audits.push(event)}
+      var raw=builder.read("answer.md").raw
+      reader._backend={client:{
+        statObject:function(bucket,key){metadataCalls++;ow.test.assert(bucket,"fixtures","S3 hydration uses configured bucket");ow.test.assert(key,"serving/mini-a-wiki-index.zip","S3 hydration uses immutable bundle key");if(denied)throw new Error("AccessDenied");return {etag:etag,modifiedTime:"fixture"}},
+        getObjectStream:function(bucket,key){downloadCalls++;if(denied)throw new Error("AccessDenied");return new java.io.FileInputStream(archive)}
+      },exists:function(path){return path==="answer.md"},read:function(path){return path==="answer.md"?raw:__},close:function(){}}
+      ow.test.assert(reader._hydrateS3Artifacts(),true,"S3 bundle hydrates through the configured S3 reader path")
+      var artifactAudit=audits.filter(function(event){return event.backend==="s3-artifact"&&event.operation==="hydrate"})[0]
+      ow.test.assert(artifactAudit.ok,true,"S3 artifact hydration emits a successful transport audit")
+      ow.test.assert(artifactAudit.bytes>0&&artifactAudit.expandedBytes>0,true,"S3 artifact audit reports compressed and expanded bytes")
+      ow.test.assert(artifactAudit.metadataMillis>=0&&artifactAudit.downloadMillis>=0&&artifactAudit.totalMillis>=artifactAudit.downloadMillis,true,"S3 artifact audit reports monotonic metadata/download durations")
+      var pointer=io.readFileString(dir+"/cache/.mini-a-wiki-bundles/current.json")
+      ow.test.assert(reader.retrieve("s3bundleparameter",{chunks:1}).evidence.length,1,"hydrated S3 reader serves the validated indexed passage")
+      ow.test.assert(reader._hydrateS3Artifacts(),false,"unchanged S3 metadata avoids a duplicate download")
+      ow.test.assert(downloadCalls,1,"unchanged S3 bundle performs exactly one download")
+      etag="two";denied=true
+      ow.test.assert(reader._hydrateS3Artifacts(),false,"denied S3 refresh remains explicit")
+      ow.test.assert(io.readFileString(dir+"/cache/.mini-a-wiki-bundles/current.json"),pointer,"denied S3 refresh retains the prior hydrated generation")
+      ow.test.assert(metadataCalls>=3,true,"S3 metadata is checked before every eligible refresh")
+      denied=false;etag="three"
+      builder.write("answer.md",{title:"Answer"},"# Answer\ns3bundlereplacementparameter is verified.")
+      raw=builder.read("answer.md").raw
+      ow.test.assert(builder.reindex().bundle.ok,true,"changed S3 fixture publishes a replacement bundle")
+      ow.test.assert(reader._hydrateS3Artifacts(),true,"changed S3 metadata activates a complete replacement generation")
+      ow.test.assert(reader.retrieve("s3bundlereplacementparameter",{chunks:1}).evidence.length,1,"replacement S3 generation serves its new validated evidence")
+    } finally {if(reader)reader.close();if(builder)builder.close();io.rm(dir)}
+  }
+  exports.testSourceIoAuditAccounting = function() {
+    var dir=temporary(), events=[], wm
+    try {
+      io.writeFileString(dir+"/unicode.md","# Unicode\né 😀 transport bytes")
+      wm=new MiniAWikiManager({backend:"fs",root:dir,access:"rw",wikiretrievalv2:true,wikiretrievalconfig:{passageChars:256}},function(){},function(event){events.push(event)})
+      ow.test.assert(wm._backend.read("unicode.md").indexOf("transport")>=0,true,"filesystem source read remains available with I/O auditing")
+      var event=events.filter(function(item){return item.backend==="fs"&&item.path==="unicode.md"})[0]
+      ow.test.assert(isMap(event),true,"filesystem source read emits one audit event")
+      ow.test.assert(event.bytes,Number(new java.lang.String("# Unicode\né 😀 transport bytes").getBytes("UTF-8").length),"source audit bytes use UTF-8 payload length rather than JavaScript character count")
+      ow.test.assert(event.operation,"read","source audit identifies the read operation")
+      ow.test.assert(event.protocol,"file","filesystem source audit identifies its protocol")
+      ow.test.assert(isNumber(event.totalMillis)&&event.totalMillis>=0,true,"source audit records a monotonic boundary duration")
+      events=[];ow.test.assert(isUnDef(wm._backend.read("missing.md")),true,"missing filesystem source remains unavailable")
+      event=events.filter(function(item){return item.backend==="fs"&&item.path==="missing.md"})[0]
+      ow.test.assert(event.ok,false,"failed filesystem source read is audited explicitly")
+      ow.test.assert(event.bytes,0,"failed source read reports no payload bytes")
+      ow.test.assert(event.totalMillis>=0,true,"failed source read retains its elapsed boundary duration")
+      events=[];ow.test.assert(wm._backend.exists("unicode.md"),true,"filesystem existence probe remains available with I/O auditing")
+      event=events.filter(function(item){return item.backend==="fs"&&item.path==="unicode.md"&&item.operation==="exists"})[0]
+      ow.test.assert(isMap(event),true,"filesystem existence probe emits an audit event")
+      ow.test.assert(event.protocol,"file","filesystem existence audit identifies its protocol")
+      ow.test.assert(event.bytes,0,"existence probe does not invent a payload byte count")
+      ow.test.assert(event.totalMillis>=0,true,"existence probe records a monotonic boundary duration")
+      ow.test.assert(wm.reindex().ok,true,"serving-block audit fixture builds a validated generation")
+      var pin=wm._retrievalV2.acquire()
+      try {events=[];ow.test.assert(wm._retrievalV2._body(pin,pin.catalog.pages["unicode.md"]).indexOf("transport")>=0,true,"serving-block audit fixture reads the exact immutable body")} finally {wm._retrievalV2.release(pin)}
+      event=events.filter(function(item){return item.backend==="serving-block"&&item.path==="unicode.md"})[0]
+      ow.test.assert(isMap(event),true,"immutable serving block emits an audit event")
+      ow.test.assert(event.operation,"read","serving block audit identifies the read operation")
+      ow.test.assert(event.protocol,"file","serving block audit identifies its local artifact protocol")
+      ow.test.assert(event.bytes>0&&event.totalMillis>=0,true,"serving block audit records payload bytes and monotonic duration")
+      events=[];ow.test.assert(wm.retrieve("transport",{chunks:1}).evidence.length,1,"stored-passage audit fixture retrieves indexed evidence")
+      event=events.filter(function(item){return item.backend==="serving-index-passage"&&item.path==="unicode.md"})[0]
+      ow.test.assert(event.protocol,"lucene-stored","stored passage audit identifies its Lucene materialization protocol")
+      ow.test.assert(event.operation,"read","stored passage audit identifies its read operation")
+      ow.test.assert(event.totalMillis,0,"stored passage audit does not invent blocking filesystem duration")
+      pin=wm._retrievalV2.acquire()
+      try {events=[];wm._retrievalV2._body(pin,pin.catalog.pages["unicode.md"])} finally {wm._retrievalV2.release(pin)}
+      event=events.filter(function(item){return item.backend==="serving-cache"&&item.path==="unicode.md"})[0]
+      ow.test.assert(event.protocol,"memory","immutable body cache audit identifies memory rather than source I/O")
+      ow.test.assert(event.cacheHit,true,"immutable body cache audit identifies the hit explicitly")
+    } finally {if(wm)wm.close();io.rm(dir)}
+  }
   exports.testLegacyReadOnlyLexicalFeatures = function() {
     loadLib("mini-a-wiki-knowledge.js")
     var dir = temporary(), writer, reader, lockWriter, directory, analyzer
@@ -1509,6 +1729,10 @@
       wm._retrievalV2.release(snapshot);snapshot=null
       wm.write("unresolved.md",{title:"Unresolved retirement",superseded_by:"@unselected/hidden.md"},"# Retired\nunresolvedsupersessionmarker")
       ow.test.assert(wm.retrieve("unresolvedsupersessionmarker").evidence.length,0,"explicit retirement does not follow an unselected replacement target")
+      wm.write("retired-status.md",{title:"Explicitly retired",status:"retired"},"# Retired\nretiredstatusparameter must not remain answer evidence.")
+      ow.test.assert(wm.retrieve("retiredstatusparameter").evidence.length,0,"explicit retired status excludes current evidence without requiring a replacement path")
+      wm.write("review-status.md",{title:"Reviewed",status:"review"},"# Current\nreviewstatusparameter remains eligible as declared review metadata.")
+      ow.test.assert(wm.retrieve("reviewstatusparameter").evidence.length,1,"ordinary review status remains descriptive rather than implicit retirement")
       ow.test.assert(wm.open("older.md").headings.length>0,true,"trusted navigation can inspect retired pages independently of answer evidence")
     }finally{if(snapshot)wm._retrievalV2.release(snapshot);if(wm)wm.close();io.rm(dir)}
   }
@@ -1516,7 +1740,7 @@
     var dir = temporary(), wm
     try {
       wm = make(dir)
-      wm.write("old.md", { title: "Old guide", updated: "2030-01-01", applicability: { product: "mini-a", version: "release-A" } }, "# Default\nclaimsetting has limit ten for release-A.")
+      wm.write("old.md", { title: "Old guide", updated: "2030-01-01", applicability: { product: "mini-a", version: "release-A" }, status: "review", authority: "release engineering", verified: "2026-09-15", source_ref: "release-A", ingested: "2026-09-15T00:00:00Z" }, "# Default\nclaimsetting has limit ten for release-A.")
       wm.write("new.md", { title: "New guide", updated: "2000-01-01", applicability: { product: "mini-a", version: "release-B" } }, "# Default\nclaimsetting has limit twenty for release-B.")
       wm.write("bounded.md", {title:"Effective guide", validity:{from:"2024-02-29",until:"2024-03-01"}}, "# Guidance\nvaliditymarker dated instruction")
       wm.write("unknown.md", {title:"Undated guide"}, "# Guidance\nvaliditymarker unknown instruction")
@@ -1576,6 +1800,10 @@
       var recent = wm.retrieve("claimsetting", { applicability: { version: "release-B" }, chunks: 1 }).evidence[0]
       ow.test.assert(recent.path, "new.md", "explicit release applicability wins over editorial timestamp")
       ow.test.assert(recent.applicability.version, "release-B", "evidence carries explicit applicability without trust inference")
+      ow.test.assert(old.provenance.reviewStatus, "review", "trusted evidence exposes an explicit review status without inferring stability")
+      ow.test.assert(old.provenance.authority, "release engineering", "trusted evidence carries declared authority separately from rank")
+      ow.test.assert(old.provenance.verificationDate, "2026-09-15", "trusted evidence carries declared verification date without treating updated as verification")
+      ow.test.assert(old.provenance.sourceRevision, "release-A", "trusted evidence carries an explicit source revision")
       ow.test.assert(wm.knowledgeRecordDerivative("fact", "old-limit", { claimKey: "default-limit", value: 10, applicability: old.applicability }, [old.passage]).ok, true, "operator grounds old version claim")
       ow.test.assert(wm.knowledgeRecordDerivative("fact", "new-limit", { claimKey: "default-limit", value: 20, applicability: recent.applicability }, [recent.passage]).ok, true, "operator grounds new version claim")
       var before = io.readFileString(wm._knowledgeStatePath()), report = wm._retrievalV2.maintenance({ limit: 5 })

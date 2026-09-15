@@ -665,6 +665,7 @@ try {
     wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts; fs roots may be directories or local .zip/.okt archives." },
     wikiretrievalv2: { type: "boolean", description: "Opt-in versioned passage retrieval (requires explicit writable reindex)." },
     wikiretrievalconfig: { type: "string", description: "Validated SLON/JSON advanced passage/cache/artifact budgets." },
+    wikitelemetry: { type: "boolean", description: "Persist local aggregate wiki retrieval telemetry (off by default)." },
     wikilexical    : { type: "string", description: "SLON/JSON Lucene lexical configuration; defaults to {language:'english'} and supports optional synonymsFile." },
     usewikigraph   : { type: "boolean", default: false, description: "Enable the wiki knowledge graph for structural and semantic page relationships." },
     wikigraphsemantic: { type: "boolean", default: false, description: "Build semantic (embedding-based) edges in addition to structural links when running /graph build." },

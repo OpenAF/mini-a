@@ -380,8 +380,19 @@ var MiniAWikiManager = function(config, loggerFn, auditFn) {
 // store (s3, http, es). Never lets a caller-supplied audit callback break
 // retrieval. `identifier` is the backend-resolved location (s3://bucket/key,
 // full URL, es:index/path) -- distinct from `path`, the wiki-relative path.
-MiniAWikiManager.prototype._auditRetrieval = function(backend, identifier, path, ok, bytes) {
-  try { this._auditFn({ backend: backend, identifier: identifier, path: path, ok: ok === true, bytes: isNumber(bytes) ? bytes : 0 }) } catch(e) {}
+MiniAWikiManager.prototype._auditRetrieval = function(backend, identifier, path, ok, bytes, details) {
+  try { this._auditFn(merge({ backend: backend, identifier: identifier, path: path, ok: ok === true, bytes: isNumber(bytes) ? bytes : 0 }, isMap(details) ? details : {})) } catch(e) {}
+}
+
+// Transport audit records describe the bytes actually represented by a text
+// payload, not JavaScript UTF-16 code units. Keep timing measurement beside the
+// backend boundary so source, archive and remote reads have one comparable
+// protocol-accounting shape. Auditing remains best effort through _auditRetrieval.
+var __miniAWikiAuditBytes = function(value) {
+  return isString(value) ? Number(new java.lang.String(String(value)).getBytes("UTF-8").length) : 0
+}
+var __miniAWikiAuditMillis = function(started) {
+  return (Number(java.lang.System.nanoTime()) - started) / 1000000
 }
 
 
@@ -1165,19 +1176,20 @@ MiniAWikiManager.prototype._activeBundleRoot = function() {
   return this._bundlePointer.root
 }
 MiniAWikiManager.prototype._hydrateArtifactBundle = function(remoteMetaFn, downloadFn, source, key) {
-  var self = this, root = this._getIndexRoot(), config = global.MiniAWikiRetrievalV2.config(this._config && this._config.wikiretrievalconfig)
+  var self = this, root = this._getIndexRoot(), config = global.MiniAWikiRetrievalV2.config(this._config && this._config.wikiretrievalconfig), started = Number(java.lang.System.nanoTime()), metadataMillis = 0, downloadMillis = 0, compressedBytes = 0
   var generation = String(java.util.UUID.randomUUID()), dir = root + "/.mini-a-wiki-bundles/" + generation, pointer = root + "/.mini-a-wiki-bundles/current.json", channel, lock, input, zip, temporaryEngine, reader, directory
   try {
     io.mkdir(root + "/.mini-a-wiki-bundles")
     channel = new java.io.RandomAccessFile(root + "/.mini-a-wiki-bundles/publish.lock", "rw").getChannel(); lock = channel.tryLock()
     if (!lock) throw "bundle refresh busy"
-    var remote = remoteMetaFn(), local
+    var metadataStarted = Number(java.lang.System.nanoTime()), remote = remoteMetaFn(), local
+    metadataMillis = (Number(java.lang.System.nanoTime()) - metadataStarted) / 1000000
     try { local = af.fromJson(io.readFileString(pointer)) } catch(ignoreMeta) {}
     if (!__miniAWikiBundleChanged(remote, local) && local.source === source && local.key === key) return false
     io.mkdir(dir)
-    input = downloadFn()
+    var downloadStarted = Number(java.lang.System.nanoTime()); input = downloadFn()
     var downloaded = dir + "/download.zip", saved = new java.io.FileOutputStream(downloaded), compressed = 0, copyBuffer = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 65536), copied
-    try { while ((copied = input.read(copyBuffer)) !== -1) { compressed += copied; if (compressed > config.maxArtifactBytes) throw "compressed bundle byte budget"; saved.write(copyBuffer, 0, copied) } } finally { saved.close(); input.close(); input = null }
+    try { while ((copied = input.read(copyBuffer)) !== -1) { compressed += copied; if (compressed > config.maxArtifactBytes) throw "compressed bundle byte budget"; saved.write(copyBuffer, 0, copied) } } finally { saved.close(); input.close(); input = null; compressedBytes = compressed; downloadMillis = (Number(java.lang.System.nanoTime()) - downloadStarted) / 1000000 }
     // A missing/truncated central directory is not a complete downloaded object.
     var central = new java.util.zip.ZipFile(downloaded), declared = {}, declaredCount = 0, declaredBytes = 0
     try {
@@ -1191,7 +1203,7 @@ MiniAWikiManager.prototype._hydrateArtifactBundle = function(remoteMetaFn, downl
       if (++files > config.maxArtifactFiles || name.indexOf("\\") >= 0 || name.startsWith("/") || name.indexOf("..") >= 0 || /^[A-Za-z]:/.test(name) || seen[name]) throw "unsafe or excessive bundle entries"
       if (!declared[name]) throw "conflicting bundle directory"
       seen[name] = true
-      var supported = /^(?:\.mini-a-wiki-lucene\/[A-Za-z0-9_.-]+|\.mini-a-wiki-graph\/graph\.json|\.mini-a-wiki-serving\/(?:current\.json|[a-f0-9-]{36}\/(?:manifest\.json|catalog\.json|index\/[A-Za-z0-9_.-]+|blocks\/[a-f0-9]{40}\.md)))$/.test(name)
+      var supported = /^(?:\.mini-a-wiki-lucene\/[A-Za-z0-9_.-]+|\.mini-a-wiki-graph\/graph\.json|\.mini-a-wiki-serving\/(?:current\.json|previous\.json|[a-f0-9-]{36}\/(?:manifest\.json|catalog\.json|index\/[A-Za-z0-9_.-]+|blocks\/[a-f0-9]{40}\.md)))$/.test(name)
       if (entry.isDirectory()) { zip.closeEntry(); continue }
       // A full wiki archive may include source Markdown; it is never extracted.
       if (!supported && (!/\.md$/.test(name) || name.startsWith(".mini-a-"))) throw "unsupported bundle layout"
@@ -1217,6 +1229,18 @@ MiniAWikiManager.prototype._hydrateArtifactBundle = function(remoteMetaFn, downl
       var manifest = af.fromJson(io.readFileString(manifestPath)), catalog = temporaryEngine._validate(serving, manifest)
       var snapshot = temporaryEngine._openSnapshot(serving, manifest, catalog)
       try { snapshot.searcher.search(new Packages.org.apache.lucene.search.MatchAllDocsQuery(), 1) } finally { temporaryEngine._closeSnapshot(snapshot) }
+      var previousPath = dir + "/.mini-a-wiki-serving/previous.json"
+      if (io.fileExists(previousPath)) {
+        if (java.nio.file.Files.isSymbolicLink(new java.io.File(previousPath).toPath())) throw "unsafe serving predecessor pointer"
+        var previous = af.fromJson(io.readFileString(previousPath))
+        if (!isMap(previous) || previous.schema !== 1 || !/^[a-f0-9-]{36}$/.test(previous.generation) || previous.generation === active.generation) throw "invalid serving predecessor pointer"
+        var predecessor = dir + "/.mini-a-wiki-serving/" + previous.generation, predecessorManifestPath = predecessor + "/manifest.json"
+        if (java.nio.file.Files.isSymbolicLink(new java.io.File(predecessor).toPath()) || java.nio.file.Files.isSymbolicLink(new java.io.File(predecessorManifestPath).toPath()) || String(new java.io.File(predecessor).getCanonicalPath()).indexOf(String(new java.io.File(dir + "/.mini-a-wiki-serving").getCanonicalPath()) + "/") !== 0) throw "unsafe serving predecessor path"
+        if (global.MiniAWikiRetrievalV2.digest(predecessorManifestPath) !== previous.checksum) throw "bundle predecessor checksum failure"
+        var predecessorManifest = af.fromJson(io.readFileString(predecessorManifestPath)), predecessorCatalog = temporaryEngine._validate(predecessor, predecessorManifest)
+        var predecessorSnapshot = temporaryEngine._openSnapshot(predecessor, predecessorManifest, predecessorCatalog)
+        try { predecessorSnapshot.searcher.search(new Packages.org.apache.lucene.search.MatchAllDocsQuery(), 1) } finally { temporaryEngine._closeSnapshot(predecessorSnapshot) }
+      }
     }
     if (legacy) {
       if (!this._ensureLucene()) throw "Lucene unavailable for bundle validation"
@@ -1231,9 +1255,10 @@ MiniAWikiManager.prototype._hydrateArtifactBundle = function(remoteMetaFn, downl
     var activation = merge(remote, { schema: 1, generation: generation, source: source, key: key, fetchedAt: new Date().toISOString(), files: files, bytes: expanded })
     global.MiniAWikiRetrievalV2.prototype._atomic(pointer, activation)
     this._bundlePointer = __
+    this._auditRetrieval(source + "-artifact", key, key, true, compressedBytes, { operation: "hydrate", metadataMillis: metadataMillis, downloadMillis: downloadMillis, totalMillis: (Number(java.lang.System.nanoTime()) - started) / 1000000, expandedBytes: expanded })
     this._logFn("info", "Hydrated validated wiki artifact generation from " + source)
     return true
-  } catch(e) { this._logFn("warn", "Failed to hydrate wiki artifact generation: " + __miniAErrMsg(e)); return false }
+  } catch(e) { this._auditRetrieval(source + "-artifact", key, key, false, compressedBytes, { operation: "hydrate", metadataMillis: metadataMillis, downloadMillis: downloadMillis, totalMillis: (Number(java.lang.System.nanoTime()) - started) / 1000000 }); this._logFn("warn", "Failed to hydrate wiki artifact generation: " + __miniAErrMsg(e)); return false }
   finally {
     try { if (zip) zip.close(); else if (input) input.close() } catch(ignoreInput) {}
     try { if (reader) reader.close(); if (directory) directory.close() } catch(ignoreReader) {}
@@ -2615,10 +2640,13 @@ MiniAWikiManager.prototype._makeFsBackend = function(cfg) {
       } catch(e) { return [] }
     },
     read: function(path) {
+      var started = Number(java.lang.System.nanoTime()), identifier = path
       try {
         var content = io.readFileString(resolvePath(path, false))
-        return isDef(content) ? String(content) : __
-      } catch(e) { return __ }
+        content = isDef(content) ? String(content) : __
+        manager._auditRetrieval("fs", identifier, path, isString(content), __miniAWikiAuditBytes(content), { operation: "read", protocol: "file", totalMillis: __miniAWikiAuditMillis(started) })
+        return content
+      } catch(e) { manager._auditRetrieval("fs", identifier, path, false, 0, { operation: "read", protocol: "file", totalMillis: __miniAWikiAuditMillis(started) }); return __ }
     },
     sourceStatus: function(path) {
       try {
@@ -2635,7 +2663,12 @@ MiniAWikiManager.prototype._makeFsBackend = function(cfg) {
       io.writeFileString(full, content)
     },
     exists: function(path) {
-      try { return io.fileExists(resolvePath(path, false)) } catch(e) { return false }
+      var started = Number(java.lang.System.nanoTime()), identifier = path
+      try {
+        var exists = io.fileExists(resolvePath(path, false))
+        manager._auditRetrieval("fs", identifier, path, exists, 0, { operation: "exists", protocol: "file", totalMillis: __miniAWikiAuditMillis(started) })
+        return exists
+      } catch(e) { manager._auditRetrieval("fs", identifier, path, false, 0, { operation: "exists", protocol: "file", totalMillis: __miniAWikiAuditMillis(started) }); return false }
     },
     delete: function(path) {
       var full = resolvePath(path, false)
@@ -2651,6 +2684,7 @@ MiniAWikiManager.prototype._makeFsBackend = function(cfg) {
 // deliberately the archive entry names: bundles must place index.md at root.
 MiniAWikiManager.prototype._makeArchiveFsBackend = function(archivePath) {
   plugin("ZIP")
+  var parent = this
   var safeEntry = function(value) {
     if (!isString(value)) return __
     try {
@@ -2682,14 +2716,20 @@ MiniAWikiManager.prototype._makeArchiveFsBackend = function(archivePath) {
     read: function(path) {
       var entry = safeEntry(path)
       if (isUnDef(entry)) return __
+      var started = Number(java.lang.System.nanoTime()), identifier = archivePath + "::" + entry
       try {
         var content = io.readFileString(archivePath + "::" + entry)
-        return isDef(content) ? String(content) : __
-      } catch(e) { return __ }
+        content = isDef(content) ? String(content) : __
+        parent._auditRetrieval("archive", identifier, entry, isString(content), __miniAWikiAuditBytes(content), { operation: "read", protocol: "archive", totalMillis: __miniAWikiAuditMillis(started) })
+        return content
+      } catch(e) { parent._auditRetrieval("archive", identifier, entry, false, 0, { operation: "read", protocol: "archive", totalMillis: __miniAWikiAuditMillis(started) }); return __ }
     },
     exists: function(path) {
       var entry = safeEntry(path)
-      return isDef(entry) && entries().indexOf(entry) >= 0
+      if (isUnDef(entry)) return false
+      var started = Number(java.lang.System.nanoTime()), exists = entries().indexOf(entry) >= 0
+      parent._auditRetrieval("archive", archivePath + "::" + entry, entry, exists, 0, { operation: "exists", protocol: "archive", totalMillis: __miniAWikiAuditMillis(started) })
+      return exists
     },
     write: function() { throw "archive wiki is read-only" },
     delete: function() { throw "archive wiki is read-only" }
@@ -2729,13 +2769,14 @@ MiniAWikiManager.prototype._makeS3Backend = function(cfg) {
     },
     read: function(path) {
       var identifier = "s3://" + bucket + "/" + prefix + path
+      var started = Number(java.lang.System.nanoTime())
       try {
         var stream = s3client.getObjectStream(bucket, prefix + path)
         var content = af.fromInputStream2String(stream)
-        parent._auditRetrieval("s3", identifier, path, true, isString(content) ? content.length : 0)
+        parent._auditRetrieval("s3", identifier, path, true, __miniAWikiAuditBytes(content), { operation: "read", protocol: "s3", method: "GET", totalMillis: __miniAWikiAuditMillis(started) })
         return content
       } catch(e) {
-        parent._auditRetrieval("s3", identifier, path, false, 0)
+        parent._auditRetrieval("s3", identifier, path, false, 0, { operation: "read", protocol: "s3", method: "GET", totalMillis: __miniAWikiAuditMillis(started) })
         return __
       }
     },
@@ -2744,11 +2785,14 @@ MiniAWikiManager.prototype._makeS3Backend = function(cfg) {
         af.fromString2InputStream(content), {}, "text/markdown")
     },
     exists: function(path) {
+      var identifier = "s3://" + bucket + "/" + prefix + path, started = Number(java.lang.System.nanoTime())
       try {
         var stream = s3client.getObjectStream(bucket, prefix + path)
-        if (isDef(stream)) { try { stream.close() } catch(ig) {} return true }
-        return false
-      } catch(e) { return false }
+        var exists = isDef(stream)
+        if (exists) try { stream.close() } catch(ig) {}
+        parent._auditRetrieval("s3", identifier, path, exists, 0, { operation: "exists", protocol: "s3", method: "GET", totalMillis: __miniAWikiAuditMillis(started) })
+        return exists
+      } catch(e) { parent._auditRetrieval("s3", identifier, path, false, 0, { operation: "exists", protocol: "s3", method: "GET", totalMillis: __miniAWikiAuditMillis(started) }); return false }
     },
     delete: function(path) {
       s3client.removeObject(bucket, prefix + path)
@@ -2763,7 +2807,7 @@ MiniAWikiManager.prototype._makeS3Backend = function(cfg) {
 
 MiniAWikiManager.prototype._makeHttpBackend = function(cfg) {
   var parent = this
-  var base = isString(cfg.url) ? cfg.url.trim() : ""
+  var base = isString(cfg.url) && cfg.url.trim().length ? cfg.url.trim() : (isString(cfg.root) ? cfg.root.trim() : "")
   var timeout = isNumber(Number(cfg.wikihttptimeout)) && Number(cfg.wikihttptimeout) > 0 ? Number(cfg.wikihttptimeout) : 30000
   var secret = isString(cfg.secret) && cfg.secret.length > 0 ? cfg.secret : (isString(getEnv("OAF_MINI_A_WIKI_SECRET")) ? getEnv("OAF_MINI_A_WIKI_SECRET") : __)
   var auth = function(connection) {
@@ -2784,7 +2828,7 @@ MiniAWikiManager.prototype._makeHttpBackend = function(cfg) {
     list: function(prefix) { return parent._luceneListAllReadOnly(prefix) },
     read: function(path, options) {
       var identifier = __miniAWikiUrlJoin(base, path)
-      var conn = __
+      var conn = __, started = Number(java.lang.System.nanoTime())
       try {
         conn = open(path, "GET", options)
         var code = Number(conn.getResponseCode())
@@ -2793,30 +2837,31 @@ MiniAWikiManager.prototype._makeHttpBackend = function(cfg) {
             var errStream = conn.getErrorStream()
             if (isDef(errStream) && errStream != null) { af.fromInputStream2String(errStream); errStream.close() }
           } catch(ignoreErrStream) {}
-          parent._auditRetrieval("http", identifier, path, false, 0)
+          parent._auditRetrieval("http", identifier, path, false, 0, { operation: "read", protocol: "http", method: "GET", status: code, totalMillis: __miniAWikiAuditMillis(started) })
           return __
         }
         var stream = conn.getInputStream()
         try {
           var content = af.fromInputStream2String(stream)
-          parent._auditRetrieval("http", identifier, path, true, isString(content) ? content.length : 0)
+          parent._auditRetrieval("http", identifier, path, true, __miniAWikiAuditBytes(content), { operation: "read", protocol: "http", method: "GET", status: code, totalMillis: __miniAWikiAuditMillis(started) })
           return content
         } finally { try { stream.close() } catch(ignoreClose) {} }
       } catch(e) {
-        parent._auditRetrieval("http", identifier, path, false, 0)
+        parent._auditRetrieval("http", identifier, path, false, 0, { operation: "read", protocol: "http", method: "GET", totalMillis: __miniAWikiAuditMillis(started) })
         return __
       } finally {
         try { if (isDef(conn) && conn instanceof java.net.HttpURLConnection) conn.disconnect() } catch(ignoreDisconnect) {}
       }
     },
     exists: function(path, options) {
-      var conn = __
+      var conn = __, identifier = __miniAWikiUrlJoin(base, path), started = Number(java.lang.System.nanoTime())
       try {
         conn = open(path, "HEAD", options)
         var code = Number(conn.getResponseCode())
-        return code >= 200 && code < 300
-      } catch(e) {
-        return false
+        var exists = code >= 200 && code < 300
+        parent._auditRetrieval("http", identifier, path, exists, 0, { operation: "exists", protocol: "http", method: "HEAD", status: code, totalMillis: __miniAWikiAuditMillis(started) })
+        return exists
+      } catch(e) { parent._auditRetrieval("http", identifier, path, false, 0, { operation: "exists", protocol: "http", method: "HEAD", totalMillis: __miniAWikiAuditMillis(started) }); return false
       } finally {
         try { if (isDef(conn) && conn instanceof java.net.HttpURLConnection) conn.disconnect() } catch(ignoreDisconnect) {}
       }
@@ -2828,7 +2873,10 @@ MiniAWikiManager.prototype._makeHttpBackend = function(cfg) {
 }
 
 MiniAWikiManager.prototype._hydrateHttpArtifacts = function() {
-  var base = isString(this._config.url) ? this._config.url.trim() : ""
+  // HTTP callers historically configure the content base as root/wikiroot.
+  // Prefer an explicit endpoint URL, but do not silently skip bundle hydration
+  // when only that documented base is supplied.
+  var base = isString(this._config.url) && this._config.url.trim().length ? this._config.url.trim() : (isString(this._config.root) ? this._config.root.trim() : "")
   if (base.length === 0) return
   var bundleUrl = isString(this._config.wikihttpindexurl) && this._config.wikihttpindexurl.trim().length > 0 ? this._config.wikihttpindexurl.trim() : __miniAWikiUrlJoin(base, "mini-a-wiki-index.zip")
   var timeout = isNumber(Number(this._config.wikihttptimeout)) && Number(this._config.wikihttptimeout) > 0 ? Number(this._config.wikihttptimeout) : 30000
@@ -2918,13 +2966,17 @@ MiniAWikiManager.prototype._makeEsBackend = function(cfg) {
       return __miniAWikiEsRowsToPaths(rows)
     },
     read: function(path) {
-      var r = $ch(chName).get({ path: path })
+      var started = Number(java.lang.System.nanoTime()), r = $ch(chName).get({ path: path })
       var raw = isMap(r) ? r.raw : __
-      parent._auditRetrieval("es", "es:" + index + "/" + path, path, isDef(raw), isString(raw) ? raw.length : 0)
+      parent._auditRetrieval("es", "es:" + index + "/" + path, path, isDef(raw), __miniAWikiAuditBytes(raw), { operation: "read", protocol: "elasticsearch", totalMillis: __miniAWikiAuditMillis(started) })
       return raw
     },
     write: function(path, content) { $ch(chName).set({ path: path }, { path: path, raw: content }) },
-    exists: function(path) { return isMap($ch(chName).get({ path: path })) },
+    exists: function(path) {
+      var started = Number(java.lang.System.nanoTime()), exists = isMap($ch(chName).get({ path: path }))
+      parent._auditRetrieval("es", "es:" + index + "/" + path, path, exists, 0, { operation: "exists", protocol: "elasticsearch", totalMillis: __miniAWikiAuditMillis(started) })
+      return exists
+    },
     delete: function(path) { $ch(chName).unset({ path: path }) },
     close: function() { try { $ch(chName).destroy() } catch(e) {} }
   }

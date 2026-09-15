@@ -304,14 +304,24 @@ Cross-wiki expansion touches no backend: it only reads each mount's already-load
 
 ## Publishing a static HTTP wiki
 
-Publish the Markdown pages at the same relative paths used by the wiki, then publish `mini-a-wiki-index.zip` at the static root (or specify `wikihttpindexurl`). The zip must contain the complete generated paths:
+Publish the Markdown pages at the same relative paths used by the wiki, then publish `mini-a-wiki-index.zip` at the static root (or specify `wikihttpindexurl`). A legacy lexical bundle contains these generated paths:
 
 ```
 .mini-a-wiki-lucene/
 .mini-a-wiki-graph/graph.json
 ```
 
-The Lucene directory must be copied as binary files; do not convert segment files through a text encoder. Mini-A downloads and atomically installs the bundle into its local `wikiindexdir` cache. Page reads remain live HTTP GET requests, while `list`, search, tree, and browse use the catalog stored in Lucene. Consequently, pages excluded from indexing are not visible in an HTTP catalog.
+V2 bundles additionally contain `.mini-a-wiki-serving/current.json`, its immutable
+generation directory (catalogue, Lucene files and raw evidence blocks), and, after
+an update, one optional `previous.json` plus its validated predecessor generation.
+The Lucene directory must be copied as binary files; do not convert segment files
+through a text encoder. Mini-A downloads and atomically installs the bundle into
+its local `wikiindexdir` cache. A v2 static HTTP reader serves validated immutable
+passage text from that bundle; it does not invent per-page GET/HEAD validation for
+a server that exposes only the bundle. Artifact authentication and refresh control
+that view. Legacy page reads remain live HTTP GET requests, while `list`, search,
+tree, and browse use the catalog stored in Lucene. Consequently, pages excluded
+from indexing are not visible in an HTTP catalog.
 
 Set `wikihttptimeout` (milliseconds, default `30000`) for HTTP request timeouts. Set `wikiaccesskey` plus `wikisecret` for Basic authentication, or only `wikisecret` for Bearer authentication. If unset, `wikisecret` may come from `OAF_MINI_A_WIKI_SECRET`.
 

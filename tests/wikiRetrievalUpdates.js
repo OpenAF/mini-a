@@ -18,8 +18,10 @@ try {
   for (var i = 0; i < pages; i++) io.writeFileString(dir + "/page-" + i + ".md", "# Reference " + i + "\n" + new Array(30).join("Technical prerequisite and warning.\n") + "\n# Configuration\nparameter" + i + " controls expiry.")
   var config = {}
   if (["true","false"].indexOf(String(getEnv("WIKI_BENCH_LINKS")))>=0) config.linkImmutableFiles = String(getEnv("WIKI_BENCH_LINKS")) === "true"
+  if (["true","false"].indexOf(String(getEnv("WIKI_BENCH_SHARED_BLOCKS")))>=0) config.sharedBlockStore = String(getEnv("WIKI_BENCH_SHARED_BLOCKS")) === "true"
   manager = new MiniAWikiManager({backend:"fs",root:dir,access:"rw",wikiretrievalv2:true,wikiretrievalconfig:config}, function(){})
   report.linkImmutableFiles = manager._retrievalV2.config.linkImmutableFiles
+  report.sharedBlockStore = manager._retrievalV2.config.sharedBlockStore
   var started = clock(), built = manager.reindex(); if (!built.ok) throw new Error(stringify(built)); report.buildMillis = clock() - started
   manager.retrieve("parameter0") // warm serving catalogue and reader
   for (var s = 0; s < samples; s++) {

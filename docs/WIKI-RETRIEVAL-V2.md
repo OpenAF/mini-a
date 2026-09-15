@@ -270,8 +270,11 @@ Readers acquire/release managed read-only generation searchers. At most two
 reader snapshots are retained per manager, with in-flight references protected
 from close. A new manager does not share a process-global path-hash reader.
 Detach, replacement, configure and close release owned resources. Failed staged
-publication leaves the old pointer usable. A corrupt already-activated pointer
-returns unavailable; automatic selection of a previous pointer is not implemented.
+publication leaves the old pointer usable. Before each later activation, the
+previous valid pointer is retained as `previous.json`. If `current.json` or its
+generation fails validation, a reader may serve that validated predecessor without
+rewriting either pointer; a writer/operator must still repair the active state.
+This is one-generation read recovery, not an authorised historical-view API.
 
 Warm search/open/navigate uses compact cached catalogue metadata, without source
 body reads solely for headings. Backlinks uses reverse postings, even without the
@@ -280,6 +283,19 @@ revision/stat and pending suppression are checked even on cache hits. Audit hook
 distinguish serving-block fetches from serving-cache hits. Parsed catalogue memory
 is bounded by artifact caps rather than a separate compact-catalogue eviction limit.
 
+Structural instruction support recognizes plain/bold warning and prerequisite
+labels, plus GitHub-style blockquote admonitions `> [!WARNING]`, `> [!CAUTION]`
+and `> [!IMPORTANT]`. The parser retains exact raw ranges and treats an admonition
+only as context for the immediately following bounded structure; it does not
+infer support from warning-looking content inside fenced code.
+
+New retrieval excludes pages explicitly retired by `retired: true`,
+`status: retired`, `status: superseded`, `superseded: true`, or non-empty
+`superseded_by`. Other declared statuses, including `review`, remain descriptive
+provenance and do not silently remove current evidence. Trusted navigation may
+still inspect a retired page; it cannot ground new retrieval evidence or
+derivatives.
+
 Writes/deletes rebuild affected passage records only when a serving pointer exists.
 Incremental publication uses portable copies by default. Setting
 `wikiretrievalconfig="(linkImmutableFiles: true)"` reuses immutable revision blocks
@@ -287,6 +303,11 @@ and Lucene segment/commit files through hard links where supported, with a copy
 fallback. The measured local hard-link latency regression makes this an operator
 choice, not a default optimisation. Existing
 linked blocks are never overwritten, including same-revision updates. Reverse-link
+`wikiretrievalconfig="(sharedBlockStore: true)"` additionally retains revision
+blocks in a content-addressed local store and hard-links them into new immutable
+generation directories (with a portable-copy fallback). Generations and bundles
+remain self-contained; this opt-in slice reduces repeated block-byte copies but
+does not yet remove catalogue, segment, validation or cold-reader corpus work.
 postings and content-block reference counts change only for affected pages/targets.
 Backlinks group multiple links from one inbound page. Additive block counts are built
 only by a writable publisher for older v2 catalogues; readers do not migrate them.
@@ -351,15 +372,42 @@ as `backendReadMillis` and `backendExistsMillis`, measured with monotonic
 `System.nanoTime`. `backendReadCalls`, `backendExistsCalls`, `backendReadBytes`
 and `backendFailures` count actual calls, complete UTF-8 text returned by source
 reads and thrown failures. False permission responses are rejections rather than
-backend exceptions. Revision validation of remote/archive content counts its
-full returned source text even when a cached immutable serving block supplies
-the quote. These measurements overlap the enclosing search/selection durations.
+backend exceptions. Revision validation of remote content counts its full
+returned source text even when a cached immutable serving block supplies the
+quote. A static HTTP bundle is different: its validated immutable block is the
+serving source, so it makes no nonexistent per-page GET/HEAD probe; artifact
+authentication and refresh govern that view. These measurements overlap the
+enclosing search/selection durations.
 Absent counters mean no corresponding source-backend calls were made; these are
 not totals for Lucene file I/O, checksums, filesystem stat calls or HTTP wire
 bytes. The common request usage object preserves counts across selected wikis
 and error/partial-result adapters; no manager-global counter subtraction is used.
 They also accumulate in bounded private `request_work` telemetry when writable
 telemetry is enabled. Read-only readers report usage without persisting telemetry.
+
+Bundle hydration separately emits one best-effort audit event with backend
+`http-artifact` or `s3-artifact`, operation `hydrate`, success/failure, compressed
+download bytes, expanded bytes on success, and monotonic `metadataMillis`,
+`downloadMillis` and `totalMillis`. This is transport observability for the
+artifact operation, not a claim of complete kernel/filesystem I/O accounting.
+Ordinary source reads emit the same best-effort boundary record for `fs`,
+`archive`, `s3`, `http`, and `es`: UTF-8 payload `bytes`, `operation: "read"`,
+protocol, success/failure and monotonic `totalMillis`; HTTP also records its
+response status and S3/HTTP record `GET`. These are application-boundary timing
+and payload measurements, not TCP/TLS framing, kernel page-cache, filesystem
+metadata, Lucene, checksum or provider-side measurements.
+Existence probes are recorded separately with `operation: "exists"` and zero
+payload bytes: filesystem/archive probes use their local protocol, S3 uses its
+existing GET probe, HTTP uses HEAD and records status, and ES uses its document
+lookup. A failed probe is an observed failed boundary operation, not a claim
+that the backend or provider is unavailable globally.
+When a request genuinely needs an immutable generation block (rather than a
+stored Lucene passage), `serving-block` emits the same `read`/`file` record with
+UTF-8 bytes and monotonic duration, including an explicit zero-byte failure.
+Stored passage materialization remains separately identified as
+`serving-index-passage` with protocol `lucene-stored` and zero blocking duration;
+the immutable body cache is `serving-cache`/`memory`. Neither must be misreported
+as a filesystem block read.
 Assembled context preserves the shared retrieval timings. Empty retrievals do not
 advertise citation work, and source-suppressed compact searches do not run it.
 When the response envelope cannot fit with useful evidence, optional public
@@ -523,7 +571,11 @@ Other product/version/platform/environment constraints retain exact matching.
 This selects applicable current revisions, never historical source revisions,
 and superseded pages remain excluded even when an earlier date is requested.
 Trusted evidence carries the declared `validity` object, or null when unknown;
-restricted references retain their existing disclosure policy. No new MCP tool
+when declared, its descriptive `provenance` also carries `reviewStatus`,
+`authority`, `verificationDate`, `sourceRevision`, and `ingestedAt`. These fields
+do not affect rank or applicability; `updated` is never a verification date and
+an absent value remains unknown. Restricted references retain their existing
+disclosure policy and do not expose provenance. No new MCP tool
 or caller-controlled historical-view interface is introduced.
 Trusted wiki search schemas and the shared utility facade accept the same
 `applicability` object. Both internal agent dispatch paths forward it and explicit
@@ -771,6 +823,10 @@ replaces the output file. It includes no ingestion journal, source-internal mani
 query telemetry or runtime credentials. Front matter chosen by wiki authors remains
 in exact immutable source blocks and ordinary serving metadata; publishing a bundle
 is therefore a disclosure of the authorised wiki revision. It is not a secret filter.
+When a local predecessor pointer exists, export validates and includes exactly that
+one predecessor generation plus `previous.json`, so a hydrated HTTP/S3 reader has
+the same bounded corrupt-active-pointer recovery path. It does not export an
+unbounded generation history or create a historical-view interface.
 Local activation precedes optional export: `localPublished: true` and `bundle.ok`
 report those outcomes separately if export fails. Existing legacy artifacts remain
 on disk; the v2 bundle is not promised usable by old readers.

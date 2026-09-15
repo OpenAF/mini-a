@@ -64,6 +64,9 @@ help:
   - name     : wikiretrievalconfig
     desc     : Validated SLON/JSON advanced passage, cache and artifact budgets
     mandatory: false
+  - name     : wikitelemetry
+    desc     : Persist local aggregate retrieval telemetry (off by default)
+    mandatory: false
   - name     : wikilexical
     desc     : "SLON/JSON Lucene lexical configuration. Defaults to {language: 'english'}."
     mandatory: false
@@ -344,6 +347,7 @@ jobs:
       wikiindexdir         : isString.default(__)
       wikiretrievalv2: toBoolean.isBoolean.default(__)
       wikiretrievalconfig: isString.default(__)
+      wikitelemetry       : toBoolean.isBoolean.default(__)
       wikilexical          : isString.default(__)
       usewikigraph        : toBoolean.isBoolean.default(false)
       wikigraphfalkorhost : isString.default(__)

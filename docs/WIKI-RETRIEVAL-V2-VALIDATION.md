@@ -358,6 +358,15 @@ unanswerable identifier. Returned quote/range checks are 1.00 and duplicate frac
 content-token metrics are per fixture in `quality-held-out-*.json`; these exclude
 presentation overhead and must not be mistaken for whole-response token efficiency.
 
+A current rerun of this unchanged six-question fixture on runtime `20260914`
+binds its fixture SHA-1 (`8928e58077bc8a55073778acb213b17a861909fc`) and source
+SHA-1 values in the `QUALITY=` record. V2 remains Recall@k 1.00, MRR 1.00 and
+strict citation-range correctness 1.00. Legacy remains Recall@k/MRR 0.40, but
+strict citation-range correctness is 0.00 because its legacy evidence does not
+carry revision-positioned citations. This supersedes any interpretation of older
+legacy quality artifacts as strict-citation proof. The fixture remains too small
+and curated to establish general quality or an independent large-corpus result.
+
 ## Local performance
 
 The size parameter supports 1000 and 10000 or larger explicit runs. Measurements
@@ -1679,6 +1688,73 @@ Raw results are `updates-1000-immutable-catalogue-{before,after}.json`.
 The compact map fork, artifact copies, checksumming and catalogue serialization
 remain corpus-scaled; this does not complete broader incremental publication.
 
+A current local-FS 1,000-page/three-update portable-copy run on OpenAF `20260914`
+and JVM `26.0.2` measured p50/p95 566.39/689.26 ms. Each one-page update parsed
+one source page but copied 1,003–1,010 retained files (about 1.46 MB), cloned
+3,998–4,000 catalogue keys and serialized 4,000–4,002 records. Retained-block
+staging consumed 219.72–242.09 ms and artifact validation 131.10–161.01 ms.
+The recorded retrieval source SHA-1 is
+`e3ded49e52f5481995d11edbd7fc81359f7c97e0`. This is a diagnostic local run,
+not a performance acceptance gate or a completed incremental-publication claim.
+
+The opt-in shared-block-store variant linked 1,000 retained blocks per update and
+reduced the POSIX identity-based unique-file estimate from about 15.6 MB to 12.3
+MB. Its local p50/p95 were 838.03/974.71 ms, slower than portable copies on this
+filesystem because linking remains corpus-sized metadata work and full catalogue,
+manifest and validation stages still execute. The regression corrupts a stored
+block and verifies publication fails without replacing the active pointer. This
+is a bounded storage-reuse result, not a latency improvement or a completed
+publication redesign.
+
+## Source I/O audit boundary accounting
+
+The registered `SourceIoAuditAccounting` fixture verifies that a filesystem source
+read emits exactly the UTF-8 payload byte length (including non-ASCII text), an
+explicit `read`/`file` boundary descriptor and nonnegative elapsed duration. A
+missing source emits the corresponding failed zero-byte record. The fixture also
+verifies a filesystem existence probe as a distinct zero-byte boundary operation.
+The shared source audit implementation applies that record shape to archive, S3,
+HTTP and ES reads/probes; HTTP adds response status and its probe is HEAD,
+whereas the existing S3 probe uses GET. This is application-boundary observability
+only, not evidence of complete physical/kernel/protocol accounting or live provider
+telemetry.
+
+The same fixture directly reads a validated immutable block and verifies the
+separate `serving-block` audit event carries UTF-8 bytes, `read`/`file` semantics
+and a monotonic duration. Normal passage retrieval can use stored Lucene text,
+which is recorded as `serving-index-passage` instead; this distinction prevents
+the report from inventing a filesystem block read. It also verifies explicit
+`lucene-stored` and `memory` protocol events for stored passage materialization
+and immutable-body cache hits, both with zero blocking duration.
+
+## Remote source revocation boundary
+
+`SourceRevocationBeforeMaterialization` uses a real indexed generation with an
+external-source backend whose permission probe succeeds during candidate search
+and fails immediately before evidence materialization. It verifies the second
+probe occurs, no remote body read is made, no indexed/cached quotation is
+returned, and the response is explicitly partial with
+`stale-or-revoked-evidence`. This is an in-process deterministic boundary test;
+it is not a live identity-provider, transport-race or distributed revocation
+proof.
+
+## GitHub-style warning support
+
+The structural-context fixture now covers a `> [!WARNING]` blockquote immediately
+before a fenced command. It verifies the code remains selected evidence and the
+admonition marker/body return as exact revision-bound `instruction-context`
+support. Existing bold `**Prerequisites:**` and `> **Warning:**` forms remain in
+the same fixture, preventing an admonition grammar change from regressing the
+established label syntax.
+
+## Explicit retirement status
+
+The supersession regression now verifies `status: retired` excludes a page from
+new evidence requests without requiring a replacement path, while `status: review`
+remains descriptive and eligible. This joins existing `superseded`,
+`superseded_by` and `retired: true` retirement markers; retired trusted pages
+remain navigable but cannot become current retrieval evidence.
+
 ## Serial filesystem enumeration and failure preservation
 
 The registered direct-postings fixture creates a nested manual page and 250 fake
@@ -2068,3 +2144,64 @@ failures. This is exact support deduplication, not a general overlapping-range
 merger. No latency improvement or independent quality gain is claimed.
 The full-wiki runner passes **2,039 assertions across 193 functions**, with zero
 failures. The source-bound record is `early-support-dedup-validation.json`.
+
+## Pointer recovery and static HTTP serving regression
+
+Serving publication now keeps one validated predecessor pointer. A reader whose
+active pointer or selected generation fails validation can use that predecessor
+without rewriting activation state; the regression corrupts `current.json` and a
+referenced immutable block, then verifies only the prior validated generation is
+served. Publication fault checkpoints retain their existing pre/post-activation
+semantics.
+
+The structural-support merger now unions only overlapping spans while preserving
+the caller's priority for disjoint contexts, so a complete table header remains
+available before a separately budgeted warning. Static HTTP bundle readers serve
+their validated immutable passage text without inventing a per-page HTTP
+permission endpoint; the same fixture separately exercises the dynamic backend
+read/exists accounting path.
+
+On 2026-09-15, the registered OpenAF assertion runners passed **1,320 assertions
+across 33 v2 functions** and **2,047 assertions across 193 full-wiki functions**
+with zero failures. These are local filesystem/simulated-backend results only;
+they do not prove physical power-loss behavior, live S3 reader refresh or
+authorization denial, network-filesystem durability, or provider performance.
+
+## Exported predecessor recovery
+
+Published v2 bundles now contain the active generation and, when present, one
+fully validated predecessor generation with `previous.json`. Hydration validates
+both generations before activation, and the static HTTP fixture corrupts the
+hydrated active pointer to prove that a read-only consumer selects only the
+predecessor without rewriting activation state. This extends local recovery to
+the bundle transport; it is not live S3/provider validation.
+
+On 2026-09-15, the registered runners passed **1,323 assertions across 33 v2
+functions** and **2,050 assertions across 193 full-wiki functions**, with zero
+failures.
+
+## S3 bundle-reader lifecycle
+
+The registered S3 fixture drives the manager's actual `_hydrateS3Artifacts()`
+bundle path with an in-process S3 client: configured bucket/key selection,
+metadata-gated no-op refresh, hydrated evidence serving, denied metadata refresh
+with the prior pointer retained, and a changed ETag activating a complete
+replacement generation. The fixture passes **1,343 assertions across 34 v2
+functions** with zero failures. It validates Mini-A's reader lifecycle and failure
+handling, but uses a simulated S3 client; live IAM, provider cache, network and
+S3-compatible-server behavior remain separate verification obligations.
+
+## Local live S3-compatible bundle reader
+
+On 2026-09-15, a disposable local MinIO server at `127.0.0.1:19000` was used as
+a live S3-compatible endpoint. Mini-A created bucket `mini-a-live`, uploaded the
+Markdown source and `artifacts/mini-a-wiki-index.zip`, and a read-only `backend:s3`
+manager hydrated and retrieved the indexed passage. A replacement source/bundle
+produced a new active generation and served its new passage. Replacing the reader
+client with an invalid secret made refresh fail while preserving the replacement
+cache pointer. The bucket and container were removed after the run.
+
+This proves Mini-A's S3-compatible reader/hydration/replacement/denial path
+against a local live service. It does not prove a public-cloud IAM policy,
+provider cache/network failure behavior, distributed writer coordination, or
+physical durability.

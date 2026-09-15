@@ -59,9 +59,21 @@ jobs:
 - name: MiniA Wiki V2::ServingBundlesAndRemoteEvidence
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testServingBundlesAndRemoteEvidence
+- name: MiniA Wiki V2::S3BundleHydrationRefresh
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testS3BundleHydrationRefresh
+- name: MiniA Wiki V2::SourceIoAuditAccounting
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testSourceIoAuditAccounting
 - name: MiniA Wiki V2::ConcurrentRestrictedLedger
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testConcurrentRestrictedLedger
+- name: MiniA Wiki V2::SourceRevocationBeforeMaterialization
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testSourceRevocationBeforeMaterialization
+- name: MiniA Wiki V2::SharedBlockStore
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testSharedBlockStore
 - name: MiniA Wiki V2::GroundedDerivatives
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testGroundedDerivatives
@@ -74,6 +86,9 @@ jobs:
 - name: MiniA Wiki V2::PublicationFailureRecovery
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testPublicationFailureRecovery
+- name: MiniA Wiki V2::PreviousGenerationPointerFallback
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testPreviousGenerationPointerFallback
 - name: MiniA Wiki V2::ImmutableIncrementalGenerations
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testImmutableIncrementalGenerations
@@ -119,11 +134,16 @@ todo:
 - MiniA Wiki V2::GroundedApplicabilityDisagreements
 - MiniA Wiki V2::LegacyReadOnlyLexicalFeatures
 - MiniA Wiki V2::ServingBundlesAndRemoteEvidence
+- MiniA Wiki V2::S3BundleHydrationRefresh
+- MiniA Wiki V2::SourceIoAuditAccounting
 - MiniA Wiki V2::ConcurrentRestrictedLedger
+- MiniA Wiki V2::SourceRevocationBeforeMaterialization
+- MiniA Wiki V2::SharedBlockStore
 - MiniA Wiki V2::GroundedDerivatives
 - MiniA Wiki V2::DerivativeJournalAndIntegrity
 - MiniA Wiki V2::DirectDerivedPostings
 - MiniA Wiki V2::PublicationFailureRecovery
+- MiniA Wiki V2::PreviousGenerationPointerFallback
 - MiniA Wiki V2::ImmutableIncrementalGenerations
 - MiniA Wiki V2::LifecycleAndSuppression
 - MiniA Wiki V2::EnhancedPassageLexical
