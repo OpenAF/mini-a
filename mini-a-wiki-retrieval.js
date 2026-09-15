@@ -372,27 +372,33 @@ MiniAWikiRetrievalV2.prototype._atomic = function(path, value, durable, quiet) {
 }
 MiniAWikiRetrievalV2.prototype._files = function(dir, reused, work) {
   var out = [], self = this
-  var visit = function(base, prefix) {
+  // Serving layout is fixed. Avoid recursively discovering a staged tree:
+  // publication must not accidentally turn a small catalogue delta into a
+  // corpus walk just to construct its manifest.
+  var add = function(file, name) {
+    if (java.nio.file.Files.isSymbolicLink(file.toPath())) throw new Error("unsafe-artifact-path")
+    if (!file.isFile() || name === "index/write.lock") return
+    var size=Number(file.length()), prior=reused&&reused[name], checksum
+    if (prior && prior.bytes===size) {
+      self._path(dir,name); checksum=prior.checksum
+      if(work){work.reusedChecksums++;work.reusedChecksumBytes+=size}
+    } else checksum=MiniAWikiRetrievalV2.digest(self._path(dir,name))
+    out.push({path:name,bytes:size,checksum:checksum})
+    if (out.length > self.config.maxArtifactFiles) throw new Error("artifact-file-budget")
+  }
+  var visitKnown = function(base, prefix, oneMoreLevel) {
     var files = new java.io.File(base).listFiles()
     for (var i = 0; files && i < files.length; i++) {
       var name = prefix + String(files[i].getName())
       if (java.nio.file.Files.isSymbolicLink(files[i].toPath())) throw new Error("unsafe-artifact-path")
-      if (files[i].isDirectory()) visit(String(files[i].getPath()), name + "/")
-      else if (name !== "manifest.json" && name !== "index/write.lock") {
-        var size=Number(files[i].length()), prior=reused&&reused[name], checksum
-        if (prior && prior.bytes===size) {
-          // Use the pinned generation's expected checksum, not a new checksum
-          // of copied data. _validate still hashes every staged file before
-          // activation and therefore detects corruption during or after copy.
-          self._path(dir,name); checksum=prior.checksum
-          if(work){work.reusedChecksums++;work.reusedChecksumBytes+=size}
-        } else checksum=MiniAWikiRetrievalV2.digest(self._path(dir,name))
-        out.push({path:name,bytes:size,checksum:checksum})
-      }
-      if (out.length > self.config.maxArtifactFiles) throw new Error("artifact-file-budget")
+      if (files[i].isDirectory()) { if (oneMoreLevel) visitKnown(String(files[i].getPath()), name + "/", false); else throw new Error("unsafe-artifact-path") }
+      else add(files[i], name)
     }
   }
-  visit(dir, ""); out.sort(function(a,b) { return a.path < b.path ? -1 : 1 }); return out
+  visitKnown(dir + "/index", "index/", false)
+  if (io.fileExists(dir + "/blocks")) visitKnown(dir + "/blocks", "blocks/", false)
+  if (io.fileExists(dir + "/catalogue")) visitKnown(dir + "/catalogue", "catalogue/", true)
+  out.sort(function(a,b) { return a.path < b.path ? -1 : 1 }); return out
 }
 MiniAWikiRetrievalV2.prototype._readVerifiedBlock = function(path, record) {
   var digest = java.security.MessageDigest.getInstance("SHA-256")
@@ -661,6 +667,45 @@ MiniAWikiRetrievalV2.prototype._validateStructural = function(dir, manifest) {
     if (!isMap(cursor) || cursor.schema !== 3 || cursor.parser !== 5 || cursor.fingerprint !== this.fingerprint || !/^[a-f0-9]{64}$/.test(cursor.merkle || '') || MiniAWikiRetrievalV2.manifestMerkle(cursor) !== cursor.merkle) throw new Error('invalid-catalogue-lineage')
   }
   return __
+}
+// Activation is intentionally narrower than lint/export validation.  The
+// parent generation is immutable and was validated before its pointer became
+// eligible for retention; publication only proves bytes and semantic bindings
+// introduced by this transaction.  `_validate` remains the explicit complete
+// closure validator used by lint/export and diagnostic callers.
+MiniAWikiRetrievalV2.prototype._validatePublication = function(dir, manifest, prepared) {
+  this._validateStructural(dir, manifest)
+  if (!prepared || !isMap(prepared.catalog) || !isMap(prepared.changedPaths)) throw new Error("invalid-publication-proof")
+  var self = this, catalog = prepared.catalog, changed = prepared.changedPaths, seen = {}
+  // Every transaction-produced routed shard is checked now.  Parent shards are
+  // checked when a reader resolves their selected key.
+  ;["pages","passages","reverseLinks","moveReverse","blockRefs"].forEach(function(name) {
+    Object.keys(manifest.catalogue.shards[name] || {}).forEach(function(shard) {
+      var record = manifest.catalogue.shards[name][shard]
+      self._readCatalogueShard(dir, name, shard, record)
+    })
+  })
+  Object.keys(changed).forEach(function(path) {
+    var page = catalog.pages[path]
+    // A tombstoned page has no new byte binding. Lucene's page delete is
+    // checked by the post-open probe below.
+    if (!page) return
+    if (!isMap(page) || page.path !== path || !isArray(page.passageIds)) throw new Error("invalid-page-record")
+    var block = catalog.blockRefs[page.locator]
+    if (!isMap(block) || block.locator !== page.locator || !isFinite(block.bytes) || !/^[a-f0-9]{64}$/.test(block.checksum)) throw new Error("invalid-block-postings")
+    var raw = self._readVerifiedBlock(self._blockFile(dir, manifest, page.locator), block), positions = MiniAWikiRetrievalV2.positions(raw)
+    self.metrics.validationBlockReads++; self.metrics.validationBlockBytes += MiniAWikiRetrievalV2.bytes(raw)
+    if (sha1(raw) !== page.revision || raw.length !== page.charLength || positions.lines.length !== page.linesTotal) throw new Error("page-revision-binding-failure")
+    var parsed = MiniAWikiRetrievalV2.parse(path, raw, manifest.passageChars, true, positions), metadata = af.fromJson(stringify(self.manager.parseFrontmatter(raw).meta, __, ""))
+    if (stringify(parsed.outline, __, "") !== stringify(page.outline, __, "") || stringify(metadata, __, "") !== stringify(page.metadata, __, "") || page.title !== (metadata.title || path) || page.description !== (metadata.description || "")) throw new Error("page-metadata-binding-failure")
+    page.passageIds.forEach(function(id) {
+      if (seen[id]) throw new Error("invalid-passage-record")
+      seen[id] = true
+      var passage = catalog.passages[id]
+      if (!isMap(passage) || passage.path !== path || passage.revision !== page.revision || passage.charStart < 0 || passage.charEnd <= passage.charStart || passage.charEnd > raw.length || passage.textHash !== sha1(raw.substring(passage.charStart, passage.charEnd)) || passage.startLine !== positions.lineFor(passage.charStart) || passage.endLine !== positions.lineFor(passage.charEnd - 1) || passage.byteStart !== positions.byteAt(passage.charStart) || passage.byteEnd !== positions.byteAt(passage.charEnd)) throw new Error("passage-revision-binding-failure")
+    })
+  })
+  return MiniAWikiRetrievalV2.immutable(catalog)
 }
 MiniAWikiRetrievalV2.prototype._openDirectory = function(dir) { return Packages.org.apache.lucene.store.FSDirectory.open(java.nio.file.Paths.get(dir+"/index")) }
 MiniAWikiRetrievalV2.prototype._openReader = function(directory) { return Packages.org.apache.lucene.index.DirectoryReader.open(directory) }
@@ -969,52 +1014,93 @@ MiniAWikiRetrievalV2.prototype._blockFile = function(dir, manifest, locator) {
   if (record.storage !== "generation") throw new Error("invalid-generation-manifest")
   return this._path(dir, locator)
 }
-// Explicit, conservative maintenance for schema-2 stores.  Every complete
-// generation directory is considered recoverable (not merely current/previous),
-// and managed/pinned snapshots are included as a second guard.  An interrupted
-// run leaves its journal and/or surplus bytes; it never removes evidence first.
+// Return the exact recoverable generation closure.  A schema-3 child only owns
+// a delta, so every parent named by its catalogue descriptor is part of the
+// reader contract too.  Do not use "all directories" as a retention policy:
+// that makes reclamation permanently ineffective and hides abandoned staging
+// generations after a crash.
+MiniAWikiRetrievalV2.prototype._retentionClosure = function() {
+  var retained = {}, expected = {}, queue = [], self = this
+  var add = function(generation, checksum) {
+    if (!/^[a-f0-9-]{36}$/.test(String(generation || "")) || retained[generation]) return
+    retained[generation] = true; if (checksum) expected[generation] = checksum; queue.push(String(generation))
+  }
+  ;["current.json", "previous.json"].forEach(function(name) {
+    var path = self.root + "/" + name
+    if (!io.fileExists(path)) return
+    var pointer = af.fromJson(io.readFileString(path))
+    if (!isMap(pointer) || pointer.schema !== 1 || !/^[a-f0-9-]{36}$/.test(String(pointer.generation || ""))) throw new Error("invalid-generation-pointer")
+    if (!/^[a-f0-9]{64}$/.test(String(pointer.checksum || ""))) throw new Error("invalid-generation-pointer")
+    add(pointer.generation, pointer.checksum)
+  })
+  this.serving.forEach(function(snapshot) { if (snapshot && snapshot.manifest) add(snapshot.manifest.generation, snapshot.manifestChecksum) })
+  while (queue.length) {
+    var generation = queue.shift(), manifestPath = self.root + "/" + generation + "/manifest.json"
+    if (!io.fileExists(manifestPath)) throw new Error("reclamation-deferred-missing-generation")
+    if (expected[generation] && MiniAWikiRetrievalV2.digest(manifestPath) !== expected[generation]) throw new Error("generation-integrity-failure")
+    var manifest = af.fromJson(io.readFileString(manifestPath)), descriptor = self._catalogueDescriptor(manifest)
+    if (manifest.schema !== 3) throw new Error("reindex-required")
+    if (descriptor.base !== true) {
+      add(descriptor.parent.generation, descriptor.parent.checksum)
+    }
+  }
+  return retained
+}
+// Mark only the retained closure. This deliberately resolves complete
+// block-reference maps during maintenance; publication and serving paths do
+// not call it. A collector is re-run immediately before every delete.
+MiniAWikiRetrievalV2.prototype._markSharedReachability = function(retained) {
+  var reachable = {}, self = this
+  Object.keys(retained).forEach(function(generation) {
+    var manifestPath = self.root + "/" + generation + "/manifest.json", manifest = af.fromJson(io.readFileString(manifestPath))
+    if (manifest.schema !== 3) throw new Error("reindex-required")
+    Object.keys(self._blockRecords(manifest)).forEach(function(locator) { reachable[locator] = true })
+  })
+  return reachable
+}
+// Shared immutable blocks are reclaimed with a journalled mark/sweep. A
+// malformed or interrupted journal never authorizes deletion. The final mark
+// is made from disk while the publication lock is held, immediately before
+// each unlink, so a stale candidate list cannot race a recovered pointer.
 MiniAWikiRetrievalV2.prototype.reclaimSharedBlocks = function() {
   if (!this.config.sharedBlockStore) return { ok: true, skipped: "shared-block-store-disabled", removed: 0 }
-  var store = this.root + "/.blocks", journal = store + "/reclaim.json", reachable = {}, removed = 0, unknownGeneration = false, self = this, channel, lock
+  var store = this.root + "/.blocks", journal = store + "/reclaim.json", reachable = {}, removed = 0, removedGenerations = 0, self = this, channel, lock
   try {
     if (!io.fileExists(store)) return { ok: true, removed: 0 }
     if (io.fileExists(journal)) {
       var recovery = af.fromJson(io.readFileString(journal))
-      if (!isMap(recovery) || recovery.schema !== 1 || ["planned","marked","deleting","complete"].indexOf(recovery.phase) < 0 || !isArray(recovery.candidates)) return { ok: false, error: "reclamation-deferred-invalid-journal", removed: 0, recoveryJournal: true }
+      // Schema 1 journals predate the exact-closure list. They contain no
+      // authority to delete: recover by discarding their candidate set and
+      // making a fresh mark below. Schema 2 records the retained roots too.
+      if (!isMap(recovery) || [1,2].indexOf(recovery.schema) < 0 || ["planned","marked","deleting","complete"].indexOf(recovery.phase) < 0 || !isArray(recovery.candidates) || recovery.schema === 2 && !isArray(recovery.retainedGenerations)) return { ok: false, error: "reclamation-deferred-invalid-journal", removed: 0, recoveryJournal: true }
     }
     // Publication and sweep share one OS lock.  A failed or interrupted sweep
     // is conservative: its journal is retained and later runs re-mark first.
     channel = new java.io.RandomAccessFile(this.root + "/publish.lock", "rw").getChannel()
     lock = channel.tryLock(); if (!lock) throw new Error("publication-busy")
-    var children = new java.io.File(this.root).listFiles() || []
-    for (var i=0; i<children.length; i++) {
-      var child = children[i], manifestPath = String(child.getPath()) + "/manifest.json"
-      if (!child.isDirectory() || !/^[a-f0-9-]{36}$/.test(String(child.getName())) || !io.fileExists(manifestPath)) continue
-      try {
-        var manifest = af.fromJson(io.readFileString(manifestPath)), records = this._blockRecords(manifest)
-        if (manifest.schema !== 3) throw new Error("reindex-required")
-        self._catalogueDescriptor(manifest)
-        Object.keys(records).forEach(function(locator) { reachable[locator] = true })
-      } catch(ignoreInvalidGeneration) { unknownGeneration = true }
-    }
-    if (unknownGeneration) return { ok: false, error: "reclamation-deferred-unverified-generation", removed: 0, recoveryJournal: io.fileExists(journal) }
-    this.serving.forEach(function(snapshot) { if (snapshot && snapshot.manifest) Object.keys(self._blockRecords(snapshot.manifest)).forEach(function(locator) { reachable[locator] = true }) })
+    var retained = this._retentionClosure(); reachable = this._markSharedReachability(retained)
     var candidates = [], blocks = new java.io.File(store).listFiles() || []
     for (var b=0; b<blocks.length; b++) if (blocks[b].isFile() && /^[a-f0-9]{40}\.md$/.test(String(blocks[b].getName()))) {
       var locator = "blocks/" + String(blocks[b].getName())
       if (!reachable[locator]) candidates.push(locator)
     }
-    this._atomic(journal, { schema: 1, phase: "planned", candidates: candidates }, true, true)
-    this._atomic(journal, { schema: 1, phase: "marked", candidates: candidates }, true, true)
+    this._atomic(journal, { schema: 2, phase: "planned", candidates: candidates, retainedGenerations: Object.keys(retained).sort() }, true, true)
+    this._atomic(journal, { schema: 2, phase: "marked", candidates: candidates, retainedGenerations: Object.keys(retained).sort() }, true, true)
     candidates.forEach(function(locator) {
-      // Re-read all valid manifests while the publication lock is held before
-      // each unlink. A malformed recovery generation always retains storage.
-      self._atomic(journal, { schema: 1, phase: "deleting", candidates: candidates, deleting: locator }, true, true)
+      self._atomic(journal, { schema: 2, phase: "deleting", candidates: candidates, retainedGenerations: Object.keys(retained).sort(), deleting: locator }, true, true)
+      reachable = self._markSharedReachability(self._retentionClosure())
       if (!reachable[locator]) { java.nio.file.Files.deleteIfExists(new java.io.File(self._sharedBlockPath(locator)).toPath()); removed++ }
     })
-    this._atomic(journal, { schema: 1, phase: "complete", candidates: candidates, removed: removed }, true, true)
+    // Generation directories outside the exact retention closure have no
+    // recovery role once their blocks have been marked from retained roots.
+    var children = new java.io.File(this.root).listFiles() || []
+    for (var i=0; i<children.length; i++) {
+      var child = children[i], generation = String(child.getName())
+      if (child.isDirectory() && /^[a-f0-9-]{36}$/.test(generation) && !retained[generation]) { io.rm(String(child.getPath())); removedGenerations++ }
+    }
+    this._atomic(journal, { schema: 2, phase: "complete", candidates: candidates, retainedGenerations: Object.keys(retained).sort(), removed: removed, removedGenerations: removedGenerations }, true, true)
     java.nio.file.Files.deleteIfExists(new java.io.File(journal).toPath())
-    return { ok: true, removed: removed, retained: Object.keys(reachable).length }
+    return { ok: true, removed: removed, retained: Object.keys(reachable).length, removedGenerations: removedGenerations }
   } catch(e) { return { ok: false, error: __miniAErrMsg(e), removed: removed, recoveryJournal: io.fileExists(journal) } }
   finally { try { if(lock)lock.release() } catch(ignoreLock) {}; try { if(channel)channel.close() } catch(ignoreChannel) {} }
 }
@@ -1102,7 +1188,7 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
       if (!enumeration || enumeration.ok !== true || !isArray(enumeration.pages)) throw new Error("source-enumeration-failed")
       paths = enumeration.pages.filter(function(path) { return !m._isHiddenPath(path) })
     } else paths = m.list("")
-    var affectedBlocks = {}, writtenBlocks = {}
+    var affectedBlocks = {}, writtenBlocks = {}, changedPaths = {}
     paths.forEach(function(path) {
       path = self.manager._normalizeRetrievalPath(path)
       var previous = catalog.pages[path]
@@ -1130,6 +1216,9 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
           }
         }
       }
+      // This is the publication proof scope. It contains only source entries
+      // whose binding, postings or deletion is emitted by this transaction.
+      changedPaths[path] = true
       if (previous) {
         if (isMap(catalog.moveReverse)) (previous.moveTargets || []).forEach(function(target) {
           var posting = (catalog.moveReverse[target] || []).filter(function(source) { return source !== path })
@@ -1268,7 +1357,7 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
     // depth-zero base; an incremental build is a delta over its predecessor.
     var compacting = isArray(changes) && old && old.manifest.schema === 3 && Number(old.manifest.catalogue.depth) >= 31
     var schema = 3
-    var manifest = { schema: schema, parser: 5, passageChars: this.config.passageChars, generation: generation, fingerprint: this.fingerprint, lexical: m._lexicalConfig, indexContract: this.indexContract, files: this._files(dir,reused,work) }
+    var manifest = { schema: schema, parser: 5, passageChars: this.config.passageChars, generation: generation, fingerprint: this.fingerprint, lexical: m._lexicalConfig, indexContract: this.indexContract, files: [] }
     // Turn publication-local reachability counters into immutable routed
     // descriptors only after all page mutations have completed.  This keeps
     // updates bounded while making every reference independently verifiable.
@@ -1297,7 +1386,7 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
     finishStage("manifestWrite")
     this._publicationCheckpoint("manifest-written", dir)
     var bindingReads=this.metrics.validationBlockReads, bindingReused=this.metrics.validationReusedPages
-    var validated = this._validate(dir, manifest, old, {catalog:catalog,checksum:catalogueChecksum})
+    var validated = this._validatePublication(dir, manifest, {catalog:catalog,changedPaths:changedPaths,checksum:catalogueChecksum})
     finishStage("artifactValidation")
     work.bindingBlockReads=this.metrics.validationBlockReads-bindingReads;work.bindingReusedPages=this.metrics.validationReusedPages-bindingReused
     this._publicationCheckpoint("artifacts-validated", dir)

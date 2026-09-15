@@ -17,6 +17,18 @@ The guarantee applies to ingestion-managed artifacts within their identified sco
 
 Confirm the current branch before editing. Adapt to existing corrections without duplicating them. Read AGENTS.md; respect OpenAF, JavaScript and repository conventions. Avoid unnecessary external dependencies. Never migrate or destructively operate on real wikis; use temporary fixtures and simulated backends.
 
+### Compatibility baseline
+
+Use `main` as the compatibility baseline; `autonomy` is an unreleased development
+branch. Preserve ingestion contracts and authoritative state supported by `main`.
+Formats and internal APIs introduced only on `autonomy` need no compatibility
+adapters or migration tooling. This does not permit discarding authoritative
+content or guessing ownership: unresolved provenance still blocks removal.
+
+For retrieval serving artifacts, follow the
+[retrieval plan compatibility baseline](../WIKI-RETRIEVE-PLAN.md#compatibility-baseline--development-branch)
+and its [remaining-work companion](../WIKI-RETRIEVE-PLAN-2.md).
+
 ## 2. Files and paths to inspect
 
 Main implementation: mini-a-ingest.js, mini-a-wiki-knowledge.js, mini-a-wiki.js, mini-a-dreams.js.
@@ -57,7 +69,7 @@ Use one authoritative applied-generation state. The ledger may remain a compatib
 
 ## 5. Migration of existing wikis
 
-Version and migrate conservatively. Distinguish missing state, valid legacy state and corrupt/partially persisted state. Read errors never authorize approximate ownership reconstruction followed by deletion.
+Version and migrate state supported by `main` conservatively. In this section, legacy state means a format supported by `main`, not an intermediate development-only format. Distinguish missing state, valid legacy state and corrupt/partially persisted state. Read errors never authorize approximate ownership reconstruction followed by deletion.
 
 Associate legacy records using concrete checks, such as recomputing the old key from the supplied origin/sourceId, checking wikiPath, and validating available provenance. Never assign every record to the current origin.
 
@@ -212,3 +224,8 @@ journals, full-source reconstruction and protected pruning remain authoritative.
 Original ingestion chunks and summaries do not become wiki-range quotations.
 See [retrieval v2](WIKI-RETRIEVAL-V2.md) for effective capabilities, restricted
 presentation policy, rollout and outstanding requirements.
+
+Retrieval publication, cold opening, first-use evidence verification and full
+lint/export follow the [validation boundaries](../WIKI-RETRIEVE-PLAN.md#validation-boundaries).
+Obsolete development serving schemas require explicit rejection and a writable
+rebuild; ingestion must not introduce old-schema readers or exporters.

@@ -1527,6 +1527,53 @@
       ow.test.assert(io.fileExists(activeStore),true,"cleanup retains the active manifest block even after a failed publication")
     } finally {if(oldPin&&wm)wm._retrievalV2.release(oldPin);if(fresh)fresh.close();if(wm)wm.close();io.rm(dir)}
   }
+  exports.testPublicationScopedValidation = function() {
+    var dir=temporary(), wm
+    try {
+      wm=make(dir,{wikiretrievalconfig:{passageChars:128}})
+      wm.write("changed.md",{title:"Changed"},"# Changed\nfirst scopedpublicationparameter value.")
+      wm.write("unchanged.md",{title:"Unchanged"},"# Unchanged\nunchangedpublicationparameter remains valid.")
+      ow.test.assert(wm.reindex().ok,true,"scoped validation fixture creates its validated parent")
+      var engine=wm._retrievalV2, complete=engine._validate
+      engine._validate=function(){throw new Error("full-closure-validation-must-not-run-at-activation")}
+      wm.write("changed.md",{title:"Changed"},"# Changed\nsecond scopedpublicationparameter value.")
+      var published=engine.build(["changed.md"])
+      engine._validate=complete
+      ow.test.assert(published.ok,true,"incremental activation validates changed bindings without a full catalogue closure")
+      ow.test.assert(published.updateWork.bindingBlockReads<=1,true,"activation performs a bounded changed-binding proof rather than reading the parent closure")
+      ow.test.assert(wm.retrieve("scopedpublicationparameter").evidence.length,1,"scoped publication serves the changed verified evidence")
+      ow.test.assert(wm.retrieve("unchangedpublicationparameter").evidence.length,1,"parent-bound unchanged evidence remains readable after scoped publication")
+    } finally {if(wm)wm.close();io.rm(dir)}
+  }
+  exports.testSharedBlockStoreReclamationClosure = function() {
+    var dir=temporary(), wm
+    try {
+      wm=make(dir,{wikiretrievalconfig:{passageChars:128,sharedBlockStore:true}})
+      wm.write("a.md",{title:"A"},"# A\nclosurestoreparameter is retained by the active generation.")
+      ow.test.assert(wm.reindex().ok,true,"closure fixture publishes a shared-block generation")
+      var pin=wm._retrievalV2.acquire(), store=wm._retrievalV2._sharedBlockPath(pin.catalog.pages["a.md"].locator)
+      wm._retrievalV2.release(pin)
+      var root=wm._retrievalV2.root, stray="blocks/0000000000000000000000000000000000000000.md", strayPath=wm._retrievalV2._sharedBlockPath(stray)
+      io.writeFileString(strayPath,"unreachable interrupted block")
+      io.writeFileString(root+"/.blocks/reclaim.json",stringify({schema:2,phase:"not-a-phase",candidates:[stray],retainedGenerations:[]},__,""))
+      var deferred=wm._retrievalV2.reclaimSharedBlocks()
+      ow.test.assert(deferred.error,"reclamation-deferred-invalid-journal","malformed reclamation journal never authorizes a delete")
+      ow.test.assert(io.fileExists(strayPath),true,"malformed reclamation journal preserves unmarked candidate bytes")
+      io.rm(root+"/.blocks/reclaim.json")
+      var originalMark=wm._retrievalV2._markSharedReachability, calls=0
+      wm._retrievalV2._markSharedReachability=function(retained) { var marked=originalMark.call(this,retained); if (++calls>1) marked[stray]=true; return marked }
+      var remarked=wm._retrievalV2.reclaimSharedBlocks()
+      wm._retrievalV2._markSharedReachability=originalMark
+      ow.test.assert(remarked.ok,true,"shared reclamation completes after a valid re-mark")
+      ow.test.assert(io.fileExists(strayPath),true,"re-mark immediately before unlink retains a newly reachable candidate")
+      ow.test.assert(io.fileExists(store),true,"exact closure keeps the active generation block")
+      var abandoned=root+"/"+String(java.util.UUID.randomUUID());io.mkdir(abandoned);io.writeFileString(abandoned+"/manifest.json","abandoned")
+      var reclaimed=wm._retrievalV2.reclaimSharedBlocks()
+      ow.test.assert(reclaimed.ok,true,"closure sweep tolerates and retires an abandoned staging generation")
+      ow.test.assert(io.fileExists(abandoned),false,"unreachable generation directory is reclaimed after the block mark")
+      ow.test.assert(io.fileExists(store),true,"generation reclamation cannot remove retained shared evidence")
+    } finally {if(wm)wm.close();io.rm(dir)}
+  }
   exports.testServingBundlesAndRemoteEvidence = function() {
     var dir = temporary(), builder, client, oldPin
     try {
