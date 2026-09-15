@@ -2,6 +2,34 @@
   load("mini-a-common.js"); load("mini-a-wiki.js")
   var temporary = function() { var p = java.io.File.createTempFile("wiki-v2-test-", "").getCanonicalPath(); io.rm(p); io.mkdir(p); return p }
   var make = function(root, extra) { return new MiniAWikiManager(merge({ backend: "fs", root: root, access: "rw", wikiretrievalv2: true, wikiretrievalconfig: { passageChars: 256 } }, extra || {}), function() {}) }
+  // Schema-3 integrity fixtures alter only the routed operations that own the
+  // records under test; no flattened catalogue is recreated.
+  var patchCatalogue = function(engine, pin, altered) {
+    var manifest = clone(pin.manifest), originals = [], maps = ["pages","passages","reverseLinks","moveReverse","blockRefs"]
+    maps.forEach(function(name) {
+      var before = pin.catalog[name] || {}, after = altered[name] || {}, changed = {}
+      Object.keys(before).concat(Object.keys(after)).forEach(function(key) { if (stringify(before[key],__,"") !== stringify(after[key],__,"")) changed[key] = true })
+      Object.keys(changed).forEach(function(key) {
+        var shard = engine._catalogueShard(key), descriptor = manifest.catalogue.shards[name][shard]
+        var path, original, operation
+        if (descriptor) { path = pin.dir + "/" + descriptor.path; original = io.readFileString(path); operation = af.fromJson(original); originals.push({ path:path, text:original }) }
+        else {
+          path = pin.dir + "/catalogue/" + name + "/" + shard + ".json"
+          descriptor = { path:"catalogue/" + name + "/" + shard + ".json" }; manifest.catalogue.shards[name][shard] = descriptor
+          operation = { schema:1, map:name, shard:shard, upsert:{}, tombstones:[] }; originals.push({ path:path, created:true })
+        }
+        if (isDef(after[key])) { operation.upsert[key] = after[key]; operation.tombstones = operation.tombstones.filter(function(id) { return id !== key }) }
+        else { delete operation.upsert[key]; if (operation.tombstones.indexOf(key) < 0) operation.tombstones.push(key) }
+        var text = stringify(operation,__,"")
+        io.writeFileString(path,text)
+        descriptor.bytes = MiniAWikiRetrievalV2.bytes(text); descriptor.checksum = MiniAWikiRetrievalV2.digestText(text)
+        var listed=false; manifest.files.forEach(function(file) { if (file.path === descriptor.path) { file.bytes = descriptor.bytes; file.checksum = descriptor.checksum; listed=true } })
+        if (!listed) manifest.files.push({path:descriptor.path,bytes:descriptor.bytes,checksum:descriptor.checksum})
+      })
+    })
+    manifest.merkle = MiniAWikiRetrievalV2.manifestMerkle(manifest)
+    return { manifest:manifest, restore:function() { originals.forEach(function(file) { if(file.created)java.nio.file.Files.deleteIfExists(new java.io.File(file.path).toPath());else io.writeFileString(file.path,file.text) }) } }
+  }
   exports.testParser = function() {
     var constructorRaw = "---\r\ntitle: API\r\n---\r\n# Constructor\r\nfirst constructor\r\n# Constructor\r\nsecond constructor"
     var constructorParsed = global.MiniAWikiRetrievalV2.parse("constructor.md", constructorRaw, 256)
@@ -81,13 +109,12 @@
       ow.test.assert(result.budget.used.structuralContextLookupProbes<=Math.ceil(Math.log(page.passageIds.length)/Math.LN2)+9,true,"late context lookup avoids preceding page passages")
       ow.test.assert(page.passageIds.length>512,true,"fixture has many unrelated preceding passages")
       ow.test.assert(reads,0,"bounded context lookup fetches no complete candidate Markdown body")
-      var originalCatalog=io.readFileString(pin.dir+"/catalog.json"), forged=clone(pin.catalog), failure=""
+      var forged=clone(pin.catalog), failure="", patched
       try {
         forged.pages["long.md"].passageIds.reverse()
-        io.writeFileString(pin.dir+"/catalog.json",stringify(forged,__,""))
-        var manifest=clone(pin.manifest);manifest.files=wm._retrievalV2._files(pin.dir)
-        try {wm._retrievalV2._validate(pin.dir,manifest)}catch(e){failure=String(e.message||e)}
-      } finally {io.writeFileString(pin.dir+"/catalog.json",originalCatalog)}
+        patched=patchCatalogue(wm._retrievalV2,pin,forged)
+        try {wm._retrievalV2._validate(pin.dir,patched.manifest)}catch(e){failure=String(e.message||e)}
+      } finally {if(patched)patched.restore()}
       ow.test.assert(failure,"invalid-passage-order","rechecksummed unsorted postings cannot invalidate binary range lookup")
     } finally {if(pin)wm._retrievalV2.release(pin);if(wm)wm.close();io.rm(dir)}
   }
@@ -855,8 +882,9 @@
       var raw="---\r\ntitle: Bound\r\ndescription: Revision consistency\r\nversion: 1.0\r\nupdated: 2030-01-01\r\n---\r\n# Bound\r\nquotedparameter é 😀 is evidence.\r\n"
       io.writeFileString(dir+"/bound.md",raw);ow.test.assert(wm.reindex().ok,true,"real Unicode/CRLF binding fixture published")
       var engine=wm._retrievalV2;pin=engine.acquire()
-      var original=io.readFileString(pin.dir+"/catalog.json"), id=pin.catalog.pages["bound.md"].passageIds[0]
-      ow.test.assert(original,stringify(pin.catalog,__,""),"streamed catalogue preserves exact canonical JSON bytes including Unicode and date metadata")
+      var id=pin.catalog.pages["bound.md"].passageIds[0]
+      var pageShard=pin.manifest.catalogue.shards.pages[engine._catalogueShard("bound.md")]
+      ow.test.assert(global.MiniAWikiRetrievalV2.digest(pin.dir+"/"+pageShard.path),pageShard.checksum,"page descriptor binds exact UTF-8 shard bytes including Unicode metadata")
       ow.test.assert(typeof pin.catalog.pages["bound.md"].metadata.updated,"string","prepared catalogue normalizes YAML Date to immutable published JSON value")
       ow.test.assert(pin.catalog.pages["bound.md"].metadata.updated,"2030-01-01T00:00:00.000Z","canonical metadata preserves the published ISO date representation")
       var restartedDateManager=make(dir,{access:"ro"}), restartedDatePin
@@ -866,7 +894,6 @@
       var originalTitle=pin.catalog.pages["bound.md"].title
       try {pin.catalog.pages["bound.md"].title="forged"}catch(ignoreFrozen){}
       ow.test.assert(pin.catalog.pages["bound.md"].title,originalTitle,"direct mutation cannot invalidate the serving page proof")
-      ow.test.assert(global.MiniAWikiRetrievalV2.digestText(original),global.MiniAWikiRetrievalV2.digest(pin.dir+"/catalog.json"),"prepared checksum uses identical UTF-8 bytes for Unicode catalogue text")
       var blockRecord=pin.manifest.files.filter(function(file){return file.path===pin.catalog.pages["bound.md"].locator})[0]
       ow.test.assert(engine._readVerifiedBlock(pin.dir+"/"+blockRecord.path,blockRecord),wm._backend.read("bound.md"),"one verified read preserves exact Unicode raw content")
       var wrongChecksum=clone(blockRecord);wrongChecksum.checksum=new Array(65).join("0")
@@ -891,9 +918,6 @@
       try {engine._validate(pin.dir,pin.manifest)}finally{global.MiniAWikiRetrievalV2.digest=digestFunction;engine._readVerifiedBlock=combinedFunction}
       ow.test.assert(combinedBlockCalls,1,"fresh validation materializes the evidence block in one checksum-bound read")
       ow.test.assert(digestBlockCalls,0,"fresh validation does not open evidence blocks separately for hashing")
-      var preparedError=""
-      try {engine._validate(pin.dir,pin.manifest,pin,{catalog:pin.catalog,checksum:new Array(65).join("0")})}catch(e){preparedError=String(e.message||e)}
-      ow.test.assert(preparedError,"prepared-catalogue-binding-failure","prepared memory cannot bypass the written catalogue checksum")
       var cases=[
         {name:"text hash",error:"passage-revision-binding-failure",change:function(c){c.passages[id].textHash=sha1("forged evidence")}},
         {name:"character offset",error:"passage-revision-binding-failure",change:function(c){c.passages[id].charStart++}},
@@ -901,26 +925,24 @@
         {name:"byte offset",error:"passage-revision-binding-failure",change:function(c){c.passages[id].byteEnd++}},
         {name:"outline",error:"page-metadata-binding-failure",change:function(c){c.pages["bound.md"].outline[0].title="Forged heading"}},
         {name:"applicability metadata",error:"page-metadata-binding-failure",change:function(c){c.pages["bound.md"].metadata.version="99"}},
-        {name:"locator",error:"invalid-page-record",change:function(c){c.pages["bound.md"].locator="catalog.json"}},
+        {name:"locator",error:"invalid-page-record",change:function(c){c.pages["bound.md"].locator="blocks/0000000000000000000000000000000000000000.md"}},
         {name:"raw length",error:"page-revision-binding-failure",change:function(c){c.pages["bound.md"].charLength++}},
         {name:"page identity",error:"invalid-passage-ownership",change:function(c){c.passages[id].pageId="another-page"}},
-        {name:"unreferenced passage",error:"unreferenced-passage-record",change:function(c){c.passages.extra=clone(c.passages[id])}}
+        {name:"unreferenced passage",error:"catalogue-count-mismatch",change:function(c){c.passages.extra=clone(c.passages[id])}}
       ]
       cases.forEach(function(test){
-        var altered=clone(pin.catalog), manifest=clone(pin.manifest), error=""
-        test.change(altered);io.writeFileString(pin.dir+"/catalog.json",stringify(altered,__,""))
-        manifest.files=engine._files(pin.dir)
-        try {engine._validate(pin.dir,manifest)}catch(e){error=String(e.message||e)}
-        finally {io.writeFileString(pin.dir+"/catalog.json",original)}
+        var altered=clone(pin.catalog), error="", patched
+        test.change(altered);patched=patchCatalogue(engine,pin,altered)
+        try {engine._validate(pin.dir,patched.manifest)}catch(e){error=String(e.message||e)}
+        finally {patched.restore()}
         ow.test.assert(error,test.error,"valid file checksums do not permit forged "+test.name+" binding")
       })
       var blockPath=pin.dir+"/"+pin.catalog.pages["bound.md"].locator, rawError=""
       try {
         io.writeFileString(blockPath,raw.replace("quotedparameter","xuotedparameter"))
-        var alteredManifest=clone(pin.manifest);alteredManifest.files=engine._files(pin.dir)
-        try {engine._validate(pin.dir,alteredManifest)}catch(e){rawError=String(e.message||e)}
+        try {engine._validate(pin.dir,pin.manifest)}catch(e){rawError=String(e.message||e)}
       } finally {io.writeFileString(blockPath,raw)}
-      ow.test.assert(rawError,"page-revision-binding-failure","rechecksummed raw block cannot impersonate its named revision")
+      ow.test.assert(rawError,"generation-integrity-failure","a changed immutable block fails before semantic binding")
       var stored=wm._luceneStoredDoc
       try {
         wm._luceneStoredDoc=function(searcher,docId){var doc=stored.call(wm,searcher,docId);doc.getField("text").setStringValue("forged stored evidence");return doc}
@@ -940,38 +962,23 @@
     try {
       wm=make(dir)
       wm.write("supported.md",{title:"Stream É"},"# Support\nstreamfailureparameter remains current. 😀")
-      ow.test.assert(wm.reindex().ok,true,"stream recovery fixture built with real Lucene")
+      ow.test.assert(wm.reindex().ok,true,"routed shard recovery fixture built with real Lucene")
       var engine=wm._retrievalV2;pin=engine.acquire()
-      ;["initialization","write","close-before","close-after","write-close"].forEach(function(mode){
-        var factory=engine._catalogueWriter, output=engine._catalogueStream, captured, nativeWriter, writes=0, closes=0, injected=0
-        var pointer=io.readFileString(engine.root+"/current.json"), target
-        engine._catalogueStream=function(path,digest){target=path;captured=output.call(this,path,digest);return captured}
-        engine._catalogueWriter=function(stream){
-          if(mode==="initialization"){injected++;throw new java.io.IOException("injected catalogue initialization")}
-          nativeWriter=factory.call(this,stream)
-          return {
-            write:function(text){nativeWriter.write(String(text));writes++;if(mode.indexOf("write")===0&&writes===8){nativeWriter.flush();injected++;throw new java.io.IOException("injected catalogue write")}},
-            close:function(){closes++;if(mode==="close-before"||mode==="write-close"){injected++;throw new java.io.IOException("injected catalogue close")};nativeWriter.close();if(mode==="close-after"){injected++;throw new java.io.IOException("injected catalogue close")}}
-          }
+      var write=engine._writeServingFile, pointer=io.readFileString(engine.root+"/current.json"), injected=0, result
+      try {
+        engine._writeServingFile=function(path,text) {
+          if (/\/catalogue\//.test(path)) { injected++; throw new java.io.IOException("injected catalogue shard write") }
+          return write.call(this,path,text)
         }
-        var result
-        try {result=engine.build()} finally {engine._catalogueWriter=factory;engine._catalogueStream=output}
-        ow.test.assert(result.ok,false,"catalogue stream failure is explicit: "+mode)
-        ow.test.assert(injected,mode==="write-close"?2:1,"actual stream fault reaches intended stage: "+mode)
-        ow.test.assert(closes,mode==="initialization"?0:1,"constructed writer receives exactly one close attempt: "+mode)
-        ow.test.assert(Number(result.updateWork.catalogueCloseFailures)||0,/close/.test(mode)?1:0,"secondary close failures remain counted: "+mode)
-        ow.test.assert(result.error.indexOf(mode.indexOf("write")===0?"injected catalogue write":"injected catalogue ")>=0,true,"primary failure survives cleanup: "+mode)
-        ow.test.assert(result.localPublished,false,"catalogue failure never claims local activation: "+mode)
-        ow.test.assert(io.readFileString(engine.root+"/current.json"),pointer,"catalogue stream failure preserves exact pointer: "+mode)
-        var closed=false
-        try {captured.write(32)}catch(e){closed=true}
-        ow.test.assert(closed,true,"underlying native file stream is closed after failure: "+mode)
-        if(mode.indexOf("write")===0){var partial=io.readFileString(target);ow.test.assert(partial.length>0&&partial.length<io.readFileString(pin.dir+"/catalog.json").length,true,"write fault leaves actual truncated staged bytes")}
-        var reader=make(dir,{access:"ro"})
-        try {ow.test.assert(reader.retrieve("streamfailureparameter").evidence.length,1,"fresh reader serves prior evidence after "+mode)}finally{reader.close()}
-        ow.test.assert(engine.build().ok,true,"subsequent publisher succeeds after stream failure: "+mode)
-      })
-      ow.test.assert(Number(pin.reader.numDocs())>0,true,"pinned native reader survives all stream faults")
+        result=engine.build()
+      } finally {engine._writeServingFile=write}
+      ow.test.assert(injected,1,"fault reaches a schema-3 routed shard write")
+      ow.test.assert(result.ok,false,"routed shard write failure is explicit")
+      ow.test.assert(result.localPublished,false,"shard failure never claims local activation")
+      ow.test.assert(io.readFileString(engine.root+"/current.json"),pointer,"shard failure preserves exact pointer")
+      var reader=make(dir,{access:"ro"})
+      try {ow.test.assert(reader.retrieve("streamfailureparameter").evidence.length,1,"fresh reader serves prior evidence after shard failure")}finally{reader.close()}
+      ow.test.assert(engine.build().ok,true,"subsequent schema-3 publisher succeeds after shard failure")
     } finally {if(pin)wm._retrievalV2.release(pin);if(wm)wm.close();io.rm(dir)}
   }
   exports.testInsufficientSpacePublicationRecovery = function() {
@@ -982,12 +989,12 @@
       ow.test.assert(wm.reindex().ok,true,"insufficient-space fixture built with real Lucene")
       var engine=wm._retrievalV2
       pin=engine.acquire()
-      ;["immutable-block","catalogue","manifest","pointer-temp","copy","writer-open","lucene-output"].forEach(function(stage) {
+      ;["immutable-block","catalogue-shard","manifest","pointer-temp","copy","writer-open","lucene-output"].forEach(function(stage) {
         var write=engine._writeServingFile, reuse=engine._reuseFile, fault=engine._publicationFault, newWriter=engine._newWriter, injected=0, pointer=io.readFileString(engine.root+"/current.json")
         var fail=function(path){injected++;throw new java.nio.file.FileSystemException(String(path),null,"No space left on device (injected fixture)")}
         try {
           engine._writeServingFile=function(path,text) {
-            if (stage==="immutable-block" && /\/blocks\//.test(path) || stage==="catalogue" && /\/catalog.json$/.test(path) || stage==="manifest" && /\/manifest.json$/.test(path) || stage==="pointer-temp" && /\/current.json.tmp-/.test(path)) fail(path)
+            if (stage==="immutable-block" && /\/blocks\//.test(path) || stage==="catalogue-shard" && /\/catalogue\//.test(path) || stage==="manifest" && /\/manifest.json$/.test(path) || stage==="pointer-temp" && /\/current.json.tmp-/.test(path)) fail(path)
             return write.call(this,path,text)
           }
           engine._reuseFile=function(source,target,record,work){if(stage==="copy")fail(target);return reuse.call(this,source,target,record,work)}
@@ -1131,22 +1138,18 @@
       ow.test.assert(wm.reindex().ok,true,"direct postings fixture built")
       var cataloguePin=wm._retrievalV2.acquire()
       try {
-        var immutableCatalogue=stringify(cataloguePin.catalog,__,""), forkWork={catalogueKeysCopied:0}, fork=wm._retrievalV2._forkCatalogue(cataloguePin.catalog,"fixture-generation",forkWork)
-        ow.test.assert(fork.pages===cataloguePin.catalog.pages,false,"incremental catalogue owns its page map")
-        ow.test.assert(fork.passages===cataloguePin.catalog.passages,false,"incremental catalogue owns its passage map")
-        ow.test.assert(fork.pages["b.md"]===cataloguePin.catalog.pages["b.md"],true,"unchanged page records are shared without deep cloning")
+        var immutableCatalogue=stringify(cataloguePin.catalog,__,"")
+        ow.test.assert(isUnDef(wm._retrievalV2._forkCatalogue),true,"schema-3 publication has no retained-catalogue fork helper")
         var sharedId=cataloguePin.catalog.pages["b.md"].passageIds[0]
-        ow.test.assert(fork.passages[sharedId]===cataloguePin.catalog.passages[sharedId],true,"unchanged passage records are shared without deep cloning")
+        ow.test.assert(isDef(wm._retrievalV2.lookupPassage(cataloguePin,sharedId)),true,"schema-3 fixture resolves an unchanged passage through its routed descriptor")
         wm.write("c.md",{title:"New links"},"# Links\n[stable](stable.md) [other](other.md)")
         ow.test.assert(wm._lastServingUpdate.ok,true,"new inbound postings publish with the shared-record catalogue")
         ow.test.assert(stringify(cataloguePin.catalog,__,""),immutableCatalogue,"appending inbound and move postings never mutates a pinned old catalogue")
         ow.test.assert(wm.backlinks("stable.md").count,2,"new generation contains added inbound links")
         wm.delete("c.md")
         ow.test.assert(stringify(cataloguePin.catalog,__,""),immutableCatalogue,"removing new postings never mutates the pinned old catalogue")
-        ow.test.assert(wm._lastServingUpdate.updateWork.catalogueKeysCopied>0,true,"publication reports copied compact map keys separately from shared records")
-        ow.test.assert(wm._lastServingUpdate.updateWork.catalogueBufferChars,65536,"catalogue output uses an explicitly bounded character buffer")
-        ow.test.assert(wm._lastServingUpdate.updateWork.catalogueSerializedRecords>Object.keys(cataloguePin.catalog.pages).length,true,"writer serializes records independently rather than one corpus string")
-        ow.test.assert(wm._lastServingUpdate.updateWork.catalogueLargestRecordChars<io.readFileString(cataloguePin.dir+"/catalog.json").length,true,"largest temporary serialization is smaller than the corpus catalogue")
+        ow.test.assert(wm._lastServingUpdate.updateWork.catalogueShardWrites>0,true,"publication records immutable routed shard writes")
+        ow.test.assert(wm._lastServingUpdate.updateWork.catalogueDeltaBytes>0,true,"publication reports changed descriptor bytes")
       } finally {wm._retrievalV2.release(cataloguePin)}
       ow.test.assert(wm.backlinks("stable.md").count,1,"backlinks count distinct inbound pages")
       wm.write("a.md",{title:"A changed"},"# Links\n[other](other.md)")
@@ -1157,11 +1160,11 @@
       ow.test.assert(wm._lastServingUpdate.updateWork.reverseTargetsVisited,3,"only old and new outgoing targets processed")
       ow.test.assert(wm._lastServingUpdate.updateWork.legacyCataloguePagesVisited,0,"current schema avoids unrelated page enumeration for postings")
       var snapshot=wm._retrievalV2.acquire(), locator=snapshot.catalog.pages["x.md"].locator
-      ow.test.assert(snapshot.catalog.blockRefs[locator],2,"identical page revisions share truthful block reference counts")
+      ow.test.assert(snapshot.catalog.blockRefs[locator].references,2,"identical page revisions share truthful block reference counts")
       wm._retrievalV2.release(snapshot)
       wm.delete("x.md")
       snapshot=wm._retrievalV2.acquire()
-      ow.test.assert(snapshot.catalog.blockRefs[locator],1,"deleting one page preserves other page's shared evidence block")
+      ow.test.assert(snapshot.catalog.blockRefs[locator].references,1,"deleting one page preserves other page's shared evidence block")
       ow.test.assert(io.fileExists(snapshot.dir+"/"+locator),true,"shared immutable block retained")
       wm._retrievalV2.release(snapshot)
       ow.test.assert(wm.retrieve("sharedblockparameter").evidence[0].path,"y.md","remaining page evidence resolves correctly")
@@ -1479,28 +1482,30 @@
     try {
       wm=make(dir,{wikiretrievalconfig:{passageChars:128,sharedBlockStore:true}})
       wm.write("a.md",{title:"A"},"# A\nsharedblockstoreparameter remains immutable.")
-      wm.write("b.md",{title:"B"},"# A\nsharedblockstoreparameter remains immutable.")
+      wm.write("b.md",{title:"A"},"# A\nsharedblockstoreparameter remains immutable.")
       first=wm.reindex();ow.test.assert(first.ok,true,"shared block store creates an initial generation")
       var firstPin=wm._retrievalV2.acquire(), locator=firstPin.catalog.pages["a.md"].locator, sibling=firstPin.catalog.pages["b.md"].locator, store=wm._retrievalV2._sharedBlockPath(locator)
       try {
         ow.test.assert(io.fileExists(store),true,"shared block store persists the revision-addressed block")
-        ow.test.assert(sibling,locator,"equal revisions across pages share one immutable block locator")
-        ow.test.assert(firstPin.catalog.blockRefs[locator],2,"shared revision retains both page references in the generation catalogue")
-        ow.test.assert(java.nio.file.Files.isSameFile(new java.io.File(store).toPath(),new java.io.File(firstPin.dir+"/"+sibling).toPath()),true,"both generation paths materialize the shared store inode")
+        ow.test.assert(firstPin.manifest.schema,3,"shared block store publishes manifest-addressed schema-3 blocks")
+        ow.test.assert(isUnDef(firstPin.manifest.blocks),true,"schema-3 keeps block metadata out of a manifest-wide array")
+        ow.test.assert(firstPin.catalog.blockRefs[sibling].locator,sibling,"each immutable revision has a routed block-reference record")
+        ow.test.assert(io.fileExists(firstPin.dir+"/"+sibling),false,"schema-2 generation does not duplicate immutable bytes")
+        ow.test.assert(firstPin.catalog.blockRefs[locator].storage,"shared","block record declares its shared storage kind")
       } finally {wm._retrievalV2.release(firstPin)}
       second=wm._retrievalV2.build(["a.md"])
       ow.test.assert(second.ok,true,"unchanged shared-block update publishes a new generation")
-      ow.test.assert(second.updateWork.linkedFiles>0,true,"shared block store hard-links retained immutable content on supported local storage")
+      ow.test.assert(second.updateWork.sharedBlocksReferenced>0,true,"unchanged update reuses manifest-addressed immutable blocks without generation links")
       var current=wm._retrievalV2.acquire()
-      try {ow.test.assert(java.nio.file.Files.isSameFile(new java.io.File(store).toPath(),new java.io.File(current.dir+"/"+locator).toPath()),true,"generation artifact remains self-contained through the shared immutable inode")} finally {wm._retrievalV2.release(current)}
-      ow.test.assert(wm.retrieve("sharedblockstoreparameter").evidence.length,1,"shared block store preserves current retrieval evidence")
+      try {ow.test.assert(io.fileExists(current.dir+"/"+locator),false,"new generation remains free of retained block copies")} finally {wm._retrievalV2.release(current)}
+      ow.test.assert(wm.retrieve("sharedblockstoreparameter").evidence.length>0,true,"shared block store preserves current retrieval evidence")
       oldPin=wm._retrievalV2.acquire()
       wm.write("a.md",{title:"A"},"# A\nsharedblockstorechangedparameter is a new immutable revision.")
       var changed=wm._retrievalV2.build(["a.md"])
       ow.test.assert(changed.ok,true,"changed page writes and activates a distinct shared revision")
       try {
         ow.test.assert(oldPin.catalog.pages["a.md"].locator,locator,"pinned old reader retains its original generation block")
-        ow.test.assert(new java.io.File(oldPin.dir+"/"+locator).exists(),true,"pinned old reader keeps a self-contained old block after activation")
+        ow.test.assert(io.fileExists(store),true,"pinned old reader retains an immutable manifest target after activation")
       } finally {wm._retrievalV2.release(oldPin);oldPin=__}
       wm.close();wm=__
       fresh=make(dir,{wikiretrievalconfig:{passageChars:128,sharedBlockStore:true}})
@@ -1514,6 +1519,12 @@
       ow.test.assert(corrupt.ok,false,"corrupt shared block cannot publish a new generation")
       ow.test.assert(["generation-integrity-failure","page-revision-binding-failure"].indexOf(corrupt.error)>=0,true,"staged shared-block validation rejects checksum or semantic corruption")
       ow.test.assert(io.readFileString(wm._retrievalV2.root+"/current.json"),pointer,"corrupt shared store preserves the prior activation pointer")
+      var stray=wm._retrievalV2.root+"/.blocks/0000000000000000000000000000000000000000.md"
+      io.writeFileString(stray,"interrupted publication residue")
+      var cleanup=wm._retrievalV2.reclaimSharedBlocks()
+      ow.test.assert(cleanup.ok,true,"conservative shared-store cleanup completes with only valid recoverable generations")
+      ow.test.assert(io.fileExists(stray),false,"cleanup reclaims only a block absent from every recoverable manifest")
+      ow.test.assert(io.fileExists(activeStore),true,"cleanup retains the active manifest block even after a failed publication")
     } finally {if(oldPin&&wm)wm._retrievalV2.release(oldPin);if(fresh)fresh.close();if(wm)wm.close();io.rm(dir)}
   }
   exports.testServingBundlesAndRemoteEvidence = function() {
@@ -1732,7 +1743,8 @@
       wm.write("retired-status.md",{title:"Explicitly retired",status:"retired"},"# Retired\nretiredstatusparameter must not remain answer evidence.")
       ow.test.assert(wm.retrieve("retiredstatusparameter").evidence.length,0,"explicit retired status excludes current evidence without requiring a replacement path")
       wm.write("review-status.md",{title:"Reviewed",status:"review"},"# Current\nreviewstatusparameter remains eligible as declared review metadata.")
-      ow.test.assert(wm.retrieve("reviewstatusparameter").evidence.length,1,"ordinary review status remains descriptive rather than implicit retirement")
+      var reviewed=wm.retrieve("reviewstatusparameter")
+      ow.test.assert(reviewed.evidence.length,1,"ordinary review status remains descriptive rather than implicit retirement")
       ow.test.assert(wm.open("older.md").headings.length>0,true,"trusted navigation can inspect retired pages independently of answer evidence")
     }finally{if(snapshot)wm._retrievalV2.release(snapshot);if(wm)wm.close();io.rm(dir)}
   }
@@ -2184,5 +2196,33 @@
       try { ow.test.assert(current.catalog.pages["nested/moved.md"].pageId, pageId, "logical identity retained on subsequent explicit full rebuild") } finally { wm._retrievalV2.release(current) }
       ow.test.assert(isUnDef(wm._servingBatchChanges) && isUnDef(wm._servingMoveOrigins), true, "move scope restored after publication")
     } finally { if(pinned)wm._retrievalV2.release(pinned); if(wm)wm.close(); io.rm(dir) }
+  }
+  exports.testSchema3CatalogueDelta = function() {
+    var dir = temporary(), wm, fresh
+    try {
+      wm = make(dir)
+      wm.write("a.md", {title:"A"}, "# A\nschema3baseparameter")
+      ow.test.assert(wm.reindex().ok, true, "schema-3 fixture has an immutable base")
+      var base = wm._retrievalV2.acquire(); try { ow.test.assert(base.manifest.schema, 3, "initial local generation is a schema-3 depth-zero base"); ow.test.assert(base.manifest.catalogue.depth, 0, "schema-3 base has no predecessor depth") } finally { wm._retrievalV2.release(base) }
+      wm.write("a.md", {title:"A"}, "# A\nschema3changedparameter")
+      var changed = wm._lastServingUpdate, pin = wm._retrievalV2.acquire()
+      try {
+        ow.test.assert(changed.ok, true, "incremental publication succeeds")
+        ow.test.assert(pin.manifest.schema, 3, "incremental publication uses a schema-3 delta")
+        ow.test.assert(/^[a-f0-9]{64}$/.test(pin.manifest.merkle), true, "schema-3 manifest carries a Merkle root")
+        ow.test.assert(pin.manifest.catalogue.stats.pageCount, 1, "schema-3 manifest exposes catalogue counts")
+        ow.test.assert(pin.manifest.catalogue.schema, 3, "schema-3 manifest routes immutable catalogue shards")
+        ow.test.assert(Object.keys(pin.manifest.catalogue.shards.pages).length > 0, true, "changed page is persisted in a routed shard")
+        ow.test.assert(io.fileExists(pin.dir + "/" + pin.manifest.catalogue.shards.pages[Object.keys(pin.manifest.catalogue.shards.pages)[0]].path), true, "catalogue shard is published with its descriptor")
+        ow.test.assert(wm._retrievalV2.lookupPage(pin, "a.md").revision, pin.catalog.pages["a.md"].revision, "targeted page lookup resolves the routed delta without a flattened file")
+        ow.test.assert(io.fileExists(pin.dir + "/catalog.json"), false, "schema-3 generation does not clone a corpus catalogue")
+      } finally { wm._retrievalV2.release(pin) }
+      wm.close(); wm = __
+      fresh = make(dir, {access:"ro"})
+      var resolves = 0, resolve = fresh._retrievalV2._resolveCatalogue, cold = __
+      fresh._retrievalV2._resolveCatalogue = function(){ resolves++; return resolve.apply(this,arguments) }
+      try { cold = fresh._retrievalV2.acquire(); ow.test.assert(resolves,0,"cold schema-3 reader opens from structural metadata without resolving catalogue shards") } finally { if(cold)fresh._retrievalV2.release(cold); fresh._retrievalV2._resolveCatalogue = resolve }
+      ow.test.assert(fresh.retrieve("schema3changedparameter").evidence.length, 1, "fresh reader resolves a schema-3 ancestor chain")
+    } finally { if(fresh)fresh.close(); if(wm)wm.close(); io.rm(dir) }
   }
 })()

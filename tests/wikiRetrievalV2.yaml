@@ -74,6 +74,9 @@ jobs:
 - name: MiniA Wiki V2::SharedBlockStore
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testSharedBlockStore
+- name: MiniA Wiki V2::Schema3CatalogueDelta
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testSchema3CatalogueDelta
 - name: MiniA Wiki V2::GroundedDerivatives
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testGroundedDerivatives
