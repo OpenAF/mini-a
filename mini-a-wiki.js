@@ -1203,7 +1203,7 @@ MiniAWikiManager.prototype._hydrateArtifactBundle = function(remoteMetaFn, downl
       if (++files > config.maxArtifactFiles || name.indexOf("\\") >= 0 || name.startsWith("/") || name.indexOf("..") >= 0 || /^[A-Za-z]:/.test(name) || seen[name]) throw "unsafe or excessive bundle entries"
       if (!declared[name]) throw "conflicting bundle directory"
       seen[name] = true
-      var supported = /^(?:\.mini-a-wiki-lucene\/[A-Za-z0-9_.-]+|\.mini-a-wiki-graph\/graph\.json|\.mini-a-wiki-serving\/(?:current\.json|previous\.json|[a-f0-9-]{36}\/(?:manifest\.json|catalog\.json|index\/[A-Za-z0-9_.-]+|blocks\/[a-f0-9]{40}\.md)))$/.test(name)
+      var supported = /^(?:\.mini-a-wiki-lucene\/[A-Za-z0-9_.-]+|\.mini-a-wiki-graph\/graph\.json|\.mini-a-wiki-serving\/(?:current\.json|previous\.json|[a-f0-9-]{36}\/(?:manifest\.json|catalog\.json|index\/[A-Za-z0-9_.-]+|blocks\/[a-f0-9]{40}\.md|catalogue\/(?:pages|passages|reverseLinks|moveReverse|blockRefs)\/[a-f0-9]{2}\.json)))$/.test(name)
       if (entry.isDirectory()) { zip.closeEntry(); continue }
       // A full wiki archive may include source Markdown; it is never extracted.
       if (!supported && (!/\.md$/.test(name) || name.startsWith(".mini-a-"))) throw "unsupported bundle layout"

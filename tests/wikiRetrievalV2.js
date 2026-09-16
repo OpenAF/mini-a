@@ -312,7 +312,12 @@
       var warningRaw=wm.read("warning-table.md").raw
       warned.evidence[0].supportingContext.forEach(function(part){ow.test.assert(warningRaw.substring(part.charStart,part.charEnd),part.content,"combined table support uses exact raw CRLF ranges");ow.test.assert(part.revision,sha1(warningRaw),"combined table support binds the same revision")})
       var parserPin=wm._retrievalV2.acquire()
-      try {[3,4].forEach(function(version){var priorParser=clone(parserPin.manifest), parserError="";priorParser.parser=version;try{wm._retrievalV2._validate(parserPin.dir,priorParser)}catch(e){parserError=String(e.message||e)};ow.test.assert(parserError,"incompatible-generation","prior parser artifacts require explicit writable reindex: "+version)})}finally{wm._retrievalV2.release(parserPin)}
+      try {
+        [3,4].forEach(function(version){var priorParser=clone(parserPin.manifest), parserError="";priorParser.parser=version;try{wm._retrievalV2._validate(parserPin.dir,priorParser)}catch(e){parserError=String(e.message||e)};ow.test.assert(parserError,"incompatible-generation","prior parser artifacts require explicit writable reindex: "+version)})
+        var obsolete=clone(parserPin.manifest),obsoleteError="";delete obsolete.catalogue.transactionFormat
+        try{wm._retrievalV2._validate(parserPin.dir,obsolete)}catch(e){obsoleteError=String(e.message||e)}
+        ow.test.assert(obsoleteError,"reindex-required","unmarked development schema-3 artifacts require an authorized rebuild")
+      }finally{wm._retrievalV2.release(parserPin)}
     } finally {if(portugueseManager)portugueseManager.close();if(wm)wm.close();io.rm(dir)}
   }
   exports.testRetrievalAndPublication = function() {
@@ -798,16 +803,18 @@
       ow.test.assert(wm._lastServingUpdate.updateWork.retiredBlockUnlinksAvoided,1,"never-staged retired block requires no unlink syscall")
       ow.test.assert(wm._lastServingUpdate.updateWork.retiredBlockBytesNotStaged,original.files.filter(function(file){return file.path===old.catalog.pages["changed.md"].locator})[0].bytes,"avoided retired block bytes use the pinned manifest")
       ow.test.assert(wm._lastServingUpdate.updateWork.linkedFiles>0,true,"immutable generation files reused with actual hard links")
-      ow.test.assert(wm._lastServingUpdate.updateWork.reusedChecksums>0,true,"validated expected checksums reused when constructing staged manifest")
-      ow.test.assert(wm._lastServingUpdate.updateWork.reusedChecksumBytes>0,true,"avoided redundant hashing bytes reported explicitly")
+      ow.test.assert(wm._lastServingUpdate.updateWork.catalogueKeysCopied,0,"incremental publication copies no prior catalogue keys")
+      ow.test.assert(wm._lastServingUpdate.updateWork.catalogueKeyLookups<20,true,"incremental publication resolves only its affected routed keys")
       ow.test.assert(wm._lastServingUpdate.updateWork.bindingBlockReads,1,"incremental semantic validation materializes only the changed page")
-      ow.test.assert(wm._lastServingUpdate.updateWork.bindingReusedPages,1,"unchanged page binding reused after full staged checksum validation")
+      ow.test.assert(wm._lastServingUpdate.updateWork.bindingReusedPages,0,"unchanged parent bindings require no activation-time page validation")
       var current=wm._retrievalV2.acquire()
-      ow.test.assert(current.catalog.pages["stable.md"]===old.catalog.pages["stable.md"],true,"prepared validation preserves unchanged immutable page identity")
+      ow.test.assert(stringify(current.catalog.pages["stable.md"],__,""),stringify(old.catalog.pages["stable.md"],__,""),"routed inheritance preserves unchanged immutable page value")
       var stableId=old.catalog.pages["stable.md"].passageIds[0]
-      ow.test.assert(current.catalog.passages[stableId]===old.catalog.passages[stableId],true,"prepared validation preserves unchanged immutable passage identity")
+      ow.test.assert(stringify(current.catalog.passages[stableId],__,""),stringify(old.catalog.passages[stableId],__,""),"routed inheritance preserves unchanged immutable passage value")
       ow.test.assert(io.fileExists(current.dir+"/"+old.catalog.pages["changed.md"].locator),false,"retired block is absent from newly activated generation")
-      ow.test.assert(java.nio.file.Files.isSameFile(new java.io.File(old.dir+"/"+untouched).toPath(),new java.io.File(current.dir+"/"+untouched).toPath()),true,"unchanged block shares immutable inode")
+      var inheritedRecord=wm._retrievalV2.lookupBlockReference(current,untouched)
+      ow.test.assert(inheritedRecord.ownerGeneration,old.generation,"unchanged generation-local block retains its immutable owner")
+      ow.test.assert(wm._retrievalV2._blockFile(current.dir,current.manifest,untouched,inheritedRecord),old.dir+"/"+untouched,"unchanged block resolves through its owner without a new link or copy")
       wm._retrievalV2.release(current)
       original.files.forEach(function(file){ow.test.assert(global.MiniAWikiRetrievalV2.digest(old.dir+"/"+file.path),file.checksum,"old pinned generation file remains byte-identical: "+file.path)})
       ow.test.assert(wm._retrievalV2._query(old,"oldgenerationparameter",5,0).hits[0].text,oldText,"pinned old reader keeps its own committed text")
@@ -832,7 +839,7 @@
       ow.test.assert(wm._retrievalV2.metrics.parsedPages,parsedBeforeReuse,"unchanged requested page performs no segmentation or document reconstruction")
       ow.test.assert(sameRevision.updateWork.reverseTargetsVisited,0,"unchanged page does not remove and rebuild incoming-link postings")
       var sameCurrent=wm._retrievalV2.acquire()
-      try{ow.test.assert(java.nio.file.Files.isSameFile(new java.io.File(old.dir+"/"+untouched).toPath(),new java.io.File(sameCurrent.dir+"/"+untouched).toPath()),true,"same-revision update retains its immutable inode when links are enabled")}finally{wm._retrievalV2.release(sameCurrent)}
+      try{var sameRecord=wm._retrievalV2.lookupBlockReference(sameCurrent,untouched);ow.test.assert(sameRecord.ownerGeneration,old.generation,"same-revision update inherits the original immutable block owner")}finally{wm._retrievalV2.release(sameCurrent)}
       ow.test.assert(global.MiniAWikiRetrievalV2.digest(old.dir+"/"+untouched),record.checksum,"same-content write preserves old immutable block")
       ow.test.assert(wm.backlinks("changed.md").count,1,"unchanged-page reuse retains its real incoming-link posting")
       var stableFile=new java.io.File(dir+"/stable.md"), stableStamp=wm._retrievalV2._stamp("stable.md")
@@ -845,20 +852,7 @@
         ow.test.assert(refreshedCurrent.catalog.pages["stable.md"].stamp.modified!==stableStamp.modified,true,"stamp-refresh fixture changes actual filesystem attributes")
       } finally {wm._retrievalV2.release(refreshedCurrent)}
       ow.test.assert(wm.retrieve("stableparameter").evidence.length,1,"stamp-only reuse remains eligible as current evidence")
-      var engine=wm._retrievalV2, reuse=engine._reuseFile, linkEnabled=engine.config.linkImmutableFiles, pointerBefore=io.readFileString(engine.root+"/current.json")
-      try {
-        engine.config.linkImmutableFiles=false
-        engine._reuseFile=function(source,target,file,work) {
-          var immutable=reuse.call(this,source,target,file,work)
-          if(file.path===untouched)io.writeFileString(target,io.readFileString(target).replace("stableparameter","xtableparameter"))
-          return immutable
-        }
-        var failed=engine.build(["changed.md"])
-        ow.test.assert(failed.ok,false,"same-size staged copy corruption rejected despite checksum reuse")
-        ow.test.assert(failed.error,"generation-integrity-failure","staged validation compares actual bytes with pinned expected checksum")
-        ow.test.assert(io.readFileString(engine.root+"/current.json"),pointerBefore,"corrupt staged copy cannot replace working generation")
-        ow.test.assert(wm.retrieve("stableparameter").evidence.length,1,"failed corrupted refresh preserves prior working evidence")
-      } finally {engine._reuseFile=reuse;engine.config.linkImmutableFiles=linkEnabled}
+      var engine=wm._retrievalV2
       var sharedRaw="# Shared\nsharedblockparameter remains supported."
       io.writeFileString(dir+"/shared-a.md",sharedRaw);io.writeFileString(dir+"/shared-b.md",sharedRaw)
       ow.test.assert(engine.build(["shared-a.md","shared-b.md"]).ok,true,"identical raw manual pages share one revision block")
@@ -866,7 +860,7 @@
       ow.test.assert(wm.delete("shared-a.md").ok,true,"first shared page deleted")
       ow.test.assert(wm._lastServingUpdate.updateWork.retiredBlocksNotStaged,0,"block with another active page reference is still staged")
       var sharedCurrent=engine.acquire()
-      try{ow.test.assert(io.fileExists(sharedCurrent.dir+"/"+sharedLocator),true,"shared block survives in the new generation")}finally{engine.release(sharedCurrent)}
+      try{var sharedRecord=engine.lookupBlockReference(sharedCurrent,sharedLocator);ow.test.assert(io.fileExists(engine._blockFile(sharedCurrent.dir,sharedCurrent.manifest,sharedLocator,sharedRecord)),true,"shared block survives through its inherited owner")}finally{engine.release(sharedCurrent)}
       ow.test.assert(wm.retrieve("sharedblockparameter").evidence[0].content.indexOf("sharedblockparameter")>=0,true,"remaining shared page still returns exact evidence")
       ow.test.assert(wm.delete("shared-b.md").ok,true,"last shared page deleted")
       ow.test.assert(wm._lastServingUpdate.updateWork.retiredBlocksNotStaged,1,"last reference removal avoids staging its block")
@@ -1031,7 +1025,7 @@
       ow.test.assert(wm.reindex().ok,true,"failure recovery fixture built")
       pin=wm._retrievalV2.acquire()
       var pointer=io.readFileString(wm._retrievalV2.root+"/current.json"), manifest=clone(pin.manifest)
-      ;["_reuseFile","_analyzer","_files","_validate","_openSnapshot","_syncGeneration","_atomic"].forEach(function(stage){
+      ;["_reuseFile","_analyzer","_files","_validatePublication","_openSnapshot","_syncGeneration","_atomic"].forEach(function(stage){
         var original=wm._retrievalV2[stage]
         wm._retrievalV2[stage]=function(){throw new Error("injected failure at "+stage)}
         var failed=wm._retrievalV2.build(["supported.md"])
@@ -1048,8 +1042,8 @@
         try {
           engine._syncPath=function(path,directory) {
             if (directory && path===engine.root) rootSyncs++
-            if ((stage==="artifact-file" && !directory && /\/catalog\.json$/.test(path)) ||
-                (stage==="generation-directory" && directory && /\/blocks$/.test(path)) ||
+            if ((stage==="artifact-file" && !directory && /\/index\//.test(path)) ||
+                (stage==="generation-directory" && directory && /\/index$/.test(path)) ||
                 (stage==="pointer-file" && !directory && path.indexOf("current.json.tmp-")>=0) ||
                 (stage==="activation-directory" && directory && path===engine.root && rootSyncs===3)) {
               injected++;throw new Error("injected synchronization failure: "+stage)
@@ -1165,7 +1159,8 @@
       wm.delete("x.md")
       snapshot=wm._retrievalV2.acquire()
       ow.test.assert(snapshot.catalog.blockRefs[locator].references,1,"deleting one page preserves other page's shared evidence block")
-      ow.test.assert(io.fileExists(snapshot.dir+"/"+locator),true,"shared immutable block retained")
+      var retainedRecord=wm._retrievalV2.lookupBlockReference(snapshot,locator)
+      ow.test.assert(io.fileExists(wm._retrievalV2._blockFile(snapshot.dir,snapshot.manifest,locator,retainedRecord)),true,"shared immutable block retained through its owner generation")
       wm._retrievalV2.release(snapshot)
       ow.test.assert(wm.retrieve("sharedblockparameter").evidence[0].path,"y.md","remaining page evidence resolves correctly")
       wm.delete("y.md")
@@ -1490,7 +1485,7 @@
         ow.test.assert(firstPin.manifest.schema,3,"shared block store publishes manifest-addressed schema-3 blocks")
         ow.test.assert(isUnDef(firstPin.manifest.blocks),true,"schema-3 keeps block metadata out of a manifest-wide array")
         ow.test.assert(firstPin.catalog.blockRefs[sibling].locator,sibling,"each immutable revision has a routed block-reference record")
-        ow.test.assert(io.fileExists(firstPin.dir+"/"+sibling),false,"schema-2 generation does not duplicate immutable bytes")
+        ow.test.assert(io.fileExists(firstPin.dir+"/"+sibling),false,"schema-3 generation does not duplicate immutable bytes")
         ow.test.assert(firstPin.catalog.blockRefs[locator].storage,"shared","block record declares its shared storage kind")
       } finally {wm._retrievalV2.release(firstPin)}
       second=wm._retrievalV2.build(["a.md"])
@@ -1516,9 +1511,9 @@
       wm._retrievalV2.release(active)
       io.writeFileString(activeStore,"corrupt shared store")
       var corrupt=wm._retrievalV2.build(["a.md"])
-      ow.test.assert(corrupt.ok,false,"corrupt shared block cannot publish a new generation")
-      ow.test.assert(["generation-integrity-failure","page-revision-binding-failure"].indexOf(corrupt.error)>=0,true,"staged shared-block validation rejects checksum or semantic corruption")
-      ow.test.assert(io.readFileString(wm._retrievalV2.root+"/current.json"),pointer,"corrupt shared store preserves the prior activation pointer")
+      ow.test.assert(corrupt.ok,false,"representative activation probe rejects a selected corrupt inherited block")
+      ow.test.assert(["generation-integrity-failure","page-revision-binding-failure","generation-evidence-probe-failed"].indexOf(corrupt.error)>=0,true,"corrupt inherited shared evidence fails before activation")
+      ow.test.assert(io.readFileString(wm._retrievalV2.root+"/current.json"),pointer,"corrupt inherited evidence preserves the prior activation pointer")
       var stray=wm._retrievalV2.root+"/.blocks/0000000000000000000000000000000000000000.md"
       io.writeFileString(stray,"interrupted publication residue")
       var cleanup=wm._retrievalV2.reclaimSharedBlocks()
@@ -1534,16 +1529,38 @@
       wm.write("changed.md",{title:"Changed"},"# Changed\nfirst scopedpublicationparameter value.")
       wm.write("unchanged.md",{title:"Unchanged"},"# Unchanged\nunchangedpublicationparameter remains valid.")
       ow.test.assert(wm.reindex().ok,true,"scoped validation fixture creates its validated parent")
-      var engine=wm._retrievalV2, complete=engine._validate
+      var engine=wm._retrievalV2, complete=engine._validate, resolve=engine._resolveCatalogue, blockRecords=engine._blockRecords
       engine._validate=function(){throw new Error("full-closure-validation-must-not-run-at-activation")}
+      engine._resolveCatalogue=function(){throw new Error("prior-catalogue-must-not-materialize")}
+      engine._blockRecords=function(){throw new Error("prior-block-map-must-not-materialize")}
       wm.write("changed.md",{title:"Changed"},"# Changed\nsecond scopedpublicationparameter value.")
       var published=engine.build(["changed.md"])
-      engine._validate=complete
+      engine._validate=complete;engine._resolveCatalogue=resolve;engine._blockRecords=blockRecords
       ow.test.assert(published.ok,true,"incremental activation validates changed bindings without a full catalogue closure")
       ow.test.assert(published.updateWork.bindingBlockReads<=1,true,"activation performs a bounded changed-binding proof rather than reading the parent closure")
+      ow.test.assert(published.updateWork.catalogueKeysCopied,0,"incremental activation copies no prior catalogue records")
+      ow.test.assert(published.updateWork.catalogueKeyLookups<20,true,"incremental activation performs bounded routed-key lookups")
       ow.test.assert(wm.retrieve("scopedpublicationparameter").evidence.length,1,"scoped publication serves the changed verified evidence")
       ow.test.assert(wm.retrieve("unchangedpublicationparameter").evidence.length,1,"parent-bound unchanged evidence remains readable after scoped publication")
     } finally {if(wm)wm.close();io.rm(dir)}
+  }
+  exports.testRoutedCompactionBoundary = function() {
+    var dir=temporary(),wm
+    try {
+      wm=make(dir,{wikiretrievalconfig:{passageChars:128}})
+      wm.write("depth.md",{title:"Depth"},"# Depth\ncompactionboundaryparameter remains available.")
+      ow.test.assert(wm.reindex().ok,true,"compaction fixture creates a depth-zero routed base")
+      for(var i=1;i<=32;i++){
+        var update=wm._retrievalV2.build(["depth.md"])
+        ow.test.assert(update.ok,true,"bounded routed update succeeds before the lineage limit: "+i)
+      }
+      var pointer=io.readFileString(wm._retrievalV2.root+"/current.json"),blocked=wm._retrievalV2.build(["depth.md"])
+      ow.test.assert(blocked.error,"compaction-required","lineage limit requires explicit compaction instead of hiding corpus work in a small update")
+      ow.test.assert(io.readFileString(wm._retrievalV2.root+"/current.json"),pointer,"compaction-required leaves the active pointer unchanged")
+      ow.test.assert(wm.reindex().ok,true,"authorized full reindex performs explicit compaction")
+      var pin=wm._retrievalV2.acquire()
+      try{ow.test.assert(pin.manifest.catalogue.depth,0,"explicit compaction publishes a new routed base")}finally{wm._retrievalV2.release(pin)}
+    }finally{if(wm)wm.close();io.rm(dir)}
   }
   exports.testSharedBlockStoreReclamationClosure = function() {
     var dir=temporary(), wm

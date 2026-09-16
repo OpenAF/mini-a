@@ -483,7 +483,8 @@ MiniAWikiRetrievalV2.prototype._catalogueDescriptor = function(manifest) {
   if (!isMap(c) || !isFinite(c.depth) || c.depth < 0 || c.depth > 32) throw new Error("invalid-catalogue-lineage")
   if (c.base !== true && (!isMap(c.parent) || !/^[a-f0-9-]{36}$/.test(c.parent.generation) || !/^[a-f0-9]{64}$/.test(c.parent.checksum))) throw new Error("invalid-catalogue-lineage")
   if (c.base === true && c.depth !== 0) throw new Error("invalid-catalogue-lineage")
-  if (c.schema !== 3 || !isMap(c.shards) || !isMap(c.stats) || !isFinite(c.stats.pageCount) || c.stats.pageCount < 0 || !isFinite(c.stats.passageCount) || c.stats.passageCount < 0) throw new Error("invalid-catalogue-lineage")
+  if (c.schema !== 3 || c.transactionFormat !== "routed-delta-v1") throw new Error("reindex-required")
+  if (!isMap(c.shards) || !isMap(c.stats) || !isFinite(c.stats.pageCount) || c.stats.pageCount < 0 || !isFinite(c.stats.passageCount) || c.stats.passageCount < 0) throw new Error("invalid-catalogue-lineage")
   maps.forEach(function(name) { if (!isMap(c.shards[name])) throw new Error("invalid-catalogue-lineage"); Object.keys(c.shards[name]).forEach(function(shard) { if (!/^[a-f0-9]{2}$/.test(shard)) throw new Error("invalid-catalogue-lineage") }) })
   return c
 }
@@ -551,6 +552,7 @@ MiniAWikiRetrievalV2.prototype.lookupBlockReference = function(snapshot, locator
 MiniAWikiRetrievalV2.prototype._validate = function(dir, manifest, validatedParent, prepared) {
   if (!isMap(manifest) || manifest.schema !== 3) throw new Error("reindex-required")
   if (manifest.parser !== 5 || manifest.fingerprint !== this.fingerprint || stringify(manifest.indexContract,__,"") !== stringify(this.indexContract,__,"") || !isArray(manifest.files) || manifest.files.length > this.config.maxArtifactFiles) throw new Error("incompatible-generation")
+  this._catalogueDescriptor(manifest)
   if (!/^[a-f0-9]{64}$/.test(manifest.merkle || "") || MiniAWikiRetrievalV2.manifestMerkle(manifest) !== manifest.merkle) throw new Error("manifest-merkle-failure")
   var count = 0, seen = {}, checksums={}, blockRecords={}, verifiedBlocks={}, self = this
   manifest.files.forEach(function(record) {
@@ -642,8 +644,8 @@ MiniAWikiRetrievalV2.prototype._validate = function(dir, manifest, validatedPare
 // reader never walks a corpus-sized catalogue.
 MiniAWikiRetrievalV2.prototype._validateStructural = function(dir, manifest) {
   if (!isMap(manifest) || manifest.schema !== 3 || manifest.parser !== 5 || manifest.fingerprint !== this.fingerprint || stringify(manifest.indexContract,__,'') !== stringify(this.indexContract,__, '') || !isArray(manifest.files) || manifest.files.length > this.config.maxArtifactFiles) throw new Error('incompatible-generation')
-  if (!/^[a-f0-9]{64}$/.test(manifest.merkle || '') || MiniAWikiRetrievalV2.manifestMerkle(manifest) !== manifest.merkle) throw new Error('manifest-merkle-failure')
   this._catalogueDescriptor(manifest)
+  if (!/^[a-f0-9]{64}$/.test(manifest.merkle || '') || MiniAWikiRetrievalV2.manifestMerkle(manifest) !== manifest.merkle) throw new Error('manifest-merkle-failure')
   var seen={}, total=0, self=this
   manifest.files.forEach(function(record) {
     if (!isMap(record) || seen[record.path] || !isFinite(record.bytes) || record.bytes < 0 || !/^[a-f0-9]{64}$/.test(record.checksum)) throw new Error('invalid-generation-manifest')
@@ -675,8 +677,8 @@ MiniAWikiRetrievalV2.prototype._validateStructural = function(dir, manifest) {
 // closure validator used by lint/export and diagnostic callers.
 MiniAWikiRetrievalV2.prototype._validatePublication = function(dir, manifest, prepared) {
   this._validateStructural(dir, manifest)
-  if (!prepared || !isMap(prepared.catalog) || !isMap(prepared.changedPaths)) throw new Error("invalid-publication-proof")
-  var self = this, catalog = prepared.catalog, changed = prepared.changedPaths, seen = {}
+  if (!prepared || !isMap(prepared.changedPaths)) throw new Error("invalid-publication-proof")
+  var self = this, catalog = prepared.catalog, transaction=prepared.transaction, changed = prepared.changedPaths, seen = {}
   // Every transaction-produced routed shard is checked now.  Parent shards are
   // checked when a reader resolves their selected key.
   ;["pages","passages","reverseLinks","moveReverse","blockRefs"].forEach(function(name) {
@@ -686,14 +688,14 @@ MiniAWikiRetrievalV2.prototype._validatePublication = function(dir, manifest, pr
     })
   })
   Object.keys(changed).forEach(function(path) {
-    var page = catalog.pages[path]
+    var page = transaction ? self._lookupCatalogue(dir,manifest,"pages",path) : catalog.pages[path]
     // A tombstoned page has no new byte binding. Lucene's page delete is
     // checked by the post-open probe below.
     if (!page) return
     if (!isMap(page) || page.path !== path || !isArray(page.passageIds)) throw new Error("invalid-page-record")
-    var block = catalog.blockRefs[page.locator]
+    var block = transaction ? self._lookupCatalogue(dir,manifest,"blockRefs",page.locator) : catalog.blockRefs[page.locator]
     if (!isMap(block) || block.locator !== page.locator || !isFinite(block.bytes) || !/^[a-f0-9]{64}$/.test(block.checksum)) throw new Error("invalid-block-postings")
-    var raw = self._readVerifiedBlock(self._blockFile(dir, manifest, page.locator), block), positions = MiniAWikiRetrievalV2.positions(raw)
+    var raw = self._readVerifiedBlock(self._blockFile(dir, manifest, page.locator,block), block), positions = MiniAWikiRetrievalV2.positions(raw)
     self.metrics.validationBlockReads++; self.metrics.validationBlockBytes += MiniAWikiRetrievalV2.bytes(raw)
     if (sha1(raw) !== page.revision || raw.length !== page.charLength || positions.lines.length !== page.linesTotal) throw new Error("page-revision-binding-failure")
     var parsed = MiniAWikiRetrievalV2.parse(path, raw, manifest.passageChars, true, positions), metadata = af.fromJson(stringify(self.manager.parseFrontmatter(raw).meta, __, ""))
@@ -701,11 +703,11 @@ MiniAWikiRetrievalV2.prototype._validatePublication = function(dir, manifest, pr
     page.passageIds.forEach(function(id) {
       if (seen[id]) throw new Error("invalid-passage-record")
       seen[id] = true
-      var passage = catalog.passages[id]
+      var passage = transaction ? self._lookupCatalogue(dir,manifest,"passages",id) : catalog.passages[id]
       if (!isMap(passage) || passage.path !== path || passage.revision !== page.revision || passage.charStart < 0 || passage.charEnd <= passage.charStart || passage.charEnd > raw.length || passage.textHash !== sha1(raw.substring(passage.charStart, passage.charEnd)) || passage.startLine !== positions.lineFor(passage.charStart) || passage.endLine !== positions.lineFor(passage.charEnd - 1) || passage.byteStart !== positions.byteAt(passage.charStart) || passage.byteEnd !== positions.byteAt(passage.charEnd)) throw new Error("passage-revision-binding-failure")
     })
   })
-  return MiniAWikiRetrievalV2.immutable(catalog)
+  return catalog ? MiniAWikiRetrievalV2.immutable(catalog) : __
 }
 MiniAWikiRetrievalV2.prototype._openDirectory = function(dir) { return Packages.org.apache.lucene.store.FSDirectory.open(java.nio.file.Paths.get(dir+"/index")) }
 MiniAWikiRetrievalV2.prototype._openReader = function(directory) { return Packages.org.apache.lucene.index.DirectoryReader.open(directory) }
@@ -908,8 +910,8 @@ MiniAWikiRetrievalV2.prototype._body = function(snapshot, page, deadline, used) 
     self.metrics.cacheMisses++
     var started = Number(java.lang.System.nanoTime()), text, size
     try {
-      var record = self._blockRecords(snapshot.manifest)[page.locator]
-      text = self._readVerifiedBlock(self._blockFile(snapshot.dir, snapshot.manifest, page.locator), record)
+      var record = self.lookupBlockReference(snapshot,page.locator)
+      text = self._readVerifiedBlock(self._blockFile(snapshot.dir, snapshot.manifest, page.locator,record), record)
       if (sha1(text) !== page.revision || text.length !== page.charLength) throw new Error("page-revision-binding-failure")
     }
     catch(readError) {
@@ -990,9 +992,9 @@ MiniAWikiRetrievalV2.prototype._stageSharedText = function(locator, text) {
   } finally { try { java.nio.file.Files.deleteIfExists(new java.io.File(temporary).toPath()) } catch(ignore) {} }
   return { bytes: MiniAWikiRetrievalV2.bytes(text), checksum: checksum }
 }
-// Schema 2 keeps immutable revision bytes outside a generation.  The manifest,
-// rather than a hard link in the generation directory, is the ownership edge.
-// Schema 1 deliberately continues to resolve blocks below its generation.
+// Schema 3 keeps shared immutable revision bytes outside a generation. Routed
+// block-reference records, rather than links in every generation directory,
+// are the ownership edges.
 MiniAWikiRetrievalV2.prototype._blockRecords = function(manifest) {
   var records = {}
   if (manifest.schema !== 3) throw new Error("reindex-required")
@@ -1006,13 +1008,18 @@ MiniAWikiRetrievalV2.prototype._blockRecords = function(manifest) {
   })
   return records
 }
-MiniAWikiRetrievalV2.prototype._blockFile = function(dir, manifest, locator) {
-  var record = this._blockRecords(manifest)[locator]
+MiniAWikiRetrievalV2.prototype._blockPath = function(dir, manifest, locator, record) {
   if (!record) throw new Error("generation-block-missing")
   if (!isFinite(record.bytes) || record.bytes < 0 || !/^[a-f0-9]{64}$/.test(record.checksum)) throw new Error("invalid-generation-manifest")
   if (record.storage === "shared") return this._sharedBlockPath(locator)
   if (record.storage !== "generation") throw new Error("invalid-generation-manifest")
-  return this._path(dir, locator)
+  var owner = record.ownerGeneration || manifest.generation
+  if (!/^[a-f0-9-]{36}$/.test(String(owner))) throw new Error("invalid-generation-manifest")
+  return this._path(owner===manifest.generation?dir:this.root + "/" + owner, locator)
+}
+MiniAWikiRetrievalV2.prototype._blockFile = function(dir, manifest, locator, record) {
+  if (!record) record = this._lookupCatalogue(dir, manifest, "blockRefs", locator)
+  return this._blockPath(dir, manifest, locator, record)
 }
 // Return the exact recoverable generation closure.  A schema-3 child only owns
 // a delta, so every parent named by its catalogue descriptor is part of the
@@ -1115,30 +1122,41 @@ MiniAWikiRetrievalV2.prototype._newWriter = function(directory, analyzer) {
 // behind a transaction boundary is important: readers only ever see immutable
 // shard operations and future callers must not reach into a retained snapshot
 // and modify one of its maps directly.
-var CatalogueTransaction = function(source, generation, work) {
-  var catalog = {}, maps = ["pages", "passages", "reverseLinks", "moveReverse", "blockRefs"]
-  Object.keys(source).forEach(function(key) { catalog[key] = source[key] })
-  maps.forEach(function(name) {
-    if (!isMap(source[name])) return
-    var target = {}
-    Object.keys(source[name]).forEach(function(key) { target[key] = source[name][key]; work.catalogueKeysCopied++ })
-    catalog[name] = target
-  })
-  catalog.generation = generation
-  work.sharedPageRecords = Object.keys(source.pages).length
-  work.sharedPassageRecords = Object.keys(source.passages).length
-  this.catalog = catalog
+var RoutedCatalogueTransaction = function(engine, parent, generation, work) {
+  this.engine=engine;this.parent=parent;this.generation=generation;this.work=work
+  this.maps=["pages","passages","reverseLinks","moveReverse","blockRefs"]
+  this.operations={};this.cache={};this.pageDelta=0;this.passageDelta=0
+  var self=this;this.maps.forEach(function(name){self.operations[name]={upsert:{},tombstones:[]};self.cache[name]={}})
 }
-CatalogueTransaction.prototype.get = function(map, key) { return this.catalog[map] && this.catalog[map][key] }
-CatalogueTransaction.prototype.put = function(map, key, value) { this.catalog[map][key] = value; return value }
-CatalogueTransaction.prototype.replace = CatalogueTransaction.prototype.put
-CatalogueTransaction.prototype.tombstone = function(map, key) { delete this.catalog[map][key] }
+RoutedCatalogueTransaction.prototype.get=function(map,key){
+  var op=this.operations[map]
+  if(!op)throw new Error("invalid-catalogue-map")
+  if(Object.prototype.hasOwnProperty.call(op.upsert,key))return op.upsert[key]
+  if(op.tombstones.indexOf(key)>=0)return __
+  if(Object.prototype.hasOwnProperty.call(this.cache[map],key))return this.cache[map][key]
+  var value=this.engine._lookupCatalogue(this.parent.dir,this.parent.manifest,map,key)
+  this.cache[map][key]=value;this.work.catalogueKeyLookups=(Number(this.work.catalogueKeyLookups)||0)+1
+  return value
+}
+RoutedCatalogueTransaction.prototype.put=function(map,key,value){
+  var op=this.operations[map], existed=isDef(this.get(map,key))
+  op.tombstones=op.tombstones.filter(function(item){return item!==key});op.upsert[key]=value
+  if(!existed){if(map==="pages")this.pageDelta++;if(map==="passages")this.passageDelta++}
+  return value
+}
+RoutedCatalogueTransaction.prototype.tombstone=function(map,key){
+  var op=this.operations[map], existed=isDef(this.get(map,key))
+  delete op.upsert[key];if(existed&&op.tombstones.indexOf(key)<0)op.tombstones.push(key)
+  if(existed){if(map==="pages")this.pageDelta--;if(map==="passages")this.passageDelta--}
+}
+RoutedCatalogueTransaction.prototype.delta=function(){var self=this;this.maps.forEach(function(name){self.operations[name].tombstones.sort()});return{schema:1,maps:this.operations}}
+RoutedCatalogueTransaction.prototype.stats=function(){return{pageCount:Number(this.parent.manifest.catalogue.stats.pageCount)+this.pageDelta,passageCount:Number(this.parent.manifest.catalogue.stats.passageCount)+this.passageDelta}}
 MiniAWikiRetrievalV2.prototype.build = function(changes) {
   var m = this.manager, self = this
   if (this.capabilityError) return {ok:false,error:this.capabilityError}
   if (m._access !== "rw") return { ok: false, error: "wiki is read-only" }
   if (["fs", "s3fs"].indexOf(m._backendType) < 0 || m._archiveRoot) return { ok: false, error: "v2-backend-unsupported" }
-  var work = { linkedFiles: 0, linkedBytes: 0, copiedFiles: 0, copiedBytes: 0, reusedChecksums: 0, reusedChecksumBytes: 0, reverseTargetsVisited: 0, legacyCataloguePagesVisited: 0, catalogueKeysCopied: 0, sharedPageRecords: 0, sharedPassageRecords: 0, retiredBlocksNotStaged: 0, retiredBlockBytesNotStaged: 0, retiredBlockUnlinksAvoided: 0, sameRevisionBlocksReused: 0 }, reused={}, oldBlocks={}, reusedPageBlocks={}
+  var work = { linkedFiles: 0, linkedBytes: 0, copiedFiles: 0, copiedBytes: 0, reusedChecksums: 0, reusedChecksumBytes: 0, reverseTargetsVisited: 0, legacyCataloguePagesVisited: 0, catalogueKeysCopied: 0, sharedPageRecords: 0, sharedPassageRecords: 0, retiredBlocksNotStaged: 0, retiredBlockBytesNotStaged: 0, retiredBlockUnlinksAvoided: 0, sameRevisionBlocksReused: 0 }, reused={}, oldBlocks={}, reusedPageBlocks={}, transaction
   work.publicationTimingsMillis={}
   var stageStarted=Number(java.lang.System.nanoTime()), finishStage=function(name){var now=Number(java.lang.System.nanoTime());work.publicationTimingsMillis[name]=(now-stageStarted)/1000000;stageStarted=now}
   var generation = String(java.util.UUID.randomUUID()), dir = this.root + "/" + generation, writer, directory, analyzer, old, snapshot, fileLock, channel, activated = false, cleanupAfterActivation = false
@@ -1152,17 +1170,9 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
     finishStage("preparation")
     if (isArray(changes)) {
       old = this.acquire()
-      // `catalog` remains an implementation-local mutable view.  Published
-      // schema-3 state is emitted below as immutable per-shard operations.
-      var transaction = new CatalogueTransaction(old.catalog, generation, work)
-      catalog = transaction.catalog
-      // Additive builder-only mapping for generations built before block postings.
-      if (!isMap(catalog.blockRefs)) {
-        catalog.blockRefs = {}
-        Object.keys(catalog.pages).forEach(function(path) { var locator = catalog.pages[path].locator; catalog.blockRefs[locator] = (catalog.blockRefs[locator] || 0) + 1; work.legacyCataloguePagesVisited++ })
-      }
+      if(Number(old.manifest.catalogue.depth)>=32)throw new Error("compaction-required")
+      transaction = new RoutedCatalogueTransaction(this,old,generation,work)
       finishStage("catalogueFork")
-      Object.keys(self._blockRecords(old.manifest)).forEach(function(locator) { oldBlocks[locator] = self._blockRecords(old.manifest)[locator] })
       old.manifest.files.forEach(function(file) {
         // Block retention is determined after applying the affected page set.
         if (/^index\//.test(file.path) && self._reuseFile(self._path(old.dir, file.path), self._path(dir, file.path), file, work)) reused[file.path]=file
@@ -1189,9 +1199,24 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
       paths = enumeration.pages.filter(function(path) { return !m._isHiddenPath(path) })
     } else paths = m.list("")
     var affectedBlocks = {}, writtenBlocks = {}, changedPaths = {}
+    var getRecord=function(map,key){return transaction?transaction.get(map,key):catalog[map][key]}
+    var putRecord=function(map,key,value){if(transaction)return transaction.put(map,key,value);catalog[map][key]=value;return value}
+    var removeRecord=function(map,key){if(transaction)return transaction.tombstone(map,key);delete catalog[map][key]}
+    var adjustBlock=function(locator,amount){
+      var state=affectedBlocks[locator]
+      if(!state){var prior=getRecord("blockRefs",locator);state=affectedBlocks[locator]={prior:prior,count:(prior?Number(prior.references):0)}}
+      state.count+=amount;return state
+    }
+    var moveIdentityPages={},moveIdentityPassages={}
+    if(transaction&&isMap(m._servingMoveOrigins))Object.keys(m._servingMoveOrigins).forEach(function(target){
+      var origin=m._servingMoveOrigins[target], page=getRecord("pages",origin)
+      if(!page)return
+      moveIdentityPages[target]=page
+      page.passageIds.forEach(function(id){var passage=getRecord("passages",id);if(passage)moveIdentityPassages[id]=passage})
+    })
     paths.forEach(function(path) {
       path = self.manager._normalizeRetrievalPath(path)
-      var previous = catalog.pages[path]
+      var previous = getRecord("pages",path)
       var excluded = m._isSearchExcludedPath(path), raw, sourceMissing = false, stamp
       if (!excluded) {
         var beforeRead = self._stamp(path)
@@ -1208,10 +1233,12 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
             // parser, postings churn or Lucene delete/add. Keep the revision's
             // immutable records; only refresh the validated source stamp.
             if (stringify(previous.stamp, __, "") !== stringify(stamp, __, "")) {
-              var refreshed = {}; Object.keys(previous).forEach(function(key) { refreshed[key] = previous[key] }); refreshed.stamp = stamp; catalog.pages[path] = refreshed
+              var refreshed = {}; Object.keys(previous).forEach(function(key) { refreshed[key] = previous[key] }); refreshed.stamp = stamp; putRecord("pages",path,refreshed)
             }
             work.unchangedPagesReused = Number(work.unchangedPagesReused || 0) + 1
             if (!reusedPageBlocks[previous.locator]) { reusedPageBlocks[previous.locator] = true; work.sameRevisionBlocksReused++ }
+            var unchangedBlock=getRecord("blockRefs",previous.locator)
+            if(unchangedBlock&&unchangedBlock.storage==="shared")work.sharedBlocksReferenced=(Number(work.sharedBlocksReferenced)||0)+1
             return
           }
         }
@@ -1219,31 +1246,33 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
       // This is the publication proof scope. It contains only source entries
       // whose binding, postings or deletion is emitted by this transaction.
       changedPaths[path] = true
+      var previousPassages={}
       if (previous) {
         if (isMap(catalog.moveReverse)) (previous.moveTargets || []).forEach(function(target) {
-          var posting = (catalog.moveReverse[target] || []).filter(function(source) { return source !== path })
-          if(posting.length)catalog.moveReverse[target]=posting
-          else delete catalog.moveReverse[target]
+          var posting = (getRecord("moveReverse",target) || []).filter(function(source) { return source !== path })
+          if(posting.length)putRecord("moveReverse",target,posting)
+          else removeRecord("moveReverse",target)
         })
-        previous.passageIds.forEach(function(id) { if (catalog.passages[id] && catalog.passages[id].path === path) delete catalog.passages[id] })
-        catalog.blockRefs[previous.locator] = (isMap(catalog.blockRefs[previous.locator]) ? Number(catalog.blockRefs[previous.locator].references) : Number(catalog.blockRefs[previous.locator])) - 1; affectedBlocks[previous.locator] = true
+        previous.passageIds.forEach(function(id) { var priorPassage=getRecord("passages",id);if(priorPassage){previousPassages[id]=priorPassage;if(priorPassage.path===path)removeRecord("passages",id)} })
+        adjustBlock(previous.locator,-1)
         var priorTargets = {}
         previous.links.forEach(function(link) {
           if (priorTargets[link.resolved]) return
           priorTargets[link.resolved] = true; work.reverseTargetsVisited++
-          var posting = (catalog.reverseLinks[link.resolved] || []).filter(function(entry) { return entry.path !== path })
-          if (posting.length) catalog.reverseLinks[link.resolved] = posting
-          else delete catalog.reverseLinks[link.resolved]
+          var posting = (getRecord("reverseLinks",link.resolved) || []).filter(function(entry) { return entry.path !== path })
+          if (posting.length) putRecord("reverseLinks",link.resolved,posting)
+          else removeRecord("reverseLinks",link.resolved)
         })
       }
       var remove = java.lang.reflect.Array.newInstance(L.index.Term, 1); remove[0] = new L.index.Term("page", path)
-      writer.deleteDocuments(remove); delete catalog.pages[path]
+      writer.deleteDocuments(remove); removeRecord("pages",path)
       if (excluded || sourceMissing) return
       var parsed = MiniAWikiRetrievalV2.parse(path, raw, self.config.passageChars), meta = af.fromJson(stringify(m.parseFrontmatter(raw).meta, __, ""))
       self.metrics.parsedPages++
       var locator = "blocks/" + parsed.revision + ".md"
       var blockPath = self.config.sharedBlockStore ? self._sharedBlockPath(locator) : self._path(dir, locator)
-      if(oldBlocks[locator]) {
+      var existingBlock=getRecord("blockRefs",locator)
+      if(existingBlock) {
         // Raw source hashes to the existing immutable block. Defer its reuse
         // until retained-block staging, which still undergoes full validation.
         if(!reusedPageBlocks[locator]) { reusedPageBlocks[locator]=true;work.sameRevisionBlocksReused++ }
@@ -1258,13 +1287,13 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
         writtenBlocks[locator]=true
       }
       var movedFrom = isMap(m._servingMoveOrigins) ? m._servingMoveOrigins[path] : __
-      var identityPrevious = old ? old.catalog.pages[movedFrom || path] : __
+      var identityPrevious = old ? (transaction?(movedFrom?moveIdentityPages[path]:previous):old.catalog.pages[movedFrom || path]) : __
       if (!movedFrom && isMap(m._servingMoveOrigins) && Object.keys(m._servingMoveOrigins).some(function(target) { return m._servingMoveOrigins[target] === path })) identityPrevious = __
       var stablePageId = identityPrevious ? identityPrevious.pageId : sha1(catalog.wikiId + ":" + path + (m._servingMoveOrigins ? ":" + parsed.revision : ""))
       var oldKeys = {}, newKeys = {}, oldRaw
       if (identityPrevious) {
         identityPrevious.passageIds.forEach(function(id) {
-          var record = old.catalog.passages[id]
+          var record = transaction?(previousPassages[id]||moveIdentityPassages[id]):old.catalog.passages[id]
           if (!record.textHash) {
             if (isUnDef(oldRaw)) oldRaw = io.readFileString(self._blockFile(old.dir, old.manifest, identityPrevious.locator))
             if (sha1(oldRaw) !== identityPrevious.revision) throw new Error("identity-block-mismatch")
@@ -1286,7 +1315,7 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
         var identityKey = passage.textHash + ":" + stringify(passage.headingAncestry, __, "") + ":" + passage.kind
         passage.passageId = oldKeys[identityKey] && oldKeys[identityKey].length === 1 && newKeys[identityKey] === 1 ? oldKeys[identityKey][0] : sha1(page.pageId + ":" + passage.passageId + ":" + passage.textHash + ":" + parsed.revision)
         passage.path = path; passage.pageId = page.pageId; passage.wikiId = catalog.wikiId; passage.generation = generation
-        catalog.passages[passage.passageId] = passage; page.passageIds.push(passage.passageId)
+        putRecord("passages",passage.passageId,passage); page.passageIds.push(passage.passageId)
         var doc = new L.document.Document()
         doc.add(new L.document.StringField("id", passage.passageId, L.document.Field.Store.YES))
         doc.add(new L.document.StringField("page", path, L.document.Field.Store.YES))
@@ -1307,47 +1336,31 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
         var target = entry.raw.split("#")[0], resolved = entry.type === "wiki" ? target : m.resolveLink(path, target)
         if (resolved && page.moveTargets.indexOf(resolved) < 0) page.moveTargets.push(resolved)
       })
-      if (isMap(catalog.moveReverse)) page.moveTargets.forEach(function(target) {
-        catalog.moveReverse[target] = (catalog.moveReverse[target] || []).concat([path])
+      page.moveTargets.forEach(function(target) {
+        putRecord("moveReverse",target,(getRecord("moveReverse",target) || []).concat([path]))
       })
-      catalog.pages[path] = page
-      catalog.blockRefs[locator] = (isMap(catalog.blockRefs[locator]) ? Number(catalog.blockRefs[locator].references) : Number(catalog.blockRefs[locator]) || 0) + 1; affectedBlocks[locator] = true
+      putRecord("pages",path,page)
+      adjustBlock(locator,1)
       var targets = {}
       page.links.forEach(function(link) { if (!targets[link.resolved]) targets[link.resolved] = []; targets[link.resolved].push(link) })
       Object.keys(targets).forEach(function(target) {
         work.reverseTargetsVisited++
-        catalog.reverseLinks[target] = (catalog.reverseLinks[target] || []).concat([{ path: path, title: page.title, links: targets[target] }])
+        putRecord("reverseLinks",target,(getRecord("reverseLinks",target) || []).concat([{ path: path, title: page.title, links: targets[target] }]))
       })
     })
     // Direct reference counts remove only newly retired immutable blocks.
     Object.keys(affectedBlocks).forEach(function(locator) {
-      if ((isMap(catalog.blockRefs[locator]) ? Number(catalog.blockRefs[locator].references) : Number(catalog.blockRefs[locator])) > 0) return
-      delete catalog.blockRefs[locator]
-      if(writtenBlocks[locator] && !self.config.sharedBlockStore)java.nio.file.Files.deleteIfExists(new java.io.File(self._path(dir, locator)).toPath())
-      else work.retiredBlockUnlinksAvoided++
+      var state=affectedBlocks[locator]
+      if(state.count<=0){removeRecord("blockRefs",locator);if(state.prior){work.retiredBlocksNotStaged++;work.retiredBlockBytesNotStaged+=Number(state.prior.bytes)||0}if(writtenBlocks[locator]&&!self.config.sharedBlockStore)java.nio.file.Files.deleteIfExists(new java.io.File(self._path(dir,locator)).toPath());else work.retiredBlockUnlinksAvoided++;return}
+      var prior=state.prior||reused[locator], blockPath=self.config.sharedBlockStore?self._sharedBlockPath(locator):self._path(dir,locator)
+      if(!prior)prior={bytes:Number(new java.io.File(blockPath).length()),checksum:MiniAWikiRetrievalV2.digest(blockPath)}
+      putRecord("blockRefs",locator,{locator:locator,bytes:Number(prior.bytes),checksum:prior.checksum,storage:self.config.sharedBlockStore?"shared":"generation",ownerGeneration:self.config.sharedBlockStore?__:((prior&&prior.ownerGeneration)||generation),references:state.count})
     })
     finishStage("pageUpdates")
     writer.commit(); writer.close(); writer = null; directory.close(); directory = null; this._closeAnalyzer(analyzer); analyzer = null
     finishStage("writerCommitClose")
     this._publicationCheckpoint("writer-closed", dir)
-    if(isArray(changes)) {
-      var retainedBlockRecords = self._blockRecords(old.manifest)
-      Object.keys(retainedBlockRecords).forEach(function(key) {
-        var file = retainedBlockRecords[key]
-        if(!/^blocks\//.test(file.path))return
-        if(!((isMap(catalog.blockRefs[file.path]) ? Number(catalog.blockRefs[file.path].references) : Number(catalog.blockRefs[file.path]))>0)) { work.retiredBlocksNotStaged++;work.retiredBlockBytesNotStaged+=file.bytes;return }
-        if(writtenBlocks[file.path])return
-        if(self.config.sharedBlockStore) {
-          var storePath = self._sharedBlockPath(file.path)
-          if (!io.fileExists(storePath)) java.nio.file.Files.copy(new java.io.File(self._blockFile(old.dir,old.manifest,file.path)).toPath(),new java.io.File(storePath).toPath())
-          if (MiniAWikiRetrievalV2.digest(storePath) !== file.checksum) throw new Error("generation-integrity-failure")
-          reused[file.path]=file; work.sharedBlocksReferenced=(Number(work.sharedBlocksReferenced)||0)+1
-        }
-        else self._reuseFile(self._path(old.dir,file.path),self._path(dir,file.path),file,work)
-        reused[file.path]=file
-      })
-      finishStage("blockStaging")
-    }
+    if(isArray(changes))finishStage("blockStaging")
     // Do not publish or enumerate a flattened catalogue.  Schema-3 shards
     // are written from the transaction below; the in-memory view is retained
     // only until the newly-written generation has been bound to Lucene.
@@ -1355,47 +1368,47 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
     finishStage("catalogueWrite")
     // Schema 3 is the sole local serving format.  A full reindex is a
     // depth-zero base; an incremental build is a delta over its predecessor.
-    var compacting = isArray(changes) && old && old.manifest.schema === 3 && Number(old.manifest.catalogue.depth) >= 31
     var schema = 3
     var manifest = { schema: schema, parser: 5, passageChars: this.config.passageChars, generation: generation, fingerprint: this.fingerprint, lexical: m._lexicalConfig, indexContract: this.indexContract, files: [] }
     // Turn publication-local reachability counters into immutable routed
     // descriptors only after all page mutations have completed.  This keeps
     // updates bounded while making every reference independently verifiable.
-    Object.keys(catalog.blockRefs).forEach(function(locator) {
+    if(!transaction)Object.keys(catalog.blockRefs).forEach(function(locator) {
       var references = isMap(catalog.blockRefs[locator]) ? Number(catalog.blockRefs[locator].references) : Number(catalog.blockRefs[locator])
-      var prior = oldBlocks[locator] || reused[locator], path = self.config.sharedBlockStore ? self._sharedBlockPath(locator) : self._path(dir, locator)
+      var prior = reused[locator], path = self.config.sharedBlockStore ? self._sharedBlockPath(locator) : self._path(dir, locator)
       if (!prior) prior = { bytes: Number(new java.io.File(path).length()), checksum: MiniAWikiRetrievalV2.digest(path) }
-      catalog.blockRefs[locator] = { locator: locator, bytes: Number(prior.bytes), checksum: prior.checksum, storage: self.config.sharedBlockStore ? "shared" : "generation", references: references }
+      catalog.blockRefs[locator] = { locator: locator, bytes: Number(prior.bytes), checksum: prior.checksum, storage: self.config.sharedBlockStore ? "shared" : "generation", ownerGeneration:self.config.sharedBlockStore?__:generation, references: references }
     })
     if (this.config.sharedBlockStore) manifest.files = manifest.files.filter(function(file) { return !/^blocks\//.test(file.path) })
     if (manifest.schema === 3) {
-      var delta = this._catalogueDelta(compacting || !old ? { pages:{}, passages:{}, reverseLinks:{}, moveReverse:{}, blockRefs:{} } : old.catalog, catalog), shards = this._writeCatalogueShards(dir, delta, work)
+      var delta = transaction ? transaction.delta() : this._catalogueDelta({ pages:{}, passages:{}, reverseLinks:{}, moveReverse:{}, blockRefs:{} }, catalog), shards = this._writeCatalogueShards(dir, delta, work)
       // The schema-3 manifest is the immutable routing table.  The data
       // shards are deliberately not represented by a monolithic catalogue
       // record, which lets a cold reader validate metadata before touching
       // page/passages it will not serve.
       manifest.files = this._files(dir,reused,work)
-      manifest.catalogue = { schema: 3, base: compacting === true || !old, wikiId: catalog.wikiId, shards: shards, depth: compacting || !old ? 0 : Number(old.manifest.catalogue.depth) + 1, stats: { pageCount: Object.keys(catalog.pages).length, passageCount: Object.keys(catalog.passages).length } }
-      if (!compacting && old) manifest.catalogue.parent = { generation: old.generation, checksum: MiniAWikiRetrievalV2.digest(old.dir + "/manifest.json") }
+      var stats=transaction?transaction.stats():{pageCount:Object.keys(catalog.pages).length,passageCount:Object.keys(catalog.passages).length}
+      manifest.catalogue = { schema: 3, transactionFormat:"routed-delta-v1", base: !transaction, wikiId: catalog.wikiId, shards: shards, depth: transaction ? Number(old.manifest.catalogue.depth) + 1 : 0, stats: stats }
+      if (transaction) manifest.catalogue.parent = { generation: old.generation, checksum: MiniAWikiRetrievalV2.digest(old.dir + "/manifest.json") }
       manifest.merkle = MiniAWikiRetrievalV2.manifestMerkle(manifest)
       work.catalogueDeltaRecords = Object.keys(delta.maps.pages.upsert).length + delta.maps.pages.tombstones.length
       work.catalogueDeltaBytes = Number(work.catalogueShardBytes) || 0
     }
-    if (compacting) { work.catalogueCompacted = true; work.catalogueCompactionDepth = 32 }
     this._writeServingFile(dir + "/manifest.json", stringify(manifest, __, ""))
     finishStage("manifestWrite")
     this._publicationCheckpoint("manifest-written", dir)
     var bindingReads=this.metrics.validationBlockReads, bindingReused=this.metrics.validationReusedPages
-    var validated = this._validatePublication(dir, manifest, {catalog:catalog,changedPaths:changedPaths,checksum:catalogueChecksum})
+    var validated = this._validatePublication(dir, manifest, {catalog:transaction?__:catalog,transaction:transaction,changedPaths:changedPaths,checksum:catalogueChecksum})
     finishStage("artifactValidation")
     work.bindingBlockReads=this.metrics.validationBlockReads-bindingReads;work.bindingReusedPages=this.metrics.validationReusedPages-bindingReused
     this._publicationCheckpoint("artifacts-validated", dir)
-    snapshot = this._openSnapshot(dir, manifest, validated)
+    snapshot = this._openSnapshot(dir, manifest, transaction?__:validated)
     var probe = snapshot.searcher.search(new L.search.MatchAllDocsQuery(), 2)
     for (var sample = 0; sample < probe.scoreDocs.length; sample++) {
-      var stored = m._luceneStoredDoc(snapshot.searcher, probe.scoreDocs[sample].doc), passage = catalog.passages[String(stored.get("id"))]
+      var stored = m._luceneStoredDoc(snapshot.searcher, probe.scoreDocs[sample].doc), passage = this.lookupPassage(snapshot,String(stored.get("id")))
       if (!passage || String(stored.get("recordType")) !== "passage") throw new Error("generation-probe-failed")
-      var block = io.readFileString(self._blockFile(dir, manifest, catalog.pages[passage.path].locator))
+      var probePage=this.lookupPage(snapshot,passage.path), probeBlock=this.lookupBlockReference(snapshot,probePage.locator)
+      var block = io.readFileString(self._blockFile(dir, manifest, probePage.locator,probeBlock))
       if (sha1(block) !== passage.revision || block.substring(passage.charStart, passage.charEnd) !== String(stored.get("text"))) throw new Error("generation-evidence-probe-failed")
     }
     this._publicationCheckpoint("searcher-verified", dir)
@@ -1424,7 +1437,7 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
     var pendingExport = this.manager._knowledgeJournalPending && this.manager._knowledgeJournalPending()
     var exported = this.config.bundlePath ? (pendingExport ? { ok: false, deferred: true, error: "ingest-pending" } : this.exportBundle(this.config.bundlePath)) : __
     finishStage("readerRetentionExport")
-    return { ok: !exported || exported.ok || exported.deferred === true, activationSucceeded: true, localPublished: true, bundle: exported, generation: generation, pages: Object.keys(catalog.pages).length, passages: Object.keys(catalog.passages).length, updatedPages: paths.length, updateWork: work }
+    return { ok: !exported || exported.ok || exported.deferred === true, activationSucceeded: true, localPublished: true, bundle: exported, generation: generation, pages: Number(manifest.catalogue.stats.pageCount), passages: Number(manifest.catalogue.stats.passageCount), updatedPages: paths.length, updateWork: work }
   } catch(e) { activated = activated || e._pointerActivated === true; return { ok: false, error: __miniAErrMsg(e), previousGenerationPreserved: true, activationSucceeded: activated, localPublished: activated, generation: activated ? generation : __, updateWork: work } }
   finally {
     try { if (snapshot) this._closeSnapshot(snapshot) } catch(ignoreS) {}
@@ -2134,7 +2147,7 @@ MiniAWikiRetrievalV2.prototype._flushTelemetry = function() {
 MiniAWikiRetrievalV2.prototype._bundleBase = function(manifest, catalog) {
   if (!manifest || manifest.schema !== 3 || !catalog) throw new Error("bundle-schema3-required")
   var self = this, maps = ["pages","passages","reverseLinks","moveReverse","blockRefs"], shards = {}, texts = {}, bundleCatalog = clone(catalog)
-  Object.keys(bundleCatalog.blockRefs || {}).forEach(function(locator) { bundleCatalog.blockRefs[locator].storage = "generation" })
+  Object.keys(bundleCatalog.blockRefs || {}).forEach(function(locator) { bundleCatalog.blockRefs[locator].storage = "generation";bundleCatalog.blockRefs[locator].ownerGeneration=manifest.generation })
   maps.forEach(function(name) {
     var grouped = {}; shards[name] = {}
     Object.keys(bundleCatalog[name] || {}).forEach(function(key) { var shard = self._catalogueShard(key); if (!grouped[shard]) grouped[shard] = {}; grouped[shard][key] = bundleCatalog[name][key] })
@@ -2148,7 +2161,7 @@ MiniAWikiRetrievalV2.prototype._bundleBase = function(manifest, catalog) {
   maps.forEach(function(name) { Object.keys(shards[name]).forEach(function(shard) { base.files.push(clone(shards[name][shard])) }) })
   Object.keys(bundleCatalog.blockRefs || {}).sort().forEach(function(locator) { var record = bundleCatalog.blockRefs[locator]; base.files.push({path:locator,bytes:record.bytes,checksum:record.checksum}) })
   base.files.sort(function(a,b) { return a.path < b.path ? -1 : a.path > b.path ? 1 : 0 })
-  base.catalogue = { schema:3, base:true, wikiId:bundleCatalog.wikiId, shards:shards, depth:0, stats:{pageCount:Object.keys(bundleCatalog.pages || {}).length,passageCount:Object.keys(bundleCatalog.passages || {}).length} }
+  base.catalogue = { schema:3, transactionFormat:"routed-delta-v1", base:true, wikiId:bundleCatalog.wikiId, shards:shards, depth:0, stats:{pageCount:Object.keys(bundleCatalog.pages || {}).length,passageCount:Object.keys(bundleCatalog.passages || {}).length} }
   delete base.catalogue.parent; base.merkle = MiniAWikiRetrievalV2.manifestMerkle(base)
   return { manifest:base, texts:texts }
 }

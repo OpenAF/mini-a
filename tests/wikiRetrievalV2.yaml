@@ -77,6 +77,9 @@ jobs:
 - name: MiniA Wiki V2::PublicationScopedValidation
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testPublicationScopedValidation
+- name: MiniA Wiki V2::RoutedCompactionBoundary
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testRoutedCompactionBoundary
 - name: MiniA Wiki V2::SharedBlockStoreReclamationClosure
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testSharedBlockStoreReclamationClosure
@@ -149,6 +152,7 @@ todo:
 - MiniA Wiki V2::SourceRevocationBeforeMaterialization
 - MiniA Wiki V2::SharedBlockStore
 - MiniA Wiki V2::PublicationScopedValidation
+- MiniA Wiki V2::RoutedCompactionBoundary
 - MiniA Wiki V2::SharedBlockStoreReclamationClosure
 - MiniA Wiki V2::GroundedDerivatives
 - MiniA Wiki V2::DerivativeJournalAndIntegrity
