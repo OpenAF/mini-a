@@ -1185,7 +1185,10 @@ MiniAWikiManager.prototype._hydrateArtifactBundle = function(remoteMetaFn, downl
     var metadataStarted = Number(java.lang.System.nanoTime()), remote = remoteMetaFn(), local
     metadataMillis = (Number(java.lang.System.nanoTime()) - metadataStarted) / 1000000
     try { local = af.fromJson(io.readFileString(pointer)) } catch(ignoreMeta) {}
-    if (!__miniAWikiBundleChanged(remote, local) && local.source === source && local.key === key) return false
+    if (!__miniAWikiBundleChanged(remote, local) && local.source === source && local.key === key) {
+      this._auditRetrieval(source + "-artifact", key, key, true, 0, { operation: "metadata", metadataMillis: metadataMillis, totalMillis: (Number(java.lang.System.nanoTime()) - started) / 1000000 })
+      return false
+    }
     io.mkdir(dir)
     var downloadStarted = Number(java.lang.System.nanoTime()); input = downloadFn()
     var downloaded = dir + "/download.zip", saved = new java.io.FileOutputStream(downloaded), compressed = 0, copyBuffer = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 65536), copied

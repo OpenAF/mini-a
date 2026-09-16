@@ -1807,6 +1807,8 @@
       ow.test.assert(reader.retrieve("s3bundleparameter",{chunks:1}).evidence.length,1,"hydrated S3 reader serves the validated indexed passage")
       ow.test.assert(reader._hydrateS3Artifacts(),false,"unchanged S3 metadata avoids a duplicate download")
       ow.test.assert(downloadCalls,1,"unchanged S3 bundle performs exactly one download")
+      var metadataAudit=audits.filter(function(event){return event.backend==="s3-artifact"&&event.operation==="metadata"})[0]
+      ow.test.assert(metadataAudit.ok&&metadataAudit.bytes===0&&metadataAudit.metadataMillis>=0,true,"unchanged S3 metadata probe is measured without invented download bytes")
       etag="two";denied=true
       ow.test.assert(reader._hydrateS3Artifacts(),false,"denied S3 refresh remains explicit")
       ow.test.assert(io.readFileString(dir+"/cache/.mini-a-wiki-bundles/current.json"),pointer,"denied S3 refresh retains the prior hydrated generation")
@@ -1842,8 +1844,34 @@
       ow.test.assert(event.protocol,"file","filesystem existence audit identifies its protocol")
       ow.test.assert(event.bytes,0,"existence probe does not invent a payload byte count")
       ow.test.assert(event.totalMillis>=0,true,"existence probe records a monotonic boundary duration")
+      events=[]
       ow.test.assert(wm.reindex().ok,true,"serving-block audit fixture builds a validated generation")
+      var syncEvents=events.filter(function(item){return item.backend==="serving-sync"})
+      ow.test.assert(syncEvents.some(function(item){return item.ok&&item.target==="file"}),true,"publication audits successful file force requests")
+      ow.test.assert(syncEvents.some(function(item){return item.ok&&item.target==="directory"}),true,"publication audits successful directory force requests")
+      ow.test.assert(syncEvents.every(function(item){return item.bytes===0&&item.operation==="force"&&item.protocol==="file"&&item.totalMillis>=0}),true,"force events report requests and elapsed time without inventing physical bytes")
       var pin=wm._retrievalV2.acquire()
+      try {
+        var shard=wm._retrievalV2._catalogueShard("unicode.md"), descriptor=pin.manifest.catalogue.shards.pages[shard]
+        events=[];wm._retrievalV2._readCatalogueShard(pin.dir,"pages",shard,descriptor)
+        event=events.filter(function(item){return item.backend==="serving-catalogue-shard"})[0]
+        ow.test.assert(event.ok,true,"validated catalogue shard read is audited")
+        ow.test.assert(event.bytes,descriptor.bytes,"catalogue audit counts the exact UTF-8 payload")
+        ow.test.assert(event.verification,"sha256","catalogue audit identifies its checksum pass")
+        ow.test.assert(event.totalMillis>=0,true,"catalogue audit includes checksum and decode time")
+        events=[]
+        var corruptDescriptor=clone(descriptor);corruptDescriptor.checksum=new Array(65).join("0")
+        try {wm._retrievalV2._readCatalogueShard(pin.dir,"pages",shard,corruptDescriptor)} catch(ignoreShard) {}
+        event=events.filter(function(item){return item.backend==="serving-catalogue-shard"})[0]
+        ow.test.assert(event.ok,false,"failed catalogue verification emits a failed audit")
+        ow.test.assert(event.bytes,0,"failed catalogue verification does not claim a returned payload")
+      } finally {wm._retrievalV2.release(pin)}
+      events=[]
+      try {wm._retrievalV2._syncPath(dir+"/missing-force-target",false)} catch(ignoreForce) {}
+      event=events.filter(function(item){return item.backend==="serving-sync"})[0]
+      ow.test.assert(event.ok,false,"failed force request is audited without changing publication status")
+      ow.test.assert(event.bytes,0,"failed force request does not invent persisted bytes")
+      pin=wm._retrievalV2.acquire()
       try {events=[];ow.test.assert(wm._retrievalV2._body(pin,pin.catalog.pages["unicode.md"]).indexOf("transport")>=0,true,"serving-block audit fixture reads the exact immutable body")} finally {wm._retrievalV2.release(pin)}
       event=events.filter(function(item){return item.backend==="serving-block"&&item.path==="unicode.md"})[0]
       ow.test.assert(isMap(event),true,"immutable serving block emits an audit event")

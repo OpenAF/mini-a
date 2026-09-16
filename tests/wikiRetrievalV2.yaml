@@ -168,6 +168,7 @@ todo:
 - MiniA Wiki V2::PublicationScopedValidation
 - MiniA Wiki V2::RoutedCompactionBoundary
 - MiniA Wiki V2::SharedBlockStoreReclamationClosure
+- MiniA Wiki V2::Schema3CatalogueDelta
 - MiniA Wiki V2::GroundedDerivatives
 - MiniA Wiki V2::DerivativeJournalAndIntegrity
 - MiniA Wiki V2::DirectDerivedPostings

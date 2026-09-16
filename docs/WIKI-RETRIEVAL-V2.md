@@ -270,6 +270,17 @@ This is an operating-system durability request, not measured hardware power-loss
 proof. Distributed conditional publication is not provided. Publication has a
 bounded filesystem single-writer lock.
 
+The optional trusted audit callback reports `serving-sync` for each file or
+directory force request: `operation: "force"`, target kind, success/failure and
+elapsed milliseconds. Its `bytes` value is zero because `FileChannel.force`
+does not expose device-write bytes. Verified routed catalogue reads report
+`serving-catalogue-shard` with the decoded UTF-8 payload size and elapsed
+checksum/decode time. As with source, block, stored-passage and bundle audits,
+these are application-boundary observations; Lucene index-file I/O, checksum
+pass bytes, filesystem cache, protocol framing and physical writes are outside
+their byte totals. The [Area 5 characterization](../WIKI-RETRIEVE-PLAN.md#area-5-local-io-and-durability-characterization--2026-09-16)
+defines the measurement and durability evidence boundary.
+
 Readers acquire/release managed read-only generation searchers. At most two
 reader snapshots are retained per manager, with in-flight references protected
 from close. A new manager does not share a process-global path-hash reader.

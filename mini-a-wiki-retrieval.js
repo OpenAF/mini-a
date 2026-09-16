@@ -333,8 +333,19 @@ MiniAWikiRetrievalV2.prototype._writeServingFile = function(path, text) {
   io.writeFileString(path, text)
 }
 MiniAWikiRetrievalV2.prototype._syncPath = function(path, directory) {
-  var channel = java.nio.channels.FileChannel.open(new java.io.File(path).toPath(), directory ? java.nio.file.StandardOpenOption.READ : java.nio.file.StandardOpenOption.WRITE)
-  try { channel.force(true) } finally { channel.close() }
+  var started = Number(java.lang.System.nanoTime()), channel, ok = false
+  try {
+    channel = java.nio.channels.FileChannel.open(new java.io.File(path).toPath(), directory ? java.nio.file.StandardOpenOption.READ : java.nio.file.StandardOpenOption.WRITE)
+    channel.force(true)
+    channel.close(); channel = null
+    ok = true
+  } finally {
+    try { if (channel) channel.close() } finally {
+      // force requests are observable here; the number of bytes written by the
+      // kernel or persisted by the device is not available from FileChannel.
+      this.manager._auditRetrieval("serving-sync", directory ? "directory" : "file", "", ok, 0, { operation: "force", protocol: "file", target: directory ? "directory" : "file", totalMillis: Math.max(0, (Number(java.lang.System.nanoTime()) - started) / 1000000) })
+    }
+  }
 }
 MiniAWikiRetrievalV2.prototype._syncGeneration = function(dir, manifest) {
   var self = this
@@ -477,14 +488,21 @@ MiniAWikiRetrievalV2.prototype._writeCatalogueShards = function(dir, delta, work
 }
 MiniAWikiRetrievalV2.prototype._readCatalogueShard = function(dir, name, shard, descriptor) {
   if (!isMap(descriptor) || descriptor.path !== "catalogue/" + name + "/" + shard + ".json" || !/^[a-f0-9]{64}$/.test(descriptor.checksum) || !isFinite(descriptor.bytes) || descriptor.bytes < 0) throw new Error("invalid-catalogue-shard")
-  var path = this._path(dir, descriptor.path), file = new java.io.File(path)
-  if (!file.isFile() || Number(file.length()) !== descriptor.bytes || MiniAWikiRetrievalV2.digest(path) !== descriptor.checksum) throw new Error("catalogue-shard-integrity-failure")
-  this.metrics.catalogueShardReads++; this.metrics.catalogueShardBytes += Number(descriptor.bytes)
-  var operation = af.fromJson(io.readFileString(path))
-  if (!isMap(operation) || operation.schema !== 1 || operation.map !== name || operation.shard !== shard || !isMap(operation.upsert) || !isArray(operation.tombstones)) throw new Error("invalid-catalogue-shard")
-  operation.tombstones.forEach(function(key) { if (!isString(key) || sha1(key).substring(0,2) !== shard || Object.prototype.hasOwnProperty.call(operation.upsert, key)) throw new Error("invalid-catalogue-tombstone") })
-  Object.keys(operation.upsert).forEach(function(key) { if (sha1(key).substring(0,2) !== shard) throw new Error("invalid-catalogue-shard") })
-  return operation
+  var started = Number(java.lang.System.nanoTime()), path = this._path(dir, descriptor.path), file = new java.io.File(path), raw, operation
+  try {
+    if (!file.isFile() || Number(file.length()) !== descriptor.bytes || MiniAWikiRetrievalV2.digest(path) !== descriptor.checksum) throw new Error("catalogue-shard-integrity-failure")
+    raw = io.readFileString(path)
+    operation = af.fromJson(raw)
+    if (!isMap(operation) || operation.schema !== 1 || operation.map !== name || operation.shard !== shard || !isMap(operation.upsert) || !isArray(operation.tombstones)) throw new Error("invalid-catalogue-shard")
+    operation.tombstones.forEach(function(key) { if (!isString(key) || sha1(key).substring(0,2) !== shard || Object.prototype.hasOwnProperty.call(operation.upsert, key)) throw new Error("invalid-catalogue-tombstone") })
+    Object.keys(operation.upsert).forEach(function(key) { if (sha1(key).substring(0,2) !== shard) throw new Error("invalid-catalogue-shard") })
+    this.metrics.catalogueShardReads++; this.metrics.catalogueShardBytes += Number(descriptor.bytes)
+    this.manager._auditRetrieval("serving-catalogue-shard", name, "", true, Number(descriptor.bytes), { operation: "read", protocol: "file", verification: "sha256", totalMillis: Math.max(0, (Number(java.lang.System.nanoTime()) - started) / 1000000) })
+    return operation
+  } catch(e) {
+    this.manager._auditRetrieval("serving-catalogue-shard", name, "", false, 0, { operation: "read", protocol: "file", verification: "sha256", totalMillis: Math.max(0, (Number(java.lang.System.nanoTime()) - started) / 1000000) })
+    throw e
+  }
 }
 MiniAWikiRetrievalV2.prototype._catalogueDescriptor = function(manifest) {
   var c = manifest.catalogue, maps = ["pages", "passages", "reverseLinks", "moveReverse", "blockRefs"]

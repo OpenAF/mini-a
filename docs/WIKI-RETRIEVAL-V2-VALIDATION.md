@@ -2205,3 +2205,26 @@ This proves Mini-A's S3-compatible reader/hydration/replacement/denial path
 against a local live service. It does not prove a public-cloud IAM policy,
 provider cache/network failure behavior, distributed writer coordination, or
 physical durability.
+
+## Area 5 application I/O and local durability boundary — 2026-09-16
+
+The registered `SourceIoAuditAccounting` fixture now checks UTF-8 source
+payloads, zero-byte probes, verified catalogue shard payloads and checksum
+failures, immutable block reads, Lucene stored-passage materialization, cache
+hits, and successful and failed `FileChannel.force` requests. The S3 bundle
+fixture checks compressed/expanded byte accounting and a metadata-only refresh
+with zero download bytes. A force event records elapsed time and target kind,
+with zero physical bytes; an unchanged bundle probe cannot be mistaken for a
+download. The audit callback remains best effort.
+
+On this checkout, focused audit, S3 metadata and twelve-checkpoint abrupt-JVM
+recovery runs passed. The v2 assertion runner passed 1,494 assertions across 45
+functions with no failures. Registered v2 and wiki jobs passed 45 and 197
+functions respectively, with no reported failures. The JVM recovery run checks a
+fresh process at every checkpoint; existing publication fixtures also inject
+file, directory and pointer synchronization errors. These results characterize
+the local filesystem and OS-request boundary only. They do not measure Lucene
+index-file traffic, checksum physical reads, kernel cache, TCP/TLS framing,
+provider-side bytes, device writes, network-filesystem acknowledgements or
+physical power-loss recovery. The [Area 5 measurement contract](../WIKI-RETRIEVE-PLAN.md#area-5-local-io-and-durability-characterization--2026-09-16)
+specifies how to collect those environment counters and recovery observations.
