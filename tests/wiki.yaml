@@ -45,6 +45,9 @@ jobs:
 - name: MiniA Wiki Tests::V2StandaloneMcpRuntimeCompilation
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testStandaloneMcpRuntimeCompilation
+- name: MiniA Wiki Tests::V2CrossSurfaceV2Configuration
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testCrossSurfaceV2Configuration
 - name: MiniA Wiki Tests::V2IngestBatchAndDeferredExport
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testIngestBatchAndDeferredExport

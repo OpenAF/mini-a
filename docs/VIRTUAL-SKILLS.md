@@ -392,6 +392,15 @@ not something this test suite runs in CI.
 ## Opt-in passage retrieval
 
 `wikiretrievalv2=true` and `wikiretrievalconfig` reach the shared wiki manager.
+CLI, console and web launchers also pass these settings to a dedicated
+`useskillwiki=true skillwikiroot=...` manager. Build its serving generation
+explicitly with a writable wiki manager before using that read-only skill
+library; `wikitelemetry=true` records aggregate restricted outcomes in memory
+for read-only MCP servers. Restricted calls consume quotas and one-shot
+references, so their MCP schemas mark them non-idempotent.
+For a dedicated remote skill backend, the normal `wiki*` connection and artifact
+arguments supply its endpoint, credentials and cache; `skillwikibackend` selects
+the backend and `skillwikimounts` supplies any additional read-only libraries.
 An explicit writable reindex builds local serving generations; existing ingestion
 journals, full-source reconstruction and protected pruning remain authoritative.
 Original ingestion chunks and summaries do not become wiki-range quotations.

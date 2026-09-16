@@ -33,14 +33,16 @@ search remains separate. Missing/incompatible artifacts never trigger a migratio
 
 Direct configuration overrides environment defaults:
 `OAF_MINI_A_WIKI_RETRIEVAL_V2` and `OAF_MINI_A_WIKI_RETRIEVAL_CONFIG`.
-The flag and `wikiretrievalconfig` are propagated through agent, console, Dream,
-ingestion, wiki MCP and wiki-backed skill launchers. Mounts inherit settings
+The flag, `wikiretrievalconfig` and `wikitelemetry` are propagated through agent,
+console, web, Dream, ingestion, wiki MCP and wiki-backed skill launchers, including
+dedicated skill libraries. Mounts inherit settings
 unless explicitly configured otherwise. The advanced object accepts JSON/SLON
 and rejects unknown keys, invalid booleans and non-positive/non-integer numeric values:
 
 | Setting | Default | Bound/meaning |
 | --- | ---: | --- |
 | linkImmutableFiles | false | Explicit immutable hard-link reuse; falls back to copy on unsupported filesystems |
+| sharedBlockStore | false | Opt-in local immutable block store; reclamation uses retained-generation reachability |
 | passageChars | 1400 | 64–16000 UTF-16 units; soft structural target |
 | cacheBytes | 8388608 | FIFO immutable raw-block cache, at most 268435456 UTF-8 bytes per manager |
 | maxArtifactBytes | 268435456 | Expanded generation cap, at most 2147483647 bytes |
@@ -89,16 +91,16 @@ shingle/ngram parameters. Published metadata must agree with that contract, and
 nonempty staged indexes are checked for their required typed fields. Earlier v2
 generations lacking this complete contract require an explicit writable reindex;
 read-only readers report incompatibility and do not mutate or migrate them.
-Parser version 4 requires explicit reindexing of parser-version-1/2/3 generations;
-the earlier usable directories and legacy artifacts remain available for rollback
-with their compatible runtime. A reader's `passageChars` build target need not
+Parser version 6 and the schema-3 routed catalogue require an explicit writable
+reindex for obsolete development-only generations. Read-only readers return
+`reindex-required`; they do not migrate old serving formats. A reader's `passageChars` build target need not
 match the published target: trusted source diagnostics report the generation's
 effective `passageChars` without rebuilding it.
 Query-only synonym/feedback settings can change without reindexing when the
 effective indexed analyzer and fields remain compatible; they are deliberately
 excluded from the indexing fingerprint.
-Reindex preserves the prior UUID generation and legacy-compatible artifacts for
-rollback with a matching reader/runtime contract. The Markdown source is unchanged.
+Reindex retains the previous valid schema-3 generation for rollback and preserves
+the feature-off artifacts supported by `main`. The Markdown source is unchanged.
 
 Optional `applicability` request keys product/version/platform/environment match
 exact strings or declared arrays; missing applicability is unknown and excluded
@@ -291,12 +293,12 @@ generation fails validation, a reader may serve that validated predecessor witho
 rewriting either pointer; a writer/operator must still repair the active state.
 This is one-generation read recovery, not an authorised historical-view API.
 
-Warm search/open/navigate uses compact cached catalogue metadata, without source
+Warm search/open/navigate uses cached routed catalogue shards, without source
 body reads solely for headings. Backlinks uses reverse postings, even without the
 optional graph. Evidence blocks load lazily into the byte-bounded FIFO cache;
 revision/stat and pending suppression are checked even on cache hits. Audit hooks
-distinguish serving-block fetches from serving-cache hits. Parsed catalogue memory
-is bounded by artifact caps rather than a separate compact-catalogue eviction limit.
+distinguish serving-block fetches from serving-cache hits. Parsed shard and block
+caches are bounded by the configured artifact and cache budgets.
 
 Structural instruction support recognizes plain/bold warning and prerequisite
 labels, plus GitHub-style blockquote admonitions `> [!WARNING]`, `> [!CAUTION]`
@@ -318,26 +320,26 @@ Incremental publication uses portable copies by default. Setting
 and Lucene segment/commit files through hard links where supported, with a copy
 fallback. The measured local hard-link latency regression makes this an operator
 choice, not a default optimisation. Existing
-linked blocks are never overwritten, including same-revision updates. Reverse-link
-`wikiretrievalconfig="(sharedBlockStore: true)"` additionally retains revision
-blocks in a content-addressed local store and hard-links them into new immutable
-generation directories (with a portable-copy fallback). Generations and bundles
-remain self-contained; this opt-in slice reduces repeated block-byte copies but
-does not yet remove catalogue, segment, validation or cold-reader corpus work.
-postings and content-block reference counts change only for affected pages/targets.
-Backlinks group multiple links from one inbound page. Additive block counts are built
-only by a writable publisher for older v2 catalogues; readers do not migrate them.
-Generation catalogue cloning, file staging/validation and index commit work remain
-corpus scaled; this is not a fully delta-published index. It does not reread every unrelated Markdown body or enumerate source chunks
-per hit. Incremental manifests reuse expected checksums from the pinned generation
-for staged immutable files, avoiding an extra complete-file hash pass. Every staged
-file is still hashed and compared to its expected checksum before activation;
-same-size corruption is rejected. `_lastServingUpdate.updateWork` reports
+linked blocks are never overwritten, including same-revision updates.
+`wikiretrievalconfig="(sharedBlockStore: true)"` retains revision blocks in an
+opt-in local content-addressed store. Reclamation marks current, previous and
+pinned catalogue lineage under the publication lock and re-marks before unlink.
+Bundles materialize referenced blocks into a self-contained schema-3 base.
+Incremental publication uses affected-key routed catalogue deltas; unchanged
+bindings retain their validated immutable owner generation. Publication validates
+new and changed bindings, while cold open checks the pointer, manifest, routing
+lineage and lexical contract structurally. A selected shard/block is checked
+before disclosure, and full lint/export validates the selected closure. Lucene
+writer and explicit full-reindex work can still scale with corpus size. It does
+not reread unrelated Markdown bodies or enumerate source chunks per hit. Same-size
+corruption of selected or newly published evidence is rejected.
+`_lastServingUpdate.updateWork` reports
 `reusedChecksums` and `reusedChecksumBytes`, linked/copied files and bytes, reverse
-targets visited and legacy catalogue pages inspected. Source writes remain authoritative if derived publication fails; a warning
+targets visited and catalogue work. Source writes remain authoritative if derived publication fails; a warning
 and `_lastServingUpdate` report the failure and stale candidates are suppressed.
-Old generations and failed staging directories are retained; no automatic disk
-cleanup is implemented. Mount aliases of equivalent content can deduplicate evidence;
+Current, previous and pinned generations are retained. Explicit shared-block
+reclamation only removes unreachable blocks after a fresh mark; malformed state
+defers deletion. Mount aliases of equivalent content can deduplicate evidence;
 independent page provenance remains distinguishable.
 
 Generation validation also binds each content-block filename and hash to the page
@@ -345,11 +347,10 @@ revision, front matter, outline and raw character/line/UTF-8 passage positions.
 Unowned or unreferenced passage records are rejected. Indexed stored passage text
 must agree with its validated catalogue hash before ranking, feedback expansion
 or disclosure. File checksums alone do not establish these cross-file bindings.
-Fresh readers validate all page bindings once per generation, retaining one page's
-position map at a time; this adds a measured cold-load cost. Ordinary warm requests
-do not repeat it. During in-process incremental publication only, unchanged page
-and passage records can reuse the pinned parent's proof after the staged block
-passes the parent's checksum. `updateWork.bindingBlockReads` and
+Cold readers validate structure and routing lineage without resolving the full
+catalogue. Selected shards and blocks are checked on first use; full lint/export
+materializes the selected closure. Incremental publication reuses immutable parent
+binding proofs for unchanged pages. `updateWork.bindingBlockReads` and
 `bindingReusedPages` distinguish fresh checks from proof reuse.
 `validationBlockReads`/`validationBlockBytes` serving metrics count semantic block
 validation separately from returned-evidence reads; they exclude the file-checksum
@@ -486,8 +487,10 @@ read-only managers retain these aggregates in memory without persistence.
 Telemetry exceptions never change retrieval or policy responses. Disabled
 telemetry bypasses the adapter observation entirely. These counters describe
 adapter outcomes, independently of core search counters; do not add them as
-though both counted distinct searches. Skills-specific and transport-before-job
-events are outside this adapter's coverage.
+though both counted distinct searches. Restricted skill search/open/read/related
+use the same aggregate adapter. Recognized restricted MCP calls with malformed
+arguments reach the policy validator and record a rejection; unknown tools and
+transport errors before tool dispatch are outside retrieval telemetry.
 Page cooldowns cover physical aliases, and existing
 expiry/single-use/cumulative quotas remain enforced. It does not reveal mount names,
 source URLs, raw paths, generations or fusion explanations. Restricted wiki-backed skills also pin their private grants to source revisions;
@@ -629,17 +632,11 @@ complete the broader lifecycle/concurrency fault matrix.
 
 ## Incremental catalogue copies
 
-Incremental publication copies the compact page/passage/link/reference maps and
-shares their unchanged records in the builder instead of deep-cloning all nested
-metadata. Affected reverse-link and move postings are replaced, never appended
-in place. Pinned readers retain their unchanged catalogue; activation still uses
-the validated staged files. This does not change the schema or lexical fingerprint.
-`catalogueKeysCopied` reports copied map entries; `sharedPageRecords` and
-`sharedPassageRecords` count references initially shared at the fork, before
-changed records are replaced. Those are builder work counters, not claims that
-activated snapshots share all records or that publication is proportional only
-to the changed set. Full catalogue serialization/validation and artifact copies
-remain corpus-wide.
+The following comparison measured an earlier unreleased autonomy-branch
+catalogue implementation. Current schema-3 incremental publication uses routed
+affected-key deltas, keeps `catalogueKeysCopied` at zero for the measured
+single-page update, and does not serialize or validate a complete catalogue at
+activation. Historical timings below are not current schema-3 acceptance data.
 
 A same-machine local-FS 1,000-page/10-update comparison measures p50
 592.09 → 507.05 ms (14.4% lower in this run) and p95/p99
@@ -701,11 +698,11 @@ Current-view source revision checks still apply; rollback cannot make old conten
 current. No online rollback/cleanup command or authorised historical-view API is
 provided. Remove only unreferenced old/failed UUID directories after all readers
 stop, preserving current and intended rollback generations.
-Restoring an earlier parser/schema generation also requires its compatible
-runtime; the current parser-v6 reader does not silently reinterpret older v2 artifacts.
+Obsolete development-only parser/schema generations require reindexing. The
+current reader does not silently reinterpret them.
 
-Remaining acceptance work covers complete physical/protocol I/O accounting,
-independent quality evaluation, comprehensive concurrency, transport and
+Remaining acceptance work covers physical device/network I/O instrumentation,
+independent quality evaluation, broader concurrency, transport and
 security-revocation tests. Trusted/safe STDIO and localhost HTTP search/read smoke
 pass; twelve abrupt-JVM publication checkpoints and injected synchronization/space
 failures have regression coverage. These do not prove physical power-loss behavior
@@ -724,9 +721,9 @@ Lucene delete/add or reverse-link posting churn. It still reads and hashes the
 authoritative page, checks before/after source stamps and refreshes a changed
 stamp in the page record. Explicit move reconciliation bypasses this reuse to
 preserve identity decisions. Missing, unavailable and excluded sources retain
-their existing removal/error policy. All staged files, catalogue bindings,
+their existing removal/error policy. Newly written files and changed bindings,
 representative reads and publication synchronization remain validated. This
-does not remove corpus-sized catalogue/file traversal or establish a speedup.
+reuse alone does not establish a speedup.
 
 Publication checkpoints now include an abrupt JVM halt immediately after pointer
 activation. Fresh JVMs then serve the newly activated evidence, while already
@@ -752,18 +749,11 @@ physical volume, live-provider testing or power-loss durability validation.
 
 ## Changed implementation files
 
-V2 publication writes the catalogue through a 65,536-character buffered UTF-8
-writer and SHA-256 digest stream. Top-level catalogue maps are serialized one
-record at a time, avoiding a complete catalogue string and its separate UTF-8
-hashing copy. The on-disk JSON format and lexical/schema fingerprints are
-unchanged. Preparation still verifies the resulting file checksum before
-activation; fresh readers receive the same validation as before.
-`catalogueSerializedRecords`, `catalogueLargestRecordChars` and
-`catalogueBufferChars` describe writer work. The largest temporary serialization
-is a page, passage or posting value; a high-degree reverse-link posting can still
-be large. Compact map copying, catalogue traversal, artifact copying/checksums
-and synchronization remain corpus-scaled. This is a memory-amplification repair,
-not a claim of corpus-independent publication or measured latency improvement.
+The buffered whole-catalogue writer and its
+`catalogueSerializedRecords`/`catalogueLargestRecordChars` measurements below
+describe an earlier unreleased development format. Schema-3 publication writes
+affected routed shards and inherited immutable bindings instead. The older
+measurements remain for comparison and are not current format guarantees.
 
 Catalogue preparation closes each constructed writer once and independently
 attempts underlying stream closure even if writer initialization, writing or
@@ -775,12 +765,11 @@ This is local exception handling, not a guarantee against hardware power loss.
 
 Fresh generation validation hashes and decodes referenced evidence blocks in
 one native UTF-8 read, then validates their exact revisions and passage positions.
-Malformed UTF-8 is rejected rather than replaced silently. Unchanged immutable
-records reused during local publication still require staged block checksums;
-unreferenced block files in a manifest are also checksum-verified. File/byte
-budgets and the persisted schema remain unchanged. Only one page's raw content
-and positional map are materialized at a time; cold validation still traverses
-the complete catalogue and compatible artifact set.
+Malformed UTF-8 is rejected rather than replaced silently. In the current
+schema-3 format, unchanged immutable records retain their validated parent
+binding, while newly written or selected evidence is verified before use.
+Cold open validates structure and routing lineage; full lint/export materializes
+the selected closure. File/byte budgets still apply.
 
 The verified-reader character array scales to the declared block byte size,
 with a one-character minimum and a 65,536-character ceiling. Empty and small
@@ -1122,18 +1111,12 @@ and their activation pointer; authoritative Markdown edits and ingestion journal
 retain their existing write/recovery contracts and are not newly promised as
 power-loss-durable transactions.
 
-Publication serializes its compact catalogue once, hashes the exact UTF-8
-serialization and binds its prepared in-memory catalogue to the verified written
-checksum. After validation, nested catalogue maps, page/passage records, metadata
-and outlines are frozen. Unchanged page/passage identities from the pinned parent
-can then reuse semantic validation after their staged block checksums pass.
-Changed records still receive full evidence-binding validation. Fresh readers
-parse and validate the published catalogue normally; no writer-only prepared
-proof is persisted or accepted from a reader. This preserves the schema/parser
-contract and avoids duplicate catalogue parsing and per-record serialization
-during ordinary incremental publication. Copying artifacts, hashing staged bytes,
-the compact map fork and final catalogue serialization still scale with corpus
-size; this repair does not complete the broader incremental architecture.
+An earlier unreleased implementation serialized and validated a compact whole
+catalogue at publication. Schema-3 routed deltas supersede that path. Changed
+bindings receive evidence validation; unchanged identities retain their
+immutable parent proof. Fresh readers validate the pointer, manifest and
+routing lineage, then validate selected shards and blocks on first use.
+No writer-only prepared proof is accepted as a reader shortcut.
 Newly built and freshly validated metadata is normalized to its published JSON
 representation before caching. YAML date values therefore remain ISO strings in
 both warm and restarted catalogues, rather than mutable `Date` objects. This is

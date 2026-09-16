@@ -2328,6 +2328,45 @@
       }
     })
   }
+  exports.testCrossSurfaceV2Configuration = function() {
+    var dir = temporary(), writer, agent, originalWikiManager = global.__wikiManager, originalWikiTool = global.__wikiTool, originalMcp = global.__miniAMcpWiki
+    try {
+      writer = make(dir)
+      writer.write("skill.md", {type:"skill",name:"Area Six",title:"Area Six"}, "# Skill\nareasixparameter is available")
+      ow.test.assert(writer.reindex().ok,true,"dedicated skill fixture has published v2 evidence")
+      writer.close(); writer = __
+      load("mini-a.js")
+      agent = Object.create(MiniA.prototype)
+      agent.fnI = function() {}
+      agent._wikiManager = __
+      agent._initSkillWiki({useskillwiki:true,skillwikiroot:String(dir),wikiretrievalv2:true,wikiretrievalconfig:"(passageChars: 256)",wikitelemetry:true})
+      ow.test.assert(isObject(agent._skillWikiManager),true,"dedicated agent skill manager initializes")
+      ow.test.assert(isObject(agent._skillWikiManager._retrievalV2),true,"dedicated agent skill manager uses v2")
+      ow.test.assert(agent._skillWikiManager._config.wikitelemetry,true,"dedicated agent skill manager receives telemetry")
+      var skillResult = agent._skillWikiManager.retrieve("areasixparameter")
+      ow.test.assert(isArray(skillResult.evidence) && skillResult.evidence.length > 0,true,"dedicated agent skill manager reads published evidence: " + stringify(skillResult.sources))
+      var cli = io.readFileString("mini-a.yaml"), web = io.readFileYAML("mini-a-web.yaml")
+      ow.test.assert(/wikitelemetry\s*:\s*wikitelemetry/.test(cli),true,"CLI forwards telemetry to MiniA")
+      ow.test.assert(/useskillwiki\s*:\s*useskillwiki/.test(cli),true,"CLI forwards virtual skill-library selection")
+      var webInit = web.jobs.filter(function(job){return job.name === "Init"})[0]
+      ow.test.assert(isString(webInit.check.in.wikiretrievalv2) && isString(webInit.check.in.wikitelemetry) && isString(webInit.check.in.useskillwiki),true,"web startup validates v2, telemetry and skill flags")
+      var safe = io.readFileString("mcps/mcp-skills-safe.yaml")
+      ow.test.assert((safe.match(/__miniAMcpWikiObserveRestricted\(/g)||[]).length,4,"restricted skill tools record aggregate outcome events")
+      load("mini-a-mcp-skills.js")
+      __miniAMcpSkillsInit({wikibackend:"fs",wikiroot:String(dir),wikiretrievalv2:true,wikitelemetry:true,wikirestrict:true,wikirestrictprofile:"relaxed",label:"Skills"},{access:"ro",readonly:true,logPrefix:"area-six-test"})
+      var observed = [], reader = global.__wikiManager
+      reader._retrievalV2._recordRestrictedTelemetry = function(operation,outcome,millis,bytes) { observed.push({operation:operation,outcome:outcome,millis:millis,bytes:bytes}) }
+      var rejected = __miniAMcpWikiObserveRestricted("search",__miniAMcpSkillsRestrictedSearch,{query:42})
+      ow.test.assert(rejected.error,"restricted-query-rejected","invalid skill query reaches bounded policy rejection")
+      ow.test.assert(observed.length,1,"invalid skill call is counted after dispatch")
+      ow.test.assert(observed[0].outcome,"rejected","invalid skill call has aggregate outcome only")
+      ow.test.assert(isDef(observed[0].query),false,"restricted telemetry does not retain the query")
+    } finally {
+      if (global.__wikiManager && global.__wikiManager !== originalWikiManager) global.__wikiManager.close()
+      global.__wikiManager = originalWikiManager; global.__wikiTool = originalWikiTool; global.__miniAMcpWiki = originalMcp
+      if(agent && agent._skillWikiManager) agent._skillWikiManager.close(); if(writer) writer.close(); io.rm(dir)
+    }
+  }
   exports.testProcessCrashPublicationRecovery = function() {
     var dir = temporary(), wm, snapshot
     try {

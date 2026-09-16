@@ -131,7 +131,8 @@ persistence; unsupported filesystems fail explicitly.
 
 ## Opt-in passage retrieval
 
-`wikiretrievalv2=true` and `wikiretrievalconfig` reach the shared wiki manager.
+`wikiretrievalv2=true`, `wikiretrievalconfig` and `wikitelemetry=true` reach
+the shared wiki manager. Telemetry is disabled by default.
 An explicit writable reindex builds local serving generations; existing ingestion
 journals, full-source reconstruction and protected pruning remain authoritative.
 Original ingestion chunks and summaries do not become wiki-range quotations.

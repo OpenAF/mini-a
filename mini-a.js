@@ -8288,7 +8288,29 @@ MiniA.prototype._initSkillWiki = function(args) {
     var cfg = {
       access : "ro",
       backend: isString(args.skillwikibackend) ? args.skillwikibackend : "fs",
-      root   : isString(args.skillwikiroot) && args.skillwikiroot.trim().length > 0 ? args.skillwikiroot.trim() : "."
+      root   : isString(args.skillwikiroot) && args.skillwikiroot.trim().length > 0 ? args.skillwikiroot.trim() : ".",
+      indexdir: args.wikiindexdir,
+      s3artifactprefix: args.wikis3artifactprefix,
+      s3artifactbundle: args.s3artifactbundle,
+      wikihttpindexurl: args.wikihttpindexurl,
+      wikihttptimeout: args.wikihttptimeout,
+      wikiartifactrefreshsecs: args.wikiartifactrefreshsecs,
+      wikilexical: args.wikilexical,
+      wikiretrievalv2: args.wikiretrievalv2,
+      wikiretrievalconfig: args.wikiretrievalconfig,
+      wikitelemetry: args.wikitelemetry
+    }
+    if (cfg.backend === "s3" || cfg.backend === "s3fs") {
+      cfg.bucket = args.wikibucket; cfg.prefix = args.wikiprefix; cfg.url = args.wikiurl
+      cfg.accessKey = args.wikiaccesskey; cfg.secret = args.wikisecret
+      cfg.region = args.wikiregion; cfg.useVersion1 = args.wikiuseversion1
+      cfg.ignoreCertCheck = args.wikiignorecertcheck
+    } else if (cfg.backend === "es") {
+      cfg.esurl = args.wikiurl; cfg.esindex = isString(args.wikiprefix) && args.wikiprefix.trim().length > 0 ? args.wikiprefix.trim() : "mini_a_wiki"
+      cfg.esuser = args.wikiaccesskey; cfg.espass = args.wikisecret
+    } else if (cfg.backend === "http" || cfg.backend === "https") {
+      cfg.backend = "http"; cfg.url = args.wikiurl
+      cfg.accessKey = args.wikiaccesskey; cfg.secret = args.wikisecret
     }
     this._skillWikiManager = new MiniAWikiManager(cfg, function(level, msg) {
       this.fnI(level || "info", "[skills] " + msg)

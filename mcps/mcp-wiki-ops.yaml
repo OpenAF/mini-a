@@ -92,7 +92,7 @@ help:
     desc     : Validated SLON/JSON advanced passage, cache and artifact budgets
     mandatory: false
   - name     : wikitelemetry
-    desc     : Persist local aggregate retrieval telemetry (off by default)
+    desc     : Record local aggregate retrieval telemetry (off by default); writable managers persist it, read-only managers keep it in memory
     mandatory: false
   - name     : wikilexical
     desc     : "SLON/JSON Lucene lexical configuration. Defaults to {language: 'english'}; supports inline synonyms and an optional synonymsFile."

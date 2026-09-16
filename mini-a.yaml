@@ -1171,7 +1171,7 @@ help:
     example  : "1"
     mandatory: false
   - name     : wikitelemetry
-    desc     : Persist local aggregate retrieval telemetry (off by default)
+    desc     : Record local aggregate retrieval telemetry (off by default); writable managers persist it, read-only managers keep it in memory
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
@@ -1182,6 +1182,18 @@ help:
   - name     : wikimounts
     desc     : SLON/JSON array of read-only wiki mounts [{name, backend, root|bucket|prefix|url|...}]
     example  : "[{name: 'team', backend: 'fs', root: '/shared/team-wiki'}]"
+    mandatory: false
+  - name     : useskillwiki
+    desc     : Enable the virtual skill library, reusing usewiki unless a dedicated skillwiki* source is given
+    mandatory: false
+  - name     : skillwikibackend
+    desc     : Backend for a dedicated skill library
+    mandatory: false
+  - name     : skillwikiroot
+    desc     : Filesystem root for a dedicated skill library
+    mandatory: false
+  - name     : skillwikimounts
+    desc     : SLON/JSON read-only mounts for a dedicated skill library
     mandatory: false
   - name     : mode
     desc     : Apply one of the presets defined in mini-a-modes
@@ -1556,12 +1568,17 @@ jobs:
         wikiartifactrefreshsecs: wikiartifactrefreshsecs
         wikiretrievalv2: wikiretrievalv2
         wikiretrievalconfig: wikiretrievalconfig
+        wikitelemetry  : wikitelemetry
         wikilexical    : wikilexical
         wikisourceurl  : wikisourceurl
         wikisourcefield: wikisourcefield
         wikisourceinline: wikisourceinline
         wikilintstaleddays: wikilintstaleddays
         wikimounts     : wikimounts
+        useskillwiki   : useskillwiki
+        skillwikibackend: skillwikibackend
+        skillwikiroot  : skillwikiroot
+        skillwikimounts: skillwikimounts
         mode           : mode
         resume         : resume
         usehistory     : usehistory
@@ -1838,12 +1855,17 @@ jobs:
       wikiartifactrefreshsecs: toNumber.isNumber.default(__)
       wikiretrievalv2: toBoolean.isBoolean.default(__)
       wikiretrievalconfig: isString.default(__)
+      wikitelemetry  : toBoolean.isBoolean.default(__)
       wikilexical    : isString.default(__)
       wikisourceurl  : isString.default(__)
       wikisourcefield: isString.default(__)
       wikisourceinline: toBoolean.isBoolean.default(false)
       wikilintstaleddays: toNumber.isNumber.default(__)
       wikimounts     : isString.default(__)
+      useskillwiki   : toBoolean.isBoolean.default(false)
+      skillwikibackend: isString.default(__)
+      skillwikiroot  : isString.default(__)
+      skillwikimounts: isString.default(__)
       mode           : isString.default(__)
       resume         : toBoolean.isBoolean.default(false)
       usehistory     : toBoolean.isBoolean.default(false)

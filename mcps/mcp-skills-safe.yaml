@@ -68,7 +68,7 @@ help:
     desc     : Validated SLON/JSON advanced passage, cache and artifact budgets
     mandatory: false
   - name     : wikitelemetry
-    desc     : Persist local aggregate retrieval telemetry (off by default)
+    desc     : Record local aggregate retrieval telemetry (off by default); read-only managers keep it in memory
     mandatory: false
   - name     : wikilexical
     desc     : "SLON/JSON Lucene lexical configuration. Defaults to {language: 'english'}."
@@ -182,7 +182,7 @@ todo:
         annotations:
           title         : search
           readOnlyHint  : true
-          idempotentHint: true
+          idempotentHint: false
 
       open:
         name       : open
@@ -196,11 +196,13 @@ todo:
             reference:
               type       : string
               description: Alias for "ref".
-          required  : [ ref ]
+          anyOf:
+          - required: [ ref ]
+          - required: [ reference ]
         annotations:
           title         : open
           readOnlyHint  : true
-          idempotentHint: true
+          idempotentHint: false
 
       read:
         name       : read
@@ -221,11 +223,13 @@ todo:
               type       : integer
             endLine:
               type       : integer
-          required  : [ ref ]
+          anyOf:
+          - required: [ ref ]
+          - required: [ reference ]
         annotations:
           title         : read
           readOnlyHint  : true
-          idempotentHint: true
+          idempotentHint: false
 
       related:
         name       : related
@@ -239,11 +243,13 @@ todo:
             reference:
               type       : string
               description: Alias for "ref".
-          required  : [ ref ]
+          anyOf:
+          - required: [ ref ]
+          - required: [ reference ]
         annotations:
           title         : related
           readOnlyHint  : true
-          idempotentHint: true
+          idempotentHint: false
 
     ((fns    )): &MCPFNS
       search : Skills search
@@ -338,38 +344,38 @@ jobs:
 - name : Skills search
   check:
     in:
-      query        : isString
-      limit        : toNumber.isNumber.default(10)
+      query        : default(__)
+      limit        : default(__)
       tags         : default(__)
       appliesTo    : default(__)
-      compatibility: isString.default(__)
-      maxRisk      : isString.default(__)
+      compatibility: default(__)
+      maxRisk      : default(__)
   exec : | #js
-    return __miniAMcpSkillsRestrictedSearch(args)
+    return __miniAMcpWikiObserveRestricted("search", __miniAMcpSkillsRestrictedSearch, args)
 
 - name : Skills open
   check:
     in:
-      ref      : isString.default(__)
-      reference: isString.default(__)
+      ref      : default(__)
+      reference: default(__)
   exec : | #js
-    return __miniAMcpSkillsRestrictedOpen(args)
+    return __miniAMcpWikiObserveRestricted("read", __miniAMcpSkillsRestrictedOpen, args)
 
 - name : Skills read
   check:
     in:
-      ref      : isString.default(__)
-      reference: isString.default(__)
-      section  : isString.default(__)
-      startLine: toNumber.isNumber.default(__)
-      endLine  : toNumber.isNumber.default(__)
+      ref      : default(__)
+      reference: default(__)
+      section  : default(__)
+      startLine: default(__)
+      endLine  : default(__)
   exec : | #js
-    return __miniAMcpSkillsRestrictedRead(args)
+    return __miniAMcpWikiObserveRestricted("read", __miniAMcpSkillsRestrictedRead, args)
 
 - name : Skills related
   check:
     in:
-      ref      : isString.default(__)
-      reference: isString.default(__)
+      ref      : default(__)
+      reference: default(__)
   exec : | #js
-    return __miniAMcpSkillsRestrictedRelated(args)
+    return __miniAMcpWikiObserveRestricted("search", __miniAMcpSkillsRestrictedRelated, args)

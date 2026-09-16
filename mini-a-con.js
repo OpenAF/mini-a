@@ -665,7 +665,7 @@ try {
     wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts; fs roots may be directories or local .zip/.okt archives." },
     wikiretrievalv2: { type: "boolean", description: "Opt-in versioned passage retrieval (requires explicit writable reindex)." },
     wikiretrievalconfig: { type: "string", description: "Validated SLON/JSON advanced passage/cache/artifact budgets." },
-    wikitelemetry: { type: "boolean", description: "Persist local aggregate wiki retrieval telemetry (off by default)." },
+    wikitelemetry: { type: "boolean", description: "Record local aggregate wiki retrieval telemetry (off by default); writable managers persist it, read-only managers keep it in memory." },
     wikilexical    : { type: "string", description: "SLON/JSON Lucene lexical configuration; defaults to {language:'english'} and supports optional synonymsFile." },
     usewikigraph   : { type: "boolean", default: false, description: "Enable the wiki knowledge graph for structural and semantic page relationships." },
     wikigraphsemantic: { type: "boolean", default: false, description: "Build semantic (embedding-based) edges in addition to structural links when running /graph build." },
@@ -1561,7 +1561,29 @@ try {
       var cfg = {
         access : "ro",
         backend: isString(sessionOptions.skillwikibackend) ? sessionOptions.skillwikibackend : "fs",
-        root   : isString(sessionOptions.skillwikiroot) && sessionOptions.skillwikiroot.trim().length > 0 ? sessionOptions.skillwikiroot.trim() : "."
+        root   : isString(sessionOptions.skillwikiroot) && sessionOptions.skillwikiroot.trim().length > 0 ? sessionOptions.skillwikiroot.trim() : ".",
+        indexdir: sessionOptions.wikiindexdir,
+        s3artifactprefix: sessionOptions.wikis3artifactprefix,
+        s3artifactbundle: sessionOptions.s3artifactbundle,
+        wikihttpindexurl: sessionOptions.wikihttpindexurl,
+        wikihttptimeout: sessionOptions.wikihttptimeout,
+        wikiartifactrefreshsecs: sessionOptions.wikiartifactrefreshsecs,
+        wikilexical: sessionOptions.wikilexical,
+        wikiretrievalv2: sessionOptions.wikiretrievalv2,
+        wikiretrievalconfig: sessionOptions.wikiretrievalconfig,
+        wikitelemetry: sessionOptions.wikitelemetry
+      }
+      if (cfg.backend === "s3" || cfg.backend === "s3fs") {
+        cfg.bucket = sessionOptions.wikibucket; cfg.prefix = sessionOptions.wikiprefix; cfg.url = sessionOptions.wikiurl
+        cfg.accessKey = sessionOptions.wikiaccesskey; cfg.secret = sessionOptions.wikisecret
+        cfg.region = sessionOptions.wikiregion; cfg.useVersion1 = sessionOptions.wikiuseversion1
+        cfg.ignoreCertCheck = sessionOptions.wikiignorecertcheck
+      } else if (cfg.backend === "es") {
+        cfg.esurl = sessionOptions.wikiurl; cfg.esindex = isString(sessionOptions.wikiprefix) && sessionOptions.wikiprefix.trim().length > 0 ? sessionOptions.wikiprefix.trim() : "mini_a_wiki"
+        cfg.esuser = sessionOptions.wikiaccesskey; cfg.espass = sessionOptions.wikisecret
+      } else if (cfg.backend === "http" || cfg.backend === "https") {
+        cfg.backend = "http"; cfg.url = sessionOptions.wikiurl
+        cfg.accessKey = sessionOptions.wikiaccesskey; cfg.secret = sessionOptions.wikisecret
       }
       var swm2 = new MiniAWikiManager(cfg)
       if (isString(sessionOptions.skillwikimounts) && sessionOptions.skillwikimounts.trim().length > 0) {

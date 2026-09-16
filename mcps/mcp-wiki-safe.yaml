@@ -76,7 +76,7 @@ help:
     desc     : Validated SLON/JSON advanced passage, cache and artifact budgets
     mandatory: false
   - name     : wikitelemetry
-    desc     : Persist local aggregate retrieval telemetry (off by default)
+    desc     : Record local aggregate retrieval telemetry (off by default); read-only managers keep it in memory
     mandatory: false
   - name     : wikilexical
     desc     : "SLON/JSON Lucene lexical configuration. Defaults to {language: 'english'}; supports inline synonyms and an optional synonymsFile."
@@ -195,7 +195,7 @@ todo:
         annotations:
           title         : search
           readOnlyHint  : true
-          idempotentHint: true
+          idempotentHint: false
 
       read:
         name       : read
@@ -226,11 +226,13 @@ todo:
               type       : boolean
               description: Accepted for compatibility; safe mode returns bounded content, with incomplete:true when required v2 support cannot fit.
               default    : false
-          required  : [ path ]
+          anyOf:
+          - required: [ path ]
+          - required: [ reference ]
         annotations:
           title         : read
           readOnlyHint  : true
-          idempotentHint: true
+          idempotentHint: false
 
     ((fns    )): &MCPFNS
       search: Wiki search pages
@@ -325,24 +327,24 @@ jobs:
 - name : Wiki search pages
   check:
     in:
-      query        : isString
-      limit        : toNumber.isNumber.default(20)
-      caseSensitive: toBoolean.isBoolean.default(false)
-      regex        : toBoolean.isBoolean.default(false)
-      contextLines : toNumber.isNumber.default(0)
-      path         : isString.default("")
+      query        : default(__)
+      limit        : default(__)
+      caseSensitive: default(__)
+      regex        : default(__)
+      contextLines : default(__)
+      path         : default(__)
   exec : | #js
     return __miniAMcpWikiRestrictedSearch(args)
 
 - name : Wiki read page
   check:
     in:
-      path      : isString.default(__)
-      reference : isString.default(__)
-      startLine : toNumber.isNumber.default(__)
-      endLine   : toNumber.isNumber.default(__)
-      section   : isString.default(__)
-      countLines: toBoolean.isBoolean.default(false)
-      compact   : toBoolean.isBoolean.default(false)
+      path      : default(__)
+      reference : default(__)
+      startLine : default(__)
+      endLine   : default(__)
+      section   : default(__)
+      countLines: default(__)
+      compact   : default(__)
   exec : | #js
     return __miniAMcpWikiRestrictedRead(args)

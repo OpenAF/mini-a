@@ -404,6 +404,7 @@ function __miniAMcpWikiObserveRestricted(operation, implementation, args) {
         else if (result.incomplete === true) outcome = "incomplete"
         else if (isArray(result.results)) outcome = result.results.length ? "success" : "zero"
         else if (isString(result.content)) outcome = "success"
+        else if (isString(result.title) || isArray(result.backlinks) || isArray(result.graph) || isArray(result.cross)) outcome = "success"
       }
       manager._retrievalV2._recordRestrictedTelemetry(operation,outcome,(Number(java.lang.System.nanoTime())-started)/1000000,global.MiniAWikiRetrievalV2.bytes(stringify(result || {},__,"")))
     } catch(ignoreTelemetry) {}

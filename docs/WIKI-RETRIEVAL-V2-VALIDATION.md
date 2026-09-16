@@ -2228,3 +2228,22 @@ index-file traffic, checksum physical reads, kernel cache, TCP/TLS framing,
 provider-side bytes, device writes, network-filesystem acknowledgements or
 physical power-loss recovery. The [Area 5 measurement contract](../WIKI-RETRIEVE-PLAN.md#area-5-local-io-and-durability-characterization--2026-09-16)
 specifies how to collect those environment counters and recovery observations.
+
+## Area 6 cross-surface check — 2026-09-16
+
+The governing plan and companion audit now record Area 6's local completion.
+The current source forwards CLI telemetry and skill-library flags, accepts
+v2/artifact and skill settings through the web launcher, and constructs dedicated agent/console skill managers
+with v2, cache and telemetry settings. The OpenAF cross-surface fixture opens a
+published generation from a dedicated skill manager and verifies aggregate
+restricted skill rejection telemetry. `tests/wikiRetrievalTransport.py` exercises
+trusted and restricted wiki/skills MCP tools over both STDIO and localhost HTTP,
+including skill search/open/read, opaque references, and a malformed recognized
+safe-skill query. Historical statements above about missing skills-specific
+telemetry or corpus-wide cold binding validation describe older revisions.
+The current v2 assertion runner passed 1,507 assertions across 46 functions
+with no failures; the registered wiki and skills jobs and the eight local
+transport/descriptor smoke combinations passed.
+
+Local smoke does not measure broad concurrent transport load, a live provider,
+or malformed frames rejected before a recognized MCP tool is dispatched.

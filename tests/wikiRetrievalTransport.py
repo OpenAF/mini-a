@@ -25,6 +25,8 @@ def run_server(descriptor, root, work, transport="stdio"):
         source = source.replace('  unique      :\n    pidFile     : .mcp-wiki.pid\n    killPrevious: true\n', '').replace('  unique      :\n    pidFile     : .mcp-wiki-safe.pid\n    killPrevious: true\n', '')
     source = source.replace('pidFile     : .mcp-wiki.pid', 'pidFile     : ' + str(work / 'trusted.pid'))
     source = source.replace('pidFile     : .mcp-wiki-safe.pid', 'pidFile     : ' + str(work / 'safe.pid'))
+    source = source.replace('pidFile     : .mcp-skills.pid', 'pidFile     : ' + str(work / 'skills.pid'))
+    source = source.replace('pidFile     : .mcp-skills-safe.pid', 'pidFile     : ' + str(work / 'skills-safe.pid'))
     config = work / ("smoke-" + descriptor)
     config.write_text(source)
     extra = []
@@ -91,17 +93,14 @@ def run_server(descriptor, root, work, transport="stdio"):
         tools = request('tools/list', {})['tools']
         names = {tool['name'] for tool in tools}
         assert {'search', 'read'} <= names, names
-        safe = descriptor == 'mcp-wiki-safe.yaml'
+        safe = descriptor.endswith('-safe.yaml')
+        skills = descriptor.startswith('mcp-skills')
         if safe:
-            assert names == {'search', 'read'}, names
-        found = request('tools/call', {'name': 'search', 'arguments': {'query': 'transportparameter'}})
-        encoded = json.dumps(found)
-        assert not found.get('isError'), found
-        if safe:
-            for forbidden in ['answer.md', str(root), 'passageId', 'generation', 'nativeScore']:
-                assert forbidden not in encoded, (forbidden, found)
-        else:
-            assert 'answer.md' in encoded and 'rankScore' in encoded, found
+            for tool in tools:
+                assert tool.get('annotations', {}).get('idempotentHint') is False, tool
+                if tool['name'] in ({'open', 'read', 'related'} if skills else {'read'}):
+                    alternatives = tool['inputSchema'].get('anyOf', [])
+                    assert any('reference' in option.get('required', []) for option in alternatives), tool
         def references(value):
             if isinstance(value, dict):
                 if isinstance(value.get('reference'), str):
@@ -126,12 +125,47 @@ def run_server(descriptor, root, work, transport="stdio"):
                     except json.JSONDecodeError:
                         pass
             raise AssertionError(reply)
+        if safe:
+            assert names == ({'search', 'open', 'read', 'related'} if skills else {'search', 'read'}), names
+        found = request('tools/call', {'name': 'search', 'arguments': {'query': 'transportparameter'}})
+        encoded = json.dumps(found)
+        assert not found.get('isError'), found
+        if skills:
+            assert 'transportparameter' in encoded, found
+            if safe:
+                for forbidden in ['answer.md', str(root), 'passageId', 'generation', 'nativeScore']:
+                    assert forbidden not in encoded, (forbidden, found)
+                ref = next(references(found))
+                inspected = request('tools/call', {'name': 'open', 'arguments': {'ref': ref}})
+                assert not inspected.get('isError') and 'transportparameter' in json.dumps(inspected), inspected
+                assert 'answer.md' not in json.dumps(inspected), inspected
+                next_ref = next(references(inspected))
+                read = request('tools/call', {'name': 'read', 'arguments': {'ref': next_ref}})
+                assert not read.get('isError') and 'transportparameter' in json.dumps(read), read
+                assert 'answer.md' not in json.dumps(read), read
+                invalid = request('tools/call', {'name': 'search', 'arguments': {'query': 42}})
+                assert 'restricted-query-rejected' in json.dumps(invalid), invalid
+            else:
+                inspected = request('tools/call', {'name': 'open', 'arguments': {'ref': 'wiki:answer.md'}})
+                assert not inspected.get('isError'), inspected
+                read = request('tools/call', {'name': 'read', 'arguments': {'ref': 'wiki:answer.md'}})
+                assert not read.get('isError') and 'transportparameter' in json.dumps(read), read
+            return {'descriptor': descriptor, 'transport': transport, 'tools': sorted(names),
+                    'searchPassed': True, 'openPassed': True, 'readPassed': True,
+                    'invalidArgumentsHandled': safe, 'liveProvider': False}
+        if safe:
+            for forbidden in ['answer.md', str(root), 'passageId', 'generation', 'nativeScore']:
+                assert forbidden not in encoded, (forbidden, found)
+        else:
+            assert 'answer.md' in encoded and 'rankScore' in encoded, found
         path = next(references(found)) if safe else 'answer.md'
         arguments = {'path': path} if safe else {'path': path, 'section': 'Specific'}
         opened = request('tools/call', {'name': 'read', 'arguments': arguments})
         assert not opened.get('isError') and 'transportparameter' in json.dumps(opened), opened
         if safe:
             assert 'answer.md' not in json.dumps(opened), opened
+            invalid = tool_value(request('tools/call', {'name': 'search', 'arguments': {'query': 42}}))
+            assert invalid.get('error') == 'restricted-query-rejected', invalid
             replay = tool_value(request('tools/call', {'name': 'read', 'arguments': arguments}))
             assert replay.get('error') == 'invalid-or-expired-reference', replay
             found_again = request('tools/call', {'name': 'search', 'arguments': {'query': 'transportparameter'}})
@@ -161,7 +195,7 @@ def run_server(descriptor, root, work, transport="stdio"):
             assert ''.join(read_fragments).rstrip('\n') == '# Specific\ntransportparameter is the exact late answer.'
             record['readContinuationPassed'] = True
             record['navigationAndRelatedPassed'] = True
-            arguments = {'path': 'answer.md', 'pattern': 'transportparameter',
+            arguments = {'path': 'answer.md', 'pattern': 'exact late answer',
                          'maxChars': 8, 'contextLines': 0, 'limit': 1}
             fragments, match_id = [], None
             for _ in range(40):
@@ -201,7 +235,9 @@ with tempfile.TemporaryDirectory(prefix='wiki-v2-transport-') as temporary:
     work = Path(temporary)
     root = work / 'wiki'
     root.mkdir()
-    (root / 'answer.md').write_text('# Introduction\n' + 'Background text.\n' * 100
+    (root / 'answer.md').write_text('---\ntype: skill\nname: transportparameter\ntitle: Transportparameter Skill\n'
+                                  'description: Find transportparameter answers.\n---\n# Introduction\n'
+                                  + 'Background text.\n' * 100
                                   + '\n# Specific\ntransportparameter is the exact late answer.\n')
     script = work / 'build.js'
     script.write_text('load("mini-a-common.js");load("mini-a-wiki.js");var m=new MiniAWikiManager('
@@ -210,5 +246,5 @@ with tempfile.TemporaryDirectory(prefix='wiki-v2-transport-') as temporary:
     subprocess.run(['oaf', '-f', str(script)], cwd=REPO, check=True, capture_output=True, text=True)
     transports = os.getenv('WIKI_TRANSPORTS', 'stdio,http').split(',')
     records = [run_server(name, root, work, transport) for transport in transports
-               for name in ['mcp-wiki.yaml', 'mcp-wiki-safe.yaml']]
+               for name in ['mcp-wiki.yaml', 'mcp-wiki-safe.yaml', 'mcp-skills.yaml', 'mcp-skills-safe.yaml']]
     print('TRANSPORT=' + json.dumps({'results': records, 'liveProvider': False}))
