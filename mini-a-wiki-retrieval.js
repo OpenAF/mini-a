@@ -1670,6 +1670,8 @@ MiniAWikiRetrievalV2.prototype._collect = function(query, options, materialize, 
           // while resolving a hit. Re-run the complete Lucene/query binding on
           // the already-published predecessor; never mix generations.
           if (!/^(catalogue-(?:shard-)?integrity-failure|invalid-catalogue|generation-integrity-failure|generation-record-missing|generation-index-text-mismatch)/.test(firstUseReason)) throw firstUseFailure
+          if (used.queries >= budget.maxQueries || Date.now() >= deadline) throw new Error("query-budget-exhausted")
+          used.queries++
           engine.release(pin); pins.pop()
           pin = measure("pin", function(){ return engine.acquire(deadline,true) })
           pins.push({ engine: engine, snapshot: pin }); vector[target.name] = pin.generation
@@ -1695,7 +1697,7 @@ MiniAWikiRetrievalV2.prototype._collect = function(query, options, materialize, 
           if (stages.indexOf("rank") < 0) stages.push("rank")
           candidates.push(measure("rank", function() { return engine._rank(hit, query) }))
         })
-      } catch(e) { source.reason = __miniAErrMsg(e).substring(0, 160); source.status = source.reason === "invalid-query" ? "invalid-query" : "unavailable"; stopReasons.push(source.status === "invalid-query" ? "invalid-query" : "source-unavailable") }
+      } catch(e) { source.reason = __miniAErrMsg(e).substring(0, 160); source.status = source.reason === "invalid-query" ? "invalid-query" : source.reason === "query-budget-exhausted" ? "partial" : "unavailable"; stopReasons.push(source.status === "invalid-query" ? "invalid-query" : source.status === "partial" ? "query-budget" : "source-unavailable") }
     }
     measure("candidateOrdering", function() { candidates.sort(function(a,b) { return b.rankScore - a.rankScore || (a.path < b.path ? -1 : a.path > b.path ? 1 : a.record.charStart - b.record.charStart) }) })
     var complete = sources.every(function(s) { return s.status === "searched" })
@@ -1726,6 +1728,16 @@ MiniAWikiRetrievalV2.prototype.search = function(query, options) {
     var seen = {}, results = []
     candidates.forEach(function(hit) {
       if (results.length >= limit || seen[hit.path] || !self._authorised(hit)) return
+      // Permission can change after candidate discovery. Recheck immediately
+      // before indexed title/description and passage metadata are disclosed.
+      var stillActive = false
+      try { stillActive = hit.engine._active(hit.page, hit.engine._pending(), __, deadline, out.budget.used) } catch(permissionFailure) {}
+      if (!stillActive) {
+        out.outcome = "partial"
+        if (out.stopReasons.indexOf("stale-or-revoked-evidence") < 0) out.stopReasons.push("stale-or-revoked-evidence")
+        out.sources.forEach(function(source) {if (source.wiki === hit.wiki) {source.status = "partial";source.reason = "stale-or-revoked-evidence"}})
+        return
+      }
       seen[hit.path] = true
       var result = { path: hit.path, ref: self.manager._agenticRef(hit.path), wiki: hit.wiki, title: String(hit.page.title).substring(0, 512), description: String(hit.page.description).substring(0, 256), summary: String(hit.page.description).substring(0, 256), nativeScore: hit.nativeScore, rankScore: hit.rankScore, score: hit.rankScore, scoreComponents: hit.scoreComponents, retrievalMethod: hit.retrievalMethod, passage: self._reference(hit) }
       if (isNumber(opts.evidenceChars) && opts.evidenceChars > 0) {
@@ -1835,7 +1847,7 @@ MiniAWikiRetrievalV2.prototype.retrieve = function(query, options, present) {
           }
         } catch(e) { out.outcome = "partial"; var reason = __miniAErrMsg(e); stop.push(["stale-evidence","source-read-unavailable","request-deadline-exhausted","stale-or-revoked-evidence"].indexOf(reason) >= 0 ? reason : "evidence-read-failure"); return }
         var hash = sha1(text)
-        var key = hit.engine.manager._getBackendIdentity() + ":" + r.pageId + ":" + r.revision + ":" + hash
+        var key = hit.path + ":" + r.pageId + ":" + r.revision + ":" + hash
         if (seenText[key]) return
         var record = { path: hit.path, ref: self.manager._agenticRef(hit.path), wiki: hit.wiki, title: hit.page.title, content: text, selectionComponents: hit.selectionComponents, lineStart: r.startLine, lineEnd: r.endLine, charStart: r.charStart, charEnd: r.charEnd, revision: r.revision, passage: self._reference(hit), origin: "wiki-page", applicability: clone(hit.page.metadata.applicability || {}), validity: isMap(hit.page.metadata.validity) ? clone(hit.page.metadata.validity) : null, nativeScore: hit.nativeScore, rankScore: hit.rankScore, score: hit.rankScore, scoreComponents: hit.scoreComponents, retrievalMethod: hit.retrievalMethod }
         var provenance = MiniAWikiRetrievalV2.trustedProvenance(hit.page.metadata)

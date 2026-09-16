@@ -112,6 +112,12 @@ jobs:
 - name: MiniA Wiki Tests::V2FederationAndBudgets
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testFederationAndBudgets
+- name: MiniA Wiki Tests::V2FederatedAliasAndPermissionBoundary
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testFederatedAliasAndPermissionBoundary
+- name: MiniA Wiki Tests::V2FederatedRetryBudget
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testFederatedRetryBudget
 
 - name: MiniA Wiki Tests::IndexedLanguageAndTelemetry
   to: oJob Test
@@ -792,6 +798,8 @@ todo:
 - MiniA Wiki Tests::V2Parser
 - MiniA Wiki Tests::V2RetrievalAndPublication
 - MiniA Wiki Tests::V2FederationAndBudgets
+- MiniA Wiki Tests::V2FederatedAliasAndPermissionBoundary
+- MiniA Wiki Tests::V2FederatedRetryBudget
 - MiniA Wiki Tests::IndexedLanguageAndTelemetry
 - MiniA Wiki Tests::RetrievalContracts
 - MiniA Wiki Tests::ParseFrontmatterWithYaml

@@ -34,7 +34,8 @@ def run_server(descriptor, root, work, transport="stdio"):
             port = probe.getsockname()[1]
         extra = ["onport=" + str(port), "host=127.0.0.1"]
     process = subprocess.Popen(['ojob', str(config), 'wikiroot=' + str(root),
-                                'wikiretrievalv2=true', 'label=Transport', 'wikirestrictprofile=relaxed'] + extra,
+                                'wikiretrievalv2=true', 'label=Transport', 'wikirestrictprofile=relaxed']
+                               + (['wikirestrictmaxreads=1'] if descriptor == 'mcp-wiki-safe.yaml' else []) + extra,
                                cwd=REPO, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True, bufsize=1,
                                start_new_session=True)
@@ -115,25 +116,34 @@ def run_server(descriptor, root, work, transport="stdio"):
                     yield from references(json.loads(value))
                 except json.JSONDecodeError:
                     pass
+        def tool_value(reply):
+            if isinstance(reply.get('structuredContent'), dict):
+                return reply['structuredContent']
+            for item in reply.get('content', []):
+                if isinstance(item.get('text'), str):
+                    try:
+                        return json.loads(item['text'])
+                    except json.JSONDecodeError:
+                        pass
+            raise AssertionError(reply)
         path = next(references(found)) if safe else 'answer.md'
         arguments = {'path': path} if safe else {'path': path, 'section': 'Specific'}
         opened = request('tools/call', {'name': 'read', 'arguments': arguments})
         assert not opened.get('isError') and 'transportparameter' in json.dumps(opened), opened
         if safe:
             assert 'answer.md' not in json.dumps(opened), opened
+            replay = tool_value(request('tools/call', {'name': 'read', 'arguments': arguments}))
+            assert replay.get('error') == 'invalid-or-expired-reference', replay
+            found_again = request('tools/call', {'name': 'search', 'arguments': {'query': 'transportparameter'}})
+            next_ref = next(references(found_again))
+            exhausted = tool_value(request('tools/call', {'name': 'read', 'arguments': {'reference': next_ref}}))
+            assert exhausted.get('error') == 'restricted-budget-exhausted', exhausted
+            assert 'answer.md' not in json.dumps(exhausted), exhausted
         record = {'descriptor': descriptor, 'transport': transport, 'tools': sorted(names),
                   'searchPassed': True, 'readPassed': True, 'liveProvider': False}
+        if safe:
+            record['singleUseAndCumulativeReadQuotaPassed'] = True
         if not safe:
-            def tool_value(reply):
-                if isinstance(reply.get('structuredContent'), dict):
-                    return reply['structuredContent']
-                for item in reply.get('content', []):
-                    if isinstance(item.get('text'), str):
-                        try:
-                            return json.loads(item['text'])
-                        except json.JSONDecodeError:
-                            pass
-                raise AssertionError(reply)
             for tool, args in [('open', {'path': 'answer.md'}),
                                ('navigate', {'path': 'answer.md', 'section': 'Specific'}),
                                ('related', {'path': 'answer.md', 'limit': 2})]:
@@ -198,6 +208,7 @@ with tempfile.TemporaryDirectory(prefix='wiki-v2-transport-') as temporary:
                       + json.dumps({'backend': 'fs', 'root': str(root), 'access': 'rw', 'wikiretrievalv2': True})
                       + ',function(){});try{var r=m.reindex();if(!r.ok)throw new Error(stringify(r))}finally{m.close()}')
     subprocess.run(['oaf', '-f', str(script)], cwd=REPO, check=True, capture_output=True, text=True)
-    records = [run_server(name, root, work, transport) for transport in ['stdio', 'http']
+    transports = os.getenv('WIKI_TRANSPORTS', 'stdio,http').split(',')
+    records = [run_server(name, root, work, transport) for transport in transports
                for name in ['mcp-wiki.yaml', 'mcp-wiki-safe.yaml']]
     print('TRANSPORT=' + json.dumps({'results': records, 'liveProvider': False}))

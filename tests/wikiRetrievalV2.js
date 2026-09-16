@@ -452,6 +452,64 @@
       ow.test.assert(applicable.evidence[0].path,"version.md","version applicability precedes editorial timestamps")
     } finally { if(root)root.close(); mounts.forEach(function(m){m.close()}); io.rm(dir) }
   }
+  exports.testFederatedAliasAndPermissionBoundary = function() {
+    var dir = temporary(), root, remote
+    try {
+      io.mkdir(dir + "/primary"); io.mkdir(dir + "/shared")
+      root = make(dir + "/primary")
+      remote = make(dir + "/shared")
+      remote.write("same.md", {title:"Private alias"}, "# Answer\naliaspermissionparameter is present here.")
+      ow.test.assert(remote.reindex().ok, true, "alias fixture has a serving generation")
+      ow.test.assert(root.reindex().ok, true, "primary fixture has a serving generation")
+      ow.test.assert(root.attach("first", {root:dir+"/shared",backend:"fs"}).ok, true, "first alias attached")
+      ow.test.assert(root.attach("second", {root:dir+"/shared",backend:"fs"}).ok, true, "second alias attached")
+      var aliased = root.retrieve("aliaspermissionparameter", {wiki:["first","second"],chunks:2,maxCandidates:4})
+      ow.test.assert(aliased.evidence.map(function(e) {return e.path}).sort().join(","), "@first/same.md,@second/same.md", "selected aliases keep separate mount-qualified evidence identity")
+      ow.test.assert(root.retrieve("aliaspermissionparameter", {wiki:"first"}).evidence[0].path, "@first/same.md", "explicit alias scope cannot return another alias")
+      ow.test.assert(root.retrieve("aliaspermissionparameter", {wiki:"primary"}).evidence.length, 0, "primary scope cannot return aliased evidence")
+      ow.test.assert(root.agenticSearch("aliaspermissionparameter", {wiki:["first","first"]}).error, "duplicate-wiki", "conflicting explicit selectors are rejected")
+
+      var engine = root._mounts.filter(function(m) {return m.name === "first"})[0].manager._retrievalV2
+      var slowQuery = engine._query
+      engine._query = function() {java.lang.Thread.sleep(30);return slowQuery.apply(this,arguments)}
+      try {
+        var slow = root.agenticSearch("aliaspermissionparameter", {wiki:["first","second"],maxMillis:20})
+        ow.test.assert(slow.outcome, "partial", "a slow selected mount cannot claim complete federation")
+        ow.test.assert(slow.sources[1].status, "omitted", "later mount is honestly omitted after request deadline")
+        ow.test.assert(slow.budget.used.queries <= slow.budget.limits.maxQueries, true, "slow mount uses the request-wide query budget")
+      } finally {engine._query = slowQuery}
+      var originalRank = engine._rank, originalStamp = engine._stamp, permissionChecks = 0, revoked = false
+      engine._stamp = function(path) {permissionChecks++; return revoked ? __ : originalStamp.call(this, path)}
+      engine._rank = function(hit, query) {var ranked = originalRank.call(this, hit, query); revoked = true; return ranked}
+      try {
+        var denied = root.agenticSearch("aliaspermissionparameter", {wiki:"first",limit:1})
+        ow.test.assert(denied.results.length, 0, "revocation after candidate discovery cannot disclose indexed search metadata")
+        ow.test.assert(denied.outcome, "partial", "revoked search reports partial coverage")
+        ow.test.assert(denied.sources[0].status, "partial", "revoked source status agrees with request outcome")
+        ow.test.assert(denied.stopReasons.indexOf("stale-or-revoked-evidence") >= 0, true, "revoked search reports bounded reason")
+        ow.test.assert(permissionChecks >= 2, true, "search rechecks source permission before output")
+      } finally {engine._rank = originalRank;engine._stamp = originalStamp}
+    } finally {if(root)root.close();if(remote)remote.close();io.rm(dir)}
+  }
+  exports.testFederatedRetryBudget = function() {
+    var dir = temporary(), wm
+    try {
+      wm = make(dir)
+      wm.write("answer.md", {title:"Answer"}, "# Answer\nretrybudgetparameter is available.")
+      ow.test.assert(wm.reindex().ok, true, "retry fixture publishes a predecessor")
+      wm.write("answer.md", {title:"Answer"}, "# Answer\nretrybudgetparameter is still available.")
+      ow.test.assert(wm.reindex().ok, true, "retry fixture publishes a current generation")
+      var engine = wm._retrievalV2, originalQuery = engine._query, calls = 0
+      engine._query = function() {calls++;if(calls === 1)throw new Error("catalogue-shard-integrity-failure");return originalQuery.apply(this,arguments)}
+      try {
+        var capped = wm.agenticSearch("retrybudgetparameter", {maxQueries:1})
+        ow.test.assert(calls, 1, "predecessor retry cannot bypass the request query budget")
+        ow.test.assert(capped.outcome, "partial", "exhausted retry returns partial coverage")
+        ow.test.assert(capped.stopReasons.indexOf("query-budget") >= 0, true, "exhausted retry exposes a bounded budget reason")
+        ow.test.assert(capped.budget.used.queries, 1, "failed first query remains charged")
+      } finally {engine._query = originalQuery}
+    } finally {if(wm)wm.close();io.rm(dir)}
+  }
   exports.testRestrictedPassages = function() {
     load("mini-a-mcp-wiki.js")
     ow.test.assert(__miniAMcpWikiSafeChars("😀😀x",3),"😀","restricted UTF-16 cap does not split or overallocate surrogate pairs")
