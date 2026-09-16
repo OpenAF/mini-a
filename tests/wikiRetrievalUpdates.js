@@ -24,12 +24,19 @@ try {
   report.sharedBlockStore = manager._retrievalV2.config.sharedBlockStore
   var started = clock(), built = manager.reindex(); if (!built.ok) throw new Error(stringify(built)); report.buildMillis = clock() - started
   manager.retrieve("parameter0") // warm serving catalogue and reader
+  // Include the complete build call, including finally/maintenance work, in
+  // the scaling proof rather than only the routed transaction's counters.
+  var engine = manager._retrievalV2, fullResolutions = 0, reclamationRuns = 0
+  var resolveCatalogue = engine._resolveCatalogue, reclaimBlocks = engine.reclaimSharedBlocks
+  engine._resolveCatalogue = function() { fullResolutions++; return resolveCatalogue.apply(this, arguments) }
+  engine.reclaimSharedBlocks = function() { reclamationRuns++; return reclaimBlocks.apply(this, arguments) }
   for (var s = 0; s < samples; s++) {
+    fullResolutions = 0; reclamationRuns = 0
     var before = manager._retrievalV2.metrics.parsedPages; started = clock()
     var changed = manager.write("page-" + s + ".md", { title: "Updated " + s }, "# Update\nreplacementparameter" + s + " is current.")
     var elapsed = clock() - started, serving = manager._lastServingUpdate
     if (!changed.ok || !serving.ok || manager.retrieve("replacementparameter" + s).evidence.length !== 1) throw new Error("incremental update not serving current evidence")
-    report.observations.push({ millis: elapsed, parsedPages: manager._retrievalV2.metrics.parsedPages - before, work: serving.updateWork || null })
+    report.observations.push({ fullCatalogueResolutions: fullResolutions, reclamationRuns: reclamationRuns, millis: elapsed, parsedPages: manager._retrievalV2.metrics.parsedPages - before, work: serving.updateWork || null })
   }
   var times = report.observations.map(function(o){return o.millis}).sort(function(a,b){return a-b}), percentile = function(f){return times[Math.min(times.length-1, Math.ceil(times.length*f)-1)]}
   report.latency = {p50:percentile(0.5),p95:percentile(0.95),p99:percentile(0.99)}; report.disk = disk(dir); report.memoryUsed = Number(java.lang.Runtime.getRuntime().totalMemory()-java.lang.Runtime.getRuntime().freeMemory())

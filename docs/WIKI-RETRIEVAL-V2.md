@@ -41,7 +41,7 @@ and rejects unknown keys, invalid booleans and non-positive/non-integer numeric 
 
 | Setting | Default | Bound/meaning |
 | --- | ---: | --- |
-| linkImmutableFiles | false | Explicit immutable hard-link reuse; falls back to copy on unsupported filesystems |
+| linkImmutableFiles | true | Reuse immutable index files through hard links; false forces copies; unsupported links fall back to copies |
 | sharedBlockStore | false | Opt-in local immutable block store; reclamation uses retained-generation reachability |
 | passageChars | 1400 | 64–16000 UTF-16 units; soft structural target |
 | cacheBytes | 8388608 | FIFO immutable raw-block cache, at most 268435456 UTF-8 bytes per manager |
@@ -315,15 +315,20 @@ still inspect a retired page; it cannot ground new retrieval evidence or
 derivatives.
 
 Writes/deletes rebuild affected passage records only when a serving pointer exists.
-Incremental publication uses portable copies by default. Setting
-`wikiretrievalconfig="(linkImmutableFiles: true)"` reuses immutable revision blocks
-and Lucene segment/commit files through hard links where supported, with a copy
-fallback. The measured local hard-link latency regression makes this an operator
-choice, not a default optimisation. Existing
-linked blocks are never overwritten, including same-revision updates.
+Incremental publication reuses immutable Lucene segment/commit files through
+hard links by default, with a portable copy fallback when links are unsupported.
+Set `wikiretrievalconfig="(linkImmutableFiles: false)"` to force copies. Unchanged
+revision blocks are referenced through their owner generation rather than staged
+again. Linked artifacts are never overwritten, including same-revision updates.
+This avoids retained-index byte copies where links work; it does not remove
+per-file metadata/force operations, Lucene merge costs or fallback copying.
 `wikiretrievalconfig="(sharedBlockStore: true)"` retains revision blocks in an
 opt-in local content-addressed store. Reclamation marks current, previous and
 pinned catalogue lineage under the publication lock and re-marks before unlink.
+Reclamation runs after an explicit full reindex, or an explicit maintenance call
+to the serving engine's `reclaimSharedBlocks()`. Ordinary incremental writes never
+run the full reachability sweep. Unreachable blocks and abandoned generations
+may therefore consume disk until maintenance; read-only readers do not reclaim.
 Bundles materialize referenced blocks into a self-contained schema-3 base.
 Incremental publication uses affected-key routed catalogue deltas; unchanged
 bindings retain their validated immutable owner generation. Publication validates

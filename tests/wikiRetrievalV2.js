@@ -893,7 +893,8 @@
   exports.testImmutableIncrementalGenerations = function() {
     var dir = temporary(), wm, old
     try {
-      wm=make(dir,{wikiretrievalconfig:{passageChars:256,linkImmutableFiles:true}})
+      wm=make(dir,{wikiretrievalconfig:{passageChars:256}})
+      ow.test.assert(wm._retrievalV2.config.linkImmutableFiles,true,"immutable file reuse is enabled by default")
       wm.write("changed.md",{title:"Changed"},"# Changed\noldgenerationparameter is supported.")
       wm.write("stable.md",{title:"Stable"},"# Stable\nstableparameter remains valid. See [guidance](changed.md).")
       ow.test.assert(wm.reindex().ok,true,"immutable reuse fixture published")
@@ -908,6 +909,7 @@
       ow.test.assert(wm._lastServingUpdate.updateWork.retiredBlockUnlinksAvoided,1,"never-staged retired block requires no unlink syscall")
       ow.test.assert(wm._lastServingUpdate.updateWork.retiredBlockBytesNotStaged,original.files.filter(function(file){return file.path===old.catalog.pages["changed.md"].locator})[0].bytes,"avoided retired block bytes use the pinned manifest")
       ow.test.assert(wm._lastServingUpdate.updateWork.linkedFiles>0,true,"immutable generation files reused with actual hard links")
+      ow.test.assert(wm._lastServingUpdate.updateWork.copiedBytes,0,"supported hard links avoid all retained index byte copies")
       ow.test.assert(wm._lastServingUpdate.updateWork.catalogueKeysCopied,0,"incremental publication copies no prior catalogue keys")
       ow.test.assert(wm._lastServingUpdate.updateWork.catalogueKeyLookups<20,true,"incremental publication resolves only its affected routed keys")
       ow.test.assert(wm._lastServingUpdate.updateWork.bindingBlockReads,1,"incremental semantic validation materializes only the changed page")
@@ -932,6 +934,15 @@
       wm._retrievalV2._linkFile=link
       ow.test.assert(fallback.copiedFiles,1,"unsupported links use copy fallback")
       ow.test.assert(global.MiniAWikiRetrievalV2.digest(dir+"/fallback"),record.checksum,"fallback copy preserves exact bytes")
+      var fallbackUpdate
+      try {
+        wm._retrievalV2._linkFile=function(){throw new java.lang.UnsupportedOperationException("fixture unsupported index links")}
+        fallbackUpdate=wm._retrievalV2.build(["stable.md"])
+      } finally {wm._retrievalV2._linkFile=link}
+      ow.test.assert(fallbackUpdate.ok,true,"unsupported index links still publish through portable copies")
+      ow.test.assert(fallbackUpdate.updateWork.copiedBytes>0,true,"index-copy fallback reports retained bytes")
+      ow.test.assert(fallbackUpdate.updateWork.linkedFiles,0,"unsupported links do not claim physical reuse")
+      original.files.forEach(function(file){ow.test.assert(global.MiniAWikiRetrievalV2.digest(old.dir+"/"+file.path),file.checksum,"fallback update preserves pinned original bytes: "+file.path)})
       // Identical raw content must not truncate a hard-linked old block.
       var writeServing=wm._retrievalV2._writeServingFile, sameRevision, parsedBeforeReuse=wm._retrievalV2.metrics.parsedPages
       try {
@@ -1228,7 +1239,7 @@
   exports.testDirectDerivedPostings = function() {
     var dir=temporary(), wm
     try {
-      wm=make(dir)
+      wm=make(dir,{wikiretrievalconfig:{linkImmutableFiles:false}})
       wm.write("a.md",{title:"A"},"# Links\n[one](stable.md) [two](stable.md) [other](other.md)")
       wm.write("b.md",{title:"B"},"# Links\n[other](other.md)")
       wm.write("stable.md",{title:"Stable"},"# Stable\nreference")
@@ -1254,8 +1265,7 @@
       wm.write("a.md",{title:"A changed"},"# Links\n[other](other.md)")
       ow.test.assert(wm.backlinks("stable.md").count,0,"old inbound posting removed directly")
       ow.test.assert(wm.backlinks("other.md").count,2,"unrelated inbound posting preserved")
-      ow.test.assert(wm._lastServingUpdate.updateWork.copiedFiles>0,true,"portable copy remains default after measured link regression")
-      ow.test.assert(wm._lastServingUpdate.updateWork.copiedFiles>0,true,"portable copy remains default after measured link regression")
+      ow.test.assert(wm._lastServingUpdate.updateWork.copiedFiles>0,true,"explicit linkImmutableFiles=false retains portable copying")
       ow.test.assert(wm._lastServingUpdate.updateWork.reverseTargetsVisited,3,"only old and new outgoing targets processed")
       ow.test.assert(wm._lastServingUpdate.updateWork.legacyCataloguePagesVisited,0,"current schema avoids unrelated page enumeration for postings")
       var snapshot=wm._retrievalV2.acquire(), locator=snapshot.catalog.pages["x.md"].locator
@@ -1631,23 +1641,32 @@
   exports.testPublicationScopedValidation = function() {
     var dir=temporary(), wm
     try {
-      wm=make(dir,{wikiretrievalconfig:{passageChars:128}})
+      wm=make(dir,{wikiretrievalconfig:{passageChars:128,sharedBlockStore:true}})
       wm.write("changed.md",{title:"Changed"},"# Changed\nfirst scopedpublicationparameter value.")
       wm.write("unchanged.md",{title:"Unchanged"},"# Unchanged\nunchangedpublicationparameter remains valid.")
       ow.test.assert(wm.reindex().ok,true,"scoped validation fixture creates its validated parent")
       var engine=wm._retrievalV2, complete=engine._validate, resolve=engine._resolveCatalogue, blockRecords=engine._blockRecords
+      var reclaim=engine.reclaimSharedBlocks, sweeps=0, resolutions=0
+      engine.reclaimSharedBlocks=function(){sweeps++;return reclaim.apply(this,arguments)}
       engine._validate=function(){throw new Error("full-closure-validation-must-not-run-at-activation")}
-      engine._resolveCatalogue=function(){throw new Error("prior-catalogue-must-not-materialize")}
+      engine._resolveCatalogue=function(){resolutions++;throw new Error("prior-catalogue-must-not-materialize")}
       engine._blockRecords=function(){throw new Error("prior-block-map-must-not-materialize")}
       wm.write("changed.md",{title:"Changed"},"# Changed\nsecond scopedpublicationparameter value.")
       var published=engine.build(["changed.md"])
       engine._validate=complete;engine._resolveCatalogue=resolve;engine._blockRecords=blockRecords
+      ow.test.assert(sweeps,0,"shared-store incremental writes never invoke synchronous reclamation")
+      ow.test.assert(resolutions,0,"complete incremental call performs no full catalogue resolution, including cleanup")
       ow.test.assert(published.ok,true,"incremental activation validates changed bindings without a full catalogue closure")
       ow.test.assert(published.updateWork.bindingBlockReads<=1,true,"activation performs a bounded changed-binding proof rather than reading the parent closure")
       ow.test.assert(published.updateWork.catalogueKeysCopied,0,"incremental activation copies no prior catalogue records")
       ow.test.assert(published.updateWork.catalogueKeyLookups<20,true,"incremental activation performs bounded routed-key lookups")
       ow.test.assert(wm.retrieve("scopedpublicationparameter").evidence.length,1,"scoped publication serves the changed verified evidence")
       ow.test.assert(wm.retrieve("unchangedpublicationparameter").evidence.length,1,"parent-bound unchanged evidence remains readable after scoped publication")
+      var stray=engine._sharedBlockPath("blocks/0000000000000000000000000000000000000000.md")
+      io.writeFileString(stray,"deferred maintenance residue")
+      ow.test.assert(wm.reindex().ok,true,"explicit full reindex remains a maintenance boundary")
+      ow.test.assert(sweeps,1,"explicit full reindex runs reclamation once")
+      ow.test.assert(io.fileExists(stray),false,"full reindex reclaims deferred unreachable blocks")
     } finally {if(wm)wm.close();io.rm(dir)}
   }
   exports.testRoutedCompactionBoundary = function() {

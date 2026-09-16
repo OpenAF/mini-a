@@ -484,9 +484,10 @@ process-kill, power-loss or remote-provider tests; those remain unverified.
 | reuse | 814.33 | 1031.31 | 39637277 / 25017850 |
 
 The default improves p50 in this run but worsens the measured tail; no uniform
-speedup is claimed. Hard links worsen local update latency, so they are disabled
-by default even when v2 is enabled. Use `linkImmutableFiles: true` only after
-measuring the intended filesystem. The hard-link record was measured with the
+speedup is claimed. At this historical revision, hard links worsened local
+update latency and were disabled by default. The 2026-09-16 update-path correction
+below supersedes that default after generation-local block staging was removed.
+Measure the intended filesystem when choosing the explicit copy override. The hard-link record was measured with the
 same publication behavior before the option was added; the option changes only
 which reuse branch is selected. End heap and all per-update work records remain
 in the machine-readable JSON. This corpus has no outgoing links; functional
@@ -1248,7 +1249,9 @@ copies and immutable hard links measures p50 507.40 versus 741.82 ms and p95/p99
 644.88 versus 807.05 ms. Hard links reduce unique file bytes from 41,011,542 to
 26,393,213 (POSIX identity and file-length estimator, excluding allocation and
 metadata), while apparent retained fixture bytes remain about 41 MB. This
-reproduces the earlier latency regression, so portable copies remain the default.
+reproduced the earlier latency regression, so portable copies remained the default
+at that revision. The update-path correction below supersedes that choice; these
+measurements include an older block-staging architecture.
 Records are `updates-1000-current-{copies,links}.json`. The harness now accepts
 both explicit `WIKI_BENCH_LINKS=false` and `true` and records the effective setting;
 no setting is silently inferred from the benchmark label.
@@ -2247,3 +2250,43 @@ transport/descriptor smoke combinations passed.
 
 Local smoke does not measure broad concurrent transport load, a live provider,
 or malformed frames rejected before a recognized MCP tool is dispatched.
+
+## Area 1 update-path correction — 2026-09-16
+
+Ordinary shared-store updates no longer run synchronous full-catalogue
+reclamation. Full reindex or explicit maintenance retains the journalled sweep.
+Default immutable index staging now uses hard links, with unsupported-link
+fallback and an explicit `linkImmutableFiles:false` copy override.
+
+`PublicationScopedValidation` now exercises the shared store and counts calls
+across the complete update, including cleanup, so swallowed cleanup failures
+cannot hide a full-catalogue scan. It also proves full reindex reclaims an
+unreachable residue. `ImmutableIncrementalGenerations` checks default zero-copy
+index staging, actual unsupported-index-link fallback, and pinned-generation
+checksums. `DirectDerivedPostings` retains explicit-copy coverage.
+
+The v2 assertion runner passed **1,530 assertions across 46 functions**, including
+the twelve abrupt-JVM checkpoints, with no failures. `ojob tests/wiki.yaml`
+passed **197 functions** with no reported failures.
+
+The source-bound local-FS 1,000-page/three-update record is
+[`updates-1000-deferred-reclamation-links.json`](../tests/fixtures/wiki-retrieval-v2/updates-1000-deferred-reclamation-links.json).
+Each update parsed one page, copied zero catalogue keys, made six routed-key
+lookups, performed zero full catalogue resolutions and zero reclamation calls,
+and copied zero retained index bytes. Retained index links numbered 4, 8 and 11.
+The observed p50 was 123.52 ms and p95/p99 198.68 ms; three samples under local
+suite activity do not establish tail latency or a matched speedup. The benchmark
+now records complete-update resolution and reclamation call counts itself.
+
+Area 1 end-to-end scaling acceptance remains open. Metadata/force operations,
+Lucene merges, copy fallback and configured full bundle export can still scale;
+explicit maintenance and deferred disk retention require separate measurement.
+No new provider, network-filesystem or physical power-loss proof is claimed.
+
+Reproduction commands from the checkout root:
+
+```sh
+WIKI_COUNT_SUITE=wikiRetrievalV2 oaf -f tests/wikiRetrievalAssertions.js
+ojob tests/wiki.yaml
+WIKI_BENCH_PAGES=1000 WIKI_BENCH_SAMPLES=3 WIKI_BENCH_SHARED_BLOCKS=true oaf -f tests/wikiRetrievalUpdates.js
+```

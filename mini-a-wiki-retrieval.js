@@ -33,7 +33,7 @@ MiniAWikiRetrievalV2.config = function(value) {
   if (isString(value)) value = af.fromJSSLON(value)
   if (isUnDef(value)) value = {}
   if (!isMap(value)) throw new Error("wikiretrievalconfig must be a SLON/JSON object")
-  var defaults = { passageChars: 1400, cacheBytes: 8388608, maxArtifactBytes: 268435456, maxArtifactFiles: 100000, maxMillis: 15000, telemetryFlushQueries: 16, telemetryRetentionDays: 30, linkImmutableFiles: false, sharedBlockStore: false, telemetrySampleQueries: false }
+  var defaults = { passageChars: 1400, cacheBytes: 8388608, maxArtifactBytes: 268435456, maxArtifactFiles: 100000, maxMillis: 15000, telemetryFlushQueries: 16, telemetryRetentionDays: 30, linkImmutableFiles: true, sharedBlockStore: false, telemetrySampleQueries: false }
   Object.keys(value).forEach(function(k) {
     if (k === "bundlePath") { if (!isString(value[k]) || !value[k].trim().length || value[k].length > 4096) throw new Error("Invalid wikiretrievalconfig option: " + k); defaults[k] = value[k]; return }
     if (k === "linkImmutableFiles" || k === "sharedBlockStore" || k === "telemetrySampleQueries") { if (!isBoolean(value[k])) throw new Error("Invalid wikiretrievalconfig option: " + k); defaults[k] = value[k]; return }
@@ -1454,7 +1454,7 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
     }
     this._atomic(pointerPath, { schema: 1, generation: generation, checksum: MiniAWikiRetrievalV2.digest(dir + "/manifest.json") }, true)
     activated = true
-    cleanupAfterActivation = this.config.sharedBlockStore === true
+    cleanupAfterActivation = this.config.sharedBlockStore === true && !isArray(changes)
     finishStage("activation")
     this._publicationCheckpoint("pointer-activated", dir)
     if(old){this.release(old);old=null}
@@ -1472,9 +1472,10 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
     try { if (analyzer) this._closeAnalyzer(analyzer) } catch(ignoreA) {}
     try { if (old) this.release(old) } catch(ignoreO) {}
     try { if (fileLock) fileLock.release(); if (channel) channel.close() } catch(ignoreL) {}
-    // Cleanup is deliberately outside the publication lock and never changes
-    // activation success. The sweeper acquires the same lock, re-marks every
-    // candidate and leaves a recovery journal on any uncertainty.
+    // Full reindex is an explicit maintenance boundary. Incremental updates
+    // must not pay for full-catalogue reachability scans in this finally block.
+    // Deferred residue remains until full reindex or explicit reclamation.
+    // The sweeper reacquires the publication lock and preserves recovery roots.
     if (cleanupAfterActivation) try { this.reclaimSharedBlocks() } catch(ignoreCleanup) {}
   }
 }
