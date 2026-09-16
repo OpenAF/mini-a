@@ -142,6 +142,53 @@
       io.rm(dir)
     }
   }
+  exports.testListStructuralSupport = function() {
+    var dir = temporary(), wm
+    try {
+      wm = make(dir)
+      var raw = "# Procedure\r\nWarning: Back up the configuração before these steps.\r\n\r\n" + new Array(50).join("- ordinary setup step with detail\r\n") + "- listcontextparameter enables the final setting.\r\n"
+      wm.write("list.md", { title: "Long procedure" }, raw)
+      ow.test.assert(wm.reindex().ok, true, "long list fixture publishes")
+      raw = wm.read("list.md").raw
+      var out = wm.retrieve("listcontextparameter", { chunks: 1, maxBytes: 12000 }), evidence = out.evidence[0]
+      ow.test.assert(evidence.structure.kind, "list", "long list is one explicit fragmented structure")
+      ow.test.assert(evidence.structure.fragment, true, "late list item is a fragment")
+      ow.test.assert(evidence.supportingContext.length, 1, "late list item retains its warning")
+      ow.test.assert(evidence.supportingContext[0].role, "instruction-context", "warning has a distinct support role")
+      ow.test.assert(evidence.supportingContext[0].content.indexOf("Back up the configuração") >= 0, true, "warning text is preserved")
+      ow.test.assert(raw.substring(evidence.supportingContext[0].charStart, evidence.supportingContext[0].charEnd), evidence.supportingContext[0].content, "list support keeps exact CRLF and Unicode positions")
+      var limited = wm.retrieve("listcontextparameter", { chunks: 1, maxQueries: 1 })
+      ow.test.assert(limited.outcome, "partial", "missing list support is explicit under query budget")
+      ow.test.assert(limited.evidence[0].contextOmitted, "structural-context-budget-or-unavailable", "list warning is never silently dropped")
+      wm.write("separate.md", { title: "Separate" }, "# Previous\nWarning: Applies only here.\n# Next\n- unrelatedlistparameter is independent.\n")
+      ow.test.assert(wm.retrieve("unrelatedlistparameter", { chunks: 1 }).evidence[0].supportingContext, __, "list context does not cross headings")
+      wm.write("adjacent.md", { title: "Adjacent" }, "# Steps\nWarning: Only the first list.\n\n- first item\n- another item\n\nIndependent explanation.\n\n- secondlistparameter belongs to the second list.\n")
+      ow.test.assert(wm.retrieve("secondlistparameter", { chunks: 1 }).evidence[0].supportingContext, __, "warning from a completed list does not attach to a later list")
+    } finally { if (wm) wm.close(); io.rm(dir) }
+  }
+  exports.testApplicabilityMaintenanceBoundary = function() {
+    var dir = temporary(), wm, pin
+    try {
+      wm = make(dir)
+      wm.write("versions.md", { title: "Versions", applicability: { product: "mini-a", version: ["release-A", "release.C"] } }, "# Versions\narrayversionparameter is available here.")
+      wm.write("unknown.md", { title: "Unknown" }, "# Unknown\narrayversionparameter has unknown applicability.")
+      wm.write("future.md", { title: "Future", validity: { from: "9999-01-01" } }, "# Future\nfutureclaimparameter is not effective yet.")
+      ow.test.assert(wm.reindex().ok, true, "applicability matrix publishes")
+      var matching = wm.retrieve("arrayversionparameter", { applicability: { product: "mini-a", version: "release.C" } })
+      ow.test.assert(matching.evidence.length, 1, "explicit exact array version selects only a confirmed match")
+      ow.test.assert(matching.evidence[0].path, "versions.md", "unknown applicability does not satisfy an explicit constraint")
+      ow.test.assert(wm.retrieve("arrayversionparameter", { applicability: { version: "release-B" } }).evidence.length, 0, "version strings are matched exactly without guessed ordering")
+      var support = matching.evidence[0].passage
+      ow.test.assert(wm.knowledgeRecordDerivative("fact", "array-claim", { claimKey: "array-overlap", value: 1, applicability: { product: "mini-a", version: ["release-A", "release.C"] } }, [support]).ok, true, "array applicability can ground a recorded claim")
+      ow.test.assert(wm.knowledgeRecordDerivative("fact", "scalar-claim", { claimKey: "array-overlap", value: 2, applicability: { product: "mini-a", version: "release.C" } }, [support]).ok, true, "scalar applicability can ground a peer claim")
+      ow.test.assert(wm.knowledgeConflictCandidates({ paths: ["versions.md"] }).candidates.length, 1, "overlapping array and scalar versions remain reviewable")
+      pin = wm._retrievalV2.acquire()
+      var page = pin.catalog.pages["future.md"], passage = pin.catalog.passages[page.passageIds[0]]
+      var ref = { page: page.path, pageId: page.pageId, wikiId: pin.catalog.wikiId, revision: page.revision, passageId: passage.passageId, charStart: passage.charStart, charEnd: passage.charEnd }
+      ow.test.assert(wm.knowledgeRecordDerivative("fact", "future", { claimKey: "future", value: true }, [ref], { dryRun: true }).error, "stale-support", "not-yet-effective source cannot ground a derivative")
+      ow.test.assert(wm.knowledgeDerivativeCandidates({ paths: ["future.md"] }).candidates.length, 0, "failed registration creates no maintenance dependency")
+    } finally { if (pin) wm._retrievalV2.release(pin); if (wm) wm.close(); io.rm(dir) }
+  }
   exports.testStructuralContext = function() {
     var dir=temporary(), wm, portugueseManager
     try {
@@ -228,8 +275,8 @@
       var fencedLabel=parser.parse("fake-warning.md","```text\nWarning: example content\n```\n\n```sh\nfakewarningparameter\n```",128)
       ow.test.assert(fencedLabel.passages.some(function(p){return isDef(p.contextRange)}),false,"warning-looking examples inside fences do not become prerequisites")
       var currentGeneration=wm._retrievalV2.acquire(), legacyManifest=clone(currentGeneration.manifest), legacyError=""
-      try {legacyManifest.parser=2;try{wm._retrievalV2._validate(currentGeneration.dir,legacyManifest)}catch(e){legacyError=String(e.message||e)}} finally {wm._retrievalV2.release(currentGeneration)}
-      ow.test.assert(legacyError,"incompatible-generation","parser2 artifacts require an explicit writable build for instruction context")
+      try {legacyManifest.parser=5;try{wm._retrievalV2._validate(currentGeneration.dir,legacyManifest)}catch(e){legacyError=String(e.message||e)}} finally {wm._retrievalV2.release(currentGeneration)}
+      ow.test.assert(legacyError,"incompatible-generation","parser5 artifacts require an explicit writable build for list context")
       wm.write("tight-support.md",{title:"Tight support"},"# Apply\nWarning: "+new Array(90).join("careful ")+"\n\n```sh\ntightcontextparameter --apply\n```")
       var tight=wm.retrieve("tightcontextparameter",{chunks:1,maxBytes:3000})
       ow.test.assert(tight.evidence.length,1,"tight context budget preserves the available instruction")
@@ -1324,6 +1371,7 @@
       ow.test.assert(reader.knowledgeRecordDerivative("fact", "blocked", {}, [ref]).error, "wiki-read-only", "read-only cannot register authority")
       var state = wm.knowledgeLoadState(); state.facts.claim.passageSupports[0].textHash = new Array(41).join("0"); wm.knowledgeSaveState(state)
       ow.test.assert(wm.knowledgeGetDerivative("fact", "claim").error, "invalid-provenance", "disclosure checks actual support hash")
+      ow.test.assert(wm.knowledgeDerivativeCandidates({ paths: ["source.md"] }).candidates[0].reason, "invalid-provenance", "targeted maintenance checks the same exact support hash")
       ow.test.assert(wm.knowledgeRecordDerivative("fact", "claim", { text: "Supported claim." }, [ref]).ok, true, "valid support registration or replacement")
       state = wm.knowledgeLoadState(); state.facts.claim.passageSupports = [null]; wm.knowledgeSaveState(state)
       ow.test.assert(wm.knowledgeGetDerivative("fact", "claim").error, "invalid-provenance", "malformed support rejected explicitly")
@@ -1809,6 +1857,10 @@
       wm.write("review-status.md",{title:"Reviewed",status:"review"},"# Current\nreviewstatusparameter remains eligible as declared review metadata.")
       var reviewed=wm.retrieve("reviewstatusparameter")
       ow.test.assert(reviewed.evidence.length,1,"ordinary review status remains descriptive rather than implicit retirement")
+      wm.write("rejected-status.md",{title:"Rejected",status:"rejected"},"# Rejected\nrejectedstatusparameter is explicitly ineligible.")
+      ow.test.assert(wm.retrieve("rejectedstatusparameter").evidence.length,0,"explicit rejected status excludes answer evidence")
+      wm.write("withdrawn-status.md",{title:"Withdrawn",status:"withdrawn"},"# Withdrawn\nwithdrawnstatusparameter is explicitly ineligible.")
+      ow.test.assert(wm.retrieve("withdrawnstatusparameter").evidence.length,0,"explicit withdrawn status excludes answer evidence")
       ow.test.assert(wm.open("older.md").headings.length>0,true,"trusted navigation can inspect retired pages independently of answer evidence")
     }finally{if(snapshot)wm._retrievalV2.release(snapshot);if(wm)wm.close();io.rm(dir)}
   }
@@ -1882,6 +1934,10 @@
       ow.test.assert(old.provenance.sourceRevision, "release-A", "trusted evidence carries an explicit source revision")
       ow.test.assert(wm.knowledgeRecordDerivative("fact", "old-limit", { claimKey: "default-limit", value: 10, applicability: old.applicability }, [old.passage]).ok, true, "operator grounds old version claim")
       ow.test.assert(wm.knowledgeRecordDerivative("fact", "new-limit", { claimKey: "default-limit", value: 20, applicability: recent.applicability }, [recent.passage]).ok, true, "operator grounds new version claim")
+      ow.test.assert(wm.knowledgeRecordDerivative("fact", "linux-limit", { claimKey: "platform-limit", value: 1, applicability: { product: "mini-a", platform: "linux" } }, [old.passage]).ok, true, "Linux guidance has a grounded support")
+      ow.test.assert(wm.knowledgeRecordDerivative("fact", "mac-limit", { claimKey: "platform-limit", value: 2, applicability: { product: "mini-a", platform: "macos" } }, [recent.passage]).ok, true, "macOS guidance has a grounded support")
+      var claimIndex = wm.knowledgeLoadState().derivativeRegistry.byClaim
+      ow.test.assert(claimIndex["$default-limit"].length, 2, "claim peers are posted for targeted maintenance")
       var before = io.readFileString(wm._knowledgeStatePath()), report = wm._retrievalV2.maintenance({ limit: 5 })
       ow.test.assert(report.conflicts.candidates.length, 1, "bounded report identifies different recorded guidance")
       var conflict = report.conflicts.candidates[0]
@@ -1890,7 +1946,8 @@
       ow.test.assert(conflict.evidence.length, 2, "reviewable disagreement has identifiable revision-bound evidence")
       ow.test.assert(conflict.resolution, "not-automated", "report does not choose source truth")
       ow.test.assert(io.readFileString(wm._knowledgeStatePath()), before, "conflict proposal writes no derivative authority")
-      ow.test.assert(wm.knowledgeConflictCandidates({ paths: ["old.md"] }).candidates.length, 0, "explicit affected scope does not inspect other support pages")
+      ow.test.assert(wm.knowledgeConflictCandidates({ paths: ["old.md"] }).candidates.length, 1, "affected support finds a claim peer through the dependency posting")
+      ow.test.assert(wm.knowledgeConflictCandidates({ paths: ["new.md"] }).candidates.length, 1, "either affected side reaches the same claim peer")
       wm.delete("old.md")
       ow.test.assert(wm.knowledgeConflictCandidates({ limit: 5 }).candidates.length, 0, "retired evidence cannot ground current conflict")
     } finally { if (wm) wm.close(); io.rm(dir) }

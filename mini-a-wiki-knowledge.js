@@ -26,7 +26,7 @@ MiniAWikiKnowledgeBudget.prototype.reserve = function(candidate, input, output) 
 MiniAWikiKnowledgeBudget.prototype.stats = function() { return { limit: this.limit, remaining: this.limit < 0 ? -1 : Math.max(0, this.limit - this.used), estimated_input_tokens: this.estimatedInput, estimated_output_tokens: this.estimatedOutput, calls_attempted: this.attempted, calls_executed: this.executed, calls_deferred: this.deferred.length, deferred: this.deferred } }
 
 MiniAWikiManager.prototype._knowledgeStatePath = function() { return this._getIndexRoot() + "/.mini-a-wiki-state/manifest.json" }
-MiniAWikiManager.prototype._knowledgeEmptyState = function() { return { version: MINI_A_WIKI_KNOWLEDGE.manifest, versions: MINI_A_WIKI_KNOWLEDGE, sources: {}, chunks: {}, pages: {}, dependencies: {}, derivativeRegistry: { byPage: {} }, facts: {}, summaries: { pages: {}, sections: {} }, telemetry: { queries: {}, zero_results: 0 }, updated: new Date().toISOString() } }
+MiniAWikiManager.prototype._knowledgeEmptyState = function() { return { version: MINI_A_WIKI_KNOWLEDGE.manifest, versions: MINI_A_WIKI_KNOWLEDGE, sources: {}, chunks: {}, pages: {}, dependencies: {}, derivativeRegistry: { byPage: {}, byClaim: {}, claimIndexVersion: 0 }, facts: {}, summaries: { pages: {}, sections: {} }, telemetry: { queries: {}, zero_results: 0 }, updated: new Date().toISOString() } }
 MiniAWikiManager.prototype.knowledgeLoadState = function() {
   if (this._access !== "rw" && !io.fileExists(this._knowledgeStatePath())) return this._knowledgeEmptyState()
   if (!io.fileExists(this._knowledgeStatePath())) return this._knowledgeEmptyState()
@@ -187,12 +187,23 @@ MiniAWikiManager.prototype.knowledgeRecordDerivative = function(kind, id, record
   try {
     var state = this.knowledgeLoadState(), map = this._knowledgeDerivativeMap(state, kind)
     if (state._corrupt || !isMap(map) || !isMap(state.derivativeRegistry) || !isMap(state.derivativeRegistry.byPage)) throw new Error("knowledge-state-unavailable")
+    if (kind === "fact" && (state.derivativeRegistry.claimIndexVersion !== 1 || !isMap(state.derivativeRegistry.byClaim))) {
+      state.derivativeRegistry.byClaim = {}
+      Object.keys(state.facts).forEach(function(factId) {
+        var fact = state.facts[factId]
+        if (!isMap(fact) || !isString(fact.claimKey)) return
+        var claimKey = "$" + fact.claimKey
+        if (!state.derivativeRegistry.byClaim[claimKey]) state.derivativeRegistry.byClaim[claimKey] = []
+        state.derivativeRegistry.byClaim[claimKey].push(factId)
+      })
+      state.derivativeRegistry.claimIndexVersion = 1
+    }
     snapshot = engine.acquire(); var pending = engine._pending(), selected = [], seen = {}
     supports.forEach(function(ref) {
       if (!isMap(ref) || !isString(ref.page) || ref.page.startsWith("@") || ref.wiki && ref.wiki !== "primary") throw new Error("nonlocal-support")
       if (ref.wikiId !== snapshot.catalog.wikiId) throw new Error("nonlocal-support")
       var path = self._normalizeRetrievalPath(ref.page), page = snapshot.catalog.pages[path], passage = snapshot.catalog.passages[ref.passageId]
-      if (!page || !passage || passage.path !== path || page.revision !== ref.revision || global.MiniAWikiRetrievalV2.retired(page) || !engine._active(page, pending)) throw new Error("stale-support")
+      if (!page || !passage || passage.path !== path || page.revision !== ref.revision || !engine._constraints(page, {}) || !engine._active(page, pending)) throw new Error("stale-support")
       if (!isNumber(ref.charStart) || !isNumber(ref.charEnd) || !isFinite(ref.charStart) || !isFinite(ref.charEnd) || Math.floor(ref.charStart) !== ref.charStart || Math.floor(ref.charEnd) !== ref.charEnd || ref.charStart < passage.charStart || ref.charEnd > passage.charEnd || ref.charEnd <= ref.charStart) throw new Error("invalid-support-range")
       var raw = engine._body(snapshot, page), key = path + ":" + ref.charStart + ":" + ref.charEnd
       if (seen[key]) return
@@ -207,7 +218,17 @@ MiniAWikiManager.prototype.knowledgeRecordDerivative = function(kind, id, record
       if (list.length) state.derivativeRegistry.byPage[ref.page] = list; else delete state.derivativeRegistry.byPage[ref.page]
       state.dependencies[ref.page] = (state.dependencies[ref.page] || []).filter(function(k) { return k !== key })
     })
+    if (kind === "fact" && isMap(previous) && isString(previous.claimKey)) {
+      var oldClaim = "$" + previous.claimKey
+      state.derivativeRegistry.byClaim[oldClaim] = (state.derivativeRegistry.byClaim[oldClaim] || []).filter(function(value) { return value !== id })
+      if (!state.derivativeRegistry.byClaim[oldClaim].length) delete state.derivativeRegistry.byClaim[oldClaim]
+    }
     map[id] = candidate
+    if (kind === "fact" && isString(candidate.claimKey)) {
+      var claim = "$" + candidate.claimKey
+      if (!isArray(state.derivativeRegistry.byClaim[claim])) state.derivativeRegistry.byClaim[claim] = []
+      if (state.derivativeRegistry.byClaim[claim].indexOf(id) < 0) state.derivativeRegistry.byClaim[claim].push(id)
+    }
     selected.forEach(function(ref) {
       if (!state.derivativeRegistry.byPage[ref.page]) state.derivativeRegistry.byPage[ref.page] = []
       if (state.derivativeRegistry.byPage[ref.page].indexOf(key) < 0) state.derivativeRegistry.byPage[ref.page].push(key)
@@ -227,8 +248,12 @@ MiniAWikiManager.prototype._knowledgeDerivativeStatus = function(record, snapsho
     var ref = record.passageSupports[i]
     if (!isMap(ref) || !isString(ref.page) || !isString(ref.passageId) || !/^[a-f0-9]{40}$/.test(String(ref.textHash)) || !isNumber(ref.charStart) || !isNumber(ref.charEnd) || !isFinite(ref.charStart) || !isFinite(ref.charEnd) || Math.floor(ref.charStart) !== ref.charStart || Math.floor(ref.charEnd) !== ref.charEnd) return { active: false, reason: "invalid-provenance" }
     var page = snapshot.catalog.pages[ref.page], passage = snapshot.catalog.passages[ref.passageId]
-    if (!page || ref.wikiId !== snapshot.catalog.wikiId || ref.pageId !== page.pageId || ref.revision !== page.revision || !passage || passage.path !== ref.page || global.MiniAWikiRetrievalV2.retired(page) || !engine._active(page, pending)) return { active: false, reason: "stale-support", page: ref.page }
+    if (!page || ref.wikiId !== snapshot.catalog.wikiId || ref.pageId !== page.pageId || ref.revision !== page.revision || !passage || passage.path !== ref.page || !engine._constraints(page, {}) || !engine._active(page, pending)) return { active: false, reason: "stale-support", page: ref.page }
     if (ref.charStart < passage.charStart || ref.charEnd > passage.charEnd || ref.charEnd <= ref.charStart) return { active: false, reason: "invalid-provenance" }
+  }
+  for (var j = 0; j < record.passageSupports.length; j++) {
+    var support = record.passageSupports[j], raw = engine._body(snapshot, snapshot.catalog.pages[support.page])
+    if (sha1(raw.substring(support.charStart, support.charEnd)) !== support.textHash) return { active: false, reason: "invalid-provenance", page: support.page }
   }
   return { active: true, reason: "current-support" }
 }
@@ -241,7 +266,6 @@ MiniAWikiManager.prototype.knowledgeGetDerivative = function(kind, id) {
     var map = this._knowledgeDerivativeMap(state, kind), record = Object.prototype.hasOwnProperty.call(map, id) ? map[id] : __
     if (!record) return { ok: false, error: "derivative-not-found" }
     snapshot = engine.acquire(); var status = this._knowledgeDerivativeStatus(record, snapshot, engine._pending())
-    if (status.active) record.passageSupports.forEach(function(ref) { var raw = engine._body(snapshot, snapshot.catalog.pages[ref.page]); if (sha1(raw.substring(ref.charStart, ref.charEnd)) !== ref.textHash) throw new Error("invalid-provenance") })
     return status.active ? { ok: true, origin: "derived", record: clone(record), generation: snapshot.generation, evidence: "navigation-or-claim; not-a-verbatim-quotation" } : { ok: false, error: status.reason, restart: status.reason === "stale-support" }
   } catch(e) { return { ok: false, error: __miniAErrMsg(e) } }
   finally { if (snapshot) engine.release(snapshot) }
@@ -283,18 +307,31 @@ MiniAWikiManager.prototype.knowledgeDerivativeCandidates = function(options, sna
 // reports disagreement; it does not extract claims or choose a true source.
 MiniAWikiManager.prototype.knowledgeConflictCandidates = function(options, snapshot) {
   var opts = isMap(options) ? options : {}, limit = Math.min(100, Math.max(1, Math.floor(Number(opts.limit) || 25))), engine = this._retrievalV2, owned = !snapshot, self = this
+  var overlap = function(left, right) {
+    if (isUnDef(left) || isUnDef(right)) return null
+    var a = isArray(left) ? left : [left], b = isArray(right) ? right : [right]
+    return a.some(function(value) { return b.indexOf(value) >= 0 })
+  }
   if (!engine) return { ok: false, error: "v2-required", candidates: [] }
   try {
     if (isDef(opts.paths) && !isArray(opts.paths)) throw new Error("invalid-maintenance-paths")
     if (!snapshot) snapshot = engine.acquire()
     var state = this.knowledgeLoadState(); if (state._corrupt) throw new Error("knowledge-state-unavailable")
-    var ids = [], seen = {}, bounded = false, inspected = 0, groups = {}, findings = [], pending = engine._pending()
+    var ids = [], seen = {}, affected = {}, bounded = false, inspected = 0, groups = {}, findings = [], pending = engine._pending()
     if (isArray(opts.paths)) {
       bounded = opts.paths.length > 100
       opts.paths.slice(0, 100).some(function(path) {
         var postings = state.derivativeRegistry.byPage[self._normalizeRetrievalPath(path)] || []
-        for (var j = 0; j < postings.length; j++) { if (ids.length >= limit * 8) { bounded = true; return true }; if (!String(postings[j]).startsWith("fact:")) continue; var id = String(postings[j]).substring(5); if (!seen[id]) { seen[id] = true; ids.push(id) } }
+        for (var j = 0; j < postings.length; j++) { if (Object.keys(affected).length >= limit * 8) { bounded = true; return true }; if (!String(postings[j]).startsWith("fact:")) continue; var id = String(postings[j]).substring(5); affected[id] = true }
         return false
+      })
+      Object.keys(affected).forEach(function(id) {
+        var fact = state.facts[id], claim = isMap(fact) && isString(fact.claimKey) ? "$" + fact.claimKey : null
+        var peers = claim && isMap(state.derivativeRegistry.byClaim) && isArray(state.derivativeRegistry.byClaim[claim]) ? state.derivativeRegistry.byClaim[claim] : []
+        // Existing manifests can predate the claim posting. Scan only those
+        // manifests; newly recorded facts use the direct dependency posting.
+        if ((state.derivativeRegistry.claimIndexVersion !== 1 || !isMap(state.derivativeRegistry.byClaim)) && claim) peers = Object.keys(state.facts).filter(function(key) { return isMap(state.facts[key]) && state.facts[key].claimKey === fact.claimKey })
+        peers.forEach(function(key) { if (!seen[key]) { seen[key] = true; ids.push(key) } })
       })
     } else ids = Object.keys(state.facts)
     for (var i = 0; i < ids.length && inspected < limit * 8 && findings.length < limit; i++) {
@@ -304,9 +341,10 @@ MiniAWikiManager.prototype.knowledgeConflictCandidates = function(options, snaps
       for (var k = 0; k < peers.length && findings.length < limit; k++) {
         var peer = peers[k], other = isMap(peer.fact.applicability) ? peer.fact.applicability : {}
         if (stringify(fact.value, __, "") === stringify(peer.fact.value, __, "")) continue
-        if (isDef(applicability.product) && isDef(other.product) && applicability.product !== other.product) continue
-        var versioned = isString(applicability.version) && isString(other.version) && applicability.version !== other.version
-        var known = ["product", "version", "platform", "environment"].every(function(field) { return isString(applicability[field]) && isString(other[field]) && applicability[field] === other[field] })
+        if (["product", "platform", "environment"].some(function(field) { return overlap(applicability[field], other[field]) === false })) continue
+        if (isArray(opts.paths) && !affected[id] && !affected[peer.id]) continue
+        var versioned = overlap(applicability.version, other.version) === false
+        var known = ["product", "version", "platform", "environment"].every(function(field) { return overlap(applicability[field], other[field]) === true })
         findings.push({ kind: versioned ? "version-guidance-divergence" : "recorded-claim-disagreement", claimKey: fact.claimKey, action: "review", reason: "differing-recorded-values", applicabilityOverlap: known ? "exact" : versioned ? "different-versions" : "unknown", evidence: [{ id: peer.id, applicability: clone(other), supports: clone(peer.fact.passageSupports) }, { id: id, applicability: clone(applicability), supports: clone(fact.passageSupports) }], origin: "derived", resolution: "not-automated" })
       }
       peers.push({ id: id, fact: fact }); groups[key] = peers

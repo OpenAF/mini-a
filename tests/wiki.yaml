@@ -30,6 +30,12 @@ jobs:
 - name: MiniA Wiki V2::StructuralContext
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testStructuralContext
+- name: MiniA Wiki V2::ListStructuralSupport
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testListStructuralSupport
+- name: MiniA Wiki V2::ApplicabilityMaintenanceBoundary
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testApplicabilityMaintenanceBoundary
 - name: MiniA Wiki Tests::V2StableSectionAndMoveIdentities
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testStableSectionAndMoveIdentities
@@ -760,6 +766,8 @@ todo:
 - MiniA Wiki V2::GenerationEvidenceBindings
 - MiniA Wiki Tests::WikiSelectionRoutesOnlyChosenMounts
 - MiniA Wiki V2::StructuralContext
+- MiniA Wiki V2::ListStructuralSupport
+- MiniA Wiki V2::ApplicabilityMaintenanceBoundary
 - MiniA Wiki Tests::V2StableSectionAndMoveIdentities
 - MiniA Wiki Tests::V2ProcessCrashPublicationRecovery
 - MiniA Wiki Tests::V2StandaloneMcpRuntimeCompilation

@@ -27,7 +27,7 @@ var MiniAWikiRetrievalV2 = function(manager, config) {
     this.indexContract = { analyzer: String(this.analyzers.get(analysis).get(0).getClass().getName()), exactAnalyzer: "org.apache.lucene.analysis.standard.StandardAnalyzer", analysisVersion: String(Packages.org.apache.lucene.util.Version.LATEST), enhancedAsciiFolding: effective.asciiFolding, shingles: {enabled:effective.shingles.enabled,minSize:effective.shingles.minSize,maxSize:effective.shingles.maxSize}, characterNGrams: {enabled:effective.characterNGrams.enabled,minGram:effective.characterNGrams.minGram,maxGram:effective.characterNGrams.maxGram} }
   } catch(capabilityError) { this.capabilityError = __miniAErrMsg(capabilityError); this.indexContract = { unavailable: true } }
   finally { if (analysis) this._closeAnalyzer(analysis) }
-  this.fingerprint = sha1(stringify({ schema: 1, parser: 5, fields: fields, indexContract: this.indexContract }, __, ""))
+  this.fingerprint = sha1(stringify({ schema: 1, parser: 6, fields: fields, indexContract: this.indexContract }, __, ""))
 }
 MiniAWikiRetrievalV2.config = function(value) {
   if (isString(value)) value = af.fromJSSLON(value)
@@ -205,11 +205,11 @@ MiniAWikiRetrievalV2.parse = function(path, raw, target, outlineOnly, mappedPosi
   }
   headings.forEach(function(h, i) { for (var j = i + 1; j < headings.length; j++) if (headings[j].level <= h.level) { h.lineEnd = headings[j].lineStart - 1; break } })
   if (outlineOnly === true) return {revision:sha1(raw),outline:headings,linesTotal:lines.length,linkText:searchable.join("\n"),bodyStart:frontEnd<starts.length?starts[frontEnd]:raw.length}
-  var revision = sha1(raw), passages = [], ancestry = [], begin = frontEnd, lastBoundary = frontEnd, ordinals = {}
+  var revision = sha1(raw), passages = [], ancestry = [], begin = frontEnd, lastBoundary = frontEnd, lastStructureEnd = frontEnd, ordinals = {}
   var lineFor = positions.lineFor
-  var instructionContext = function(start) {
+  var instructionContext = function(start, kind) {
     var label = -1
-    for (var before = start - 1; before >= Math.max(frontEnd, start - 64); before--) {
+    for (var before = start - 1; before >= Math.max(frontEnd, kind === "list" ? lastStructureEnd : frontEnd, start - 64); before--) {
       if (section[before] || code[before]) break
       if (MiniAWikiRetrievalV2.contextLabel(lines[before])) label = before
     }
@@ -255,13 +255,21 @@ MiniAWikiRetrievalV2.parse = function(path, raw, target, outlineOnly, mappedPosi
     } else if (p + 1 < lines.length && /\|/.test(lines[p]) && /^ {0,3}\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*\r?$/.test(lines[p + 1])) {
       structure = { kind: "table", headerEnd: p + 2 }; structureEnd = p + 2
       while (structureEnd < lines.length && !code[structureEnd] && lines[structureEnd].trim() && /\|/.test(lines[structureEnd]) && !section[structureEnd]) structureEnd++
+    } else if (!section[p - 1] && /^ {0,3}(?:[-*+]|\d+[.)])\s+/.test(lines[p])) {
+      structure = { kind: "list" }; structureEnd = p + 1
+      while (structureEnd < lines.length && !section[structureEnd] && !MiniAWikiRetrievalV2.fenceMarker(lines[structureEnd])) {
+        var item = lines[structureEnd]
+        if (/^ {0,3}(?:[-*+]|\d+[.)])\s+/.test(item) || /^ {2,}\S/.test(item)) { structureEnd++; continue }
+        if (!item.trim() && structureEnd + 1 < lines.length && (/^ {0,3}(?:[-*+]|\d+[.)])\s+/.test(lines[structureEnd + 1]) || section[structureEnd + 1])) { structureEnd++; continue }
+        break
+      }
     }
     if (structure) {
-      if (structure.kind !== "table") structure.contextRange = instructionContext(p)
-      else { var tableContext = instructionContext(p); if (tableContext) { tableContext.kind = "table-context"; structure.warningRange = tableContext } }
+      if (structure.kind !== "table") structure.contextRange = instructionContext(p, structure.kind)
+      else { var tableContext = instructionContext(p, structure.kind); if (tableContext) { tableContext.kind = "table-context"; structure.warningRange = tableContext } }
       emit(begin,p,ancestry,false)
       emit(p,structureEnd,ancestry,false,structure)
-      begin=structureEnd; lastBoundary=structureEnd; p=structureEnd-1
+      begin=structureEnd; lastBoundary=structureEnd; lastStructureEnd=structureEnd; p=structureEnd-1
       continue
     }
     if (!code[p] && !lines[p].trim()) lastBoundary = p + 1
@@ -551,7 +559,7 @@ MiniAWikiRetrievalV2.prototype.lookupMoveLinks = function(snapshot, path) { retu
 MiniAWikiRetrievalV2.prototype.lookupBlockReference = function(snapshot, locator) { return this._lookupCatalogue(snapshot.dir, snapshot.manifest, "blockRefs", locator) }
 MiniAWikiRetrievalV2.prototype._validate = function(dir, manifest, validatedParent, prepared) {
   if (!isMap(manifest) || manifest.schema !== 3) throw new Error("reindex-required")
-  if (manifest.parser !== 5 || manifest.fingerprint !== this.fingerprint || stringify(manifest.indexContract,__,"") !== stringify(this.indexContract,__,"") || !isArray(manifest.files) || manifest.files.length > this.config.maxArtifactFiles) throw new Error("incompatible-generation")
+  if (manifest.parser !== 6 || manifest.fingerprint !== this.fingerprint || stringify(manifest.indexContract,__,"") !== stringify(this.indexContract,__,"") || !isArray(manifest.files) || manifest.files.length > this.config.maxArtifactFiles) throw new Error("incompatible-generation")
   this._catalogueDescriptor(manifest)
   if (!/^[a-f0-9]{64}$/.test(manifest.merkle || "") || MiniAWikiRetrievalV2.manifestMerkle(manifest) !== manifest.merkle) throw new Error("manifest-merkle-failure")
   var count = 0, seen = {}, checksums={}, blockRecords={}, verifiedBlocks={}, self = this
@@ -615,7 +623,7 @@ MiniAWikiRetrievalV2.prototype._validate = function(dir, manifest, validatedPare
     page.passageIds.forEach(function(id) { var passage = catalog.passages[id]; if (passage.charStart < postingEnd) throw new Error("invalid-passage-order"); postingEnd = passage.charEnd })
     page.passageIds.forEach(function(id) {
       var passage=catalog.passages[id], structure=passage.structure
-      if (isDef(structure) && (!isMap(structure) || ["table","fenced-code","indented-code"].indexOf(structure.kind)<0 || !isFinite(structure.charStart) || !isFinite(structure.charEnd) || structure.charStart<0 || structure.charStart>passage.charStart || structure.charEnd<passage.charEnd || structure.charEnd>page.charLength || structure.startLine!==lineFor(structure.charStart) || structure.endLine!==lineFor(structure.charEnd-1))) throw new Error("invalid-structure-record")
+      if (isDef(structure) && (!isMap(structure) || ["table","list","fenced-code","indented-code"].indexOf(structure.kind)<0 || !isFinite(structure.charStart) || !isFinite(structure.charEnd) || structure.charStart<0 || structure.charStart>passage.charStart || structure.charEnd<passage.charEnd || structure.charEnd>page.charLength || structure.startLine!==lineFor(structure.charStart) || structure.endLine!==lineFor(structure.charEnd-1))) throw new Error("invalid-structure-record")
       ;[passage.contextRange,structure&&structure.headerRange,structure&&structure.warningRange].forEach(function(range) {
         if (!range) return
         if (!isMap(range) || !structure || !isFinite(range.charStart) || !isFinite(range.charEnd) || range.charStart!==Math.floor(range.charStart) || range.charEnd!==Math.floor(range.charEnd) || range.charStart<0 || range.charEnd<=range.charStart || range.startLine!==lineFor(range.charStart) || range.endLine!==lineFor(range.charEnd-1)) throw new Error("invalid-context-range")
@@ -643,7 +651,7 @@ MiniAWikiRetrievalV2.prototype._validate = function(dir, manifest, validatedPare
 // block bytes are intentionally left for the resolver/body paths so opening a
 // reader never walks a corpus-sized catalogue.
 MiniAWikiRetrievalV2.prototype._validateStructural = function(dir, manifest) {
-  if (!isMap(manifest) || manifest.schema !== 3 || manifest.parser !== 5 || manifest.fingerprint !== this.fingerprint || stringify(manifest.indexContract,__,'') !== stringify(this.indexContract,__, '') || !isArray(manifest.files) || manifest.files.length > this.config.maxArtifactFiles) throw new Error('incompatible-generation')
+  if (!isMap(manifest) || manifest.schema !== 3 || manifest.parser !== 6 || manifest.fingerprint !== this.fingerprint || stringify(manifest.indexContract,__,'') !== stringify(this.indexContract,__, '') || !isArray(manifest.files) || manifest.files.length > this.config.maxArtifactFiles) throw new Error('incompatible-generation')
   this._catalogueDescriptor(manifest)
   if (!/^[a-f0-9]{64}$/.test(manifest.merkle || '') || MiniAWikiRetrievalV2.manifestMerkle(manifest) !== manifest.merkle) throw new Error('manifest-merkle-failure')
   var seen={}, total=0, self=this
@@ -666,7 +674,7 @@ MiniAWikiRetrievalV2.prototype._validateStructural = function(dir, manifest) {
     var parentDir = this.root + '/' + descriptor.parent.generation, parentPath = parentDir + '/manifest.json'
     if (!io.fileExists(parentPath) || java.nio.file.Files.isSymbolicLink(new java.io.File(parentDir).toPath()) || MiniAWikiRetrievalV2.digest(parentPath) !== descriptor.parent.checksum) throw new Error('catalogue-parent-unavailable')
     cursor = af.fromJson(io.readFileString(parentPath)); cursorDir = parentDir
-    if (!isMap(cursor) || cursor.schema !== 3 || cursor.parser !== 5 || cursor.fingerprint !== this.fingerprint || !/^[a-f0-9]{64}$/.test(cursor.merkle || '') || MiniAWikiRetrievalV2.manifestMerkle(cursor) !== cursor.merkle) throw new Error('invalid-catalogue-lineage')
+    if (!isMap(cursor) || cursor.schema !== 3 || cursor.parser !== 6 || cursor.fingerprint !== this.fingerprint || !/^[a-f0-9]{64}$/.test(cursor.merkle || '') || MiniAWikiRetrievalV2.manifestMerkle(cursor) !== cursor.merkle) throw new Error('invalid-catalogue-lineage')
   }
   return __
 }
@@ -1369,7 +1377,7 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
     // Schema 3 is the sole local serving format.  A full reindex is a
     // depth-zero base; an incremental build is a delta over its predecessor.
     var schema = 3
-    var manifest = { schema: schema, parser: 5, passageChars: this.config.passageChars, generation: generation, fingerprint: this.fingerprint, lexical: m._lexicalConfig, indexContract: this.indexContract, files: [] }
+    var manifest = { schema: schema, parser: 6, passageChars: this.config.passageChars, generation: generation, fingerprint: this.fingerprint, lexical: m._lexicalConfig, indexContract: this.indexContract, files: [] }
     // Turn publication-local reachability counters into immutable routed
     // descriptors only after all page mutations have completed.  This keeps
     // updates bounded while making every reference independently verifiable.
@@ -1567,7 +1575,7 @@ MiniAWikiRetrievalV2.prototype._rank = function(hit, query) {
 MiniAWikiRetrievalV2.retired = function(page) {
   var metadata = page && page.metadata || {}
   var status = isString(metadata.status) ? metadata.status.trim().toLowerCase() : ""
-  return metadata.retired === true || status === "retired" || status === "superseded" || metadata.superseded === true || isString(metadata.superseded_by) && metadata.superseded_by.trim().length > 0
+  return metadata.retired === true || ["retired", "superseded", "withdrawn", "rejected"].indexOf(status) >= 0 || metadata.superseded === true || isString(metadata.superseded_by) && metadata.superseded_by.trim().length > 0
 }
 // These fields are descriptive provenance for trusted evidence, never a claim
 // that a page is current or factually verified. Restricted adapters must keep

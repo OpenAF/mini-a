@@ -108,6 +108,8 @@ from support for grounded derivatives. The latter includes move-generated
 retirement records. Replacement targets are not resolved or followed by this
 filter, including targets in unselected mounts; an unresolved replacement still
 expresses explicit retirement. Trusted navigation can inspect the retired page.
+Explicit `status: withdrawn` and `status: rejected` also exclude answer evidence;
+`status: review` remains descriptive.
 No reverse retirement is inferred from `supersedes`, and no manual page is
 rewritten or deleted to resolve a conflict. Feature-off retrieval remains
 compatible. There is no
@@ -165,8 +167,9 @@ record until a writable rebuild. Restoring all stat attributes can evade externa
 
 One bounded parser preserves raw CRLF, Unicode and missing trailing newline,
 frontmatter, ATX/Setext headings, repeated anchors, heading ancestry, fenced and
-indented examples. Parser version 3 retains complete code blocks and pipe tables
-up to twice the soft passage target. Larger structures split at raw line boundaries
+indented examples. Parser version 6 retains complete code blocks, pipe tables and
+bounded Markdown lists up to twice the soft passage target. Larger structures
+split at raw line boundaries
 (or progressing UTF-16 fragments for an oversized line) with explicit structure
 ranges and continuations. Late table fragments can include exact column-header
 passages in `supportingContext`, each with its own raw range and revision.
@@ -189,8 +192,9 @@ aggregated in private request-work telemetry. Unsorted published postings are
 rejected explicitly without reader migration. Existing parser-v4 builder output
 already follows this order, so the lookup repair needs no artifact-format change.
 
-Fenced and indented instructions can also carry exact `instruction-context`
-support from preceding explicit colon-labelled warning/prerequisite blocks.
+Fenced and indented instructions, and long lists with an explicit preceding label,
+can carry exact `instruction-context` support from preceding explicit
+colon-labelled warning/prerequisite blocks.
 Recognised labels are Warning, Caution, Prerequisite(s), Aviso, Atenção and
 Pré-requisito(s), optionally bold or blockquoted. The bounded lookback is 64 raw
 lines within the same heading, stopping at an intervening code block. Associated
@@ -290,8 +294,9 @@ only as context for the immediately following bounded structure; it does not
 infer support from warning-looking content inside fenced code.
 
 New retrieval excludes pages explicitly retired by `retired: true`,
-`status: retired`, `status: superseded`, `superseded: true`, or non-empty
-`superseded_by`. Other declared statuses, including `review`, remain descriptive
+`status: retired`, `status: superseded`, `status: withdrawn`, `status: rejected`,
+`superseded: true`, or non-empty `superseded_by`. Other declared statuses,
+including `review`, remain descriptive
 provenance and do not silently remove current evidence. Trusted navigation may
 still inspect a retired page; it cannot ground new retrieval evidence or
 derivatives.
@@ -498,8 +503,9 @@ page dependency postings. No retrieval-frequency ranking or LLM work is added.
 ### Passage-grounded facts and summaries
 
 The existing knowledge manifest remains derivative authority. Optional
-`passageSupports` and `derivativeRegistry.byPage` extend its existing `facts` and
-page/section summary maps. Opt-in manager construction installs the shared
+`passageSupports`, `derivativeRegistry.byPage` and `derivativeRegistry.byClaim`
+extend its existing `facts` and page/section summary maps. Opt-in manager
+construction installs the shared
 knowledge methods even when OpenAF libraries have different constructor scopes.
 No source chunk or legacy summary receives inferred wiki positions or provenance.
 
@@ -523,17 +529,18 @@ selected immutable text is verified and its hash recorded. A dry run validates
 without writing; read-only managers cannot persist records. Registration does not
 prove that a claim follows from its support or that the source is factually correct.
 
-The getter validates support identity, current revision, policy/suppression, range
-and actual text hash before disclosing a derived record. Changed/deleted support
+The getter and bounded maintenance report validate support identity, current
+revision, applicability, policy/suppression, range and actual text hash before
+disclosing a derived record. Changed/deleted support
 returns `stale-support`; explicitly invalidated records return `invalidated`;
 legacy records return `unknown-provenance`, without disclosing their claim text.
 Summaries and claims retain `origin: derived` and are navigation aids, never
 verbatim wiki-page evidence. Ordinary retrieval continues to quote wiki passages.
 Unchanged support survives publication of unrelated pages.
 
-Reports check compact support metadata/revisions without reading every supporting
-body. Approved deterministic reconciliation rechecks candidates and marks stale or
-structurally invalid records invalidated; it does not regenerate claims, delete
+Reports read only the selected supporting revision blocks to verify their exact
+text hashes. Approved deterministic reconciliation rechecks candidates and marks
+stale or structurally invalid records invalidated; it does not regenerate claims, delete
 legacy summaries or modify Markdown. Dry run is the default and writes additionally
 require `approved: true`. Registration/repair refuse pending or corrupt ingestion
 journals, preserving finalisation fingerprints. Existing ingestion invalidation
@@ -550,8 +557,10 @@ against a journal starting concurrently after validation. Reviewable applicabili
 conflicts and question weaknesses are proposals only; they never select source truth
 or approve an LLM repair. `knowledgeConflictCandidates()` compares explicitly
 recorded scalar `claimKey`/`value` facts with current passage support. Different exact
-version strings produce version-guidance divergence, and incomplete applicability
-is reported unknown. Reports carry supporting revision-bound locators. No semantic
+version strings or disjoint declared version arrays produce version-guidance
+divergence. Disjoint product, platform or environment scopes are not reported as
+simultaneous disagreements, and incomplete applicability is reported unknown.
+Reports carry supporting revision-bound locators. No semantic
 claim extraction or confidence-based truth decision occurs. Explicit query sampling
 adds repeated-zero-result questions for alias/coverage review; these cannot be
 attributed to a page and are omitted from path-targeted reports.
@@ -682,12 +691,10 @@ current. No online rollback/cleanup command or authorised historical-view API is
 provided. Remove only unreferenced old/failed UUID directories after all readers
 stop, preserving current and intended rollback generations.
 Restoring an earlier parser/schema generation also requires its compatible
-runtime; the current parser-v5 reader does not silently reinterpret v2 artifacts.
+runtime; the current parser-v6 reader does not silently reinterpret older v2 artifacts.
 
-Remaining acceptance work has no external blocker: corpus-scaled incremental
-publication and cold initialization, richer structural/context packing, complete
-physical/protocol I/O accounting, broader dependency-driven repair and applicability,
-independent quality evaluation, and comprehensive concurrency, transport and
+Remaining acceptance work covers complete physical/protocol I/O accounting,
+independent quality evaluation, comprehensive concurrency, transport and
 security-revocation tests. Trusted/safe STDIO and localhost HTTP search/read smoke
 pass; twelve abrupt-JVM publication checkpoints and injected synchronization/space
 failures have regression coverage. These do not prove physical power-loss behavior
