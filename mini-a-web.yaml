@@ -76,7 +76,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : contextvirtualization
-    desc     : Enable the experimental Phase 2 hierarchical ContextObject foundation (requires historyvm=true)
+    desc     : Enable experimental Phase 2 hierarchical context retrieval and active provider projection (requires historyvm=true)
     example  : "true"
     mandatory: false
     options  : ["true", "false"]

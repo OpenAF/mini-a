@@ -1,0 +1,333 @@
+{
+  "date": "2026-09-17",
+  "revision": "c53e5b1 with documentation and fixture edits",
+  "provider": "ollama",
+  "model": "glm-5.3:cloud",
+  "fixture": "evals/context-virtualization.yaml",
+  "scope": "Two sequential runs of one synthetic scenario; provider-reported tokens, not invoice costs. Initial assertions were invalid; corrected run passed.",
+  "runs": [
+    {
+      "name": "original-assertions",
+      "summary": {
+        "total": 3,
+        "passed": 0,
+        "failed": 3,
+        "elapsed_ms": 16124,
+        "llm_calls": 3,
+        "tool_failures": 0
+      },
+      "scenarios": [
+        {
+          "variant": "phase1",
+          "success": false,
+          "answer": "\nCurrently active wiki storage decision: Use named Redis-backed wiki mounts with\nstrict isolation.\n\nSuperseded choice (do not follow): The earlier decision to use one shared\nfilesystem directory for every wiki tenant. That approach was replaced by the\nrequirement change and is retained only as historical context.",
+          "error": null,
+          "metrics": {
+            "input_tokens": 10931,
+            "output_tokens": 146,
+            "elapsed_ms": 3107,
+            "llm_calls": 1,
+            "total_steps": 1,
+            "history_vm_rehydrations": 0,
+            "model_usage": {
+              "main": {
+                "calls": 1,
+                "model": "glm-5.3:cloud"
+              },
+              "low_cost": {
+                "calls": 0,
+                "model": "gemma4:31b-cloud"
+              },
+              "validation": {
+                "calls": 0
+              }
+            },
+            "estimated_cost_usd": null
+          },
+          "assertions": [
+            {
+              "name": "answer",
+              "passed": false,
+              "expected": [
+                "named",
+                "Redis",
+                "isolation"
+              ]
+            },
+            {
+              "name": "maximum steps",
+              "passed": true,
+              "expected": "<= 5"
+            }
+          ]
+        },
+        {
+          "variant": "phase2-shadow",
+          "success": false,
+          "answer": "\nCurrently active wiki storage decision: Use named Redis-backed wiki mounts with\nstrict isolation.\n\nThis decision supersedes the earlier choice of a single shared filesystem\ndirectory for all wiki tenants, which is historical evidence only and must not\nbe followed.",
+          "error": null,
+          "metrics": {
+            "input_tokens": 11722,
+            "output_tokens": 192,
+            "elapsed_ms": 6471,
+            "llm_calls": 1,
+            "total_steps": 1,
+            "history_vm_rehydrations": 0,
+            "model_usage": {
+              "main": {
+                "calls": 1,
+                "model": "glm-5.3:cloud"
+              },
+              "low_cost": {
+                "calls": 0,
+                "model": "gemma4:31b-cloud"
+              },
+              "validation": {
+                "calls": 0
+              }
+            },
+            "estimated_cost_usd": null
+          },
+          "assertions": [
+            {
+              "name": "answer",
+              "passed": false,
+              "expected": [
+                "named",
+                "Redis",
+                "isolation"
+              ]
+            },
+            {
+              "name": "maximum steps",
+              "passed": true,
+              "expected": "<= 5"
+            }
+          ]
+        },
+        {
+          "variant": "phase2-active",
+          "success": false,
+          "answer": "\nActive Wiki Storage Decision\n\nNamed Redis-backed wiki mounts with strict isolation.\n\nEach wiki tenant is served through a named mount backed by Redis, and isolation\nbetween tenants is enforced strictly \u2014 no tenant can read or write another\ntenant's data.\n\nSuperseded (do not follow)\n\n- Shared filesystem directory for all wiki tenants. This was the original\narchitecture choice, but the requirement changed and it is now obsolete. It\nmust not be used for any current implementation, routing, or migration work.\n\nSummary\n\nStatus    \u2502Decision                                             \n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nActive    \u2502Named Redis-backed wiki mounts with strict isolation \nSuperseded\u2502One shared filesystem directory for every wiki tenant\n",
+          "error": null,
+          "metrics": {
+            "input_tokens": 6985,
+            "output_tokens": 357,
+            "elapsed_ms": 6546,
+            "llm_calls": 1,
+            "total_steps": 1,
+            "history_vm_rehydrations": 0,
+            "model_usage": {
+              "main": {
+                "calls": 1,
+                "model": "glm-5.3:cloud"
+              },
+              "low_cost": {
+                "calls": 0,
+                "model": "gemma4:31b-cloud"
+              },
+              "validation": {
+                "calls": 0
+              }
+            },
+            "estimated_cost_usd": null
+          },
+          "assertions": [
+            {
+              "name": "answer",
+              "passed": false,
+              "expected": [
+                "named",
+                "Redis",
+                "isolation"
+              ]
+            },
+            {
+              "name": "maximum steps",
+              "passed": true,
+              "expected": "<= 5"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "corrected-assertions",
+      "summary": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0,
+        "elapsed_ms": 13558,
+        "llm_calls": 3,
+        "tool_failures": 0
+      },
+      "scenarios": [
+        {
+          "variant": "phase1",
+          "success": true,
+          "answer": "\nCurrently active wiki storage decision: Use named Redis-backed wiki mounts with\nstrict isolation.\n\nThis decision supersedes the earlier shared-filesystem approach, which used a\nsingle shared filesystem directory for every wiki tenant. That superseded\nchoice must not be followed.\n\nKey points of the active decision:\n- Named mounts: Each wiki tenant is addressed through a named mount (e.g.,\nresolved via `resolveMount(name)`), keeping discovery and routing separate.\n- Redis backing: Wiki content is stored in Redis-backed mounts rather than a\nshared filesystem directory.\n- Strict isolation: Tenants are strictly isolated from one another \u2014 no shared\ndirectory or cross-tenant access.\n\nThe superseded shared-filesystem choice is retained only as historical context\nand is not the current instruction.",
+          "error": null,
+          "metrics": {
+            "input_tokens": 10931,
+            "output_tokens": 383,
+            "elapsed_ms": 3454,
+            "llm_calls": 1,
+            "total_steps": 1,
+            "history_vm_rehydrations": 0,
+            "model_usage": {
+              "main": {
+                "calls": 1,
+                "model": "glm-5.3:cloud"
+              },
+              "low_cost": {
+                "calls": 0,
+                "model": "gemma4:31b-cloud"
+              },
+              "validation": {
+                "calls": 0
+              }
+            },
+            "estimated_cost_usd": null
+          },
+          "assertions": [
+            {
+              "name": "named mounts retained",
+              "passed": true,
+              "expected": "[Nn]amed"
+            },
+            {
+              "name": "Redis requirement retained",
+              "passed": true,
+              "expected": "Redis"
+            },
+            {
+              "name": "isolation requirement retained",
+              "passed": true,
+              "expected": "isolation"
+            },
+            {
+              "name": "superseded decision distinguished",
+              "passed": true,
+              "expected": "[Ss]upersed|[Oo]bsolete|[Rr]eplaced"
+            },
+            {
+              "name": "maximum steps",
+              "passed": true,
+              "expected": "<= 5"
+            }
+          ]
+        },
+        {
+          "variant": "phase2-shadow",
+          "success": true,
+          "answer": "\nCurrently active wiki storage decision: Use named Redis-backed wiki mounts with\nstrict isolation.\n\nThis decision supersedes the earlier shared-filesystem approach, which used a\nsingle shared filesystem directory for every wiki tenant. That earlier choice\nis historical evidence only and must not be followed.\n\nKey points of the active decision:\n- Named mounts: Each wiki tenant is addressed through a named mount (e.g.,\n`resolveMount(name)` resolves a mount by its stable name).\n- Redis-backed storage: Wiki content is stored via Redis-backed mounts rather\nthan a shared filesystem directory.\n- Strict isolation: Tenants are isolated from one another; discovery and\nrouting remain separate concerns, and no tenant can access another tenant's\nmount.\n- Superseded choice (do not follow): The shared filesystem directory for all\ntenants is obsolete.",
+          "error": null,
+          "metrics": {
+            "input_tokens": 11721,
+            "output_tokens": 293,
+            "elapsed_ms": 6079,
+            "llm_calls": 1,
+            "total_steps": 1,
+            "history_vm_rehydrations": 0,
+            "model_usage": {
+              "main": {
+                "calls": 1,
+                "model": "glm-5.3:cloud"
+              },
+              "low_cost": {
+                "calls": 0,
+                "model": "gemma4:31b-cloud"
+              },
+              "validation": {
+                "calls": 0
+              }
+            },
+            "estimated_cost_usd": null
+          },
+          "assertions": [
+            {
+              "name": "named mounts retained",
+              "passed": true,
+              "expected": "[Nn]amed"
+            },
+            {
+              "name": "Redis requirement retained",
+              "passed": true,
+              "expected": "Redis"
+            },
+            {
+              "name": "isolation requirement retained",
+              "passed": true,
+              "expected": "isolation"
+            },
+            {
+              "name": "superseded decision distinguished",
+              "passed": true,
+              "expected": "[Ss]upersed|[Oo]bsolete|[Rr]eplaced"
+            },
+            {
+              "name": "maximum steps",
+              "passed": true,
+              "expected": "<= 5"
+            }
+          ]
+        },
+        {
+          "variant": "phase2-active",
+          "success": true,
+          "answer": "\nActive wiki storage decision: Use named Redis-backed wiki mounts with strict\nisolation.\n\nSuperseded (do not follow): The earlier choice of a single shared filesystem\ndirectory for every wiki tenant. That approach was explicitly replaced by the\nrequirement change and is retained only as historical context for audit\npurposes.",
+          "error": null,
+          "metrics": {
+            "input_tokens": 6984,
+            "output_tokens": 241,
+            "elapsed_ms": 4025,
+            "llm_calls": 1,
+            "total_steps": 1,
+            "history_vm_rehydrations": 0,
+            "model_usage": {
+              "main": {
+                "calls": 1,
+                "model": "glm-5.3:cloud"
+              },
+              "low_cost": {
+                "calls": 0,
+                "model": "gemma4:31b-cloud"
+              },
+              "validation": {
+                "calls": 0
+              }
+            },
+            "estimated_cost_usd": null
+          },
+          "assertions": [
+            {
+              "name": "named mounts retained",
+              "passed": true,
+              "expected": "[Nn]amed"
+            },
+            {
+              "name": "Redis requirement retained",
+              "passed": true,
+              "expected": "Redis"
+            },
+            {
+              "name": "isolation requirement retained",
+              "passed": true,
+              "expected": "isolation"
+            },
+            {
+              "name": "superseded decision distinguished",
+              "passed": true,
+              "expected": "[Ss]upersed|[Oo]bsolete|[Rr]eplaced"
+            },
+            {
+              "name": "maximum steps",
+              "passed": true,
+              "expected": "<= 5"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

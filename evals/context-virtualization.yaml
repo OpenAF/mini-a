@@ -80,10 +80,14 @@ scenarios:
           historyvm: true
           contextvirtualization: true
           contextvirtualizationshadow: false
-    expected:
-      contains:
-        - named
-        - Redis
-        - isolation
+    assertions:
+      - name: named mounts retained
+        matches: "[Nn]amed"
+      - name: Redis requirement retained
+        contains: Redis
+      - name: isolation requirement retained
+        contains: isolation
+      - name: superseded decision distinguished
+        matches: "[Ss]upersed|[Oo]bsolete|[Rr]eplaced"
     limits:
       steps: 5

@@ -454,7 +454,7 @@ Mini-A ships with complementary components:
 | `toolresultmaxinline` | Max inline bytes kept from large tool or `readresult` outputs before spill/truncation under `contextguard` | `4096` when `contextguard=true` |
 | `readresultmaxmatches` | Max matching regions returned by `proxy-dispatch` `readresult` `op='grep'` under `contextguard` | `20` when `contextguard=true` |
 | `historyvm` | Persist exact conversation events in a conversation-owned journal and replace eligible old large provider messages with bounded, retrievable references | `false` |
-| `historyvmmode` | History VM policy mode (`safe` is the v1 mode) | `safe` |
+| `historyvmmode` | History VM policy mode (`safe` is the only supported mode) | `safe` |
 | `historyvmshadow` | Capture canonical events and estimate projection savings while leaving model requests unchanged | `false` |
 | `contextvirtualization` | Enable opt-in Phase 2 multi-resolution ContextObjects, typed graph retrieval, consumer-specific assembly, and active progressive provider projection; requires `historyvm=true` | `false` |
 | `contextvirtualizationshadow` | Dry-run and measure the same Phase 2 projection while continuing to send the Phase 1 provider context; requires `historyvm=true contextvirtualization=true` | `false` |
@@ -615,7 +615,7 @@ Wiki folders become browsable sub-wikis when they contain `index.md`. Agents can
 | `toolresultmaxinline` | Max inline bytes kept from large tool or `readresult` outputs before spill/truncation under `contextguard` | `4096` when `contextguard=true` |
 | `readresultmaxmatches` | Max matching regions returned by `proxy-dispatch` `readresult` `op='grep'` under `contextguard` | `20` when `contextguard=true` |
 | `historyvm` | Enable durable bounded conversation history; requires a writable `conversation=` path | `false` |
-| `historyvmmode` | History VM policy mode | `safe` |
+| `historyvmmode` | History VM policy mode (`safe` is the only supported mode) | `safe` |
 | `historyvmshadow` | Measure the VM projection without changing requests or registering retrieval tools | `false` |
 | `contextvirtualization` | Enable opt-in lazy L0-L4 representations, typed relationships, stale suppression, structured paging, consumer-specific utility-per-token budgeting, local reuse, and active provider projection; requires `historyvm=true` | `false` |
 | `contextvirtualizationshadow` | Dry-run the Phase 2 working-set projection without replacing the Phase 1 provider context; requires `historyvm=true contextvirtualization=true` | `false` |
