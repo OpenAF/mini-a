@@ -2287,3 +2287,117 @@ MiniAHistoryVM.prototype.deleteOwnedStore = function() {
   remove(new java.io.File(this.storePath))
   return true
 }
+
+// A single remote envelope commits provider history and canonical backing together.
+MiniAHistoryVM.prototype.exportSnapshot = function() {
+  if (this.degraded) throw new Error("Cannot export degraded History VM: " + this.degradedReason)
+  var snapshot = {
+    version: 1,
+    schemaVersion: this.schemaVersion,
+    conversationId: this.conversationId,
+    branchId: this.branchId,
+    sequence: this._seq,
+    sourceHash: this._lastHash,
+    events: this.events
+  }
+  // Detach the snapshot from the live writer before handing it to transport code.
+  return jsonParse(stringify(snapshot, __, ""), __, __, true)
+}
+
+MiniAHistoryVM.validateSnapshot = function(snapshot, metadata) {
+  if (!isMap(snapshot) || snapshot.version !== 1 || snapshot.schemaVersion !== 1 ||
+      !isString(snapshot.conversationId) || snapshot.conversationId.length === 0 ||
+      !isString(snapshot.branchId) || snapshot.branchId.length === 0 || !isArray(snapshot.events) ||
+      snapshot.sequence !== snapshot.events.length || !isString(snapshot.sourceHash)) {
+    throw new Error("Invalid History VM snapshot header")
+  }
+  if (!isMap(metadata) || metadata.conversationId !== snapshot.conversationId || metadata.branchId !== snapshot.branchId) {
+    throw new Error("History VM snapshot identity mismatch")
+  }
+  var previousHash = ""
+  snapshot.events.forEach(function(event, index) {
+    if (!isMap(event) || event.schemaVersion !== 1 || event.conversationId !== snapshot.conversationId ||
+        event.seq !== index + 1 || event.previousHash !== previousHash || !isString(event.branchId)) {
+      throw new Error("Invalid History VM snapshot event sequence or identity")
+    }
+    var copy = jsonParse(stringify(event, __, ""), __, __, true)
+    delete copy.eventHash
+    if (event.eventHash !== sha256(stringify(copy, __, ""))) throw new Error("History VM snapshot hash mismatch")
+    previousHash = event.eventHash
+  })
+  if (snapshot.sourceHash !== previousHash || (snapshot.events.length > 0 && snapshot.events[snapshot.events.length - 1].branchId !== snapshot.branchId)) {
+    throw new Error("History VM snapshot head mismatch")
+  }
+  return true
+}
+
+// Restore only into an inactive session. Never trust paths from remote metadata.
+MiniAHistoryVM.restorePayload = function(path, payload) {
+  if (!isMap(payload) || !isArray(payload.c)) throw new Error("Invalid history envelope")
+  var snapshot = payload.history_vm_snapshot
+  if (isDef(snapshot)) MiniAHistoryVM.validateSnapshot(snapshot, payload.history_vm)
+  var token = ".restore-" + genUUID()
+  var stagedFile = path + token
+  var stagedStore = stagedFile + ".historyvm"
+  var store = path + ".historyvm"
+  var backupFile = path + token + ".old"
+  var backupStore = store + token + ".old"
+  var movedFile = false, movedStore = false, installedFile = false, installedStore = false
+  var move = function(from, to) {
+    java.nio.file.Files.move(java.nio.file.Paths.get(from), java.nio.file.Paths.get(to), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+  }
+  var remove = function(file) {
+    if (!file.exists()) return
+    if (file.isDirectory()) {
+      var children = file.listFiles()
+      for (var i = 0; isDef(children) && i < children.length; i++) remove(children[i])
+    }
+    if (!file.delete()) throw new Error("Unable to remove history staging file")
+  }
+  try {
+    if (isDef(snapshot)) {
+      io.mkdir(stagedStore)
+      io.writeFileString(stagedStore + "/events.jsonl", snapshot.events.map(function(event) { return stringify(event, __, "") }).join("\n") + (snapshot.events.length ? "\n" : ""))
+      io.writeFileJSON(stagedStore + "/checkpoint.json", {
+        schemaVersion: 1, normalizerVersion: 1, policyVersion: 1,
+        conversationId: snapshot.conversationId, branchHead: snapshot.branchId,
+        lastCommittedSequence: snapshot.sequence, sourceHash: snapshot.sourceHash,
+        indexGeneration: snapshot.sequence, updatedAt: new Date().toISOString()
+      }, "")
+      payload.history_vm.store = store
+    }
+    io.writeFileJSON(stagedFile, payload, "")
+    if (io.fileExists(path)) { move(path, backupFile); movedFile = true }
+    if (io.fileExists(store)) { move(store, backupStore); movedStore = true }
+    if (isDef(snapshot)) { move(stagedStore, store); installedStore = true }
+    move(stagedFile, path); installedFile = true
+  } catch(e) {
+    if (installedFile) remove(new java.io.File(path))
+    if (installedStore) remove(new java.io.File(store))
+    if (movedStore) move(backupStore, store)
+    if (movedFile) move(backupFile, path)
+    throw e
+  } finally {
+    remove(new java.io.File(stagedFile))
+    remove(new java.io.File(stagedStore))
+  }
+  // Cleanup cannot turn a successfully installed generation into a failed restore.
+  try { remove(new java.io.File(backupFile)); remove(new java.io.File(backupStore)) } catch(ignoreCleanup) {}
+  return path
+}
+
+MiniAHistoryVM.readLocalSnapshot = function(path) {
+  var payload = io.readFileJSON(path)
+  var checkpoint = io.readFileJSON(path + ".historyvm/checkpoint.json")
+  var events = io.readFileString(path + ".historyvm/events.jsonl").split(/\r?\n/).filter(function(line) {
+    return line.trim().length > 0
+  }).map(function(line) { return jsonParse(line, __, __, true) })
+  var snapshot = {
+    version: 1, schemaVersion: checkpoint.schemaVersion,
+    conversationId: checkpoint.conversationId, branchId: checkpoint.branchHead,
+    sequence: checkpoint.lastCommittedSequence, sourceHash: checkpoint.sourceHash, events: events
+  }
+  if (!isArray(payload.c)) throw new Error("Invalid local history envelope")
+  MiniAHistoryVM.validateSnapshot(snapshot, payload.history_vm)
+  return snapshot
+}

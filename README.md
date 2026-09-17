@@ -614,7 +614,7 @@ Wiki folders become browsable sub-wikis when they contain `index.md`. Agents can
 | `contextguardbudget` | Assumed smallest context window used by `contextguard` when `maxcontext=0` | `32000` |
 | `toolresultmaxinline` | Max inline bytes kept from large tool or `readresult` outputs before spill/truncation under `contextguard` | `4096` when `contextguard=true` |
 | `readresultmaxmatches` | Max matching regions returned by `proxy-dispatch` `readresult` `op='grep'` under `contextguard` | `20` when `contextguard=true` |
-| `historyvm` | Enable durable bounded conversation history; requires a writable `conversation=` path | `false` |
+| `historyvm` | Enable durable bounded conversation history; requires a writable `conversation=` path; web S3 history includes recoverable canonical snapshots | `false` |
 | `historyvmmode` | History VM policy mode (`safe` is the only supported mode) | `safe` |
 | `historyvmshadow` | Measure the VM projection without changing requests or registering retrieval tools | `false` |
 | `contextvirtualization` | Enable opt-in lazy L0-L4 representations, typed relationships, stale suppression, structured paging, consumer-specific utility-per-token budgeting, local reuse, and active provider projection; requires `historyvm=true` | `false` |

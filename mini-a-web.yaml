@@ -488,7 +488,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : historys3bucket
-    desc     : "S3 bucket to store conversation history objects"
+    desc     : "S3 bucket to store conversation history and enabled History VM snapshots (requires usehistory=true)"
     example  : "mini-a-history"
     mandatory: false
   - name     : historys3prefix
@@ -1107,7 +1107,7 @@ todo:
         if (isDef(global.__subagentState) && isDef(global.__subagentState[ postData.uuid ])) {
           delete global.__subagentState[ postData.uuid ]
         }
-        if (global.__usehistory && !global.__historykeep) {
+        if ((global.__usehistory || global.maArgs.historyvm === true || global.maArgs.historyvmshadow === true) && (postData.force || !global.__historykeep)) {
           log("Deleting history file for session " + postData.uuid)
           if (isFunction(global._mini_a_web_deleteHistory)) {
             global._mini_a_web_deleteHistory(postData.uuid)
@@ -1420,7 +1420,7 @@ todo:
                 global._mini_a_web_ssePush(uuid, "interaction", { event: _e })
               }
               // Only sync to S3 after user prompts (not on every event)
-              if (_e == "👤" && isFunction(global._mini_a_web_storeHistory)) {
+              if (_e == "👤" && global.maArgs.historyvm !== true && global.maArgs.historyvmshadow !== true && isFunction(global._mini_a_web_storeHistory)) {
                 try {
                   global._mini_a_web_storeHistory(uuid)
                 } catch(syncErr) {
@@ -1444,7 +1444,7 @@ todo:
           global.__conversations[ uuid ] = lma
         } else {
           lma = global.__conversations[ uuid ]
-          var _historyFile = global.__usehistory && isString(_hfile) ? global._mini_a_web_loadFile(_hfile) : __
+          var _historyFile = global.__usehistory && !isObject(lma._historyVm) && isString(_hfile) ? global._mini_a_web_loadFile(_hfile) : __
           if (isString(_historyFile) && io.fileExists(_historyFile)) {
             try {
               var _existingConversationPayload = io.readFileJSON(_historyFile)
@@ -1484,6 +1484,9 @@ todo:
             var parsedPostBrowserContext = af.fromJSSLON(postData.browserContext)
             if (isMap(parsedPostBrowserContext)) startArgs.browsercontext = parsedPostBrowserContext
           }
+        }
+        lma._historyCheckpointFn = function(goal) {
+          if (isObject(lma._historyVm)) global._mini_a_web_storeHistory(uuid, goal)
         }
         var _rma = lma.start(startArgs)
 
@@ -2462,32 +2465,19 @@ jobs:
       state.updated = now
     }
 
-    global._mini_a_web_buildHistoryPayload = (uuid) => {
+    global._mini_a_web_buildHistoryPayload = (uuid, pendingGoal) => {
       if (isUnDef(uuid)) return __
       var hfile = global.__historypath + "/c-" + uuid + ".json"
 
-      // Prefer S3 when enabled
-      if (global.__historys3enabled) {
-        var stream, str
-        try {
-          var key = global._mini_a_web_historyS3Key(uuid)
-          log("S3 history get (payload) bucket=" + global.__historys3bucket + " key=" + key)
-          stream = global.__historys3client.getObjectStream(global.__historys3bucket, key)
-          str = af.fromInputStream2String(stream)
-        } catch(getErr) {
-          // Ignore missing objects; log other errors
-          if (isDef(getErr) && String(getErr).indexOf("NoSuchKey") < 0) {
-            logErr(getErr)
-          }
-        } finally {
-          if (isDef(stream)) { try { stream.close() } catch(ignore) {} }
-        }
-        if (isDef(str)) {
-          try {
-            log("S3 history got payload for uuid=" + uuid + " size=" + str.length)
-            return str
-          } catch(convErr) { logErr(convErr) }
-        }
+      // The active writer/local cache is authoritative for uploads.
+      var agent = global.__conversations[uuid]
+      if (isObject(agent) && isObject(agent._historyVm)) {
+        if (agent._writeConversationPayload(hfile) !== true) throw new Error("Unable to checkpoint history")
+        var envelope = io.readFileJSON(hfile)
+        envelope.history_vm_snapshot = agent._historyVm.exportSnapshot()
+        if (isString(pendingGoal)) envelope.c.push({ role: "user", content: pendingGoal })
+        io.writeFileJSON(hfile, envelope, "")
+        return stringify(envelope, __, "")
       }
 
       // Otherwise try local file if present
@@ -2538,15 +2528,16 @@ jobs:
       return __
     }
 
-    global._mini_a_web_storeHistory = (uuid) => {
+    global._mini_a_web_storeHistory = (uuid, pendingGoal) => {
       if (!global.__historys3enabled) return
-      var payload = global._mini_a_web_buildHistoryPayload(uuid)
-      if (isUnDef(payload)) return
-      var stream, bytes
+      var stream
       try {
+        var payload = global._mini_a_web_buildHistoryPayload(uuid, pendingGoal)
+        if (isUnDef(payload)) return
         var key = global._mini_a_web_historyS3Key(uuid)
         log("S3 history put bucket=" + global.__historys3bucket + " key=" + key + " size=" + (isDef(payload) ? payload.length : 0))
-        global.__historys3client.putObjectStream(global.__historys3bucket, key, af.fromString2InputStream(payload), {}, "application/json")
+        stream = af.fromString2InputStream(payload)
+        global.__historys3client.putObjectStream(global.__historys3bucket, key, stream, {}, "application/json")
       } catch(storeErr) {
         logErr(storeErr)
       } finally {
@@ -2591,7 +2582,8 @@ jobs:
     global._mini_a_web_saveFile = (aFile, aMap) => {
       var uuid = global._mini_a_web_uuidFromPath(aFile)
       if (global.__historys3enabled && isDef(uuid)) {
-        // Save to S3 instead of local
+        // Retain the local checkpoint even if the remote upload fails.
+        io.writeFileJSON(aFile, aMap, "")
         var payload
         try {
           payload = stringify(aMap, __, "")
@@ -2626,9 +2618,9 @@ jobs:
           log("S3 history exists: true for key=" + key)
           return true
         } catch(getErr) {
-          // Missing object is not an error
-          try { if (String(getErr).indexOf("NoSuchKey") >= 0) log("S3 history exists: false for key=" + global._mini_a_web_historyS3Key(uuid)) } catch(ignore) {}
-          return false
+          if (isString(localFile) && io.fileExists(localFile)) return true
+          if (String(getErr).indexOf("NoSuchKey") >= 0) return false
+          throw getErr
         } finally {
           if (isDef(stream)) { try { stream.close() } catch(ignore) {} }
         }
@@ -2637,35 +2629,49 @@ jobs:
     }
 
     global._mini_a_web_loadFile = (aFile) => {
-      // Can be __
-      if (global.__historys3enabled && isString(aFile)) {
-        var uuid = global._mini_a_web_uuidFromPath(aFile)
-        if (isDef(uuid)) {
-          var stream, str
+      if (!global.__historys3enabled || !isString(aFile)) return aFile
+      var uuid = global._mini_a_web_uuidFromPath(aFile)
+      if (isUnDef(uuid)) return aFile
+      var active = global.__conversations[uuid]
+      if (isObject(active) && isObject(active._historyVm)) return aFile
+      var stream
+      try {
+        var key = global._mini_a_web_historyS3Key(uuid)
+        stream = global.__historys3client.getObjectStream(global.__historys3bucket, key)
+        var payload = jsonParse(af.fromInputStream2String(stream), __, __, true)
+        // Preserve a newer local checkpoint left by a failed upload.
+        if (isDef(payload.history_vm_snapshot)) MiniAHistoryVM.validateSnapshot(payload.history_vm_snapshot, payload.history_vm)
+        if (io.fileExists(aFile)) {
           try {
-            var key = global._mini_a_web_historyS3Key(uuid)
-            log("S3 history get (load) bucket=" + global.__historys3bucket + " key=" + key + " -> file=" + aFile)
-            stream = global.__historys3client.getObjectStream(global.__historys3bucket, key)
-            str = af.fromInputStream2String(stream)
-          } catch(getErr) {
-            // Ignore missing objects
-            if (isDef(getErr) && String(getErr).indexOf("NoSuchKey") < 0) {
-              logErr(getErr)
-            }
-          } finally {
-            if (isDef(stream)) {
-              try { stream.close() } catch(ignore) {}
-            }
-          }
-          if (isDef(str)) {
-            try {
-              log("S3 history downloaded uuid=" + uuid + " size=" + str.length + " -> " + aFile)
-              io.writeFileString(aFile, str)
-            } catch(writeErr) {
-              logErr(writeErr)
-            }
-          }
+            var cached = MiniAHistoryVM.readLocalSnapshot(aFile)
+            var remote = payload.history_vm_snapshot
+            // The first VM upload may have failed while S3 still holds legacy history.
+            if (isUnDef(remote)) return aFile
+            if (cached.conversationId === remote.conversationId && cached.sequence >= remote.sequence &&
+                (remote.sequence === 0 || cached.events[remote.sequence - 1].eventHash === remote.sourceHash)) return aFile
+          } catch(ignoreCache) {}
         }
+        MiniAHistoryVM.restorePayload(aFile, payload)
+      } catch(loadErr) {
+        var missing = String(loadErr).indexOf("NoSuchKey") >= 0
+        if (!missing) logErr(loadErr)
+        // A valid local generation can serve through an outage. Do not invent
+        // an empty session when a remote object could not be read or validated.
+        var usableLocal = false
+        if (io.fileExists(aFile)) {
+          try {
+            var local = io.readFileJSON(aFile)
+            usableLocal = isMap(local) && isArray(local.c)
+            if (usableLocal && isMap(local.history_vm) && (local.history_vm.active || local.history_vm.shadow)) {
+              MiniAHistoryVM.readLocalSnapshot(aFile)
+            }
+          } catch(ignoreLocal) { usableLocal = false }
+        }
+        if (!usableLocal && (!missing || io.fileExists(aFile) || io.fileExists(aFile + ".historyvm"))) {
+          throw new Error("Unable to resume S3 history: " + String(loadErr))
+        }
+      } finally {
+        if (isDef(stream)) { try { stream.close() } catch(ignore) {} }
       }
       return aFile
     }

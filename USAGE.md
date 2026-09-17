@@ -514,7 +514,7 @@ Optional flags when starting the server:
 - `usestream=true` to enable real-time token streaming via Server-Sent Events (SSE) for live response display
 - `usehistory=true` to expose the history side panel and persist conversations on disk
 - `historypath=/tmp/mini-a-history` / `historyretention=600` / `historykeep=true` to manage history storage (see comments in `mini-a-web.yaml`)
-- `historys3bucket=my-bucket historys3prefix=sessions/` to mirror history JSON files to S3 (supports `historys3url`, `historys3accesskey`, `historys3secret`, `historys3region`, `historys3useversion1`, `historys3ignorecertcheck`). History is uploaded at optimized checkpoints: immediately after user prompts and when final answers are provided, rather than on every interaction event
+- `historys3bucket=my-bucket historys3prefix=sessions/` to mirror history JSON files, including canonical VM snapshots when `historyvm=true` or `historyvmshadow=true`, to S3 (requires `usehistory=true`; supports `historys3url`, `historys3accesskey`, `historys3secret`, `historys3region`, `historys3useversion1`, `historys3ignorecertcheck`). History is uploaded at optimized checkpoints: immediately after user prompts and when final answers are provided, rather than on every interaction event
 - `useattach=true` to enable the file attachment button in the browser UI (disabled by default)
 - `maxpromptchars=120000` to set the maximum accepted prompt size in characters (default: 120,000). Applies to the user-supplied `prompt` field in each `/prompt` request body. Requests whose prompt field exceeds this limit are rejected with an error before any LLM call is made. Reduces risk from very large or malformed inputs.
 
@@ -2728,7 +2728,17 @@ exact pages; use `nextCursor` as the next `offset`.
 
 Semantic compression is available only through the `MiniAHistoryVM` module options (`semanticCompression=true` plus a `semanticCompressor` callback); normal CLI/web initialization does not wire a compressor. Deterministic representations are the runtime default. Provider-specific delta transmission, automatic wiki promotion, learned-skill publication, and an independent cross-conversation episodic index remain future work.
 
-Version 1 supports local conversation storage only. If S3 history mirroring is configured, Mini-A visibly disables the VM and continues with legacy history behavior. If the local journal cannot be written, it likewise keeps content inline and reports degraded persistence. `maxcontext=0` remains unchanged: virtualization can still reduce eligible old large messages, but Mini-A does not claim a verified hard context-window bound without an effective budget.
+History VM uses a writable local journal and supports S3 history mirroring in the web interface:
+
+```bash
+./mini-a-web.sh usehistory=true historyvm=true historys3bucket=my-bucket historys3prefix=sessions/
+```
+
+Each prompt checkpoint (after canonical prompt capture) and final-answer checkpoint uploads the conversation and a versioned canonical VM snapshot together in the existing S3 JSON object. `historyvmshadow=true` and opt-in `contextvirtualization=true` are also supported. A session opened on a new host, or after local cache loss, restores the journal and rebuilds derived indexes before VM initialization. Existing S3 objects without a snapshot use legacy conversation import.
+
+Uploads use current local state. Failed uploads retain the local checkpoint and retry at the next checkpoint; recovery from S3 reaches the last successful upload. Valid newer local canonical state is retained over an older matching S3 snapshot. Failed downloads or invalid snapshots preserve usable local state; without usable local state, resume reports an error. Explicit history deletion removes the remote object and local sidecar even with `historykeep=true`; automatic expiry respects `historykeep`.
+
+This supports one active writer per conversation and sequential movement between hosts, not concurrent distributed writers. Full snapshots increase storage and transfer size. Existing S3 endpoint, prefix, and credential options apply; CLI history does not gain an S3 transport. If the local journal cannot be written, Mini-A keeps content inline and reports degraded persistence; a degraded VM is not uploaded as a valid canonical snapshot. `maxcontext=0` remains unchanged: virtualization can still reduce eligible old large messages, but Mini-A does not claim a verified hard context-window bound without an effective budget.
 
 ### Context Management
 

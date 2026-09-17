@@ -2470,15 +2470,6 @@ MiniA.prototype._initHistoryVm = function(args, existingPayload) {
     this._historyVmInitKey = ""
     return __
   }
-  if (isString(args.historys3bucket) && args.historys3bucket.trim().length > 0) {
-    this.fnI("warn", "History VM v1 does not support remote S3 backing; using legacy conversation behavior.")
-    args.historyvm = false
-    args.historyvmshadow = false
-    args.contextvirtualization = false
-    args.contextvirtualizationshadow = false
-    this._historyVm = __
-    return __
-  }
   var conversationPath = isString(args.conversation) ? args.conversation.trim() : ""
   var initKey = conversationPath + "|" + enabled + "|" + shadow + "|" + contextVirtualization + "|" + contextVirtualizationShadow
   if (isObject(this._historyVm) && this._historyVmInitKey === initKey) return this._historyVm
@@ -18559,6 +18550,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (isObject(this._historyVm) && !this._historyVm.degraded) {
       this._historyVm.captureUserMessage(args.goal, { interactionId: "goal-" + String(nowNano()), explicitPin: true })
     }
+    if (isFunction(this._historyCheckpointFn)) this._historyCheckpointFn(args.goal)
     if (args.debug === true) {
       this.fnI("debug", `[goal-trace] post-init goal length=${isString(args.goal) ? args.goal.length : 0} preview=${this._truncateAuditValue(isString(args.goal) ? args.goal : stringify(args.goal, __, ""), 500)}`)
     }

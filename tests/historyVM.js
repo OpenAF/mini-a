@@ -22,6 +22,46 @@
     }
   }
 
+  exports.testRemoteSnapshots = function() {
+    withVm(function(vm, conversation) {
+      vm.captureProviderConversation([{ role: "user", content: "Remember exact detail" }, { role: "assistant", content: "Exact payload 12345" }])
+      vm.rewind(1)
+      vm.captureUserMessage("New branch")
+      var snapshot = vm.exportSnapshot()
+      var metadata = { conversationId: vm.conversationId, branchId: vm.branchId, active: true }
+      var payload = { c: [{ role: "user", content: "New branch" }], history_vm: metadata, history_vm_snapshot: snapshot }
+      var target = conversation + ".remote"
+      MiniAHistoryVM.restorePayload(target, payload)
+      var recovered = new MiniAHistoryVM({ enabled: true, contextVirtualization: true, conversationPath: target, conversationId: vm.conversationId })
+      ow.test.assert(recovered.branchId, vm.branchId, "Remote restore preserves branch")
+      ow.test.assert(stringify(recovered.events), stringify(vm.events), "Remote restore preserves exact canonical content")
+      ow.test.assert(recovered.objects.length > 0, true, "Phase 2 indexes rebuild")
+      ow.test.assert(MiniAHistoryVM.readLocalSnapshot(target).sourceHash, snapshot.sourceHash, "Local snapshot validates")
+      var before = io.readFileString(target)
+      var invalidSnapshots = [
+        merge(snapshot, { version: 999 }, true),
+        merge(snapshot, { conversationId: "other-conversation" }, true),
+        merge(snapshot, { sequence: snapshot.sequence + 1 }, true),
+        merge(snapshot, { branchId: "other-branch" }, true)
+      ]
+      invalidSnapshots.forEach(function(invalid) {
+        var failed = false
+        try { MiniAHistoryVM.restorePayload(target, { c: [], history_vm: metadata, history_vm_snapshot: invalid }) } catch(expected) { failed = true }
+        ow.test.assert(failed, true, "Reject unsupported schema, identity, sequence and branch mismatch")
+        ow.test.assert(io.readFileString(target), before, "Invalid snapshot preserves prior generation")
+      })
+      snapshot.events[0].content = "tampered"
+      var rejected = false
+      try { MiniAHistoryVM.restorePayload(target, payload) } catch(expected) { rejected = true }
+      ow.test.assert(rejected, true, "Reject corrupt remote hashes")
+      ow.test.assert(io.readFileString(target), before, "Corrupt restore preserves local envelope")
+      ow.test.assert(MiniAHistoryVM.readLocalSnapshot(target).sourceHash, vm._lastHash, "Corrupt restore preserves local journal")
+      ow.test.assert(vm.events[0].content !== "tampered", true, "Export is detached")
+      MiniAHistoryVM.restorePayload(target, { c: [{ role: "user", content: "Legacy" }] })
+      ow.test.assert(io.fileExists(target + ".historyvm"), false, "Legacy restore cannot inherit an unrelated sidecar")
+    }, { contextVirtualization: true })
+  }
+
   exports.testLongRequestPaging = function() {
     withVm(function(vm) {
       var history = [{ role: "system", content: "Keep exact user constraints." }, { role: "user", content: "Use named Redis mounts with strict isolation." }]
@@ -164,18 +204,18 @@
       agent._initHistoryVm(invalidPhase2Args)
       ow.test.assert(invalidPhase2Args.contextvirtualization === false && invalidPhase2Args.contextvirtualizationshadow === false && isUnDef(agent._historyVm), true, "Phase 2 and its shadow must not activate without Phase 1 History VM")
 
-      var shadowArgs = { historyvm: false, historyvmshadow: true, historyvmmode: "safe", conversation: conversation }
+      var shadowArgs = { historys3bucket: "test-bucket", historyvm: false, historyvmshadow: true, historyvmmode: "safe", conversation: conversation }
       agent._initHistoryVm(shadowArgs)
       ow.test.assert(agent._historyVm.shadow === true, true, "Shadow mode should initialize canonical capture")
       ow.test.assert(isUnDef(agent._createHistoryVmMcpConfig(shadowArgs)), true, "Shadow mode must not register retrieval tools")
 
-      var phaseOneArgs = { historyvm: true, historyvmshadow: false, contextvirtualization: false, conversation: root + "/phase1.json" }
+      var phaseOneArgs = { historys3bucket: "test-bucket", historyvm: true, historyvmshadow: false, contextvirtualization: false, conversation: root + "/phase1.json" }
       agent._initHistoryVm(phaseOneArgs)
       var phaseOneConfig = agent._createHistoryVmMcpConfig(phaseOneArgs)
       ow.test.assert(isFunction(phaseOneConfig.options.fns.history_search) && isUnDef(phaseOneConfig.options.fns.context_search), true, "Phase 1 must keep its existing tool surface without Phase 2 paging schemas")
       agent._historyVm.deleteOwnedStore()
 
-      var enabledArgs = { historyvm: true, historyvmshadow: true, historyvmmode: "experimental", contextvirtualization: true, contextvirtualizationshadow: true, conversation: conversation }
+      var enabledArgs = { historys3bucket: "test-bucket", historyvm: true, historyvmshadow: true, historyvmmode: "experimental", contextvirtualization: true, contextvirtualizationshadow: true, conversation: conversation }
       agent._initHistoryVm(enabledArgs)
       var config = agent._createHistoryVmMcpConfig(enabledArgs)
       ow.test.assert(enabledArgs.historyvmshadow === false && enabledArgs.historyvmmode === "safe", true, "Enabled mode should take precedence and normalize the v1 policy")

@@ -770,7 +770,7 @@ try {
     historykeep    : { type: "boolean", default: false, description: "Keep console conversations under ~/.openaf-mini-a/history" },
     historykeepperiod: { type: "number", description: "Delete kept conversation files older than this many minutes" },
     historykeepcount: { type: "number", description: "Keep only the newest N kept conversation files" },
-    historys3bucket: { type: "string", description: "S3 bucket used to mirror history files." },
+    historys3bucket: { type: "string", description: "S3 bucket used by web history to mirror conversations and enabled History VM snapshots." },
     historys3prefix: { type: "string", description: "S3 key prefix used for mirrored history files." },
     historys3url   : { type: "string", description: "S3 endpoint URL for history mirroring." },
     historys3accesskey: { type: "string", description: "S3 access key for history mirroring." },

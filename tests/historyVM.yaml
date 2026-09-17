@@ -180,7 +180,19 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/historyVM.js").testRuntimeSourceViewsAndDelegation
 
+- name: MiniA History VM Tests::RemoteSnapshots
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testRemoteSnapshots
+
+- name: MiniA History VM Tests::S3Persistence
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyS3.js").testWebPersistence
+
 todo:
+- MiniA History VM Tests::S3Persistence
+- MiniA History VM Tests::RemoteSnapshots
 - MiniA History VM Tests::RuntimeSourcesDelegation
 - MiniA History VM Tests::LongRequestPaging
 - MiniA History VM Tests::SourceVersionsSnapshot
