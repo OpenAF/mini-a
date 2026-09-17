@@ -26,8 +26,8 @@ adapters or migration tooling. This does not permit discarding authoritative
 content or guessing ownership: unresolved provenance still blocks removal.
 
 For retrieval serving artifacts, follow the
-[retrieval plan compatibility baseline](../WIKI-RETRIEVE-PLAN.md#compatibility-baseline--development-branch)
-and its [remaining-work companion](../WIKI-RETRIEVE-PLAN-2.md).
+[retrieval plan compatibility baseline](../../WIKI-RETRIEVE-PLAN.md#compatibility-baseline--development-branch)
+and its [remaining-work companion](../../WIKI-RETRIEVE-PLAN-2.md).
 
 ## 2. Files and paths to inspect
 
@@ -223,10 +223,10 @@ the shared wiki manager. Telemetry is disabled by default.
 An explicit writable reindex builds local serving generations; existing ingestion
 journals, full-source reconstruction and protected pruning remain authoritative.
 Original ingestion chunks and summaries do not become wiki-range quotations.
-See [retrieval v2](WIKI-RETRIEVAL-V2.md) for effective capabilities, restricted
+See [retrieval v2](../../docs/WIKI-RETRIEVAL-V2.md) for effective capabilities, restricted
 presentation policy, rollout and outstanding requirements.
 
 Retrieval publication, cold opening, first-use evidence verification and full
-lint/export follow the [validation boundaries](../WIKI-RETRIEVE-PLAN.md#validation-boundaries).
+lint/export follow the [validation boundaries](../../WIKI-RETRIEVE-PLAN.md#validation-boundaries).
 Obsolete development serving schemas require explicit rejection and a writable
 rebuild; ingestion must not introduce old-schema readers or exporters.

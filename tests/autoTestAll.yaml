@@ -33,7 +33,7 @@ jobs:
   from: oJob Test Results
   deps:
     - Run Tests
-  args: 
+  args:
     quiet: true
   exec: | #js
     args.results.asserts = ow.test.getCountAssert()
@@ -58,7 +58,7 @@ jobs:
     - JUnit results
   exec: | #js
     sleep(1000)
-    exit(0)
+    exit(ow.test.getCountFail() > 0 ? 1 : 0)
 
 todo:
 # Run tests

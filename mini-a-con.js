@@ -3276,12 +3276,6 @@ try {
     }
   }
 
-  function truncateText(text, maxLen) {
-    var str = isString(text) ? text : String(text || "")
-    if (str.length <= maxLen) return str
-    return str.substring(0, Math.max(0, maxLen - 1)) + "…"
-  }
-
   function extractGoalFromPlannerPrompt(text) {
     if (!isString(text)) return __
     var normalized = text.replace(/\r\n/g, "\n").trim()

@@ -2718,7 +2718,7 @@ the invocation rather than silently deleting constraints. Counts are application
 estimates; provider-internal tool rounds and billing remain provider-owned.
 Derived representation caches are bounded, and periodic index snapshots permit
 tail replay with journal fallback when the cache is invalid. See the
-[implementation review](docs/VM-IMPLEMENTATION-REVIEW.md) for verification and
+[implementation review](https://github.com/openaf/mini-a/blob/main/development/docs/VM-IMPLEMENTATION-REVIEW.md) for verification and
 provider acceptance limits. `context_get`/`context_expand` with L4 return bounded
 exact pages; use `nextCursor` as the next `offset`.
 

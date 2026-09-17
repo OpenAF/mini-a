@@ -55,8 +55,8 @@ interactive test is not proof that a standalone MCP constructor acquired it.
 `tests/wiki*.js`, `tests/graph*.js`, and `tests/dreams*.js` exercise their own
 explicit loading arrangements. `tests/wikiRetrievalContracts.js` covers the
 legacy contracts, while `tests/wikiRetrievalV2.js` covers opt-in serving and
-publication behavior. `docs/WIKI.md`, `docs/WIKI-INGEST-IMPLEMENTATION-PLAN.md`,
-`docs/WIKI-INGEST-VALIDATION.md`, and `docs/VIRTUAL-SKILLS.md` were checked
+publication behavior. `docs/WIKI.md`, `development/docs/WIKI-INGEST-IMPLEMENTATION-PLAN.md`,
+`development/docs/WIKI-INGEST-VALIDATION.md`, and `docs/VIRTUAL-SKILLS.md` were checked
 against those dispatch paths and contracts.
 
 ## Findings

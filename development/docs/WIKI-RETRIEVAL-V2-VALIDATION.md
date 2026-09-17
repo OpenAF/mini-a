@@ -1,7 +1,13 @@
 # Wiki retrieval v2 validation
 
+> Archive update — 2026-09-17: historical source ZIPs and the comparison patch
+> are preserved in Git rather than this checkout. Use the
+> [archive index](../../tests/fixtures/wiki-retrieval-v2/ARCHIVE.md) for immutable
+> links, checksums, and recovery before reproducing older commands below.
+
+
 This is a working local passage implementation with incomplete requirements,
-listed explicitly in [implementation and limitations](WIKI-RETRIEVAL-V2.md).
+listed explicitly in [implementation and limitations](../../docs/WIKI-RETRIEVAL-V2.md).
 No external blocker explains the outstanding work. No push, deployment or live
 provider validation was performed. Starting checkout and isolated baseline
 reproduction are recorded in [baseline](WIKI-RETRIEVAL-V2-BASELINE.md).
@@ -518,7 +524,7 @@ No new performance or quality improvement is claimed for this increment; the ear
 measured results remain historical measurements of their recorded source revisions.
 
 Current commands, assertion counts and runtime source hashes are recorded in
-[derivative validation](../tests/fixtures/wiki-retrieval-v2/derivatives-validation.json).
+[derivative validation](../../tests/fixtures/wiki-retrieval-v2/derivatives-validation.json).
 The earlier `v2-assertions.json` and `wiki-v2-after.json` are historical pre-increment
 records, retained for comparison.
 
@@ -2229,7 +2235,7 @@ file, directory and pointer synchronization errors. These results characterize
 the local filesystem and OS-request boundary only. They do not measure Lucene
 index-file traffic, checksum physical reads, kernel cache, TCP/TLS framing,
 provider-side bytes, device writes, network-filesystem acknowledgements or
-physical power-loss recovery. The [Area 5 measurement contract](../WIKI-RETRIEVE-PLAN.md#area-5-local-io-and-durability-characterization--2026-09-16)
+physical power-loss recovery. The [Area 5 measurement contract](../../WIKI-RETRIEVE-PLAN.md#area-5-local-io-and-durability-characterization--2026-09-16)
 specifies how to collect those environment counters and recovery observations.
 
 ## Area 6 cross-surface check — 2026-09-16
@@ -2270,7 +2276,7 @@ the twelve abrupt-JVM checkpoints, with no failures. `ojob tests/wiki.yaml`
 passed **197 functions** with no reported failures.
 
 The source-bound local-FS 1,000-page/three-update record is
-[`updates-1000-deferred-reclamation-links.json`](../tests/fixtures/wiki-retrieval-v2/updates-1000-deferred-reclamation-links.json).
+[`updates-1000-deferred-reclamation-links.json`](../../tests/fixtures/wiki-retrieval-v2/updates-1000-deferred-reclamation-links.json).
 Each update parsed one page, copied zero catalogue keys, made six routed-key
 lookups, performed zero full catalogue resolutions and zero reclamation calls,
 and copied zero retained index bytes. Retained index links numbered 4, 8 and 11.
@@ -2305,7 +2311,7 @@ targets.
 
 ### Frozen quality set
 
-[`acceptance.json`](../tests/fixtures/wiki-retrieval-v2/acceptance.json) was
+[`acceptance.json`](../../tests/fixtures/wiki-retrieval-v2/acceptance.json) was
 frozen before its first retrieval run and no ranking weights or query expectations
 were changed after observing results. It is separate from the three-question
 development and six-question previously observed held-out sets. Its 30 local
@@ -2334,15 +2340,15 @@ unanswerable outcomes were `zero`. The useful-character metric estimates content
 tokens as `ceil(content characters / 4)` and excludes wrapper/prompt tokens.
 These curated synthetic questions test deterministic evidence selection; they do
 not establish real-world answer generalization or a model's final answer quality.
-The [V2](../tests/fixtures/wiki-retrieval-v2/quality-acceptance-v2.json) and
-[flag-off](../tests/fixtures/wiki-retrieval-v2/quality-acceptance-legacy.json)
+The [V2](../../tests/fixtures/wiki-retrieval-v2/quality-acceptance-v2.json) and
+[flag-off](../../tests/fixtures/wiki-retrieval-v2/quality-acceptance-legacy.json)
 records contain every query, cited path, strict citation check, outcome, fixture
 hash and runtime source hash. `python3 tests/wikiRetrievalAcceptance.py` verifies
 the frozen source binding and required quality results.
 
 ### Matched local-FS performance
 
-[`tests/wikiRetrievalPerformance.js`](../tests/wikiRetrievalPerformance.js) ran
+[`tests/wikiRetrievalPerformance.js`](../../tests/wikiRetrievalPerformance.js) ran
 20 warm observations per operation at each size. Cold time is the first call
 after constructing a read-only manager; construction and mount attach are separate
 fields in the JSON. JVM and OS caches were not forcibly cleared between runs.
@@ -2359,13 +2365,13 @@ distributions. All times below are milliseconds.
 | 10,000 | flag-off | 11.13 | 10.59 | 10.78 | 1,396.24 | 8.31 | 139,029 | 49.15 | 140,368 | 708 |
 | 10,000 | V2 | 23.40 | 1.41 | 23.90 | 609.42 | 9,128.18 | 17,063 | 264.58 | 83,089 | 2,648 |
 
-The complete [100](../tests/fixtures/wiki-retrieval-v2/performance-area7-100-v2.json),
-[1,000](../tests/fixtures/wiki-retrieval-v2/performance-area7-1000-v2.json)
-and [10,000](../tests/fixtures/wiki-retrieval-v2/performance-area7-10000-v2.json)
+The complete [100](../../tests/fixtures/wiki-retrieval-v2/performance-area7-100-v2.json),
+[1,000](../../tests/fixtures/wiki-retrieval-v2/performance-area7-1000-v2.json)
+and [10,000](../../tests/fixtures/wiki-retrieval-v2/performance-area7-10000-v2.json)
 V2 records and corresponding
-[100](../tests/fixtures/wiki-retrieval-v2/performance-area7-100-legacy.json),
-[1,000](../tests/fixtures/wiki-retrieval-v2/performance-area7-1000-legacy.json)
-and [10,000](../tests/fixtures/wiki-retrieval-v2/performance-area7-10000-legacy.json)
+[100](../../tests/fixtures/wiki-retrieval-v2/performance-area7-100-legacy.json),
+[1,000](../../tests/fixtures/wiki-retrieval-v2/performance-area7-1000-legacy.json)
+and [10,000](../../tests/fixtures/wiki-retrieval-v2/performance-area7-10000-legacy.json)
 flag-off records include warm p50/p95/p99, cold calls, manager construction,
 source requests/bytes, output bytes, validation block reads, reader opens,
 sampled heap, publication work and final fixture bytes. At 10,000 pages the
@@ -2383,15 +2389,15 @@ The large V2 full-publication observation also differs from older runs; it is
 one observation under this exact source and machine, not a stable percentile.
 
 The controllable-latency local facade is separately recorded for
-[V2](../tests/fixtures/wiki-retrieval-v2/performance-area7-simulated-100-v2.json)
-and [flag-off](../tests/fixtures/wiki-retrieval-v2/performance-area7-simulated-100-legacy.json):
+[V2](../../tests/fixtures/wiki-retrieval-v2/performance-area7-simulated-100-v2.json)
+and [flag-off](../../tests/fixtures/wiki-retrieval-v2/performance-area7-simulated-100-legacy.json):
 100 pages, 20 warm samples and an injected 2 ms delay per source-body read.
 Warm backlinks p50 was 3.60 ms V2 versus 325.87 ms flag-off, with zero versus
 2,000 source-body reads. This is simulated backend latency, not a provider result.
 
 ### Complete shared-store update path
 
-[`tests/wikiRetrievalUpdates.js`](../tests/wikiRetrievalUpdates.js) measured ten
+[`tests/wikiRetrievalUpdates.js`](../../tests/wikiRetrievalUpdates.js) measured ten
 one-page updates at 1,000 and 10,000 pages with `sharedBlockStore:true` and
 default linked immutable files. It includes the complete update call, force
 requests, deferred maintenance, disk retention, full reindex and a fresh
@@ -2404,9 +2410,9 @@ pages. All three records carry the exact harness/runtime hashes.
 | 10,000 linked | 115.11 / 169.46 | 29–47 | 0 | 5,003.45 | 37,498.48 | 48,018,945 |
 | 1,000 explicit copy | 107.77 / 169.43 | 29–47 | 352–379 KB | 1,215.83 | 5,049.43 | 8,745,466 |
 
-The [1,000 linked](../tests/fixtures/wiki-retrieval-v2/updates-area7-1000-linked.json),
-[10,000 linked](../tests/fixtures/wiki-retrieval-v2/updates-area7-10000-linked.json)
-and [1,000 copy](../tests/fixtures/wiki-retrieval-v2/updates-area7-1000-copy.json)
+The [1,000 linked](../../tests/fixtures/wiki-retrieval-v2/updates-area7-1000-linked.json),
+[10,000 linked](../../tests/fixtures/wiki-retrieval-v2/updates-area7-10000-linked.json)
+and [1,000 copy](../../tests/fixtures/wiki-retrieval-v2/updates-area7-1000-copy.json)
 records show six routed-key lookups and one binding-block read per update,
 zero full catalogue resolutions and reclamation calls inside every update,
 and no copied retained index bytes in linked mode. Linked-file *apparent*
@@ -2423,7 +2429,7 @@ total lifecycle cost, device bytes or network-filesystem behavior.
 
 ### Concurrent readers and release decision
 
-The [same-JVM local reader run](../tests/fixtures/wiki-retrieval-v2/concurrent-area7-1000.json)
+The [same-JVM local reader run](../../tests/fixtures/wiki-retrieval-v2/concurrent-area7-1000.json)
 used four callers with 30 `retrieve` calls each against one warm 1,000-page V2
 generation. All 120 returned the expected evidence and all threads stopped;
 latency p50/p95/p99 was 5.32/12.94/17.02 ms. This does not test multiple JVMs,

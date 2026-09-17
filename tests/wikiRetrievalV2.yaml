@@ -148,6 +148,7 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testFederatedRetryBudget
 todo:
+- MiniA Wiki V2::CompactBacklinkActivity
 - MiniA Wiki V2::TargetedMetadataAndShardCache
 - MiniA Wiki V2::DeadlineAwareCacheGuard
 - MiniA Wiki V2::InsufficientSpacePublicationRecovery
@@ -194,3 +195,4 @@ todo:
 - MiniA Wiki V2::FederationAndBudgets
 - MiniA Wiki V2::FederatedAliasAndPermissionBoundary
 - MiniA Wiki V2::FederatedRetryBudget
+- MiniA Wiki V2::CrossSurfaceV2Configuration

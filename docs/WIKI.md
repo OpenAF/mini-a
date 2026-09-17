@@ -4,7 +4,7 @@ Mini-A's wiki is a Markdown knowledge base shared by agent sessions, the console
 
 For opt-in versioned passages, enable `wikiretrievalv2=true` and explicitly build
 with writable Dream reindex. See [retrieval v2](WIKI-RETRIEVAL-V2.md) for supported
-local backends, migration, budget differences and [measured validation](WIKI-RETRIEVAL-V2-VALIDATION.md).
+local backends, migration, budget differences and [measured validation](https://github.com/openaf/mini-a/blob/main/development/docs/WIKI-RETRIEVAL-V2-VALIDATION.md).
 Flag-off behavior retains the existing page engine with compatible contract repairs.
 
 ## Backends and access

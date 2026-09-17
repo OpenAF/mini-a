@@ -3,8 +3,8 @@
 `wikiretrievalv2=true` enables a shared deterministic passage engine. It is disabled
 by default. Markdown remains authoritative; serving generations are rebuildable.
 This implementation includes local serving, compatible published-bundle readers
-and deterministic maintenance. Some acceptance items remain unverified or incomplete. See [validation](WIKI-RETRIEVAL-V2-VALIDATION.md)
-and [baseline](WIKI-RETRIEVAL-V2-BASELINE.md).
+and deterministic maintenance. Some acceptance items remain unverified or incomplete. See [validation](https://github.com/openaf/mini-a/blob/main/development/docs/WIKI-RETRIEVAL-V2-VALIDATION.md)
+and [baseline](https://github.com/openaf/mini-a/blob/main/development/docs/WIKI-RETRIEVAL-V2-BASELINE.md).
 
 ## Enable and build
 
@@ -706,7 +706,7 @@ stop, preserving current and intended rollback generations.
 Obsolete development-only parser/schema generations require reindexing. The
 current reader does not silently reinterpret them.
 
-The [Area 7 local evaluation](WIKI-RETRIEVAL-V2-VALIDATION.md#area-7-independent-local-evaluation-and-release-audit--2026-09-16)
+The [Area 7 local evaluation](https://github.com/openaf/mini-a/blob/main/development/docs/WIKI-RETRIEVAL-V2-VALIDATION.md#area-7-independent-local-evaluation-and-release-audit--2026-09-16)
 now includes frozen quality questions, matched 100/1,000/10,000-page
 benchmarks and bounded same-JVM readers. Quality passed that curated set, while
 cold and warm retrieval, update, heap and artifact-size regressions prevent an
@@ -1157,7 +1157,7 @@ Routing is checked once per opened immutable snapshot. Cold acquisition still
 checks generation structure, and high-degree backlinks still inspect each incoming
 source. Explicit maintenance, full reindex, retained disk, and live-provider
 behavior are outside this optimization. See the
-[measured follow-up](WIKI-RETRIEVAL-V2-VALIDATION.md#targeted-metadata-and-shard-cache-follow-up--2026-09-16)
+[measured follow-up](https://github.com/openaf/mini-a/blob/main/development/docs/WIKI-RETRIEVAL-V2-VALIDATION.md#targeted-metadata-and-shard-cache-follow-up--2026-09-16)
 for before/after results and remaining performance limits.
 
 
@@ -1177,4 +1177,4 @@ check. Restricted or revoked sources remain filtered. Full validation compares
 reverse postings with the authoritative page records, including source stamps.
 Because backlinks resolves one reverse key per generation level, it no longer
 repeats parent-manifest verification for every incoming source. See the
-[2026-09-17 validation record](WIKI-RETRIEVAL-V2-VALIDATION.md#backlink-serving-optimization--2026-09-17).
+[2026-09-17 validation record](https://github.com/openaf/mini-a/blob/main/development/docs/WIKI-RETRIEVAL-V2-VALIDATION.md#backlink-serving-optimization--2026-09-17).

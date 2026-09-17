@@ -3483,9 +3483,6 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
     // the model happens to emit a newline, which feels like no streaming at all.
     var bufferMarkdown = opts.bufferMarkdown !== false && !isConsoleStream
     
-    // Match markdown table separator rows with or without outer pipes.
-    var TABLE_SEPARATOR_REGEX = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/
-
     // Thinking-tag streaming filter state
     var tfEnabled = !toBoolean(isObject(args) ? args.showthinking : false)
     var tfShowThinking = !tfEnabled   // true when showthinking=true — emit blocks as thought events
@@ -3497,19 +3494,6 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
     var tfContentBuf = ""   // accumulates content inside confirmed thinking tag
     var tfCloseBuf = ""     // accumulates "</tagname>" chars during tag_closing
     var tfActiveTag = ""    // normalized name of the currently open thinking tag
-
-    function isTableSeparatorLine(lineText) {
-        if (!isString(lineText)) return false
-        return TABLE_SEPARATOR_REGEX.test(lineText.trim())
-    }
-
-    function isTableRowLine(lineText) {
-        if (!isString(lineText)) return false
-        var trimmed = lineText.trim()
-        if (trimmed.length === 0) return false
-        if (isTableSeparatorLine(trimmed)) return false
-        return trimmed.indexOf("|") >= 0
-    }
 
     function isHexDigit(ch) {
         return /^[0-9a-fA-F]$/.test(ch)

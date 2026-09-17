@@ -5,7 +5,7 @@ The pre-existing `.package.yaml` worktree changes were preserved. No real wiki w
 migrated or pruned. All mutation tests used temporary fixtures or a simulated backend.
 
 The translated requirements are in [the English implementation plan](WIKI-INGEST-IMPLEMENTATION-PLAN.md).
-Operating examples and safety limits are in [Safe repeated ingestion](WIKI.md#safe-repeated-ingestion).
+Operating examples and safety limits are in [Safe repeated ingestion](../../docs/WIKI.md#safe-repeated-ingestion).
 
 ## Corrected behavior
 
@@ -43,17 +43,17 @@ Operating examples and safety limits are in [Safe repeated ingestion](WIKI.md#sa
 
 | File | Change |
 | --- | --- |
-| [mini-a-ingest.js](../mini-a-ingest.js) | Scoped reconciliation, full transforms, ownership, journal, migration, results, locks |
-| [mini-a-wiki-knowledge.js](../mini-a-wiki-knowledge.js) | Schema/chunker versions, atomic state, strict corrupt-state handling, active retrieval |
-| [mini-a-ingest.yaml](../mini-a-ingest.yaml) | Parameter validation/help and explicit read-only preservation |
-| [mini-a-con.js](../mini-a-con.js) | Session parameters, command flags and partial/failure reporting |
-| [mini-a.yaml](../mini-a.yaml) | Parameter documentation |
-| [tests/wikiIngest.js](../tests/wikiIngest.js) | More informative existing assertion |
-| [tests/wikiIngestReconcile.js](../tests/wikiIngestReconcile.js) | Temporary-fixture and fault-injection regressions |
-| [tests/wikiIngest.yaml](../tests/wikiIngest.yaml) | Register all additional regressions |
-| [WIKI.md](WIKI.md) | Upsert/prune, costs, conflicts, migration, recovery and backend limits |
-| [USAGE.md](../USAGE.md) | Reconciliation examples and operating guidance |
-| [CHEATSHEET.md](../CHEATSHEET.md) | Preview/apply/empty-source examples |
+| [mini-a-ingest.js](../../mini-a-ingest.js) | Scoped reconciliation, full transforms, ownership, journal, migration, results, locks |
+| [mini-a-wiki-knowledge.js](../../mini-a-wiki-knowledge.js) | Schema/chunker versions, atomic state, strict corrupt-state handling, active retrieval |
+| [mini-a-ingest.yaml](../../mini-a-ingest.yaml) | Parameter validation/help and explicit read-only preservation |
+| [mini-a-con.js](../../mini-a-con.js) | Session parameters, command flags and partial/failure reporting |
+| [mini-a.yaml](../../mini-a.yaml) | Parameter documentation |
+| [tests/wikiIngest.js](../../tests/wikiIngest.js) | More informative existing assertion |
+| [tests/wikiIngestReconcile.js](../../tests/wikiIngestReconcile.js) | Temporary-fixture and fault-injection regressions |
+| [tests/wikiIngest.yaml](../../tests/wikiIngest.yaml) | Register all additional regressions |
+| [WIKI.md](../../docs/WIKI.md) | Upsert/prune, costs, conflicts, migration, recovery and backend limits |
+| [USAGE.md](../../USAGE.md) | Reconciliation examples and operating guidance |
+| [CHEATSHEET.md](../../CHEATSHEET.md) | Preview/apply/empty-source examples |
 | [WIKI-INGEST-IMPLEMENTATION-PLAN.md](WIKI-INGEST-IMPLEMENTATION-PLAN.md) | English translation of the supplied plan |
 | [WIKI-INGEST-VALIDATION.md](WIKI-INGEST-VALIDATION.md) | This delivery record |
 
@@ -136,7 +136,7 @@ the shared wiki manager. Telemetry is disabled by default.
 An explicit writable reindex builds local serving generations; existing ingestion
 journals, full-source reconstruction and protected pruning remain authoritative.
 Original ingestion chunks and summaries do not become wiki-range quotations.
-See [retrieval v2](WIKI-RETRIEVAL-V2.md) for effective capabilities, restricted
+See [retrieval v2](../../docs/WIKI-RETRIEVAL-V2.md) for effective capabilities, restricted
 presentation policy, rollout and outstanding requirements.
 
 ### Retrieval v2 publication batching

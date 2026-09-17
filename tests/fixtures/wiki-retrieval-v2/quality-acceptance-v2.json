@@ -2,12 +2,12 @@
   "evaluationVersion": 3,
   "mode": "v2",
   "split": "acceptance",
-  "runtime": "20260914",
+  "runtime": "20260916",
   "fixtureSha1": "838d528fa4c4f026be90db8e0dd5b55b6871714a",
   "sourceSha1": {
     "wiki": "eb73c1b17923c67e980161d1f67cfd3a5e152e5c",
     "knowledge": "9907ab7bad31adcd9b32cf5247e4c29f7a050170",
-    "retrieval": "36c0129fd114cc82b531321b6794890be9109c7a",
+    "retrieval": "bd78bc47774ad8425fdb486c74d4f6b44ecbba85",
     "harness": "472598ad929786c93359aed6971a73ad886e38e2"
   },
   "samples": 31,
