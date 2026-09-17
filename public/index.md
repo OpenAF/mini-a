@@ -2841,8 +2841,7 @@
             lastRawContent = content;
             conversationFinished = events.some(ev => ev && (ev.event === 'final' || ev.event === 'assistant' || ev.event === '🤖'));
 
-            const preprocessed = preprocessChartBlocks(content);
-            const htmlContent = converter.makeHtml(preprocessed);
+            const htmlContent = renderConversationMarkdown(content);
             await updateResultsContent(htmlContent);
             try { hljs.highlightAll(); } catch (e) { /* ignore */ }
             forceRenderChartBlocks();
@@ -3176,13 +3175,22 @@
         }
     }
 
+    function renderConversationMarkdown(content) {
+        // Activity is already escaped HTML, not Markdown. Showdown hashes its spans
+        // and leaves internal tokens visible once its unhashing limit is reached.
+        // Keep panels out of both Markdown conversion and diagram preprocessing.
+        return (content || '').split(/(<details class="answer-activity"[\s\S]*?<\/details>)/g)
+            .map((part, index) => index % 2 ? part :
+                converter.makeHtml(preprocessChartBlocks(preprocessSvgBlocks(part))))
+            .join('');
+    }
+
     async function renderRawContent(rawContent) {
         const nextContent = rawContent || '';
         if (nextContent === lastRenderedRaw) return;
 
         const normalizedContent = normalizeRenderedConversationText(nextContent);
-        const preprocessed = preprocessChartBlocks(preprocessSvgBlocks(normalizedContent));
-        const htmlContent = converter.makeHtml(preprocessed);
+        const htmlContent = renderConversationMarkdown(normalizedContent);
         await updateResultsContent(htmlContent);
         try { hljs.highlightAll(); } catch (e) { /* ignore */ }
         forceRenderChartBlocks();
@@ -4986,8 +4994,7 @@
         currentSessionUuid = entry.uuid;
 
         const savedContent = upgradeActivityTranscript(entry.content || '', lastKnownHistory);
-        const preprocessed = preprocessChartBlocks(preprocessSvgBlocks(savedContent));
-        const htmlContent = converter.makeHtml(preprocessed);
+        const htmlContent = renderConversationMarkdown(savedContent);
         await updateResultsContent(htmlContent);
         resetPlanPanel();
         try { hljs.highlightAll(); } catch (e) { /* ignore */ }
@@ -5041,8 +5048,7 @@
                 }
                 resetSubagentPanel(false);
             }
-            const preprocessed = preprocessChartBlocks(preprocessSvgBlocks(data.content || ''));
-            const htmlContent = converter.makeHtml(preprocessed);
+            const htmlContent = renderConversationMarkdown(data.content || '');
             await updateResultsContent(htmlContent);
             try { hljs.highlightAll(); } catch (e) { /* ignore */ }
             forceRenderChartBlocks();

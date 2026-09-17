@@ -73,6 +73,34 @@ function functionSource(name) {
   assert.ok(start >= 0 && end > start, name);
   return page.slice(start, end);
 }
+// Use the real browser converter and rendering pipeline for long activity lists.
+const rendering = vm.createContext({ showdown });
+for (const name of ['createMarkdownConverter', 'escapeHtml', 'preprocessChartBlocks',
+  'preprocessSvgBlocks', 'renderConversationMarkdown']) {
+  vm.runInContext(functionSource(name), rendering);
+}
+vm.runInContext('const converter = createMarkdownConverter(false);', rendering);
+const longEvents = Array.from({ length: 40 }, (_, index) => ({
+  event: '💭', message: "Using tool 'wiki' #" + index
+}));
+longEvents.push({ event: '💭', message: '<script>alert(1)</script> & `skills`\n```chart\n{}\n```' });
+for (const transcript of [
+  result(longEvents).content,
+  result([...longEvents, { event: 'final', message: '## Answer\n\nA **useful** answer.' }]).content
+]) {
+  const rendered = rendering.renderConversationMarkdown(transcript);
+  const activity = transcript.match(/<details class="answer-activity"[\s\S]*?<\/details>/)[0];
+  assert.ok(rendered.includes(activity), 'All escaped activity text survives conversion unchanged');
+  assert.doesNotMatch(rendered, /¨C\d+C/);
+  assert.equal((rendered.match(/class="activity-event"/g) || []).length, 41);
+  assert.ok(!rendered.includes('<script>'));
+  if (transcript.includes('## Answer')) assert.match(rendered, /<strong>useful<\/strong>/);
+}
+const renderedFollowup = rendering.renderConversationMarkdown(twoAnswers.content);
+assert.equal((renderedFollowup.match(/class="answer-activity"/g) || []).length, 2);
+assert.match(renderedFollowup, /<strong>useful<\/strong>/);
+assert.ok(renderedFollowup.includes('Second answer'));
+
 let panels = [];
 const context = vm.createContext({
   resultsDiv: { querySelectorAll: () => panels }, currentSessionUuid: 'test',
