@@ -1,0 +1,12 @@
+{
+  "suite": "wikiRetrievalV2",
+  "assertions": 1556,
+  "passedFunctions": 47,
+  "failures": [],
+  "sourceSha1": {
+    "mini-a-wiki-retrieval.js": "5e2585a3449779d02161be06fd9f52a2f4e54ead",
+    "tests/wikiRetrievalV2.js": "7da29414dc3c62788e9d6455eacb79e00354514f",
+    "tests/wikiRetrievalV2.yaml": "42d078479928ff88b31c32add01d8ab4425d7032",
+    "tests/wikiRetrievalAssertions.js": "f8db420dc88e540a2c52540620b7709a77428406"
+  }
+}

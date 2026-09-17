@@ -44,7 +44,7 @@ and rejects unknown keys, invalid booleans and non-positive/non-integer numeric 
 | linkImmutableFiles | true | Reuse immutable index files through hard links; false forces copies; unsupported links fall back to copies |
 | sharedBlockStore | false | Opt-in local immutable block store; reclamation uses retained-generation reachability |
 | passageChars | 1400 | 64–16000 UTF-16 units; soft structural target |
-| cacheBytes | 8388608 | FIFO immutable raw-block cache, at most 268435456 UTF-8 bytes per manager |
+| cacheBytes | 8388608 | Shared FIFO payload budget for raw blocks, decoded catalogue shards and metadata proofs; at most 268435456 bytes per manager |
 | maxArtifactBytes | 268435456 | Expanded generation cap, at most 2147483647 bytes |
 | maxArtifactFiles | 100000 | Expanded generation cap, at most 1000000 files |
 | maxMillis | 15000 | Request deadline, at most 120000 ms |
@@ -706,9 +706,13 @@ stop, preserving current and intended rollback generations.
 Obsolete development-only parser/schema generations require reindexing. The
 current reader does not silently reinterpret them.
 
-Remaining acceptance work covers physical device/network I/O instrumentation,
-independent quality evaluation, broader concurrency, transport and
-security-revocation tests. Trusted/safe STDIO and localhost HTTP search/read smoke
+The [Area 7 local evaluation](WIKI-RETRIEVAL-V2-VALIDATION.md#area-7-independent-local-evaluation-and-release-audit--2026-09-16)
+now includes frozen quality questions, matched 100/1,000/10,000-page
+benchmarks and bounded same-JVM readers. Quality passed that curated set, while
+cold and warm retrieval, update, heap and artifact-size regressions prevent an
+unqualified release-performance claim. Physical device/network I/O, broader
+distributed concurrency and live transport/security-revocation proof remain
+deployment-dependent work. Trusted/safe STDIO and localhost HTTP search/read smoke
 pass; twelve abrupt-JVM publication checkpoints and injected synchronization/space
 failures have regression coverage. These do not prove physical power-loss behavior
 or live-provider durability. Distributed restricted quota writes
@@ -1129,3 +1133,48 @@ representation consistency, not a new verification or freshness signal.
 Network filesystems, provider caches, storage-controller write caches and hardware
 power loss remain unverified. Existing pre-synchronization benchmarks are
 historical results; the added force operations can increase publication latency.
+
+
+## Targeted metadata and catalogue caching — 2026-09-16
+
+V2 `open` and `navigate` validate the selected page's immutable block and outline
+without materializing or validating the entire catalogue. `backlinks` reads
+compact reverse postings and still checks each incoming source. Opening remote
+bundle metadata uses local immutable block bytes without a source-body GET.
+
+Verified catalogue shards and page-metadata proofs share `cacheBytes` with raw
+blocks. The allowance counts serialized payload and cache-key bytes for metadata,
+not actual JVM object overhead or peak request memory. Entries are immutable,
+generation/path/checksum scoped and released by FIFO eviction or manager close.
+Each shard reuse checks its file identity, size and modification timestamp;
+backlinks verifies its selected reverse shard. This assumes immutable
+local generation files under the supported single-writer contract; it does not
+detect adversarial rewrites that preserve all file stamps. Full validation always
+rereads and checksums shards. Source activity/permission checks still run on
+metadata and evidence disclosure, including cache hits.
+
+Routing is checked once per opened immutable snapshot. Cold acquisition still
+checks generation structure, and high-degree backlinks still inspect each incoming
+source. Explicit maintenance, full reindex, retained disk, and live-provider
+behavior are outside this optimization. See the
+[measured follow-up](WIKI-RETRIEVAL-V2-VALIDATION.md#targeted-metadata-and-shard-cache-follow-up--2026-09-16)
+for before/after results and remaining performance limits.
+
+
+## Compact backlink activity — 2026-09-17
+
+Reverse-link postings now include the source stamp used by the page record.
+Backlinks checks each current source directly from that compact posting and
+returns the established public shape (`path`, `title`, `links`). A changed source
+stamp without changed Markdown refreshes its affected reverse postings during an
+incremental update. A posting without the new stamp requires reindexing; this
+schema detail existed only on the unreleased development branch.
+
+For local files, the canonical root is resolved once per backlink request and
+file attributes are read without following symbolic links. Each source still
+receives a current readability, containment, file identity, size and modification
+check. Restricted or revoked sources remain filtered. Full validation compares
+reverse postings with the authoritative page records, including source stamps.
+Because backlinks resolves one reverse key per generation level, it no longer
+repeats parent-manifest verification for every incoming source. See the
+[2026-09-17 validation record](WIKI-RETRIEVAL-V2-VALIDATION.md#backlink-serving-optimization--2026-09-17).

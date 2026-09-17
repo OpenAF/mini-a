@@ -1,0 +1,853 @@
+{
+  "evaluationVersion": 3,
+  "mode": "legacy",
+  "split": "acceptance",
+  "runtime": "20260914",
+  "fixtureSha1": "838d528fa4c4f026be90db8e0dd5b55b6871714a",
+  "sourceSha1": {
+    "wiki": "eb73c1b17923c67e980161d1f67cfd3a5e152e5c",
+    "knowledge": "9907ab7bad31adcd9b32cf5247e4c29f7a050170",
+    "retrieval": "36c0129fd114cc82b531321b6794890be9109c7a",
+    "harness": "472598ad929786c93359aed6971a73ad886e38e2"
+  },
+  "samples": 31,
+  "answerableSamples": 26,
+  "unanswerableSamples": 5,
+  "passageRecallAtK": 0.8846153846153846,
+  "mrr": 0.8846153846153846,
+  "unanswerableCorrect": 5,
+  "results": [
+    {
+      "query": "authcachettl",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.2578125,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "auth-cache.md"
+      ]
+    },
+    {
+      "query": "auditwindowdays",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.20553359683794467,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "audit-window.md"
+      ]
+    },
+    {
+      "query": "batchmaxrecords",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.20634920634920634,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "batch-limit.md"
+      ]
+    },
+    {
+      "query": "certpinsha256",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.20553359683794467,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "cert-pinning.md"
+      ]
+    },
+    {
+      "query": "dnstimeoutms",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.172,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "dns-timeout.md"
+      ]
+    },
+    {
+      "query": "eventretrycount",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.23622047244094488,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "event-retry.md"
+      ]
+    },
+    {
+      "query": "filelockwaitms",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.23228346456692914,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "file-lock.md"
+      ]
+    },
+    {
+      "query": "graphmaxdepth",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.21739130434782608,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "graph-depth.md"
+      ]
+    },
+    {
+      "query": "httpidlelimit",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.21739130434782608,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "http-idle.md"
+      ]
+    },
+    {
+      "query": "indexshardcount",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.19444444444444445,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "index-shard.md"
+      ]
+    },
+    {
+      "query": "jobdeadlinems",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.1752988047808765,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "job-deadline.md"
+      ]
+    },
+    {
+      "query": "keyrotationdays",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.172,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "key-rotation.md"
+      ]
+    },
+    {
+      "query": "How should a backup be restored?",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.7083333333333334,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "backup.md"
+      ]
+    },
+    {
+      "query": "When should a critical incident be escalated?",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        },
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.06451612903225806,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "incident.md",
+        "graph-depth.md"
+      ]
+    },
+    {
+      "query": "What happens after a tenant exceeds its quota?",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        },
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.3617021276595745,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "quota.md",
+        "token.md"
+      ]
+    },
+    {
+      "query": "When do readers switch after a schema change?",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        },
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.4897959183673469,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "schema.md",
+        "backup.md"
+      ]
+    },
+    {
+      "query": "What is the order for replacing a leaked token?",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.9545454545454546,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "token.md"
+      ]
+    },
+    {
+      "query": "What does a completed checkpoint record?",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        },
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.46938775510204084,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "checkpoint.md",
+        "retention.md"
+      ]
+    },
+    {
+      "query": "How should transport failures be retried?",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        },
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.07581227436823104,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "transport.md",
+        "event-retry.md"
+      ]
+    },
+    {
+      "query": "When are expired records removed?",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        },
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.3673469387755102,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "retention.md",
+        "checkpoint.md"
+      ]
+    },
+    {
+      "query": "issuer signature audience claim",
+      "k": 3,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        },
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 2.4782608695652173,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "audience.md",
+        "issuer.md"
+      ]
+    },
+    {
+      "query": "source digest destination capacity",
+      "k": 3,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        },
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        },
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.35906040268456374,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "destination.md",
+        "source.md",
+        "cert-pinning.md"
+      ]
+    },
+    {
+      "query": "preceding generation rollback pin active readers",
+      "k": 3,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        },
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        },
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 1.6527777777777777,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "pin.md",
+        "rollback.md",
+        "schema.md"
+      ]
+    },
+    {
+      "query": "protocol handshake",
+      "k": 1,
+      "recall": 0,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": null,
+      "citationChecks": [],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "zero",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": []
+    },
+    {
+      "query": "protocol handshake",
+      "k": 1,
+      "recall": 0,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": null,
+      "citationChecks": [],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "zero",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": []
+    },
+    {
+      "query": "archiveflushsize last mount",
+      "k": 1,
+      "recall": 0,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": 0,
+      "citationChecks": [
+        {
+          "correct": false,
+          "textCorrect": false,
+          "reasons": [
+            "missing-or-invalid-character-range",
+            "text-mismatch",
+            "revision-mismatch-or-missing"
+          ]
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "checkpoint.md"
+      ]
+    },
+    {
+      "query": "nonexistentciphermode",
+      "k": 2,
+      "recall": null,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": null,
+      "citationChecks": [],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "zero",
+      "expectedUnanswerable": true,
+      "unanswerableCorrect": true,
+      "evidencePaths": []
+    },
+    {
+      "query": "missingledgeroption",
+      "k": 2,
+      "recall": null,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": null,
+      "citationChecks": [],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "zero",
+      "expectedUnanswerable": true,
+      "unanswerableCorrect": true,
+      "evidencePaths": []
+    },
+    {
+      "query": "unknowntransportbudget",
+      "k": 2,
+      "recall": null,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": null,
+      "citationChecks": [],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "zero",
+      "expectedUnanswerable": true,
+      "unanswerableCorrect": true,
+      "evidencePaths": []
+    },
+    {
+      "query": "absentrecoverycommand",
+      "k": 2,
+      "recall": null,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": null,
+      "citationChecks": [],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "zero",
+      "expectedUnanswerable": true,
+      "unanswerableCorrect": true,
+      "evidencePaths": []
+    },
+    {
+      "query": "neverdefinedretentionflag",
+      "k": 2,
+      "recall": null,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": null,
+      "citationChecks": [],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "zero",
+      "expectedUnanswerable": true,
+      "unanswerableCorrect": true,
+      "evidencePaths": []
+    }
+  ]
+}

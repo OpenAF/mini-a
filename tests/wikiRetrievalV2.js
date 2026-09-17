@@ -2462,6 +2462,111 @@
       ow.test.assert(isUnDef(wm._servingBatchChanges) && isUnDef(wm._servingMoveOrigins), true, "move scope restored after publication")
     } finally { if(pinned)wm._retrievalV2.release(pinned); if(wm)wm.close(); io.rm(dir) }
   }
+  exports.testCompactBacklinkActivity = function() {
+    var dir=temporary(), writer, reader, pin
+    try {
+      io.writeFileString(dir+"/target.md","# Target\n")
+      for(var i=0;i<30;i++)io.writeFileString(dir+"/source-"+i+".md","# Source\n[target](target.md)\n")
+      writer=make(dir);ow.test.assert(writer.reindex().ok,true,"backlink activity fixture publishes")
+      reader=make(dir,{access:"ro"})
+      var engine=reader._retrievalV2, first=reader.backlinks("target.md")
+      ow.test.assert(first.count,30,"all current incoming sources are returned")
+      ow.test.assert(Object.keys(first.backlinks[0]).sort().join(","),"links,path,title","compact validation stamp is not disclosed")
+      ow.test.assert(engine.metrics.catalogueLookups,1,"base-generation backlink resolves one catalogue key")
+      io.writeFileString(dir+"/source-0.md","# External edit\n[target](target.md)\n")
+      ow.test.assert(reader.backlinks("target.md").count,29,"external source edit suppresses stale posting")
+      var updated=writer.write("source-0.md",{},"# Updated\n[target](target.md)\n")
+      ow.test.assert(updated.ok,true,"changed source publishes a delta")
+      ow.test.assert(reader.backlinks("target.md").count,30,"new posting carries current source stamp")
+      pin=engine.acquire();ow.test.assert(pin.manifest.catalogue.depth,1,"backlink refresh uses a delta generation")
+      var before=engine.metrics.catalogueLookups
+      ow.test.assert(reader.backlinks("target.md").count,30,"delta backlink remains complete")
+      ow.test.assert(engine.metrics.catalogueLookups-before,2,"delta backlink resolves once per lineage level")
+      engine.release(pin);pin=__
+      var unchangedPath=new java.io.File(dir+"/source-1.md").toPath()
+      java.nio.file.Files.setLastModifiedTime(unchangedPath,java.nio.file.attribute.FileTime.fromMillis(Date.now()+2000))
+      ow.test.assert(reader.backlinks("target.md").count,29,"stamp-only external change suppresses prior posting")
+      ow.test.assert(writer._retrievalV2.build(["source-1.md"]).ok,true,"same-byte update refreshes source stamp")
+      ow.test.assert(reader.backlinks("target.md").count,30,"stamp-only publication refreshes compact posting")
+      pin=engine.acquire();engine._validate(pin.dir,pin.manifest)
+      var resolve=engine._resolveCatalogue, mismatch=""
+      engine._resolveCatalogue=function() {
+        var catalog=clone(resolve.apply(engine,arguments));catalog.reverseLinks["target.md"][0].stamp.size++
+        return catalog
+      }
+      try {engine._validate(pin.dir,pin.manifest)} catch(e) {mismatch=String(e.message||e)}
+      finally {engine._resolveCatalogue=resolve}
+      ow.test.assert(mismatch,"invalid-backlink-postings","full validation rejects a stamp detached from its page")
+      engine.release(pin);pin=__
+      var symlinkPath=new java.io.File(dir+"/source-2.md").toPath()
+      java.nio.file.Files.delete(symlinkPath)
+      java.nio.file.Files.createSymbolicLink(symlinkPath,new java.io.File(dir+"/source-3.md").toPath())
+      ow.test.assert(reader.backlinks("target.md").count,29,"symlinked source is rejected even within the root")
+    } finally {if(pin&&reader)reader._retrievalV2.release(pin);if(reader)reader.close();if(writer)writer.close();io.rm(dir)}
+  }
+  exports.testTargetedMetadataAndShardCache = function() {
+    var dir=temporary(), writer, reader, pin
+    try {
+      for(var i=0;i<120;i++)io.writeFileString(dir+"/unrelated-"+i+".md","# Unrelated\nOrdinary content "+i)
+      io.writeFileString(dir+"/target.md","---\ntitle: Target\n---\n# Answer\ncachetargetparameter is current.")
+      io.writeFileString(dir+"/ref.md","# Reference\n[target](target.md)")
+      writer=make(dir);ow.test.assert(writer.reindex().ok,true,"cache fixture publishes real Lucene generation")
+      reader=make(dir,{access:"ro"});var engine=reader._retrievalV2, resolve=engine._resolveCatalogue
+      engine._resolveCatalogue=function(){throw new Error("unexpected-full-catalogue")}
+      ow.test.assert(reader.open("target.md").title,"Target","cold open resolves only the selected page")
+      ow.test.assert(reader.navigate("target.md",{section:"Answer"}).section.title,"Answer","cold navigation retains the validated outline")
+      ow.test.assert(reader.backlinks("target.md").count,1,"backlinks resolves only incoming records")
+      ow.test.assert(engine.metrics.validationBlockReads,1,"only selected page block is read for cold metadata validation")
+      ow.test.assert(engine.metrics.bodyReads,0,"metadata validation needs no serving body-cache load")
+      var reads=engine.metrics.catalogueShardReads, bodies=engine.metrics.validationBlockReads
+      reader.open("target.md");reader.navigate("target.md",{section:"Answer"});reader.backlinks("target.md")
+      ow.test.assert(engine.metrics.catalogueShardReads,reads,"warm metadata uses verified shard cache")
+      ow.test.assert(engine.metrics.validationBlockReads,bodies,"warm metadata avoids block rereads")
+      var first=reader.retrieve("cachetargetparameter",{chunks:1}), warmReads=engine.metrics.catalogueShardReads
+      ow.test.assert(first.evidence.length,1,"targeted serving retrieves exact evidence")
+      ow.test.assert(reader.retrieve("cachetargetparameter",{chunks:1}).evidence.length,1,"warm retrieval preserves evidence")
+      ow.test.assert(engine.metrics.catalogueShardReads,warmReads,"repeated retrieval reuses verified shards")
+      ow.test.assert(engine.metrics.catalogueCacheHits>0,true,"shard reuse is observable")
+      var backendRead=reader._backend.read, backendType=reader._backendType, indexdir=reader._config.indexdir
+      reader._backend.read=function(){throw new Error("unexpected-source-body-read")};reader._config.indexdir=reader._backend.root;reader._backendType="http"
+      try {var remoteOpened=reader.open("ref.md");ow.test.assert(remoteOpened.error,__,"cold remote outline validates local bundle bytes without a source-body GET");ow.test.assert(remoteOpened.title,"ref.md","remote outline retains published title")}
+      finally {reader._backend.read=backendRead;reader._backendType=backendType;reader._config.indexdir=indexdir}
+      pin=engine.acquire();var page=engine.lookupPage(pin,"target.md"), descriptor=pin.manifest.catalogue.shards.pages[engine._catalogueShard("target.md")]
+      ow.test.assert(Object.isFrozen(page.metadata),true,"cached catalogue records cannot be mutated")
+      ow.test.assert(Object.isFrozen(pin.manifest.catalogue.shards.pages),true,"validated routing is deeply immutable")
+      ow.test.assert(stringify(pin.manifest,__,"").indexOf("_validatedCatalogue"),-1,"routing proof is excluded from serialized artifacts")
+      var lookup=engine.lookupPage, forged=clone(page);forged.outline[0].title="Forged"
+      engine.lookupPage=function(){return forged}
+      try {ow.test.assert(reader.open("target.md").error,"page-metadata-binding-failure","selected metadata still has semantic revision validation")} finally {engine.lookupPage=lookup}
+      var shardPath=pin.dir+"/"+descriptor.path, original=io.readFileString(shardPath), rejected=""
+      try {
+        io.writeFileString(shardPath,original.replace("Target","Forged"))
+        java.nio.file.Files.setLastModifiedTime(new java.io.File(shardPath).toPath(),java.nio.file.attribute.FileTime.fromMillis(Date.now()+2000))
+        try {engine.lookupPage(pin,"target.md")}catch(e){rejected=String(e.message||e)}
+        ow.test.assert(rejected,"catalogue-shard-integrity-failure","changed cached shard cannot bypass checksum validation")
+      } finally {io.writeFileString(shardPath,original)}
+      engine._resolveCatalogue=resolve
+      reads=engine.metrics.catalogueShardReads
+      engine._validate(pin.dir,pin.manifest)
+      ow.test.assert(engine.metrics.catalogueShardReads>reads,true,"full validation bypasses serving shard cache")
+      var byteLimit=engine.config.cacheBytes
+      engine.config.cacheBytes=2500
+      for(var j=0;j<120;j++)engine.lookupPage(pin,"unrelated-"+j+".md")
+      ow.test.assert(engine.cacheBytes<=2500,true,"metadata and bodies share one bounded payload budget")
+      ow.test.assert(engine.metrics.cacheEvictions>0,true,"small budget evicts older metadata and body entries")
+      engine.config.cacheBytes=byteLimit
+      ow.test.assert(engine.lookupPage(pin,"target.md").title,"Target","evicted page can be verified again")
+      writer.write("target.md",{title:"Updated"},"# Updated\ncachetargetparameter remains current.")
+      ow.test.assert(reader.open("target.md").title,"Updated","new generation does not reuse an old metadata proof")
+      ow.test.assert(engine.lookupPage(pin,"target.md").title,"Target","pinned predecessor keeps isolated cached records")
+      io.writeFileString(dir+"/target.md","# External edit\nchanged")
+      ow.test.assert(reader.open("target.md").error,"stale-evidence","cached metadata does not bypass current source activity")
+      engine.release(pin);pin=__
+      reader.close()
+      ow.test.assert(engine.cacheBytes,0,"shutdown releases all cache payload accounting")
+      ow.test.assert(Object.keys(engine.cache).length,0,"shutdown drops decoded metadata and body references")
+    } finally {if(pin&&reader)reader._retrievalV2.release(pin);if(reader)reader.close();if(writer)writer.close();io.rm(dir)}
+  }
   exports.testSchema3CatalogueDelta = function() {
     var dir = temporary(), wm, fresh
     try {

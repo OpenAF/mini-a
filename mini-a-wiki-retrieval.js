@@ -10,10 +10,11 @@ var MiniAWikiRetrievalV2 = function(manager, config) {
   this.lock = new java.util.concurrent.locks.ReentrantLock()
   this._resourceSlots=new java.util.concurrent.Semaphore(3)
   this._pendingClosures=new java.util.concurrent.ConcurrentLinkedQueue()
-  this.serving = []; this.cache = {}; this.cacheOrder = []; this.cacheBytes = 0
+  this.serving = []; this.cache = {}; this.cacheOrder = []; this.cacheSizes = {}; this.cacheBytes = 0
   this.analyzers = java.util.Collections.synchronizedMap(new java.util.IdentityHashMap())
   this.closed = false
   this.metrics = { readerOpens: 0, resourceCloseFailures: 0, cacheHits: 0, cacheMisses: 0, bodyReads: 0, bytesRead: 0, parsedPages: 0, validationBlockReads: 0, validationBlockBytes: 0, validationReusedPages: 0, catalogueShardReads: 0, catalogueShardBytes: 0, catalogueLookups: 0 }
+  this.metrics.catalogueCacheHits = 0; this.metrics.catalogueCacheMisses = 0; this.metrics.cacheEvictions = 0
   var closeFailures=new java.util.concurrent.atomic.AtomicLong(0)
   this._closeFailures=closeFailures
   Object.defineProperty(this.metrics,"resourceCloseFailures",{enumerable:true,get:function(){return Number(closeFailures.get())}})
@@ -504,8 +505,44 @@ MiniAWikiRetrievalV2.prototype._readCatalogueShard = function(dir, name, shard, 
     throw e
   }
 }
+// Bodies and decoded metadata share the configured payload-byte allowance.
+// Call under _guard; entries are immutable and eviction releases their roots.
+MiniAWikiRetrievalV2.prototype._cachePut = function(key, value, size) {
+  if (Object.prototype.hasOwnProperty.call(this.cacheSizes,key)) {
+    this.cacheBytes -= this.cacheSizes[key]; delete this.cache[key]; delete this.cacheSizes[key]
+    this.cacheOrder.splice(this.cacheOrder.indexOf(key),1)
+  }
+  if (size > this.config.cacheBytes || this.closed) return
+  while (this.cacheOrder.length && this.cacheBytes + size > this.config.cacheBytes) {
+    var old = this.cacheOrder.shift(); this.cacheBytes -= this.cacheSizes[old]
+    delete this.cache[old]; delete this.cacheSizes[old]; this.metrics.cacheEvictions++
+  }
+  this.cache[key] = value; this.cacheSizes[key] = size; this.cacheOrder.push(key); this.cacheBytes += size
+}
+MiniAWikiRetrievalV2.prototype._cachedCatalogueShard = function(dir, name, shard, descriptor) {
+  if (!isMap(descriptor) || descriptor.path !== "catalogue/" + name + "/" + shard + ".json" || !/^[a-f0-9]{64}$/.test(descriptor.checksum) || !isFinite(descriptor.bytes) || descriptor.bytes < 0) throw new Error("invalid-catalogue-shard")
+  var self = this
+  return this._guard(function() {
+    if (self.closed) throw new Error("retrieval-closed")
+    var path = self._path(dir,descriptor.path), attrs
+    try { attrs = java.nio.file.Files.readAttributes(new java.io.File(path).toPath(),java.nio.file.attribute.BasicFileAttributes) }
+    catch(missingShard) { throw new Error("catalogue-shard-integrity-failure") }
+    var token = String(attrs.fileKey()) + ":" + String(attrs.lastModifiedTime()) + ":" + Number(attrs.size())
+    var key = "catalogue:" + path + ":" + descriptor.checksum, cached = self.cache[key]
+    if (attrs.isRegularFile() && Number(attrs.size()) === descriptor.bytes && cached && cached.token === token) {
+      self.metrics.catalogueCacheHits++; return cached.value
+    }
+    self.metrics.catalogueCacheMisses++
+    // Full validators deliberately call _readCatalogueShard directly. Serving
+    // reuse binds to the immutable descriptor and current file identity/stamp.
+    var value = MiniAWikiRetrievalV2.immutable(self._readCatalogueShard(dir,name,shard,descriptor))
+    self._cachePut(key,{token:token,value:value},Number(descriptor.bytes) + MiniAWikiRetrievalV2.bytes(key + token))
+    return value
+  })
+}
 MiniAWikiRetrievalV2.prototype._catalogueDescriptor = function(manifest) {
   var c = manifest.catalogue, maps = ["pages", "passages", "reverseLinks", "moveReverse", "blockRefs"]
+  if (Object.isFrozen(manifest) && manifest._validatedCatalogue === c) return c
   if (!isMap(c) || !isFinite(c.depth) || c.depth < 0 || c.depth > 32) throw new Error("invalid-catalogue-lineage")
   if (c.base !== true && (!isMap(c.parent) || !/^[a-f0-9-]{36}$/.test(c.parent.generation) || !/^[a-f0-9]{64}$/.test(c.parent.checksum))) throw new Error("invalid-catalogue-lineage")
   if (c.base === true && c.depth !== 0) throw new Error("invalid-catalogue-lineage")
@@ -549,7 +586,7 @@ MiniAWikiRetrievalV2.prototype._resolveCatalogue = function(dir, manifest, seen)
 // Targeted resolver used by serving paths that only need one catalogue key.
 // It intentionally verifies just the selected shard at first use.  Full
 // catalogue materialization remains available for lint/export and legacy APIs.
-MiniAWikiRetrievalV2.prototype._lookupCatalogue = function(dir, manifest, name, key, seen) {
+MiniAWikiRetrievalV2.prototype._lookupCatalogue = function(dir, manifest, name, key, seen, requestShards) {
   var maps = ["pages", "passages", "reverseLinks", "moveReverse", "blockRefs"]
   if (maps.indexOf(name) < 0 || !isString(key)) throw new Error("invalid-catalogue-lookup")
   this.metrics.catalogueLookups++
@@ -562,11 +599,17 @@ MiniAWikiRetrievalV2.prototype._lookupCatalogue = function(dir, manifest, name, 
   else {
     var parentDir = this.root + "/" + descriptor.parent.generation, parentManifestPath = parentDir + "/manifest.json"
     if (!io.fileExists(parentManifestPath) || MiniAWikiRetrievalV2.digest(parentManifestPath) !== descriptor.parent.checksum) throw new Error("catalogue-parent-unavailable")
-    var parentManifest = af.fromJson(io.readFileString(parentManifestPath)); value = this._lookupCatalogue(parentDir, parentManifest, name, key, lineage)
+    var parentManifest = af.fromJson(io.readFileString(parentManifestPath)); value = this._lookupCatalogue(parentDir, parentManifest, name, key, lineage, requestShards)
   }
   var shard = this._catalogueShard(key), record = descriptor.shards[name][shard]
   if (!record) return value
-  var operation = this._readCatalogueShard(dir, name, shard, record)
+  // A request may reuse a verified immutable shard across its selected keys.
+  var requestKey = dir + ":" + name + ":" + shard
+  var operation = requestShards && requestShards[requestKey]
+  if (!operation) {
+    operation = this._cachedCatalogueShard(dir, name, shard, record)
+    if (requestShards) requestShards[requestKey] = operation
+  }
   if (operation.tombstones.indexOf(key) >= 0) return __
   return Object.prototype.hasOwnProperty.call(operation.upsert, key) ? operation.upsert[key] : value
 }
@@ -654,6 +697,22 @@ MiniAWikiRetrievalV2.prototype._validate = function(dir, manifest, validatedPare
       })
     })
   })
+  var expectedReverse = {}
+  Object.keys(catalog.pages).forEach(function(path) {
+    var page = catalog.pages[path], targets = {}
+    page.links.forEach(function(link) { if (!targets[link.resolved]) targets[link.resolved] = []; targets[link.resolved].push(link) })
+    Object.keys(targets).forEach(function(target) {
+      if (!expectedReverse[target]) expectedReverse[target] = []
+      expectedReverse[target].push({path:path,title:page.title,links:targets[target],stamp:page.stamp})
+    })
+  })
+  if (Object.keys(expectedReverse).length !== Object.keys(catalog.reverseLinks).length || !Object.keys(expectedReverse).every(function(target) {
+    var actual = catalog.reverseLinks[target]
+    if (!isArray(actual) || expectedReverse[target].length !== actual.length) return false
+    var byPath = function(left,right) { return left.path < right.path ? -1 : left.path > right.path ? 1 : 0 }
+    var expected = expectedReverse[target].sort(byPath), sorted = actual.slice().sort(byPath)
+    return expected.every(function(posting,index) { return stringify(posting,__,"") === stringify(sorted[index],__,"") })
+  })) throw new Error("invalid-backlink-postings")
   if(Object.keys(passageRefs).length!==Object.keys(catalog.passages).length)throw new Error("unreferenced-passage-record")
   if (isDef(catalog.blockRefs) && (!isMap(catalog.blockRefs) || Object.keys(catalog.blockRefs).length !== Object.keys(blockRefs).length || !Object.keys(blockRefs).every(function(locator) {
     var record = catalog.blockRefs[locator]
@@ -745,6 +804,11 @@ MiniAWikiRetrievalV2.prototype._openSnapshot = function(dir, manifest, catalog) 
   if(!this._resourceSlots.tryAcquire())throw new Error("generation-resource-budget")
   snapshot._slotHeld.set(true)
   try {
+    // A snapshot's manifest cannot change. Validate routing once, then retain
+    // the proof outside its serialized/Merkle fields for repeated key lookups.
+    var routing = this._catalogueDescriptor(manifest)
+    if (!Object.isFrozen(manifest)) Object.defineProperty(manifest,"_validatedCatalogue",{value:routing,enumerable:false})
+    MiniAWikiRetrievalV2.immutable(manifest)
     snapshot.generation=manifest.generation;snapshot.dir=dir;snapshot.manifest=manifest
     if (catalog) snapshot.catalog=catalog
     else {
@@ -857,7 +921,7 @@ MiniAWikiRetrievalV2.prototype.release = function(snapshot) {
 }
 MiniAWikiRetrievalV2.prototype.close = function() {
   var self = this
-  this._guard(function() { self._flushTelemetry(); self.closed = true; self.cache = {}; self.cacheOrder = []; self.cacheBytes = 0 })
+  this._guard(function() { self._flushTelemetry(); self.closed = true; self.cache = {}; self.cacheOrder = []; self.cacheSizes = {}; self.cacheBytes = 0 })
 }
 MiniAWikiRetrievalV2.prototype._pending = function() {
   var m = this.manager, path = m._getIndexRoot() + "/.mini-a-wiki-ingest/journal.json", state = m._getIndexRoot() + "/.mini-a-wiki-state/manifest.json", pending = {}, token = ""
@@ -875,11 +939,13 @@ MiniAWikiRetrievalV2.prototype._pending = function() {
   this.suppression = { token: token, pending: pending }
   return pending
 }
-MiniAWikiRetrievalV2.prototype._stamp = function(path) {
+MiniAWikiRetrievalV2.prototype._stamp = function(path, canonicalRoot) {
   if (this.manager._archiveRoot || ["fs", "s3fs"].indexOf(this.manager._backendType) < 0) return __
-  var file = new java.io.File(this.manager._backend.root, path), root = String(new java.io.File(this.manager._backend.root).getCanonicalPath())
-  if (!file.isFile() || !file.canRead() || java.nio.file.Files.isSymbolicLink(file.toPath()) || String(file.getCanonicalPath()).indexOf(root + "/") !== 0) return __
-  var attrs = java.nio.file.Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes)
+  var file = new java.io.File(this.manager._backend.root, path), filePath = file.toPath()
+  var root = canonicalRoot || String(new java.io.File(this.manager._backend.root).getCanonicalPath()), attrs
+  try { attrs = java.nio.file.Files.readAttributes(filePath, java.nio.file.attribute.BasicFileAttributes, java.nio.file.LinkOption.NOFOLLOW_LINKS) }
+  catch(missingSource) { return __ }
+  if (!attrs.isRegularFile() || !java.nio.file.Files.isReadable(filePath) || String(file.getCanonicalPath()).indexOf(root + "/") !== 0) return __
   return { modified: String(attrs.lastModifiedTime()), size: Number(attrs.size()), fileKey: String(attrs.fileKey()) }
 }
 MiniAWikiRetrievalV2.prototype._backendCall = function(method, path, deadline, used) {
@@ -898,7 +964,7 @@ MiniAWikiRetrievalV2.prototype._backendCall = function(method, path, deadline, u
     }
   }
 }
-MiniAWikiRetrievalV2.prototype._active = function(page, pending, permissions, deadline, used) {
+MiniAWikiRetrievalV2.prototype._active = function(page, pending, permissions, deadline, used, canonicalRoot) {
   if (!page || this.closed || pending._all || pending[page.path] || this.manager._isSearchExcludedPath(page.path)) return false
   if (this.manager._archiveRoot) return true
   // A static HTTP wiki is served solely from the validated pinned bundle; it
@@ -917,7 +983,7 @@ MiniAWikiRetrievalV2.prototype._active = function(page, pending, permissions, de
     }
     return permissions[page.path]
   }
-  var stamp = this._stamp(page.path)
+  var stamp = this._stamp(page.path, canonicalRoot)
   return !!stamp && !!page.stamp && stamp.modified === page.stamp.modified && stamp.size === page.stamp.size && stamp.fileKey === page.stamp.fileKey
 }
 MiniAWikiRetrievalV2.prototype._body = function(snapshot, page, deadline, used) {
@@ -948,10 +1014,7 @@ MiniAWikiRetrievalV2.prototype._body = function(snapshot, page, deadline, used) 
     self.metrics.bodyReads++; self.metrics.bytesRead += size
     self.manager._auditRetrieval("serving-block", page.locator, page.path, true, size, { operation: "read", protocol: "file", totalMillis: Math.max(0,(Number(java.lang.System.nanoTime())-started)/1000000) })
     if (sha1(text) !== page.revision) throw new Error("stale-evidence")
-    if (size <= self.config.cacheBytes) {
-      while (self.cacheOrder.length && self.cacheBytes + size > self.config.cacheBytes) { var old = self.cacheOrder.shift(); self.cacheBytes -= MiniAWikiRetrievalV2.bytes(self.cache[old]); delete self.cache[old] }
-      self.cache[key] = text; self.cacheOrder.push(key); self.cacheBytes += size
-    }
+    self._cachePut(key,text,size)
     return text
   }, deadline)
 }
@@ -1260,6 +1323,16 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
             // immutable records; only refresh the validated source stamp.
             if (stringify(previous.stamp, __, "") !== stringify(stamp, __, "")) {
               var refreshed = {}; Object.keys(previous).forEach(function(key) { refreshed[key] = previous[key] }); refreshed.stamp = stamp; putRecord("pages",path,refreshed)
+              var refreshedTargets = {}
+              previous.links.forEach(function(link) { refreshedTargets[link.resolved] = true })
+              Object.keys(refreshedTargets).forEach(function(target) {
+                var postings = getRecord("reverseLinks",target) || []
+                putRecord("reverseLinks",target,postings.map(function(entry) {
+                  if (entry.path !== path) return entry
+                  return { path: entry.path, title: entry.title, links: entry.links, stamp: stamp }
+                }))
+                work.reverseTargetsVisited++
+              })
             }
             work.unchangedPagesReused = Number(work.unchangedPagesReused || 0) + 1
             if (!reusedPageBlocks[previous.locator]) { reusedPageBlocks[previous.locator] = true; work.sameRevisionBlocksReused++ }
@@ -1371,7 +1444,7 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
       page.links.forEach(function(link) { if (!targets[link.resolved]) targets[link.resolved] = []; targets[link.resolved].push(link) })
       Object.keys(targets).forEach(function(target) {
         work.reverseTargetsVisited++
-        putRecord("reverseLinks",target,(getRecord("reverseLinks",target) || []).concat([{ path: path, title: page.title, links: targets[target] }]))
+        putRecord("reverseLinks",target,(getRecord("reverseLinks",target) || []).concat([{ path: path, title: page.title, links: targets[target], stamp: stamp }]))
       })
     })
     // Direct reference counts remove only newly retired immutable blocks.
@@ -2029,11 +2102,37 @@ MiniAWikiRetrievalV2.prototype._presentContext = function(out) {
   if (MiniAWikiRetrievalV2.bytes(serialized) > out.budget.limits.maxBytes || Math.ceil(serialized.length / 4) > context.budget) return { ok: false, error: "context-presentation-budget" }
   return context
 }
+MiniAWikiRetrievalV2.prototype._validatePageMetadata = function(snapshot, page) {
+  var self = this, key = "page-metadata:" + snapshot.dir + ":" + page.path
+  if (this._guard(function() { return !!self.cache[key] && self.cache[key].page === page })) return
+  if (!isMap(page) || page.path !== self.manager._normalizeRetrievalPath(page.path) || page.locator !== "blocks/" + page.revision + ".md" || !isArray(page.outline) || !isArray(page.links)) throw new Error("invalid-page-record")
+  // Metadata comes from the selected immutable block even for bundle/remote
+  // readers. Source permission/activity is checked by open before and after;
+  // opening an outline does not fetch a candidate source Markdown body.
+  var raw, started = Number(java.lang.System.nanoTime()), bytes = 0, verified = false
+  try {
+    var block = this.lookupBlockReference(snapshot,page.locator)
+    raw = this._readVerifiedBlock(this._blockFile(snapshot.dir,snapshot.manifest,page.locator,block),block)
+    bytes = MiniAWikiRetrievalV2.bytes(raw); verified = true
+    this.metrics.validationBlockReads++; this.metrics.validationBlockBytes += bytes
+  } finally {
+    this.manager._auditRetrieval("serving-block",page.locator,page.path,verified,bytes,{operation:"read",protocol:"file",totalMillis:Math.max(0,(Number(java.lang.System.nanoTime())-started)/1000000)})
+  }
+  var positions = MiniAWikiRetrievalV2.positions(raw)
+  if (sha1(raw) !== page.revision || raw.length !== page.charLength || positions.lines.length !== page.linesTotal) throw new Error("page-revision-binding-failure")
+  var parsed = MiniAWikiRetrievalV2.parse(page.path,raw,snapshot.manifest.passageChars,true,positions)
+  var metadata = af.fromJson(stringify(self.manager.parseFrontmatter(raw).meta,__,""))
+  if (stringify(parsed.outline,__,"") !== stringify(page.outline,__,"") || stringify(metadata,__,"") !== stringify(page.metadata,__,"") || page.title !== (metadata.title || page.path) || page.description !== (metadata.description || "")) throw new Error("page-metadata-binding-failure")
+  this._guard(function() { self._cachePut(key,{page:page},MiniAWikiRetrievalV2.bytes(key + stringify(page,__,""))) })
+}
 MiniAWikiRetrievalV2.prototype.open = function(path, options) {
   var snapshot, self = this
   try {
-    snapshot = this.acquire(); var page = snapshot.catalog.pages[path]
+    snapshot = this.acquire(); var page = this.lookupPage(snapshot,path)
     if (!page) return { path: path, error: "page-not-found" }
+    if (page.path !== path) throw new Error("invalid-page-record")
+    if (!this._active(page, this._pending())) return { path: path, error: "stale-evidence", restart: true }
+    this._validatePageMetadata(snapshot,page)
     if (!this._active(page, this._pending())) return { path: path, error: "stale-evidence", restart: true }
     var limit = Math.min(100, Math.max(1, Number(options && options.maxHeadings) || 40))
     return { path: path, ref: this.manager._agenticRef(path), title: page.title, description: page.description, revision: page.revision, generation: snapshot.generation, frontmatter: clone(page.metadata), headings: clone(page.outline.slice(0, limit)), headingsTruncated: page.outline.length > limit, links: page.links.map(function(l) { return l.resolved }), size: page.stamp.size }
@@ -2044,8 +2143,12 @@ MiniAWikiRetrievalV2.prototype.backlinks = function(path) {
   var snapshot
   try {
     snapshot = this.acquire(); var pending = this._pending(), self = this
-    var links = (snapshot.catalog.reverseLinks[path] || []).filter(function(link) { return self._active(snapshot.catalog.pages[link.path], pending) })
-    return { target: path, count: links.length, backlinks: clone(links), generation: snapshot.generation }
+    var root = ["fs", "s3fs"].indexOf(this.manager._backendType) >= 0 && !this.manager._archiveRoot ? String(new java.io.File(this.manager._backend.root).getCanonicalPath()) : __
+    var links = this.lookupBacklinks(snapshot,path).filter(function(link) {
+      if (!isMap(link.stamp) || !isString(link.path) || !isArray(link.links)) throw new Error("reindex-required")
+      return self._active({path:link.path,stamp:link.stamp},pending,__,__,__,root)
+    })
+    return { target: path, count: links.length, backlinks: links.map(function(link) { return {path:link.path,title:link.title,links:clone(link.links)} }), generation: snapshot.generation }
   } catch(e) { return { target: path, error: __miniAErrMsg(e), backlinks: [], count: 0 } }
   finally { if (snapshot) this.release(snapshot) }
 }

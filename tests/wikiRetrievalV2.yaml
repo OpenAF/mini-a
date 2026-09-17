@@ -1,6 +1,12 @@
 include:
 - oJobTest.yaml
 jobs:
+- name: MiniA Wiki V2::CompactBacklinkActivity
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testCompactBacklinkActivity
+- name: MiniA Wiki V2::TargetedMetadataAndShardCache
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testTargetedMetadataAndShardCache
 - name: MiniA Wiki V2::ExplicitSupersession
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testExplicitSupersession
@@ -142,6 +148,7 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testFederatedRetryBudget
 todo:
+- MiniA Wiki V2::TargetedMetadataAndShardCache
 - MiniA Wiki V2::DeadlineAwareCacheGuard
 - MiniA Wiki V2::InsufficientSpacePublicationRecovery
 - MiniA Wiki V2::CatalogueStreamRecovery

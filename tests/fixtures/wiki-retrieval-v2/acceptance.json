@@ -1,0 +1,516 @@
+{
+  "split": "acceptance",
+  "design": "Frozen deterministic evaluation authored without inspecting retrieval outputs; no ranking adjustment from this set. Synthetic local corpus, not live provider evidence.",
+  "pages": [
+    {
+      "path": "auth-cache.md",
+      "title": "Auth Cache",
+      "introRepeats": 24,
+      "body": "# Configuration\nSet authcachettl to 45 seconds to bound credential cache lifetime."
+    },
+    {
+      "path": "audit-window.md",
+      "title": "Audit Window",
+      "introRepeats": 24,
+      "body": "# Configuration\nSet auditwindowdays to 21 to retain security events."
+    },
+    {
+      "path": "batch-limit.md",
+      "title": "Batch Limit",
+      "introRepeats": 24,
+      "body": "# Configuration\nSet batchmaxrecords to 300 to cap each import batch."
+    },
+    {
+      "path": "cert-pinning.md",
+      "title": "Cert Pinning",
+      "introRepeats": 24,
+      "body": "# Configuration\nSet certpinsha256 to the trusted certificate digest."
+    },
+    {
+      "path": "dns-timeout.md",
+      "title": "Dns Timeout",
+      "introRepeats": 24,
+      "body": "# Configuration\nSet dnstimeoutms to 800 for resolver waits."
+    },
+    {
+      "path": "event-retry.md",
+      "title": "Event Retry",
+      "introRepeats": 24,
+      "body": "# Configuration\nSet eventretrycount to four for transient delivery failures."
+    },
+    {
+      "path": "file-lock.md",
+      "title": "File Lock",
+      "introRepeats": 24,
+      "body": "# Configuration\nSet filelockwaitms to 600 before reporting lock contention."
+    },
+    {
+      "path": "graph-depth.md",
+      "title": "Graph Depth",
+      "introRepeats": 24,
+      "body": "# Configuration\nSet graphmaxdepth to six when traversing related pages."
+    },
+    {
+      "path": "http-idle.md",
+      "title": "Http Idle",
+      "introRepeats": 24,
+      "body": "# Configuration\nSet httpidlelimit to 90 seconds for pooled connections."
+    },
+    {
+      "path": "index-shard.md",
+      "title": "Index Shard",
+      "introRepeats": 24,
+      "body": "# Configuration\nSet indexshardcount to eight for this collection."
+    },
+    {
+      "path": "job-deadline.md",
+      "title": "Job Deadline",
+      "introRepeats": 24,
+      "body": "# Configuration\nSet jobdeadlinems to 120000 for worker jobs."
+    },
+    {
+      "path": "key-rotation.md",
+      "title": "Key Rotation",
+      "introRepeats": 24,
+      "body": "# Configuration\nSet keyrotationdays to 30 for signing keys."
+    },
+    {
+      "path": "backup.md",
+      "title": "Backup",
+      "body": "# Procedure\nRestore a backup only after verifying the manifest checksum."
+    },
+    {
+      "path": "incident.md",
+      "title": "Incident",
+      "body": "# Procedure\nEscalate a critical incident to the on-call owner within ten minutes."
+    },
+    {
+      "path": "quota.md",
+      "title": "Quota",
+      "body": "# Procedure\nA request that exceeds the tenant quota receives a bounded rejection."
+    },
+    {
+      "path": "schema.md",
+      "title": "Schema",
+      "body": "# Procedure\nA schema change must publish a new generation before readers switch."
+    },
+    {
+      "path": "token.md",
+      "title": "Token",
+      "body": "# Procedure\nRevoke a leaked token before issuing its replacement."
+    },
+    {
+      "path": "checkpoint.md",
+      "title": "Checkpoint",
+      "body": "# Procedure\nA completed checkpoint records the last committed sequence."
+    },
+    {
+      "path": "transport.md",
+      "title": "Transport",
+      "body": "# Procedure\nRetry transport failures with a shared request budget."
+    },
+    {
+      "path": "retention.md",
+      "title": "Retention",
+      "body": "# Procedure\nExpired records are removed only after a reachability sweep."
+    },
+    {
+      "path": "issuer.md",
+      "title": "Issuer",
+      "body": "# Procedure\nCheck the issuer signature before accepting the assertion."
+    },
+    {
+      "path": "audience.md",
+      "title": "Audience",
+      "body": "# Procedure\nCheck the audience claim against the configured service."
+    },
+    {
+      "path": "source.md",
+      "title": "Source",
+      "body": "# Procedure\nConfirm the source digest before starting an import."
+    },
+    {
+      "path": "destination.md",
+      "title": "Destination",
+      "body": "# Procedure\nConfirm destination capacity before starting an import."
+    },
+    {
+      "path": "rollback.md",
+      "title": "Rollback",
+      "body": "# Procedure\nKeep the preceding generation available during rollback."
+    },
+    {
+      "path": "pin.md",
+      "title": "Pin",
+      "body": "# Procedure\nPin active readers until they release the preceding generation."
+    },
+    {
+      "path": "protocol-1.md",
+      "title": "Protocol guidance",
+      "metadata": {
+        "applicability": {
+          "version": "1"
+        }
+      },
+      "body": "# Handshake\nUse the compatibility handshake for protocol version one."
+    },
+    {
+      "path": "protocol-2.md",
+      "title": "Protocol guidance",
+      "metadata": {
+        "applicability": {
+          "version": "2"
+        }
+      },
+      "body": "# Handshake\nUse the signed handshake for protocol version two."
+    },
+    {
+      "wiki": "last",
+      "path": "mount-config.md",
+      "title": "Archive option",
+      "body": "# Archive\nSet archiveflushsize to 512 for the last mount."
+    },
+    {
+      "path": "mount-config.md",
+      "title": "Archive option",
+      "body": "# Archive\nOrdinary archive settings are described here."
+    }
+  ],
+  "queries": [
+    {
+      "query": "authcachettl",
+      "support": [
+        {
+          "path": "auth-cache.md",
+          "text": "Set authcachettl to 45 seconds to bound credential cache lifetime."
+        }
+      ],
+      "k": 1,
+      "group": "exact"
+    },
+    {
+      "query": "auditwindowdays",
+      "support": [
+        {
+          "path": "audit-window.md",
+          "text": "Set auditwindowdays to 21 to retain security events."
+        }
+      ],
+      "k": 1,
+      "group": "exact"
+    },
+    {
+      "query": "batchmaxrecords",
+      "support": [
+        {
+          "path": "batch-limit.md",
+          "text": "Set batchmaxrecords to 300 to cap each import batch."
+        }
+      ],
+      "k": 1,
+      "group": "exact"
+    },
+    {
+      "query": "certpinsha256",
+      "support": [
+        {
+          "path": "cert-pinning.md",
+          "text": "Set certpinsha256 to the trusted certificate digest."
+        }
+      ],
+      "k": 1,
+      "group": "exact"
+    },
+    {
+      "query": "dnstimeoutms",
+      "support": [
+        {
+          "path": "dns-timeout.md",
+          "text": "Set dnstimeoutms to 800 for resolver waits."
+        }
+      ],
+      "k": 1,
+      "group": "exact"
+    },
+    {
+      "query": "eventretrycount",
+      "support": [
+        {
+          "path": "event-retry.md",
+          "text": "Set eventretrycount to four for transient delivery failures."
+        }
+      ],
+      "k": 1,
+      "group": "exact"
+    },
+    {
+      "query": "filelockwaitms",
+      "support": [
+        {
+          "path": "file-lock.md",
+          "text": "Set filelockwaitms to 600 before reporting lock contention."
+        }
+      ],
+      "k": 1,
+      "group": "exact"
+    },
+    {
+      "query": "graphmaxdepth",
+      "support": [
+        {
+          "path": "graph-depth.md",
+          "text": "Set graphmaxdepth to six when traversing related pages."
+        }
+      ],
+      "k": 1,
+      "group": "exact"
+    },
+    {
+      "query": "httpidlelimit",
+      "support": [
+        {
+          "path": "http-idle.md",
+          "text": "Set httpidlelimit to 90 seconds for pooled connections."
+        }
+      ],
+      "k": 1,
+      "group": "exact"
+    },
+    {
+      "query": "indexshardcount",
+      "support": [
+        {
+          "path": "index-shard.md",
+          "text": "Set indexshardcount to eight for this collection."
+        }
+      ],
+      "k": 1,
+      "group": "exact"
+    },
+    {
+      "query": "jobdeadlinems",
+      "support": [
+        {
+          "path": "job-deadline.md",
+          "text": "Set jobdeadlinems to 120000 for worker jobs."
+        }
+      ],
+      "k": 1,
+      "group": "exact"
+    },
+    {
+      "query": "keyrotationdays",
+      "support": [
+        {
+          "path": "key-rotation.md",
+          "text": "Set keyrotationdays to 30 for signing keys."
+        }
+      ],
+      "k": 1,
+      "group": "exact"
+    },
+    {
+      "query": "How should a backup be restored?",
+      "support": [
+        {
+          "path": "backup.md",
+          "text": "manifest checksum"
+        }
+      ],
+      "k": 2,
+      "group": "natural"
+    },
+    {
+      "query": "When should a critical incident be escalated?",
+      "support": [
+        {
+          "path": "incident.md",
+          "text": "within ten minutes"
+        }
+      ],
+      "k": 2,
+      "group": "natural"
+    },
+    {
+      "query": "What happens after a tenant exceeds its quota?",
+      "support": [
+        {
+          "path": "quota.md",
+          "text": "bounded rejection"
+        }
+      ],
+      "k": 2,
+      "group": "natural"
+    },
+    {
+      "query": "When do readers switch after a schema change?",
+      "support": [
+        {
+          "path": "schema.md",
+          "text": "publish a new generation"
+        }
+      ],
+      "k": 2,
+      "group": "natural"
+    },
+    {
+      "query": "What is the order for replacing a leaked token?",
+      "support": [
+        {
+          "path": "token.md",
+          "text": "Revoke a leaked token"
+        }
+      ],
+      "k": 2,
+      "group": "natural"
+    },
+    {
+      "query": "What does a completed checkpoint record?",
+      "support": [
+        {
+          "path": "checkpoint.md",
+          "text": "last committed sequence"
+        }
+      ],
+      "k": 2,
+      "group": "natural"
+    },
+    {
+      "query": "How should transport failures be retried?",
+      "support": [
+        {
+          "path": "transport.md",
+          "text": "shared request budget"
+        }
+      ],
+      "k": 2,
+      "group": "natural"
+    },
+    {
+      "query": "When are expired records removed?",
+      "support": [
+        {
+          "path": "retention.md",
+          "text": "reachability sweep"
+        }
+      ],
+      "k": 2,
+      "group": "natural"
+    },
+    {
+      "query": "issuer signature audience claim",
+      "support": [
+        {
+          "path": "issuer.md",
+          "text": "Check the issuer signature before accepting the assertion."
+        },
+        {
+          "path": "audience.md",
+          "text": "Check the audience claim against the configured service."
+        }
+      ],
+      "k": 3,
+      "group": "paired"
+    },
+    {
+      "query": "source digest destination capacity",
+      "support": [
+        {
+          "path": "source.md",
+          "text": "Confirm the source digest before starting an import."
+        },
+        {
+          "path": "destination.md",
+          "text": "Confirm destination capacity before starting an import."
+        }
+      ],
+      "k": 3,
+      "group": "paired"
+    },
+    {
+      "query": "preceding generation rollback pin active readers",
+      "support": [
+        {
+          "path": "rollback.md",
+          "text": "Keep the preceding generation available during rollback."
+        },
+        {
+          "path": "pin.md",
+          "text": "Pin active readers until they release the preceding generation."
+        }
+      ],
+      "k": 3,
+      "group": "paired"
+    },
+    {
+      "query": "protocol handshake",
+      "applicability": {
+        "version": "1"
+      },
+      "support": [
+        {
+          "path": "protocol-1.md",
+          "text": "Use the compatibility handshake for protocol version one."
+        }
+      ],
+      "k": 1,
+      "group": "version"
+    },
+    {
+      "query": "protocol handshake",
+      "applicability": {
+        "version": "2"
+      },
+      "support": [
+        {
+          "path": "protocol-2.md",
+          "text": "Use the signed handshake for protocol version two."
+        }
+      ],
+      "k": 1,
+      "group": "version"
+    },
+    {
+      "query": "archiveflushsize last mount",
+      "wiki": "*",
+      "support": [
+        {
+          "path": "@last/mount-config.md",
+          "text": "Set archiveflushsize to 512"
+        }
+      ],
+      "k": 1,
+      "group": "mount"
+    },
+    {
+      "query": "nonexistentciphermode",
+      "support": [],
+      "k": 2,
+      "group": "unanswerable"
+    },
+    {
+      "query": "missingledgeroption",
+      "support": [],
+      "k": 2,
+      "group": "unanswerable"
+    },
+    {
+      "query": "unknowntransportbudget",
+      "support": [],
+      "k": 2,
+      "group": "unanswerable"
+    },
+    {
+      "query": "absentrecoverycommand",
+      "support": [],
+      "k": 2,
+      "group": "unanswerable"
+    },
+    {
+      "query": "neverdefinedretentionflag",
+      "support": [],
+      "k": 2,
+      "group": "unanswerable"
+    }
+  ]
+}

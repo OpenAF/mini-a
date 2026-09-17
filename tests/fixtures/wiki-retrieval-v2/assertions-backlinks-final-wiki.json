@@ -1,0 +1,12 @@
+{
+  "suite": "wiki",
+  "assertions": 2139,
+  "passedFunctions": 200,
+  "failures": [],
+  "sourceSha1": {
+    "mini-a-wiki-retrieval.js": "bd78bc47774ad8425fdb486c74d4f6b44ecbba85",
+    "tests/wikiRetrievalV2.js": "49e77e8df81504178b4c666367e5f0485d9d381e",
+    "tests/wiki.yaml": "522ffb69f621b95572d1af3120010f930249a583",
+    "tests/wikiRetrievalAssertions.js": "f8db420dc88e540a2c52540620b7709a77428406"
+  }
+}

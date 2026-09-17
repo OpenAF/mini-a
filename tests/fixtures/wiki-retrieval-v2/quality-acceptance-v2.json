@@ -1,0 +1,729 @@
+{
+  "evaluationVersion": 3,
+  "mode": "v2",
+  "split": "acceptance",
+  "runtime": "20260914",
+  "fixtureSha1": "838d528fa4c4f026be90db8e0dd5b55b6871714a",
+  "sourceSha1": {
+    "wiki": "eb73c1b17923c67e980161d1f67cfd3a5e152e5c",
+    "knowledge": "9907ab7bad31adcd9b32cf5247e4c29f7a050170",
+    "retrieval": "36c0129fd114cc82b531321b6794890be9109c7a",
+    "harness": "472598ad929786c93359aed6971a73ad886e38e2"
+  },
+  "samples": 31,
+  "answerableSamples": 26,
+  "unanswerableSamples": 5,
+  "passageRecallAtK": 1,
+  "mrr": 1,
+  "unanswerableCorrect": 5,
+  "results": [
+    {
+      "query": "authcachettl",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 3.142857142857143,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "auth-cache.md"
+      ]
+    },
+    {
+      "query": "auditwindowdays",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 3.0588235294117645,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "audit-window.md"
+      ]
+    },
+    {
+      "query": "batchmaxrecords",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 3.0588235294117645,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "batch-limit.md"
+      ]
+    },
+    {
+      "query": "certpinsha256",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 3.0588235294117645,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "cert-pinning.md"
+      ]
+    },
+    {
+      "query": "dnstimeoutms",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 2.8666666666666667,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "dns-timeout.md"
+      ]
+    },
+    {
+      "query": "eventretrycount",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 3.1578947368421053,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "event-retry.md"
+      ]
+    },
+    {
+      "query": "filelockwaitms",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 3.1052631578947367,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "file-lock.md"
+      ]
+    },
+    {
+      "query": "graphmaxdepth",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 3.0555555555555554,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "graph-depth.md"
+      ]
+    },
+    {
+      "query": "httpidlelimit",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 3.0555555555555554,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "http-idle.md"
+      ]
+    },
+    {
+      "query": "indexshardcount",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 2.8823529411764706,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "index-shard.md"
+      ]
+    },
+    {
+      "query": "jobdeadlinems",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 2.933333333333333,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "job-deadline.md"
+      ]
+    },
+    {
+      "query": "keyrotationdays",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 2.8666666666666667,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "key-rotation.md"
+      ]
+    },
+    {
+      "query": "How should a backup be restored?",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.9444444444444444,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "backup.md"
+      ]
+    },
+    {
+      "query": "When should a critical incident be escalated?",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        },
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.47368421052631576,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "incident.md",
+        "graph-depth.md"
+      ]
+    },
+    {
+      "query": "What happens after a tenant exceeds its quota?",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        },
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.4358974358974359,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "quota.md",
+        "backup.md"
+      ]
+    },
+    {
+      "query": "When do readers switch after a schema change?",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        },
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.631578947368421,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "schema.md",
+        "graph-depth.md"
+      ]
+    },
+    {
+      "query": "What is the order for replacing a leaked token?",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 1.2352941176470589,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "token.md"
+      ]
+    },
+    {
+      "query": "What does a completed checkpoint record?",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        },
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.6388888888888888,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "checkpoint.md",
+        "retention.md"
+      ]
+    },
+    {
+      "query": "How should transport failures be retried?",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        },
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.5833333333333334,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "transport.md",
+        "event-retry.md"
+      ]
+    },
+    {
+      "query": "When are expired records removed?",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        },
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.5,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "retention.md",
+        "graph-depth.md"
+      ]
+    },
+    {
+      "query": "issuer signature audience claim",
+      "k": 3,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        },
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 3.257142857142857,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "audience.md",
+        "issuer.md"
+      ]
+    },
+    {
+      "query": "source digest destination capacity",
+      "k": 3,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        },
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        },
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 2.14,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "destination.md",
+        "source.md",
+        "cert-pinning.md"
+      ]
+    },
+    {
+      "query": "preceding generation rollback pin active readers",
+      "k": 3,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        },
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        },
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 2.125,
+      "outcome": "partial",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "pin.md",
+        "rollback.md",
+        "schema.md"
+      ]
+    },
+    {
+      "query": "protocol handshake",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 3.1666666666666665,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "protocol-1.md"
+      ]
+    },
+    {
+      "query": "protocol handshake",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 3.125,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "protocol-2.md"
+      ]
+    },
+    {
+      "query": "archiveflushsize last mount",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 1.8,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "unanswerableCorrect": null,
+      "evidencePaths": [
+        "@last/mount-config.md"
+      ]
+    },
+    {
+      "query": "nonexistentciphermode",
+      "k": 2,
+      "recall": null,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": null,
+      "citationChecks": [],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "zero",
+      "expectedUnanswerable": true,
+      "unanswerableCorrect": true,
+      "evidencePaths": []
+    },
+    {
+      "query": "missingledgeroption",
+      "k": 2,
+      "recall": null,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": null,
+      "citationChecks": [],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "zero",
+      "expectedUnanswerable": true,
+      "unanswerableCorrect": true,
+      "evidencePaths": []
+    },
+    {
+      "query": "unknowntransportbudget",
+      "k": 2,
+      "recall": null,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": null,
+      "citationChecks": [],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "zero",
+      "expectedUnanswerable": true,
+      "unanswerableCorrect": true,
+      "evidencePaths": []
+    },
+    {
+      "query": "absentrecoverycommand",
+      "k": 2,
+      "recall": null,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": null,
+      "citationChecks": [],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "zero",
+      "expectedUnanswerable": true,
+      "unanswerableCorrect": true,
+      "evidencePaths": []
+    },
+    {
+      "query": "neverdefinedretentionflag",
+      "k": 2,
+      "recall": null,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": null,
+      "citationChecks": [],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "zero",
+      "expectedUnanswerable": true,
+      "unanswerableCorrect": true,
+      "evidencePaths": []
+    }
+  ]
+}

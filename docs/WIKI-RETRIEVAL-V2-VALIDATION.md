@@ -2290,3 +2290,394 @@ WIKI_COUNT_SUITE=wikiRetrievalV2 oaf -f tests/wikiRetrievalAssertions.js
 ojob tests/wiki.yaml
 WIKI_BENCH_PAGES=1000 WIKI_BENCH_SAMPLES=3 WIKI_BENCH_SHARED_BLOCKS=true oaf -f tests/wikiRetrievalUpdates.js
 ```
+
+## Area 7 independent local evaluation and release audit — 2026-09-16
+
+This is a fresh, source-bound local-FS assessment on `autonomy` at
+`adb7b88c556b9ac7c66db532d013d9ca03dbd05a` plus the Area 7 harness changes.
+The runtime reports OpenAF `20260914` and JVM `26.0.2` on Darwin 25.6.0 arm64.
+Each JSON record carries source hashes; the performance records also carry the
+unchanged benchmark-harness hash. V2 and flag-off runs used the same corpus,
+configuration, runtime and host sequentially, with no concurrent benchmark or
+test process. `main` is the compatibility baseline for released behavior;
+unreleased v2 schemas and intermediate APIs were not benchmarked as migration
+targets.
+
+### Frozen quality set
+
+[`acceptance.json`](../tests/fixtures/wiki-retrieval-v2/acceptance.json) was
+frozen before its first retrieval run and no ranking weights or query expectations
+were changed after observing results. It is separate from the three-question
+development and six-question previously observed held-out sets. Its 30 local
+pages and 31 questions include 12 exact identifiers, eight natural questions,
+three complementary-page questions, two version-scoped questions, one last-mount
+identity question and five genuinely unanswerable identifiers. Twelve long
+parameter pages put the answer after repeated introductory text. Expected
+support binds both text and mount-qualified page identity.
+
+| Metric | Current flag-off | Current V2 |
+| --- | ---: | ---: |
+| Passage Recall@k, 26 answerable questions | 0.8846 | 1.0000 |
+| MRR, 26 answerable questions | 0.8846 | 1.0000 |
+| Exact-identifier success | 12/12 | 12/12 |
+| Strict cited revision/range correctness | 0/35 verifiable | 37/37 correct |
+| Duplicate fraction | 0 | 0 |
+| Mean supporting characters per estimated content token | 0.403 | 2.204 |
+| Unanswerable questions with no evidence | 5/5 | 5/5 |
+
+Flag-off misses the two version-scoped questions and last-mount answer. Its
+evidence does not expose V2's revision/position citation contract, so 0/35 means
+unverifiable under the strict evaluator, not demonstrated incorrect source text.
+V2 returned one `partial` outcome on a paired question even though both expected
+passages were present; the other answerable results were `hits`, and all five
+unanswerable outcomes were `zero`. The useful-character metric estimates content
+tokens as `ceil(content characters / 4)` and excludes wrapper/prompt tokens.
+These curated synthetic questions test deterministic evidence selection; they do
+not establish real-world answer generalization or a model's final answer quality.
+The [V2](../tests/fixtures/wiki-retrieval-v2/quality-acceptance-v2.json) and
+[flag-off](../tests/fixtures/wiki-retrieval-v2/quality-acceptance-legacy.json)
+records contain every query, cited path, strict citation check, outcome, fixture
+hash and runtime source hash. `python3 tests/wikiRetrievalAcceptance.py` verifies
+the frozen source binding and required quality results.
+
+### Matched local-FS performance
+
+[`tests/wikiRetrievalPerformance.js`](../tests/wikiRetrievalPerformance.js) ran
+20 warm observations per operation at each size. Cold time is the first call
+after constructing a read-only manager; construction and mount attach are separate
+fields in the JSON. JVM and OS caches were not forcibly cleared between runs.
+The p99 of 20 samples is the maximum, so it is a weak tail estimate. Initial
+build, single update and full publication are one observation each, not latency
+distributions. All times below are milliseconds.
+
+| Pages | Mode | Warm search p50 | Warm zero p50 | Warm retrieve p50 | Warm backlinks p50 | Cold open | Build | Small update | Full publication | Max sampled heap MiB |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | flag-off | 8.86 | 8.02 | 8.67 | 25.39 | 12.98 | 1,853 | 32.27 | 1,402 | 102 |
+| 100 | V2 | 14.33 | 1.47 | 14.39 | 8.39 | 194.82 | 985 | 127.59 | 600 | 259 |
+| 1,000 | flag-off | 10.86 | 10.30 | 11.17 | 142.29 | 6.90 | 13,632 | 41.74 | 13,599 | 258 |
+| 1,000 | V2 | 17.59 | 1.46 | 17.85 | 78.07 | 1,072.29 | 3,177 | 150.07 | 4,037 | 503 |
+| 10,000 | flag-off | 11.13 | 10.59 | 10.78 | 1,396.24 | 8.31 | 139,029 | 49.15 | 140,368 | 708 |
+| 10,000 | V2 | 23.40 | 1.41 | 23.90 | 609.42 | 9,128.18 | 17,063 | 264.58 | 83,089 | 2,648 |
+
+The complete [100](../tests/fixtures/wiki-retrieval-v2/performance-area7-100-v2.json),
+[1,000](../tests/fixtures/wiki-retrieval-v2/performance-area7-1000-v2.json)
+and [10,000](../tests/fixtures/wiki-retrieval-v2/performance-area7-10000-v2.json)
+V2 records and corresponding
+[100](../tests/fixtures/wiki-retrieval-v2/performance-area7-100-legacy.json),
+[1,000](../tests/fixtures/wiki-retrieval-v2/performance-area7-1000-legacy.json)
+and [10,000](../tests/fixtures/wiki-retrieval-v2/performance-area7-10000-legacy.json)
+flag-off records include warm p50/p95/p99, cold calls, manager construction,
+source requests/bytes, output bytes, validation block reads, reader opens,
+sampled heap, publication work and final fixture bytes. At 10,000 pages the
+final V2 fixture occupied 74.1 MB versus 10.5 MB flag-off; V2 warm source-body
+GETs were zero, while flag-off recorded 200,540 across the operation matrix,
+mostly backlinks. These counters do not include Lucene index, metadata or
+kernel/device I/O. The heap sampler observes aggregate Java heap every 10 ms;
+it can miss shorter peaks and excludes native memory.
+
+V2 improves zero-result search, backlinks, build and full publication on this
+matrix. Warm compact search, retrieve and assemble context are slower, as are
+cold operations and small updates. Cold open/navigation grow sharply with corpus
+size. The matrix therefore does not justify an overall latency or memory win.
+The large V2 full-publication observation also differs from older runs; it is
+one observation under this exact source and machine, not a stable percentile.
+
+The controllable-latency local facade is separately recorded for
+[V2](../tests/fixtures/wiki-retrieval-v2/performance-area7-simulated-100-v2.json)
+and [flag-off](../tests/fixtures/wiki-retrieval-v2/performance-area7-simulated-100-legacy.json):
+100 pages, 20 warm samples and an injected 2 ms delay per source-body read.
+Warm backlinks p50 was 3.60 ms V2 versus 325.87 ms flag-off, with zero versus
+2,000 source-body reads. This is simulated backend latency, not a provider result.
+
+### Complete shared-store update path
+
+[`tests/wikiRetrievalUpdates.js`](../tests/wikiRetrievalUpdates.js) measured ten
+one-page updates at 1,000 and 10,000 pages with `sharedBlockStore:true` and
+default linked immutable files. It includes the complete update call, force
+requests, deferred maintenance, disk retention, full reindex and a fresh
+read-only reader after publication. Explicit copy mode was measured at 1,000
+pages. All three records carry the exact harness/runtime hashes.
+
+| Pages and mode | Update p50 / p95 ms | Force requests per update | Retained index copied per update | Explicit maintenance ms | Full reindex ms | Unique file bytes after ten updates |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 linked | 118.19 / 178.41 | 29–47 | 0 | 1,190.60 | 4,926.24 | 5,131,813 |
+| 10,000 linked | 115.11 / 169.46 | 29–47 | 0 | 5,003.45 | 37,498.48 | 48,018,945 |
+| 1,000 explicit copy | 107.77 / 169.43 | 29–47 | 352–379 KB | 1,215.83 | 5,049.43 | 8,745,466 |
+
+The [1,000 linked](../tests/fixtures/wiki-retrieval-v2/updates-area7-1000-linked.json),
+[10,000 linked](../tests/fixtures/wiki-retrieval-v2/updates-area7-10000-linked.json)
+and [1,000 copy](../tests/fixtures/wiki-retrieval-v2/updates-area7-1000-copy.json)
+records show six routed-key lookups and one binding-block read per update,
+zero full catalogue resolutions and reclamation calls inside every update,
+and no copied retained index bytes in linked mode. Linked-file *apparent*
+bytes still grow with Lucene segments, but hard links do not copy those bytes.
+The force count varied with Lucene files/merges, not corpus size in these two
+runs. Explicit maintenance retained all 1,010/10,010 reachable blocks and did
+not shrink disk immediately; full reindex increased unique bytes because a
+previous generation remains retained. Copy mode's p50 being slightly lower in
+one run is noise, not evidence that copying is faster. The measured ordinary
+update remained flat between these two sizes, while maintenance, full reindex,
+retained disk and post-publication manager construction grew with corpus size.
+This supports a bounded *local ordinary update* claim, not corpus-independent
+total lifecycle cost, device bytes or network-filesystem behavior.
+
+### Concurrent readers and release decision
+
+The [same-JVM local reader run](../tests/fixtures/wiki-retrieval-v2/concurrent-area7-1000.json)
+used four callers with 30 `retrieve` calls each against one warm 1,000-page V2
+generation. All 120 returned the expected evidence and all threads stopped;
+latency p50/p95/p99 was 5.32/12.94/17.02 ms. This does not test multiple JVMs,
+writers, remote providers or network transport pressure.
+
+The governing plan's required-fixture and hard-gate audit is explicit here:
+
+| Requirement group from plan §11 | Current local evidence | Audit outcome |
+| --- | --- | --- |
+| Late answer, exact identifier, complementary evidence, version conflict, last mount, same relative path and genuine zero | Frozen Area 7 acceptance fixture plus `testRetrievalAndPublication`, `testFederationAndBudgets`, `testFederatedAliasAndPermissionBoundary` | Passed on local real Lucene; five unanswerable queries remain zero. |
+| Repeated/code headings, table/list context, CRLF/Unicode, oversized structures and exact citations | `testParser`, `testStructuralContext`, `testListStructuralSupport`, `testEvidenceWindowsAndRelevancePacking`, strict Area 7 citation checks | Passed on local fixtures. |
+| Source/derived differences, manual content, modification/deletion/move/supersession, ownership, stale references | `testRetrievalAndPublication`, `testStableSectionAndMoveIdentities`, `testExplicitSupersession`, `testIngestBatchAndDeferredExport`, `testGroundedDerivatives` | Passed in registered fixture paths. |
+| Missing/incompatible index, partial backend failure, read-only behavior and safe namespace quotas | `testLegacyReadOnlyLexicalFeatures`, `testPublicationFailureRecovery`, `testRestrictedPassages`, `testConcurrentRestrictedLedger`, `testSourceRevocationBeforeMaterialization` | Passed in local fixtures; live provider fault behavior remains Area 8. |
+| Continuations, mount isolation, exact revision/ranges and actual lexical configuration | `testParser`, `testLexicalAndEvidenceBudget`, `testEnhancedPassageLexical`, `testFederatedAliasAndPermissionBoundary`, 37/37 strict acceptance citations | Passed on local real Lucene. |
+| Healthy zero result, warm metadata/outline, backlink and direct passage lookup without corpus-body scanning | `testDirectDerivedPostings` and matched performance counters: zero V2 warm source-body GETs at 100/1,000/10,000 pages | Passed at the instrumented source-body boundary; Lucene/index/OS reads are separate. |
+| Shared mount/query budgets, pruning, pointer-last failure recovery, telemetry separation | `testFederationAndBudgets`, `testFederatedRetryBudget`, `testExplicitSupersession`, `testPublicationFailureRecovery`, `testProcessCrashPublicationRecovery`, `testTargetedTelemetryRetention` | Passed for local single-writer fixture cases. |
+| Safe-MCP quotas, read-only/archive non-mutation, feature-off behavior, current-format bundle and obsolete development-schema rejection | `testRestrictedPassages`, `testArchiveServingAndTruncatedBundle`, `testLegacyReadOnlyLexicalFeatures`, `testSchema3CatalogueDelta`, flag-off Area 7 quality/performance runs | Current-branch local paths passed. Stable `main` is the compatibility contract; no new stable-`main` parity run was made. Development-only schema-1/2 readers are deliberately not retained. |
+
+This maps every §11 fixture class and hard gate to a current fixture or
+measurement, but the table's local pass entries do not substitute for provider
+or physical durability proof. The benchmark records contain no remote-provider
+request accounting or device-write byte claims.
+
+Fresh regression execution on this checkout: `WIKI_COUNT_SUITE=wikiRetrievalV2
+oaf -f tests/wikiRetrievalAssertions.js` passed **1,530 assertions across 46
+functions** with no failures; `ojob tests/wikiRetrievalV2.yaml` passed all 45
+registered V2 jobs; `ojob tests/wiki.yaml` passed **197 functions** with no
+reported failures. No production retrieval source was changed for this Area 7
+evaluation. The new acceptance checker, concurrent benchmark and all
+machine-readable benchmark runs also completed successfully.
+`oaf -f tests/wikiRetrievalRepeat.js` passed two complete V2 passes in one JVM
+with **3,070 assertions**. `ojob tests/skills.yaml` passed **21 functions**
+with no reported failures. The repeat count includes assertions outside the
+single-pass counter's scope; it is not used as a quality sample size.
+
+The new evidence closes Area 7's **measurement and audit work** at the local
+boundary. The quality/citation gate passes on the frozen set and registered
+functional regressions remain the hard correctness gate. Performance release
+acceptance is **not signed off**: cold calls, warm retrieval, small updates,
+artifact size and sampled heap regress in this matrix. Area 1's architectural
+ordinary-update boundary now has matched 1,000/10,000-page evidence, but
+end-to-end lifecycle scaling remains qualified by explicit maintenance and full
+publication. Area 8 still requires live provider, distributed coordination,
+network-filesystem and physical-durability proof where deployed.
+
+Reproduce serially from the checkout root (one command at a time):
+
+```sh
+WIKI_EVAL_SPLIT=acceptance WIKI_EVAL_MODE=v2 oaf -f tests/wikiRetrievalQuality.js
+WIKI_EVAL_SPLIT=acceptance WIKI_EVAL_MODE=legacy oaf -f tests/wikiRetrievalQuality.js
+python3 tests/wikiRetrievalAcceptance.py
+WIKI_BENCH_MODE=v2 WIKI_BENCH_PAGES=1000 WIKI_BENCH_SAMPLES=20 oaf -f tests/wikiRetrievalPerformance.js
+WIKI_BENCH_MODE=legacy WIKI_BENCH_PAGES=1000 WIKI_BENCH_SAMPLES=20 oaf -f tests/wikiRetrievalPerformance.js
+WIKI_BENCH_PAGES=1000 WIKI_BENCH_SAMPLES=10 WIKI_BENCH_SHARED_BLOCKS=true WIKI_BENCH_LINKS=true oaf -f tests/wikiRetrievalUpdates.js
+WIKI_BENCH_PAGES=1000 WIKI_BENCH_CALLERS=4 WIKI_BENCH_CALLS=30 oaf -f tests/wikiRetrievalConcurrentBenchmark.js
+```
+
+Repeat the performance commands with `WIKI_BENCH_PAGES=100` and `10000`, and
+the update command with `WIKI_BENCH_PAGES=10000`; set
+`WIKI_BENCH_LINKS=false` for the portable copy case. For simulated source
+latency, add `WIKI_BENCH_REMOTE=true WIKI_BENCH_LATENCY_MS=2` at 100 pages.
+
+## Targeted metadata and shard-cache follow-up — 2026-09-16
+
+The Area 7 profile identified two avoidable serving costs: cold metadata calls
+materialized and validated the entire catalogue through `snapshot.catalog`, and
+warm selected-key lookups reread/checksummed/parsed the same catalogue shards.
+The follow-up removes those paths for `open`, `navigate` and `backlinks`, caches
+immutable verified shards under the existing shared payload budget, and retains
+an immutable per-snapshot routing proof. Backlinks reuses a verified shard within
+one request while checking activity for each incoming source. Selected-page
+outline/frontmatter validation still checks the immutable block's revision and
+semantic bindings; remote metadata does not fetch the source body.
+
+The new registered regression covers targeted serving with full materialization
+forced to fail, warm reuse, immutable records/routing, forged metadata, changed
+cached shard checksums, full-validator cache bypass, eviction, generation refresh,
+pinned predecessors, external source edits, remote metadata and shutdown cleanup.
+The V2 assertion runner passed **1,556 assertions across 47 functions**, with no
+failures (`assertions-cache-v2.json`). The unchanged 30-page/31-question acceptance
+fixture passed against both current modes (`quality-cache-{v2,legacy}.json`): V2
+Recall@k/MRR remain 1.000/1.000, strict citations 37/37 and unanswerables 5/5.
+This is regression on the now-observed set, not a new independent held-out result.
+
+Reproduction:
+
+```sh
+WIKI_COUNT_SUITE=wikiRetrievalV2 oaf -f tests/wikiRetrievalAssertions.js
+WIKI_EVAL_SPLIT=acceptance WIKI_EVAL_MODE=v2 oaf -f tests/wikiRetrievalQuality.js
+WIKI_EVAL_SPLIT=acceptance WIKI_EVAL_MODE=legacy oaf -f tests/wikiRetrievalQuality.js
+python3 tests/wikiRetrievalAcceptance.py --prefix quality-cache
+WIKI_BENCH_MODE=v2 WIKI_BENCH_PAGES=1000 WIKI_BENCH_SAMPLES=20 oaf -f tests/wikiRetrievalPerformance.js
+WIKI_BENCH_MODE=v2 WIKI_BENCH_PAGES=10000 WIKI_BENCH_SAMPLES=20 oaf -f tests/wikiRetrievalPerformance.js
+```
+
+Performance uses the unchanged harness and workload, run sequentially without
+other test jobs. Before values are the preserved same-host Area 7 source-bound
+runs; after values are `performance-cache-{1000,10000}-v2.json`. These are separate
+JVM runs with 20 warm samples per operation, not statistically controlled repeated
+experiments. Cold operation timings exclude separately reported manager creation
+and mount attachment. Cache accounting bounds serialized payload, not decoded
+object heap overhead, request-local shard references or native memory. Full
+validators bypass serving reuse; the local immutable-file contract assumes no
+adversarial file rewrites preserving file identity, length and modification time.
+
+| Pages | Operation | Cold before → after (ms) | Warm p50 before → after (ms) |
+| ---: | --- | ---: | ---: |
+| 1,000 | compactSearch | 158.70 → 161.99 | 17.59 → 10.92 |
+| 1,000 | zeroSearch | 84.12 → 93.84 | 1.46 → 1.55 |
+| 1,000 | retrieve | 113.85 → 125.33 | 17.85 → 8.48 |
+| 1,000 | assembleContext | 99.00 → 118.74 | 16.82 → 8.32 |
+| 1,000 | open | 1072.29 → 99.63 | 0.23 → 0.39 |
+| 1,000 | navigate | 945.59 → 92.63 | 0.24 → 0.41 |
+| 1,000 | backlinks | 1003.77 → 250.40 | 78.07 → 98.52 |
+| 1,000 | federation | 106.41 → 111.28 | 13.56 → 6.51 |
+| 10,000 | compactSearch | 594.65 → 587.69 | 23.40 → 9.13 |
+| 10,000 | zeroSearch | 450.68 → 465.62 | 1.41 → 1.46 |
+| 10,000 | retrieve | 486.94 → 501.00 | 23.90 → 8.10 |
+| 10,000 | assembleContext | 475.16 → 506.69 | 23.11 → 7.56 |
+| 10,000 | open | 9128.18 → 469.29 | 0.21 → 0.34 |
+| 10,000 | navigate | 8497.47 → 459.69 | 0.23 → 0.37 |
+| 10,000 | backlinks | 9170.31 → 1547.29 | 609.42 → 797.84 |
+| 10,000 | federation | 481.25 → 503.13 | 21.72 → 6.79 |
+
+At 10,000 pages, cold open is 19.5× faster and warm retrieval 2.95× faster.
+Cold open validates one selected block instead of 10,000. Sampled peak heap
+across the full benchmark fell from 527,124,712 to 387,261,632 bytes at 1,000
+pages and from 2,776,356,240 to 1,406,630,920 bytes at 10,000 pages. GC and
+sampling affect these observations; they are not retained-heap guarantees.
+
+The remaining tradeoffs are visible: warm open/navigation gain sub-millisecond
+file checks, and warm high-degree backlinks regress by 26–31% while cold
+backlinks improve 4.0–5.9×. Backlinks must still inspect every incoming source;
+selected-key routing and cache management add work compared with an already
+materialized whole catalogue. Cold retrieval/search is broadly unchanged because
+structural acquisition still scales with generation size. Full lifecycle cost,
+retained artifact size, deep delta lineage and provider concurrency need separate
+work. This closes the two selected serving optimizations, not every Area 7
+performance concern; the opt-in boundary and qualified release decision remain.
+
+The final four-caller same-JVM workload completed all 120 retrievals without
+errors at 1,000 pages: p50 3.72 ms, p95 8.07 ms, p99 10.72 ms
+(`concurrent-cache-1000.json`). This exercises shared-cache synchronization for
+local readers; it is not distributed or live-provider concurrency proof.
+
+```sh
+WIKI_BENCH_PAGES=1000 oaf -f tests/wikiRetrievalConcurrentBenchmark.js
+WIKI_COUNT_SUITE=wiki oaf -f tests/wikiRetrievalAssertions.js
+```
+
+The final full registered wiki assertion run passed **2,124 assertions across
+199 functions**, with no failures (`assertions-cache-wiki.json`). Artifact source
+hashes, frozen quality checks and `git diff --check` also passed.
+
+## Backlink serving optimization — 2026-09-17
+
+Following the 2026-09-16 serving-cache work, a 10,000-page profile found
+9,459,905 bytes of reverse/page shard payload against the default 8 MiB budget.
+Seven warm backlink calls reread 1,799 shards (65,654,568 bytes); a 16 MiB
+allowance removed those rereads and lowered the median from 818 to 615 ms in
+that separate diagnostic run. Inclusive instrumentation attributed roughly
+400 ms of a 10,000-source call to source stamps and 238 ms to catalogue lookup
+at the default allowance. Instrumentation changes timings and the diagnostic
+run has seven samples, so the matched Area 7 harness below is the comparison.
+
+The implementation reduces source-stamp filesystem operations and resolves the
+canonical root once per backlink request. Reverse postings carry the source
+stamp bound to each page; backlinks checks current source activity directly from
+the compact posting and strips the stamp from public output. Incremental
+same-content updates refresh affected postings when their source stamp changes.
+Full validation compares every reverse posting with its page, including stamps.
+The selected reverse key is resolved once per lineage level, so no per-incoming
+source parent-manifest read remains. No new general-purpose lineage memo is
+needed on this path. Old unreleased postings without stamps require reindexing.
+
+The focused regression covers external content and stamp-only changes, delta
+publication, full validation, symlink denial, public shape and bounded lineage
+lookups. The earlier targeted metadata and direct-posting tests passed as well.
+The matched local-FS performance run uses the unchanged 20-warm-sample harness,
+with 1,000 and 10,000 pages, separately from the 2026-09-16 source-bound runs.
+These are separate JVM runs, not a statistically controlled multi-run experiment.
+
+| Pages | Backlinks cold before → after | Warm p50 before → after | Selected shard reads before → after | Catalogue lookups before → after |
+| ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 250.40 → 144.74 ms | 98.52 → 48.28 ms | 253 → 1 | 21,021 → 21 |
+| 10,000 | 1547.29 → 1055.97 ms | 797.84 → 377.60 ms | 5,397 → 1 | 210,021 → 21 |
+
+At 10,000 pages warm backlinks are 2.11× faster than the previous serving-cache
+revision, and cold backlinks are 1.47× faster. The result still scales with the
+number of incoming sources because each current source is checked and each
+returned link is serialized. The default cache holds the selected reverse shard
+(2,096,801 bytes at 10,000 pages), so this workload has no serving-cache
+thrashing. Initial fixture disk grew from 37,366,194 to 38,415,299 bytes at
+10,000 pages because each reverse posting now records a source stamp. The same
+run sampled a higher heap peak (1.91 versus 1.41 GB) and slower cold retrieval
+(691 versus 501 ms), while warm retrieve was 9.57 versus 8.10 ms; these unrelated
+operation measurements need a repeat before attributing their difference to the
+posting change or GC. The original Area 7 V2 peak was 2.78 GB.
+
+```sh
+WIKI_BENCH_MODE=v2 WIKI_BENCH_PAGES=1000 WIKI_BENCH_SAMPLES=20 oaf -f tests/wikiRetrievalPerformance.js
+WIKI_BENCH_MODE=v2 WIKI_BENCH_PAGES=10000 WIKI_BENCH_SAMPLES=20 oaf -f tests/wikiRetrievalPerformance.js
+```
+
+The final V2 runner passed **1,573 assertions across 48 functions** and the full
+registered wiki runner passed **2,139 assertions across 200 functions**, both
+with no failures (`assertions-backlinks-{v2,wiki}.json`). The unchanged frozen
+30-page/31-question fixture passed against the current source: V2 answerable
+Recall@k/MRR 1.000/1.000, strict citations 37/37, and five of five
+unanswerables (`quality-backlinks-{v2,legacy}.json`). This is a regression
+check on an observed synthetic set. Four same-JVM local callers completed 120
+retrievals without errors, with p50/p95/p99 of 3.92/7.41/10.62 ms
+(`concurrent-backlinks-1000.json`). It does not prove live-provider or
+multi-process concurrency.
+
+```sh
+WIKI_COUNT_SUITE=wikiRetrievalV2 oaf -f tests/wikiRetrievalAssertions.js
+WIKI_COUNT_SUITE=wiki oaf -f tests/wikiRetrievalAssertions.js
+WIKI_EVAL_SPLIT=acceptance WIKI_EVAL_MODE=v2 oaf -f tests/wikiRetrievalQuality.js
+WIKI_EVAL_SPLIT=acceptance WIKI_EVAL_MODE=legacy oaf -f tests/wikiRetrievalQuality.js
+python3 tests/wikiRetrievalAcceptance.py --prefix quality-backlinks
+WIKI_BENCH_PAGES=1000 oaf -f tests/wikiRetrievalConcurrentBenchmark.js
+```
+
+### Final-source recheck
+
+A full second 10,000-page run on the first posting implementation measured
+379.09 ms warm backlinks, 514.23 ms cold retrieve and 1,983,470,384 bytes sampled
+peak heap. The full validator was then changed to compare each posting separately
+instead of serializing a whole high-degree list twice. Focused positive and
+forged-stamp validation passed. The final-source unchanged-harness measurements
+are `performance-backlinks-final-{1000,10000}-v2.json`:
+
+| Pages | Backlinks cold | Backlinks warm p50 | Selected shard reads, 21 calls | Sampled peak heap |
+| ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 152.67 ms | 53.31 ms | 1 | 654,214,464 bytes |
+| 10,000 | 1,041.91 ms | 379.90 ms | 1 | 1,874,296,376 bytes |
+
+The final 10,000-page result is a 2.10× warm-backlink improvement over the
+previous serving-cache revision (797.84 ms); cold backlinks improve 1.49×
+(1,547.29 ms). Cold retrieve varied across the original, first backlink,
+repeat backlink, and final-source runs (501, 691, 514, 576 ms); warm retrieve
+varied 8.10, 9.57, 8.64, 10.06 ms. Sampled peak heap varied 1.41, 1.91, 1.98,
+and 1.87 GB. These separate JVM runs do not isolate GC or attribute the larger
+heap observations to a specific code path. The final initial fixture occupied
+38,414,803 bytes at 10,000 pages versus 37,366,194 bytes before the compact
+posting change. A release heap and broader lifecycle budget remains open.
+
+Final-source verification after the bounded full-validator change repeated the
+complete suites: **1,573 V2 assertions across 48 functions** and **2,139 wiki
+assertions across 200 functions**, with no failures. The current-source frozen
+acceptance fixture again passed at V2 Recall@k/MRR 1.000/1.000, 37/37 strict
+citations and 5/5 unanswerables. Four same-JVM callers completed 120 retrievals
+without errors (p50/p95/p99 3.46/9.54/14.26 ms). The source-bound files are
+`assertions-backlinks-final-{v2,wiki}.json`,
+`quality-backlinks-final-{v2,legacy}.json` and
+`concurrent-backlinks-final-1000.json`.
