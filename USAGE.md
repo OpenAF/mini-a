@@ -474,6 +474,8 @@ Web Markdown responses encourage relevant photographs and images using `![alt te
 
 Mini‑A includes a simple web UI you can use from your browser. The static page lives in `public/index.md` and is served by a small HTTP server defined in `mini-a-web.yaml`.
 
+Mermaid diagrams include an **Open full screen** (⛶) control. This opens a viewer that fills the browser area: pinch with two fingers to zoom, drag with one finger to pan, or use the zoom and recenter buttons. Desktop users can also drag and zoom with the mouse wheel. Close with **×** or **Escape** to return to the conversation with the inline diagram's view preserved.
+
 Quick steps:
 
 1) Export your model config

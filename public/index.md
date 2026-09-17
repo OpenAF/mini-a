@@ -455,6 +455,58 @@
         height: 0.85rem;
     }
 
+    .mermaid-fullscreen {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        height: 100dvh;
+        max-width: none;
+        max-height: none;
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        background: #f8f9fa;
+        color: #24292f;
+        overflow: hidden;
+        overscroll-behavior: none;
+    }
+
+    body.markdown-body-dark .mermaid-fullscreen {
+        background: #0f1115;
+        color: #e6edf3;
+    }
+
+    .mermaid-fullscreen-stage {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        touch-action: none;
+        cursor: grab;
+        user-select: none;
+    }
+
+    .mermaid-fullscreen-stage img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        max-width: none;
+        object-fit: contain;
+        pointer-events: none;
+        transform-origin: center;
+    }
+
+    .mermaid-fullscreen .mermaid-diagram-controls {
+        bottom: max(1rem, env(safe-area-inset-bottom));
+        right: max(1rem, env(safe-area-inset-right));
+    }
+
+    .mermaid-fullscreen .mermaid-control-btn {
+        width: 2.75rem;
+        height: 2.75rem;
+    }
+
     /* ========== LEAFLET MAPS ========== */
     .leaflet-map {
         width: 100%;
@@ -3458,6 +3510,111 @@
         });
     }
 
+    function openMermaidFullscreen(svg, originalViewBoxAttr, originalPreserveAspectRatio) {
+        const dialog = document.createElement('dialog');
+        dialog.className = 'mermaid-fullscreen';
+        dialog.setAttribute('aria-label', 'Full-screen Mermaid diagram. Pinch to zoom and drag to pan.');
+        const stage = document.createElement('div');
+        stage.className = 'mermaid-fullscreen-stage';
+        const picture = document.createElement('img');
+        picture.alt = 'Mermaid diagram';
+        picture.draggable = false;
+        // An image keeps SVG IDs isolated from the inline diagram and preserves its view.
+        const copy = svg.cloneNode(true);
+        if (originalViewBoxAttr) copy.setAttribute('viewBox', originalViewBoxAttr);
+        else copy.removeAttribute('viewBox');
+        if (originalPreserveAspectRatio) copy.setAttribute('preserveAspectRatio', originalPreserveAspectRatio);
+        else copy.removeAttribute('preserveAspectRatio');
+        copy.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(copy)], { type: 'image/svg+xml' }));
+        picture.src = url;
+        stage.appendChild(picture);
+        const controls = document.createElement('div');
+        controls.className = 'mermaid-diagram-controls';
+        controls.innerHTML = '<div class="mermaid-control-group">' +
+            '<button type="button" class="mermaid-control-btn" data-action="zoom-out" aria-label="Zoom out">−</button>' +
+            '<button type="button" class="mermaid-control-btn" data-action="zoom-in" aria-label="Zoom in">+</button>' +
+            '<button type="button" class="mermaid-control-btn" data-action="reset" aria-label="Recenter diagram" title="Recenter diagram">↺</button>' +
+            '<button type="button" class="mermaid-control-btn" data-action="close" aria-label="Close full-screen diagram" title="Close full-screen diagram">×</button></div>';
+        dialog.append(stage, controls);
+        const previousFocus = document.activeElement;
+        const previousOverflow = document.body.style.overflow;
+        document.body.appendChild(dialog);
+        document.body.style.overflow = 'hidden';
+        let scale = 1;
+        let x = 0;
+        let y = 0;
+        const pointers = new Map();
+        function apply() {
+            picture.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+        }
+        function zoom(factor, anchorX = 0, anchorY = 0) {
+            const nextScale = Math.max(0.35, Math.min(12, scale * factor));
+            const ratio = nextScale / scale;
+            x = anchorX - (anchorX - x) * ratio;
+            y = anchorY - (anchorY - y) * ratio;
+            scale = nextScale;
+        }
+        function gesture() {
+            const points = Array.from(pointers.values());
+            const a = points[0];
+            const b = points[1] || a;
+            return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2,
+                distance: Math.hypot(a.x - b.x, a.y - b.y) };
+        }
+        stage.addEventListener('pointerdown', event => {
+            if (event.button !== 0) return;
+            pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+            stage.setPointerCapture(event.pointerId);
+        });
+        stage.addEventListener('pointermove', event => {
+            if (!pointers.has(event.pointerId)) return;
+            const before = gesture();
+            pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+            const after = gesture();
+            const rect = stage.getBoundingClientRect();
+            if (before.distance > 0 && after.distance > 0) {
+                zoom(after.distance / before.distance,
+                    before.x - rect.left - rect.width / 2,
+                    before.y - rect.top - rect.height / 2);
+            }
+            x += after.x - before.x;
+            y += after.y - before.y;
+            apply();
+        });
+        function release(event) { pointers.delete(event.pointerId); }
+        stage.addEventListener('pointerup', release);
+        stage.addEventListener('pointercancel', release);
+        stage.addEventListener('lostpointercapture', release);
+        stage.addEventListener('wheel', event => {
+            event.preventDefault();
+            const rect = stage.getBoundingClientRect();
+            zoom(event.deltaY < 0 ? 1.12 : 1 / 1.12,
+                event.clientX - rect.left - rect.width / 2,
+                event.clientY - rect.top - rect.height / 2);
+            apply();
+        }, { passive: false });
+        controls.addEventListener('click', event => {
+            const button = event.target.closest('button[data-action]');
+            if (!button) return;
+            const action = button.getAttribute('data-action');
+            if (action === 'close') { dialog.close(); return; }
+            if (action === 'reset') { scale = 1; x = 0; y = 0; }
+            if (action === 'zoom-in') zoom(1.2);
+            if (action === 'zoom-out') zoom(1 / 1.2);
+            apply();
+        });
+        dialog.addEventListener('close', () => {
+            pointers.clear();
+            URL.revokeObjectURL(url);
+            dialog.remove();
+            document.body.style.overflow = previousOverflow;
+            if (previousFocus && previousFocus.isConnected) previousFocus.focus();
+        }, { once: true });
+        dialog.showModal();
+        controls.querySelector('[data-action="close"]').focus();
+    }
+
     function addMermaidPanZoomLayer(container) {
         if (!container) return;
 
@@ -3476,6 +3633,7 @@
         controls.className = 'mermaid-diagram-controls';
         controls.innerHTML = [
             '<div class="mermaid-control-group">',
+            '<button type="button" class="mermaid-control-btn" data-action="fullscreen" aria-label="Open diagram full screen" title="Open full screen">⛶</button>',
             '<button type="button" class="mermaid-control-btn" data-action="reset" aria-label="Reset mermaid view" title="Reset view">',
             '<svg class="mermaid-reset-icon" viewBox="0 0 16 16" aria-hidden="true">',
             '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -3589,7 +3747,9 @@
             const cy = rect.height / 2;
             const action = btn.getAttribute('data-action');
 
-            if (action === 'zoom-in') {
+            if (action === 'fullscreen') {
+                openMermaidFullscreen(svg, originalViewBoxAttr, originalPreserveAspectRatio);
+            } else if (action === 'zoom-in') {
                 zoomAt(1.2, cx, cy);
             } else if (action === 'zoom-out') {
                 zoomAt(1 / 1.2, cx, cy);
