@@ -4,6 +4,10 @@ include:
 
 jobs:
 
+- name: MiniA Wiki Tests::MountedNavigationPathsRoundTrip
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testMountedNavigationPathsRoundTrip
+
 - name: MiniA Wiki Ingest Tests::LegacyContextProvenance
   to: oJob Test
   exec: args.func = require("tests/wikiIngestReconcile.js").testLegacyContextProvenance
@@ -816,3 +820,4 @@ todo:
 - MiniA Wiki Tests::PeriodicArtifactBundleRefreshReopensCachedRuntime
 - MiniA Wiki Tests::HttpBackendIsReadOnly
 - MiniA Wiki Tests::ArtifactBundleHydratesAtomically
+- MiniA Wiki Tests::MountedNavigationPathsRoundTrip

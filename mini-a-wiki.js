@@ -4209,11 +4209,31 @@ MiniAWikiManager.prototype._searchMounts = function(query, opts, compact, remain
   return combined
 }
 
+// Navigation results must retain the mount namespace so their paths can be
+// passed straight back to read/open/tree/browse on the parent manager.
+MiniAWikiManager.prototype._qualifyMountedNavigation = function(result, name) {
+  var out = clone(result), prefix = "@" + name + "/"
+  var qualify = function(path) { return isString(path) && !path.startsWith("@") ? prefix + path : path }
+  var visit = function(node) {
+    if (!isObject(node)) return
+    if (isString(node.path)) node.path = qualify(node.path)
+    if (isString(node.prefix)) node.prefix = qualify(node.prefix)
+    if (isObject(node.index)) visit(node.index)
+    if (isObject(node.nearest_index)) visit(node.nearest_index)
+    ;["pages", "sections", "direct_pages", "child_sections"].forEach(function(key) {
+      if (isArray(node[key])) node[key].forEach(visit)
+    })
+    if (isArray(node.suggested_next_reads)) node.suggested_next_reads = node.suggested_next_reads.map(qualify)
+  }
+  visit(out)
+  return out
+}
+
 MiniAWikiManager.prototype.tree = function(prefix, depth) {
   var mountPrefix = isString(prefix) ? prefix.trim() : ""
   if (mountPrefix.startsWith("@")) {
     var mountResult = this._resolveMountPath(mountPrefix)
-    if (mountResult && mountResult.mount) return mountResult.mount.manager.tree(mountResult.localPath, depth)
+    if (mountResult && mountResult.mount) return this._qualifyMountedNavigation(mountResult.mount.manager.tree(mountResult.localPath, depth), mountResult.name)
     return { path: mountPrefix, error: "mount not found: " + (mountResult ? mountResult.name : mountPrefix), pages: [], sections: [] }
   }
   var sectionPrefix = ""
@@ -4308,8 +4328,8 @@ MiniAWikiManager.prototype.browse = function(path) {
   // Mount routing: @name/... browse
   var trimmedPath = isString(path) ? path.trim() : ""
   if (trimmedPath.startsWith("@")) {
-    var mres = this._resolveMountPath(trimmedPath.endsWith("/") ? trimmedPath + "_dummy.md" : trimmedPath)
-    if (mres && mres.mount) return mres.mount.manager.browse(mres.localPath)
+    var mres = this._resolveMountPath(trimmedPath)
+    if (mres && mres.mount) return this._qualifyMountedNavigation(mres.mount.manager.browse(mres.localPath), mres.name)
     return { path: trimmedPath, error: "mount not found: " + (mres ? mres.name : trimmedPath) }
   }
 

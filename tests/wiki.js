@@ -991,6 +991,59 @@
     }
   }
 
+  exports.testMountedNavigationPathsRoundTrip = function() {
+    [false, true].forEach(function(v2) {
+      var primaryDir = createTestDir(), mountedDir = createTestDir(), primary, writer
+      try {
+        writePage(primaryDir, "guides/setup.md", "---\ntitle: Wrong primary page\n---\n# Wrong primary page")
+        writePage(mountedDir, "index.md", "---\ntitle: Mounted Home\n---\n# Mounted Home")
+        writePage(mountedDir, "guides/index.md", "---\ntitle: Mounted Guides\n---\n# Mounted Guides")
+        writePage(mountedDir, "guides/setup.md", "---\ntitle: Mounted Setup\n---\n# Mounted Setup\nCorrect mounted content")
+        writePage(mountedDir, "guides/deep/page.md", "---\ntitle: Deep page\n---\n# Deep page")
+        if (v2) {
+          writer = new MiniAWikiManager({ backend: "fs", root: mountedDir, access: "rw", wikiretrievalv2: true })
+          ow.test.assert(writer.reindex().ok, true, "mounted v2 fixture builds")
+          writer.close(); writer = __
+        }
+        primary = new MiniAWikiManager({ backend: "fs", root: primaryDir, access: "ro", wikiretrievalv2: v2 })
+        ow.test.assert(primary.attach("docs", { backend: "fs", root: mountedDir }).ok, true, "mount attaches")
+        var tree = primary.tree("@docs/", 2), guides = tree.sections[0]
+        ow.test.assert(tree.path, "@docs/", "mounted root retains namespace")
+        ow.test.assert(tree.prefix, "@docs/", "tree prefix retains namespace")
+        ow.test.assert(tree.index.path, "@docs/index.md", "root index retains namespace")
+        ow.test.assert(guides.path, "@docs/guides/", "section retains namespace")
+        ow.test.assert(guides.index.path, "@docs/guides/index.md", "section index retains namespace")
+        ow.test.assert(guides.sections[0].pages[0].path, "@docs/guides/deep/page.md", "nested pages retain namespace")
+        var page = primary.agenticRead(guides.pages[0].path)
+        ow.test.assert(page.title, "Mounted Setup", "tree path reads mounted content instead of primary")
+        ow.test.assert(page.path, "@docs/guides/setup.md", "read preserves mounted identity")
+        ow.test.assert(primary.tree("@docs", 0).sections[0].index.path, "@docs/guides/index.md", "depth-limited nodes retain namespace")
+        var subtree = primary.tree(guides.path, 0)
+        ow.test.assert(subtree.prefix, "@docs/guides/", "returned section path round trips without duplicate prefix")
+        ;["@docs/guides", "@docs/guides/", "@docs/guides/setup.md"].forEach(function(path) {
+          var browse = primary.browse(path)
+          ow.test.assert(browse.path, "@docs/guides/", "browse normalizes mounted folder and page paths")
+          ow.test.assert(browse.nearest_index.path, "@docs/guides/index.md", "nearest index retains namespace")
+          ow.test.assert(browse.child_sections[0].index.path, "@docs/guides/deep/index.md", "missing child index retains namespace")
+          ow.test.assert(primary.agenticRead(browse.direct_pages[0].path).title, "Mounted Setup", "browse page round trips to mounted content")
+          browse.suggested_next_reads.forEach(function(next) {
+            ow.test.assert(next.indexOf("@docs/"), 0, "every suggested read is mount qualified")
+            ow.test.assert(isObject(primary.read(next)), true, "suggested path resolves in mounted backend")
+          })
+        })
+        ow.test.assert(primary.browse("@docs/").path, "@docs/", "mounted browse root retains namespace")
+        ow.test.assert(primary.tree("@missing/", 1).error, "mount not found: missing", "unknown mounts still fail explicitly")
+        ow.test.assert(primary.browse("@missing/").error, "mount not found: missing", "unknown browse mount still fails")
+        ow.test.assert(primary.tree("", 1).sections[0].pages[0].path, "guides/setup.md", "primary paths remain local")
+        ow.test.assert(primary._mounts[0].manager.tree("", 2).sections[0].path, "guides/", "child manager results remain local")
+      } finally {
+        if (writer) writer.close()
+        if (primary) primary.close()
+        cleanupTestDir(primaryDir); cleanupTestDir(mountedDir)
+      }
+    })
+  }
+
   exports.testLintMissingIndex = function() {
     var dir = createTestDir()
     try {
@@ -1983,7 +2036,7 @@
       ow.test.assert(primary.read("@reference/guides/setup.md").meta.title, "Archive Setup", "archive mount should route reads")
       var hits = primary.search("archive-nested-keyword", { forceScan: true })
       ow.test.assert(hits.some(function(hit) { return hit.path === "@reference/guides/setup.md" }), true, "archive mount should join search")
-      ow.test.assert(primary.tree("@reference/", 2).sections[0].path, "guides/", "archive mount should build tree")
+      ow.test.assert(primary.tree("@reference/", 2).sections[0].path, "@reference/guides/", "archive mount should build tree")
       ow.test.assert(primary.browse("@reference/guides").nearest_index.exists, true, "archive mount should browse")
       ow.test.assert(primary.graph("neighbors", { path: "@reference/overview.md" }).length, 1, "archive mount should load graph state")
       var graphHints = primary.search("archive-root-keyword", { forceScan: true })
