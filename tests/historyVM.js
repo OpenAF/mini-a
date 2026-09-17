@@ -113,12 +113,26 @@
       var child = manager._buildChildArgs({ goal: "Redis isolation", depth: 1, parentId: "root", args: {} })
       ow.test.assert(child.knowledge.indexOf("DO NOT COPY THE ENTIRE PARENT") < 0 && child.knowledge.indexOf("BEGIN_UNTRUSTED_CONTEXT") >= 0, true, "Delegates must receive a bounded task projection instead of parent knowledge")
       ow.test.assert(vm.estimateTokens(agent._contextForDelegate("Redis isolation", 2048)) <= 2048, true, "Delegate budget must include its wrapper")
+      var subtask = { id: "status-child", goal: "Check History VM status", status: "running", startedAt: new Date().getTime() }
+      manager.subtasks[subtask.id] = subtask
+      manager.runningCount = manager.metrics.running = 1
+      manager._completeSubtask(subtask, "test", "Parent enabled", { history_vm: { active: false, reason: "history VM is disabled" } }, {})
+      var episode = vm.objects.filter(function(object) { return object.kind === "delegation" })[0]
+      ow.test.assert(episode.content.child_diagnostics.diagnostics_scope.scope, "child_execution", "Canonical delegation content must scope child diagnostics")
+      var exact = vm.getRepresentation(episode.handle, "L4")
+      ow.test.assert(stringify(exact, __, "").indexOf("child_execution") >= 0, true, "Exact retrieved context must preserve scope alongside disabled child metrics")
+      var statusPrompt = agent._prepareContextInvocation(llm, "Check History VM status", "validator")
+      ow.test.assert(statusPrompt.indexOf('"history_vm":{"active":true') >= 0, true, "Parent runtime status must remain active when disabled child metrics are retrieved")
+      manager.destroy()
       agent._getEffectiveContextBudget = function() { return 10 }
       var stopped = false
       try { agent._prepareContextInvocation(llm, "Protected input", "validator") } catch(e) { stopped = e.miniAStop === true }
       ow.test.assert(stopped, true, "Auxiliary hard overflow must stop before model dispatch")
       vm.contextVirtualizationShadow = true
-      ow.test.assert(agent._prepareContextInvocation(llm, "Protected input", "validator"), "Protected input", "Shadow mode must not enforce projected overflow or alter input")
+      var shadowPrompt = agent._prepareContextInvocation(llm, "Protected input", "validator")
+      ow.test.assert(shadowPrompt.indexOf("Protected input"), 0, "Shadow mode must retain the original input")
+      ow.test.assert(shadowPrompt.indexOf("CURRENT CONVERSATION STATUS") >= 0, true, "Shadow calls must still receive authoritative runtime status")
+      ow.test.assert(shadowPrompt.indexOf("BEGIN_UNTRUSTED_CONTEXT"), -1, "Shadow mode must not enforce projected overflow or inject retrieved context")
     }, { contextVirtualization: true })
   }
 
@@ -323,7 +337,8 @@
       load("mini-a.js")
       var agent = new MiniA()
       agent.setInteractionFn(function() {})
-      var args = { historyvm: true, contextvirtualization: true, contextvirtualizationshadow: false, conversation: root + "/conversation.json", maxcontext: 500, goal: "architecture" }
+      // Include the authoritative runtime snapshot in the protected-input budget.
+      var args = { historyvm: true, contextvirtualization: true, contextvirtualizationshadow: false, conversation: root + "/conversation.json", maxcontext: 650, goal: "architecture" }
       agent._sessionArgs = args
       agent._initHistoryVm(args)
       var large = new Array(5001).join("archived architecture output ")

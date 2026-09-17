@@ -2545,6 +2545,49 @@ MiniA.prototype.getHistoryVmDiagnostics = function() {
   return isObject(this._historyVm) ? this._historyVm.diagnostics() : { active: false, shadow: false, reason: "history VM is disabled" }
 }
 
+// Only live, instance-owned facts belong here. Do not copy session arguments,
+// secrets, process-wide counters, or retrieved/child state into this snapshot.
+MiniA.prototype.getCurrentConversationStatus = function() {
+  var vm = this._historyVm
+  var present = isObject(vm)
+  var healthy = present && !vm.degraded
+  return {
+    scope: "current_conversation",
+    agent_id: this._id,
+    conversation_id: present ? vm.conversationId : __,
+    history_vm: {
+      active: healthy && vm.enabled === true,
+      shadow: healthy && vm.shadow === true,
+      degraded: present && vm.degraded === true
+    },
+    context_virtualization: {
+      active: healthy && vm.enabled === true && vm.contextVirtualization === true && vm.contextVirtualizationShadow !== true,
+      shadow: healthy && vm.enabled === true && vm.contextVirtualization === true && vm.contextVirtualizationShadow === true
+    }
+  }
+}
+
+// Refresh at each call, including retries and final/auxiliary calls. Cache only
+// the last input per consumer so our own prepared prompts are never nested.
+MiniA.prototype._prepareContextInvocation = function(llm, prompt, consumer) {
+  var key = consumer || "executor"
+  if (!isMap(this._contextInvocationInputs)) this._contextInvocationInputs = {}
+  var previous = this._contextInvocationInputs[key]
+  if (isMap(previous) && prompt === previous.prepared) prompt = previous.original
+  var original = prompt
+  var prefix = "\n\nCURRENT CONVERSATION STATUS (runtime-owned snapshot for this call):\n"
+  var suffix = "\nUse this snapshot for the current agent/conversation. Child diagnostics and retrieved or historical status describe their own scope, not this conversation. Tool availability does not establish local feature status.\n"
+  var status = stringify(this.getCurrentConversationStatus(), __, "")
+  prompt += prefix + status + suffix
+  var prepared = this._projectContextInvocation(llm, prompt, consumer)
+  // Capturing/projecting context can itself degrade the VM. Never send the
+  // pre-failure status as authoritative; re-account the refreshed fixed input.
+  var refreshed = stringify(this.getCurrentConversationStatus(), __, "")
+  if (refreshed !== status) prepared = this._projectContextInvocation(llm, original + prefix + refreshed + suffix, consumer)
+  this._contextInvocationInputs[key] = { original: original, prepared: prepared }
+  return prepared
+}
+
 MiniA.prototype._syncContextSources = function() {
   var vm = this._historyVm
   if (!isObject(vm) || !vm.contextVirtualization || vm.degraded) return
@@ -2571,14 +2614,13 @@ MiniA.prototype._captureContextToolResult = function(name, params, result) {
 
 // The next exposed invocation is the paging boundary. Provider-internal rounds
 // remain intact. Counts here are application estimates, not billed usage.
-MiniA.prototype._prepareContextInvocation = function(llm, prompt, consumer) {
+MiniA.prototype._projectContextInvocation = function(llm, prompt, consumer) {
   var vm = this._historyVm
   if (!isObject(vm) || !vm.contextVirtualization || vm.degraded || !isObject(llm) || !isFunction(llm.getGPT)) return prompt
   var gpt = llm.getGPT()
   if (!isObject(gpt) || !isFunction(gpt.getConversation) || !isFunction(gpt.setConversation)) return prompt
   var conversation = gpt.getConversation()
   if (!isArray(conversation)) return prompt
-  if (consumer && consumer !== "executor" && isMap(this._contextAuxiliaryPrompts) && isMap(this._contextAuxiliaryPrompts[consumer]) && prompt === this._contextAuxiliaryPrompts[consumer].enriched) prompt = this._contextAuxiliaryPrompts[consumer].original
   this._syncContextSources()
   if (!consumer || consumer === "executor") vm.captureProviderConversation(conversation)
   if (vm.degraded) return prompt
@@ -2605,8 +2647,6 @@ MiniA.prototype._prepareContextInvocation = function(llm, prompt, consumer) {
     var extra = vm.serializeContext(auxiliary).text
     var enriched = prompt + (extra.length > 0 ? "\nBEGIN_UNTRUSTED_CONTEXT\nRetrieved source data:\n" + extra + "\nEND_UNTRUSTED_CONTEXT" : "")
     if (vm.contextVirtualizationShadow || auxiliary.overflow || vm.estimateTokens(enriched) - fixed.prompt > available) return prompt
-    if (!isMap(this._contextAuxiliaryPrompts)) this._contextAuxiliaryPrompts = {}
-    this._contextAuxiliaryPrompts[consumer] = { original: prompt, enriched: enriched }
     return enriched
   }
   if (vm.contextVirtualizationShadow) {

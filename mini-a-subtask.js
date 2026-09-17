@@ -1045,8 +1045,15 @@ SubtaskManager.prototype._remoteObservationTimeoutMs = function(subtask) {
 
 SubtaskManager.prototype._completeSubtask = function(subtask, prefix, answer, metrics, state) {
   var completedAt = new Date().getTime()
+  var diagnosticsScope = {
+    scope: "child_execution",
+    subtask_id: subtask.id,
+    authority: "child state and instance diagnostics only; not parent conversation status",
+    counters: "may include shared process totals"
+  }
   if (!this._claimTerminal(subtask, "completed", completedAt, __, {
     answer: answer,
+    diagnostics_scope: diagnosticsScope,
     metrics: metrics,
     state: state
   })) return false
@@ -1054,7 +1061,8 @@ SubtaskManager.prototype._completeSubtask = function(subtask, prefix, answer, me
 
   if (isObject(this.parentAgent) && isObject(this.parentAgent._historyVm) && this.parentAgent._historyVm.contextVirtualization) {
     this.parentAgent._historyVm.upsertContextSource("delegation", subtask.id, {
-      goal: subtask.goal, result: answer, state: state, metrics: metrics
+      goal: subtask.goal, result: answer,
+      child_diagnostics: { diagnostics_scope: diagnosticsScope, state: state, metrics: metrics }
     }, { type: "delegation_episode", provenance: { source: "delegated-result", child: subtask.id, coverage: "returned-result-only" } })
   }
 
@@ -1621,6 +1629,7 @@ SubtaskManager.prototype.result = function(subtaskId) {
   
   return {
     answer: isDef(subtask.result) ? subtask.result.answer : __,
+    diagnostics_scope: isDef(subtask.result) ? subtask.result.diagnostics_scope : __,
     metrics: isDef(subtask.result) ? subtask.result.metrics : __,
     state: isDef(subtask.result) ? subtask.result.state : __,
     error: subtask.error

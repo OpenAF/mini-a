@@ -1,4 +1,14 @@
 jobs:
+- name: MiniA Core Tests::ChildDiagnosticsScope
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testChildDiagnosticsDoNotDescribeParentConversation
+
+- name: MiniA Core Tests::CurrentConversationStatus
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testCurrentConversationStatusRefreshesOnRetry
+
 - name: MiniA Core Tests::ConsoleChartMarkdown
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -1075,6 +1085,8 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Core Tests::ChildDiagnosticsScope
+- MiniA Core Tests::CurrentConversationStatus
 - MiniA Core Tests::ConsoleChartMarkdown
 - MiniA Core Tests::ConsoleChartStreaming
 - MiniA Core Tests::FinalAnswerPreservesConsoleChartFence

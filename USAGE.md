@@ -2703,6 +2703,8 @@ Use `historyvm=true contextvirtualization=true contextvirtualizationshadow=true`
 
 The compatibility modes are explicit: `historyvm=false historyvmshadow=false` keeps legacy Mini-A, `historyvm=true contextvirtualization=false` selects Phase 1, and `historyvm=true contextvirtualization=true` selects Phase 2. Neither phase is silently enabled.
 
+At model-call boundaries, Mini-A supplies a compact `CURRENT CONVERSATION STATUS` snapshot from the current agent's runtime, including effective History VM and context virtualization modes. This takes precedence over child diagnostics or historical status when answering questions about the current conversation. Delegation results label their diagnostics with `diagnostics_scope: { scope: "child_execution", subtask_id: ... }`; retrieved delegation episodes keep metrics and state under `child_diagnostics`. These describe the child execution (some counters remain process-wide), not the parent's configuration. Children do not inherit the parent's History VM by default, even when they can access parent-owned history tools.
+
 Runtime projections include the active plan, selected memory, supplied knowledge,
 and authorized wiki/skill/tool results. Source snapshots are versioned and old
 versions remain retrievable. Auxiliary planner/advisor/validator/summarizer calls

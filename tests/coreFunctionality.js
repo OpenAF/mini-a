@@ -2263,6 +2263,72 @@
     } finally { manager.destroy() }
   }
 
+  exports.testChildDiagnosticsDoNotDescribeParentConversation = function() {
+    var parent = createAgent()
+    var captured
+    parent._historyVm = {
+      enabled: true, shadow: false, contextVirtualization: true, conversationId: "parent-conversation",
+      upsertContextSource: function(kind, id, value) { captured = value }
+    }
+    var manager = new SubtaskManager({}, {})
+    manager.parentAgent = parent
+    var child = createAgent()
+    var childMetrics = { history_vm: child.getHistoryVmDiagnostics(), tokens: 7 }
+    var original = stringify(childMetrics, __, "")
+    try {
+      ;["local", "remote"].forEach(function(mode) {
+        var subtask = { id: mode + "-diagnostics", goal: "Inspect status", status: "running", startedAt: new Date().getTime() }
+        if (mode === "remote") { subtask.workerUrl = "http://worker"; subtask.remoteTaskId = "remote-task" }
+        manager.subtasks[subtask.id] = subtask
+        manager.runningCount = manager.metrics.running = 1
+        manager._completeSubtask(subtask, "test", "Parent VM is enabled", childMetrics, { childOnly: true })
+        var result = manager.result(subtask.id)
+        ow.test.assert(result.diagnostics_scope.scope, "child_execution", "Both local and remote completion must scope returned diagnostics")
+        ow.test.assert(result.diagnostics_scope.subtask_id, subtask.id, "Scope must identify the child")
+        ow.test.assert(result.metrics.history_vm.active, false, "Legacy metrics access must retain the child's actual values")
+        ow.test.assert(captured.child_diagnostics.diagnostics_scope.subtask_id, subtask.id, "Retrieved delegation context must retain child scope")
+        ow.test.assert(isUnDef(captured.metrics) && isUnDef(captured.state), true, "Child diagnostics must not be exposed as unscoped context fields")
+        ow.test.assert(captured.child_diagnostics.state.childOnly, true, "Child state must stay accessible in its own scope")
+      })
+      ow.test.assert(stringify(childMetrics, __, ""), original, "Scoping must not mutate incoming worker metrics")
+      var prompt = parent._prepareContextInvocation(__, "Check status. Retrieved child data: " + stringify(captured, __, ""), "executor")
+      ow.test.assert(prompt.indexOf('"scope":"current_conversation"') >= 0, true, "Parent must receive authoritative current status alongside child data")
+      ow.test.assert(parent.getCurrentConversationStatus().history_vm.active, true, "Disabled child VM must not disable parent status")
+      ow.test.assert(child.getCurrentConversationStatus().history_vm.active, false, "Child status must reflect its own VM")
+    } finally { manager.destroy() }
+  }
+
+  exports.testCurrentConversationStatusRefreshesOnRetry = function() {
+    var agent = createAgent()
+    agent._sessionArgs = { historyvm: true, secret: "must-not-leak" }
+    ow.test.assert(agent.getCurrentConversationStatus().history_vm.active, false, "Requested flags alone must not claim a running VM")
+    agent._historyVm = { enabled: true, contextVirtualization: true, conversationId: "live" }
+    ;["executor", "planner", "validator", "advisor", "summarizer"].forEach(function(consumer) {
+      var prompt = agent._prepareContextInvocation(__, "Question", consumer)
+      ow.test.assert(prompt.indexOf('"active":true') >= 0, true, "Every model consumer must receive live status")
+      agent._historyVm.degraded = true
+      var retry = agent._prepareContextInvocation(__, prompt, consumer)
+      ow.test.assert(retry.split("CURRENT CONVERSATION STATUS").length, 2, "Retries must refresh rather than duplicate the snapshot")
+      ow.test.assert(retry.indexOf('"active":true'), -1, "Retry must not retain stale active status after degradation")
+      ow.test.assert(retry.indexOf('"degraded":true') >= 0, true, "Degradation must be reported")
+      ow.test.assert(retry.indexOf("must-not-leak"), -1, "Status must not expose arbitrary configuration")
+      agent._historyVm.degraded = false
+    })
+    agent._historyVm.contextVirtualizationShadow = true
+    ow.test.assert(agent.getCurrentConversationStatus().context_virtualization.active, false, "Phase 2 shadow must not claim active projection")
+    ow.test.assert(agent.getCurrentConversationStatus().context_virtualization.shadow, true, "Phase 2 shadow must be explicit")
+    agent._historyVm.enabled = false
+    agent._historyVm.shadow = true
+    ow.test.assert(agent.getCurrentConversationStatus().history_vm.shadow, true, "Capture-only shadow must be explicit")
+    ow.test.assert(agent.getCurrentConversationStatus().context_virtualization.shadow, false, "Phase 2 requires an enabled VM")
+    agent._historyVm.enabled = true
+    agent._historyVm.shadow = false
+    agent._projectContextInvocation = function(llm, prompt) { this._historyVm.degraded = true; return prompt }
+    var failedProjection = agent._prepareContextInvocation(__, "Question", "executor")
+    ow.test.assert(failedProjection.indexOf('"active":true'), -1, "A failure during projection must refresh status before dispatch")
+    ow.test.assert(failedProjection.indexOf('"degraded":true') >= 0, true, "The same call must report projection degradation")
+  }
+
   exports.testSubtaskShutdownCancelsRemoteTask = function() {
     var manager = new SubtaskManager({}, {})
     var calls = []
