@@ -2983,10 +2983,10 @@
                 id = index;
                 result += buildOptimisticUserPromptBlock(ev.message);
             } else {
-                if (/^(⚠️|❌|❗|warn|warning|error)$/.test(ev.event) ||
-                    (ev.event === '🤝' && /❌|❗|⚠️|failed|timeout/i.test(ev.message || ''))) warnings++;
                 if (!['🧩', '💡', '💭', '🌀', '🛑', '⏳'].includes(ev.event) &&
                     !(showExecsEnabled && ['⚙️', '🖥️'].includes(ev.event))) return;
+                if (/^(⚠️|❌|❗|warn|warning|error)$/.test(ev.event) ||
+                    (ev.event === '🤝' && /❌|❗|⚠️|failed|timeout/i.test(ev.message || ''))) warnings++;
                 lines.push(`<div class="activity-event">${escapeHtml(ev.event)} <span>${escapeHtml(ev.message).replace(/\n/g, '<br>')}</span></div>`);
             }
         });

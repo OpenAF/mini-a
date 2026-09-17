@@ -41,7 +41,7 @@ const events = [
 const active = result(events);
 assert.equal(active.status, 'processing');
 assert.match(active.content, /data-complete="false" open/);
-assert.match(active.content, /2 warning\/error event/);
+assert.doesNotMatch(active.content, /warning\/error event/);
 assert.ok(!active.content.includes('<script>'));
 for (const hidden of ['Tool output', 'Plan: fetch, compare', 'Child failed', 'Partial results']) {
   assert.ok(!active.content.includes(hidden), 'Previously hidden event stays hidden: ' + hidden);
@@ -62,6 +62,44 @@ assert.equal(followup.status, 'processing');
 const twoAnswers = result([...finishedEvents, { event: '👤', message: 'Next' },
   { event: '💡', message: 'Working' }, { event: 'final', message: 'Second answer' }]);
 assert.equal((twoAnswers.content.match(/data-complete="true"/g) || []).length, 2);
+
+// Run the actual interaction normalization, including the numbered thoughts
+// produced by repeated native calls and diagnostics before the dispatch event.
+const proxyStart = yaml.indexOf('              var isGenericProxyThought =');
+const proxyEnd = yaml.indexOf('              if (global.__usestream', proxyStart);
+const proxyContext = vm.createContext({
+  global: { __res: { test: [] } }, uuid: 'test', lma: {},
+  isString: value => typeof value === 'string',
+  isDef: value => value !== undefined && value !== null, __: undefined
+});
+vm.runInContext('var pendingProxyThought;', proxyContext);
+const normalizeInteraction = vm.runInContext('(function(_e, m) {' +
+  yaml.slice(proxyStart, proxyEnd) + '})', proxyContext);
+for (const suffix of ['', ' #2', ' #3', ' #4']) {
+  normalizeInteraction('💭', "Using tool 'proxy-dispatch'" + suffix);
+  normalizeInteraction('⚠️', 'Hidden diagnostic');
+  normalizeInteraction('💡', 'Search each module separately');
+  proxyContext.lma._pendingProxyDisplayTool = 'search';
+  normalizeInteraction('⚙️', 'Dispatch');
+  proxyContext.lma._pendingProxyDisplayTool = undefined;
+}
+let proxyEvents = proxyContext.global.__res.test;
+assert.deepEqual(Array.from(proxyEvents.filter(ev => ev.event === '💭'), ev => ev.message),
+  ['', ' #2', ' #3', ' #4'].map(suffix => "Using tool 'search'" + suffix));
+const proxyResult = result(proxyEvents, false);
+assert.doesNotMatch(proxyResult.content, /proxy-dispatch|warning\/error event|Hidden diagnostic/);
+assert.match(proxyResult.content, /search&#39; #4/);
+normalizeInteraction('💭', "Using tool 'proxy-dispatch' #5");
+normalizeInteraction('💭', "Using tool 'get-url' #2");
+normalizeInteraction('⚙️', 'Dispatch');
+assert.equal(proxyEvents.filter(ev => ev.event === '💭').length, 5,
+  'Canonical translated thoughts replace pending generic thoughts without duplication');
+normalizeInteraction('💭', "Using tool 'proxy-dispatch' #6");
+normalizeInteraction('⚙️', 'List proxy tools');
+assert.equal(proxyEvents.filter(ev => ev.event === '💭').at(-1).message,
+  "Using tool 'proxy-dispatch' #6", 'Management calls retain their real tool name');
+normalizeInteraction('💭', "Using tool 'get-url' #3");
+assert.equal(proxyEvents.at(-1).message, "Using tool 'get-url' #3");
 
 // Compile every inline browser script, then exercise disclosure state across DOM replacements.
 for (const match of page.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)) {
@@ -145,7 +183,7 @@ context.restoreActivityDisclosures();
 assert.equal(panels[0].open, false, 'Reopening saved history resets expansion');
 const upgraded = context.upgradeActivityTranscript('old content', finishedEvents);
 assert.match(upgraded, /data-complete="true">/);
-assert.match(upgraded, /2 warning\/error event/);
+assert.doesNotMatch(upgraded, /warning\/error event/);
 assert.ok(!upgraded.includes('Tool output'));
 assert.ok(!upgraded.includes('Child failed'));
 context.showExecsEnabled = false;

@@ -1395,18 +1395,18 @@ todo:
                 log("[" + uuid + "] 🤝 " + m)
                 return
               }
-              var isGenericProxyThought = _e == "💭" && isString(m) && /^Using tool ['"]proxy-dispatch['"]\.?$/i.test(m.trim())
-              var isTranslatedProxyThought = _e == "💭" && isString(m) && /^Using tool ['"](?!proxy-dispatch['"])([^'"]+)['"]\.?$/i.test(m.trim())
+              var isGenericProxyThought = _e == "💭" && isString(m) && /^Using tool ['"]proxy-dispatch['"]\.?(?: #\d+)?$/i.test(m.trim())
+              var isTranslatedProxyThought = _e == "💭" && isString(m) && /^Using tool ['"](?!proxy-dispatch['"])([^'"]+)['"]\.?(?: #\d+)?$/i.test(m.trim())
               if (isGenericProxyThought) {
                 // A streamed reasoning block can announce the proxy before its
-                // native function call exposes the downstream tool. Wait one
-                // event so the activity panel can show the useful tool name.
+                // native function call exposes the downstream tool. Keep it
+                // pending across diagnostics until dispatch identifies the tool.
                 pendingProxyThought = m
                 return
               }
-              if (isDef(pendingProxyThought)) {
+              if (isDef(pendingProxyThought) && (_e == "⚙️" || isTranslatedProxyThought || _e == "🏁" || _e == "🛑" || _e == "👤")) {
                 if (_e == "⚙️" && isString(lma._pendingProxyDisplayTool)) {
-                  global.__res[uuid].push({ event: "💭", message: "Using tool '" + lma._pendingProxyDisplayTool + "'" })
+                  global.__res[uuid].push({ event: "💭", message: pendingProxyThought.replace(/proxy-dispatch/i, function() { return lma._pendingProxyDisplayTool }) })
                 } else if (!isTranslatedProxyThought) {
                   global.__res[uuid].push({ event: "💭", message: pendingProxyThought })
                 }
@@ -1663,9 +1663,9 @@ todo:
               activityId = i
               _res.content += "<div style=\"text-align: right;\"><i><div style=\"display: inline-block; text-align: left;\">" + __formatUserMessage(r.message) + "</div> " + r.event + "</i>\n<br><br></div>"
             } else if (isDef(r.event)) {
-              if (/^(⚠️|❌|❗|warn|warning|error)$/.test(r.event) || (r.event == "🤝" && /❌|❗|⚠️|failed|timeout/i.test(String(r.message)))) activityWarnings++
               // Group only the messages that were visible before activity disclosures.
               if (!(r.event == "🧩" || r.event == "💡" || r.event == "💭" || r.event == "🌀" || r.event == "🛑" || r.event == "⏳" || ((r.event == "⚙️" || r.event == "🖥️") && global.__showexecs))) continue
+              if (/^(⚠️|❌|❗|warn|warning|error)$/.test(r.event) || (r.event == "🤝" && /❌|❗|⚠️|failed|timeout/i.test(String(r.message)))) activityWarnings++
               activityLines.push('<div class="activity-event">' + __escapeHtml(r.event) + ' <span>' + __escapeHtml(r.message).replace(/\n/g, '<br>') + '</span></div>')
             }
           }
