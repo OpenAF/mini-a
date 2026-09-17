@@ -1395,22 +1395,25 @@ todo:
                 log("[" + uuid + "] 🤝 " + m)
                 return
               }
-              var isGenericProxyThought = _e == "💭" && isString(m) && /^Using tool ['"]proxy-dispatch['"]\.?(?: #\d+)?$/i.test(m.trim())
-              var isTranslatedProxyThought = _e == "💭" && isString(m) && /^Using tool ['"](?!proxy-dispatch['"])([^'"]+)['"]\.?(?: #\d+)?$/i.test(m.trim())
+              var genericProxyPattern = /^Using tool ['"]proxy-dispatch['"]\.?(?: #\d+)?$/i
+              var isGenericProxyThought = _e == "💭" && isString(m) && genericProxyPattern.test(m.trim())
+              var isTranslatedProxyThought = _e == "💭" && isString(m) && (/^Using tool ['"](?!proxy-dispatch['"])([^'"]+)['"]\.?(?: #\d+)?$/i.test(m.trim()) || /^(Listing available tools|Searching available tools|Checking tool connections|Reading a saved tool result)(?: #\d+)?$/.test(m.trim()))
               if (isGenericProxyThought) {
-                // A streamed reasoning block can announce the proxy before its
-                // native function call exposes the downstream tool. Keep it
-                // pending across diagnostics until dispatch identifies the tool.
+                // Wait for actual dispatch parameters, across intervening diagnostics.
                 pendingProxyThought = m
                 return
               }
-              if (isDef(pendingProxyThought) && (_e == "⚙️" || isTranslatedProxyThought || _e == "🏁" || _e == "🛑" || _e == "👤")) {
-                if (_e == "⚙️" && isString(lma._pendingProxyDisplayTool)) {
-                  global.__res[uuid].push({ event: "💭", message: pendingProxyThought.replace(/proxy-dispatch/i, function() { return lma._pendingProxyDisplayTool }) })
-                } else if (!isTranslatedProxyThought) {
-                  global.__res[uuid].push({ event: "💭", message: pendingProxyThought })
+              if (isDef(pendingProxyThought)) {
+                var proxyDisplayThought = lma._pendingProxyDisplayThought
+                if (_e == "⚙️" && isString(proxyDisplayThought) && !genericProxyPattern.test(proxyDisplayThought.trim())) {
+                  var proxyCounter = / #\d+$/.exec(pendingProxyThought.trim())
+                  global.__res[uuid].push({ event: "💭", message: proxyDisplayThought + (proxyCounter ? proxyCounter[0] : "") })
+                  pendingProxyThought = __
+                } else if (isTranslatedProxyThought || _e == "🏁" || _e == "🛑" || _e == "👤") {
+                  // Canonical thoughts supersede announcements. Never guess a tool
+                  // or publish an unresolved announcement at the end of a turn.
+                  pendingProxyThought = __
                 }
-                pendingProxyThought = __
               }
               global.__res[uuid].push({ event: _e, message: m })
               if (global.__usestream && isFunction(global._mini_a_web_ssePush) && _e != "🗺️") {

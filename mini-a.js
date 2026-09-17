@@ -1443,10 +1443,27 @@ MiniA.prototype._logMessageWithCounter = function(type, message) {
 MiniA.prototype._translateProxyToolThought = function(actionName, params, thoughtValue) {
   if (isString(thoughtValue)) thoughtValue = thoughtValue.replace(/^Use tool\b/, "Using tool")
   if (((actionName || "") + "").trim().toLowerCase() !== "proxy-dispatch" || !isMap(params)) return thoughtValue
-  if (params.action !== "call" || !isString(params.tool) || params.tool.trim().length === 0) return thoughtValue
   if (!isString(thoughtValue)) return thoughtValue
-  var toolName = params.tool.trim()
-  return thoughtValue.replace(/\bproxy-dispatch\b/g, function() { return toolName })
+  // Match the argument envelope and aliases accepted by the proxy executor.
+  if (isMap(params.params)) {
+    var outerParams = params
+    params = merge(params.params, outerParams)
+  }
+  var action = ((params.action || "") + "").toLowerCase().trim()
+  var toolName = isString(params.tool) ? params.tool.trim() : ""
+  if (["", "execute", "run", "invoke", "call_tool"].indexOf(action) >= 0 && toolName.length > 0) action = "call"
+  if (action === "call" && toolName.length > 0) {
+    return thoughtValue.replace(/\bproxy-dispatch\b/g, function() { return toolName })
+  }
+  var operationLabels = {
+    list: "Listing available tools",
+    search: "Searching available tools",
+    status: "Checking tool connections",
+    readresult: "Reading a saved tool result"
+  }
+  var genericThought = /^Using tool ['"]proxy-dispatch['"]\.?( #\d+)?$/i.exec(thoughtValue.trim())
+  if (genericThought && isString(operationLabels[action])) return operationLabels[action] + (genericThought[1] || "")
+  return thoughtValue
 }
 
 /**
@@ -16904,13 +16921,12 @@ MiniA.prototype.init = function(args) {
                 if (isObject(parent._runtime)) {
                   parent._runtime.modelToolCallDetected = true
                 }
-                var proxyDisplayTool = t === "proxy-dispatch" && isMap(a) && a.action === "call" && isString(a.tool) && a.tool.trim().length > 0
-                  ? a.tool.trim() : __
-                parent._pendingProxyDisplayTool = proxyDisplayTool
+                parent._pendingProxyDisplayThought = t === "proxy-dispatch"
+                  ? parent._translateProxyToolThought(t, a, "Using tool 'proxy-dispatch'") : __
                 try {
                   parent.fnI(MiniA._isCommsTool(t, a) ? "comms" : "exec", `Executing action '${t}' with parameters: ${MiniA._isCommsTool(t, a) ? "[payload omitted]" : parent._truncateAuditValue(af.toCSLON(a), 800)}`)
                 } finally {
-                  parent._pendingProxyDisplayTool = __
+                  parent._pendingProxyDisplayThought = __
                 }
                 parent._trace("tool_call", { name: t, params: a })
 

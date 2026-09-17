@@ -689,8 +689,17 @@
     agent._emitCanonicalThoughtEvent("proxy-dispatch", "Use tool 'proxy-dispatch'", "(no thought)", params)
     ow.test.assert(events[0].message, "Using tool 'http-request'", "Action-mode thoughts should display the downstream tool")
     ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", params, "Fetch the page"), "Fetch the page", "Descriptive thoughts should be preserved")
-    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { action: "list" }, "Use tool 'proxy-dispatch'"), "Using tool 'proxy-dispatch'", "Management actions have no downstream tool")
+    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { action: "list" }, "Use tool 'proxy-dispatch'"), "Listing available tools", "Management actions describe their operation")
     ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { action: "call", tool: "" }, "Use tool 'proxy-dispatch'"), "Using tool 'proxy-dispatch'", "Missing downstream names must not invent a tool")
+    var callAliases = ["", "execute", "run", "invoke", "call_tool", " CALL "]
+    callAliases.forEach(function(action) {
+      var aliasParams = { action: action, tool: " wiki " }
+      ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", aliasParams, "Using tool 'proxy-dispatch' #2"), "Using tool 'wiki' #2", "Execution aliases should display the downstream tool")
+      ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { params: aliasParams }, "Using tool 'proxy-dispatch'"), "Using tool 'wiki'", "Nested arguments should display the downstream tool")
+    })
+    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { action: "search" }, "Using tool 'proxy-dispatch'"), "Searching available tools", "Search is a proxy operation, not a downstream call")
+    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { action: "status" }, "Using tool 'proxy-dispatch'"), "Checking tool connections", "Status should have a meaningful label")
+    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { action: "readresult" }, "Using tool 'proxy-dispatch'"), "Reading a saved tool result", "Saved results should have a meaningful label")
     ow.test.assert(agent._translateProxyToolThought("other-tool", params, "Use tool 'other-tool'"), "Using tool 'other-tool'", "Direct tool names should remain unchanged")
     ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", params, "Using tool 'proxy-dispatch'"), "Using tool 'http-request'", "Already normalized thoughts should translate too")
   }

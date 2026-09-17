@@ -11,7 +11,7 @@ const showdown = require(path.join(root, 'public/showdown.min.js'));
 const converter = new showdown.Converter({ tables: true });
 assert.match(page, /\.answer-activity > summary\s*\{[\s\S]*?color: #737373;[\s\S]*?font-style: italic;/);
 assert.match(page, /\.activity-body\s*\{[\s\S]*?color: #737373;/);
-assert.match(agent, /_pendingProxyDisplayTool/);
+assert.match(agent, /_pendingProxyDisplayThought/);
 assert.match(yaml, /pendingProxyThought/);
 const route = yaml.split('# Get results of a prompt')[1].split('# Stream events via SSE')[0]
   .split('((execURI      )): | #js\n')[1].replace(/^    /gm, '');
@@ -65,7 +65,7 @@ assert.equal((twoAnswers.content.match(/data-complete="true"/g) || []).length, 2
 
 // Run the actual interaction normalization, including the numbered thoughts
 // produced by repeated native calls and diagnostics before the dispatch event.
-const proxyStart = yaml.indexOf('              var isGenericProxyThought =');
+const proxyStart = yaml.indexOf('              var genericProxyPattern =');
 const proxyEnd = yaml.indexOf('              if (global.__usestream', proxyStart);
 const proxyContext = vm.createContext({
   global: { __res: { test: [] } }, uuid: 'test', lma: {},
@@ -79,9 +79,9 @@ for (const suffix of ['', ' #2', ' #3', ' #4']) {
   normalizeInteraction('💭', "Using tool 'proxy-dispatch'" + suffix);
   normalizeInteraction('⚠️', 'Hidden diagnostic');
   normalizeInteraction('💡', 'Search each module separately');
-  proxyContext.lma._pendingProxyDisplayTool = 'search';
+  proxyContext.lma._pendingProxyDisplayThought = "Using tool 'search'";
   normalizeInteraction('⚙️', 'Dispatch');
-  proxyContext.lma._pendingProxyDisplayTool = undefined;
+  proxyContext.lma._pendingProxyDisplayThought = undefined;
 }
 let proxyEvents = proxyContext.global.__res.test;
 assert.deepEqual(Array.from(proxyEvents.filter(ev => ev.event === '💭'), ev => ev.message),
@@ -95,9 +95,17 @@ normalizeInteraction('⚙️', 'Dispatch');
 assert.equal(proxyEvents.filter(ev => ev.event === '💭').length, 5,
   'Canonical translated thoughts replace pending generic thoughts without duplication');
 normalizeInteraction('💭', "Using tool 'proxy-dispatch' #6");
+proxyContext.lma._pendingProxyDisplayThought = 'Listing available tools';
 normalizeInteraction('⚙️', 'List proxy tools');
+proxyContext.lma._pendingProxyDisplayThought = undefined;
 assert.equal(proxyEvents.filter(ev => ev.event === '💭').at(-1).message,
-  "Using tool 'proxy-dispatch' #6", 'Management calls retain their real tool name');
+  "Listing available tools #6", 'Management calls describe the proxy operation');
+normalizeInteraction('💭', "Using tool 'proxy-dispatch' #7");
+normalizeInteraction('⚙️', 'An unrelated execution event');
+normalizeInteraction('💭', 'I already have the answer');
+normalizeInteraction('🏁', 'Answer');
+assert.ok(!proxyEvents.some(ev => /proxy-dispatch/.test(ev.message)),
+  'Unresolved announcements never leak into the activity pane');
 normalizeInteraction('💭', "Using tool 'get-url' #3");
 assert.equal(proxyEvents.at(-1).message, "Using tool 'get-url' #3");
 
