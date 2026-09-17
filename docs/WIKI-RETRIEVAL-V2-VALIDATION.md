@@ -2681,3 +2681,35 @@ without errors (p50/p95/p99 3.46/9.54/14.26 ms). The source-bound files are
 `assertions-backlinks-final-{v2,wiki}.json`,
 `quality-backlinks-final-{v2,legacy}.json` and
 `concurrent-backlinks-final-1000.json`.
+
+## Area 8 environment evidence — 2026-09-17
+
+The executable `tests/wikiRetrievalArea8S3.js` ran against a disposable
+localhost `minio/minio:latest` container (image ID
+`sha256:8f08aee614800a237906bd48114d733e5ac5bfac4ccdf731f141b0e880d7a253`).
+It creates a unique object prefix in a pre-existing disposable bucket and
+removes both objects afterward. Source commit, image ID and all eleven passed
+checks are recorded in `tests/fixtures/wiki-retrieval-v2/area8-s3-compatible-live.json`.
+The new check covers real S3 protocol metadata/download, unchanged ETag,
+credential denial, corrupt replacement, pointer/evidence retention and valid
+replacement with retired evidence omitted. It passed with exit code 0. The
+test file and plan edits were uncommitted during the run.
+
+To repeat against an authorized disposable S3-compatible endpoint, create an
+empty bucket and set `WIKI_AREA8_S3_URL`, `WIKI_AREA8_S3_BUCKET`,
+`WIKI_AREA8_S3_ACCESS_KEY` and `WIKI_AREA8_S3_SECRET_KEY`, then run
+`oaf -f tests/wikiRetrievalArea8S3.js`. The account needs object put/get/head
+and delete access under its temporary `area8/` prefix. The script intentionally
+does not create or remove the bucket.
+
+| Area 8 deployment gate | Current evidence | Evidence needed to close that gate |
+| --- | --- | --- |
+| Local S3-compatible bundle reader | Ten live MinIO checks passed on the recorded image | Repeat on each supported provider/configuration and exercise its network/cache/authorization failures. |
+| Public-cloud IAM and remote revocation | No cloud endpoint reached; STS returned a connection error on this host | Temporary least-privilege cloud bucket/identity, allowed and denied principals, live permission change between candidate discovery and disclosure, provider request logs and fresh-reader result. |
+| Network filesystem publication/recovery | No NFS/SMB/FUSE mount available in this checkout | Record mount protocol/options, shared writer/reader hosts, force acknowledgements, failure checkpoints and fresh-host old/new pointer plus evidence checks. Do not infer correctness from local file locks. |
+| Physical power-loss durability | No controllable volume/power source | Disposable storage with actual power or storage-server interruption, acknowledged publication and force log at each checkpoint, fresh-host checksums and old/new evidence after restart, repeated by failure mode. |
+| Distributed multi-JVM quotas and writers | Same-JVM quota and local file-lock tests only; remote multi-writer CAS is explicitly deferred | Either deploy one writer with external quota coordination and verify multi-JVM atomicity, or implement and test backend-wide CAS before supporting concurrent writers. |
+
+The S3 run does not convert application-byte audits into wire/device accounting
+and does not sign off the Area 7 release-performance regressions. The remaining
+rows require the named environment and are unverified here.
