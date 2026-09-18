@@ -190,7 +190,25 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/historyS3.js").testWebPersistence
 
+- name: MiniA History VM Tests::AppendDetachesCallerData
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testAppendDetachesCallerData
+
+- name: MiniA History VM Tests::ResumeUnterminatedJournal
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testResumeUnterminatedJournal
+
+- name: MiniA History VM Tests::RecoverBranchWithoutCheckpoint
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testRecoverBranchWithoutCheckpoint
+
 todo:
+- MiniA History VM Tests::AppendDetachesCallerData
+- MiniA History VM Tests::ResumeUnterminatedJournal
+- MiniA History VM Tests::RecoverBranchWithoutCheckpoint
 - MiniA History VM Tests::S3Persistence
 - MiniA History VM Tests::RemoteSnapshots
 - MiniA History VM Tests::RuntimeSourcesDelegation

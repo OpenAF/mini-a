@@ -235,6 +235,10 @@ MiniAHistoryVM.prototype._readJournal = function(checkpoint) {
     // Retain the verified snapshot prefix when repairing an incomplete tail.
     var prefix = offset > 0 ? this.events.slice(0, this._restoredIndex.sequence).map(function(event) { return stringify(event, __, "") }).join("\n") + "\n" : ""
     io.writeFileString(this.journalPath, prefix + (validLines.length > 0 ? validLines.join("\n") + "\n" : ""))
+  } else if (text.length > 0 && text.charAt(text.length - 1) !== "\n") {
+    // A complete final record may survive without its delimiter. Repair it
+    // before another append can concatenate two JSON objects on one line.
+    io.writeFileString(this.journalPath, "\n", __, true)
   }
 }
 
@@ -253,6 +257,11 @@ MiniAHistoryVM.prototype._open = function() {
     } else {
       this.metrics.checkpoint_rebuilds++
       this._indexGeneration++
+      // The verified journal is authoritative when the checkpoint is missing
+      // or stale, including a branch change committed before a crash.
+      if (this.events.length > 0 && isString(this.events[this.events.length - 1].branchId)) {
+        this.branchId = this.events[this.events.length - 1].branchId
+      }
       this._writeCheckpoint()
     }
     this._rebuildObjects()
@@ -345,6 +354,9 @@ MiniAHistoryVM.prototype.append = function(sourceKind, content, metadata) {
       metadata: meta,
       content: content
     }
+    // Own the serialized value: callers may reuse and mutate provider messages,
+    // tool results or metadata after capture, but canonical events cannot change.
+    event = jsonParse(stringify(event, __, ""), __, __, true)
     event.eventHash = sha256(stringify(event, __, ""))
     io.writeFileString(this.journalPath, stringify(event, __, "") + "\n", __, true)
     this.events.push(event)

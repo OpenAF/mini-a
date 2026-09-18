@@ -22,6 +22,47 @@
     }
   }
 
+  exports.testAppendDetachesCallerData = function() {
+    withVm(function(vm, conversation) {
+      var content = { nested: { text: "original" } }
+      var metadata = { tags: ["original"] }
+      vm.append("tool_exchange", content, metadata)
+      content.nested.text = "changed"
+      metadata.tags.push("changed")
+      ow.test.assert(vm.events[0].content.nested.text, "original", "Caller mutation must not alter canonical content")
+      ow.test.assert(vm.events[0].metadata.tags.length, 1, "Caller mutation must not alter canonical metadata")
+      MiniAHistoryVM.validateSnapshot(vm.exportSnapshot(), { conversationId: vm.conversationId, branchId: vm.branchId })
+      var resumed = new MiniAHistoryVM({ enabled: true, conversationPath: conversation, conversationId: vm.conversationId })
+      ow.test.assert(stringify(vm.events), stringify(resumed.events), "Live and resumed canonical events must match")
+    })
+  }
+
+  exports.testResumeUnterminatedJournal = function() {
+    withVm(function(vm, conversation) {
+      vm.captureUserMessage("first")
+      io.writeFileString(vm.journalPath, io.readFileString(vm.journalPath).replace(/\n$/, ""))
+      var resumed = new MiniAHistoryVM({ enabled: true, conversationPath: conversation, conversationId: vm.conversationId })
+      resumed.captureUserMessage("second")
+      var reopened = new MiniAHistoryVM({ enabled: true, conversationPath: conversation, conversationId: vm.conversationId })
+      ow.test.assert(reopened.events.map(function(event) { return event.content }).join(","), "first,second", "Appending after an unterminated valid record must preserve both events")
+    })
+  }
+
+  exports.testRecoverBranchWithoutCheckpoint = function() {
+    withVm(function(vm, conversation) {
+      vm.captureProviderConversation([{ role: "user", content: "old branch" }])
+      vm.rewind(0)
+      vm.captureProviderConversation([{ role: "user", content: "current branch" }])
+      io.writeFileString(vm.checkpointPath, "{broken")
+      var resumed = new MiniAHistoryVM({ enabled: true, conversationPath: conversation, conversationId: vm.conversationId })
+      ow.test.assert(resumed.branchId, vm.branchId, "Journal recovery must retain the active branch")
+      ow.test.assert(resumed._providerObjectForIndex(0).content.content, "current branch", "Recovered provider indexes must use the active branch")
+      MiniAHistoryVM.validateSnapshot(resumed.exportSnapshot(), { conversationId: resumed.conversationId, branchId: resumed.branchId })
+      resumed.captureUserMessage("after recovery")
+      ow.test.assert(resumed.events[resumed.events.length - 1].branchId, vm.branchId, "Recovery must not append to an old branch")
+    })
+  }
+
   exports.testRemoteSnapshots = function() {
     withVm(function(vm, conversation) {
       vm.captureProviderConversation([{ role: "user", content: "Remember exact detail" }, { role: "assistant", content: "Exact payload 12345" }])
