@@ -30,6 +30,185 @@
     manifest.merkle = MiniAWikiRetrievalV2.manifestMerkle(manifest)
     return { manifest:manifest, restore:function() { originals.forEach(function(file) { if(file.created)java.nio.file.Files.deleteIfExists(new java.io.File(file.path).toPath());else io.writeFileString(file.path,file.text) }) } }
   }
+  exports.testCrossWikiGraphExplicitTraversal = function() {
+    var dir=temporary(), root, remote
+    try {
+      io.mkdir(dir+"/root");io.mkdir(dir+"/remote")
+      root=make(dir+"/root",{usegraph:true});remote=make(dir+"/remote",{usegraph:true})
+      root.write("seed.md",{title:"Seed"},"# Seed\ncrossgraphneedle [Remote](@other/target.md#remote)")
+      remote.write("target.md",{title:"Remote"},"# Remote\nRemote source evidence. [More](deep.md)")
+      remote.write("deep.md",{title:"Deep"},"# Deep\nSecond hop evidence. [Cycle](target.md)")
+      root.reindex();remote.reindex();root.attach("other",{backend:"fs",root:dir+"/remote"})
+      var mounted=root._mounts[0].manager
+      ow.test.assert(!!mounted._graph,true,"mount inherits graph opt-in from federation")
+      var options={wiki:"*",expandGraph:true,maxGraphExpansion:8,maxBytes:32000}
+      var off=root.agenticSearch("crossgraphneedle",{wiki:"*"}), on=root.agenticSearch("crossgraphneedle",options)
+      ow.test.assert(off.results.some(function(r){return r.path==="@other/target.md"}),false,"cross traversal remains opt-in")
+      var target=on.results.filter(function(r){return r.path==="@other/target.md"})[0]
+      ow.test.assert(isDef(target),true,"explicit cross link discovers page without lexical hit")
+      ow.test.assert(target.passage.wiki,"other","passage belongs to destination wiki")
+      ow.test.assert(target.passage.generation,on.generations.other,"destination pinned generation used")
+      ow.test.assert(on.results.some(function(r){return r.path==="@other/deep.md"}),false,"default depth does not recurse")
+      var evidence=root.retrieve("crossgraphneedle",merge(options,{chunks:8})).evidence.filter(function(r){return r.path==="@other/target.md"})[0]
+      ow.test.assert(remote.read("target.md").raw.substring(evidence.charStart,evidence.charEnd),evidence.content,"cross evidence quotes exact destination revision")
+      var graph=mounted._graph
+      mounted._graph=undefined
+      ow.test.assert(root.agenticSearch("crossgraphneedle",options).results.some(function(r){return r.path==="@other/target.md"}),true,"explicit links need destination passages but no destination graph")
+      mounted._graph=graph
+      var sourceRevision=root._graph._state.nodes["doc:seed.md"].props.revision
+      root._graph._state.nodes["doc:seed.md"].props.revision="stale"
+      ow.test.assert(root.agenticSearch("crossgraphneedle",options).results.some(function(r){return r.path==="@other/target.md"}),false,"stale explicit cross support cannot discover a current destination")
+      root._graph._state.nodes["doc:seed.md"].props.revision=sourceRevision
+      var acquisitions=mounted._retrievalV2.metrics.readerOpens
+      ow.test.assert(root.agenticSearch("crossgraphneedle",{wiki:"primary",expandGraph:true}).results.every(function(r){return r.wiki==="primary"}),true,"unselected target never traversed")
+      ow.test.assert(mounted._retrievalV2.metrics.readerOpens,acquisitions,"unselected target opens no reader")
+      ;["wikigraphcross","wikigraphmounts"].forEach(function(flag){root._config[flag]=false;ow.test.assert(root.agenticSearch("crossgraphneedle",options).results.some(function(r){return r.path==="@other/target.md"}),false,flag+" disables cross traversal");delete root._config[flag]})
+      root._config.wikigraphcrossjoin="tag"
+      ow.test.assert(root.agenticSearch("crossgraphneedle",options).results.some(function(r){return r.path==="@other/target.md"}),false,"join-kind filter disables explicit links")
+      root._config.wikigraphcrossjoin="link";root._config.wikigraphcrossdepth=2
+      var deep=root.agenticSearch("crossgraphneedle",options)
+      ow.test.assert(deep.results.some(function(r){return r.path==="@other/deep.md"}),true,"depth two permits one local target hop")
+      ow.test.assert(deep.budget.used.graphExpansion,2,"cycle and duplicate target do not spend extra candidate attempts")
+      root._config.wikigraphcrosscap=1
+      ow.test.assert(root.agenticSearch("crossgraphneedle",options).results.filter(function(r){return r.retrievalMethod==="graph"}).length,1,"cross cap shared by both depths")
+      delete root._config.wikigraphcrosscap;root._config.wikigraphcrossdepth=1
+      ;[{maxGraphExpansion:0},{maxGraphEdges:0},{maxQueries:2},{maxCandidates:1}].forEach(function(limits){var out=root.agenticSearch("crossgraphneedle",merge(options,limits));ow.test.assert(out.results.some(function(r){return r.path==="@other/target.md"}),false,"cross traversal cannot reset an exhausted request budget")})
+      var hit=mounted._retrievalV2._graphHit, active=root._retrievalV2._active, revoked=false
+      mounted._retrievalV2._graphHit=function(){var value=hit.apply(this,arguments);revoked=true;return value}
+      root._retrievalV2._active=function(page){return !(revoked && page.path==="seed.md") && active.apply(this,arguments)}
+      var denied=root.agenticSearch("crossgraphneedle",options)
+      ow.test.assert(denied.results.some(function(r){return r.path==="@other/target.md"}),false,"source authority rechecked using source engine before target disclosure")
+      root._retrievalV2._active=active;mounted._retrievalV2._graphHit=hit
+      remote.write("target.md",{title:"Retired",status:"retired"},"# Retired\nNo current evidence")
+      ow.test.assert(root.agenticSearch("crossgraphneedle",options).results.some(function(r){return r.path==="@other/target.md"}),false,"cross links cannot bypass target retirement")
+    } finally {if(root)root.close();if(remote)remote.close();io.rm(dir)}
+  }
+
+  exports.testCrossWikiGraphSharedJoins = function() {
+    var dir=temporary(), root, remote
+    try {
+      io.mkdir(dir+"/root");io.mkdir(dir+"/remote")
+      root=make(dir+"/root",{usegraph:true,wikigraphcrossmaxdf:1});remote=make(dir+"/remote",{usegraph:true})
+      root.write("seed.md",{title:"Seed",tags:["joined"],aliases:["Shared alias"]},"# Seed\nsharedcrossneedle")
+      remote.write("target.md",{title:"Remote",tags:["joined"],aliases:["Shared alias"]},"# Remote\nSupporting evidence")
+      root.reindex();remote.reindex();root.attach("other",{backend:"fs",root:dir+"/remote"})
+      var options={wiki:"*",expandGraph:true}, has=function(out){return out.results.some(function(r){return r.path==="@other/target.md"})}
+      ;["tag","alias"].forEach(function(kind){root._config.wikigraphcrossjoin=kind;ow.test.assert(has(root.agenticSearch("sharedcrossneedle",options)),true,"cross "+kind+" joins use bounded adjacency")})
+      root._config.wikigraphcrossmaxdf=0
+      ow.test.assert(has(root.agenticSearch("sharedcrossneedle",options)),false,"common-key frequency filter applies to destination")
+      root._config.wikigraphcrossmaxdf=1;root._config.wikigraphcrossminkeylen=100
+      ow.test.assert(has(root.agenticSearch("sharedcrossneedle",options)),false,"minimum join-key length enforced")
+      root._config.wikigraphcrossminkeylen=3;root._config.wikigraphcrossjoin=""
+      ow.test.assert(has(root.agenticSearch("sharedcrossneedle",options)),false,"empty join kinds disable cross joins")
+      root._config.wikigraphcrossjoin="concept"
+      var extract=function(){return {relationships:[{from:"Joined concept",to:"Other concept",provenance:"INFERRED"}]}}
+      root._graph._llmExtractFn=extract;remote._graph._llmExtractFn=extract
+      root._graph.buildSemantic(root._graphPages());remote._graph.buildSemantic(remote._graphPages())
+      root.attach("other",{backend:"fs",root:dir+"/remote"})
+      var graph=root._mounts[0].manager._graph
+      ow.test.assert(has(root.agenticSearch("sharedcrossneedle",options)),true,"semantic concepts join different pinned wikis")
+      graph._semanticByPage["target.md"][0].props.revision="stale"
+      var stale=root.agenticSearch("sharedcrossneedle",options)
+      ow.test.assert(has(stale),false,"stale target semantic support excluded")
+      ow.test.assert(stale.stopReasons.indexOf("stale-graph-evidence")>=0,true,"stale cross support reported explicitly")
+      var tiny=root.agenticSearch("sharedcrossneedle",merge(options,{maxGraphEdges:1}))
+      ow.test.assert(tiny.budget.used.graphEdges<=1,true,"shared joins and local traversal share adjacency budget")
+      ow.test.assert(has(tiny),false,"partial join postings cannot masquerade as complete frequency evidence")
+    } finally {if(root)root.close();if(remote)remote.close();io.rm(dir)}
+  }
+
+  exports.testCrossWikiGraphSourceNamespaces = function() {
+    var dir=temporary(), root, a, b
+    try {
+      ;["root","a","b"].forEach(function(p){io.mkdir(dir+"/"+p)})
+      root=make(dir+"/root",{usegraph:true});a=make(dir+"/a",{usegraph:true});b=make(dir+"/b",{usegraph:true})
+      a.write("seed.md",{title:"Seed"},"# Seed\nnamespacedgraphneedle [Private alias](@private/target.md)")
+      b.write("target.md",{title:"Destination"},"# Destination\nCorrect selected wiki")
+      root.reindex();a.reindex();b.reindex()
+      root.attach("a",{backend:"fs",root:dir+"/a"});root.attach("b",{backend:"fs",root:dir+"/b"})
+      var source=root._mounts[0].manager
+      source.attach("private",{backend:"fs",root:dir+"/b"})
+      var out=root.agenticSearch("namespacedgraphneedle",{wiki:["a","b"],expandGraph:true})
+      ow.test.assert(out.results.some(function(r){return r.path==="@b/target.md"}),true,"source-private alias resolves to already-selected destination")
+      ow.test.assert(out.results.some(function(r){return r.path.indexOf("@private/")===0}),false,"private source alias never becomes public federation path")
+      ow.test.assert(root.agenticSearch("namespacedgraphneedle",{wiki:"a",expandGraph:true}).results.some(function(r){return r.path==="@b/target.md"}),false,"nested mount is not implicitly selected")
+      var destination=root._mounts[1].manager._retrievalV2, originalHit=destination._graphHit
+      destination._graphHit=function(){var hit=originalHit.apply(this,arguments);source.detach("private");return hit}
+      ow.test.assert(root.agenticSearch("namespacedgraphneedle",{wiki:["a","b"],expandGraph:true}).results.some(function(r){return r.retrievalMethod==="graph"}),false,"private route revocation rechecked before public disclosure")
+      destination._graphHit=originalHit
+      root.attach("private",{backend:"fs",root:dir+"/b"})
+      ow.test.assert(root.agenticSearch("namespacedgraphneedle",{wiki:["a","b","private"],expandGraph:true}).results.some(function(r){return r.retrievalMethod==="graph"}),false,"root mount alias cannot reinterpret a mounted page's unresolved link")
+    } finally {if(root)root.close();if(a)a.close();if(b)b.close();io.rm(dir)}
+  }
+
+  exports.testBoundedGraphExpansion = function() {
+    var dir = temporary(), wm
+    try {
+      wm = make(dir,{usegraph:true})
+      wm.write("seed.md",{title:"Seed"},"# Seed\ngraphneedle\n[More](target.md)")
+      wm.write("target.md",{title:"Related"},"# Details\nUseful additional evidence without the search term.\n[Further](third.md)")
+      wm.write("third.md",{title:"Third"},"# Third\nMust not recursively expand.")
+      ow.test.assert(wm.reindex().ok,true,"graph fixture published")
+      var off=wm.agenticSearch("graphneedle"), on=wm.agenticSearch("graphneedle",{expandGraph:true})
+      ow.test.assert(off.results.some(function(r){return r.path==="target.md"}),false,"expansion remains opt-in")
+      ow.test.assert(on.results.some(function(r){return r.path==="target.md" && r.retrievalMethod==="graph"}),true,"graph discovers non-lexical supporting page")
+      ow.test.assert(on.results.some(function(r){return r.path==="third.md"}),false,"discovered pages do not become recursive seeds")
+      ow.test.assert(on.budget.used.graphExpansion,1,"graph attempts counted")
+      ow.test.assert(on.budget.used.queries,off.budget.used.queries+1,"graph passage query shares lexical query budget")
+      var evidence=wm.retrieve("graphneedle",{expandGraph:true,chunks:8,maxBytes:32000})
+      var target=evidence.evidence.filter(function(e){return e.path==="target.md"})[0]
+      ow.test.assert(isDef(target),true,"expanded candidate becomes validated passage evidence")
+      ow.test.assert(wm.read("target.md").raw.substring(target.charStart,target.charEnd),target.content,"graph evidence cites exact current revision")
+      ;[{maxGraphExpansion:0},{maxGraphEdges:0},{maxQueries:1},{maxCandidates:1}].forEach(function(cap){
+        var limited=wm.agenticSearch("graphneedle",merge({expandGraph:true},cap))
+        ow.test.assert(limited.results.some(function(r){return r.path==="target.md"}),false,"zero or exhausted budget prevents expansion")
+        ow.test.assert(limited.budget.used.candidates<=limited.budget.limits.maxCandidates,true,"candidate work remains bounded")
+        ow.test.assert(limited.budget.used.queries<=limited.budget.limits.maxQueries,true,"query work remains bounded")
+        ow.test.assert(limited.budget.used.graphEdges<=limited.budget.limits.maxGraphEdges,true,"adjacency visits remain bounded")
+      })
+      ow.test.assert(wm.agenticSearch("graphneedle",{expandGraph:true,maxGraphEdges:-1}).ok,false,"invalid graph budget rejected")
+      var saved=wm._graph._state.nodes["doc:seed.md"].props.revision
+      wm._graph._state.nodes["doc:seed.md"].props.revision="outdated"
+      var stale=wm.agenticSearch("graphneedle",{expandGraph:true})
+      ow.test.assert(stale.results.some(function(r){return r.path==="target.md"}),false,"stale graph relation never expands")
+      ow.test.assert(stale.stopReasons.indexOf("stale-graph-evidence")>=0,true,"stale graph omission is explicit")
+      wm._graph._state.nodes["doc:seed.md"].props.revision=saved
+      wm.write("target.md",{title:"Retired",status:"retired"},"# Retired\nWithdrawn instructions")
+      ow.test.assert(wm.agenticSearch("graphneedle",{expandGraph:true}).results.some(function(r){return r.path==="target.md"}),false,"graph cannot bypass retirement constraints")
+      wm.write("seed.md",{title:"Seed",tags:["shared"]},"# Seed\ngraphneedle")
+      wm.write("target.md",{title:"Related",tags:["shared"]},"# Details\nShared metadata evidence")
+      ow.test.assert(wm.agenticSearch("graphneedle",{expandGraph:true}).results.some(function(r){return r.path==="target.md"}),true,"shared tag discovery validates both source assertions")
+      wm.write("seed.md",{title:"Seed"},"# Seed\ngraphneedle")
+      wm.write("target.md",{title:"Related"},"# Details\nConceptual supporting evidence")
+      wm._graph._llmExtractFn=function(payload){return {relationships:payload.path === "seed.md" || payload.path === "target.md" ? [{from:"Shared concept",to:"Other concept",provenance:"INFERRED"}] : []}}
+      wm._graph.buildSemantic(wm._graphPages())
+      ow.test.assert(wm.agenticSearch("graphneedle",{expandGraph:true}).results.some(function(r){return r.path==="target.md"}),true,"source-bound shared concepts discover supporting pages")
+      var semantic=wm._graph._semanticByPage["seed.md"][0], revision=semantic.props.revision
+      semantic.props.revision="obsolete"
+      ow.test.assert(wm.agenticSearch("graphneedle",{expandGraph:true}).results.some(function(r){return r.path==="target.md"}),false,"semantic assertion revision must match, even when document node is current")
+      semantic.props.revision=revision
+      // Revoke supporting authority after collection but before public materialization.
+      var active=wm._retrievalV2._graphActive
+      wm._retrievalV2._graphActive=function(hit,deadline,used){return hit.graphSupports ? false : active.call(this,hit,deadline,used)}
+      ow.test.assert(wm.agenticSearch("graphneedle",{expandGraph:true}).results.some(function(r){return r.path==="target.md"}),false,"support is rechecked before search metadata is disclosed")
+      ow.test.assert(wm.retrieve("graphneedle",{expandGraph:true}).evidence.some(function(r){return r.path==="target.md"}),false,"support is rechecked before passage evidence is disclosed")
+    } finally {if(wm)wm.close();io.rm(dir)}
+  }
+  exports.testGraphSelectedWikiBudgets = function() {
+    var dir=temporary(), primary, mounted
+    try {
+      io.mkdir(dir+"/primary");io.mkdir(dir+"/mounted")
+      primary=make(dir+"/primary",{usegraph:true});mounted=make(dir+"/mounted",{usegraph:true})
+      ;[primary,mounted].forEach(function(wm){wm.write("seed.md",{title:"Seed"},"# Seed\nfederatedgraphneedle [Target](target.md)");wm.write("target.md",{title:"Target"},"# Target\nSupplemental evidence");wm.reindex()})
+      primary.attach("other",{root:dir+"/mounted",backend:"fs",usegraph:true})
+      var selected=primary.agenticSearch("federatedgraphneedle",{wiki:"other",expandGraph:true})
+      ow.test.assert(selected.results.some(function(r){return r.path==="@other/target.md"}),true,"mounted expansion retains qualified paths")
+      ow.test.assert(selected.results.every(function(r){return r.path.indexOf("@other/")===0}),true,"selected wiki cannot expand into primary")
+      var bounded=primary.agenticSearch("federatedgraphneedle",{wiki:"*",expandGraph:true,maxGraphExpansion:1})
+      ow.test.assert(bounded.budget.used.graphExpansion,1,"graph budget never resets per mount")
+      ow.test.assert(bounded.results.filter(function(r){return r.retrievalMethod==="graph"}).length,1,"one request-wide graph candidate")
+    } finally {if(primary)primary.close();if(mounted)mounted.close();io.rm(dir)}
+  }
   exports.testParser = function() {
     var constructorRaw = "---\r\ntitle: API\r\n---\r\n# Constructor\r\nfirst constructor\r\n# Constructor\r\nsecond constructor"
     var constructorParsed = global.MiniAWikiRetrievalV2.parse("constructor.md", constructorRaw, 256)

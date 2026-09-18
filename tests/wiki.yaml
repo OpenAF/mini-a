@@ -3,6 +3,12 @@ include:
 - tests/wikiRetrievalV2.yaml
 
 jobs:
+- name: MiniA Wiki Tests::McpWikiRestrictedCrossWikiGraphHints
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedCrossWikiGraphHints
+- name: MiniA Wiki Tests::McpWikiRestrictedV2GraphHints
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedV2GraphHints
 
 - name: MiniA Wiki Tests::MountedNavigationPathsRoundTrip
   to: oJob Test
@@ -659,6 +665,8 @@ jobs:
   exec: args.func = require("tests/wiki.js").testS3ArtifactsHydrateLocalSearchAndGraphCache
 
 todo:
+- MiniA Wiki Tests::McpWikiRestrictedCrossWikiGraphHints
+- MiniA Wiki Tests::McpWikiRestrictedV2GraphHints
 - MiniA Wiki Ingest Tests::LegacyContextProvenance
 - MiniA Wiki Tests::WikiSelectionRoutesOnlyChosenMounts
 - MiniA Wiki Tests::IndexedLanguageAndTelemetry

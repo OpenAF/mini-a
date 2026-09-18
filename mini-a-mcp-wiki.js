@@ -423,7 +423,7 @@ function __miniAMcpWikiRestrictedSearchImpl(args) {
   var hits
   try {
     if (global.__wikiManager._retrievalV2) {
-      var improved = global.__wikiManager._retrievalV2.search(q, { limit: state.policy.searchLimit, evidenceChars: state.policy.readChars, evidenceLines: state.policy.readLines, __wikiSuppressSource: true })
+      var improved = global.__wikiManager._retrievalV2.search(q, { limit: state.policy.searchLimit, expandGraph: !!global.__wikiManager._config && global.__wikiManager._config.wikigraphsearchhints === true, maxGraphExpansion: 5, maxGraphEdges: 256, evidenceChars: state.policy.readChars, evidenceLines: state.policy.readLines, __wikiSuppressSource: true })
       if (!improved.ok || improved.outcome === "partial" && !improved.results.length) return __miniAMcpWikiRestrictedError("restricted-unavailable")
       hits = improved.results
     } else hits = global.__wikiManager.search(q, { limit: state.policy.searchLimit, regex: false, caseSensitive: false, contextLines: 0, compact: true, path: "" }) } catch(e) { return __miniAMcpWikiRestrictedError("restricted-unavailable") }
@@ -453,7 +453,7 @@ function __miniAMcpWikiRestrictedSearchImpl(args) {
       var suffix = " [" + sourceField + ": " + hit[sourceField] + "]"
       while (publicDescription.endsWith(suffix)) publicDescription = publicDescription.substring(0, publicDescription.length - suffix.length)
     }
-    var isGraphHint = isString(hit.description) && hit.description.indexOf("[Related pages (graph") === 0
+    var isGraphHint = hit.retrievalMethod === "graph" || isString(hit.description) && hit.description.indexOf("[Related pages (graph") === 0
     var description = __miniAMcpWikiSafeChars(isGraphHint ? "Related page" : publicDescription, Math.max(0, state.policy.metaChars - title.length))
     chars += title.length + description.length + REF_LEN
     candidates.push({ path: hit.path, title: title, description: description, passage: hit.passage })
@@ -658,7 +658,10 @@ function __miniAMcpWikiCreateTool(cfg, wikiManager) {
 function __miniAMcpWikiAttachMounts(wikiManager, mountsRaw, logPrefix) {
   if (!isObject(wikiManager) || !isString(mountsRaw) || mountsRaw.trim().length === 0) return
   try {
-    var mountsList = af.fromJSSLON(mountsRaw)
+    // JSON may be pretty-printed by configuration tools. The JSSLON parser's
+    // multiline heuristic can interpret that as a map instead of an array.
+    var mountsList
+    try { mountsList = JSON.parse(mountsRaw) } catch(notJson) { mountsList = af.fromJSSLON(mountsRaw) }
     if (!isArray(mountsList)) mountsList = [mountsList]
     mountsList.forEach(function(mc) {
       if (!isMap(mc) || !isString(mc.name)) return

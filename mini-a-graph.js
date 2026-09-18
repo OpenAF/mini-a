@@ -59,8 +59,9 @@ MiniAWikiGraph.prototype._normalizeProvenance = function(provenance) {
   return allowed[p] ? p : "AMBIGUOUS"
 }
 
-MiniAWikiGraph.prototype._edgeKey = function(from, to, type, provenance) {
-  return [from, to, type, this._normalizeProvenance(provenance)].join("|")
+MiniAWikiGraph.prototype._edgeKey = function(from, to, type, provenance, props) {
+  // A relationship assertion belongs to its source, not just its endpoints.
+  return stringify([from, to, type, this._normalizeProvenance(provenance), isMap(props) ? props.page || "" : "", isMap(props) ? props.section || "" : ""], __, "")
 }
 
 MiniAWikiGraph.prototype._nodeBlob = function(id, props) {
@@ -138,6 +139,9 @@ MiniAWikiGraph.prototype._compactSemanticPayload = function(page) {
 MiniAWikiGraph.prototype._defaultSemanticExtract = function(payload) {
   var title = this._normalizeConceptName(payload && payload.title)
   var body = isString(payload && payload.body) ? payload.body : ""
+  if (!body && payload && payload.compact === true) {
+    body = (payload.headings || []).map(function(h) { return "## " + h }).concat((payload.explicitLinks || []).map(function(link) { return "[[" + link + "]]" }), payload.sectionDigests || []).join("\n")
+  }
   var relationships = []
   var seen = {}
   var self = this
@@ -218,6 +222,7 @@ MiniAWikiGraph.prototype._ensureIndexes = function() {
   if (!isMap(this._state._edgeIndex)) this._state._edgeIndex = {}
   if (!isMap(this._adj)) this._adj = {}
   if (!isMap(this._nodeRefs)) this._nodeRefs = {}
+  if (!isMap(this._semanticByPage)) this._semanticByPage = {}
   if (!isMap(this._dirty)) this._dirty = { communities: true, surprise: true }
 }
 
@@ -225,16 +230,18 @@ MiniAWikiGraph.prototype._reindexEdges = function() {
   this._state._edgeIndex = {}
   this._adj = {}
   this._nodeRefs = {}
+  this._semanticByPage = {}
   this._deletedEdges = 0
   var compact = []
   var self = this
   ;(isArray(this._state.edges) ? this._state.edges : []).forEach(function(e) {
     if (!isMap(e) || e._deleted === true) return
     e.provenance = self._normalizeProvenance(e.provenance)
-    var key = self._edgeKey(e.from, e.to, e.type, e.provenance)
+    var key = self._edgeKey(e.from, e.to, e.type, e.provenance, e.props)
     if (self._state._edgeIndex[key]) return
     self._state._edgeIndex[key] = true
     compact.push(e)
+    self._indexSemanticOwner(e)
     self._adj[e.from] = self._adj[e.from] || []
     self._adj[e.to] = self._adj[e.to] || []
     self._adj[e.from].push(e)
@@ -256,16 +263,24 @@ MiniAWikiGraph.prototype._reindexEdges = function() {
   this._ensureIndexes()
 }
 
+MiniAWikiGraph.prototype._indexSemanticOwner = function(edge) {
+  if (String(edge.from).indexOf("concept:") !== 0 || String(edge.to).indexOf("concept:") !== 0 || !edge.props || !isString(edge.props.page)) return
+  var path = edge.props.page
+  if (!this._semanticByPage[path]) this._semanticByPage[path] = []
+  this._semanticByPage[path].push(edge)
+}
+
 MiniAWikiGraph.prototype._addEdge = function(from, to, type, provenance, props) {
   if (!isString(from) || from.length === 0 || !isString(to) || to.length === 0 || !isString(type) || type.length === 0) return
   this._ensureIndexes()
   if (!isMap(this._state.nodes[from]) || !isMap(this._state.nodes[to])) return
   var prov = this._normalizeProvenance(provenance)
-  var key = this._edgeKey(from, to, type, prov)
+  var key = this._edgeKey(from, to, type, prov, props)
   if (this._state._edgeIndex[key]) return
   var edge = { from: from, to: to, type: type, provenance: prov, props: isMap(props) ? props : {} }
   this._state._edgeIndex[key] = true
   this._state.edges.push(edge)
+  this._indexSemanticOwner(edge)
   this._adj[from] = this._adj[from] || []
   this._adj[to] = this._adj[to] || []
   this._adj[from].push(edge)
@@ -278,7 +293,7 @@ MiniAWikiGraph.prototype._removeEdge = function(edge) {
   if (!isMap(edge) || edge._deleted === true) return
   this._ensureIndexes()
   edge._deleted = true
-  var key = this._edgeKey(edge.from, edge.to, edge.type, edge.provenance)
+  var key = this._edgeKey(edge.from, edge.to, edge.type, edge.provenance, edge.props)
   delete this._state._edgeIndex[key]
   var self = this
   ;[edge.from, edge.to].forEach(function(id) {
@@ -286,6 +301,7 @@ MiniAWikiGraph.prototype._removeEdge = function(edge) {
     self._adj[id] = list.filter(function(ref) { return ref !== edge && ref._deleted !== true })
     self._nodeRefs[id] = Math.max(0, (self._nodeRefs[id] || 0) - 1)
   })
+  if (edge.props && this._semanticByPage[edge.props.page]) this._semanticByPage[edge.props.page] = this._semanticByPage[edge.props.page].filter(function(e) { return e !== edge })
   this._deletedEdges++
 }
 
@@ -297,7 +313,7 @@ MiniAWikiGraph.prototype._compactEdges = function(force) {
 }
 
 MiniAWikiGraph.prototype._pageHash = function(p) {
-  return this._fingerprint((isString(p.body) ? p.body : "") + "\n" + stringify(isMap(p.meta) ? p.meta : {}, __, ""))
+  return sha1(stringify({ body: p.body || "", meta: p.meta || {}, links: p.links || [], revision: p.revision || "" }, __, ""))
 }
 
 MiniAWikiGraph.prototype._indexPageStructural = function(p) {
@@ -308,7 +324,8 @@ MiniAWikiGraph.prototype._indexPageStructural = function(p) {
     path: p.path,
     title: isMap(p.meta) && isString(p.meta.title) ? p.meta.title : p.path,
     updated: isMap(p.meta) && isDef(p.meta.updated) ? String(p.meta.updated) : "",
-    hash: newHash
+    hash: newHash,
+    revision: p.revision || ""
   })
 
   var tags = isMap(p.meta) && isArray(p.meta.tags) ? p.meta.tags : []
@@ -393,6 +410,7 @@ MiniAWikiGraph.prototype._pruneUnreferencedNodes = function(path) {
 MiniAWikiGraph.prototype._removePageState = function(path) {
   if (!isString(path) || path.length === 0) return { deleteNodes: [], deleteEdges: [] }
   this._ensureIndexes()
+  var beforeNodes = Object.keys(this._state.nodes)
   var deleteNodes = {}
   var deleteEdges = []
   var self = this
@@ -423,7 +441,7 @@ MiniAWikiGraph.prototype._removePageState = function(path) {
 
   delete this._state.semantic_cache[path]
   if (isMap(this._state.summaries.pages)) delete this._state.summaries.pages[path]
-  return { deleteNodes: Object.keys(deleteNodes), deleteEdges: deleteEdges }
+  return { deleteNodes: beforeNodes.filter(function(id) { return !isMap(self._state.nodes[id]) }), deleteEdges: deleteEdges }
 }
 
 MiniAWikiGraph.prototype._markDerivedDirty = function() {
@@ -445,6 +463,7 @@ MiniAWikiGraph.prototype._scheduleSave = function(diff) {
   if (this._autosave === "debounced") {
     var nowMs = now()
     if (this._lastSaveAt > 0 && (nowMs - this._lastSaveAt) < this._saveDebounceMs) {
+      this._falkorNeedsFullSync = true
       this._pendingSave = true
       return { ok: true, debounced: true }
     }
@@ -475,11 +494,12 @@ MiniAWikiGraph.prototype._persist = function(diff) {
 MiniAWikiGraph.prototype.buildStructural = function(pages, opts) {
   var options = isMap(opts) ? opts : {}
   var list = isArray(pages) ? pages : []
+  var oldSummaries = this._state.summaries.pages, oldCache = this._state.semantic_cache
   var oldSemanticEdges = []
   var semanticNodeIds = {}
   ;(isArray(this._state.edges) ? this._state.edges : []).forEach(function(e) {
     var prov = String(e.provenance || "").toUpperCase()
-    if (prov === "INFERRED" || prov === "AMBIGUOUS") {
+    if (e._deleted !== true && (isMap(e.props) && isString(e.props.page) || prov === "INFERRED" || prov === "AMBIGUOUS")) {
       oldSemanticEdges.push({
         from: e.from, to: e.to, type: e.type, provenance: e.provenance, props: isMap(e.props) ? clone(e.props) : {}
       })
@@ -490,8 +510,16 @@ MiniAWikiGraph.prototype.buildStructural = function(pages, opts) {
   var oldNodes = this._state.nodes
 
   this._state = this._emptyState()
-  this._ensureIndexes()
+  this._reindexEdges()
   for (var i = 0; i < list.length; i++) this._indexPageStructural(list[i])
+  var unchanged = {}
+  list.forEach(function(page) {
+    if (oldSummaries[page.path] && oldSummaries[page.path].hash === this._pageHash(page)) {
+      unchanged[page.path] = true
+      this._state.summaries.pages[page.path] = clone(oldSummaries[page.path])
+      if (oldCache[page.path]) this._state.semantic_cache[page.path] = clone(oldCache[page.path])
+    }
+  }, this)
   Object.keys(semanticNodeIds).forEach(function(nodeId) {
     var node = oldNodes[nodeId]
     if (!isMap(node)) return
@@ -502,10 +530,11 @@ MiniAWikiGraph.prototype.buildStructural = function(pages, opts) {
   }, this)
   for (var j = 0; j < oldSemanticEdges.length; j++) {
     var se = oldSemanticEdges[j]
-    if (isMap(se.props) && isString(se.props.page) && !isMap(this._state.summaries.pages[se.props.page])) continue
+    if (!isMap(se.props) || !unchanged[se.props.page]) continue
     if (!isMap(this._state.nodes[se.from]) || !isMap(this._state.nodes[se.to])) continue
     this._addEdge(se.from, se.to, se.type, se.provenance, se.props)
   }
+  this._pruneUnreferencedNodes("")
   this._markDerivedDirty()
   this._ensureDerived()
   if (options.preview !== true) this._persist()
@@ -548,9 +577,14 @@ MiniAWikiGraph.prototype.updatePage = function(p) {
 MiniAWikiGraph.prototype.removePage = function(path) {
   if (!isString(path) || path.length === 0) return { ok: false, error: "path is required" }
   var removed = this._removePageState(path)
+  var placeholder = this._state.nodes[this._id("doc", path)]
+  if (placeholder) {
+    placeholder.props = { path: path }
+    placeholder._blob = this._nodeBlob(placeholder.id, placeholder.props)
+  }
   this._markDerivedDirty()
   this._scheduleSave({
-    upsertNodes: [],
+    upsertNodes: placeholder ? [clone(placeholder)] : [],
     deleteNodes: removed.deleteNodes,
     upsertEdges: [],
     deleteEdges: removed.deleteEdges
@@ -576,7 +610,7 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, opts) {
     var needsExtraction = list.filter(function(page) {
       if (!isMap(page) || !isString(page.path)) return false
       var compact = this._compactSemanticPayload(page)
-      var hash = sha1(stringify(compact, __, ""))
+      var hash = this._pageHash(page)
       var cache = isMap(this._state.semantic_cache[page.path]) ? this._state.semantic_cache[page.path] : __
       return !(isMap(cache) && cache.hash === hash && cache.schema_version === 1 && cache.prompt_version === 1 && cache.model === (options.model || "") && options.force !== true)
     }.bind(this))
@@ -589,15 +623,12 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, opts) {
     var page = list[p]
     if (!isMap(page) || !isString(page.path)) continue
     var compact = this._compactSemanticPayload(page)
-    var hash = sha1(stringify(compact, __, ""))
+    var hash = this._pageHash(page)
     var cache = isMap(this._state.semantic_cache[page.path]) ? this._state.semantic_cache[page.path] : __
     if (isMap(cache) && cache.hash === hash && cache.schema_version === 1 && cache.prompt_version === 1 && cache.model === (options.model || "") && options.force !== true) {
       if (isFunction(onProgress)) onProgress({ index: extracted, total: totalToExtract, path: page.path, status: "skipped" })
       continue
     }
-
-    this._removePageState(page.path)
-    this._indexPageStructural(page)
 
     var payload = compact
     var res = this._llmExtractFn(payload)
@@ -607,6 +638,9 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, opts) {
       payload.compact = false
       res = this._llmExtractFn(payload)
     }
+    // Extraction must succeed before replacing the previous assertions.
+    this._removePageState(page.path)
+    this._indexPageStructural(page)
     var rels = isArray(res && res.relationships) ? res.relationships : []
     for (var r = 0; r < rels.length; r++) {
       var rel = rels[r]
@@ -619,7 +653,7 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, opts) {
       var toId = this._id("concept", to.toLowerCase())
       this._upsertNode(fromId, "concept", { name: from })
       this._upsertNode(toId, "concept", { name: to })
-      this._addEdge(fromId, toId, type, this._normalizeProvenance(rel.provenance), { page: page.path, confidence: isNumber(rel.confidence) ? rel.confidence : __ })
+      this._addEdge(fromId, toId, type, this._normalizeProvenance(rel.provenance), { page: page.path, revision: page.revision || "", sourceHash: this._pageHash(page), confidence: isNumber(rel.confidence) ? rel.confidence : __ })
     }
     var summary = isString(res && res.summary) ? res.summary.trim() : ""
     if (summary.length > 0) {
@@ -704,6 +738,127 @@ MiniAWikiGraph.prototype.crossDocumentSurprise = function() {
   this._state.surprise = result
   this._dirty.surprise = false
   return result
+}
+
+// Bounded one-hop discovery. Shared metadata requires two supported assertions.
+// The caller validates every support revision before disclosing a candidate.
+MiniAWikiGraph.prototype.expansionCandidates = function(path, options) {
+  var opts = options || {}, budget = opts.budget, docId = "doc:" + path, out = [], seen = {}, self = this
+  var support = function(owner) {
+    var node = self._state.nodes["doc:" + owner]
+    return { path: owner, revision: node && node.props && node.props.revision || "" }
+  }
+  var charge = function() {
+    if (Date.now() >= opts.deadline || budget.used >= budget.limit) { budget.truncated = true; return false }
+    budget.used++; return true
+  }
+  var add = function(target, relation, owners) {
+    if (target === path || seen[target] || isFunction(opts.accept) && !opts.accept(target)) return
+    seen[target] = true
+    out.push({ path: target, relation: relation, supports: owners.map(support) })
+  }
+  var edges = this._adj[docId] || []
+  for (var i = 0; i < edges.length; i++) {
+    if (!charge()) break
+    var edge = edges[i]
+    if (edge._deleted) continue
+    var other = edge.from === docId ? edge.to : edge.from
+    if (other.indexOf("doc:") === 0 && (edge.type === "LINKS_TO" || edge.type === "SUPERSEDES")) {
+      add(other.substring(4), edge.type, [edge.from.substring(4)])
+    } else if ((edge.type === "HAS_TAG" || edge.type === "ALIAS_OF") && other.indexOf("doc:") !== 0) {
+      var shared = this._adj[other] || []
+      for (var j = 0; j < shared.length; j++) {
+        if (!charge()) break
+        var next = shared[j], target = next.from === other ? next.to : next.from
+        if (!next._deleted && next.type === edge.type && target.indexOf("doc:") === 0) add(target.substring(4), edge.type === "HAS_TAG" ? "shared_tag" : "shared_alias", [path, target.substring(4)])
+        if (out.length >= opts.cap) { budget.truncated = true; return out }
+      }
+    }
+    if (out.length >= opts.cap) { budget.truncated = true; return out }
+  }
+  // Semantic concepts are tied to their original page revisions, independently
+  // of the current document-node metadata. Never infer ownership from endpoints.
+  var semantic = this._semanticByPage[path] || [], concepts = {}
+  for (var s = 0; s < semantic.length; s++) {
+    if (!charge()) break
+    var assertion = semantic[s]
+    if (assertion._deleted || !assertion.props.revision) continue
+    var endpoints = [assertion.from, assertion.to]
+    for (var c = 0; c < endpoints.length; c++) {
+      var concept = endpoints[c]
+      if (concepts[concept]) continue
+      concepts[concept] = true
+      var assertions = this._adj[concept] || []
+      for (var a = 0; a < assertions.length; a++) {
+        if (!charge()) break
+        var evidence = assertions[a], owner = evidence.props && evidence.props.page
+        if (evidence._deleted || !owner || owner === path || seen[owner] || !evidence.props.revision || isFunction(opts.accept) && !opts.accept(owner)) continue
+        seen[owner] = true
+        out.push({path:owner,relation:"shared_concept",supports:[{path:path,revision:assertion.props.revision},{path:owner,revision:evidence.props.revision}]})
+        if (out.length >= opts.cap) {budget.truncated = true;return out}
+      }
+    }
+  }
+  return out
+}
+
+// Cross-wiki joins use the same bounded adjacency work counter as local traversal.
+// Do not call joinKeys()/keysForDocs(): their cold path scans the entire graph.
+MiniAWikiGraph.prototype.expansionJoinKeys = function(path, options) {
+  var opts = options, out = [], seen = {}, self = this, node = this._state.nodes["doc:" + path]
+  var add = function(id, kind, revision) {
+    if (!opts.kinds[kind] || seen[id] || id.substring(id.indexOf(":") + 1).length < opts.minKeyLen) return
+    seen[id] = true; out.push({id:id,kind:kind,support:{path:path,revision:revision || ""}})
+  }
+  var visit = function(edges, semantic) {
+    for (var i = 0; i < edges.length; i++) {
+      if (Date.now() >= opts.deadline || opts.budget.used >= opts.budget.limit) {opts.budget.truncated = true;break}
+      opts.budget.used++
+      var edge = edges[i]
+      if (edge._deleted) continue
+      if (semantic) {add(edge.from,"concept",edge.props.revision);add(edge.to,"concept",edge.props.revision)}
+      else if (edge.type === "HAS_TAG") add(edge.to,"tag",node && node.props.revision)
+      else if (edge.type === "ALIAS_OF") add(edge.from,"alias",node && node.props.revision)
+    }
+  }
+  if (opts.kinds.tag || opts.kinds.alias) visit(this._adj["doc:" + path] || [],false)
+  if (opts.kinds.concept) visit(this._semanticByPage[path] || [],true)
+  return out
+}
+
+MiniAWikiGraph.prototype.expansionMatches = function(keys, options) {
+  var opts = options, out = [], seen = {}, maxDocs = Math.floor(opts.maxDf * Math.max(1,opts.pageCount))
+  for (var k = 0; k < keys.length; k++) {
+    var key = keys[k], edges = this._adj[key.id] || [], owners = {}, matches = [], complete = true
+    // Charge even an absent key, bounding work across many empty mounted graphs.
+    if (Date.now() >= opts.deadline || opts.budget.used >= opts.budget.limit) {opts.budget.truncated = true;break}
+    opts.budget.used++
+    for (var i = 0; i < edges.length; i++) {
+      if (Date.now() >= opts.deadline || opts.budget.used >= opts.budget.limit) {opts.budget.truncated = true;complete = false;break}
+      opts.budget.used++
+      var edge = edges[i], owner, revision
+      if (edge._deleted) continue
+      if (key.kind === "concept") {owner = edge.props && edge.props.page;revision = edge.props && edge.props.revision}
+      else {
+        var doc = key.kind === "tag" && edge.type === "HAS_TAG" ? edge.from : key.kind === "alias" && edge.type === "ALIAS_OF" ? edge.to : ""
+        if (doc.indexOf("doc:") !== 0) continue
+        owner = doc.substring(4)
+        var node = this._state.nodes[doc]; revision = node && node.props.revision
+      }
+      if (!owner || owner.indexOf("@") === 0 || owners[owner]) continue
+      owners[owner] = true
+      matches.push({path:owner,relation:"shared_" + key.kind,sourceSupport:key.support,targetSupport:{path:owner,revision:revision || ""}})
+      if (matches.length > maxDocs) {complete = false;break}
+    }
+    // An incomplete posting cannot establish that this key passes the DF filter.
+    if (!complete) continue
+    for (var m = 0; m < matches.length; m++) {
+      if (seen[matches[m].path] || isFunction(opts.accept) && !opts.accept(matches[m].path)) continue
+      seen[matches[m].path] = true;out.push(matches[m])
+      if (out.length >= opts.cap) {opts.budget.truncated = true;return out}
+    }
+  }
+  return out
 }
 
 MiniAWikiGraph.prototype.relatedFor = function(paths, opts) {
@@ -1036,6 +1191,17 @@ MiniAWikiGraph.prototype._falkorNodeProps = function(id, node) {
   return props
 }
 
+// MERGE each source assertion independently; endpoint-only link helpers collapse evidence.
+MiniAWikiGraph.prototype._falkorLink = function(db, edge) {
+  var esc = function(s) { return String(s || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'") }
+  var type = String(edge.type).replace(/[^A-Za-z0-9_]/g, "_")
+  var props = merge({ provenance: edge.provenance }, edge.props || {})
+  var assignments = Object.keys(props).filter(function(k) { return /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && isDef(props[k]) }).map(function(k) {
+    return "r." + k + " = " + (isNumber(props[k]) && isFinite(props[k]) ? String(props[k]) : "'" + esc(props[k]) + "'")
+  })
+  db.query("MATCH (a {id:'" + esc(edge.from) + "'}), (b {id:'" + esc(edge.to) + "'}) MERGE (a)-[r:" + type + " {evidenceKey:'" + esc(this._edgeKey(edge.from,edge.to,edge.type,edge.provenance,edge.props)) + "'}]->(b)" + (assignments.length ? " SET " + assignments.join(", ") : ""))
+}
+
 MiniAWikiGraph.prototype.falkorSync = function() {
   if (!this._hasFalkor()) return { ok: false, error: "falkor not configured" }
   var db = __
@@ -1051,16 +1217,7 @@ MiniAWikiGraph.prototype.falkorSync = function() {
     }.bind(this))
     this._state.edges.forEach(function(e) {
       if (e._deleted === true) return
-      var fromNode = this._state.nodes[e.from]
-      var toNode = this._state.nodes[e.to]
-      db.linkNodes(
-        e.from,
-        isMap(fromNode) && isString(fromNode.type) ? fromNode.type : "concept",
-        e.to,
-        isMap(toNode) && isString(toNode.type) ? toNode.type : "concept",
-        e.type,
-        merge({ provenance: e.provenance }, isMap(e.props) ? clone(e.props) : {})
-      )
+      this._falkorLink(db, e)
     }.bind(this))
     return { ok: true, nodes: Object.keys(this._state.nodes).length, edges: this.stats().edges }
   } catch(e) {
@@ -1081,8 +1238,9 @@ MiniAWikiGraph.prototype.falkorApplyDiff = function(diff) {
     db = new FalkorDB(this._falkor.host, this._falkor.port || 6379, this._falkor.graph || "mini_a_wiki", this._falkor.user, this._falkor.pass)
     ;(isArray(diff.deleteEdges) ? diff.deleteEdges : []).forEach(function(e) {
       var relType = String(e.type || "RELATED_TO").replace(/[^A-Za-z0-9_]/g, "_")
-      db.query("MATCH (a {id:'" + esc(e.from) + "'})-[r:" + relType + "]->(b {id:'" + esc(e.to) + "'}) DELETE r")
-    })
+      var key = this._edgeKey(e.from, e.to, e.type, e.provenance, e.props)
+      db.query("MATCH (a {id:'" + esc(e.from) + "'})-[r:" + relType + "]->(b {id:'" + esc(e.to) + "'}) WHERE r.evidenceKey = '" + esc(key) + "' OR (r.evidenceKey IS NULL AND coalesce(r.provenance, 'EXTRACTED') = '" + esc(e.provenance) + "' AND coalesce(r.page, '') = '" + esc(e.props && e.props.page) + "') DELETE r")
+    }.bind(this))
     var deleteNodes = isArray(diff.deleteNodes) ? diff.deleteNodes : []
     if (deleteNodes.length > 0) {
       deleteNodes.forEach(function(id) {
@@ -1094,16 +1252,7 @@ MiniAWikiGraph.prototype.falkorApplyDiff = function(diff) {
       db.createOrUpdateNode(node.id, node.type || "concept", this._falkorNodeProps(node.id, node))
     }.bind(this))
     ;(isArray(diff.upsertEdges) ? diff.upsertEdges : []).forEach(function(e) {
-      var fromNode = this._state.nodes[e.from]
-      var toNode = this._state.nodes[e.to]
-      db.linkNodes(
-        e.from,
-        isMap(fromNode) && isString(fromNode.type) ? fromNode.type : "concept",
-        e.to,
-        isMap(toNode) && isString(toNode.type) ? toNode.type : "concept",
-        e.type,
-        merge({ provenance: e.provenance }, isMap(e.props) ? clone(e.props) : {})
-      )
+      this._falkorLink(db, e)
     }.bind(this))
     return { ok: true }
   } catch(e) {
@@ -1153,7 +1302,11 @@ MiniAWikiGraph.prototype.save = function() {
   ;(isArray(cloneState.communities) ? cloneState.communities : []).forEach(function(comm) {
     delete comm._memberSet
   })
-  io.writeFileString(p, stringify(cloneState, __, ""))
+  var temporary = p + "." + java.util.UUID.randomUUID() + ".tmp"
+  try {
+    io.writeFileString(temporary, stringify(cloneState, __, ""))
+    java.nio.file.Files.move(new java.io.File(temporary).toPath(), new java.io.File(p).toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+  } finally { java.nio.file.Files.deleteIfExists(new java.io.File(temporary).toPath()) }
   return { ok: true }
 }
 
@@ -1196,6 +1349,7 @@ MiniAWikiGraph.prototype.load = function() {
       var nodes = db.readOnlyQuery("MATCH (n:Node) RETURN properties(n) AS node")
       var edges = db.readOnlyQuery("MATCH (a:Node)-[r]->(b:Node) RETURN properties(a) AS fromNode, properties(b) AS toNode, type(r) AS relType, properties(r) AS relProps")
       this._state = this._emptyState()
+      this._reindexEdges()
       for (var i = 0; i < nodes.length; i++) {
         var row = nodes[i]
         var node = isMap(row) && isMap(row.node) ? row.node : __

@@ -1375,6 +1375,49 @@
     ow.test.assert(cfg.wikilexical.indexOf("french") >= 0, true, "MCP configuration should pass lexical configuration to the wiki manager")
   }
 
+  exports.testMcpWikiRestrictedCrossWikiGraphHints = function() {
+    var dir=String(createTestDir()), writer, remote
+    try {
+      io.mkdir(dir+"/main");io.mkdir(dir+"/remote")
+      writer=new MiniAWikiManager({backend:"fs",root:dir+"/main",access:"rw",usegraph:true,wikiretrievalv2:true})
+      remote=new MiniAWikiManager({backend:"fs",root:dir+"/remote",access:"rw",wikiretrievalv2:true})
+      writer.write("seed.md",{title:"Seed"},"# Seed\nrestrictedcrossneedle [Remote](@private/private.md)")
+      remote.write("private.md",{title:"Remote"},"# Remote\nCross-wiki supporting evidence.")
+      writer.reindex();remote.reindex()
+      __miniAMcpWikiInit({wikirestrict:true,wikiroot:dir+"/main",wikiretrievalv2:true,usewikigraph:true,wikimounts:stringify([{name:"private",backend:"fs",root:dir+"/remote",usegraph:false}])},{access:"ro",readonly:true,allowRestrictedGraphHints:true})
+      var result=__miniAMcpWikiRestrictedSearch({query:"restrictedcrossneedle"}), hint=result.results.filter(function(r){return r.title==="Remote"})[0]
+      ow.test.assert(isDef(hint),true,"operator-enabled cross hint is available without target graph from multiline JSON configuration")
+      ow.test.assert(hint.description,"Related page","cross hint uses opaque description")
+      ow.test.assert(Object.keys(hint).sort().join(","),"description,reference,title","cross hint exposes no wiki, path, score or provenance")
+      ow.test.assert(stringify(result,__,"").indexOf("private"),-1,"neither target alias nor page leaks")
+      var read=__miniAMcpWikiRestrictedRead({reference:hint.reference})
+      ow.test.assert(isString(read.content) && read.content.indexOf("Cross-wiki supporting evidence")>=0,true,"opaque cross reference reads the bound destination revision")
+    } finally {if(writer)writer.close();if(remote)remote.close();if(global.__wikiManager && isFunction(global.__wikiManager.close))global.__wikiManager.close();cleanupTestDir(dir)}
+  }
+
+  exports.testMcpWikiRestrictedV2GraphHints = function() {
+    var dir=String(createTestDir()), writer
+    try {
+      writer=new MiniAWikiManager({backend:"fs",root:dir,access:"rw",usegraph:true,wikiretrievalv2:true})
+      writer.write("seed.md",{title:"Seed"},"# Seed\nrestrictedgraphneedle [Details](private.md)")
+      writer.write("private.md",{title:"Details",description:"Private authored description"},"# Details\nSupplemental evidence")
+      writer.reindex();writer.close()
+      __miniAMcpWikiInit({wikirestrict:true,wikiroot:dir,wikiretrievalv2:true,usewikigraph:false},{access:"ro",readonly:true,allowRestrictedGraphHints:false})
+      var off=__miniAMcpWikiRestrictedSearch({query:"restrictedgraphneedle",expandGraph:true})
+      ow.test.assert(isArray(off.results),true,"restricted fixture available: " + stringify(off,__,""))
+      ow.test.assert(off.results.length,1,"caller cannot opt into restricted graph traversal")
+      global.__wikiManager.close()
+      __miniAMcpWikiInit({wikirestrict:true,wikiroot:dir,wikiretrievalv2:true,usewikigraph:true},{access:"ro",readonly:true,allowRestrictedGraphHints:true})
+      var on=__miniAMcpWikiRestrictedSearch({query:"restrictedgraphneedle"})
+      ow.test.assert(on.results.length,2,"operator opt-in enables bounded V2 graph hints")
+      var related=on.results.filter(function(r){return r.title==="Details"})[0]
+      ow.test.assert(related.description,"Related page","V2 graph hint uses opaque related-page label")
+      ow.test.assert(isString(related.reference),true,"V2 graph hint carries an opaque reference")
+      ow.test.assert(Object.keys(related).sort().join(","),"description,reference,title","graph path, score, provenance and relation remain private")
+      ow.test.assert(stringify(on,__,"").indexOf("private.md"),-1,"underlying target path never disclosed")
+    } finally {if(writer)writer.close();if(global.__wikiManager && isFunction(global.__wikiManager.close))global.__wikiManager.close();cleanupTestDir(dir)}
+  }
+
   exports.testMcpWikiRestrictedGraphHintsAreOptInOpaqueReferences = function() {
     var dir = createTestDir()
     try {

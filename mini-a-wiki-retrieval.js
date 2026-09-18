@@ -1655,6 +1655,29 @@ MiniAWikiRetrievalV2.prototype._query = function(snapshot, query, limit, expansi
     return { hits: out, expansions: expansions, routes: routes, omittedRoutes: omitted, extraAttempts: extraAttempts, seedCount: seedCount, totalHits: Number(isFunction(hits.totalHits.value) ? hits.totalHits.value() : hits.totalHits.value) }
   } finally { this._closeAnalyzer(analyzer) }
 }
+// Select one query-ranked stored passage from a discovered page without a body scan.
+MiniAWikiRetrievalV2.prototype._graphHit = function(snapshot, path, query) {
+  var L = Packages.org.apache.lucene, analyzer = this._analyzer()
+  try {
+    var builder = new L.search.BooleanQuery.Builder()
+    builder.add(new L.search.TermQuery(new L.index.Term("recordType","passage")),L.search.BooleanClause.Occur.FILTER)
+    builder.add(new L.search.TermQuery(new L.index.Term("page",path)),L.search.BooleanClause.Occur.FILTER)
+    builder.add(new L.search.MatchAllDocsQuery(),L.search.BooleanClause.Occur.MUST)
+    var parser = new L.queryparser.classic.QueryParser("prose",analyzer)
+    builder.add(parser.parse(String(L.queryparser.classic.QueryParser.escape(query))),L.search.BooleanClause.Occur.SHOULD)
+    var found = snapshot.searcher.search(builder.build(),1)
+    if (!found.scoreDocs.length) return null
+    var doc = this.manager._luceneStoredDoc(snapshot.searcher,found.scoreDocs[0].doc), record = this.lookupPassage(snapshot,String(doc.get("id"))), text = String(doc.get("text") || "")
+    if (!record || record.path !== path || String(doc.get("page")) !== path || record.textHash !== sha1(text)) throw new Error("generation-index-text-mismatch")
+    return {record:record,text:text,nativeScore:Number(found.scoreDocs[0].score),sourceRank:1}
+  } finally {this._closeAnalyzer(analyzer)}
+}
+MiniAWikiRetrievalV2.prototype._graphActive = function(hit, deadline, used) {
+  var self = this
+  if (hit.graphRoutes && !hit.graphRoutes.every(function(route) {var resolved=route.owner._resolveMountPath(route.path);return !!resolved && !!resolved.mount && resolved.mount.manager === route.manager})) return false
+  return !hit.graphSupports || hit.graphSupports.every(function(support) {return self._authorised(support) && support.engine._active(support.page,support.engine._pending(),__,deadline,used)})
+}
+
 MiniAWikiRetrievalV2.prototype._rank = function(hit, query) {
   var text = hit.text.toLowerCase(), page = hit.page, title = String(page.title).toLowerCase(), heading = hit.record.headingAncestry.join(" ").toLowerCase(), q = String(query).toLowerCase(), terms = MiniAWikiRetrievalV2.terms(query)
   var fraction = function(value) { return terms.length ? terms.filter(function(t) { return value.indexOf(t) >= 0 }).length / terms.length : 0 }
@@ -1712,6 +1735,108 @@ MiniAWikiRetrievalV2.validityDate = function(value) {
   if (!isString(value) || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
   try { return Number(java.time.LocalDate.parse(value).toEpochDay()) } catch(e) { return null }
 }
+// Expand only within the already-selected and pinned federation. Graph discovery
+// never opens a new wiki, and each support keeps its own reader/permission scope.
+MiniAWikiRetrievalV2.prototype._expandGraph = function(candidates, contexts, opts, budget, used, deadline, stopReasons, measure) {
+  var self = this, cfg = this.manager._config, work = {used:0,limit:budget.maxGraphEdges,truncated:false}, known = {}, seeded = {}, secondHop = []
+  var number = function(value, fallback, max) {return isFinite(Number(value)) && isDef(value) ? Math.max(0,Math.min(max,Math.floor(Number(value)))) : fallback}
+  var crossCap = number(cfg.wikigraphcrosscap,5,10), crossUsed = 0, depth = number(cfg.wikigraphcrossdepth,1,2)
+  var maxDf = isDef(cfg.wikigraphcrossmaxdf) && isFinite(Number(cfg.wikigraphcrossmaxdf)) ? Math.max(0,Math.min(1,Number(cfg.wikigraphcrossmaxdf))) : 0.25
+  var minKeyLen = number(cfg.wikigraphcrossminkeylen,3,2048), kinds = {}
+  String(isString(cfg.wikigraphcrossjoin) ? cfg.wikigraphcrossjoin : "link,tag,alias,concept").split(",").forEach(function(kind){kinds[kind.trim().toLowerCase()] = true})
+  var enabled = function(context) {var c=context.engine.manager._config;return crossCap > 0 && depth > 0 && cfg.wikigraphcross !== false && cfg.wikigraphmounts !== false && c.wikigraphcross !== false && c.wikigraphmounts !== false}
+  var partial = function(context, reason) {context.source.status="partial";context.source.reason=reason;if(stopReasons.indexOf(reason)<0)stopReasons.push(reason)}
+  var publicPath = function(context,path) {return context.target.name === "primary" ? path : "@" + context.target.name + "/" + path}
+  var authorised = function(context,path) {return self._authorised({wiki:context.target.name,path:publicPath(context,path),engine:context.engine})}
+  var sameWiki = function(a,b) {return a === b || a._backendType === b._backendType && a._getBackendIdentity() === b._getBackendIdentity() && String(a._config.url || a._config.esurl || "") === String(b._config.url || b._config.esurl || "")}
+  var resolve = function(context,path) {
+    if (path.indexOf("@") !== 0) return {context:context,path:path,routes:[]}
+    if (!enabled(context) || !kinds.link) return null
+    var owner=context.engine.manager, mounted=owner._resolveMountPath(path)
+    if (!mounted || !mounted.mount) return null
+    var target=contexts.filter(function(candidate) {
+      // Root aliases must themselves be selected. A mounted wiki's private alias
+      // can route only to a wiki already selected in the requesting federation.
+      return owner === self.manager ? candidate.engine.manager === mounted.mount.manager : sameWiki(candidate.engine.manager,mounted.mount.manager)
+    })[0]
+    if (!target) return null
+    return {context:target,path:mounted.localPath.split("#")[0],routes:[{owner:owner,path:path,manager:mounted.mount.manager}],cross:true,explicit:true}
+  }
+  var exhausted = function() {return used.graphExpansion >= budget.maxGraphExpansion || used.candidates >= budget.maxCandidates || used.queries >= budget.maxQueries || Date.now() >= deadline}
+  var bind = function(context,support) {return {context:context,path:support.path,revision:support.revision}}
+  var admit = function(entry, origin) {
+    var target=entry.context, path=publicPath(target,entry.path)
+    if (known[path] || opts.path && path !== opts.path || !authorised(target,entry.path)) return
+    if (entry.cross && crossUsed >= crossCap || exhausted()) {partial(origin,"graph-budget");return}
+    used.graphExpansion++;if(entry.cross)crossUsed++
+    var page=target.engine.lookupPage(target.pin,entry.path)
+    if (!page || !target.engine._constraints(page,opts)) return
+    var supports=[], valid=entry.supports.every(function(support) {
+      var context=support.context, source=context.engine.lookupPage(context.pin,support.path)
+      if (!authorised(context,support.path) || !source || !support.revision || source.revision !== support.revision || !context.engine._active(source,context.pending,context.permissions,deadline,used) || !context.engine._constraints(source,opts)) return false
+      supports.push({engine:context.engine,snapshot:context.pin,wiki:context.target.name,path:publicPath(context,support.path),page:source});return true
+    })
+    if (!valid) {partial(origin,"stale-graph-evidence");return}
+    if (!target.engine._active(page,target.pending,target.permissions,deadline,used)) {partial(target,"stale-or-pending-evidence");return}
+    used.queries++
+    var hit=measure("search",function(){return target.engine._graphHit(target.pin,entry.path,opts.query)})
+    if (!hit) return
+    used.candidates++;used.materializedPassages++;target.source.candidates++
+    hit.page=page;hit.engine=target.engine;hit.snapshot=target.pin;hit.wiki=target.target.name;hit.path=path;hit.graphSupports=supports;hit.graphRoutes=entry.routes || [];hit.expansions=[]
+    measure("rank",function(){target.engine._rank(hit,opts.query)})
+    hit.scoreComponents.graph=0.25;hit.rankScore+=0.25;hit.retrievalMethod="graph"
+    candidates.push(hit);known[path]=true
+    if (entry.explicit && depth >= 2) secondHop.push({hit:hit,context:target,supports:entry.supports,routes:hit.graphRoutes})
+  }
+  var seeds=candidates.slice().sort(function(a,b){return b.rankScore-a.rankScore || (a.path<b.path?-1:a.path>b.path?1:0)})
+  seeds.forEach(function(hit){known[hit.path]=true})
+  var discover = function(seed, context, previous) {
+    var graph=context.engine.manager._graph
+    if (!graph || !isFunction(graph.expansionCandidates)) {partial(context,"graph-unavailable");return}
+    var base=(previous ? previous.supports : []).concat([bind(context,{path:seed.record.path,revision:seed.page.revision})])
+    var accept=function(path){var route=previous && path.indexOf("@")===0 ? null : resolve(context,path);return !!route && !known[publicPath(route.context,route.path)] && (!route.cross || crossUsed<crossCap)}
+    var related=graph.expansionCandidates(seed.record.path,{cap:budget.maxGraphExpansion-used.graphExpansion,budget:work,deadline:deadline,accept:accept})
+    for(var i=0;i<related.length;i++) {
+      if(exhausted()){partial(context,"graph-budget");return}
+      var suggestion=related[i], route=resolve(context,suggestion.path)
+      if(!route || previous && route.cross)continue
+      route.supports=base.concat(suggestion.supports.map(function(s){return bind(context,s)}))
+      if(previous){route.cross=true;route.routes=previous.routes}
+      admit(route,context)
+    }
+    if(previous || !enabled(context) || crossUsed>=crossCap || exhausted())return
+    var keys=graph.expansionJoinKeys(seed.record.path,{kinds:kinds,minKeyLen:minKeyLen,budget:work,deadline:deadline})
+    for(var t=0;t<contexts.length && keys.length;t++) {
+      var target=contexts[t], targetGraph=target.engine.manager._graph
+      if(sameWiki(context.engine.manager,target.engine.manager) || !targetGraph || !authorised(target,""))continue
+      if(exhausted() || crossUsed>=crossCap){partial(context,"graph-budget");break}
+      var matches=targetGraph.expansionMatches(keys,{cap:Math.min(crossCap-crossUsed,budget.maxGraphExpansion-used.graphExpansion),maxDf:maxDf,pageCount:target.pin.manifest.catalogue.stats.pageCount,budget:work,deadline:deadline,accept:function(path){return !known[publicPath(target,path)]}})
+      for(var m=0;m<matches.length;m++) {
+        var match=matches[m]
+        admit({context:target,path:match.path,cross:true,supports:base.concat([bind(context,match.sourceSupport),bind(target,match.targetSupport)])},context)
+        if(exhausted() || crossUsed>=crossCap)break
+      }
+    }
+  }
+  for(var s=0;s<seeds.length;s++) {
+    var seed=seeds[s], context=contexts.filter(function(entry){return entry.engine===seed.engine && entry.target.name===seed.wiki})[0]
+    if(!context || seeded[seed.path])continue
+    seeded[seed.path]=true
+    if(exhausted()){partial(context,"graph-budget");break}
+    try{discover(seed,context)}catch(error){partial(context,Date.now()>=deadline?"graph-budget":"graph-unavailable")}
+    if(work.truncated)partial(context,"graph-budget")
+  }
+  // Compatibility with crossdepth=2: one local hop after an explicit cross link,
+  // never another cross link or an unbounded recursive walk.
+  for(var h=0;h<secondHop.length;h++) {
+    var next=secondHop[h]
+    if(exhausted() || crossUsed>=crossCap){partial(next.context,"graph-budget");break}
+    try{discover(next.hit,next.context,next)}catch(error){partial(next.context,Date.now()>=deadline?"graph-budget":"graph-unavailable")}
+    if(work.truncated)partial(next.context,"graph-budget")
+  }
+  used.graphEdges=work.used
+}
+
 MiniAWikiRetrievalV2.prototype._collect = function(query, options, materialize, present) {
   var started = Number(java.lang.System.nanoTime())
   var opts = {}, evaluationTime = new Date().getTime()
@@ -1721,14 +1846,15 @@ MiniAWikiRetrievalV2.prototype._collect = function(query, options, materialize, 
   if (!selection.ok) return selection
   if (!isString(query) || !query.trim()) return { ok: false, error: "query-required" }
   if (query.length > 2048) return { ok: false, error: "query-too-long" }
-  if (opts.expandGraph === true) return { ok: false, error: "v2-graph-expansion-unavailable" }
   if (isDef(opts.applicability) && (!isMap(opts.applicability) || !Object.keys(opts.applicability).every(function(k) { return k === "validAt" ? MiniAWikiRetrievalV2.validityDate(opts.applicability[k]) !== null : ["product", "version", "platform", "environment"].indexOf(k) >= 0 && isString(opts.applicability[k]) }))) return { ok: false, error: "invalid-applicability" }
   var finite = function(value, fallback, max) { if (isUnDef(value)) return fallback; if (!isFinite(Number(value)) || Number(value) < 1) throw new Error("invalid-budget"); return Math.min(max, Math.floor(Number(value))) }
+  var graphLimit = function(value, fallback, max) { if (isUnDef(value)) return fallback; if (!isFinite(Number(value)) || Number(value) < 0 || Math.floor(Number(value)) !== Number(value)) throw new Error("invalid-graph-budget"); return Math.min(max, Number(value)) }
   var budget
-  try { budget = { maxCandidates: finite(opts.maxCandidates, 32, 512), maxQueries: finite(opts.maxQueries, 16, 64), maxInspected: finite(opts.maxInspected, 32, 512), maxBytes: finite(opts.maxBytes, 16000, 64000), maxMillis: finite(opts.maxMillis, this.config.maxMillis, this.config.maxMillis) } } catch(e) { return { ok: false, error: String(e) } }
-  var used = { queries: 0, candidates: 0, inspected: 0, materializedPassages: 0, bytes: 0, graphExpansion: 0 }, deadline = evaluationTime + budget.maxMillis, vector = {}, sources = [], candidates = [], pins = [], stopReasons = [], stages = ["validate"], self = this
+  try { budget = { maxCandidates: finite(opts.maxCandidates, 32, 512), maxQueries: finite(opts.maxQueries, 16, 64), maxInspected: finite(opts.maxInspected, 32, 512), maxBytes: finite(opts.maxBytes, 16000, 64000), maxMillis: finite(opts.maxMillis, this.config.maxMillis, this.config.maxMillis), maxGraphExpansion: opts.expandGraph === true ? graphLimit(opts.maxGraphExpansion, 5, 10) : 0, maxGraphEdges: opts.expandGraph === true ? graphLimit(opts.maxGraphEdges, 256, 4096) : 0 } } catch(e) { return { ok: false, error: String(e) } }
+  var used = { queries: 0, candidates: 0, inspected: 0, materializedPassages: 0, bytes: 0, graphExpansion: 0, graphEdges: 0 }, deadline = evaluationTime + budget.maxMillis, vector = {}, sources = [], candidates = [], pins = [], stopReasons = [], stages = ["validate"], self = this
   var elapsed = function(at) { return Math.max(0,(Number(java.lang.System.nanoTime())-at)/1000000) }
   var timings = { validation: elapsed(started), pin: 0, search: 0, rank: 0, candidateOrdering: 0, evidenceSelection: 0, citationDecoration: 0 }
+  var graphSources = []
   var packingMillis = 0, packingExecuted = false, presentationMillis = 0, presentationExecuted = false
   var measure = function(stage, fn) {
     var at = Number(java.lang.System.nanoTime())
@@ -1779,6 +1905,7 @@ MiniAWikiRetrievalV2.prototype._collect = function(query, options, materialize, 
         if (found.omittedRoutes.length) { source.status = "partial"; source.reason = "query-budget"; stopReasons.push("query-budget") }
         if (found.totalHits > found.hits.length) { source.candidateLimitReached = true; source.status = "partial"; source.reason = "candidate-budget"; stopReasons.push("candidate-budget") }
         used.candidates += found.hits.length
+        graphSources.push({engine:engine,pin:pin,target:target,source:source,pending:pending,permissions:permissions})
         found.hits.forEach(function(hit) {
           if (new Date().getTime() >= deadline) { source.status = "partial"; source.reason = "inspection-budget"; stopReasons.push("inspection-budget"); return }
           used.materializedPassages++
@@ -1790,6 +1917,10 @@ MiniAWikiRetrievalV2.prototype._collect = function(query, options, materialize, 
           candidates.push(measure("rank", function() { return engine._rank(hit, query) }))
         })
       } catch(e) { source.reason = __miniAErrMsg(e).substring(0, 160); source.status = source.reason === "invalid-query" ? "invalid-query" : source.reason === "query-budget-exhausted" ? "partial" : "unavailable"; stopReasons.push(source.status === "invalid-query" ? "invalid-query" : source.status === "partial" ? "query-budget" : "source-unavailable") }
+    }
+    if (budget.maxGraphExpansion > 0 && candidates.length) {
+      stages.push("graph")
+      this._expandGraph(candidates,graphSources,merge(opts,{query:query}),budget,used,deadline,stopReasons,measure)
     }
     measure("candidateOrdering", function() { candidates.sort(function(a,b) { return b.rankScore - a.rankScore || (a.path < b.path ? -1 : a.path > b.path ? 1 : a.record.charStart - b.record.charStart) }) })
     var complete = sources.every(function(s) { return s.status === "searched" })
@@ -1823,7 +1954,7 @@ MiniAWikiRetrievalV2.prototype.search = function(query, options) {
       // Permission can change after candidate discovery. Recheck immediately
       // before indexed title/description and passage metadata are disclosed.
       var stillActive = false
-      try { stillActive = hit.engine._active(hit.page, hit.engine._pending(), __, deadline, out.budget.used) } catch(permissionFailure) {}
+      try { stillActive = self._graphActive(hit,deadline,out.budget.used) && hit.engine._active(hit.page, hit.engine._pending(), __, deadline, out.budget.used) } catch(permissionFailure) {}
       if (!stillActive) {
         out.outcome = "partial"
         if (out.stopReasons.indexOf("stale-or-revoked-evidence") < 0) out.stopReasons.push("stale-or-revoked-evidence")
@@ -1925,7 +2056,7 @@ MiniAWikiRetrievalV2.prototype.retrieve = function(query, options, present) {
         if (!inspectedBodies[bodyKey] && out.budget.used.inspected >= out.budget.limits.maxInspected) { stop.push("inspection-budget"); return }
         if (!inspectedBodies[bodyKey]) { inspectedBodies[bodyKey] = true; out.budget.used.inspected++ }
         try {
-          if (!hit.engine._active(hit.page, hit.engine._pending(), __, deadline, out.budget.used)) throw new Error("stale-or-revoked-evidence")
+          if (!self._graphActive(hit,deadline,out.budget.used) || !hit.engine._active(hit.page, hit.engine._pending(), __, deadline, out.budget.used)) throw new Error("stale-or-revoked-evidence")
           if (!hit.engine.manager._archiveRoot && ["fs","s3fs","http"].indexOf(hit.engine.manager._backendType) >= 0 && r.textHash && sha1(hit.text) === r.textHash) {
             // The immutable generation validated these stored fields and positions.
             // Current source stat/access was checked above; no full page is needed.
@@ -2249,7 +2380,7 @@ MiniAWikiRetrievalV2.prototype._recordTelemetry = function(result, count, millis
     if (sources.some(function(source) { return /^(generation-(index-(text-mismatch|count-mismatch)|evidence-probe-failed|record-missing)|passage-revision-binding-failure|page-revision-binding-failure)$/.test(String(source.reason || "")) })) self._incrementTelemetryEvent("generation_mismatch_requests")
     if(isMap(requestUsed)) {
       if(!isMap(self.telemetry.request_work))self.telemetry.request_work={}
-      ;["queries","candidates","inspected","materializedPassages","indexedEvidencePassages","structuralContextPassages","structuralContextCacheHits","structuralContextLookupProbes","graphExpansion","backendReadCalls","backendExistsCalls","backendReadBytes","backendReadMillis","backendExistsMillis","backendFailures"].forEach(function(key){
+      ;["queries","candidates","inspected","materializedPassages","indexedEvidencePassages","structuralContextPassages","structuralContextCacheHits","structuralContextLookupProbes","graphExpansion","graphEdges","backendReadCalls","backendExistsCalls","backendReadBytes","backendReadMillis","backendExistsMillis","backendFailures"].forEach(function(key){
         var amount=Number(requestUsed[key])
         if(isFinite(amount)&&amount>=0)self.telemetry.request_work[key]=(Number(self.telemetry.request_work[key])||0)+amount
       })

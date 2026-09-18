@@ -582,6 +582,13 @@ See [the complete wiki guide](docs/WIKI.md) for backends, console/MCP operations
 | `wikigraphfalkoruser` | FalkorDB user | - |
 | `wikigraphfalkorpass` | FalkorDB password | - |
 
+With `wikiretrievalv2=true`, trusted search/retrieve calls can opt into one-hop
+graph discovery using `expandGraph=true`, `maxGraphExpansion` (default 5, max 10)
+and `maxGraphEdges` (default 256, max 4096). Graph evidence is source-revision
+validated; cross-wiki links and shared keys stay within the selected federation
+and share request budgets. Cross traversal honours the `wikigraphcross*` settings.
+See [retrieval contracts](docs/WIKI-RETRIEVAL-V2.md).
+
 Wiki folders become browsable sub-wikis when they contain `index.md`. Agents can use `wiki` ops `tree`, `browse`, and `backlinks` before selective `read`; read-write wikis also support `move` for link-repaired page relocation and `init path=<folder/>` for section indexes.
 
 | Option | Description | Default |

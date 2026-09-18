@@ -223,6 +223,9 @@ todo:
                 environment: {type: string}
                 validAt: {type: string, pattern: '^\d{4}-\d{2}-\d{2}$'}
             maxQueries: {type: integer, minimum: 1, description: "V2 request-wide query budget."}
+            expandGraph: {type: boolean, description: "Opt in to bounded graph discovery across selected wikis, honouring wikigraphcross settings. Requires a current source graph and V2 retrieval."}
+            maxGraphExpansion: {type: integer, minimum: 0, maximum: 10, description: "V2 graph candidate attempts; default 5 when expandGraph is true."}
+            maxGraphEdges: {type: integer, minimum: 0, maximum: 4096, description: "Request-wide graph adjacency visits; default 256."}
             maxCandidates: {type: integer, minimum: 1, description: "V2 request-wide candidate budget."}
             maxInspected: {type: integer, minimum: 1, description: "V2 request-wide inspection budget."}
             maxMillis: {type: integer, minimum: 1, description: "V2 request deadline budget; blocking backend limitations still apply."}
@@ -629,6 +632,9 @@ jobs:
       wiki         : default(__)
       applicability: default(__)
       maxQueries: default(__)
+      expandGraph: toBoolean.isBoolean.default(false)
+      maxGraphExpansion: default(__)
+      maxGraphEdges: default(__)
       maxCandidates: default(__)
       maxInspected: default(__)
       maxMillis: default(__)
@@ -646,6 +652,9 @@ jobs:
       wiki         : args.wiki,
       applicability: args.applicability,
       maxQueries: args.maxQueries,
+      expandGraph: args.expandGraph,
+      maxGraphExpansion: args.maxGraphExpansion,
+      maxGraphEdges: args.maxGraphEdges,
       maxCandidates: args.maxCandidates,
       maxInspected: args.maxInspected,
       maxMillis: args.maxMillis,

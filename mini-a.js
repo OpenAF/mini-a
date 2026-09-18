@@ -21286,6 +21286,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             wiki        : wkParams.wiki,
             applicability: wkParams.applicability,
             maxQueries: wkParams.maxQueries,
+            expandGraph: wkParams.expandGraph === true,
+            maxGraphExpansion: wkParams.maxGraphExpansion,
+            maxGraphEdges: wkParams.maxGraphEdges,
             maxCandidates: wkParams.maxCandidates,
             maxInspected: wkParams.maxInspected,
             maxMillis: wkParams.maxMillis,
@@ -21344,7 +21347,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               wkResult = wkPath.length === 0 ? "[ERROR] wiki related requires 'path'" : af.toTOON(this._wikiManager.related(wkPath, { limit: wkParams.limit }))
             } else if (wkOp === "retrieve") {
               global.__mini_a_metrics.wiki_ops_search.inc()
-              wkResult = wkQuery.length === 0 ? "[ERROR] wiki retrieve requires 'query'" : isDef(wkParams.applicability) && !this._wikiManager._retrievalV2 ? af.toTOON({ok:false,error:"applicability-requires-v2"}) : af.toTOON(this._wikiManager.retrieve(wkQuery, { wiki: wkParams.wiki, applicability: wkParams.applicability, maxQueries: wkParams.maxQueries, maxMillis: wkParams.maxMillis, maxCandidates: wkParams.maxCandidates, maxInspected: wkParams.maxInspected, maxGraphExpansion: wkParams.maxGraphExpansion, maxBytes: wkParams.maxBytes, expandGraph: wkParams.expandGraph === true }))
+              wkResult = wkQuery.length === 0 ? "[ERROR] wiki retrieve requires 'query'" : isDef(wkParams.applicability) && !this._wikiManager._retrievalV2 ? af.toTOON({ok:false,error:"applicability-requires-v2"}) : af.toTOON(this._wikiManager.retrieve(wkQuery, { wiki: wkParams.wiki, applicability: wkParams.applicability, maxQueries: wkParams.maxQueries, maxMillis: wkParams.maxMillis, maxCandidates: wkParams.maxCandidates, maxInspected: wkParams.maxInspected, maxGraphExpansion: wkParams.maxGraphExpansion, maxGraphEdges: wkParams.maxGraphEdges, maxBytes: wkParams.maxBytes, expandGraph: wkParams.expandGraph === true }))
             } else if (wkOp === "search") {
               global.__mini_a_metrics.wiki_ops_search.inc()
               if (wkQuery.length === 0) {
@@ -22115,6 +22118,9 @@ MiniA.prototype._runChatbotMode = function(options) {
               wiki        : cbWkParams.wiki,
               applicability: cbWkParams.applicability,
               maxQueries: cbWkParams.maxQueries,
+              expandGraph: cbWkParams.expandGraph === true,
+              maxGraphExpansion: cbWkParams.maxGraphExpansion,
+              maxGraphEdges: cbWkParams.maxGraphEdges,
               maxCandidates: cbWkParams.maxCandidates,
               maxInspected: cbWkParams.maxInspected,
               maxMillis: cbWkParams.maxMillis,
@@ -22154,7 +22160,7 @@ MiniA.prototype._runChatbotMode = function(options) {
               } else if (cbWkOp === "related") {
                 cbWkResult = cbWkPath.length === 0 ? "[ERROR] wiki related requires 'path'" : af.toTOON(this._wikiManager.related(cbWkPath, { limit: cbWkParams.limit }))
               } else if (cbWkOp === "retrieve") {
-                cbWkResult = cbWkQuery.length === 0 ? "[ERROR] wiki retrieve requires 'query'" : isDef(cbWkParams.applicability) && !this._wikiManager._retrievalV2 ? af.toTOON({ok:false,error:"applicability-requires-v2"}) : af.toTOON(this._wikiManager.retrieve(cbWkQuery, { wiki: cbWkParams.wiki, applicability: cbWkParams.applicability, maxQueries: cbWkParams.maxQueries, maxMillis: cbWkParams.maxMillis, maxCandidates: cbWkParams.maxCandidates, maxInspected: cbWkParams.maxInspected, maxGraphExpansion: cbWkParams.maxGraphExpansion, maxBytes: cbWkParams.maxBytes, expandGraph: cbWkParams.expandGraph === true }))
+                cbWkResult = cbWkQuery.length === 0 ? "[ERROR] wiki retrieve requires 'query'" : isDef(cbWkParams.applicability) && !this._wikiManager._retrievalV2 ? af.toTOON({ok:false,error:"applicability-requires-v2"}) : af.toTOON(this._wikiManager.retrieve(cbWkQuery, { wiki: cbWkParams.wiki, applicability: cbWkParams.applicability, maxQueries: cbWkParams.maxQueries, maxMillis: cbWkParams.maxMillis, maxCandidates: cbWkParams.maxCandidates, maxInspected: cbWkParams.maxInspected, maxGraphExpansion: cbWkParams.maxGraphExpansion, maxGraphEdges: cbWkParams.maxGraphEdges, maxBytes: cbWkParams.maxBytes, expandGraph: cbWkParams.expandGraph === true }))
               } else if (cbWkOp === "search") {
                 if (cbWkQuery.length === 0) { cbWkResult = "[ERROR] wiki search requires 'query'" }
                 else {

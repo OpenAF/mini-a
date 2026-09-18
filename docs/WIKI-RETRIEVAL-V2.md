@@ -71,7 +71,56 @@ consume request query attempts and appear only in trusted diagnostics. Configure
 shingles and character ngrams have distinct indexed fields using the installed
 adapter's analyzer factories. Bounded Lucene MoreLikeThis query expansion and PRF
 run over indexed query terms or stored wiki passage text without an IndexWriter.
-Explicit graph expansion is unavailable.
+Graph expansion is opt-in with `expandGraph=true` and an enabled, current wiki
+graph (`usewikigraph=true` in CLI/MCP, `usegraph:true` in the manager). Lexical
+hits seed one hop through document links/supersession, shared tags/aliases, or
+source-bound shared concepts. Cross-wiki links and shared keys can discover pages
+in other **selected, already-pinned wikis**, even when those wikis have no lexical
+hits. `wiki=primary` never follows a link into a mount; `wiki=*` or an explicit
+array must select both the seed wiki and the destination. Explicit links use the
+source wiki's mount namespace, including fragment-bearing links. A mounted wiki's
+private alias can reach only a destination already selected in the requesting
+federation; private aliases are not exposed as public paths. Graph-enabled parents
+pass that opt-in to newly attached managers unless the mount explicitly overrides
+`usegraph`. Explicit links need destination passage artifacts, but not a destination
+graph; shared-key joins require graphs on both sides.
+
+Cross traversal honours `wikigraphcross`, `wikigraphmounts`, `wikigraphcrossjoin`
+(`link,tag,alias,concept` by default), `wikigraphcrosscap` (default 5 attempted
+cross candidates, also limited by `maxGraphExpansion`), `wikigraphcrossmaxdf`
+(default 0.25), and `wikigraphcrossminkeylen` (default 3). Shared-key frequency is
+checked against the destination's pinned page count using bounded adjacency reads;
+a posting cut short by the work budget cannot pass that filter. Depth defaults to
+one. `wikigraphcrossdepth=2` permits one additional local hop after an explicit
+cross link, preserving the original support chain and consuming the same caps.
+It never follows a further cross link or starts an unrestricted recursive walk.
+At disclosure, both source and destination permissions/revisions and explicit
+mount routing are checked again; changing or detaching a route invalidates its
+hint. Every citation retains the destination wiki and generation.
+
+`maxGraphExpansion` defaults to 5 attempted graph candidates (maximum 10; zero
+disables expansion). `maxGraphEdges` defaults to 256 adjacency/assertion visits
+(maximum 4096; zero disables traversal). Key probes, including absent keys, also
+consume this work budget. Both limits are request-wide across selected
+wikis. Graph passage selection also consumes the existing query and candidate
+budgets; evidence selection retains the inspection, byte and deadline limits.
+Graph candidates use stored, query-ranked Lucene passages, not source-body scans.
+Graph support must match the pinned source revision and pass current activity,
+permission, retirement and applicability checks. Support is checked again before
+disclosure. Missing/stale graph support and exhausted traversal are reported as
+partial outcomes while valid lexical results remain available. `retrievalMethod`
+is `graph` for expanded results; graph support contributes a modest 0.25 ranking
+component and never replaces passage evidence or its citation.
+
+Old graph files remain readable, but assertions without current source revisions
+cannot expand v2 retrieval. Run a writable graph build/reindex to refresh
+structural revisions, and a semantic build to restore semantic assertions. Older
+files may already have discarded duplicate source assertions; those cannot be
+reconstructed without rebuilding. No automatic graph or model build runs on reads.
+Restricted MCP enables this only through its operator-controlled `usewikigraph`
+opt-in and returns graph hits as `Related page` plus opaque references, without
+paths, scores, relationship metadata or provenance. MCP `wikimounts` accepts
+both SLON and JSON, including pretty-printed JSON arrays.
 No model, embeddings or external search service runs in this pipeline.
 
 Trusted source diagnostics distinguish requested routes, executed routes and

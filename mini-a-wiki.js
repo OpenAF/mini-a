@@ -899,7 +899,8 @@ MiniAWikiManager.prototype._graphPayloadFromRecord = function(path, raw, parsed)
     path: path,
     meta: built.meta,
     body: built.body,
-    links: built.links
+    links: built.links,
+    revision: sha1(raw)
   }
 }
 
@@ -1278,7 +1279,7 @@ MiniAWikiManager.prototype._hydrateArtifactBundle = function(remoteMetaFn, downl
 MiniAWikiManager.prototype._graphPages = function(pageDocs) {
   if (isArray(pageDocs)) {
     return pageDocs.map(function(r) {
-      return { path: r.path, meta: r.meta, body: r.body, links: r.links }
+      return { path: r.path, meta: r.meta, body: r.body, links: r.links, revision: sha1(r.raw) }
     })
   }
   var self = this
@@ -1290,6 +1291,7 @@ MiniAWikiManager.prototype._graphPages = function(pageDocs) {
     var parsed = this.parseFrontmatter(raw)
     out.push({
       path: pages[i],
+      revision: sha1(raw),
       meta: isMap(parsed.meta) ? parsed.meta : {},
       body: isString(parsed.body) ? parsed.body : "",
       links: this.extractLinks(isString(parsed.body) ? parsed.body : "")
@@ -4886,6 +4888,7 @@ MiniAWikiManager.prototype.attach = function(name, config) {
   // Mounts inherit the caller's lexical contract unless they explicitly select
   // another language/rule set. This makes a single wikilexical setting apply
   // consistently to federated retrieval.
+  if (isUnDef(cfg.usegraph)) cfg.usegraph = this._config.usegraph
   if (isUnDef(cfg.wikiretrievalv2)) cfg.wikiretrievalv2 = this._config.wikiretrievalv2
   if (isUnDef(cfg.wikiretrievalconfig)) cfg.wikiretrievalconfig = this._config.wikiretrievalconfig
   if (isUnDef(cfg.wikilexical)) cfg.wikilexical = this._lexicalConfig
