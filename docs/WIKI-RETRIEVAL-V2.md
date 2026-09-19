@@ -1227,3 +1227,29 @@ reverse postings with the authoritative page records, including source stamps.
 Because backlinks resolves one reverse key per generation level, it no longer
 repeats parent-manifest verification for every incoming source. See the
 [2026-09-17 validation record](https://github.com/openaf/mini-a/blob/main/development/docs/WIKI-RETRIEVAL-V2-VALIDATION.md#backlink-serving-optimization--2026-09-17).
+
+### Source identity changes (2026-09-19)
+
+Filesystem and filesystem-backed S3 retrieval first check readability, root containment,
+regular-file status, and the indexed modification time, size, and file identity.
+When metadata differs, v2 uses OpenAF `sha256()` on a source file stream and compares
+it with the existing SHA-256 checksum in the pinned generation's page block record.
+Identical content remains eligible after a container remount, file replacement, or
+timestamp change; different content still requires indexing. No index migration is
+needed, and reads never rewrite persisted source stamps.
+
+Successful proofs share the bounded process cache and bind the generation, page,
+revision, expected checksum, and current metadata. Access and metadata are checked
+again on reuse. Changed metadata triggers verification again. Pending updates,
+exclusions, missing files, symlinks, access denial, changes during verification, and
+expired requests remain ineligible. Search, read/open, graph support, grounded
+knowledge, and backlinks use the same validation rule.
+
+The metadata fast path remains an optimization: this is not a promise to detect
+in-place content changes that preserve every checked metadata field. A cold remount
+can require one full source read per candidate page. Hashing checks deadlines before
+and after the synchronous stream operation; an in-progress filesystem read is not
+forcibly interrupted. `sourceVerificationReads`, `sourceVerificationBytes`,
+`sourceVerificationMillis`, and `sourceVerificationCacheHits` report fallback work;
+`source-verification` audit events record success and failure. Output `maxBytes`
+continues to bound output, not source verification I/O.

@@ -155,6 +155,9 @@
       ow.test.assert(on.results.some(function(r){return r.path==="third.md"}),false,"discovered pages do not become recursive seeds")
       ow.test.assert(on.budget.used.graphExpansion,1,"graph attempts counted")
       ow.test.assert(on.budget.used.queries,off.budget.used.queries+1,"graph passage query shares lexical query budget")
+      ;["seed.md","target.md"].forEach(function(p) {
+        java.nio.file.Files.setLastModifiedTime(new java.io.File(dir+"/"+p).toPath(),java.nio.file.attribute.FileTime.fromMillis(Date.now()+5000))
+      })
       var evidence=wm.retrieve("graphneedle",{expandGraph:true,chunks:8,maxBytes:32000})
       var target=evidence.evidence.filter(function(e){return e.path==="target.md"})[0]
       ow.test.assert(isDef(target),true,"expanded candidate becomes validated passage evidence")
@@ -2641,6 +2644,69 @@
       ow.test.assert(isUnDef(wm._servingBatchChanges) && isUnDef(wm._servingMoveOrigins), true, "move scope restored after publication")
     } finally { if(pinned)wm._retrievalV2.release(pinned); if(wm)wm.close(); io.rm(dir) }
   }
+  exports.testSourceIdentityFallback = function() {
+    var dir=temporary(), wm, root, pin
+    try {
+      var raw="# Source\nidentityneedle café [target](target.md)\n", path=dir+"/source.md"
+      io.writeFileString(path,raw);io.writeFileString(dir+"/target.md","# Target\n")
+      wm=make(dir);ow.test.assert(wm.reindex().ok,true,"identity fixture publishes")
+      var e=wm._retrievalV2, originalStamp=e._stamp, originalPending=e._pending
+      pin=e.acquire();var page=e.lookupPage(pin,"source.md")
+      ow.test.assert(e._active(page,{},__,__,__,__,pin),true,"original metadata is active")
+      ow.test.assert(Number(e.metrics.sourceVerificationReads||0),0,"fast path never hashes")
+      // A real replacement with identical bytes and preserved timestamp.
+      var modified=java.nio.file.Files.getLastModifiedTime(new java.io.File(path).toPath())
+      io.writeFileString(dir+"/replacement.md",raw)
+      java.nio.file.Files.move(new java.io.File(dir+"/replacement.md").toPath(),new java.io.File(path).toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+      java.nio.file.Files.setLastModifiedTime(new java.io.File(path).toPath(),modified)
+      ow.test.assert(e._stamp("source.md").fileKey!==page.stamp.fileKey,true,"replacement changes actual identity")
+      ow.test.assert(wm.agenticRead("source.md").body.indexOf("identityneedle")>=0,true,"identical replacement is readable")
+      var reads=e.metrics.sourceVerificationReads
+      ow.test.assert(reads,1,"first replacement hashes once")
+      ow.test.assert(wm.agenticSearch("identityneedle").results.length>0,true,"search accepts verified replacement")
+      ow.test.assert(wm.retrieve("identityneedle").evidence.length>0,true,"retrieval accepts verified replacement")
+      ow.test.assert(wm.backlinks("target.md").count,1,"backlinks accept verified replacement")
+      ow.test.assert(e.metrics.sourceVerificationReads,reads,"subsequent operations reuse proof")
+      root=make(temporary());root.attach("docs",{backend:"fs",root:dir,access:"ro"})
+      ow.test.assert(root.agenticSearch("identityneedle",{wiki:"docs"}).results[0].path,"@docs/source.md","mounted search recovers")
+      ow.test.assert(root.agenticRead("@docs/source.md").body.indexOf("café")>=0,true,"mounted Unicode read recovers")
+      java.nio.file.Files.setLastModifiedTime(new java.io.File(path).toPath(),java.nio.file.attribute.FileTime.fromMillis(Date.now()+5000))
+      ow.test.assert(e._active(page,{},__,__,__,__,pin),true,"timestamp-only mismatch verifies")
+      ow.test.assert(e.metrics.sourceVerificationReads,reads+1,"new metadata invalidates proof")
+      ow.test.assert(e._active(page,{},__,Date.now()-1,{},__,pin),false,"expired request rejects cached fallback")
+      e._pending=function(){return {"source.md":true}}
+      ow.test.assert(e._active(page,e._pending(),__,__,__,__,pin),false,"pending source denies cached proof")
+      e._pending=originalPending
+      e._stamp=function(p,r){return p==="source.md" ? __ : originalStamp.call(this,p,r)}
+      ow.test.assert(e._active(page,{},__,__,__,__,pin),false,"revoked access denies cached proof")
+      e._stamp=originalStamp
+      // Change during verification: unique metadata prevents using a cached proof.
+      var calls=0
+      e._stamp=function(p,r){var v=originalStamp.call(this,p,r);if(v&&p==="source.md")v.fileKey="racing-"+(++calls);return v}
+      ow.test.assert(e._active(page,{},__,__,__,__,pin),false,"changing source is rejected")
+      e._stamp=originalStamp
+      var expiredAfterRead=Date.now()+100, checks=0
+      e._stamp=function(p,r){var v=originalStamp.call(this,p,r);if(v&&p==="source.md"){v.fileKey="deadline-proof";if(++checks===2)java.lang.Thread.sleep(150)}return v}
+      ow.test.assert(e._active(page,{},__,expiredAfterRead,{},__,pin),false,"verification completed after deadline is discarded")
+      e._stamp=originalStamp
+      var saved=java.nio.file.Files.getLastModifiedTime(new java.io.File(path).toPath())
+      io.writeFileString(dir+"/replacement.md",raw.replace("identityneedle","modifiedneedle"))
+      java.nio.file.Files.move(new java.io.File(dir+"/replacement.md").toPath(),new java.io.File(path).toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+      java.nio.file.Files.setLastModifiedTime(new java.io.File(path).toPath(),saved)
+      ow.test.assert(wm.open("source.md").error,"stale-evidence","same-size changed replacement rejected")
+      ow.test.assert(wm.backlinks("target.md").count,0,"changed source cannot provide backlinks")
+      ow.test.assert(wm.reindex().ok,true,"new content publishes")
+      ow.test.assert(wm.agenticSearch("modifiedneedle").results.length>0,true,"new generation is accepted")
+      ow.test.assert(e._active(page,{},__,__,__,__,pin),false,"old pinned generation cannot use new proof")
+      io.rm(path)
+      ow.test.assert(wm.open("source.md").error,"stale-evidence","deleted source remains rejected")
+      ow.test.assert(e.cacheBytes<=e.config.cacheBytes,true,"proof cache stays bounded")
+    } finally {
+      if(pin&&wm)wm._retrievalV2.release(pin)
+      if(root){var rootDir=root._backend.root;root.close();io.rm(rootDir)}
+      if(wm)wm.close();io.rm(dir)
+    }
+  }
   exports.testCompactBacklinkActivity = function() {
     var dir=temporary(), writer, reader, pin
     try {
@@ -2664,7 +2730,7 @@
       engine.release(pin);pin=__
       var unchangedPath=new java.io.File(dir+"/source-1.md").toPath()
       java.nio.file.Files.setLastModifiedTime(unchangedPath,java.nio.file.attribute.FileTime.fromMillis(Date.now()+2000))
-      ow.test.assert(reader.backlinks("target.md").count,29,"stamp-only external change suppresses prior posting")
+      ow.test.assert(reader.backlinks("target.md").count,30,"same-content metadata change preserves posting")
       ow.test.assert(writer._retrievalV2.build(["source-1.md"]).ok,true,"same-byte update refreshes source stamp")
       ow.test.assert(reader.backlinks("target.md").count,30,"stamp-only publication refreshes compact posting")
       pin=engine.acquire();engine._validate(pin.dir,pin.manifest)

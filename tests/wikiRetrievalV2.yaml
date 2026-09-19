@@ -1,6 +1,9 @@
 include:
 - oJobTest.yaml
 jobs:
+- name: MiniA Wiki V2::SourceIdentityFallback
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testSourceIdentityFallback
 - name: MiniA Wiki V2::CrossWikiGraphExplicitTraversal
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testCrossWikiGraphExplicitTraversal
@@ -163,6 +166,7 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testFederatedRetryBudget
 todo:
+- MiniA Wiki V2::SourceIdentityFallback
 - MiniA Wiki V2::CrossWikiGraphExplicitTraversal
 - MiniA Wiki V2::CrossWikiGraphSharedJoins
 - MiniA Wiki V2::CrossWikiGraphSourceNamespaces

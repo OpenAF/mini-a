@@ -4486,7 +4486,7 @@ MiniAWikiManager.prototype._movePages = function(from, to, options) {
   var candidates = this.list(""), linkDiscovery = "legacy-full-scan"
   if (this._servingMoveSnapshot && isMap(this._servingMoveSnapshot.catalog.moveReverse)) {
     var servingCatalog = this._servingMoveSnapshot.catalog, incoming = servingCatalog.moveReverse[fromPath] || [], pending = this._retrievalV2._pending()
-    candidates = this._safeListPages("").filter(function(p) { return incoming.indexOf(p) >= 0 || !servingCatalog.pages[p] || !self._retrievalV2._active(servingCatalog.pages[p], pending) })
+    candidates = this._safeListPages("").filter(function(p) { return incoming.indexOf(p) >= 0 || !servingCatalog.pages[p] || !self._retrievalV2._active(servingCatalog.pages[p], pending, __, __, __, __, self._servingMoveSnapshot) })
     linkDiscovery = "derived-with-changed-page-validation"
   }
   candidates.forEach(function(p) {

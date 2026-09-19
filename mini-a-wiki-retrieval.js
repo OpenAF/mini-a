@@ -964,7 +964,7 @@ MiniAWikiRetrievalV2.prototype._backendCall = function(method, path, deadline, u
     }
   }
 }
-MiniAWikiRetrievalV2.prototype._active = function(page, pending, permissions, deadline, used, canonicalRoot) {
+MiniAWikiRetrievalV2.prototype._active = function(page, pending, permissions, deadline, used, canonicalRoot, snapshot) {
   if (!page || this.closed || pending._all || pending[page.path] || this.manager._isSearchExcludedPath(page.path)) return false
   if (this.manager._archiveRoot) return true
   // A static HTTP wiki is served solely from the validated pinned bundle; it
@@ -984,12 +984,56 @@ MiniAWikiRetrievalV2.prototype._active = function(page, pending, permissions, de
     return permissions[page.path]
   }
   var stamp = this._stamp(page.path, canonicalRoot)
-  return !!stamp && !!page.stamp && stamp.modified === page.stamp.modified && stamp.size === page.stamp.size && stamp.fileKey === page.stamp.fileKey
+  if (!stamp || !page.stamp) return false
+  if (stamp.modified === page.stamp.modified && stamp.size === page.stamp.size && stamp.fileKey === page.stamp.fileKey) return true
+  return this._verifySource(page, stamp, snapshot, canonicalRoot, deadline, used)
+}
+// A remount or copy can change file identity without changing authoritative bytes.
+// Keep proofs in the bounded process cache; never rewrite a pinned generation.
+MiniAWikiRetrievalV2.prototype._verifySource = function(page, stamp, snapshot, canonicalRoot, deadline, used) {
+  var self = this, stream, verified = false, cacheHit = false, readStarted = false, bytes = 0, started = Number(java.lang.System.nanoTime())
+  var expired = function() { return isNumber(deadline) && Date.now() >= deadline }
+  if (!snapshot || expired()) return false
+  try {
+    if (!page.locator) page = this.lookupPage(snapshot, page.path)
+    if (!page) return false
+    var record = this.lookupBlockReference(snapshot, page.locator)
+    if (!record || !isString(record.checksum) || !/^[a-f0-9]{64}$/.test(record.checksum) || stamp.size !== record.bytes) return false
+    var key = "source-proof:" + stringify([snapshot.generation,page.path,page.revision,record.checksum,stamp],__,"")
+    cacheHit = this._guard(function() { return self.cache[key] === true }, deadline)
+    if (!cacheHit) {
+      if (expired()) return false
+      readStarted = true
+      stream = io.readFileStream(String(new java.io.File(this.manager._backend.root, page.path)))
+      var checksum = sha256(stream)
+      bytes = stamp.size
+      stream.close(); stream = __
+      if (checksum !== record.checksum || expired()) return false
+    }
+    var after = this._stamp(page.path, canonicalRoot), pending = this._pending()
+    if (!after || stringify(after,__,"") !== stringify(stamp,__,"") || this.closed || pending._all || pending[page.path] || this.manager._isSearchExcludedPath(page.path) || expired()) return false
+    if (!cacheHit) this._guard(function() { self._cachePut(key,true,MiniAWikiRetrievalV2.bytes(key) + 8) },deadline)
+    verified = true
+    return true
+  } catch(e) { return false }
+  finally {
+    if (stream) try { stream.close() } catch(closeError) {}
+    var elapsed = Math.max(0,(Number(java.lang.System.nanoTime())-started)/1000000)
+    this.metrics.sourceVerificationReads = Number(this.metrics.sourceVerificationReads || 0) + (readStarted ? 1 : 0)
+    this.metrics.sourceVerificationBytes = Number(this.metrics.sourceVerificationBytes || 0) + bytes
+    this.metrics.sourceVerificationMillis = Number(this.metrics.sourceVerificationMillis || 0) + elapsed
+    this.metrics.sourceVerificationCacheHits = Number(this.metrics.sourceVerificationCacheHits || 0) + (cacheHit ? 1 : 0)
+    if (isMap(used)) {
+      used.sourceVerificationBytes = Number(used.sourceVerificationBytes || 0) + bytes
+      used.sourceVerificationMillis = Number(used.sourceVerificationMillis || 0) + elapsed
+    }
+    this.manager._auditRetrieval("source-verification",page ? page.path : "",page ? page.path : "",verified,bytes,{operation:"read",protocol:"file",verification:"sha256",cacheHit:cacheHit,totalMillis:elapsed})
+  }
 }
 MiniAWikiRetrievalV2.prototype._body = function(snapshot, page, deadline, used) {
   var key = snapshot.generation + ":" + page.revision, self = this
   if (isNumber(deadline) && deadline <= Date.now()) throw new Error("request-deadline-exhausted")
-  if (!self._active(page, self._pending(), __, deadline, used)) throw new Error("stale-or-revoked-evidence")
+  if (!self._active(page, self._pending(), __, deadline, used, __, snapshot)) throw new Error("stale-or-revoked-evidence")
   if (self.manager._archiveRoot || ["fs", "s3fs"].indexOf(self.manager._backendType) < 0) {
     if (isNumber(deadline) && deadline <= Date.now()) throw new Error("request-deadline-exhausted")
     var current = self._backendCall("read", page.path, deadline, used)
@@ -1631,7 +1675,7 @@ MiniAWikiRetrievalV2.prototype._query = function(snapshot, query, limit, expansi
             checkDeadline()
             var seed = this.manager._luceneStoredDoc(snapshot.searcher,seeds.scoreDocs[si].doc), seedRecord=this.lookupPassage(snapshot,String(seed.get("id"))), seedPage = this.lookupPage(snapshot,String(seed.get("page")))
             if(!seedRecord || seedRecord.path!==String(seed.get("page")) || seedRecord.textHash!==sha1(String(seed.get("text")||"")))throw new Error("generation-index-text-mismatch")
-            if (!this._active(seedPage,request ? request.pending : this._pending(),request && request.permissions,request && request.deadline,request && request.used) || !this._constraints(seedPage,request ? request.options : {})) continue
+            if (!this._active(seedPage,request ? request.pending : this._pending(),request && request.permissions,request && request.deadline,request && request.used, __, snapshot) || !this._constraints(seedPage,request ? request.options : {})) continue
             // Prose is not a stored field. Use bounded stored passage text; never a source chunk or full page.
             feedbackBuilder.add(mlt.like("prose",new java.io.StringReader(String(seed.get("text") || ""))),L.search.BooleanClause.Occur.SHOULD); eligible++
           }
@@ -1675,7 +1719,7 @@ MiniAWikiRetrievalV2.prototype._graphHit = function(snapshot, path, query) {
 MiniAWikiRetrievalV2.prototype._graphActive = function(hit, deadline, used) {
   var self = this
   if (hit.graphRoutes && !hit.graphRoutes.every(function(route) {var resolved=route.owner._resolveMountPath(route.path);return !!resolved && !!resolved.mount && resolved.mount.manager === route.manager})) return false
-  return !hit.graphSupports || hit.graphSupports.every(function(support) {return self._authorised(support) && support.engine._active(support.page,support.engine._pending(),__,deadline,used)})
+  return !hit.graphSupports || hit.graphSupports.every(function(support) {return self._authorised(support) && support.engine._active(support.page,support.engine._pending(),__,deadline,used,__,support.snapshot)})
 }
 
 MiniAWikiRetrievalV2.prototype._rank = function(hit, query) {
@@ -1773,11 +1817,11 @@ MiniAWikiRetrievalV2.prototype._expandGraph = function(candidates, contexts, opt
     if (!page || !target.engine._constraints(page,opts)) return
     var supports=[], valid=entry.supports.every(function(support) {
       var context=support.context, source=context.engine.lookupPage(context.pin,support.path)
-      if (!authorised(context,support.path) || !source || !support.revision || source.revision !== support.revision || !context.engine._active(source,context.pending,context.permissions,deadline,used) || !context.engine._constraints(source,opts)) return false
+      if (!authorised(context,support.path) || !source || !support.revision || source.revision !== support.revision || !context.engine._active(source,context.pending,context.permissions,deadline,used,__,context.pin) || !context.engine._constraints(source,opts)) return false
       supports.push({engine:context.engine,snapshot:context.pin,wiki:context.target.name,path:publicPath(context,support.path),page:source});return true
     })
     if (!valid) {partial(origin,"stale-graph-evidence");return}
-    if (!target.engine._active(page,target.pending,target.permissions,deadline,used)) {partial(target,"stale-or-pending-evidence");return}
+    if (!target.engine._active(page,target.pending,target.permissions,deadline,used,__,target.pin)) {partial(target,"stale-or-pending-evidence");return}
     used.queries++
     var hit=measure("search",function(){return target.engine._graphHit(target.pin,entry.path,opts.query)})
     if (!hit) return
@@ -1910,7 +1954,7 @@ MiniAWikiRetrievalV2.prototype._collect = function(query, options, materialize, 
           if (new Date().getTime() >= deadline) { source.status = "partial"; source.reason = "inspection-budget"; stopReasons.push("inspection-budget"); return }
           used.materializedPassages++
           hit.page = engine.lookupPage(pin,hit.record.path)
-          if (!engine._active(hit.page, pending, permissions, deadline, used)) { source.status = "partial"; source.reason = "stale-or-pending-evidence"; stopReasons.push("stale-or-pending-evidence"); return }
+          if (!engine._active(hit.page, pending, permissions, deadline, used, __, pin)) { source.status = "partial"; source.reason = "stale-or-pending-evidence"; stopReasons.push("stale-or-pending-evidence"); return }
           if (!engine._constraints(hit.page, opts)) return
           hit.expansions = found.expansions; hit.engine = engine; hit.snapshot = pin; hit.wiki = target.name; hit.path = target.name === "primary" ? hit.record.path : "@" + target.name + "/" + hit.record.path
           if (stages.indexOf("rank") < 0) stages.push("rank")
@@ -1954,7 +1998,7 @@ MiniAWikiRetrievalV2.prototype.search = function(query, options) {
       // Permission can change after candidate discovery. Recheck immediately
       // before indexed title/description and passage metadata are disclosed.
       var stillActive = false
-      try { stillActive = self._graphActive(hit,deadline,out.budget.used) && hit.engine._active(hit.page, hit.engine._pending(), __, deadline, out.budget.used) } catch(permissionFailure) {}
+      try { stillActive = self._graphActive(hit,deadline,out.budget.used) && hit.engine._active(hit.page, hit.engine._pending(), __, deadline, out.budget.used, __, hit.snapshot) } catch(permissionFailure) {}
       if (!stillActive) {
         out.outcome = "partial"
         if (out.stopReasons.indexOf("stale-or-revoked-evidence") < 0) out.stopReasons.push("stale-or-revoked-evidence")
@@ -2056,7 +2100,7 @@ MiniAWikiRetrievalV2.prototype.retrieve = function(query, options, present) {
         if (!inspectedBodies[bodyKey] && out.budget.used.inspected >= out.budget.limits.maxInspected) { stop.push("inspection-budget"); return }
         if (!inspectedBodies[bodyKey]) { inspectedBodies[bodyKey] = true; out.budget.used.inspected++ }
         try {
-          if (!self._graphActive(hit,deadline,out.budget.used) || !hit.engine._active(hit.page, hit.engine._pending(), __, deadline, out.budget.used)) throw new Error("stale-or-revoked-evidence")
+          if (!self._graphActive(hit,deadline,out.budget.used) || !hit.engine._active(hit.page, hit.engine._pending(), __, deadline, out.budget.used, __, hit.snapshot)) throw new Error("stale-or-revoked-evidence")
           if (!hit.engine.manager._archiveRoot && ["fs","s3fs","http"].indexOf(hit.engine.manager._backendType) >= 0 && r.textHash && sha1(hit.text) === r.textHash) {
             // The immutable generation validated these stored fields and positions.
             // Current source stat/access was checked above; no full page is needed.
@@ -2262,9 +2306,9 @@ MiniAWikiRetrievalV2.prototype.open = function(path, options) {
     snapshot = this.acquire(); var page = this.lookupPage(snapshot,path)
     if (!page) return { path: path, error: "page-not-found" }
     if (page.path !== path) throw new Error("invalid-page-record")
-    if (!this._active(page, this._pending())) return { path: path, error: "stale-evidence", restart: true }
+    if (!this._active(page, this._pending(), __, __, __, __, snapshot)) return { path: path, error: "stale-evidence", restart: true }
     this._validatePageMetadata(snapshot,page)
-    if (!this._active(page, this._pending())) return { path: path, error: "stale-evidence", restart: true }
+    if (!this._active(page, this._pending(), __, __, __, __, snapshot)) return { path: path, error: "stale-evidence", restart: true }
     var limit = Math.min(100, Math.max(1, Number(options && options.maxHeadings) || 40))
     return { path: path, ref: this.manager._agenticRef(path), title: page.title, description: page.description, revision: page.revision, generation: snapshot.generation, frontmatter: clone(page.metadata), headings: clone(page.outline.slice(0, limit)), headingsTruncated: page.outline.length > limit, links: page.links.map(function(l) { return l.resolved }), size: page.stamp.size }
   } catch(e) { return { path: path, error: __miniAErrMsg(e) } }
@@ -2277,7 +2321,7 @@ MiniAWikiRetrievalV2.prototype.backlinks = function(path) {
     var root = ["fs", "s3fs"].indexOf(this.manager._backendType) >= 0 && !this.manager._archiveRoot ? String(new java.io.File(this.manager._backend.root).getCanonicalPath()) : __
     var links = this.lookupBacklinks(snapshot,path).filter(function(link) {
       if (!isMap(link.stamp) || !isString(link.path) || !isArray(link.links)) throw new Error("reindex-required")
-      return self._active({path:link.path,stamp:link.stamp},pending,__,__,__,root)
+      return self._active({path:link.path,stamp:link.stamp},pending,__,__,__,root,snapshot)
     })
     return { target: path, count: links.length, backlinks: links.map(function(link) { return {path:link.path,title:link.title,links:clone(link.links)} }), generation: snapshot.generation }
   } catch(e) { return { target: path, error: __miniAErrMsg(e), backlinks: [], count: 0 } }

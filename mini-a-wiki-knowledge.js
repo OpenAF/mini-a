@@ -203,7 +203,7 @@ MiniAWikiManager.prototype.knowledgeRecordDerivative = function(kind, id, record
       if (!isMap(ref) || !isString(ref.page) || ref.page.startsWith("@") || ref.wiki && ref.wiki !== "primary") throw new Error("nonlocal-support")
       if (ref.wikiId !== snapshot.catalog.wikiId) throw new Error("nonlocal-support")
       var path = self._normalizeRetrievalPath(ref.page), page = snapshot.catalog.pages[path], passage = snapshot.catalog.passages[ref.passageId]
-      if (!page || !passage || passage.path !== path || page.revision !== ref.revision || !engine._constraints(page, {}) || !engine._active(page, pending)) throw new Error("stale-support")
+      if (!page || !passage || passage.path !== path || page.revision !== ref.revision || !engine._constraints(page, {}) || !engine._active(page, pending, __, __, __, __, snapshot)) throw new Error("stale-support")
       if (!isNumber(ref.charStart) || !isNumber(ref.charEnd) || !isFinite(ref.charStart) || !isFinite(ref.charEnd) || Math.floor(ref.charStart) !== ref.charStart || Math.floor(ref.charEnd) !== ref.charEnd || ref.charStart < passage.charStart || ref.charEnd > passage.charEnd || ref.charEnd <= ref.charStart) throw new Error("invalid-support-range")
       var raw = engine._body(snapshot, page), key = path + ":" + ref.charStart + ":" + ref.charEnd
       if (seen[key]) return
@@ -248,7 +248,7 @@ MiniAWikiManager.prototype._knowledgeDerivativeStatus = function(record, snapsho
     var ref = record.passageSupports[i]
     if (!isMap(ref) || !isString(ref.page) || !isString(ref.passageId) || !/^[a-f0-9]{40}$/.test(String(ref.textHash)) || !isNumber(ref.charStart) || !isNumber(ref.charEnd) || !isFinite(ref.charStart) || !isFinite(ref.charEnd) || Math.floor(ref.charStart) !== ref.charStart || Math.floor(ref.charEnd) !== ref.charEnd) return { active: false, reason: "invalid-provenance" }
     var page = snapshot.catalog.pages[ref.page], passage = snapshot.catalog.passages[ref.passageId]
-    if (!page || ref.wikiId !== snapshot.catalog.wikiId || ref.pageId !== page.pageId || ref.revision !== page.revision || !passage || passage.path !== ref.page || !engine._constraints(page, {}) || !engine._active(page, pending)) return { active: false, reason: "stale-support", page: ref.page }
+    if (!page || ref.wikiId !== snapshot.catalog.wikiId || ref.pageId !== page.pageId || ref.revision !== page.revision || !passage || passage.path !== ref.page || !engine._constraints(page, {}) || !engine._active(page, pending, __, __, __, __, snapshot)) return { active: false, reason: "stale-support", page: ref.page }
     if (ref.charStart < passage.charStart || ref.charEnd > passage.charEnd || ref.charEnd <= ref.charStart) return { active: false, reason: "invalid-provenance" }
   }
   for (var j = 0; j < record.passageSupports.length; j++) {
@@ -404,7 +404,7 @@ MiniAWikiManager.prototype.knowledgeRepairStructure = function(options) {
     snapshot = engine.acquire()
     var page = snapshot.catalog.pages[path]
     if (!page || page.revision !== opts.revision) throw new Error("stale-repair-proposal")
-    if (!engine._active(page,engine._pending())) throw new Error("stale-or-pending-evidence")
+    if (!engine._active(page,engine._pending(),__,__,__,__,snapshot)) throw new Error("stale-or-pending-evidence")
     var raw = this._backend.read(path)
     if (!isString(raw) || sha1(raw) !== opts.revision) throw new Error("stale-repair-proposal")
     var parsed = global.MiniAWikiRetrievalV2.parse(path,raw,engine.config.passageChars,true)
