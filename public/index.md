@@ -5888,7 +5888,7 @@
                 // Only update content if it has actually changed to prevent chart flickering
                 const rawContent = data.content || '';
                 const contentForDisplay = ensurePromptVisibleUntilAcknowledged(rawContent, lastSubmittedPrompt, promptAcknowledged);
-                if (contentForDisplay !== lastRawContent) {
+                if (data.status !== 'finished' && contentForDisplay !== lastRawContent) {
                     lastRawContent = contentForDisplay;
                     if (streamActive) {
                         // During streaming, re-render with the latest polled event log plus any
@@ -5915,8 +5915,9 @@
                 }
 
                 if (data.status === 'finished') {
-                    const finalStreamChunk = streamBuffer || '';
-                    const finalContent = mergeFinalContentWithStream(contentForDisplay, finalStreamChunk);
+                    // Completed server content is authoritative. Stream previews can
+                    // omit or alter passages and must not be appended or saved here.
+                    const finalContent = contentForDisplay;
                     conversationFinished = true;
                     setPlanningMode(false);
                     stopStream();
