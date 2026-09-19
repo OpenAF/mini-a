@@ -1,4 +1,9 @@
 jobs:
+- name: MiniA Core Tests::SubtaskAmbiguousSubmissionDoesNotRetry
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskAmbiguousSubmissionDoesNotRetry
+
 - name: MiniA Core Tests::ChildDiagnosticsScope
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -1085,6 +1090,7 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Core Tests::SubtaskAmbiguousSubmissionDoesNotRetry
 - MiniA Core Tests::ChildDiagnosticsScope
 - MiniA Core Tests::CurrentConversationStatus
 - MiniA Core Tests::ConsoleChartMarkdown

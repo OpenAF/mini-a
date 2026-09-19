@@ -166,7 +166,7 @@ Set `showdelegate=true` to display child agent events as separate console lines 
 - **Config Inheritance**: Children inherit model config (`OAF_MODEL`, `OAF_LC_MODEL`) but can override specific parameters
 - **Concurrency Control**: Limited by `maxconcurrent` (default 4); set `subtaskssequential=true` for one-at-a-time execution
 - **Depth Tracking**: Maximum nesting depth enforced (default 3)
-- **Automatic Retry**: Failed subtasks retry up to `maxAttempts` times with knowledge of previous failures
+- **Automatic Retry**: Failed subtasks run up to `maxAttempts` total attempts with knowledge of previous failures. If a remote submission loses its response or returns no task ID, the outcome is unknown and Mini-A does not resubmit automatically: the worker may already be executing the goal. Failures before submission remain retryable; cancellation is attempted only when the current attempt's remote task ID is known.
 - **Timeout Enforcement**: Local subtasks time out after inactivity unless `hardTimeoutMs` is set. Worker tasks also enforce their submitted total execution limit from the moment execution starts.
 - **Event Forwarding**: Child interaction events forwarded to parent with `[subtask:id]` prefix
 - **Auto-delegation guard**: Children never trigger auto-delegation themselves, preventing cascades

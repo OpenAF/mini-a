@@ -1209,6 +1209,11 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
   var parent = this
 
   subtask._executionPromise = $doV(function() {
+    var submissionAttempted = false
+    // Worker identity belongs to one attempt. A retry must never poll or
+    // cancel the previous attempt if selection or submission fails.
+    subtask.workerUrl = __
+    subtask.remoteTaskId = __
     try {
       var mergedArgs = parent._buildChildArgs(subtask)
       var workerUrl = parent._nextWorkerForSubtask(subtask, mergedArgs)
@@ -1232,6 +1237,7 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
       }
       var taskResponse
       if (parent.useA2A) {
+        submissionAttempted = true
         taskResponse = parent._remoteRequest(workerUrl, "/message:send", {
           message: {
             messageId: "mini-a-" + subtask.id,
@@ -1264,6 +1270,7 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
         if (subtask.fork === true && isString(mergedArgs.state) && mergedArgs.state.length > 0) {
           legacyPayload.forkState = mergedArgs.state
         }
+        submissionAttempted = true
         taskResponse = parent._remoteRequest(workerUrl, "/task", legacyPayload)
       }
 
@@ -1421,7 +1428,9 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
     } catch (e) {
       if (subtask.status === "running") {
         var error = isDef(e) && isString(e.message) ? e.message : stringify(e, __, "")
-        if (isString(subtask.remoteTaskId) && subtask.remoteTaskId.length > 0) parent._failRemoteOutcomeUnknown(subtask, prefix, error)
+        // A failed response does not prove the worker rejected the submission.
+        // Without an idempotency contract, replay could duplicate side effects.
+        if (submissionAttempted) parent._failRemoteOutcomeUnknown(subtask, prefix, error)
         else parent._failOrRetrySubtask(subtask, prefix, error)
       }
     }

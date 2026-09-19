@@ -2368,6 +2368,39 @@
     } finally { manager.destroy() }
   }
 
+  exports.testSubtaskAmbiguousSubmissionDoesNotRetry = function() {
+    ;[false, true].forEach(function(useA2A) {
+      ;["lost-first-response", "lost-response", "missing-id", "before-submission"].forEach(function(scenario) {
+        var manager = new SubtaskManager({}, {})
+        manager.remoteDelegation = true
+        manager.useA2A = useA2A
+        manager._processQueue = function() {}
+        manager._buildChildArgs = function() { return {} }
+        manager._nextWorkerForSubtask = function() { return scenario === "before-submission" ? __ : "http://worker" }
+        var calls = []
+        manager._remoteRequest = function(workerUrl, path) {
+          calls.push(path)
+          if (scenario.indexOf("lost-") === 0) throw new Error("Connection closed after the worker accepted the task")
+          return {}
+        }
+        var subtask = { id: "submission-test", goal: "Run a side effect", status: "running", startedAt: Date.now(), deadlineMs: 1000,
+          attempt: 2, maxAttempts: 3, metadata: {}, workerUrl: "http://old-worker", remoteTaskId: scenario === "lost-first-response" ? __ : "previous-attempt" }
+        manager.subtasks[subtask.id] = subtask
+        manager.runningCount = manager.metrics.running = 1
+        try {
+          manager._startRemoteSubtask(subtask, "test")
+          $doWait(subtask._executionPromise)
+          var ambiguous = scenario !== "before-submission"
+          ow.test.assert(subtask.status, ambiguous ? "failed" : "pending", "Only failures before submission may be retried")
+          ow.test.assert(manager.metrics.remoteOutcomeUnknown, ambiguous ? 1 : 0, "Ambiguous acceptance must be reported even without a task ID")
+          ow.test.assert(manager.metrics.retried, ambiguous ? 0 : 1, "Lost responses must not cause duplicate execution")
+          ow.test.assert(calls.length, ambiguous ? 1 : 0, "A previous attempt's remote ID must never be cancelled or reused")
+          ow.test.assert(manager.runningCount, 0, "Every failed attempt must release its running slot")
+        } finally { manager.destroy() }
+      })
+    })
+  }
+
   exports.testSubtaskManagerEnforcesWorkerTotalTimeout = function() {
     var manager = new SubtaskManager({}, { defaultStallTimeoutMs: 300000 })
     var now = new Date().getTime()

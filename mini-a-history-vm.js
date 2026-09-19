@@ -2288,9 +2288,11 @@ MiniAHistoryVM.prototype.rewind = function(sequence) {
 }
 
 MiniAHistoryVM.prototype.deleteOwnedStore = function() {
-  if (this.storePath.length === 0 || !io.fileExists(this.storePath)) return true
+  if (this.storePath.length === 0) return true
   var remove = function(file) {
-    if (file.isDirectory()) {
+    var symbolicLink = java.nio.file.Files.isSymbolicLink(file.toPath())
+    if (!file.exists() && !symbolicLink) return
+    if (!symbolicLink && file.isDirectory()) {
       var children = file.listFiles()
       for (var i = 0; isDef(children) && i < children.length; i++) remove(children[i])
     }
@@ -2359,8 +2361,9 @@ MiniAHistoryVM.restorePayload = function(path, payload) {
     java.nio.file.Files.move(java.nio.file.Paths.get(from), java.nio.file.Paths.get(to), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
   }
   var remove = function(file) {
-    if (!file.exists()) return
-    if (file.isDirectory()) {
+    var symbolicLink = java.nio.file.Files.isSymbolicLink(file.toPath())
+    if (!file.exists() && !symbolicLink) return
+    if (!symbolicLink && file.isDirectory()) {
       var children = file.listFiles()
       for (var i = 0; isDef(children) && i < children.length; i++) remove(children[i])
     }

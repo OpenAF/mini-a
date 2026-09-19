@@ -3,12 +3,40 @@
 
   var removeTree = function(path) {
     var file = new java.io.File(path)
-    if (!file.exists()) return
-    if (file.isDirectory()) {
+    var symbolicLink = java.nio.file.Files.isSymbolicLink(file.toPath())
+    if (!file.exists() && !symbolicLink) return
+    if (!symbolicLink && file.isDirectory()) {
       var children = file.listFiles()
       for (var i = 0; isDef(children) && i < children.length; i++) removeTree(String(children[i].getAbsolutePath()))
     }
     file.delete()
+  }
+
+  exports.testCleanupDoesNotFollowSymbolicLinks = function() {
+    withVm(function(vm, conversation) {
+      var target = conversation + ".outside"
+      io.mkdir(target)
+      var sentinel = target + "/keep.txt"
+      io.writeFileString(sentinel, "unrelated data")
+      var link = vm.storePath + "/linked-directory"
+      java.nio.file.Files.createSymbolicLink(java.nio.file.Paths.get(link), java.nio.file.Paths.get(target))
+      vm.deleteOwnedStore()
+      ow.test.assert(io.fileExists(sentinel), true, "Clearing history must not delete files outside the sidecar through a symlink")
+
+      io.mkdir(vm.storePath)
+      java.nio.file.Files.createSymbolicLink(java.nio.file.Paths.get(link), java.nio.file.Paths.get(target))
+      java.nio.file.Files.createSymbolicLink(java.nio.file.Paths.get(vm.storePath + "/broken-link"), java.nio.file.Paths.get(target + "/missing"))
+      MiniAHistoryVM.restorePayload(conversation, { c: [] })
+      ow.test.assert(io.fileExists(sentinel), true, "Restore backup cleanup must not follow symlinks")
+      var leftovers = new java.io.File(conversation).getParentFile().listFiles()
+      for (var i = 0; i < leftovers.length; i++) {
+        ow.test.assert(String(leftovers[i].getName()).indexOf(".restore-") < 0, true, "Backup cleanup must also unlink dangling symlinks")
+      }
+
+      java.nio.file.Files.createSymbolicLink(java.nio.file.Paths.get(vm.storePath), java.nio.file.Paths.get(target))
+      vm.deleteOwnedStore()
+      ow.test.assert(io.fileExists(sentinel), true, "A symlink at the sidecar root must be unlinked without traversing its target")
+    })
   }
 
   var withVm = function(fn, options) {

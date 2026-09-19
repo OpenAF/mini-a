@@ -2,6 +2,11 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA History VM Tests::CleanupSymbolicLinks
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testCleanupDoesNotFollowSymbolicLinks
+
 - name: MiniA History VM Tests::Init
   exec: true
 
@@ -206,6 +211,7 @@ jobs:
   exec: args.func = require("tests/historyVM.js").testRecoverBranchWithoutCheckpoint
 
 todo:
+- MiniA History VM Tests::CleanupSymbolicLinks
 - MiniA History VM Tests::AppendDetachesCallerData
 - MiniA History VM Tests::ResumeUnterminatedJournal
 - MiniA History VM Tests::RecoverBranchWithoutCheckpoint
