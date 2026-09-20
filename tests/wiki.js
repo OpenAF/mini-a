@@ -1007,6 +1007,29 @@
         }
         primary = new MiniAWikiManager({ backend: "fs", root: primaryDir, access: "ro", wikiretrievalv2: v2 })
         ow.test.assert(primary.attach("docs", { backend: "fs", root: mountedDir }).ok, true, "mount attaches")
+        ow.test.assert(primary.tree("wiki:@docs/", 2).path, "@docs/", "tree accepts mounted wiki references")
+        ow.test.assert(primary.browse("wiki:@docs/").path, "@docs/", "browse accepts mounted wiki references")
+        ow.test.assert(primary.browse("wiki:").path, primary.browse("").path, "root reference resolves to primary")
+        var scopedContext = primary.context({ path: "wiki:@docs/" })
+        ow.test.assert(scopedContext.wiki, "docs", "context path selects mounted wiki")
+        ow.test.assert(scopedContext.retrieval.wiki, "docs", "retrieval status identifies selected wiki")
+        ow.test.assert(primary.context({ wiki: "docs" }).pages, scopedContext.pages, "explicit context selector agrees")
+        ow.test.assert(primary.context().retrieval.wiki, "primary", "default status is explicitly primary-only")
+        ow.test.assert(primary.context({wiki:"missing"}).error, "unknown-wiki", "unknown context mount does not fall back")
+        if (v2) {
+          ow.test.assert(primary.context().retrieval.search, "v2-build-required", "primary fixture has no index")
+          ow.test.assert(scopedContext.retrieval.search, "passage-v2", "mounted index is usable despite missing primary index")
+        }
+        var contextTool = __miniAMcpWikiCreateTool({root:primaryDir,access:"ro",agenticRetrieval:true}, primary)
+        ow.test.assert(contextTool.wiki({operation:"context",wiki:"docs"}).retrieval.wiki, "docs", "utility context forwards selector")
+        var savedContextTool = global.__wikiTool
+        try {
+          global.__wikiTool = contextTool
+          ;["mcps/mcp-wiki.yaml", "mcps/mcp-wiki-ops.yaml"].forEach(function(file) {
+            var job = io.readFileYAML(file).jobs.filter(function(j) { return j.name === "Wiki context overview" })[0]
+            ow.test.assert(new Function("args", job.exec)({path:"wiki:@docs/"}).retrieval.wiki, "docs", "MCP context job forwards mounted path")
+          })
+        } finally { global.__wikiTool = savedContextTool }
         var tree = primary.tree("@docs/", 2), guides = tree.sections[0]
         ow.test.assert(tree.path, "@docs/", "mounted root retains namespace")
         ow.test.assert(tree.prefix, "@docs/", "tree prefix retains namespace")

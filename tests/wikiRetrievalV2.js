@@ -2,6 +2,28 @@
   load("mini-a-common.js"); load("mini-a-wiki.js")
   var temporary = function() { var p = java.io.File.createTempFile("wiki-v2-test-", "").getCanonicalPath(); io.rm(p); io.mkdir(p); return p }
   var make = function(root, extra) { return new MiniAWikiManager(merge({ backend: "fs", root: root, access: "rw", wikiretrievalv2: true, wikiretrievalconfig: { passageChars: 256 } }, extra || {}), function() {}) }
+  exports.testSearchOutputBudgetPreservesCandidates = function() {
+    var root = temporary(), wm
+    try {
+      wm = make(root)
+      for (var i = 0; i < 20; i++) io.writeFileString(root + "/page-" + i + ".md", "---\ntitle: Budget needle " + i + "\ndescription: " + new Array(70).join("details ") + "\n---\n# Budget needle\nsearchbudgetneedle " + i)
+      ow.test.assert(wm.reindex().ok, true, "budget fixture builds")
+      var wide = wm.agenticSearch("searchbudgetneedle", { limit: 20, maxBytes: 64000 })
+      var bounded = wm.agenticSearch("searchbudgetneedle", { limit: 20, maxBytes: 16000 })
+      ow.test.assert(wide.results.length, 20, "fixture fills requested result set")
+      ow.test.assert(bounded.ok, true, "oversized search retains successful response")
+      ow.test.assert(bounded.results.length > 0 && bounded.results.length < wide.results.length, true, "budget keeps a nonempty ranked subset")
+      ow.test.assert(bounded.outcome, "partial", "clipped results are explicit")
+      ow.test.assert(bounded.stopReasons.indexOf("output-budget") >= 0, true, "output truncation has a reason")
+      ow.test.assert(MiniAWikiRetrievalV2.bytes(stringify(bounded, __, "")) <= 16000, true, "entire serialized response fits")
+      ow.test.assert(bounded.budget.used.bytes, MiniAWikiRetrievalV2.bytes(stringify(bounded, __, "")), "byte accounting matches wire result")
+      bounded.results.forEach(function(hit, index) {
+        ow.test.assert(hit.path, wide.results[index].path, "ranking preserved")
+        ow.test.assert(wm.agenticRead(hit.ref, {maxChars:100}).error, __, "retained reference remains readable")
+      })
+      ow.test.assert(wm.agenticSearch("searchbudgetneedle", { maxBytes: 1 }).error, "output-budget-too-small", "impossible envelope still fails explicitly")
+    } finally { if (wm) wm.close(); io.rm(root) }
+  }
   // Schema-3 integrity fixtures alter only the routed operations that own the
   // records under test; no flattened catalogue is recreated.
   var patchCatalogue = function(engine, pin, altered) {

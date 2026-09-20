@@ -113,7 +113,7 @@ all.
 
 | Op | Functionality | Equivalent to / overlaps |
 | --- | --- | --- |
-| `context` | Overview: page count, sections, mounts, recent activity | Superset of `mounts` (also lists mounts, with less detail) |
+| `context` | Overview: page count, sections, mounts, recent activity, scoped retrieval status | Select one `wiki` or mounted `path`; defaults to primary. `retrieval.wiki` identifies the status owner. |
 | `list [prefix] [--meta]` | List pages; `--meta` adds title/description per page | |
 | `tree` | Hierarchical view with per-section index status | Coarser-grained view of the same structure as `browse` |
 | `browse` | One level of a path: child sections, direct pages, suggested next reads | |

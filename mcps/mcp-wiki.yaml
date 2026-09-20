@@ -181,7 +181,9 @@ todo:
         description: "[ORIENTATION] Get a compact overview of {{label}}, including available wiki names for the wiki selector. Call once before searching when the relevant knowledge source is unknown."
         inputSchema:
           type      : object
-          properties: {}
+          properties:
+            wiki: { type: string, description: "One wiki name: primary or a mount name. Omitted means primary; retrieval status applies only to that wiki." }
+            path: { type: string, description: "Alternatively select a mount with @name/ or wiki:@name/." }
         annotations:
           title         : context
           readOnlyHint  : true
@@ -538,7 +540,7 @@ jobs:
   check:
     in: {}
   exec : | #js
-    return global.__wikiTool.wiki({ operation: "context" })
+    return global.__wikiTool.wiki({ operation: "context", wiki: args.wiki, path: args.path })
 
 - name : Wiki list pages
   check:

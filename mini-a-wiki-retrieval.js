@@ -2026,8 +2026,18 @@ MiniAWikiRetrievalV2.prototype.search = function(query, options) {
   })
 }
 MiniAWikiRetrievalV2.prototype._packSearch = function(out) {
-  for (var account = 0; account < 4; account++) out.budget.used.bytes = MiniAWikiRetrievalV2.bytes(stringify(out, __, ""))
-  if (MiniAWikiRetrievalV2.bytes(stringify(out, __, "")) > out.budget.limits.maxBytes) return { ok: false, error: "output-budget-too-small" }
+  var size = function() {
+    for (var account = 0; account < 4; account++) out.budget.used.bytes = MiniAWikiRetrievalV2.bytes(stringify(out, __, ""))
+    return MiniAWikiRetrievalV2.bytes(stringify(out, __, ""))
+  }
+  // Preserve the highest-ranked complete candidates and their source diagnostics.
+  // A large result set must not turn a successful search into a total failure.
+  while (size() > out.budget.limits.maxBytes && out.results.length > 0) {
+    out.results.pop()
+    out.outcome = "partial"; out.truncated = true
+    if (out.stopReasons.indexOf("output-budget") < 0) out.stopReasons.push("output-budget")
+  }
+  if (size() > out.budget.limits.maxBytes) return { ok: false, error: "output-budget-too-small" }
   return out
 }
 // A bounded query-centred raw view. Offsets are relative UTF-16 positions; it

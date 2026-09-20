@@ -1597,7 +1597,7 @@ MiniUtilsTool.prototype.wiki = function(params) {
     if (op === "mv" || op === "rename") op = "move"
 
     if (op === "context") {
-      return wm.context()
+      return wm.context({ wiki: params.wiki, path: params.path })
     }
 
     if (op === "mounts") {

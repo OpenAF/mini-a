@@ -31,6 +31,26 @@ containing compatible serving artifacts plus the original source Markdown. Nativ
 ES storage can consume compatible locally hydrated artifacts; native ES/OpenSearch
 search remains separate. Missing/incompatible artifacts never trigger a migration.
 
+### Mounted wiki navigation and response budgets
+
+Use `wiki op=mounts` to discover names, then scope search to the intended wiki:
+
+```json
+{"op":"browse","path":"@oaf/"}
+{"op":"context","wiki":"oaf"}
+{"op":"search","wiki":"oaf","query":"OpenAF","limit":5}
+```
+
+`tree` and `browse` also accept `wiki:@oaf/` references. Context accepts a single
+`wiki` selector or a mounted `path`; its `retrieval.wiki` identifies the wiki whose
+status is reported. Without a selector, context describes `primary`, so a primary
+`v2-build-required` status does not imply that mounted indexes are missing.
+
+Search preserves the highest-ranked complete candidates that fit `maxBytes`
+(default 16000), returning `outcome: partial`, `truncated: true`, and an
+`output-budget` stop reason when candidates are omitted. Only a budget too small
+for the remaining response envelope returns `output-budget-too-small`.
+
 Direct configuration overrides environment defaults:
 `OAF_MINI_A_WIKI_RETRIEVAL_V2` and `OAF_MINI_A_WIKI_RETRIEVAL_CONFIG`.
 The flag, `wikiretrievalconfig` and `wikitelemetry` are propagated through agent,

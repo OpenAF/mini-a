@@ -4232,6 +4232,7 @@ MiniAWikiManager.prototype._qualifyMountedNavigation = function(result, name) {
 }
 
 MiniAWikiManager.prototype.tree = function(prefix, depth) {
+  prefix = this._agenticPath(prefix)
   var mountPrefix = isString(prefix) ? prefix.trim() : ""
   if (mountPrefix.startsWith("@")) {
     var mountResult = this._resolveMountPath(mountPrefix)
@@ -4327,6 +4328,7 @@ MiniAWikiManager.prototype.tree = function(prefix, depth) {
 }
 
 MiniAWikiManager.prototype.browse = function(path) {
+  path = this._agenticPath(path)
   // Mount routing: @name/... browse
   var trimmedPath = isString(path) ? path.trim() : ""
   if (trimmedPath.startsWith("@")) {
@@ -4935,6 +4937,22 @@ MiniAWikiManager.prototype.mounts = function() {
 
 MiniAWikiManager.prototype.context = function(options) {
   var opts        = isObject(options) ? options : {}
+  var scope = opts.wiki, contextPath = this._agenticPath(opts.path)
+  if (isUnDef(scope) && contextPath.charAt(0) === "@") scope = contextPath.substring(1).split("/")[0]
+  if (isDef(scope)) {
+    var selection = this.resolveWikiSelection(scope)
+    if (!selection.ok) return selection
+    if (selection.targets.length !== 1) return { ok: false, error: "context-requires-single-wiki" }
+    var target = selection.targets[0]
+    if (target.mounted) {
+      var localOptions = merge({}, opts)
+      delete localOptions.wiki; delete localOptions.path
+      var scoped = target.manager.context(localOptions)
+      scoped.wiki = target.name; scoped.retrieval.wiki = target.name
+      scoped.wikis[0].name = target.name; scoped.wikis[0].primary = false
+      return scoped
+    }
+  }
   var maxSections = isNumber(opts.maxSections) && opts.maxSections > 0 ? opts.maxSections : 10
   var maxRecent   = isNumber(opts.maxRecent)   && opts.maxRecent   > 0 ? opts.maxRecent   : 5
 
@@ -4999,6 +5017,7 @@ MiniAWikiManager.prototype.context = function(options) {
   }
 
   return {
+    wiki     : "primary",
     pages    : pages.length,
     sections : sections,
     mounts   : mountList,
@@ -5006,6 +5025,7 @@ MiniAWikiManager.prototype.context = function(options) {
     recent   : recent,
     access   : this._access,
     retrieval: {
+      wiki   : "primary",
       search : searchStatus,
       lexical: lexicalCapabilities,
       graph  : graphStatus,

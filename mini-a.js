@@ -393,7 +393,7 @@ Choose one action: {{{actionFieldValues}}}. Include only fields needed for that 
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if useMemorySearch}}
 • "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if useMemoryWrite}}
 • "memory_write" - Record durable knowledge that should survive across runs (params: {"kind":"preference|environment|procedure|pitfall|reference","value":"...","key":"optional stable key","tags":["optional"],"ttlDays":N}); use "preference" for what the user/team wants, "environment" for how this machine/repo/service is set up, "procedure" for a validated how-to, "pitfall" for something that failed and why, "reference" for a pointer to a doc/URL. Only write things worth remembering next time, not step-by-step narration.{{/if}}{{#if useWiki}}
-• "wiki" - Interact with the wiki knowledge base (params: {"op":"search|open|navigate|read|grep|related|context|list|tree|browse|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md or wiki:ref","query":"...","pattern":"...","section":"Heading Name","startLine":N,"endLine":N,"maxChars":N,"limit":N,"contextLines":N}); Retrieval strategy: SEARCH compact candidates, OPEN promising pages, NAVIGATE headings, then READ one section/range. Use GREP for exact identifiers/errors in a known page. Do not read every search result or whole long pages; use RELATED only when lexical evidence is insufficient.{{#if wikiRw}} Before write/move/delete read AGENTS.md for rules.{{/if}}{{#if wikiSourceUrl}} Results also carry a {{wikiSourceField}} URL, that page's canonical citation source; cite it when you use the page's content.{{/if}}{{/if}}{{#if useWikiGraph}}
+• "wiki" - Interact with the wiki knowledge base (params: {"op":"search|open|navigate|read|grep|related|context|list|tree|browse|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md or wiki:ref","query":"...","pattern":"...","section":"Heading Name","startLine":N,"endLine":N,"maxChars":N,"limit":N,"contextLines":N}); For mounted wikis use path="@name/" for browse/tree and wiki="name" for search/context; call mounts to discover names. Retrieval strategy: SEARCH compact candidates, OPEN promising pages, NAVIGATE headings, then READ one section/range. Use GREP for exact identifiers/errors in a known page. Do not read every search result or whole long pages; use RELATED only when lexical evidence is insufficient.{{#if wikiRw}} Before write/move/delete read AGENTS.md for rules.{{/if}}{{#if wikiSourceUrl}} Results also carry a {{wikiSourceField}} URL, that page's canonical citation source; cite it when you use the page's content.{{/if}}{{/if}}{{#if useWikiGraph}}
 • "graph" - Query the wiki knowledge graph (params: {"op":"stats|query|neighbors|path|communities|surprise|retrieve|answer|export|build|cross", ...}); use for relationship/graph-shaped questions, not as a substitute for wiki search. "cross" (params: {"path":"page.md"} or {"query":"..."}) joins into mounted wikis' graphs via explicit @-links and shared tags/aliases/concepts.{{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 {{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
@@ -21440,7 +21440,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               }
             } else if (wkOp === "context") {
               global.__mini_a_metrics.wiki_ops_list.inc()
-              wkResult = af.toTOON(this._wikiManager.context())
+              wkResult = af.toTOON(this._wikiManager.context({ wiki: wkParams.wiki, path: wkPath }))
             } else if (wkOp === "mounts") {
               wkResult = af.toTOON(this._wikiManager.mounts())
             } else if (wkOp === "attach") {
@@ -22140,6 +22140,10 @@ MiniA.prototype._runChatbotMode = function(options) {
               if (cbWkOp === "list") {
                 var cbWkPages = this._wikiManager.list(cbWkPath)
                 cbWkResult = "Wiki pages (" + cbWkPages.length + "):\n" + cbWkPages.join("\n")
+              } else if (cbWkOp === "context") {
+                cbWkResult = af.toTOON(this._wikiManager.context({ wiki: cbWkParams.wiki, path: cbWkPath }))
+              } else if (cbWkOp === "mounts") {
+                cbWkResult = af.toTOON(this._wikiManager.mounts())
               } else if (cbWkOp === "tree") {
                 cbWkResult = af.toTOON(this._wikiManager.tree(cbWkPath, isNumber(cbWkParams.depth) ? cbWkParams.depth : 3))
               } else if (cbWkOp === "browse") {
