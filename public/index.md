@@ -515,8 +515,9 @@
     }
 
     /* Ensure marker icons have transparent backgrounds */
-    .leaflet-marker-icon,
-    .leaflet-marker-icon img {
+    .leaflet-map .leaflet-marker-icon,
+    .leaflet-map .leaflet-marker-icon img,
+    .leaflet-map .leaflet-marker-shadow {
         background: transparent !important;
         background-color: transparent !important;
         border: none !important;
@@ -4099,6 +4100,36 @@
 
     /* ========== LEAFLET MAPS RENDERING ========== */
 
+    function addLeafletMarkers(map, markers) {
+        if (!Array.isArray(markers)) return;
+        const colors = {
+            default: '#2a81cb', blue: '#2a81cb', red: '#cb2b3e',
+            green: '#2aad27', orange: '#e98125', yellow: '#f2c218',
+            violet: '#9c2bcb', grey: '#777777', black: '#333333'
+        };
+        const icons = {};
+        markers.forEach(marker => {
+            if (!marker || !Number.isFinite(marker.lat) || !Number.isFinite(marker.lon) ||
+                Math.abs(marker.lat) > 90 || Math.abs(marker.lon) > 180) return;
+            const name = typeof marker.icon === 'string' && Object.prototype.hasOwnProperty.call(colors, marker.icon)
+                ? marker.icon : 'default';
+            if (!icons[name]) {
+                // Only palette values enter the SVG; configuration cannot inject markup.
+                icons[name] = L.divIcon({
+                    className: 'mini-a-map-pin',
+                    html: '<svg xmlns="http://www.w3.org/2000/svg" width="25" height="41" viewBox="0 0 25 41" aria-hidden="true">' +
+                        '<path d="M12.5 40C10 33 1 22 1 13a11.5 11.5 0 0 1 23 0c0 9-9 20-11.5 27Z" fill="' + colors[name] + '" stroke="#333" stroke-width="1"/>' +
+                        '<circle cx="12.5" cy="13" r="4.5" fill="white" stroke="#333" stroke-opacity="0.3"/></svg>',
+                    iconSize: [25, 41],
+                    iconAnchor: [12.5, 41],
+                    popupAnchor: [0, -34]
+                });
+            }
+            const pin = L.marker([marker.lat, marker.lon], { icon: icons[name] }).addTo(map);
+            if (marker.popup) pin.bindPopup(marker.popup);
+        });
+    }
+
     function renderLeafletMaps() {
         if (typeof L === 'undefined') return;
 
@@ -4156,28 +4187,7 @@
                                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                             }).addTo(map);
 
-                            // Create custom icon with explicit URLs
-                            const defaultIcon = L.icon({
-                                iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-                                iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-                                shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-                                iconSize: [25, 41],
-                                iconAnchor: [12, 41],
-                                popupAnchor: [1, -34],
-                                shadowSize: [41, 41]
-                            });
-
-                            // Add markers if provided
-                            if (config.markers && Array.isArray(config.markers)) {
-                                config.markers.forEach(marker => {
-                                    if (marker.lat && marker.lon) {
-                                        const m = L.marker([marker.lat, marker.lon], { icon: defaultIcon }).addTo(map);
-                                        if (marker.popup) {
-                                            m.bindPopup(marker.popup);
-                                        }
-                                    }
-                                });
-                            }
+                            addLeafletMarkers(map, config.markers);
 
                             // Add layers if provided
                             if (config.layers && Array.isArray(config.layers)) {
@@ -4266,17 +4276,7 @@
                         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                     }).addTo(map);
 
-                    // Re-add markers
-                    if (mapConfig.markers && Array.isArray(mapConfig.markers)) {
-                        mapConfig.markers.forEach(marker => {
-                            if (marker.lat && marker.lon) {
-                                const m = L.marker([marker.lat, marker.lon]).addTo(map);
-                                if (marker.popup) {
-                                    m.bindPopup(marker.popup);
-                                }
-                            }
-                        });
-                    }
+                    addLeafletMarkers(map, mapConfig.markers);
 
                     // Re-add layers
                     if (mapConfig.layers && Array.isArray(mapConfig.layers)) {
