@@ -1874,7 +1874,13 @@
 
         if (enableMath && typeof window.showdownKatex === 'function') {
             try {
-                converterOptions.extensions = [window.showdownKatex({ throwOnError: false })];
+                converterOptions.extensions = [window.showdownKatex({
+                    throwOnError: false,
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '$', right: '$', display: false }
+                    ]
+                })];
             } catch (error) {
                 console.warn('Failed to initialize showdown-katex extension:', error);
             }

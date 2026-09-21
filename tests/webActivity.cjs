@@ -125,6 +125,20 @@ for (const name of ['createMarkdownConverter', 'escapeHtml', 'preprocessChartBlo
   'preprocessSvgBlocks', 'renderConversationMarkdown']) {
   vm.runInContext(functionSource(name), rendering);
 }
+let mathOptions;
+rendering.window = {
+  showdownKatex: options => {
+    mathOptions = options;
+    return () => [];
+  }
+};
+vm.runInContext('createMarkdownConverter(true);', rendering);
+assert.deepEqual(Array.from(mathOptions.delimiters, delimiter => ({
+  left: delimiter.left, right: delimiter.right, display: delimiter.display
+})), [
+  { left: '$$', right: '$$', display: true },
+  { left: '$', right: '$', display: false }
+], 'Math rendering uses the documented display and inline delimiters');
 vm.runInContext('const converter = createMarkdownConverter(false);', rendering);
 const longEvents = Array.from({ length: 40 }, (_, index) => ({
   event: '💭', message: "Using tool 'wiki' #" + index
