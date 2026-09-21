@@ -1,0 +1,226 @@
+include:
+- oJobTest.yaml
+jobs:
+- name: MiniA Wiki V2::SearchOutputBudgetPreservesCandidates
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testSearchOutputBudgetPreservesCandidates
+- name: MiniA Wiki V2::SourceIdentityFallback
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testSourceIdentityFallback
+- name: MiniA Wiki V2::CrossWikiGraphExplicitTraversal
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testCrossWikiGraphExplicitTraversal
+- name: MiniA Wiki V2::CrossWikiGraphSharedJoins
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testCrossWikiGraphSharedJoins
+- name: MiniA Wiki V2::CrossWikiGraphSourceNamespaces
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testCrossWikiGraphSourceNamespaces
+- name: MiniA Wiki V2::BoundedGraphExpansion
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testBoundedGraphExpansion
+- name: MiniA Wiki V2::GraphSelectedWikiBudgets
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testGraphSelectedWikiBudgets
+- name: MiniA Wiki V2::CompactBacklinkActivity
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testCompactBacklinkActivity
+- name: MiniA Wiki V2::TargetedMetadataAndShardCache
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testTargetedMetadataAndShardCache
+- name: MiniA Wiki V2::ExplicitSupersession
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testExplicitSupersession
+- name: MiniA Wiki V2::ApprovedStructuralRepair
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testApprovedStructuralRepair
+- name: MiniA Wiki V2::CatalogueStreamRecovery
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testCatalogueStreamRecovery
+- name: MiniA Wiki V2::DeadlineAwareCacheGuard
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testDeadlineAwareCacheGuard
+
+- name: MiniA Wiki V2::InsufficientSpacePublicationRecovery
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testInsufficientSpacePublicationRecovery
+- name: MiniA Wiki V2::BoundedContextPostings
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testBoundedContextPostings
+- name: MiniA Wiki V2::GenerationEvidenceBindings
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testGenerationEvidenceBindings
+- name: MiniA Wiki V2::StructuralContext
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testStructuralContext
+- name: MiniA Wiki V2::ListStructuralSupport
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testListStructuralSupport
+- name: MiniA Wiki V2::ApplicabilityMaintenanceBoundary
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testApplicabilityMaintenanceBoundary
+- name: MiniA Wiki V2::StableSectionAndMoveIdentities
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testStableSectionAndMoveIdentities
+- name: MiniA Wiki V2::ProcessCrashPublicationRecovery
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testProcessCrashPublicationRecovery
+- name: MiniA Wiki V2::StandaloneMcpRuntimeCompilation
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testStandaloneMcpRuntimeCompilation
+- name: MiniA Wiki V2::CrossSurfaceV2Configuration
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testCrossSurfaceV2Configuration
+- name: MiniA Wiki V2::IngestBatchAndDeferredExport
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testIngestBatchAndDeferredExport
+- name: MiniA Wiki V2::EvidenceWindowsAndRelevancePacking
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testEvidenceWindowsAndRelevancePacking
+- name: MiniA Wiki V2::LegacyResetPublicationPreservesGeneration
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testLegacyResetPublicationPreservesGeneration
+- name: MiniA Wiki V2::ArchiveServingAndTruncatedBundle
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testArchiveServingAndTruncatedBundle
+- name: MiniA Wiki V2::TargetedTelemetryRetention
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testTargetedTelemetryRetention
+- name: MiniA Wiki V2::GroundedApplicabilityDisagreements
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testGroundedApplicabilityDisagreements
+- name: MiniA Wiki V2::LegacyReadOnlyLexicalFeatures
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testLegacyReadOnlyLexicalFeatures
+- name: MiniA Wiki V2::ServingBundlesAndRemoteEvidence
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testServingBundlesAndRemoteEvidence
+- name: MiniA Wiki V2::S3BundleHydrationRefresh
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testS3BundleHydrationRefresh
+- name: MiniA Wiki V2::SourceIoAuditAccounting
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testSourceIoAuditAccounting
+- name: MiniA Wiki V2::ConcurrentRestrictedLedger
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testConcurrentRestrictedLedger
+- name: MiniA Wiki V2::SourceRevocationBeforeMaterialization
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testSourceRevocationBeforeMaterialization
+- name: MiniA Wiki V2::SharedBlockStore
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testSharedBlockStore
+- name: MiniA Wiki V2::PublicationScopedValidation
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testPublicationScopedValidation
+- name: MiniA Wiki V2::RoutedCompactionBoundary
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testRoutedCompactionBoundary
+- name: MiniA Wiki V2::SharedBlockStoreReclamationClosure
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testSharedBlockStoreReclamationClosure
+- name: MiniA Wiki V2::Schema3CatalogueDelta
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testSchema3CatalogueDelta
+- name: MiniA Wiki V2::GroundedDerivatives
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testGroundedDerivatives
+- name: MiniA Wiki V2::DerivativeJournalAndIntegrity
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testDerivativeJournalAndIntegrity
+- name: MiniA Wiki V2::DirectDerivedPostings
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testDirectDerivedPostings
+- name: MiniA Wiki V2::PublicationFailureRecovery
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testPublicationFailureRecovery
+- name: MiniA Wiki V2::PreviousGenerationPointerFallback
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testPreviousGenerationPointerFallback
+- name: MiniA Wiki V2::ImmutableIncrementalGenerations
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testImmutableIncrementalGenerations
+- name: MiniA Wiki V2::LifecycleAndSuppression
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testLifecycleAndSuppression
+- name: MiniA Wiki V2::EnhancedPassageLexical
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testEnhancedPassageLexical
+
+- name: MiniA Wiki V2::LexicalAndEvidenceBudget
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testLexicalAndEvidenceBudget
+- name: MiniA Wiki V2::RestrictedPassages
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testRestrictedPassages
+- name: MiniA Wiki V2::Parser
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testParser
+- name: MiniA Wiki V2::RetrievalAndPublication
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testRetrievalAndPublication
+- name: MiniA Wiki V2::FederationAndBudgets
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testFederationAndBudgets
+- name: MiniA Wiki V2::FederatedAliasAndPermissionBoundary
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testFederatedAliasAndPermissionBoundary
+- name: MiniA Wiki V2::FederatedRetryBudget
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testFederatedRetryBudget
+todo:
+- MiniA Wiki V2::SearchOutputBudgetPreservesCandidates
+- MiniA Wiki V2::SourceIdentityFallback
+- MiniA Wiki V2::CrossWikiGraphExplicitTraversal
+- MiniA Wiki V2::CrossWikiGraphSharedJoins
+- MiniA Wiki V2::CrossWikiGraphSourceNamespaces
+- MiniA Wiki V2::BoundedGraphExpansion
+- MiniA Wiki V2::GraphSelectedWikiBudgets
+- MiniA Wiki V2::CompactBacklinkActivity
+- MiniA Wiki V2::TargetedMetadataAndShardCache
+- MiniA Wiki V2::DeadlineAwareCacheGuard
+- MiniA Wiki V2::InsufficientSpacePublicationRecovery
+- MiniA Wiki V2::CatalogueStreamRecovery
+- MiniA Wiki V2::ApprovedStructuralRepair
+- MiniA Wiki V2::ExplicitSupersession
+- MiniA Wiki V2::BoundedContextPostings
+- MiniA Wiki V2::GenerationEvidenceBindings
+- MiniA Wiki V2::StructuralContext
+- MiniA Wiki V2::ListStructuralSupport
+- MiniA Wiki V2::ApplicabilityMaintenanceBoundary
+- MiniA Wiki V2::StableSectionAndMoveIdentities
+- MiniA Wiki V2::ProcessCrashPublicationRecovery
+- MiniA Wiki V2::StandaloneMcpRuntimeCompilation
+- MiniA Wiki V2::IngestBatchAndDeferredExport
+- MiniA Wiki V2::EvidenceWindowsAndRelevancePacking
+- MiniA Wiki V2::LegacyResetPublicationPreservesGeneration
+- MiniA Wiki V2::ArchiveServingAndTruncatedBundle
+- MiniA Wiki V2::TargetedTelemetryRetention
+- MiniA Wiki V2::GroundedApplicabilityDisagreements
+- MiniA Wiki V2::LegacyReadOnlyLexicalFeatures
+- MiniA Wiki V2::ServingBundlesAndRemoteEvidence
+- MiniA Wiki V2::S3BundleHydrationRefresh
+- MiniA Wiki V2::SourceIoAuditAccounting
+- MiniA Wiki V2::ConcurrentRestrictedLedger
+- MiniA Wiki V2::SourceRevocationBeforeMaterialization
+- MiniA Wiki V2::SharedBlockStore
+- MiniA Wiki V2::PublicationScopedValidation
+- MiniA Wiki V2::RoutedCompactionBoundary
+- MiniA Wiki V2::SharedBlockStoreReclamationClosure
+- MiniA Wiki V2::Schema3CatalogueDelta
+- MiniA Wiki V2::GroundedDerivatives
+- MiniA Wiki V2::DerivativeJournalAndIntegrity
+- MiniA Wiki V2::DirectDerivedPostings
+- MiniA Wiki V2::PublicationFailureRecovery
+- MiniA Wiki V2::PreviousGenerationPointerFallback
+- MiniA Wiki V2::ImmutableIncrementalGenerations
+- MiniA Wiki V2::LifecycleAndSuppression
+- MiniA Wiki V2::EnhancedPassageLexical
+- MiniA Wiki V2::LexicalAndEvidenceBudget
+- MiniA Wiki V2::RestrictedPassages
+- MiniA Wiki V2::Parser
+- MiniA Wiki V2::RetrievalAndPublication
+- MiniA Wiki V2::FederationAndBudgets
+- MiniA Wiki V2::FederatedAliasAndPermissionBoundary
+- MiniA Wiki V2::FederatedRetryBudget
+- MiniA Wiki V2::CrossSurfaceV2Configuration

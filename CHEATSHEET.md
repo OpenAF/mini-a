@@ -14,12 +14,15 @@ A comprehensive quick reference for all Mini-A parameters, modes, and common usa
 - [Shell & Execution](#shell--execution)
 - [MCP Integration](#mcp-integration)
 - [Planning Features](#planning-features)
+- [Deep Research Mode](#deep-research-mode)
+- [Outer Loop Autonomous Coding](#outer-loop-autonomous-coding)
 - [Visual & Output](#visual--output)
 - [Knowledge & Context](#knowledge--context)
 - [Working Memory](#working-memory)
-- [Dreams (Sleep Pass)](#dreams-sleep-pass)
 - [Wiki Knowledge Base](#wiki-knowledge-base)
+- [Virtual Skill Library](#virtual-skill-library)
 - [Choosing Knowledge Features](#choosing-knowledge-features)
+- [Dreams (Sleep Pass)](#dreams-sleep-pass)
 - [Mode Presets](#mode-presets)
 - [Delegation](#delegation)
   - [Sub-agents, Forked Sub-agents & Auto-delegation](#sub-agents-forked-sub-agents--auto-delegation)
@@ -27,8 +30,10 @@ A comprehensive quick reference for all Mini-A parameters, modes, and common usa
   - [Web UI Parameters](#web-ui-parameters)
 - [Rate Limiting & Performance](#rate-limiting--performance)
 - [Security & Safety](#security--safety)
+- [Docker Usage](#docker-usage)
 - [Common Examples](#common-examples)
-- [Agent Files](#agent-files)
+- [Console Commands](#console-commands)
+- [Quick Tips](#quick-tips)
 
 ---
 
@@ -331,7 +336,7 @@ mini-a goal="inspect large logs safely" useshell=true shellmaxbytes=12000
 | `mcpprogcallbatchmax` | number | `10` | Maximum calls accepted by `/call-tools-batch` |
 | `toolcachettl` | number | `600000` | Default cache TTL in milliseconds for MCP tool results |
 | `useutils` | boolean | `false` | Auto-register Mini Utils Tool utilities as MCP connection. Tool names for `utilsallow`/`utilsdeny`: `init`, `filesystemQuery`, `filesystemModify`, `mathematics`, `timeUtilities`, `textUtilities`, `pathUtilities`, `filesystemBatch`, `validationUtilities`, `systemInfo`, `memoryStore`, `todoList`, `markdownFiles`, plus conditional `skills` (`useskills=true`) and console-only `userInput`, `showMessage` (`mini-a-con`) |
-| `usestdutils` | boolean | `true` | When `useutils=true`, expose standard Mini Utils aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names |
+| `usestdutils` | boolean | `false` | When `useutils=true`, expose standard Mini Utils aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names |
 | `utilsallow` | string | - | Comma-separated allowlist of Mini Utils Tool names to expose when `useutils=true` |
 | `utilsdeny` | string | - | Comma-separated denylist of Mini Utils Tool names to hide when `useutils=true`; applied after `utilsallow` |
 | `utilsroot` | string | - | Root path exposed to Mini Utils Tool file/document helpers (e.g. `markdownFiles`, `filesystemQuery`) |
@@ -908,7 +913,7 @@ agent.clearSessionMemory("my-session-id")
 ---
 
 ## Wiki Knowledge Base
-- **OKF Compatibility**: Mini-A wiki now supports Open Knowledge Format (OKF) for enhanced wiki interoperability with external knowledge bases
+- **OKF compatibility shims**: `type` front matter defaults to `concept` when omitted, `timestamp` is accepted as an alias for `updated`, and bundle-root-relative absolute links are resolved OKF-style — small conventions borrowed from Open Knowledge Format, not a general import/export or interop feature
 
 
 Mini-A implements an LLM wiki pattern (inspired by Karpathy's "LLM knowledge base"): the agent distils knowledge from each session into structured Markdown pages, then retrieves and extends that knowledge in future sessions. The wiki lives in a filesystem folder or S3 prefix — any agent with the same `wikiroot` (or `wikibucket`) shares the same pages.
@@ -918,7 +923,7 @@ When a brand-new wiki is opened with `wikiaccess=rw`, Mini-A bootstraps three st
 - `index.md` — catalog of all pages with summaries, section links, and recent changes
 - `log.md` — append-only journal of every write, delete, and move operation
 
-Folders become browsable sub-wikis when they contain a local `index.md`. Start with `wiki op="context"` for a compact wiki overview, then `search` before reading any page.
+Folders become browsable sub-wikis when they contain a local `index.md`. Start with `wiki op="context"` for a compact wiki overview, then `search` before reading any page. For a bounded evidence packet instead, use `wiki op="retrieve" query="..."`; it returns ranked excerpts with citations and explicit candidate/inspection/byte budgets. Add `expandGraph=true maxGraphExpansion=N` only when relationship traversal is justified.
 
 ### Folder taxonomy (recommended, never enforced)
 
@@ -960,7 +965,9 @@ Common folder names: `topics/`, `concepts/`, `entities/`, `comparisons/`. Use th
 | `wikilintstaleddays` | number | `90` | Days before a page without a recent update is flagged stale in lint |
 | `wikilintstreamthreshold` | number | `2000` | Switch lint into streaming mode above this many pages |
 | `wikilintmaxpairs` | number | `250000` | Max near-duplicate comparisons during streaming lint |
-| `wikimounts` | SLON/JSON | - | Read-only wiki mounts: `[{name: 'team', backend: 'fs', root: '/path'}]` — mounts appear as `@name/path.md` |
+| `wikimounts` | SLON/JSON | - | Read-only wiki mounts: `[{name: 'team', label: 'Team docs', description: '...', backend: 'fs', root: '/path'}]` — mounts appear as `@name/path.md` |
+
+For `mcp-wiki.yaml`, call `context()` to discover names, then use `wiki`: omitted/`"*"` searches all, `"primary"` selects the main wiki, a name selects one mount, and `["a","b"]` selects a subset. `mcp-wiki-safe.yaml` deliberately does not reveal mount names.
 | `usewikigraph` | boolean | `false` | Enable the wiki knowledge graph layer (auto-enabled when `wikigraphfalkorhost` is set) |
 | `wikigraphsemantic` | boolean | `false` | Enable semantic graph extraction when running graph build |
 | `wikigraphcommunity` | string | `louvain` | Community detection algorithm |
@@ -975,6 +982,11 @@ Common folder names: `topics/`, `concepts/`, `entities/`, `comparisons/`. Use th
 | `wikigraphfalkorgraph` | string | `mini_a_wiki` | FalkorDB graph name |
 | `wikigraphfalkoruser` | string | - | FalkorDB username |
 | `wikigraphfalkorpass` | string | - | FalkorDB password |
+
+| `capabilityselection` | boolean | `false` | Select a bounded, deterministic subset of registered capabilities for the goal |
+| `capabilitylimit` | number | `8` | Maximum capabilities exposed when selection is enabled |
+| `policy` | SLON/JSON | - | Centralized allow/deny rules for shell, MCP, delegation, Wiki, filesystem and network access |
+| `policyfile` | string | - | JSON file containing the centralized policy |
 
 Elasticsearch/OpenSearch backend mapping:
 
@@ -1052,6 +1064,7 @@ The agent uses the `wiki` action:
 | `/wiki list [prefix]` | List pages; `/wiki list --meta` shows title+description |
 | `/wiki read <page.md>` | Print a page's front-matter and body |
 | `/wiki search <query>` | Full-text search across all pages and mounts |
+| `/wiki backlinks <path>` | List all pages that link to the specified path |
 | `/wiki browse [path]` | Navigate section structure |
 | `/wiki tree [path]` | Show full folder hierarchy |
 | `/wiki lint` | Run lint check and print report |
@@ -1109,6 +1122,45 @@ mini-a goal="deep research with persistent knowledge" \
 # Lint the wiki from the console and get a compact summary
 mini-a ➤ /wiki lint
 mini-a ➤ /wiki context
+```
+
+---
+
+## Virtual Skill Library
+
+See [docs/VIRTUAL-SKILLS.md](docs/VIRTUAL-SKILLS.md) for the full picture. A skill
+library is a wiki whose pages carry `type: skill` front matter; it can be
+searched/inspected/consulted at any scale without loading the catalog into
+context. Reuses `usewiki`'s wiki by default -- a wiki can hold ordinary knowledge
+and skill pages side by side.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `useskillwiki` | boolean | `false` | Enable the virtual skill library (exposes the `skillwiki` tool and `/skills search\|recommend\|open\|read\|related` console subcommands) |
+| `skillwikibackend` | string | - | Backend for a *dedicated* skill wiki (fs/s3/s3fs/es/http); omit to reuse `usewiki`'s wiki |
+| `skillwikiroot` | string | - | Root for a dedicated skill wiki (fs backend) |
+| `skillwikimounts` | SLON/JSON | - | Read-only mounts for a dedicated skill wiki, same shape as `wikimounts` |
+| `skillsautosearch` | boolean | `false` | Reserved for future opt-in automatic skill consultation during planning |
+| `skillsautolimit` | number | `5` | Max results per automatic skill search |
+| `skillsmaxloaded` | number | `3` | Max distinct skills `open()`-ed per agent run |
+| `skillsmaxchars` | number | `12000` | Max skill-body characters `read()` may return per agent run |
+
+```bash
+# Reuse an existing wiki as the skill library
+mini-a.sh useskillwiki=true usewiki=true wikiroot=/shared/wiki goal="..."
+
+# Dedicated skill-only library
+mini-a.sh useskillwiki=true skillwikiroot=./skills goal="..."
+
+# Console
+mini-a ➤ /skills search postgres index tuning
+mini-a ➤ /skills recommend diagnose slow postgres queries
+mini-a ➤ /skills open wiki:postgres-index-review.md
+mini-a ➤ /skills read wiki:postgres-index-review.md Diagnosis
+
+# Standalone MCP server for external agents (Codex, Claude Code, OpenCode, ...)
+ojob mcps/mcp-skills.yaml label="Engineering Skill Library" wikiroot=./skills
+ojob mcps/mcp-skills-safe.yaml label="Public Skill Library" wikiroot=./skills wikirestrictprofile=moderate
 ```
 
 ---
@@ -1327,12 +1379,15 @@ Modes can inherit from other modes using `include` (string, comma-separated stri
 | Mode | Description | Equivalent Parameters |
 |------|-------------|----------------------|
 | `shell` | Read-only shell access | `useshell=true` |
-| `shellrw` | Shell with write access | `useshell=true readwrite=true` |
-| `shellutils` | Shell + Mini Utils Tool | `useshell=true useutils=true mini-a-docs=true usetools=true` |
-| `chatbot` | Conversational mode | `chatbotmode=true` |
-| `internet` | Internet-focused MCP mode | `usetools=true mini-a-docs=true mcp=...` |
-| `web` | Browser UI optimized | `usetools=true mini-a-docs=true` |
-| `webfull` | Full-featured web UI | `usetools=true useutils=true usestream=true mcpproxy=true mini-a-docs=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true` |
+| `shellrw` | Shell with write access | `useshell=true readwrite=true useutils=true shellallowpipes=true shellbatch=true showexecs=true mini-a-docs=true` (includes `shell`) |
+| `utils` | Utilities mode | `useutils=true mini-a-docs=true usetools=true` |
+| `shellutils` | Shell + Mini Utils Tool | `useshell=true useutils=true mini-a-docs=true usetools=true` (includes `shell`) |
+| `internet` | Internet-focused MCP mode | `usetools=true mini-a-docs=true mcpproxy=true mcp=[mcp-time, mcp-web, mcp-weather, mcp-net]` |
+| `news` | News from the internet mode | `mcpproxy=true mcp=[mcp-time, mcp-web, mcp-rss]` (includes `internet`) |
+| `poweruser` | Power user mode | `useshell=true readwrite=true useutils=true useskills=true usestream=true mcpproxy=true mini-a-docs=true usehistory=true historykeep=true usedelegation=true usestdutils=true ...` |
+| `chatbot` | Conversational mode | `chatbotmode=true usestream=true` |
+| `web` | Browser UI optimized with tools | `usetools=true usediagrams=true usecharts=true usemaps=true usevectors=true usemath=true usehistory=true useattach=true mcpproxy=true mcp=[mcp-web, mcp-weather, mcp-time, mcp-net]` |
+| `webfull` | Full-featured web UI | `usestream=true historykeep=true useplanning=false useascii=false llmcomplexity=true mcp=[web, weather, rss, time, fin, net, oaf, oafp]` (includes `web`) |
 
 **Examples:**
 
@@ -1614,7 +1669,7 @@ mini-a goal="investigate" adaptiverouting=true debug=true
 | `OAF_MINI_A_CON_HIST_SIZE` | Console history size (default: JLine default) |
 | `OAF_MINI_A_LIBS` | Comma-separated libraries to load automatically |
 | `OAF_MINI_A_NOJSONPROMPT` | Disable promptJSONWithStats for main model, force promptWithStats (default: false). Gemini main models auto-enable this behavior when unset |
-| `OAF_MINI_A_LCNOJSONPROMPT` | Disable promptJSONWithStats for low-cost model, force promptWithStats (default: false). Required for Gemini low-cost models |
+| `OAF_MINI_A_LCNOJSONPROMPT` | Disable promptJSONWithStats for low-cost model, force promptWithStats. Defaults to true for Gemini when unset; false otherwise |
 
 ```bash
 export OAF_MODEL="(type: openai, model: gpt-4, key: '...')"
@@ -1907,6 +1962,12 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 |---------|-------------|
 | `/show` | Display all current parameters |
 | `/show <prefix>` | Display parameters starting with prefix (e.g., `/show plan`) |
+| `/set <key> <value>` | Update a Mini-A parameter (use `"""` for multi-line values) |
+| `/toggle <key>` | Toggle boolean parameter |
+| `/unset <key>` | Clear a parameter |
+| `/reset` | Restore default parameters |
+| `/restore` | Restore a saved conversation like `resume=true` |
+| `/clear` | Reset the ongoing conversation and accumulated metrics |
 | `/context` | Show visual token usage breakdown (using internal estimates or API stats) |
 | `/context llm` or `/context analyze` | Analyze conversation tokens using LLM (prefers low-cost model if configured) |
 | `/stats memory` | Show working-memory statistics, keyed upserts, expirations, and validated-contract use for the active session |
@@ -1918,6 +1979,8 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 | `/rewind [n]` | Undo the last n exchanges and remove them from conversation history (default: 1); cancels any active subtasks |
 | `/last [md]` | Reprint the previous final answer (`md` emits raw Markdown) |
 | `/save <path>` | Save the last final answer to the provided file path |
+| `/history [n]` | Show the last n user goals (one per line) |
+| `/models` | List current main, low-cost, and validation models |
 | `/cls` | Clear the console screen |
 | `/<name> [args...]` | Execute slash template from `~/.openaf-mini-a/commands/<name>.md`, `~/.openaf-mini-a/skills/<name>.md`, or `~/.openaf-mini-a/skills/<name>/SKILL.md` |
 | `/help` | Show help information |
@@ -1939,7 +2002,7 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
   - `~/.openaf-mini-a/skills/<name>/SKILL.md` (Claude Code-style folder skill)
   - `~/.openaf-mini-a/skills/<name>.md` (legacy file skill)
 - Folders ending in `.disabled` are ignored during skill discovery
-- If both folders define the same name, `commands` takes precedence and the `skills` entry is ignored
+- If both folders define the same name, `skills` takes precedence over `commands`
 - Skills downloaded from sites like `skillsmp.com` can be copied as folders under `~/.openaf-mini-a/skills/` when each folder includes `SKILL.md` (or `skill.md`)
 - Use `extraskills=<path1>,<path2>` to load skills from additional directories (default dir wins on name conflicts)
 
@@ -2012,6 +2075,36 @@ mini-a ➤ Follow these instructions @docs/guide.md and apply rules from @polici
 - **Email**: openaf@openaf.io
 # Wiki
 
-`mini-a ingest=true ingestsource=./docs usewiki=true wikiaccess=rw ingestmode=auto`
+`ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=/tmp/wiki ingestmode=auto`
 
 `mini-a dream=true usewiki=true dreamwikimode=plan` — estimates only; never calls a model.
+# Evaluation
+
+```bash
+mini-a eval=true evalfile=evals/core.yaml evalout=/tmp/mini-a-eval.json
+mini-a eval=true evalfile=evals/core.yaml evalbaseline=evals/baseline.json
+```
+
+Suites can be YAML/JSON files or a directory of them. See `USAGE.md` for the
+scenario schema and baseline workflow.
+
+# Adaptive orchestration
+
+`mini-a goal="..." orchestration=auto` enables deterministic selection of the
+existing planning, advisor, and evidence-gate controls. The default is
+`orchestration=manual`; explicit flags override automatic selections.
+
+### Reconcile ingestion-managed wiki pages
+
+```sh
+# Plan only: no wiki changes or model calls
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=./wiki ingestmode=normalize ingestprune=true ingestdryrun=true
+# Apply verified scoped removals
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=./wiki ingestmode=normalize ingestprune=true
+# Also authorize a completely observed empty folder
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=./wiki ingestmode=normalize ingestprune=true ingestallowemptyprune=true
+```
+
+Default `ingestprune=false` preserves disappeared sources. `ingestsourceid` keeps a
+logical origin stable across physical moves. `ingestforce` does not permit deletion
+or overwrite edited pages. See [safety and recovery limits](docs/WIKI.md#safe-repeated-ingestion).

@@ -1,0 +1,360 @@
+{
+  "kind": "incremental-generations",
+  "mode": "publication-stage-profile",
+  "backend": "local-fs",
+  "pages": 1000,
+  "samples": 10,
+  "runtime": "20260913",
+  "jvm": "26.0.2",
+  "sourceSha1": {
+    "wiki": "3b671f02a6fb0485207791156c4cefd692bb2e78",
+    "retrieval": "27388796cdf68053146216e1c67e7447bd4c36a6"
+  },
+  "observations": [
+    {
+      "millis": 613.4366660118103,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1004,
+        "copiedBytes": 1458138,
+        "reusedChecksums": 1002,
+        "reusedChecksumBytes": 1456881,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 4000,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 2000,
+        "publicationTimingsMillis": {
+          "preparation": 0.400334,
+          "catalogueFork": 2.899625,
+          "fileStaging": 245.993666,
+          "writerInitialization": 3.006417,
+          "pageUpdates": 7.672708,
+          "writerCommitClose": 17.3135,
+          "catalogueWrite": 28.171292,
+          "manifestWrite": 52.701375,
+          "artifactValidation": 158.822583,
+          "searcherVerification": 4.225334,
+          "activation": 0.687291,
+          "readerRetentionExport": 0.64275
+        },
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 515.3381249904633,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1008,
+        "copiedBytes": 1461279,
+        "reusedChecksums": 1005,
+        "reusedChecksumBytes": 1459624,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 3999,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 1999,
+        "publicationTimingsMillis": {
+          "preparation": 0.326708,
+          "catalogueFork": 2.127708,
+          "fileStaging": 242.676959,
+          "writerInitialization": 2.242583,
+          "pageUpdates": 2.8525,
+          "writerCommitClose": 14.951375,
+          "catalogueWrite": 22.643792,
+          "manifestWrite": 51.697083,
+          "artifactValidation": 151.307,
+          "searcherVerification": 3.237375,
+          "activation": 0.608292,
+          "readerRetentionExport": 0.597875
+        },
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 514.147665977478,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1011,
+        "copiedBytes": 1464105,
+        "reusedChecksums": 1008,
+        "reusedChecksumBytes": 1462367,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 3998,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 1998,
+        "publicationTimingsMillis": {
+          "preparation": 0.272667,
+          "catalogueFork": 1.35075,
+          "fileStaging": 229.200416,
+          "writerInitialization": 2.255917,
+          "pageUpdates": 2.9375,
+          "writerCommitClose": 19.298875,
+          "catalogueWrite": 26.25075,
+          "manifestWrite": 50.123583,
+          "artifactValidation": 155.709875,
+          "searcherVerification": 3.578459,
+          "activation": 0.586625,
+          "readerRetentionExport": 0.368875
+        },
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 513.2688329219818,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1014,
+        "copiedBytes": 1466931,
+        "reusedChecksums": 1011,
+        "reusedChecksumBytes": 1465110,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 3997,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 1997,
+        "publicationTimingsMillis": {
+          "preparation": 0.291917,
+          "catalogueFork": 1.313167,
+          "fileStaging": 241.300125,
+          "writerInitialization": 3.516125,
+          "pageUpdates": 2.451,
+          "writerCommitClose": 17.429375,
+          "catalogueWrite": 23.333041,
+          "manifestWrite": 50.0335,
+          "artifactValidation": 147.806792,
+          "searcherVerification": 3.216,
+          "activation": 0.634792,
+          "readerRetentionExport": 0.382375
+        },
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 505.9620831012726,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1017,
+        "copiedBytes": 1469757,
+        "reusedChecksums": 1014,
+        "reusedChecksumBytes": 1467853,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 3996,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 1996,
+        "publicationTimingsMillis": {
+          "preparation": 0.2975,
+          "catalogueFork": 1.3095,
+          "fileStaging": 233.91175,
+          "writerInitialization": 2.750917,
+          "pageUpdates": 2.584833,
+          "writerCommitClose": 22.642042,
+          "catalogueWrite": 22.205042,
+          "manifestWrite": 49.33675,
+          "artifactValidation": 144.689375,
+          "searcherVerification": 2.979875,
+          "activation": 0.639041,
+          "readerRetentionExport": 0.545042
+        },
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 517.0858340263367,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1020,
+        "copiedBytes": 1472583,
+        "reusedChecksums": 1017,
+        "reusedChecksumBytes": 1470596,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 3995,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 1995,
+        "publicationTimingsMillis": {
+          "preparation": 0.313333,
+          "catalogueFork": 1.20575,
+          "fileStaging": 234.695833,
+          "writerInitialization": 2.777292,
+          "pageUpdates": 3.636583,
+          "writerCommitClose": 20.748125,
+          "catalogueWrite": 22.570584,
+          "manifestWrite": 52.687791,
+          "artifactValidation": 150.63725,
+          "searcherVerification": 2.889834,
+          "activation": 0.97775,
+          "readerRetentionExport": 0.496708
+        },
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 521.6312499046326,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1023,
+        "copiedBytes": 1475409,
+        "reusedChecksums": 1020,
+        "reusedChecksumBytes": 1473339,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 3994,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 1994,
+        "publicationTimingsMillis": {
+          "preparation": 0.278292,
+          "catalogueFork": 1.240583,
+          "fileStaging": 240.577625,
+          "writerInitialization": 2.920708,
+          "pageUpdates": 2.621459,
+          "writerCommitClose": 17.650291,
+          "catalogueWrite": 27.951042,
+          "manifestWrite": 51.662833,
+          "artifactValidation": 151.032334,
+          "searcherVerification": 3.05775,
+          "activation": 0.575125,
+          "readerRetentionExport": 0.492708
+        },
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 557.3978748321533,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1026,
+        "copiedBytes": 1478235,
+        "reusedChecksums": 1002,
+        "reusedChecksumBytes": 1450504,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 3993,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 1993,
+        "publicationTimingsMillis": {
+          "preparation": 0.343334,
+          "catalogueFork": 1.181958,
+          "fileStaging": 240.43525,
+          "writerInitialization": 3.929667,
+          "pageUpdates": 3.017833,
+          "writerCommitClose": 47.852042,
+          "catalogueWrite": 28.945916,
+          "manifestWrite": 50.730625,
+          "artifactValidation": 153.575375,
+          "searcherVerification": 2.209125,
+          "activation": 0.586625,
+          "readerRetentionExport": 0.439292
+        },
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 557.2537500858307,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1008,
+        "copiedBytes": 1456730,
+        "reusedChecksums": 1005,
+        "reusedChecksumBytes": 1455075,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 3992,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 1992,
+        "publicationTimingsMillis": {
+          "preparation": 0.297375,
+          "catalogueFork": 1.289125,
+          "fileStaging": 233.899667,
+          "writerInitialization": 1.487042,
+          "pageUpdates": 2.495916,
+          "writerCommitClose": 18.839959,
+          "catalogueWrite": 23.836083,
+          "manifestWrite": 56.155167,
+          "artifactValidation": 176.324041,
+          "searcherVerification": 2.022625,
+          "activation": 0.627834,
+          "readerRetentionExport": 0.320166
+        },
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 502.4166669845581,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1011,
+        "copiedBytes": 1459556,
+        "reusedChecksums": 1008,
+        "reusedChecksumBytes": 1457818,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 3991,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 1991,
+        "publicationTimingsMillis": {
+          "preparation": 0.285,
+          "catalogueFork": 1.179334,
+          "fileStaging": 235.586208,
+          "writerInitialization": 1.826708,
+          "pageUpdates": 2.556167,
+          "writerCommitClose": 14.447333,
+          "catalogueWrite": 26.539167,
+          "manifestWrite": 51.299417,
+          "artifactValidation": 147.078916,
+          "searcherVerification": 2.246167,
+          "activation": 0.607917,
+          "readerRetentionExport": 0.32725
+        },
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    }
+  ],
+  "linkImmutableFiles": false,
+  "buildMillis": 1943.6277918815613,
+  "latency": {
+    "p50": 515.3381249904633,
+    "p95": 613.4366660118103,
+    "p99": 613.4366660118103
+  },
+  "disk": {
+    "apparentBytes": 41012697,
+    "uniqueFileBytes": 41012697,
+    "files": 12218,
+    "estimator": "POSIX file identity and length; excludes allocation and metadata overhead"
+  },
+  "memoryUsed": 829574160,
+  "recordedHarnessSha1": "a4a5b6e5a63b7007d504e962b6964ba8679fc26c"
+}

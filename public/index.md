@@ -455,6 +455,58 @@
         height: 0.85rem;
     }
 
+    .mermaid-fullscreen {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        height: 100dvh;
+        max-width: none;
+        max-height: none;
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        background: #f8f9fa;
+        color: #24292f;
+        overflow: hidden;
+        overscroll-behavior: none;
+    }
+
+    body.markdown-body-dark .mermaid-fullscreen {
+        background: #0f1115;
+        color: #e6edf3;
+    }
+
+    .mermaid-fullscreen-stage {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        touch-action: none;
+        cursor: grab;
+        user-select: none;
+    }
+
+    .mermaid-fullscreen-stage img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        max-width: none;
+        object-fit: contain;
+        pointer-events: none;
+        transform-origin: center;
+    }
+
+    .mermaid-fullscreen .mermaid-diagram-controls {
+        bottom: max(1rem, env(safe-area-inset-bottom));
+        right: max(1rem, env(safe-area-inset-right));
+    }
+
+    .mermaid-fullscreen .mermaid-control-btn {
+        width: 2.75rem;
+        height: 2.75rem;
+    }
+
     /* ========== LEAFLET MAPS ========== */
     .leaflet-map {
         width: 100%;
@@ -463,8 +515,9 @@
     }
 
     /* Ensure marker icons have transparent backgrounds */
-    .leaflet-marker-icon,
-    .leaflet-marker-icon img {
+    .leaflet-map .leaflet-marker-icon,
+    .leaflet-map .leaflet-marker-icon img,
+    .leaflet-map .leaflet-marker-shadow {
         background: transparent !important;
         background-color: transparent !important;
         border: none !important;
@@ -1351,6 +1404,10 @@
         display: block;
     }
 
+    .preview.planning-mode .preview-text {
+        font-weight: 500;
+    }
+
     @keyframes shimmer {
         0% { background-position: 0% 50%; }
         100% { background-position: -200% 50%; }
@@ -1380,6 +1437,36 @@
     .streaming-content.streaming-content {
         animation: streamFadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     }
+
+    .answer-activity {
+        margin: 0.75rem 0;
+        border: 1px solid var(--border);
+        border-radius: 0.6rem;
+        background: var(--panel-bg);
+        color: var(--text);
+    }
+    .answer-activity > summary {
+        cursor: pointer;
+        padding: 0.65rem 0.85rem;
+        font-size: 0.9rem;
+        color: #737373;
+        font-style: italic;
+    }
+    .activity-body {
+        color: #737373;
+    }
+    .answer-activity > summary:focus-visible {
+        outline: 2px solid currentColor;
+        outline-offset: 2px;
+    }
+    .activity-body { padding: 0 0.85rem 0.75rem; overflow-wrap: anywhere; }
+    .activity-event { margin: 0.35rem 0; }
+    .activity-event > span {
+        color: var(--text);
+        opacity: 0.60;
+        font-style: italic;
+    }
+    .activity-warning { margin-left: 0.5rem; font-size: 0.85em; }
 
     /* ========== PLAN PANEL ========== */
     .plan-panel {
@@ -1787,7 +1874,13 @@
 
         if (enableMath && typeof window.showdownKatex === 'function') {
             try {
-                converterOptions.extensions = [window.showdownKatex({ throwOnError: false })];
+                converterOptions.extensions = [window.showdownKatex({
+                    throwOnError: false,
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '$', right: '$', display: false }
+                    ]
+                })];
             } catch (error) {
                 console.warn('Failed to initialize showdown-katex extension:', error);
             }
@@ -1980,6 +2073,10 @@
     let lastSubmittedPrompt = '';
     let lastFinishedPrompt = '';
     let lastKnownHistory = [];
+    let activityDisclosureState = new Map();
+    let streamCompletedActivities = new Set();
+    let showExecsEnabled = false;
+    let resetActivityDisclosure = false;
     let activeHistoryId = null;
     let historyEnabled = true;
     let attachmentsEnabled = false;
@@ -2000,6 +2097,7 @@
     let streamRenderTimer = null;
     let plannerStreamBuffer = '';
     let plannerRenderTimer = null;
+    let planningModeActive = false;
     let immediatePollTimer = null;
     let pollInFlight = false;
     let pollQueued = false;
@@ -2562,7 +2660,7 @@
     }
 
     function extractLastAnswerFromText(text) {
-        const allText = text || '';
+        const allText = (text || '').replace(/<details class="answer-activity"[\s\S]*?<\/details>/g, '');
         if (!allText) return '';
 
         const lines = allText.split('\n');
@@ -2615,7 +2713,10 @@
                 sourceText = extractPlainTextFromHtml(html);
             }
 
-            const lastAnswer = extractLastAnswerFromText(sourceText);
+            const finalEvent = getCurrentConversationEvents().slice().reverse().find(ev => ev.event === 'final');
+            const lastAnswer = finalEvent && typeof finalEvent.message === 'string'
+                ? (extractAssistantAnswerText(finalEvent.message) || finalEvent.message.trim())
+                : extractLastAnswerFromText(sourceText);
             if (!lastAnswer) {
                 throw new Error('No answer available to copy.');
             }
@@ -2799,8 +2900,7 @@
             lastRawContent = content;
             conversationFinished = events.some(ev => ev && (ev.event === 'final' || ev.event === 'assistant' || ev.event === '🤖'));
 
-            const preprocessed = preprocessChartBlocks(content);
-            const htmlContent = converter.makeHtml(preprocessed);
+            const htmlContent = renderConversationMarkdown(content);
             await updateResultsContent(htmlContent);
             try { hljs.highlightAll(); } catch (e) { /* ignore */ }
             forceRenderChartBlocks();
@@ -2879,6 +2979,80 @@
         }
     }
 
+    function captureActivityDisclosures() {
+        if (resetActivityDisclosure) {
+            activityDisclosureState.clear();
+            streamCompletedActivities.clear();
+            resetActivityDisclosure = false;
+            return;
+        }
+        resultsDiv.querySelectorAll('details.answer-activity').forEach(panel => {
+            if (panel.dataset.activityKey) {
+                activityDisclosureState.set(panel.dataset.activityKey, {
+                    open: panel.open, complete: panel.dataset.complete
+                });
+            }
+        });
+    }
+
+    function restoreActivityDisclosures() {
+        resultsDiv.querySelectorAll('details.answer-activity').forEach(panel => {
+            const key = `${currentSessionUuid || ''}:${panel.dataset.activityId}`;
+            const previous = activityDisclosureState.get(key);
+            if (streamCompletedActivities.has(key)) panel.dataset.complete = 'true';
+            // Completion closes the active section once; later renders retain the user's choice.
+            panel.open = previous && previous.complete === panel.dataset.complete
+                ? previous.open : panel.dataset.complete !== 'true';
+            panel.dataset.activityKey = key;
+        });
+    }
+
+    function completeStreamActivity(rawContent) {
+        captureActivityDisclosures();
+        // Mark by stable answer ID, including sections in a pending render.
+        for (const match of (rawContent || '').matchAll(/<details class="answer-activity" data-activity-id="(\d+)" data-complete="false"/g)) {
+            streamCompletedActivities.add(`${currentSessionUuid || ''}:${match[1]}`);
+        }
+        restoreActivityDisclosures();
+    }
+
+    // Older saved conversations contain events but predate activity markup.
+    function upgradeActivityTranscript(content, events) {
+        if (!Array.isArray(events) || !events.some(ev => ev.event === 'final')) return content || '';
+        let result = '';
+        let lines = [];
+        let warnings = 0;
+        let id = 0;
+        const flush = complete => {
+            if (!lines.length) {
+                warnings = 0;
+                return;
+            }
+            result += `\n\n<details class="answer-activity" data-activity-id="${id}" data-complete="${complete}"${complete ? '' : ' open'}><summary>Activity${warnings ? ` <span class="activity-warning">⚠ ${warnings} warning/error event(s)</span>` : ''}</summary><div class="activity-body">${lines.join('')}</div></details>\n\n`;
+            lines = [];
+            warnings = 0;
+        };
+        events.forEach((ev, index) => {
+            if (ev.event === 'final') {
+                flush(true);
+                id++;
+                result += '\n' + (ev.message || '') + '\n';
+            } else if (ev.event === '👤' || ev.event === 'user') {
+                flush(false);
+                id = index;
+                result += buildOptimisticUserPromptBlock(ev.message);
+            } else {
+                if (!['🧩', '💡', '💭', '🌀', '🛑', '⏳'].includes(ev.event) &&
+                    !(showExecsEnabled && ['⚙️', '🖥️'].includes(ev.event))) return;
+                if (/^(⚠️|❌|❗|warn|warning|error)$/.test(ev.event) ||
+                    (ev.event === '🤝' && /❌|❗|⚠️|failed|timeout/i.test(ev.message || ''))) warnings++;
+                lines.push(`<div class="activity-event">${escapeHtml(ev.event)} <span>${escapeHtml(ev.message).replace(/\n/g, '<br>')}</span></div>`);
+            }
+        });
+        flush(false);
+        return result;
+    }
+
     async function updateResultsContent(htmlContent) {
         if (!resultsDiv) return;
 
@@ -2896,8 +3070,10 @@
         const contentChanged = processedHtml !== lastRenderedHtml;
         const hadContent = lastRenderedHtml.length > 0;
 
+        captureActivityDisclosures();
         lastRenderedHtml = processedHtml;
         resultsDiv.innerHTML = processedHtml;
+        restoreActivityDisclosures();
 
         // Apply streaming class and animation
         if (isStreaming) {
@@ -3058,13 +3234,22 @@
         }
     }
 
+    function renderConversationMarkdown(content) {
+        // Activity is already escaped HTML, not Markdown. Showdown hashes its spans
+        // and leaves internal tokens visible once its unhashing limit is reached.
+        // Keep panels out of both Markdown conversion and diagram preprocessing.
+        return (content || '').split(/(<details class="answer-activity"[\s\S]*?<\/details>)/g)
+            .map((part, index) => index % 2 ? part :
+                converter.makeHtml(preprocessChartBlocks(preprocessSvgBlocks(part))))
+            .join('');
+    }
+
     async function renderRawContent(rawContent) {
         const nextContent = rawContent || '';
         if (nextContent === lastRenderedRaw) return;
 
         const normalizedContent = normalizeRenderedConversationText(nextContent);
-        const preprocessed = preprocessChartBlocks(preprocessSvgBlocks(normalizedContent));
-        const htmlContent = converter.makeHtml(preprocessed);
+        const htmlContent = renderConversationMarkdown(normalizedContent);
         await updateResultsContent(htmlContent);
         try { hljs.highlightAll(); } catch (e) { /* ignore */ }
         forceRenderChartBlocks();
@@ -3332,6 +3517,111 @@
         });
     }
 
+    function openMermaidFullscreen(svg, originalViewBoxAttr, originalPreserveAspectRatio) {
+        const dialog = document.createElement('dialog');
+        dialog.className = 'mermaid-fullscreen';
+        dialog.setAttribute('aria-label', 'Full-screen Mermaid diagram. Pinch to zoom and drag to pan.');
+        const stage = document.createElement('div');
+        stage.className = 'mermaid-fullscreen-stage';
+        const picture = document.createElement('img');
+        picture.alt = 'Mermaid diagram';
+        picture.draggable = false;
+        // An image keeps SVG IDs isolated from the inline diagram and preserves its view.
+        const copy = svg.cloneNode(true);
+        if (originalViewBoxAttr) copy.setAttribute('viewBox', originalViewBoxAttr);
+        else copy.removeAttribute('viewBox');
+        if (originalPreserveAspectRatio) copy.setAttribute('preserveAspectRatio', originalPreserveAspectRatio);
+        else copy.removeAttribute('preserveAspectRatio');
+        copy.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(copy)], { type: 'image/svg+xml' }));
+        picture.src = url;
+        stage.appendChild(picture);
+        const controls = document.createElement('div');
+        controls.className = 'mermaid-diagram-controls';
+        controls.innerHTML = '<div class="mermaid-control-group">' +
+            '<button type="button" class="mermaid-control-btn" data-action="zoom-out" aria-label="Zoom out">−</button>' +
+            '<button type="button" class="mermaid-control-btn" data-action="zoom-in" aria-label="Zoom in">+</button>' +
+            '<button type="button" class="mermaid-control-btn" data-action="reset" aria-label="Recenter diagram" title="Recenter diagram">↺</button>' +
+            '<button type="button" class="mermaid-control-btn" data-action="close" aria-label="Close full-screen diagram" title="Close full-screen diagram">×</button></div>';
+        dialog.append(stage, controls);
+        const previousFocus = document.activeElement;
+        const previousOverflow = document.body.style.overflow;
+        document.body.appendChild(dialog);
+        document.body.style.overflow = 'hidden';
+        let scale = 1;
+        let x = 0;
+        let y = 0;
+        const pointers = new Map();
+        function apply() {
+            picture.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+        }
+        function zoom(factor, anchorX = 0, anchorY = 0) {
+            const nextScale = Math.max(0.35, Math.min(12, scale * factor));
+            const ratio = nextScale / scale;
+            x = anchorX - (anchorX - x) * ratio;
+            y = anchorY - (anchorY - y) * ratio;
+            scale = nextScale;
+        }
+        function gesture() {
+            const points = Array.from(pointers.values());
+            const a = points[0];
+            const b = points[1] || a;
+            return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2,
+                distance: Math.hypot(a.x - b.x, a.y - b.y) };
+        }
+        stage.addEventListener('pointerdown', event => {
+            if (event.button !== 0) return;
+            pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+            stage.setPointerCapture(event.pointerId);
+        });
+        stage.addEventListener('pointermove', event => {
+            if (!pointers.has(event.pointerId)) return;
+            const before = gesture();
+            pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+            const after = gesture();
+            const rect = stage.getBoundingClientRect();
+            if (before.distance > 0 && after.distance > 0) {
+                zoom(after.distance / before.distance,
+                    before.x - rect.left - rect.width / 2,
+                    before.y - rect.top - rect.height / 2);
+            }
+            x += after.x - before.x;
+            y += after.y - before.y;
+            apply();
+        });
+        function release(event) { pointers.delete(event.pointerId); }
+        stage.addEventListener('pointerup', release);
+        stage.addEventListener('pointercancel', release);
+        stage.addEventListener('lostpointercapture', release);
+        stage.addEventListener('wheel', event => {
+            event.preventDefault();
+            const rect = stage.getBoundingClientRect();
+            zoom(event.deltaY < 0 ? 1.12 : 1 / 1.12,
+                event.clientX - rect.left - rect.width / 2,
+                event.clientY - rect.top - rect.height / 2);
+            apply();
+        }, { passive: false });
+        controls.addEventListener('click', event => {
+            const button = event.target.closest('button[data-action]');
+            if (!button) return;
+            const action = button.getAttribute('data-action');
+            if (action === 'close') { dialog.close(); return; }
+            if (action === 'reset') { scale = 1; x = 0; y = 0; }
+            if (action === 'zoom-in') zoom(1.2);
+            if (action === 'zoom-out') zoom(1 / 1.2);
+            apply();
+        });
+        dialog.addEventListener('close', () => {
+            pointers.clear();
+            URL.revokeObjectURL(url);
+            dialog.remove();
+            document.body.style.overflow = previousOverflow;
+            if (previousFocus && previousFocus.isConnected) previousFocus.focus();
+        }, { once: true });
+        dialog.showModal();
+        controls.querySelector('[data-action="close"]').focus();
+    }
+
     function addMermaidPanZoomLayer(container) {
         if (!container) return;
 
@@ -3350,6 +3640,7 @@
         controls.className = 'mermaid-diagram-controls';
         controls.innerHTML = [
             '<div class="mermaid-control-group">',
+            '<button type="button" class="mermaid-control-btn" data-action="fullscreen" aria-label="Open diagram full screen" title="Open full screen">⛶</button>',
             '<button type="button" class="mermaid-control-btn" data-action="reset" aria-label="Reset mermaid view" title="Reset view">',
             '<svg class="mermaid-reset-icon" viewBox="0 0 16 16" aria-hidden="true">',
             '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -3463,7 +3754,9 @@
             const cy = rect.height / 2;
             const action = btn.getAttribute('data-action');
 
-            if (action === 'zoom-in') {
+            if (action === 'fullscreen') {
+                openMermaidFullscreen(svg, originalViewBoxAttr, originalPreserveAspectRatio);
+            } else if (action === 'zoom-in') {
                 zoomAt(1.2, cx, cy);
             } else if (action === 'zoom-out') {
                 zoomAt(1 / 1.2, cx, cy);
@@ -3813,6 +4106,36 @@
 
     /* ========== LEAFLET MAPS RENDERING ========== */
 
+    function addLeafletMarkers(map, markers) {
+        if (!Array.isArray(markers)) return;
+        const colors = {
+            default: '#2a81cb', blue: '#2a81cb', red: '#cb2b3e',
+            green: '#2aad27', orange: '#e98125', yellow: '#f2c218',
+            violet: '#9c2bcb', grey: '#777777', black: '#333333'
+        };
+        const icons = {};
+        markers.forEach(marker => {
+            if (!marker || !Number.isFinite(marker.lat) || !Number.isFinite(marker.lon) ||
+                Math.abs(marker.lat) > 90 || Math.abs(marker.lon) > 180) return;
+            const name = typeof marker.icon === 'string' && Object.prototype.hasOwnProperty.call(colors, marker.icon)
+                ? marker.icon : 'default';
+            if (!icons[name]) {
+                // Only palette values enter the SVG; configuration cannot inject markup.
+                icons[name] = L.divIcon({
+                    className: 'mini-a-map-pin',
+                    html: '<svg xmlns="http://www.w3.org/2000/svg" width="25" height="41" viewBox="0 0 25 41" aria-hidden="true">' +
+                        '<path d="M12.5 40C10 33 1 22 1 13a11.5 11.5 0 0 1 23 0c0 9-9 20-11.5 27Z" fill="' + colors[name] + '" stroke="#333" stroke-width="1"/>' +
+                        '<circle cx="12.5" cy="13" r="4.5" fill="white" stroke="#333" stroke-opacity="0.3"/></svg>',
+                    iconSize: [25, 41],
+                    iconAnchor: [12.5, 41],
+                    popupAnchor: [0, -34]
+                });
+            }
+            const pin = L.marker([marker.lat, marker.lon], { icon: icons[name] }).addTo(map);
+            if (marker.popup) pin.bindPopup(marker.popup);
+        });
+    }
+
     function renderLeafletMaps() {
         if (typeof L === 'undefined') return;
 
@@ -3870,28 +4193,7 @@
                                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                             }).addTo(map);
 
-                            // Create custom icon with explicit URLs
-                            const defaultIcon = L.icon({
-                                iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-                                iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-                                shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-                                iconSize: [25, 41],
-                                iconAnchor: [12, 41],
-                                popupAnchor: [1, -34],
-                                shadowSize: [41, 41]
-                            });
-
-                            // Add markers if provided
-                            if (config.markers && Array.isArray(config.markers)) {
-                                config.markers.forEach(marker => {
-                                    if (marker.lat && marker.lon) {
-                                        const m = L.marker([marker.lat, marker.lon], { icon: defaultIcon }).addTo(map);
-                                        if (marker.popup) {
-                                            m.bindPopup(marker.popup);
-                                        }
-                                    }
-                                });
-                            }
+                            addLeafletMarkers(map, config.markers);
 
                             // Add layers if provided
                             if (config.layers && Array.isArray(config.layers)) {
@@ -3980,17 +4282,7 @@
                         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                     }).addTo(map);
 
-                    // Re-add markers
-                    if (mapConfig.markers && Array.isArray(mapConfig.markers)) {
-                        mapConfig.markers.forEach(marker => {
-                            if (marker.lat && marker.lon) {
-                                const m = L.marker([marker.lat, marker.lon]).addTo(map);
-                                if (marker.popup) {
-                                    m.bindPopup(marker.popup);
-                                }
-                            }
-                        });
-                    }
+                    addLeafletMarkers(map, mapConfig.markers);
 
                     // Re-add layers
                     if (mapConfig.layers && Array.isArray(mapConfig.layers)) {
@@ -4633,6 +4925,7 @@
             if (typeof data.showthinking === 'boolean') {
                 window.__mini_a_showthinking = data.showthinking;
             }
+            if (typeof data.showexecs === 'boolean') showExecsEnabled = data.showexecs;
             if (typeof data.usemath === 'boolean') {
                 shouldEnableMath = data.usemath;
             }
@@ -4845,6 +5138,7 @@
 
     async function loadConversationEntry(entry) {
         if (!entry) return;
+        resetActivityDisclosure = true;
 
         if (isProcessing) {
             stopProcessing(true);
@@ -4865,8 +5159,8 @@
 
         currentSessionUuid = entry.uuid;
 
-        const preprocessed = preprocessChartBlocks(preprocessSvgBlocks(entry.content || ''));
-        const htmlContent = converter.makeHtml(preprocessed);
+        const savedContent = upgradeActivityTranscript(entry.content || '', lastKnownHistory);
+        const htmlContent = renderConversationMarkdown(savedContent);
         await updateResultsContent(htmlContent);
         resetPlanPanel();
         try { hljs.highlightAll(); } catch (e) { /* ignore */ }
@@ -4876,7 +5170,8 @@
         __refreshDarkMode();
         refreshHistoryPanel();
         closeHistoryPanel();
-        lastRawContent = entry.content || '';
+        lastRawContent = savedContent;
+        lastRenderedRaw = '';
     }
 
     async function refreshCurrentConversationView() {
@@ -4919,8 +5214,7 @@
                 }
                 resetSubagentPanel(false);
             }
-            const preprocessed = preprocessChartBlocks(preprocessSvgBlocks(data.content || ''));
-            const htmlContent = converter.makeHtml(preprocessed);
+            const htmlContent = renderConversationMarkdown(data.content || '');
             await updateResultsContent(htmlContent);
             try { hljs.highlightAll(); } catch (e) { /* ignore */ }
             forceRenderChartBlocks();
@@ -5081,18 +5375,31 @@
         return lines[lines.length - 1];
     }
 
+    function setPlanningMode(active) {
+        planningModeActive = active === true;
+        const preview = document.getElementById(PREVIEW_ID);
+        if (preview) preview.classList.toggle('planning-mode', planningModeActive);
+        syncPreviewText();
+    }
+
     function syncPreviewText() {
         const preview = document.getElementById(PREVIEW_ID);
         if (!preview) return;
         const textNode = preview.querySelector('.preview-text');
         if (!textNode) return;
         const text = getPlannerPreviewText();
-        if (text.length > 0) {
+        if (planningModeActive) {
+            textNode.textContent = text.length > 0 ? `Planning · ${text}` : 'Planning…';
+            preview.classList.add('has-text');
+            preview.classList.add('planning-mode');
+        } else if (text.length > 0) {
             textNode.textContent = text;
             preview.classList.add('has-text');
+            preview.classList.remove('planning-mode');
         } else {
             textNode.textContent = '';
             preview.classList.remove('has-text');
+            preview.classList.remove('planning-mode');
         }
     }
 
@@ -5339,6 +5646,7 @@
 
     /* ========== PROCESSING STATE MANAGEMENT ========== */
     function startProcessing() {
+        streamCompletedActivities.clear();
         isProcessing = true;
         conversationFinished = false;
         pollErrorCount = 0;
@@ -5359,6 +5667,7 @@
         resetPlanPanel();
         resetSubagentPanel();
         updateCopyActionsVisibility();
+        setPlanningMode(false);
     }
 
     function stopProcessing(sendStopRequest = false) {
@@ -5378,6 +5687,7 @@
         }
 
         stopStream();
+        setPlanningMode(false);
         
         if (sendStopRequest && currentSessionUuid) {
             fetch(resolveAppUrl('result'), {
@@ -5573,6 +5883,8 @@
                     sawNonFinishedForActiveSubmission = true;
                 }
 
+                setPlanningMode(data && data.status !== 'finished' && data.phase === 'planning');
+
                 // Only update plan panel if conversation is not finished and hasn't been marked as finished
                 if (data && data.status !== 'finished' && !conversationFinished) {
                     updatePlanPanel(data.plan);
@@ -5582,7 +5894,7 @@
                 // Only update content if it has actually changed to prevent chart flickering
                 const rawContent = data.content || '';
                 const contentForDisplay = ensurePromptVisibleUntilAcknowledged(rawContent, lastSubmittedPrompt, promptAcknowledged);
-                if (contentForDisplay !== lastRawContent) {
+                if (data.status !== 'finished' && contentForDisplay !== lastRawContent) {
                     lastRawContent = contentForDisplay;
                     if (streamActive) {
                         // During streaming, re-render with the latest polled event log plus any
@@ -5609,9 +5921,11 @@
                 }
 
                 if (data.status === 'finished') {
-                    const finalStreamChunk = streamBuffer || '';
-                    const finalContent = mergeFinalContentWithStream(contentForDisplay, finalStreamChunk);
+                    // Completed server content is authoritative. Stream previews can
+                    // omit or alter passages and must not be appended or saved here.
+                    const finalContent = contentForDisplay;
                     conversationFinished = true;
+                    setPlanningMode(false);
                     stopStream();
                     lastRawContent = finalContent;
                     await renderRawContent(finalContent);
@@ -5696,6 +6010,19 @@
         const normalizedBase = normalizeRenderedConversationText(base);
         if (normalizedBase.indexOf(stream) !== -1) return base;
         if (base.indexOf(stream) !== -1) return base;
+
+        // The response endpoint returns the final answer as a Markdown suffix of
+        // the interaction log. Streaming chunks often differ only in whitespace
+        // (for example, a buffered newline between Markdown blocks), so an exact
+        // substring check above misses an already-present final answer and appends
+        // it a second time. Compare normalized suffixes before adding a preview.
+        const normalizeForStreamDedup = value => String(value || '')
+            .replace(/\r\n/g, '\n')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const comparableBase = normalizeForStreamDedup(normalizedBase);
+        const comparableStream = normalizeForStreamDedup(stream);
+        if (comparableStream && comparableBase.endsWith(comparableStream)) return base;
         return appendWithOverlap(base, stream);
     }
 
@@ -5792,6 +6119,7 @@
             try { payload = JSON.parse(event.data); } catch (e) { payload = {}; }
             const chunk = payload.message || '';
             if (!chunk) return;
+            setPlanningMode(false);
             streamBuffer += chunk;
             scheduleStreamRender();
         });
@@ -5801,6 +6129,7 @@
             try { payload = JSON.parse(event.data); } catch (e) { payload = {}; }
             const chunk = payload.message || '';
             if (!chunk) return;
+            setPlanningMode(true);
             plannerStreamBuffer += chunk;
             schedulePlannerRender();
         });
@@ -5808,6 +6137,7 @@
             if (!event || !event.data) return;
             try {
                 const payload = JSON.parse(event.data);
+                setPlanningMode(false);
                 if (payload && payload.plan) updatePlanPanel(payload.plan);
             } catch (e) { /* ignore */ }
         });
@@ -5823,10 +6153,14 @@
             syncPreviewText();
             scheduleImmediatePoll(10);
         });
-        streamSource.addEventListener('done', () => {
+        streamSource.addEventListener('done', (event) => {
+            setPlanningMode(false);
             const combined = mergeFinalContentWithStream(lastRawContent, streamBuffer);
-            renderRawContent(combined).catch(() => { /* ignore */ });
+            let payload = {};
+            try { payload = JSON.parse(event.data); } catch (e) { /* ignore malformed completion */ }
+            if (payload.status === 'finished') completeStreamActivity(combined);
             closeStreamConnectionKeepBuffers();
+            renderRawContent(combined).catch(() => { /* ignore */ });
             scheduleImmediatePoll(0);
         });
         streamSource.addEventListener('error', (event) => {
@@ -5895,6 +6229,7 @@
 
     /* ========== EVENT HANDLERS ========== */
     async function handleClearClick() {
+        resetActivityDisclosure = true;
         const uuidToClear = currentSessionUuid || 
             (typeof window !== 'undefined' ? window.mini_a_session_uuid : null);
 

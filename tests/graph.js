@@ -26,6 +26,61 @@
     ]
   }
 
+  exports.testGraphEvidenceOwnership = function() {
+    var dir = mkTmp(), calls = 0
+    try {
+      var extract = function() { calls++; return { summary: "Supported", relationships: [{from:"Foo",to:"Bar",type:"RELATED_TO",provenance:"EXTRACTED"}] } }
+      var g = new MiniAWikiGraph({graphDir:dir,llmExtractFn:extract}), input = pages()
+      g.buildStructural(input); g.buildSemantic(input)
+      var assertions = function(graph) { return graph._state.edges.filter(function(e) {return !e._deleted && e.from === "concept:foo"}) }
+      ow.test.assert(assertions(g).length, 2, "identical assertions retain both source pages")
+      g = new MiniAWikiGraph({graphDir:dir,llmExtractFn:extract})
+      ow.test.assert(assertions(g).length, 2, "save/load preserves both assertions")
+      g.buildStructural(input); g.buildSemantic(input)
+      ow.test.assert(calls, 2, "unchanged structural rebuild retains semantic cache")
+      ow.test.assert(g.neighbors("a.md").length, g._state.edges.filter(function(e) {return e.from === "doc:a.md" || e.to === "doc:a.md"}).length, "rebuild adjacency has no old references")
+      input[0].body += "\nChanged beyond compact metadata"
+      g.buildStructural(input)
+      ow.test.assert(assertions(g).length, 1, "changed source loses only its own semantic assertion")
+      ow.test.assert(assertions(g)[0].props.page, "b.md", "other source survives")
+      g.buildSemantic(input)
+      ow.test.assert(calls, 3, "only changed page is extracted")
+      g.removePage("a.md")
+      ow.test.assert(assertions(g).length, 1, "deletion preserves independent support")
+      ow.test.assert(g.joinKeys().concepts.foo.join(","), "b.md", "concept joins retain surviving source")
+      var queries = []; g._falkorLink({query:function(q){queries.push(q)}}, assertions(g)[0])
+      ow.test.assert(queries[0].indexOf("evidenceKey:") >= 0, true, "Falkor relationship identity includes source assertion")
+    } finally { io.rm(dir) }
+  }
+
+  exports.testGraphUpdateDiffPreservesIncoming = function() {
+    var dir = mkTmp()
+    try {
+      var g = new MiniAWikiGraph({graphDir:dir}), diff
+      g.buildStructural(pages())
+      g._scheduleSave = function(value) {diff=value}
+      g.updatePage({path:"b.md",meta:{title:"Changed"},body:"# Changed",links:[]})
+      ow.test.assert(diff.deleteNodes.indexOf("doc:b.md"), -1, "referenced document must not be detached remotely during update")
+      ow.test.assert(g.neighbors("b.md").some(function(e){return e.from === "doc:a.md" && e.type === "LINKS_TO"}), true, "incoming local link survives")
+      g.removePage("b.md")
+      ow.test.assert(diff.deleteNodes.indexOf("doc:b.md"), -1, "missing linked target remains a placeholder")
+      ow.test.assert(diff.deleteNodes.indexOf("section:b.md#changed") >= 0, true, "unreferenced owned nodes are removed")
+    } finally {io.rm(dir)}
+  }
+
+  exports.testGraphSemanticFullRevisionAndFailure = function() {
+    var dir = mkTmp(), calls = 0, fail = false
+    try {
+      var g = new MiniAWikiGraph({graphDir:dir,llmExtractFn:function(){calls++;if(fail)throw "extraction failed";return {relationships:[{from:"X",to:"Y",provenance:"INFERRED"}]}}})
+      var page={path:"a.md",meta:{title:"A"},body:new Array(12).join("A sufficiently long repeated prose line.\n"),links:[]}
+      g.buildStructural([page]);g.buildSemantic([page]); page.body += "Late body edit"
+      g.buildSemantic([page]);ow.test.assert(calls,2,"changes outside compact payload invalidate extraction")
+      var before=stringify(g._state,__,"");fail=true;page.body+=" another edit"
+      try {g.buildSemantic([page])}catch(expected){}
+      ow.test.assert(stringify(g._state,__,""),before,"failed extraction does not destroy previous graph state")
+    } finally {io.rm(dir)}
+  }
+
   exports.testGraphStructuralBuild = function() {
     var dir = mkTmp()
     try {

@@ -261,6 +261,9 @@ try {
 
       var applied = []
       var skipped = []
+      // Mode values are configuration choices, not merely display defaults.
+      // Keep their provenance so automatic orchestration cannot overwrite them.
+      if (!isObject(args.__modeargkeys)) args.__modeargkeys = {}
       var paramsSource = resolvedPreset.params
       var applyParam = function(key, value) {
         if (isObject(value) || isArray(value)) value = af.toSLON(value)
@@ -271,6 +274,7 @@ try {
             return
           }
           args[key] = value
+          args.__modeargkeys[normalizedKey] = true
           applied.push(key)
         }
       }
@@ -316,6 +320,7 @@ try {
           objid: true,
           execid: true,
           "__modeapplied": true,
+          "__modeargkeys": true,
           "__unknownargsreported": true
         },
         logger: function(message) { logWarn(message) }
@@ -576,6 +581,7 @@ try {
 
   function unwrapSingleMarkdownCodeBlock(text) {
     if (!isString(text)) return text
+    if (__miniAHasConsoleChartFence(text)) return text
     var normalized = text.replace(/\r\n/g, "\n")
     var fencedMatch = normalized.match(/^\s*```[^\n]*\n([\s\S]*?)\n```[ \t]*\s*$/)
     if (!isArray(fencedMatch) || fencedMatch.length < 2) return text
@@ -587,6 +593,10 @@ try {
     debug          : { type: "boolean", default: false, description: "Enable debug logging" },
     debugfile      : { type: "string", description: "Write debug output to this file instead of screen (implies debug=true)" },
     debugtrace     : { type: "boolean", default: true, description: "Capture the previous goal trace for /debug in a temporary file" },
+    durable        : { type: "boolean", default: false, description: "Persist a resumable run state and redacted JSONL trace" },
+    runid          : { type: "string", description: "Stable identifier for a durable run" },
+    resumerun      : { type: "string", description: "Resume an interrupted durable run by ID" },
+    runroot        : { type: "string", description: "Optional durable-run storage root" },
     raw            : { type: "boolean", default: false, description: "Return raw LLM output without formatting adjustments" },
     showthinking   : { type: "boolean", default: false, description: "Surface XML-tagged model thinking blocks as thought logs (uses raw prompt calls)" },
     youare         : { type: "string", description: "Override the opening 'You are...' sentence in the agent prompt" },
@@ -605,12 +615,17 @@ try {
     showseparator  : { type: "boolean", default: true, description: "Show a subtle separator line between interaction events (disable for a more compact view)" },
     nologtrunc     : { type: "boolean", default: false, description: "Disable truncation of long log output lines (show full content)" },
     usetools       : { type: "boolean", default: __, description: "Register MCP tools directly on the model" },
+    capabilityselection: { type: "boolean", default: false, description: "Select a bounded relevant subset of normalized capabilities before registering MCP tools" },
+    capabilitylimit: { type: "number", default: 8, description: "Maximum capabilities exposed when capabilityselection=true" },
+    policy         : { type: "string", description: "SLON/JSON policy definition for shell, tools, delegation, Wiki and network" },
+    policyfile     : { type: "string", description: "JSON file containing centralized policy definition" },
     usetoolslc     : { type: "boolean", default: __, description: "Register MCP tools directly only on the low-cost model" },
     useutils       : { type: "boolean", default: __, description: "Enable bundled Mini Utils Tool utilities" },
     useeditor      : { type: "boolean", default: false, description: "Compose each console goal in an external editor ($EDITOR or vi)" },
     editor         : { type: "string", description: "External editor command used when useeditor=true (overrides $EDITOR)" },
     utilsallow     : { type: "string", description: "Comma-separated allowlist of Mini Utils Tool names to expose when useutils=true" },
     utilsdeny      : { type: "string", description: "Comma-separated denylist of Mini Utils Tool names to hide when useutils=true (applied after utilsallow)" },
+    useasciiviz    : { type: "boolean", default: false, description: "Render oafPrintChart Markdown fences as console charts and expose printChart for interim charts." },
     "mini-a-docs"  : { type: "boolean", default: false, description: "When true (with useutils=true), point utilsroot to the Mini-A opack path so the LLM can inspect Mini-A documentation files." },
     usediagrams    : { type: "boolean", default: false, description: "Encourage Mermaid diagrams in knowledge prompt" },
     usemermaid     : { type: "boolean", default: false, description: "Alias for usediagrams (Mermaid diagrams guidance)" },
@@ -620,6 +635,7 @@ try {
     usevectors     : { type: "boolean", default: false, description: "Enable infographic-focused vector bundle (usesvg + usediagrams)" },
     usestream      : { type: "boolean", default: false, description: "Stream LLM tokens in real-time as they arrive" },
     useplanning    : { type: "boolean", default: false, description: "Track and expose task planning" },
+    orchestration  : { type: "string", default: "manual", description: "Execution strategy mode: manual or deterministic auto." },
     usememory      : { type: "boolean", default: false, description: "Enable structured working memory during execution" },
     memoryuser     : { type: "boolean", default: false, description: "Enable usememory and auto-configure ~/.openaf-mini-a file-backed global and session memory." },
     memoryusersession: { type: "boolean", default: false, description: "Enable usememory and auto-configure ~/.openaf-mini-a file-backed session memory only." },
@@ -647,6 +663,9 @@ try {
     wikilintstaleddays: { type: "number", default: 90, description: "Default stale-page threshold in days for wiki lint." },
     wikilintresultlimit: { type: "number", default: 0, description: "Default maximum lint issues returned to an agent (0 returns all; dream reorg defaults to 25)." },
     wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts; fs roots may be directories or local .zip/.okt archives." },
+    wikiretrievalv2: { type: "boolean", description: "Opt-in versioned passage retrieval (requires explicit writable reindex)." },
+    wikiretrievalconfig: { type: "string", description: "Validated SLON/JSON advanced passage/cache/artifact budgets." },
+    wikitelemetry: { type: "boolean", description: "Record local aggregate wiki retrieval telemetry (off by default); writable managers persist it, read-only managers keep it in memory." },
     wikilexical    : { type: "string", description: "SLON/JSON Lucene lexical configuration; defaults to {language:'english'} and supports optional synonymsFile." },
     usewikigraph   : { type: "boolean", default: false, description: "Enable the wiki knowledge graph for structural and semantic page relationships." },
     wikigraphsemantic: { type: "boolean", default: false, description: "Build semantic (embedding-based) edges in addition to structural links when running /graph build." },
@@ -666,6 +685,14 @@ try {
     wikigraphfalkorgraph: { type: "string", description: "FalkorDB graph name for wiki graph." },
     wikigraphfalkoruser: { type: "string", description: "FalkorDB username for wiki graph." },
     wikigraphfalkorpass: { type: "string", description: "FalkorDB password for wiki graph." },
+    useskillwiki   : { type: "boolean", default: false, description: "Enable the virtual skill library (docs/VIRTUAL-SKILLS.md). Reuses usewiki's wiki when no skillwiki* config is given." },
+    skillwikibackend: { type: "string", description: "Skill library backend: fs, s3, s3fs, es, or http. Defaults to fs. Only needed for a dedicated skill wiki separate from usewiki." },
+    skillwikiroot  : { type: "string", description: "Root directory for a dedicated skill library (fs backend). Only needed when not reusing usewiki's wiki." },
+    skillwikimounts: { type: "string", description: "SLON/JSON array of read-only skill-library mounts, same shape as wikimounts. Only used with a dedicated skill wiki." },
+    skillsautosearch: { type: "boolean", default: false, description: "Allow mini-a to consult the skill library automatically during planning (opt-in, bounded by skillsautolimit/skillsmaxloaded/skillsmaxchars)." },
+    skillsautolimit: { type: "number", default: 5, description: "Maximum results per automatic skill search." },
+    skillsmaxloaded: { type: "number", default: 3, description: "Maximum distinct skills opened per agent run." },
+    skillsmaxchars : { type: "number", default: 12000, description: "Maximum skill-body characters read per agent run." },
     planmode       : { type: "boolean", default: false, description: "Run in plan-only mode without executing actions" },
     validateplan   : { type: "boolean", default: false, description: "Validate a plan using LLM-based critique and structure validation" },
     convertplan    : { type: "boolean", default: false, description: "Convert plan to requested format and exit" },
@@ -689,6 +716,7 @@ try {
     evidencegatestrictness: { type: "string", default: "medium", description: "Evidence gate strictness: low, medium, or high." },
     lcescalatedefer: { type: "boolean", default: true, description: "Defer low-cost escalation decisions when the LC tier is near a handoff." },
     lcbudget       : { type: "number", default: 0, description: "Maximum total low-cost model tokens for the session (0 disables)." },
+    lcreplytool    : { type: "boolean", default: false, description: "Use a capture-only MCP tool for LC JSON retries (OpenAI-compatible/Ollama)." },
     lcjsonretries  : { type: "number", default: 1, description: "Extra same-step low-cost model retries on invalid JSON before falling back to main model (0 disables)." },
     llmcomplexity  : { type: "boolean", default: false, description: "Use an extra low-cost complexity check for medium-complexity goals." },
     mcplazy        : { type: "boolean", default: false, description: "Defer MCP connection initialization" },
@@ -729,6 +757,11 @@ try {
     knowledge      : { type: "string", description: "Extra knowledge or context" },
     libs           : { type: "string", description: "Comma-separated libraries to load" },
     conversation   : { type: "string", description: "Conversation history file" },
+    historyvm      : { type: "boolean", default: false, description: "Enable durable bounded virtual conversation history (requires conversation path)" },
+    historyvmmode  : { type: "string", default: "safe", description: "Virtual history policy mode" },
+    historyvmshadow: { type: "boolean", default: false, description: "Capture and measure virtual history without changing requests" },
+    contextvirtualization: { type: "boolean", default: false, description: "Enable experimental hierarchical context retrieval and active provider projection (requires historyvm)" },
+    contextvirtualizationshadow: { type: "boolean", default: false, description: "Measure Phase 2 projection while sending Phase 1 context (requires historyvm and contextvirtualization)" },
     resume         : { type: "boolean", default: false, description: "Resume the last console conversation/history entry on startup." },
     usehistory     : { type: "boolean", default: false, description: "List previous console conversations from ~/.openaf-mini-a/history" },
     useattach      : { type: "boolean", default: false, description: "Enable file attachments in the web UI." },
@@ -737,7 +770,7 @@ try {
     historykeep    : { type: "boolean", default: false, description: "Keep console conversations under ~/.openaf-mini-a/history" },
     historykeepperiod: { type: "number", description: "Delete kept conversation files older than this many minutes" },
     historykeepcount: { type: "number", description: "Keep only the newest N kept conversation files" },
-    historys3bucket: { type: "string", description: "S3 bucket used to mirror history files." },
+    historys3bucket: { type: "string", description: "S3 bucket used by web history to mirror conversations and enabled History VM snapshots." },
     historys3prefix: { type: "string", description: "S3 key prefix used for mirrored history files." },
     historys3url   : { type: "string", description: "S3 endpoint URL for history mirroring." },
     historys3accesskey: { type: "string", description: "S3 access key for history mirroring." },
@@ -854,6 +887,9 @@ try {
     ingestmaxfilekb: { type: "number", description: "Skip ingest sources larger than this many KB." },
     ingestconcurrency: { type: "number", description: "Number of parallel source distillations during ingest." },
     ingestdryrun   : { type: "boolean", default: false, description: "Report what would be ingested without writing." },
+    ingestprune    : { type: "boolean", default: false, description: "Remove verified missing sources within this ingestion scope." },
+    ingestallowemptyprune: { type: "boolean", default: false, description: "Allow pruning a confirmed empty source folder." },
+    ingestsourceid : { type: "string", description: "Stable logical ingestion origin identity." },
     ingestforce    : { type: "boolean", default: false, description: "Re-ingest sources the ledger reports as unchanged." },
     ingestledger   : { type: "string", description: "Override the ingest ledger file path." },
     workermode     : { type: "boolean", default: false, description: "Start in worker mode for delegated agent execution." },
@@ -1448,6 +1484,9 @@ try {
         wikihttptimeout: sessionOptions.wikihttptimeout,
         wikiartifactrefreshsecs: sessionOptions.wikiartifactrefreshsecs,
         wikilexical: sessionOptions.wikilexical,
+        wikiretrievalv2: sessionOptions.wikiretrievalv2,
+        wikitelemetry: sessionOptions.wikitelemetry,
+        wikiretrievalconfig: sessionOptions.wikiretrievalconfig,
         usegraph: toBoolean(sessionOptions.usewikigraph) === true,
         wikigraphsemantic: toBoolean(sessionOptions.wikigraphsemantic) === true,
         wikigraphcommunity: sessionOptions.wikigraphcommunity,
@@ -1508,6 +1547,55 @@ try {
       } catch(ignoreWikiMountInitError) {}
       return wm
     } catch(ignoreWikiInitError) {
+      return __
+    }
+  }
+
+  function getConsoleSkillWikiManager() {
+    var swm = isObject(activeAgent) && isObject(activeAgent._skillWikiManager) ? activeAgent._skillWikiManager : __
+    if (isObject(swm)) return swm
+    if (toBoolean(sessionOptions.useskillwiki) !== true) return __
+    var hasDedicated = isString(sessionOptions.skillwikiroot) || isString(sessionOptions.skillwikibackend) || isDef(sessionOptions.skillwikimounts)
+    if (!hasDedicated) return getConsoleWikiManager()
+    try {
+      var cfg = {
+        access : "ro",
+        backend: isString(sessionOptions.skillwikibackend) ? sessionOptions.skillwikibackend : "fs",
+        root   : isString(sessionOptions.skillwikiroot) && sessionOptions.skillwikiroot.trim().length > 0 ? sessionOptions.skillwikiroot.trim() : ".",
+        indexdir: sessionOptions.wikiindexdir,
+        s3artifactprefix: sessionOptions.wikis3artifactprefix,
+        s3artifactbundle: sessionOptions.s3artifactbundle,
+        wikihttpindexurl: sessionOptions.wikihttpindexurl,
+        wikihttptimeout: sessionOptions.wikihttptimeout,
+        wikiartifactrefreshsecs: sessionOptions.wikiartifactrefreshsecs,
+        wikilexical: sessionOptions.wikilexical,
+        wikiretrievalv2: sessionOptions.wikiretrievalv2,
+        wikiretrievalconfig: sessionOptions.wikiretrievalconfig,
+        wikitelemetry: sessionOptions.wikitelemetry
+      }
+      if (cfg.backend === "s3" || cfg.backend === "s3fs") {
+        cfg.bucket = sessionOptions.wikibucket; cfg.prefix = sessionOptions.wikiprefix; cfg.url = sessionOptions.wikiurl
+        cfg.accessKey = sessionOptions.wikiaccesskey; cfg.secret = sessionOptions.wikisecret
+        cfg.region = sessionOptions.wikiregion; cfg.useVersion1 = sessionOptions.wikiuseversion1
+        cfg.ignoreCertCheck = sessionOptions.wikiignorecertcheck
+      } else if (cfg.backend === "es") {
+        cfg.esurl = sessionOptions.wikiurl; cfg.esindex = isString(sessionOptions.wikiprefix) && sessionOptions.wikiprefix.trim().length > 0 ? sessionOptions.wikiprefix.trim() : "mini_a_wiki"
+        cfg.esuser = sessionOptions.wikiaccesskey; cfg.espass = sessionOptions.wikisecret
+      } else if (cfg.backend === "http" || cfg.backend === "https") {
+        cfg.backend = "http"; cfg.url = sessionOptions.wikiurl
+        cfg.accessKey = sessionOptions.wikiaccesskey; cfg.secret = sessionOptions.wikisecret
+      }
+      var swm2 = new MiniAWikiManager(cfg)
+      if (isString(sessionOptions.skillwikimounts) && sessionOptions.skillwikimounts.trim().length > 0) {
+        var mountsList = af.fromJSSLON(sessionOptions.skillwikimounts)
+        if (!isArray(mountsList)) mountsList = [mountsList]
+        mountsList.forEach(function(mc) {
+          if (!isMap(mc) || !isString(mc.name)) return
+          swm2.attach(mc.name, merge({ access: "ro" }, mc))
+        })
+      }
+      return swm2
+    } catch(ignoreSkillWikiInitError) {
       return __
     }
   }
@@ -2963,6 +3051,43 @@ try {
     }
   }
 
+  function renderProportionBar(items, barWidth) {
+    var total = 0
+    items.forEach(function(item) { if (item.value > 0) total += item.value })
+    if (total <= 0) return ""
+
+    var segments = []
+    items.forEach(function(item) {
+      if (item.value > 0) {
+        var proportion = item.value / total
+        segments.push({ width: Math.max(1, Math.round(proportion * barWidth)), color: item.color, pattern: item.pattern })
+      }
+    })
+
+    var currentTotal = segments.reduce(function(sum, seg) { return sum + seg.width }, 0)
+    if (currentTotal !== barWidth && segments.length > 0) {
+      var largestIdx = 0
+      var largestWidth = 0
+      segments.forEach(function(seg, idx) {
+        if (seg.width > largestWidth) { largestWidth = seg.width; largestIdx = idx }
+      })
+      segments[largestIdx].width += (barWidth - currentTotal)
+    }
+
+    var barLine = ""
+    segments.forEach(function(seg) {
+      var segment = ""
+      for (var i = 0; i < seg.width; i++) segment += seg.pattern
+      barLine += colorifyText(segment, seg.color)
+    })
+    return barLine
+  }
+
+  function getBarWidth() {
+    var termWidth = (__conAnsi && isDef(__con)) ? __con.getTerminal().getWidth() : 80
+    return Math.max(40, termWidth - 4)
+  }
+
   function printContextSummary(agentInstance, useLLMAnalysis) {
     var stats = refreshConversationStats(agentInstance)
     if (!isObject(stats) || stats.messageCount === 0) {
@@ -3014,53 +3139,11 @@ try {
     print(colorifyText("Conversation context usage", accentColor))
     print()
 
-    // Calculate available width for the bar (reserve some space for borders and padding)
-    var termWidth = (__conAnsi && isDef(__con)) ? __con.getTerminal().getWidth() : 80
-    var barWidth = Math.max(40, termWidth - 4)  // Reserve 4 chars for borders/padding
-
-    // Build the horizontal bar
-    var barSegments = []
-    var totalTokens = stats.totalTokens > 0 ? stats.totalTokens : 1
-
-    stats.sections.forEach(function(section) {
-      if (section.tokens > 0) {
-        var proportion = section.tokens / totalTokens
-        var segmentWidth = Math.max(1, Math.round(proportion * barWidth))
-        var style = sectionStyles[section.section] || sectionStyles["Other"]
-
-        barSegments.push({
-          width: segmentWidth,
-          color: style.color,
-          pattern: style.pattern,
-          section: section
-        })
-      }
-    })
-
-    // Adjust widths to exactly match barWidth (handle rounding differences)
-    var currentTotal = barSegments.reduce(function(sum, seg) { return sum + seg.width }, 0)
-    if (currentTotal !== barWidth && barSegments.length > 0) {
-      // Adjust the largest segment
-      var largestIdx = 0
-      var largestWidth = 0
-      barSegments.forEach(function(seg, idx) {
-        if (seg.width > largestWidth) {
-          largestWidth = seg.width
-          largestIdx = idx
-        }
-      })
-      barSegments[largestIdx].width += (barWidth - currentTotal)
-    }
-
-    // Render the bar
-    var barLine = ""
-    barSegments.forEach(function(seg) {
-      var segment = ""
-      for (var i = 0; i < seg.width; i++) {
-        segment += seg.pattern
-      }
-      barLine += colorifyText(segment, seg.color)
-    })
+    var barWidth = getBarWidth()
+    var barLine = renderProportionBar(stats.sections.map(function(section) {
+      var style = sectionStyles[section.section] || sectionStyles["Other"]
+      return { value: section.tokens, color: style.color, pattern: style.pattern }
+    }), barWidth)
 
     print("  " + barLine)
     print()
@@ -3089,16 +3172,120 @@ try {
     }
   }
 
-  function truncateText(text, maxLen) {
-    var str = isString(text) ? text : String(text || "")
-    if (str.length <= maxLen) return str
-    return str.substring(0, Math.max(0, maxLen - 1)) + "…"
+  function printHistoryVmSummary(agentInstance) {
+    if (!isObject(agentInstance) || !isFunction(agentInstance.getHistoryVmDiagnostics)) {
+      print(colorifyText("History VM is disabled.", hintColor))
+      return
+    }
+    var vm = agentInstance.getHistoryVmDiagnostics()
+
+    print(colorifyText("History virtual memory", accentColor))
+    print(colorifyText("  Active: ", hintColor) + colorifyText(String(vm.active === true), vm.active === true ? successColor : errorColor) + colorifyText(" | Shadow: " + String(vm.shadow === true) + " | Mode: " + String(vm.mode || "safe"), hintColor))
+    if (isString(vm.storePath) && vm.storePath.length > 0) print(colorifyText("  Store: " + vm.storePath, hintColor))
+    if (vm.degraded === true) print(colorifyText("  Degraded: " + String(vm.degradedReason || "unknown backing-store failure"), errorColor))
+    print()
+
+    var barWidth = getBarWidth()
+
+    // Object temperature: how much of the conversation graph is kept inline (hot),
+    // partially re-expanded (warm), collapsed to a reference (cold), or evicted (frozen).
+    var temperatureStyles = {
+      hot:    { color: "FG(203)", pattern: "█", label: "Hot"    },
+      warm:   { color: "FG(214)", pattern: "▓", label: "Warm"   },
+      cold:   { color: "FG(111)", pattern: "▒", label: "Cold"   },
+      frozen: { color: "FG(159)", pattern: "░", label: "Frozen" }
+    }
+    var states = isMap(vm.states) ? vm.states : {}
+    var temperatureKeys = ["hot", "warm", "cold", "frozen"]
+    var totalObjects = (states.hot || 0) + (states.warm || 0) + (states.cold || 0) + (states.frozen || 0)
+
+    print(colorifyText("Object temperature", accentColor))
+    if (totalObjects === 0) {
+      print(colorifyText("  No history objects tracked yet.", hintColor))
+    } else {
+      var temperatureBar = renderProportionBar(temperatureKeys.map(function(key) {
+        return { value: states[key] || 0, color: temperatureStyles[key].color, pattern: temperatureStyles[key].pattern }
+      }), barWidth)
+      print("  " + temperatureBar)
+      print()
+      temperatureKeys.forEach(function(key) {
+        var count = states[key] || 0
+        if (count === 0) return
+        var style = temperatureStyles[key]
+        var share = totalObjects > 0 ? (count / totalObjects * 100).toFixed(1) : "0.0"
+        var icon = colorifyText(style.pattern + style.pattern, style.color)
+        var label = colorifyText(style.label.padEnd(8), hintColor)
+        var tokens = colorifyText(String(count).padStart(6), numericColor)
+        var percentage = colorifyText((share + "%").padStart(6), hintColor)
+        print("  " + icon + " " + label + "  " + tokens + " objects " + percentage)
+      })
+    }
+    print()
+
+    // Tokens: baseline (raw conversation) vs projected (after virtualization) for the
+    // most recent projection pass, plus the cumulative delta saved across the session.
+    var metrics = isMap(vm.metrics) ? vm.metrics : {}
+    var baselineTokens = metrics.last_baseline_tokens || 0
+    var projectedTokens = metrics.last_projected_tokens || 0
+    var savedThisPass = baselineTokens - projectedTokens
+    var cumulativeSaved = metrics.estimated_tokens_saved || 0
+
+    print(colorifyText("Context tokens (last projection)", accentColor))
+    if (baselineTokens === 0) {
+      print(colorifyText("  No projection has run yet.", hintColor))
+    } else {
+      var tokensBar = renderProportionBar([
+        { value: projectedTokens, color: "FG(112)", pattern: "█" },
+        { value: Math.max(0, savedThisPass), color: "FG(249)", pattern: "░" }
+      ], barWidth)
+      print("  " + tokensBar)
+      print()
+      var keptShare = baselineTokens > 0 ? (projectedTokens / baselineTokens * 100).toFixed(1) : "0.0"
+      var savedShare = baselineTokens > 0 ? (savedThisPass / baselineTokens * 100).toFixed(1) : "0.0"
+      print("  " + colorifyText("██", "FG(112)") + " " + colorifyText("Projected".padEnd(10), hintColor) + "  " + colorifyText(String(projectedTokens).padStart(7), numericColor) + " tokens " + colorifyText((keptShare + "%").padStart(6), hintColor) + colorifyText("  (kept in context)", "FG(249)"))
+      print("  " + colorifyText("░░", "FG(249)") + " " + colorifyText("Collapsed".padEnd(10), hintColor) + "  " + colorifyText(String(savedThisPass).padStart(7), numericColor) + " tokens " + colorifyText((savedShare + "%").padStart(6), hintColor) + colorifyText("  (referenced, not inline)", "FG(249)"))
+      print()
+      var cumulativeLabel = (cumulativeSaved >= 0 ? "-" : "+") + String(Math.abs(cumulativeSaved))
+      print(colorifyText("  Baseline: ", hintColor) + colorifyText(String(baselineTokens), numericColor) + colorifyText(" tokens | Projected: ", hintColor) + colorifyText(String(projectedTokens), numericColor) + colorifyText(" tokens | Cumulative delta: ", hintColor) + colorifyText(cumulativeLabel, cumulativeSaved >= 0 ? successColor : errorColor) + colorifyText(" tokens", hintColor))
+    }
+
+    if (vm.contextVirtualization === true) {
+      var phase2Mode = vm.contextVirtualizationShadow === true ? "shadow" : "active"
+      var phase2 = vm.contextVirtualizationShadow === true ? vm.contextVirtualizationShadowLast : vm.contextVirtualizationActiveLast
+      print()
+      print(colorifyText("Hierarchical context virtualization (" + phase2Mode + ")", accentColor))
+      if (!isMap(phase2)) {
+        print(colorifyText("  No Phase 2 projection has run yet.", hintColor))
+      } else {
+        var phase2Input = vm.contextVirtualizationShadow === true ? phase2.actualTokens : phase2.inputTokens
+        var phase2Output = vm.contextVirtualizationShadow === true ? phase2.projectedTokens : phase2.outputTokens
+        var phase2Delta = vm.contextVirtualizationShadow === true ? phase2.expectedSavings : phase2.tokensSaved
+        var ratio = isNumber(phase2.effectiveContextRatio) ? phase2.effectiveContextRatio.toFixed(2) : "0.00"
+        print(colorifyText("  Addressable: ", hintColor) + colorifyText(String(phase2.addressableTokens || 0), numericColor) + colorifyText(" | Selected material: ", hintColor) + colorifyText(String(phase2.materializedTokens || 0), numericColor) + colorifyText(" | Effective ratio: ", hintColor) + colorifyText(ratio + ":1", numericColor))
+        print(colorifyText("  Provider projection: ", hintColor) + colorifyText(String(phase2Input || 0), numericColor) + colorifyText(" -> ", hintColor) + colorifyText(String(phase2Output || 0), numericColor) + colorifyText(" tokens | Difference: ", hintColor) + colorifyText(String(phase2Delta || 0), phase2Delta >= 0 ? successColor : errorColor))
+        print(colorifyText("  Objects: ", hintColor) + colorifyText(String(phase2.objectsSelected || 0), numericColor) + colorifyText(" selected / ", hintColor) + colorifyText(String(phase2.objectsConsidered || 0), numericColor) + colorifyText(" considered", hintColor))
+        var representationCounts = ["l0", "l1", "l2", "l3", "l4"].map(function(level) {
+          return level.toUpperCase() + "=" + String(metrics["representation_" + level] || 0)
+        }).join("  ")
+        print(colorifyText("  Representations: " + representationCounts, hintColor))
+        if (isMap(phase2.categoryUsage)) {
+          var categories = Object.keys(phase2.categoryUsage).sort().map(function(category) { return category + "=" + phase2.categoryUsage[category] }).join("  ")
+          if (categories.length > 0) print(colorifyText("  Categories: " + categories, hintColor))
+        }
+      }
+    }
   }
 
   function extractGoalFromPlannerPrompt(text) {
     if (!isString(text)) return __
     var normalized = text.replace(/\r\n/g, "\n").trim()
     if (normalized.length === 0) return __
+
+    var untrustedMatch = normalized.match(/BEGIN_UNTRUSTED_GOAL\s*\n([\s\S]*?)\nEND_UNTRUSTED_GOAL/)
+    if (isArray(untrustedMatch) && isString(untrustedMatch[1]) && untrustedMatch[1].trim().length > 0) {
+      return untrustedMatch[1].trim()
+    }
+
     var goalMatch = normalized.match(/(?:^|\n)GOAL:\s*([\s\S]*?)(?:\n\s*CURRENT STATE:|$)/i)
     if (!isArray(goalMatch) || goalMatch.length < 2) return normalized
     var extracted = goalMatch[1].trim()
@@ -3294,6 +3481,11 @@ try {
       return
     }
     try {
+      if (isObject(activeAgent) && isObject(activeAgent._historyVm)) {
+        try { activeAgent._historyVm.deleteOwnedStore() } catch(ignoreVmDelete) {}
+        activeAgent._historyVm = __
+        activeAgent._historyVmInitKey = ""
+      }
       if (io.fileExists(convoPath) && io.fileInfo(convoPath).isFile) io.rm(convoPath)
       deleteConversationSessionMemory(convoPath)
       // Also clear the in-memory conversation from the active agent
@@ -3388,9 +3580,15 @@ try {
     var removedCount = entries.length - newConversation.length
 
     try {
-      io.writeFileJSON(convoPath, { u: new Date(), c: newConversation }, "")
+      if (isObject(activeAgent) && isObject(activeAgent._historyVm)) {
+        activeAgent._historyVm.captureProviderConversation(entries)
+        activeAgent._historyVm.rewind(truncateAt)
+      }
       if (isObject(activeAgent) && isObject(activeAgent.llm) && typeof activeAgent.llm.getGPT === "function") {
         try { activeAgent.llm.getGPT().setConversation(newConversation) } catch (ignoreSetConversation) { }
+      }
+      if (!isObject(activeAgent) || !isFunction(activeAgent._writeConversationPayload) || activeAgent._writeConversationPayload(convoPath) !== true) {
+        io.writeFileJSON(convoPath, { u: new Date(), c: newConversation }, "")
       }
 
       if (newConversation.length > 0) {
@@ -3438,6 +3636,7 @@ try {
 
     var keepCount = isNumber(preserveCount) ? Math.max(1, Math.floor(preserveCount)) : 6
     var entries = stats.entries.slice()
+    if (isObject(activeAgent) && isObject(activeAgent._historyVm)) activeAgent._historyVm.captureProviderConversation(entries)
     // Always leave at least one older entry eligible for summarization when possible.
     var keepSize = Math.min(keepCount, Math.max(0, entries.length - 1))
     var keepTail = entries.slice(entries.length - keepSize)
@@ -3489,9 +3688,11 @@ try {
     }
 
     try {
-      io.writeFileJSON(convoPath, { u: new Date(), c: newConversation }, "")
       if (isObject(activeAgent) && isObject(activeAgent.llm) && typeof activeAgent.llm.getGPT === "function") {
         try { activeAgent.llm.getGPT().setConversation(newConversation) } catch (ignoreSetConversation) { }
+      }
+      if (!isObject(activeAgent) || !isFunction(activeAgent._writeConversationPayload) || activeAgent._writeConversationPayload(convoPath) !== true) {
+        io.writeFileJSON(convoPath, { u: new Date(), c: newConversation }, "")
       }
       var previousTokens = stats.totalTokens
       var updatedStats = refreshConversationStats(activeAgent)
@@ -3533,6 +3734,7 @@ try {
 
     var keepCount = isNumber(preserveCount) ? Math.max(1, Math.floor(preserveCount)) : 6
     var entries = stats.entries.slice()
+    if (isObject(activeAgent) && isObject(activeAgent._historyVm)) activeAgent._historyVm.captureProviderConversation(entries)
     // Always leave at least one older entry eligible for summarization when possible.
     var keepSize = Math.min(keepCount, Math.max(0, entries.length - 1))
     var keepTail = entries.slice(entries.length - keepSize)
@@ -3596,9 +3798,11 @@ try {
           return
         }
 
-        io.writeFileJSON(convoPath, { u: new Date(), c: newConversation }, "")
         if (isObject(activeAgent) && isObject(activeAgent.llm) && typeof activeAgent.llm.getGPT === "function") {
           try { activeAgent.llm.getGPT().setConversation(newConversation) } catch (ignoreSetConversation) { }
+        }
+        if (!isObject(activeAgent) || !isFunction(activeAgent._writeConversationPayload) || activeAgent._writeConversationPayload(convoPath) !== true) {
+          io.writeFileJSON(convoPath, { u: new Date(), c: newConversation }, "")
         }
 
         var previousTokens = stats.totalTokens
@@ -4208,6 +4412,22 @@ try {
   var _streamRenderer = __
   var _streamCueStopped = false
   var _streamNeedsTerminator = false
+  var _lastRenderedPlanSignature = ""
+
+  function _consoleChartsEnabled() {
+    return toBoolean(sessionOptions.useasciiviz) === true && toBoolean(sessionOptions.raw) !== true &&
+      (!isString(sessionOptions.format) || sessionOptions.format === "md")
+  }
+
+  function _renderConsoleAnswerMarkdown(text, kind) {
+    return __miniAMarkdownRender(text, _getConsoleRenderWidth(), {
+      ansi: __conAnsi === true, kind: kind,
+      useasciiviz: _consoleChartsEnabled(),
+      renderChart: function(params) {
+        return new MiniUtilsTool({ useasciiviz: true }).renderChart(params)
+      }
+    })
+  }
 
   function _printStreamMarkdown(text, kind, palette) {
     if (!isString(text) || text.length === 0) return
@@ -4215,7 +4435,7 @@ try {
     // it as such suppresses the final-answer fallback when a provider does not
     // actually deliver any stream deltas.
     if (text.replace(/\s/g, "").length > 0) _streamHasRendered = true
-    var rendered = __miniAMarkdownRender(text, _getConsoleRenderWidth(), { ansi: __conAnsi === true, kind: kind })
+    var rendered = _renderConsoleAnswerMarkdown(text, kind)
     if (isString(palette) && palette !== "RESET") rendered = colorifyText(rendered, palette)
     printnl(rendered)
   }
@@ -4255,6 +4475,7 @@ try {
     var palette = type === "planner_stream" ? eventPalette.planner_stream : eventPalette.stream
     if (!isDef(_streamRenderer)) {
       _streamRenderer = __miniAMarkdownStream({
+        useasciiviz: _consoleChartsEnabled(),
         onUnit: function(text, kind) { _clearStreamPreview(); _printStreamMarkdown(text, kind, palette) },
         onPreview: function(text) { _previewStreamMarkdown(text, palette) }
       })
@@ -4341,6 +4562,17 @@ try {
     }
   }
 
+  // Pause the activity cue while an atomic console display is being rendered.
+  function _rawOutputGuard(innerFn) {
+    var wasActive = _activityCueActive === true
+    if (wasActive) _stopActivityCueLoop()
+    try {
+      return innerFn()
+    } finally {
+      if (wasActive) _startActivityCueLoop()
+    }
+  }
+
   function _startActivityCueLoop() {
     _stopActivityCueLoop()
     _activityCueActive = true
@@ -4389,13 +4621,12 @@ try {
 
     var termWidth = _getConsoleRenderWidth()
     var contentWidth = Math.max(8, termWidth - 3)
-    var safeMessage = isString(messageText) ? messageText : String(messageText || "")
+    var safeMessage = __miniANormalizeConsoleEventText(messageText)
     var extra = isString(extraPrefix) ? extraPrefix : ""
-    safeMessage = safeMessage.replace(/\n/g, "↵").trim()
-    safeMessage = safeMessage.replace(/↵/g, colorifyText("↵", "FG(238)"))
     var textStyle = hintColor + ",ITALIC"
     var separatorStyle = "FG(240)"
     var separatorChar = "╌"
+    if (!/\s$/.test(_stripAnsiText(iconPart))) iconPart += " "
     var iconPlain = _stripAnsiText(iconPart)
     var normalizedIconPlain = iconPlain.replace(/\s{2,}$/, " ")
     var iconIndent = repeat(Math.max(0, visibleLength(iconPlain)), " ")
@@ -4403,7 +4634,13 @@ try {
     var firstLineWidth = Math.max(8, contentWidth - visibleLength(extra + iconPlain))
     var continuationWidth = Math.max(8, contentWidth - visibleLength(extra + iconIndent))
     var separatorWidth = Math.max(8, contentWidth - visibleLength(extra + separatorIndent))
-    var wrappedLines = _carryAnsiState(format.string.wordWrap(safeMessage, firstLineWidth).split("\n"))
+    var wrappedLines = []
+    safeMessage.split("\n").forEach(function(sourceLine) {
+      var lineWidth = wrappedLines.length === 0 ? firstLineWidth : continuationWidth
+      var lineParts = format.string.wordWrap(sourceLine, lineWidth).split("\n")
+      lineParts.forEach(function(linePart) { wrappedLines.push(linePart) })
+    })
+    wrappedLines = _carryAnsiState(wrappedLines)
     var renderedLines = []
 
     if (wrappedLines.length > 0) {
@@ -4413,10 +4650,7 @@ try {
     }
 
     for (var wi = 1; wi < wrappedLines.length; wi++) {
-      var continuationText = format.string.wordWrap(wrappedLines[wi], continuationWidth)
-      continuationText.split("\n").forEach(function(line) {
-        renderedLines.push(extra + iconIndent + colorifyText(line, textStyle))
-      })
+      renderedLines.push(extra + iconIndent + colorifyText(wrappedLines[wi], textStyle))
     }
 
     if (toBoolean(sessionOptions.showseparator) !== false) {
@@ -4425,6 +4659,73 @@ try {
     }
 
     return format.withSideLine(renderedLines.join("\n"), termWidth, promptColor, textStyle, sideLineTheme)
+  }
+
+  // Plans are structured state, not just a multiline log. Rendering their
+  // current snapshot as a table keeps long task descriptions readable while
+  // making completion and the active step easy to scan.
+  function _renderPlanEventMessage(messageText) {
+    var termWidth = _getConsoleRenderWidth()
+    var agent = isObject(activeAgent) ? activeAgent : __
+    var plan = isObject(agent) && isObject(agent._agentState) ? agent._agentState.plan : __
+    var items = isObject(agent) && isFunction(agent._normalizePlanItems) ? agent._normalizePlanItems(plan) : []
+    var safeMessage = __miniANormalizeConsoleEventText(messageText)
+    var isPlanSnapshot = /(^|\n)\s*\d+\.\s/.test(safeMessage) && /(^|\n)\s*Progress:\s*\d+%/i.test(safeMessage)
+
+    if (!isPlanSnapshot || !isArray(items) || items.length === 0) {
+      // A plan can emit ordinary status messages (or be announced before its
+      // first snapshot). Keep those as normal Markdown logs rather than
+      // replacing them with a stale table.
+      var markdown = __miniAMarkdownRender(safeMessage, termWidth - 3, { ansi: __conAnsi === true })
+      var planIcon = colorifyText("🗺️", "RESET," + eventPalette.plan) + "  "
+      return format.withSideLine(planIcon + markdown, termWidth, promptColor, hintColor + ",ITALIC", sideLineTheme)
+    }
+
+    var statusIcons = isFunction(agent._getStatusIcons) ? agent._getStatusIcons() : {}
+    var completed = items.filter(function(item) {
+      var status = item && (item.status || item.rawStatus)
+      return isFunction(agent._isStatusDone) ? agent._isStatusDone(status) : status === "done"
+    }).length
+    var total = items.length
+    var percent = Math.round((completed / total) * 100)
+    var currentStep = isObject(plan) ? Number(plan.currentStep) : NaN
+    var signature = stringify(items.map(function(item) {
+      return { id: item.id, title: item.title, status: item.status, rawStatus: item.rawStatus }
+    }), __, "") + "|" + currentStep
+    if (signature === _lastRenderedPlanSignature) return __
+    _lastRenderedPlanSignature = signature
+    var rows = []
+
+    for (var pi = 0; pi < items.length; pi++) {
+      var item = items[pi] || {}
+      var statusKey = String(item.status || item.rawStatus || "pending")
+      var statusInfo = statusIcons[statusKey] || statusIcons[item.rawStatus] || { icon: "•", label: statusKey }
+      var stepId = isDef(item.id) ? item.id : (pi + 1)
+      var state = (statusInfo.icon || "•") + " " + (statusInfo.label || statusKey)
+      var isDone = isFunction(agent._isStatusDone) ? agent._isStatusDone(statusKey) : statusKey === "done"
+      if (!isNaN(currentStep) && Number(stepId) === currentStep && !isDone) state += " · current"
+      rows.push({ Step: String(stepId), Status: state, Task: item.title || "(no description)" })
+    }
+
+    // The side-line takes three columns. Reserve a further three so the table
+    // and progress summary align with the indented body of ordinary log events.
+    var contentIndent = "   "
+    var tableWidth = Math.max(24, termWidth - 6)
+    var table = printTable(rows, tableWidth, false, __conAnsi === true, __conAnsi === true ? "utf" : "plain", __, true, false, true)
+      .split("\n")
+      .map(function(line) { return line.replace(/\s+$/, "") })
+      .join("\n")
+      .replace(/\s+$/, "")
+    var barWidth = Math.max(8, Math.min(32, tableWidth - 30))
+    var indicator = __conAnsi === true ? colorifyText("━", successColor) : "#"
+    var space = __conAnsi === true ? colorifyText("─", "FG(240)") : "-"
+    var bar = ow.format.string.progress(completed, total, 0, barWidth, indicator, space)
+    var summary = "Progress " + bar + " " + percent + "% (" + completed + "/" + total + " steps)"
+    if (!isNaN(currentStep) && currentStep > 0 && currentStep <= total) summary += " · Current step " + currentStep
+
+    var heading = colorifyText("🗺️  Plan", "BOLD," + eventPalette.plan) + colorifyText(" — " + completed + "/" + total + " steps", hintColor)
+    table = contentIndent + table.replace(/\n/g, "\n" + contentIndent)
+    return format.withSideLine(heading + "\n" + table + "\n" + contentIndent + summary, termWidth, promptColor, hintColor, sideLineTheme)
   }
 
   function printEvent(type, icon, message, id) {
@@ -4457,6 +4758,30 @@ try {
       print()
       _streamNeedsTerminator = false
     }
+    // Mini Utils emits these only after a successful display call. Render them
+    // before normal event formatting so cue redraws cannot overwrite them.
+    if (type == "tool_display") {
+      _rawOutputGuard(function() {
+        if (isDef(_prevEventRenderLines)) {
+          _eraseRenderedLines(_prevEventRenderLines)
+          _prevEventRenderLines = __
+          _prevEventLastUpdate = 0
+          _prevEventAnimatedRenderer = __
+        }
+        var display = isMap(message) ? message : {}
+        try {
+          var displayTool = new MiniUtilsTool({ useasciiviz: display.kind === "chart" })
+          if (display.kind === "chart") {
+            displayTool.printChart({ type: display.type, data: display.data, options: display.options, title: display.title })
+          } else if (display.kind === "message") {
+            displayTool.showMessage({ message: display.message, level: display.level, title: display.title })
+          }
+        } catch(displayErr) {
+          printErr("[display error] " + (displayErr && displayErr.message ? displayErr.message : String(displayErr)))
+        }
+      })
+      return
+    }
     // Ignore user events
     if (type == "user") return
     var extra = "", inline = false
@@ -4486,7 +4811,8 @@ try {
     }
     if (type == "delegate") inline = true
 
-    var _msg = _renderEventMessage(iconText, message, extra)
+    var _msg = type == "plan" ? _renderPlanEventMessage(message) : _renderEventMessage(iconText, message, extra)
+    if (isUnDef(_msg)) return
     // Optimized: extract previous line erase logic
     function _erasePrev() {
       if (!isDef(_prevEventRenderLines)) return
@@ -4733,15 +5059,18 @@ try {
       if (!isObject(agentRef.llm) || typeof agentRef.llm.getGPT !== "function") return
       var conversation = agentRef.llm.getGPT().getConversation()
       if (isArray(conversation)) {
+        var wroteWithAgent = isFunction(agentRef._writeConversationPayload) && agentRef._writeConversationPayload(convoPath) === true
         var existingPayload = loadConversationPayload(convoPath)
         var nowDate = new Date()
         var stamps = getConversationTimestamps(existingPayload, __)
-        var payload = {
-          u         : nowDate,
-          c         : conversation,
+        var payload = wroteWithAgent && isObject(existingPayload) ? existingPayload : {
+          u: nowDate,
+          c: conversation,
           created_at: isDate(stamps.createdAt) ? stamps.createdAt : nowDate,
           updated_at: nowDate
         }
+        payload.u = nowDate
+        payload.updated_at = nowDate
         if (isObject(existingPayload) && isObject(existingPayload.last)) payload.last = clone(existingPayload.last)
         if (isString(lastGoalPrompt) && lastGoalPrompt.trim().length > 0) {
           payload.last = payload.last || {}
@@ -4764,6 +5093,7 @@ try {
   function runGoal(goalText, skillUsage) {
     _streamOutputStats.totalChars = 0
     _streamOutputStats.contentChars = 0
+    _lastRenderedPlanSignature = ""
     _resetStreamRenderState()
     _prevEventRenderLines = __
     _prevEventLastUpdate = 0
@@ -4805,6 +5135,7 @@ try {
     })
     if (isFunction(agent.setTraceFn) && isFunction(traceSink)) agent.setTraceFn(traceSink)
     if (isFunction(agent.setAnsiLogging)) agent.setAnsiLogging(__conAnsi === true)
+    if (isFunction(agent.setRawOutputGuardFn)) agent.setRawOutputGuardFn(_rawOutputGuard)
     if (isFunction(agent.setHookFn)) {
       agent.setHookFn(function(event, contextVars) {
         return runHooks(event, contextVars)
@@ -4876,6 +5207,10 @@ try {
       // context even though _processFinalAnswer retained the answer. `/last`
       // already uses this raw value; use it for the live fallback as well.
       var displayResult = isDef(lastResult) ? lastResult : lastOrigResult
+      // Render charts from original Markdown before OpenAF output formatting.
+      if (_consoleChartsEnabled() && isString(lastOrigResult)) {
+        displayResult = lastOrigResult
+      }
       if (isObject(lastDebugTrace)) lastDebugTrace.status = "completed"
       persistConversationSnapshot(agent)
       refreshConversationStats(agent)
@@ -4889,7 +5224,7 @@ try {
           if (isObject(displayResult) || isArray(displayResult)) {
             print(_stringifyFinalResult(displayResult, true))
           } else if (isString(displayResult)) {
-            print(__miniAMarkdownRender(unwrapSingleMarkdownCodeBlock(displayResult), _getConsoleRenderWidth(), { ansi: __conAnsi === true }))
+            print(_renderConsoleAnswerMarkdown(unwrapSingleMarkdownCodeBlock(displayResult)))
           } else if (isDef(displayResult)) {
             print(_stringifyFinalResult(displayResult, false))
           }
@@ -4906,7 +5241,7 @@ try {
             if (isObject(displayResult) || isArray(displayResult)) {
               print(_stringifyFinalResult(displayResult, true))
             } else if (isString(displayResult)) {
-              print(__miniAMarkdownRender(unwrapSingleMarkdownCodeBlock(displayResult), _getConsoleRenderWidth(), { ansi: __conAnsi === true }))
+              print(_renderConsoleAnswerMarkdown(unwrapSingleMarkdownCodeBlock(displayResult)))
             } else {
               print(_stringifyFinalResult(displayResult, false))
             }
@@ -5020,6 +5355,7 @@ try {
         })
       })
       if (isFunction(agent.setAnsiLogging)) agent.setAnsiLogging(__conAnsi === true)
+      if (isFunction(agent.setRawOutputGuardFn)) agent.setRawOutputGuardFn(_rawOutputGuard)
       agent.init(initArgs)
       if (isDef(agent._subtaskManager)) return true
       print(colorifyText("Delegation could not be initialized with current settings.", errorColor))
@@ -5050,6 +5386,7 @@ try {
         })
       })
       if (isFunction(agent.setAnsiLogging)) agent.setAnsiLogging(__conAnsi === true)
+      if (isFunction(agent.setRawOutputGuardFn)) agent.setRawOutputGuardFn(_rawOutputGuard)
       agent.init(initArgs)
     } catch (e) {
       var errMsg = isDef(e) && isDef(e.message) ? e.message : "" + e
@@ -5885,7 +6222,76 @@ try {
     print( ow.format.withSideLine( lines.join("\n"), __, promptColor, hintColor, ow.format.withSideLineThemes().openCurvedRect) )
   }
 
+  var __skillWikiSubcommands = { search: true, remote: true, recommend: true, open: true, read: true, related: true, context: true }
+
+  function printRemoteSkills(subcmdRaw) {
+    var swm = getConsoleSkillWikiManager()
+    if (!isObject(swm)) {
+      print(colorifyText("Skill library is not enabled. Start with useskillwiki=true (reuses usewiki's wiki, or set skillwikiroot=<path>).", hintColor))
+      return
+    }
+    if (typeof __miniASkillSearch !== "function") loadLib("mini-a-skills.js")
+    var parts = isString(subcmdRaw) ? subcmdRaw.trim().split(/\s+/) : []
+    var sub  = parts.length > 0 ? parts[0].toLowerCase() : "search"
+    var rest = parts.slice(1).join(" ").trim()
+    if (sub === "remote") { sub = "search"; } // "/skills remote <query>" is an alias for "/skills search <query>"
+
+    try {
+      if (sub === "context") {
+        print(colorifyText(stringify(__miniASkillContext(swm, {}), __, "  "), promptColor))
+      } else if (sub === "search") {
+        if (rest.length === 0) { print(colorifyText("Usage: /skills search <query>", errorColor)); return }
+        var hits = __miniASkillSearch(swm, { query: rest })
+        if (hits.length === 0) {
+          print(colorifyText("No skills found for: " + rest, hintColor))
+        } else {
+          print(colorifyText("Skills (" + hits.length + "):", accentColor))
+          hits.forEach(function(h) {
+            print("  " + colorifyText(h.ref, promptColor) + " — " + h.title + (h.risk ? " [" + h.risk + "]" : ""))
+            if (h.summary) print("    " + colorifyText(h.summary, hintColor))
+          })
+        }
+      } else if (sub === "recommend") {
+        if (rest.length === 0) { print(colorifyText("Usage: /skills recommend <task description>", errorColor)); return }
+        var recs = __miniASkillRecommend(swm, { task: rest })
+        if (recs.length === 0) {
+          print(colorifyText("No skills recommended for: " + rest, hintColor))
+        } else {
+          print(colorifyText("Recommended skills (" + recs.length + "):", accentColor))
+          recs.forEach(function(h) {
+            print("  " + colorifyText(h.ref, promptColor) + " — " + h.title + (h.risk ? " [" + h.risk + "]" : ""))
+          })
+        }
+      } else if (sub === "open") {
+        if (rest.length === 0) { print(colorifyText("Usage: /skills open <ref>", errorColor)); return }
+        print(colorifyText(stringify(__miniASkillOpen(swm, rest, {}), __, "  "), promptColor))
+      } else if (sub === "read") {
+        var readParts = rest.split(/\s+/)
+        var readRef = readParts.shift()
+        if (!isString(readRef) || readRef.length === 0) { print(colorifyText("Usage: /skills read <ref> [section...]", errorColor)); return }
+        var section = readParts.join(" ").trim()
+        var out = __miniASkillRead(swm, readRef, section.length > 0 ? { section: section } : {})
+        if (isString(out.body)) print(out.body)
+        else print(colorifyText(stringify(out, __, "  "), errorColor))
+      } else if (sub === "related") {
+        if (rest.length === 0) { print(colorifyText("Usage: /skills related <ref>", errorColor)); return }
+        print(colorifyText(stringify(__miniASkillRelated(swm, rest, {}), __, "  "), promptColor))
+      } else {
+        print(colorifyText("Usage: /skills search|recommend|open|read|related|context ...", errorColor))
+      }
+    } catch(e) {
+      print(colorifyText("[skills] " + __miniAErrMsg(e), errorColor))
+    }
+  }
+
   function printSkills(prefix) {
+    // Only intercept as a skill-wiki subcommand when a skill library is actually
+    // configured -- otherwise fall through to the legacy prefix-filtered local
+    // skill listing unchanged, so "/skills <name>" keeps working exactly as
+    // before for any local skill whose name happens to match one of these words.
+    var firstWord = isString(prefix) ? prefix.trim().split(/\s+/)[0].toLowerCase() : ""
+    if (__skillWikiSubcommands[firstWord] === true && isObject(getConsoleSkillWikiManager())) return printRemoteSkills(prefix)
+
     var normalizedPrefix = isString(prefix) ? prefix.trim().toLowerCase() : ""
     var skillNames = Object.keys(customSkillSlashCommands).sort().filter(function(name) {
       if (normalizedPrefix.length === 0) return true
@@ -6176,17 +6582,20 @@ try {
   // /ingest <source> [section] [dryrun|force]
   function printIngest(subcmdRaw) {
     var parts   = isString(subcmdRaw) ? subcmdRaw.trim().split(/\s+/).filter(function(p) { return p.length > 0 }) : []
-    var flags   = { dryrun: false, force: false }
+    var flags   = { dryrun: false, force: false, prune: false, allowemptyprune: false, sourceid: "" }
     var operands = []
     parts.forEach(function(p) {
       var lower = p.toLowerCase()
       if (lower === "dryrun") { flags.dryrun = true; return }
       if (lower === "force")  { flags.force  = true; return }
+      if (lower === "prune") { flags.prune = true; return }
+      if (lower === "allowemptyprune") { flags.allowemptyprune = true; return }
+      if (lower.indexOf("sourceid=") === 0) { flags.sourceid = p.substring(9); return }
       operands.push(p)
     })
 
     if (operands.length === 0) {
-      print(colorifyText("Usage: /ingest <folder|repo-url|page-url> [section] [dryrun] [force]", errorColor))
+      print(colorifyText("Usage: /ingest <folder|repo-url|page-url> [section] [dryrun] [force] [prune] [allowemptyprune] [sourceid=<id>]", errorColor))
       print(colorifyText("  Ingests a docs folder, git repo or web page into the active wiki.", hintColor))
       return
     }
@@ -6208,17 +6617,25 @@ try {
     }
 
     var ingestArgs = merge({}, sessionOptions)
+    // Reuse the active agent's wiki manager. It can keep the Lucene writer
+    // open for interactive search, so a second manager would contend for it.
+    var ingestWikiManager = isObject(activeAgent) && isObject(activeAgent._wikiManager) ? activeAgent._wikiManager : __
+    if (isObject(ingestWikiManager)) ingestArgs.wikimanager = ingestWikiManager
     ingestArgs.ingestsource = operands[0]
     if (operands.length > 1) ingestArgs.ingestsection = operands[1]
     if (flags.dryrun) ingestArgs.ingestdryrun = "true"
     if (flags.force)  ingestArgs.ingestforce  = "true"
+    if (flags.prune) ingestArgs.ingestprune = "true"
+    if (flags.allowemptyprune) ingestArgs.ingestallowemptyprune = "true"
+    if (flags.sourceid) ingestArgs.ingestsourceid = flags.sourceid
 
     try {
       var runner = new MiniAIngest(ingestArgs, function(msg) { print(colorifyText(msg, hintColor)) })
       var res    = runner.run()
       if (isMap(res) && res.ok === false) {
-        print(colorifyText("Ingest did not run: " + (isString(res.reason) ? res.reason : "unknown") +
+        print(colorifyText("Ingest " + String(res.status || "failed") + ": " + (isString(res.reason) ? res.reason : "see reported conflicts/failures") +
                            (isString(res.error) ? " — " + res.error : ""), errorColor))
+        print(printTree(res))
         return
       }
       print(printTree(res))
@@ -6473,7 +6890,7 @@ try {
         continue
       }
       if (commandLower === "last" || commandLower.indexOf("last ") === 0) {
-        if (isUnDef(lastResult) && isUnDef(lastGoalPrompt)) {
+        if (isUnDef(lastResult) && isUnDef(lastOrigResult) && isUnDef(lastGoalPrompt)) {
           print(colorifyText("No goal executed yet.", hintColor))
           continue
         }
@@ -6493,20 +6910,21 @@ try {
           print()
         }
 
-        if (isDef(lastResult)) {
+        if (isDef(lastResult) || isDef(lastOrigResult)) {
           print(colorifyText("Previous answer:", accentColor))
           if (printMarkdown) {
             var rawAnswerText = extractAnswerText(lastOrigResult, false)
             print(rawAnswerText)
           } else {
-            var renderedAnswerText = extractAnswerText(lastResult, true)
-            print(ow.format.withMD(renderedAnswerText))
+            var lastDisplayResult = _consoleChartsEnabled() && isDef(lastOrigResult) ? lastOrigResult : (isDef(lastResult) ? lastResult : lastOrigResult)
+            var renderedAnswerText = extractAnswerText(lastDisplayResult, true)
+            print(_renderConsoleAnswerMarkdown(renderedAnswerText))
           }
         }
         continue
       }
       if (commandLower === "save" || commandLower.indexOf("save ") === 0) {
-        if (isUnDef(lastResult)) {
+        if (isUnDef(lastResult) && isUnDef(lastOrigResult)) {
           print(colorifyText("No goal executed yet. Nothing to save.", hintColor))
           continue
         }
@@ -6565,8 +6983,10 @@ try {
         var contextArg = command.substring(8).trim().toLowerCase()
         if (contextArg === "llm" || contextArg === "analyze") {
           printContextSummary(activeAgent, true)
+        } else if (contextArg === "vm") {
+          printHistoryVmSummary(activeAgent)
         } else {
-          print(colorifyText("Usage: /context [llm|analyze]", errorColor))
+          print(colorifyText("Usage: /context [llm|analyze|vm]", errorColor))
         }
         continue
       }

@@ -1,0 +1,63 @@
+{
+  "sources": {
+    "before": {
+      "wiki": "9b6c3666c87178fe498fe42c11c5c263b5118580",
+      "knowledge": "8e5d2828c94f7c640b31964d1bfa21934e5817ed",
+      "retrieval": "2300b2aba04bc8480235f3486398aee2253d9c31"
+    },
+    "after": {
+      "wiki": "9b6c3666c87178fe498fe42c11c5c263b5118580",
+      "knowledge": "8e5d2828c94f7c640b31964d1bfa21934e5817ed",
+      "retrieval": "36e8efc8c63a30b9a5761ec1c9232a1e31117c7d"
+    }
+  },
+  "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",
+  "focused": {
+    "assertions": 1239,
+    "functions": 30,
+    "failures": []
+  },
+  "wiki": {
+    "assertions": 1970,
+    "functions": 191,
+    "failures": []
+  },
+  "repeat": {
+    "runs": 2,
+    "assertions": 2478
+  },
+  "ojob": {
+    "command": "ojob tests/wiki.yaml",
+    "passEntries": 191,
+    "failEntries": 0,
+    "errorEntries": 0
+  },
+  "benchmark": {
+    "pages": 1000,
+    "warmSamples": 10,
+    "coldSamplesPerOperation": 1,
+    "backend": "local-fs",
+    "beforeMemory": {
+      "estimator": "MemoryMXBean aggregate heap sampled every 10 ms; shorter peaks may be missed",
+      "sampleIntervalMillis": 10,
+      "samples": 757,
+      "maxSampledHeapBytes": 843437216,
+      "heapAtEndBytes": 216290560,
+      "scope": "fixture/index construction, all operations, update and publication; excludes native/JVM non-heap memory"
+    },
+    "afterMemory": {
+      "estimator": "MemoryMXBean aggregate heap sampled every 10 ms; shorter peaks may be missed",
+      "sampleIntervalMillis": 10,
+      "samples": 736,
+      "maxSampledHeapBytes": 882358608,
+      "heapAtEndBytes": 421527552,
+      "scope": "fixture/index construction, all operations, update and publication; excludes native/JVM non-heap memory"
+    }
+  },
+  "limitations": [
+    "Mixed single-observation cold timings do not establish general speedup",
+    "Sampled heap increased; fixed read buffer allocation needs optimization",
+    "Cold validation and publication remain corpus-scaled",
+    "No live-provider or complete physical I/O validation"
+  ]
+}

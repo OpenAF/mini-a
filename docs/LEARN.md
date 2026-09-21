@@ -92,29 +92,29 @@ Mini-A can call MCP servers for domain-specific actions. Start with one tool to 
    ```bash
    ls mcps
    ```
-2. **Run a goal with the Time MCP** to fetch the current time in a city:
+2. **Run a goal with the Time MCP** to fetch the current time:
    ```bash
    mini-a goal="What time is it in Sydney?" \
      mcp="(cmd: 'ojob mcps/mcp-time.yaml', timeout: 5000)"
    ```
-3. When the answer prints, look at the debug log (add `debug=true`) to see Mini-A requesting the `getTime` tool.
+3. When the answer prints, look at the debug log (add `debug=true`) to see Mini-A requesting the `current-time` tool.
 4. Try a second query that requires reasoning, e.g., `goal="If it is noon in Sydney, what time is it in New York?"`. Mini-A should combine LLM reasoning with the MCP response.
 
 ## 6. Combining Multiple MCP Tools
 
 1. Run Mini-A with **two MCP descriptors** to aggregate capabilities:
    ```bash
-   mini-a goal="Gather the latest EUR/USD rate and describe what it means" \
+   mini-a goal="Gather the latest AAPL stock price and current time" \
      mcp="[(cmd: 'ojob mcps/mcp-fin.yaml'), (cmd: 'ojob mcps/mcp-time.yaml')]" \
      timeout=90000
    ```
 2. Add `usetools=true` if you also want the built-in Mini Utils tool for filesystem/math operations:
    ```bash
-   mini-a goal="Create a table with the current EUR/USD rate and time" \
+   mini-a goal="Create a table with the current AAPL stock price and time" \
      mcp="[(cmd: 'ojob mcps/mcp-fin.yaml'), (cmd: 'ojob mcps/mcp-time.yaml')]" \
      usetools=true
    ```
-3. Watch the debug trace: Mini-A will call distinct MCP tools (`fin-getRate`, `time-getTime`) and then assemble the response.
+3. Watch the debug trace: Mini-A will call distinct MCP tools (`get-ticker-data`, `current-time`) and then assemble the response.
 
 ## 7. Streamlining with the MCP Proxy
 
@@ -135,14 +135,14 @@ Planning lets Mini-A break complex goals into multiple sub-goals executed in seq
 
 1. Start a planning session:
    ```bash
-   mini-a goal="Plan a one-week marketing campaign for a new product launch" planning=true
+   mini-a goal="Plan a one-week marketing campaign for a new product launch" useplanning=true
    ```
 2. Observe the generated plan in the debug trace (`debug=true`). Mini-A will list steps such as `Research audience`, `Draft messaging`, `Schedule channels`.
 3. Each step is solved with the base model or MCP tools before the final synthesis message is sent.
 4. Experiment with `maxsteps=8` to allow more detailed plans:
    ```bash
    mini-a goal="Design a workshop agenda that includes presentations, hands-on labs, and feedback collection" \
-     planning=true maxsteps=8
+     useplanning=true maxsteps=8
    ```
 
 ```mermaid
@@ -160,17 +160,17 @@ sequenceDiagram
 
 ## 9. Sub-Agents: Delegating Specialized Tasks
 
-You can nest Mini-A agents as **sub-agents** that handle specific phases of the plan.
+You can enable Mini-A to delegate specialized sub-goals to **child sub-agents** running concurrently.
 
-1. Create a simple sub-agent configuration file (for example `examples/subagent.yaml`) based on `mini-a.yaml` but with a narrower goal or restricted tools.
-2. Launch the main agent with a reference to the sub-agent via `subagent=` parameter:
+1. Enable delegation by adding `usedelegation=true`:
    ```bash
    mini-a goal="Produce a competitive analysis brief" \
-     planning=true maxsteps=6 \
-     subagent="(cmd: 'ojob examples/subagent.yaml', name: 'researcher')"
+     useplanning=true maxsteps=6 \
+     usedelegation=true usetools=true
    ```
-3. In the debug output, look for steps delegated to `researcher`. The main agent will pass intermediate instructions, receive results, and integrate them.
-4. Extend the setup by adding another sub-agent (e.g., `writer`) and compare how the plan distributes work.
+2. With delegation enabled, Mini-A registers delegation actions that allow the parent agent to spawn child agents for specific sub-tasks, monitor their progress, and integrate their outputs.
+3. In the interactive console, you can also manage delegation directly using `/delegate <sub-goal>`, `/subtasks`, and `/subtask <id>`.
+4. For distributed or multi-host workloads, see [docs/DELEGATION.md](DELEGATION.md) for remote worker delegation (`mini-a-worker.yaml`).
 
 ```mermaid
 flowchart LR
@@ -198,7 +198,7 @@ flowchart LR
 
 1. Execute Mini-A jobs directly via `ojob` for repeatable automation:
    ```bash
-   ojob mini-a.yaml goal="Draft release notes for version 2.0" useshell=false planning=true
+   ojob mini-a.yaml goal="Draft release notes for version 2.0" useshell=false useplanning=true
    ```
 2. Embed Mini-A in CI workflows by exporting the required `OAF_MODEL`/`OAF_LC_MODEL` variables and running the command above.
 3. For web-based demos, start the UI:
@@ -210,9 +210,9 @@ flowchart LR
 ## 12. Troubleshooting & Next Steps
 
 - **Authentication errors** – Re-run `mini-a modelman=true` to verify keys and model IDs.
-- **Tool failures** – Execute the MCP job standalone to confirm it works, e.g., `ojob mcps/mcp-time.yaml city="Sydney"`.
-- **Long-running plans** – Increase `timeout` or `maxsteps`, or add `usetime=true` to allow more execution time.
-- **Cost control** – Lower `temperature`, enable `lcmodel` usage, or disable unnecessary MCP tools.
+- **Tool failures** – Execute the MCP job standalone to confirm it works, e.g., `ojob mcps/mcp-time.yaml`.
+- **Long-running plans** – Increase `timeout`, `maxtime`, or `maxsteps` to allow more execution time.
+- **Cost control** – Lower `temperature`, configure a low-cost model (`modellc` or `OAF_LC_MODEL`), or disable unnecessary MCP tools.
 
 Continue exploring by reading:
 - [USAGE.md](../USAGE.md) for comprehensive parameter documentation.

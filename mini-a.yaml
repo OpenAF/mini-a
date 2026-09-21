@@ -12,13 +12,54 @@ help:
       ojob mini-a.yaml goal="..." mcp="[(cmd: 'docker run --rm -i mcp/dockerhub', timeout: 5000) | (cmd: 'docker run --rm -i mcp/wikipedia-mcp', timeout: 5000)]" rpm=20
       
   expects: 
+  - name     : agentcomms
+    desc     : Opt-in communication profiles, grants, delegation allowance and limits (JSON/SLON); see USAGE.md
+    mandatory: false
   - name     : goal
     desc     : Goal for the agent to achieve
     example  : aValueExample
-    mandatory: true
+    mandatory: false
+  - name     : eval
+    desc     : Run a native Mini-A evaluation suite instead of one agent goal
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : evalfile
+    desc     : Evaluation YAML/JSON file or directory containing evaluation definitions
+    example  : "evals/core.yaml"
+    mandatory: false
+  - name     : evalbaseline
+    desc     : Optional baseline JSON report for current-versus-baseline comparison
+    example  : "evals/baseline.json"
+    mandatory: false
+  - name     : evalwritebaseline
+    desc     : Optional JSON path to write the current evaluation report as a baseline
+    example  : "evals/baseline.json"
+    mandatory: false
+  - name     : evalout
+    desc     : Optional JSON path for the full machine-readable evaluation report
+    example  : "/tmp/mini-a-eval.json"
+    mandatory: false
   - name     : mcp
     desc     : A MCP connection object (or array of objects) using OpenAF's $mcp() function in SLON or JSON format
     example  : "(url: 'http://127.0.0.1:17879/mcp', type: remote, debug: false)"
+    mandatory: false
+  - name     : capabilityselection
+    desc     : Deterministically select a bounded relevant subset of normalized capabilities before exposing MCP tools
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : capabilitylimit
+    desc     : Maximum capabilities exposed when capabilityselection=true
+    example  : "8"
+    mandatory: false
+  - name     : policy
+    desc     : Optional SLON/JSON centralized policy definition
+    example  : "(shell: deny, delegation: deny)"
+    mandatory: false
+  - name     : policyfile
+    desc     : Optional JSON file containing centralized policy definition
+    example  : "/path/to/policy.json"
     mandatory: false
   - name     : mcplazy
     desc     : Initialize MCP connections lazily on first use instead of during startup
@@ -135,6 +176,31 @@ help:
     desc     : Conversation history file to provide to the agent
     example  : "/path/to/conversation.json"
     mandatory: false
+  - name     : historyvm
+    desc     : Enable durable bounded virtual history for this conversation (requires conversation path; default false)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : historyvmmode
+    desc     : Virtual history policy mode (safe is the only v1 mode)
+    example  : "safe"
+    mandatory: false
+    options  : ["safe"]
+  - name     : historyvmshadow
+    desc     : Capture and estimate virtual history savings without changing provider requests
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : contextvirtualization
+    desc     : Enable experimental Phase 2 hierarchical context retrieval and active provider projection (requires historyvm=true)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : contextvirtualizationshadow
+    desc     : Measure a Phase 2 working-set projection without changing the Phase 1 provider context (requires historyvm=true contextvirtualization=true)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : chatyouare
     desc     : "Override the chatbot persona sentence (string or @file path, alias: chatYouAre) when running with chatbotmode=true"
     example  : "You are an enthusiastic travel concierge specialized in eco-friendly trips."
@@ -199,6 +265,27 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : durable
+    desc     : Persist a resumable run state and structured JSONL trace under the Mini-A home directory
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : runid
+    desc     : Stable identifier for a durable run (auto-generated when omitted)
+    example  : "run-20260905-abc123"
+    mandatory: false
+  - name     : resumerun
+    desc     : Resume an interrupted durable run by run identifier; does not change the existing resume option
+    example  : "run-20260905-abc123"
+    mandatory: false
+  - name     : runstatus
+    desc     : Inspect persisted durable run status by run identifier
+    example  : "run-20260905-abc123"
+    mandatory: false
+  - name     : runroot
+    desc     : "Optional durable-run storage root (default: <homedir>/.openaf-mini-a/runs)"
+    example  : "/var/lib/mini-a/runs"
+    mandatory: false
   - name     : outerloopinstructions
     desc     : Path to persistent outer loop instructions markdown file
     example  : "./TASKS.md"
@@ -313,6 +400,11 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : useasciiviz
+    desc     : Render `oafPrintChart` Markdown fences as console charts and expose `printChart` for interim charts
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : skillmaxautoload
     desc     : Maximum number of high-confidence matching skills to auto-load into bounded runtime context
     example  : "1"
@@ -414,8 +506,8 @@ help:
     example  : "get-url,web-search"
     mandatory: false
   - name     : mcpproxynative
-    desc     : Force native function calling for proxy-dispatch even for providers (e.g. Ollama) that would otherwise default to action-based JSON
-    example  : "false"
+    desc     : Enable native function calling for proxy-dispatch (defaults to true; set to false for action-based JSON)
+    example  : "true"
     mandatory: false
     options  : ["true", "false"]
   - name     : mcpprogcall
@@ -487,6 +579,11 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : orchestration
+    desc     : "Execution strategy selection mode: manual preserves explicit behavior; auto uses deterministic existing-capability routing"
+    example  : "auto"
+    mandatory: false
+    options  : ["manual", "auto"]
   - name     : adaptiverouting
     desc     : Enable rule-based route selection via mini-a-router.js
     example  : "true"
@@ -796,6 +893,11 @@ help:
     desc     : Maximum total LC token usage before permanently switching to the main model for the session (0 = unlimited)
     example  : "50000"
     mandatory: false
+  - name     : lcreplytool
+    desc     : Use a capture-only MCP tool for LC JSON retries (OpenAI-compatible and Ollama adapters)
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : lcjsonretries
     desc     : Extra same-step low-cost model retries on invalid JSON before falling back to the main model (0 disables)
     example  : "1"
@@ -1005,6 +1107,13 @@ help:
     desc     : Seconds between HTTP/S3 artifact-bundle metadata refresh checks (0 disables refresh)
     example  : "300"
     mandatory: false
+  - name     : wikiretrievalv2
+    desc     : Opt-in versioned passage retrieval; requires compatible serving artifacts; build explicitly on writable FS/s3fs or hydrate a published bundle
+    example  : "false"
+    mandatory: false
+  - name     : wikiretrievalconfig
+    desc     : Validated SLON/JSON advanced passage, cache and artifact budgets
+    mandatory: false
   - name     : wikilexical
     desc     : #SLON/JSON Lucene lexical configuration (default `{language: 'english'}`); supports language, explicit synonyms, shingles, ngrams, queryExpansion and pseudoRelevanceFeedback"
     example  : "{ language: 'english', synonyms: [['js', 'javascript']] }"
@@ -1020,6 +1129,17 @@ help:
   - name     : wikisourceinline
     desc     : "Also append the rendered URL into search results' description text, for models that attend to prose more reliably than to sibling JSON keys"
     example  : "false"
+    mandatory: false
+  - name     : ingestprune
+    desc     : Remove verified missing ingestion sources (default false)
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : ingestallowemptyprune
+    desc     : Allow pruning a completely observed empty source (default false)
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : ingestsourceid
+    desc     : Stable logical ingestion origin identity
     mandatory: false
   - name     : ingestmode
     desc     : "Wiki ingestion mode: auto (deterministic first), normalize, distill or raw"
@@ -1042,7 +1162,7 @@ help:
     desc     : Maximum estimated tokens in one Wiki LLM prompt
     example  : "24000"
     mandatory: false
-  - name     : dreamwikemaxaffected
+  - name     : dreamwikimaxaffected
     desc     : Bound Wiki dream affected-set propagation
     example  : "100"
     mandatory: false
@@ -1051,7 +1171,7 @@ help:
     example  : "1"
     mandatory: false
   - name     : wikitelemetry
-    desc     : Persist local aggregate retrieval telemetry (off by default)
+    desc     : Record local aggregate retrieval telemetry (off by default); writable managers persist it, read-only managers keep it in memory
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
@@ -1062,6 +1182,18 @@ help:
   - name     : wikimounts
     desc     : SLON/JSON array of read-only wiki mounts [{name, backend, root|bucket|prefix|url|...}]
     example  : "[{name: 'team', backend: 'fs', root: '/shared/team-wiki'}]"
+    mandatory: false
+  - name     : useskillwiki
+    desc     : Enable the virtual skill library, reusing usewiki unless a dedicated skillwiki* source is given
+    mandatory: false
+  - name     : skillwikibackend
+    desc     : Backend for a dedicated skill library
+    mandatory: false
+  - name     : skillwikiroot
+    desc     : Filesystem root for a dedicated skill library
+    mandatory: false
+  - name     : skillwikimounts
+    desc     : SLON/JSON read-only mounts for a dedicated skill library
     mandatory: false
   - name     : mode
     desc     : Apply one of the presets defined in mini-a-modes
@@ -1165,6 +1297,7 @@ ojob:
   #logToConsole: false   # to change when finished
   loadLibs    :
   - mini-a.js
+  - mini-a-eval.js
 
 jobs:
 # -------------------------
@@ -1186,6 +1319,15 @@ jobs:
       keyArg: goal
       args  :
         mcp            : mcp
+        capabilityselection: capabilityselection
+        capabilitylimit: capabilitylimit
+        policy         : policy
+        policyfile     : policyfile
+        eval           : eval
+        evalfile       : evalfile
+        evalbaseline   : evalbaseline
+        evalwritebaseline: evalwritebaseline
+        evalout        : evalout
         verbose        : verbose
         rpm            : rpm
         rtm            : rtm
@@ -1222,6 +1364,11 @@ jobs:
         modellc        : modellc
         modelval       : modelval
         conversation   : conversation
+        historyvm      : historyvm
+        historyvmmode  : historyvmmode
+        historyvmshadow: historyvmshadow
+        contextvirtualization: contextvirtualization
+        contextvirtualizationshadow: contextvirtualizationshadow
         format         : format
         raw            : raw
         showthinking   : showthinking
@@ -1237,6 +1384,11 @@ jobs:
         valgoal        : valgoal
         deepresearch   : deepresearch
         outerloop      : outerloop
+        durable        : durable
+        runid          : runid
+        resumerun      : resumerun
+        runstatus      : runstatus
+        runroot        : runroot
         outerloopinstructions: outerloopinstructions
         outerloopsessionid: outerloopsessionid
         taskfile       : taskfile
@@ -1255,6 +1407,7 @@ jobs:
         useutils       : useutils
         usestdutils    : usestdutils
         useskills      : useskills
+        useasciiviz    : useasciiviz
         skillmaxautoload: skillmaxautoload
         skillcontextchars: skillcontextchars
         skillmanifestchars: skillmanifestchars
@@ -1282,6 +1435,7 @@ jobs:
         mcpprogcalltools: mcpprogcalltools
         mcpprogcallbatchmax: mcpprogcallbatchmax
         useplanning    : useplanning
+        orchestration  : orchestration
         forceplanning  : forceplanning
         planstyle      : planstyle
         earlystopthreshold: earlystopthreshold
@@ -1359,6 +1513,7 @@ jobs:
         evidencegatestrictness: evidencegatestrictness
         lcescalatedefer: lcescalatedefer
         lcbudget       : lcbudget
+        lcreplytool    : lcreplytool
         lcjsonretries  : lcjsonretries
         llmcomplexity  : llmcomplexity
         autodelegation : autodelegation
@@ -1411,12 +1566,19 @@ jobs:
         wikihttpindexurl: wikihttpindexurl
         wikihttptimeout: wikihttptimeout
         wikiartifactrefreshsecs: wikiartifactrefreshsecs
+        wikiretrievalv2: wikiretrievalv2
+        wikiretrievalconfig: wikiretrievalconfig
+        wikitelemetry  : wikitelemetry
         wikilexical    : wikilexical
         wikisourceurl  : wikisourceurl
         wikisourcefield: wikisourcefield
         wikisourceinline: wikisourceinline
         wikilintstaleddays: wikilintstaleddays
         wikimounts     : wikimounts
+        useskillwiki   : useskillwiki
+        skillwikibackend: skillwikibackend
+        skillwikiroot  : skillwikiroot
+        skillwikimounts: skillwikimounts
         mode           : mode
         resume         : resume
         usehistory     : usehistory
@@ -1438,8 +1600,17 @@ jobs:
         dreamreport    : dreamreport
   check:
     in:
-      goal           : isString
+      goal           : isString.default("")
+      eval           : toBoolean.isBoolean.default(false)
+      evalfile       : isString.default(__)
+      evalbaseline   : isString.default(__)
+      evalwritebaseline: isString.default(__)
+      evalout        : isString.default(__)
       mcp            : default(__)
+      capabilityselection: toBoolean.isBoolean.default(false)
+      capabilitylimit: toNumber.isNumber.default(8)
+      policy         : default(__)
+      policyfile     : isString.default(__)
       verbose        : toBoolean.isBoolean.default(false)
       rpm            : toNumber.isNumber.default(__)
       rtm            : toNumber.isNumber.default(__)
@@ -1480,6 +1651,11 @@ jobs:
       modellc        : default(__)
       modelval       : default(__)
       conversation   : isString.default(__)
+      historyvm      : toBoolean.isBoolean.default(false)
+      historyvmmode  : isString.default("safe")
+      historyvmshadow: toBoolean.isBoolean.default(false)
+      contextvirtualization: toBoolean.isBoolean.default(false)
+      contextvirtualizationshadow: toBoolean.isBoolean.default(false)
       format         : isString.default(__)
       raw            : toBoolean.isBoolean.default(false)
       showthinking   : toBoolean.isBoolean.default(false)
@@ -1495,6 +1671,11 @@ jobs:
       valgoal        : isString.default(__)
       deepresearch   : toBoolean.isBoolean.default(false)
       outerloop      : toBoolean.isBoolean.default(false)
+      durable        : toBoolean.isBoolean.default(false)
+      runid          : isString.default(__)
+      resumerun      : isString.default(__)
+      runstatus      : isString.default(__)
+      runroot        : isString.default(__)
       outerloopinstructions: isString.default(__)
       outerloopsessionid: isString.default(__)
       taskfile       : isString.default(__)
@@ -1513,6 +1694,7 @@ jobs:
       useutils       : toBoolean.isBoolean.default(__)
       usestdutils    : toBoolean.isBoolean.default(__)
       useskills      : toBoolean.isBoolean.default(false)
+      useasciiviz    : toBoolean.isBoolean.default(false)
       skillmaxautoload: toNumber.isNumber.default(1)
       skillcontextchars: toNumber.isNumber.default(8000)
       skillmanifestchars: toNumber.isNumber.default(1536)
@@ -1540,6 +1722,7 @@ jobs:
       mcpprogcalltools: isString.default(__)
       mcpprogcallbatchmax: toNumber.isNumber.default(10)
       useplanning    : toBoolean.isBoolean.default(false)
+      orchestration  : isString.default("manual")
       forceplanning  : toBoolean.isBoolean.default(false)
       planstyle      : isString.default(__)
       earlystopthreshold: toNumber.isNumber.default(__)
@@ -1617,6 +1800,7 @@ jobs:
       evidencegatestrictness: isString.default("medium")
       lcescalatedefer: toBoolean.isBoolean.default(true)
       lcbudget       : toNumber.isNumber.default(0)
+      lcreplytool    : toBoolean.isBoolean.default(false)
       lcjsonretries  : toNumber.isNumber.default(1)
       llmcomplexity  : toBoolean.isBoolean.default(false)
       autodelegation : toBoolean.isBoolean.default(false)
@@ -1669,12 +1853,19 @@ jobs:
       wikihttpindexurl: isString.default(__)
       wikihttptimeout: toNumber.isNumber.default(__)
       wikiartifactrefreshsecs: toNumber.isNumber.default(__)
+      wikiretrievalv2: toBoolean.isBoolean.default(__)
+      wikiretrievalconfig: isString.default(__)
+      wikitelemetry  : toBoolean.isBoolean.default(__)
       wikilexical    : isString.default(__)
       wikisourceurl  : isString.default(__)
       wikisourcefield: isString.default(__)
       wikisourceinline: toBoolean.isBoolean.default(false)
       wikilintstaleddays: toNumber.isNumber.default(__)
       wikimounts     : isString.default(__)
+      useskillwiki   : toBoolean.isBoolean.default(false)
+      skillwikibackend: isString.default(__)
+      skillwikiroot  : isString.default(__)
+      skillwikimounts: isString.default(__)
       mode           : isString.default(__)
       resume         : toBoolean.isBoolean.default(false)
       usehistory     : toBoolean.isBoolean.default(false)
@@ -1695,6 +1886,20 @@ jobs:
       dreamwikireorg : toBoolean.isBoolean.default(false)
       dreamreport    : isString.default(__)
   exec : | #js
+    if (args.eval === true) {
+      if (!isString(args.evalfile) || args.evalfile.trim().length === 0) throw "evalfile is required when eval=true"
+      var _eval = new MiniAEval()
+      var _evalReport = _eval.run(_eval.load(args.evalfile), { args: { __evaluation: true } })
+      if (isString(args.evalbaseline) && args.evalbaseline.trim().length > 0) {
+        _evalReport.comparison = _eval.compare(_evalReport, io.readFileJSON(args.evalbaseline))
+      }
+      if (isString(args.evalout) && args.evalout.trim().length > 0) io.writeFileJSON(args.evalout, _evalReport)
+      if (isString(args.evalwritebaseline) && args.evalwritebaseline.trim().length > 0) io.writeFileJSON(args.evalwritebaseline, _evalReport)
+      print(_eval.format(_evalReport))
+      if (_evalReport.summary.failed > 0 || (isMap(_evalReport.comparison) && _evalReport.comparison.regressions.length > 0)) throw "Evaluation failed"
+      return
+    }
+    if (!isString(args.goal) || args.goal.trim().length === 0) throw "goal is required unless eval=true"
     log(`🎯 goal: ${args.goal}`)
     MiniA.applyLibEnvDefault(args)
     var _ma = new MiniA()

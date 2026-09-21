@@ -3,13 +3,17 @@
 include:
 - tests/advancedPlanning.yaml
 - tests/agentPlugins.yaml
+- tests/capabilityPolicy.yaml
 - tests/coreFunctionality.yaml
 - tests/dreams.yaml
+- tests/eval.yaml
 - tests/graph.yaml
+- tests/historyVM.yaml
 - tests/mcpAuth.yaml
 - tests/miniAUtils.yaml
 - tests/outerLoop.yaml
 - tests/progToolCall.yaml
+- tests/skills.yaml
 - tests/wiki.yaml
 - tests/wikiCross.yaml
 - tests/wikiIngest.yaml

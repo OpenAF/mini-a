@@ -60,6 +60,31 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : historyvm
+    desc     : Enable durable bounded virtual history (creates retained per-conversation data even when history listing is off)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : historyvmmode
+    desc     : Virtual history policy mode
+    example  : "safe"
+    mandatory: false
+    options  : ["safe"]
+  - name     : historyvmshadow
+    desc     : Capture and estimate virtual history without changing provider requests
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : contextvirtualization
+    desc     : Enable experimental Phase 2 hierarchical context retrieval and active provider projection (requires historyvm=true)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : contextvirtualizationshadow
+    desc     : Measure a Phase 2 working-set projection without changing the Phase 1 provider context (requires historyvm=true contextvirtualization=true)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : historykeepperiod
     desc     : Delete kept history files older than this many minutes
     example  : "1440"
@@ -463,7 +488,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : historys3bucket
-    desc     : "S3 bucket to store conversation history objects"
+    desc     : "S3 bucket to store conversation history and enabled History VM snapshots (requires usehistory=true)"
     example  : "mini-a-history"
     mandatory: false
   - name     : historys3prefix
@@ -769,6 +794,33 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : wikiindexdir
+    desc     : Local cache directory for published wiki artifacts
+    mandatory: false
+  - name     : wikis3artifactprefix
+    desc     : S3 prefix containing published wiki artifacts
+    mandatory: false
+  - name     : s3artifactbundle
+    desc     : Use the published mini-a-wiki-index.zip S3 bundle
+    mandatory: false
+  - name     : wikihttpindexurl
+    desc     : HTTP URL for the published wiki artifact bundle
+    mandatory: false
+  - name     : wikihttptimeout
+    desc     : HTTP wiki and artifact request timeout in milliseconds
+    mandatory: false
+  - name     : wikiartifactrefreshsecs
+    desc     : Seconds between HTTP or bundled-S3 artifact metadata checks (0 disables)
+    mandatory: false
+  - name     : wikiretrievalv2
+    desc     : Opt-in passage retrieval; requires an explicit writable reindex or compatible published artifacts
+    mandatory: false
+  - name     : wikiretrievalconfig
+    desc     : Validated SLON/JSON passage, cache and artifact settings
+    mandatory: false
+  - name     : wikitelemetry
+    desc     : Record local aggregate wiki retrieval telemetry (off by default); writable managers persist it, read-only managers keep it in memory
+    mandatory: false
   - name     : wikilexical
     desc     : "SLON/JSON Lucene lexical configuration (default `{language: 'english'}`)"
     example  : "{ language: 'english', synonyms: [['js', 'javascript']] }"
@@ -792,6 +844,18 @@ help:
   - name     : wikimounts
     desc     : SLON/JSON array of read-only wiki mounts [{name, backend, root|bucket|prefix|url|...}]
     example  : "[{name: 'team', backend: 'fs', root: '/shared/team-wiki'}]"
+    mandatory: false
+  - name     : useskillwiki
+    desc     : Enable the virtual skill library, reusing usewiki unless a dedicated skillwiki* source is given
+    mandatory: false
+  - name     : skillwikibackend
+    desc     : Backend for a dedicated skill library
+    mandatory: false
+  - name     : skillwikiroot
+    desc     : Filesystem root for a dedicated skill library
+    mandatory: false
+  - name     : skillwikimounts
+    desc     : SLON/JSON read-only mounts for a dedicated skill library
     mandatory: false
   - name     : promptprofile
     desc     : "Prompt verbosity profile for system instructions (minimal, balanced, verbose). Defaults to minimal in chatbot mode, verbose with debug=true outside chatbot mode, otherwise balanced"
@@ -1026,6 +1090,9 @@ todo:
           delete global.__res[ postData.uuid ]
         }
         if (isDef(global.__conversations[ postData.uuid ])) {
+          if (isObject(global.__conversations[ postData.uuid ]._historyVm)) {
+            try { global.__conversations[ postData.uuid ]._historyVm.deleteOwnedStore() } catch(ignoreClearHistoryVm) {}
+          }
           if (isFunction(global.__conversations[ postData.uuid ].clearSessionMemory)) {
             try { global.__conversations[ postData.uuid ].clearSessionMemory(postData.uuid) } catch(ignoreClearMemory) {}
           }
@@ -1040,7 +1107,7 @@ todo:
         if (isDef(global.__subagentState) && isDef(global.__subagentState[ postData.uuid ])) {
           delete global.__subagentState[ postData.uuid ]
         }
-        if (global.__usehistory && !global.__historykeep) {
+        if ((global.__usehistory || global.maArgs.historyvm === true || global.maArgs.historyvmshadow === true) && (postData.force || !global.__historykeep)) {
           log("Deleting history file for session " + postData.uuid)
           if (isFunction(global._mini_a_web_deleteHistory)) {
             global._mini_a_web_deleteHistory(postData.uuid)
@@ -1128,7 +1195,7 @@ todo:
         }
 
         // If history is enabled, set the history file
-        var _hfile = global.__usehistory ? global.__historypath + "/c-" + uuid + ".json" : __
+        var _hfile = (global.__usehistory || global.maArgs.historyvm === true || global.maArgs.historyvmshadow === true) ? global.__historypath + "/c-" + uuid + ".json" : __
 
         // If conversation does not exist, create it
         if (isUnDef(global.__conversations[ uuid ])) {
@@ -1155,15 +1222,25 @@ todo:
       
           // Initialize MiniA
           lma = new MiniA()
+          var pendingProxyThought = __
           lma.setInteractionFn( (e, m) => {
             try {
               if (e == "stream") {
+                // Local child agents inherit this callback and prefix every
+                // interaction message with [subtask:id]. Do not mix their answer
+                // deltas into the parent SSE stream: the browser maintains one
+                // stream buffer and would otherwise append a child answer (and
+                // often the parent answer again) to the main transcript.
+                if (isString(global._mini_a_web_extractSubtaskId(m))) return
                 if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
                   global._mini_a_web_ssePush(uuid, "stream", { message: m })
                 }
                 return
               }
               if (e == "planner_stream") {
+                // Planner deltas from a delegated child are likewise private to
+                // that child and must not populate the parent planner preview.
+                if (isString(global._mini_a_web_extractSubtaskId(m))) return
                 if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
                   global._mini_a_web_ssePush(uuid, "planner_stream", { message: m })
                 }
@@ -1182,6 +1259,8 @@ todo:
               case "size"     : _e = "📏"; break
               case "rate"     : _e = "⏳"; break
               case "mcp"      : _e = "🤖"; break
+              case "subagent" : _e = "🤝"; break
+              case "delegate" : _e = "🤝"; break
               case "plan"     : _e = "🗺️"; break
               case "done"     : _e = "✅"; break
               case "error"    : _e = "❌"; break
@@ -1294,11 +1373,7 @@ todo:
               }
               var _subtaskId = global._mini_a_web_extractSubtaskId(m)
               if (e == "subagent" || isString(_subtaskId)) {
-                // Subtask/subagent events are always kept out of the main answer
-                // transcript (global.__res) so raw "[subtask:xxxx]" markers never
-                // leak into the web answer view. When showdelegate=true they are
-                // still tracked as separate lines in the dedicated subagent panel
-                // (global.__subagentState / _res.subagents) instead.
+                // Child events remain in the dedicated subagent panel.
                 if (global.__showdelegate) {
                   var _sid = isString(_subtaskId) ? _subtaskId : sha1(m || "").substring(0, 8)
                   var _title = "Sub-agent " + _sid
@@ -1308,7 +1383,11 @@ todo:
                     if (_candidate.length > 0) _title = _candidate.substring(0, 120)
                   }
                   var _status = global._mini_a_web_statusFromSubtaskMessage(m)
-                  global._mini_a_web_upsertSubtaskEvent(uuid, _sid, _title, _status, m)
+                  // Child interaction callbacks carry their event kind separately
+                  // from the message. Preserve its mapped icon in the sub-agent
+                  // panel so thoughts (💭), tool work (⚙️), etc. remain legible.
+                  var _subtaskMessage = _e + (isString(m) && m.length > 0 ? " " + m : "")
+                  global._mini_a_web_upsertSubtaskEvent(uuid, _sid, _title, _status, _subtaskMessage)
                   if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
                     global._mini_a_web_ssePush(uuid, "subagents", { subagents: global.__subagentState[uuid] })
                   }
@@ -1316,12 +1395,32 @@ todo:
                 log("[" + uuid + "] 🤝 " + m)
                 return
               }
+              var genericProxyPattern = /^Using tool ['"]proxy-dispatch['"]\.?(?: #\d+)?$/i
+              var isGenericProxyThought = _e == "💭" && isString(m) && genericProxyPattern.test(m.trim())
+              var isTranslatedProxyThought = _e == "💭" && isString(m) && (/^Using tool ['"](?!proxy-dispatch['"])([^'"]+)['"]\.?(?: #\d+)?$/i.test(m.trim()) || /^(Listing available tools|Searching available tools|Checking tool connections|Reading a saved tool result)(?: #\d+)?$/.test(m.trim()))
+              if (isGenericProxyThought) {
+                // Wait for actual dispatch parameters, across intervening diagnostics.
+                pendingProxyThought = m
+                return
+              }
+              if (isDef(pendingProxyThought)) {
+                var proxyDisplayThought = lma._pendingProxyDisplayThought
+                if (_e == "⚙️" && isString(proxyDisplayThought) && !genericProxyPattern.test(proxyDisplayThought.trim())) {
+                  var proxyCounter = / #\d+$/.exec(pendingProxyThought.trim())
+                  global.__res[uuid].push({ event: "💭", message: proxyDisplayThought + (proxyCounter ? proxyCounter[0] : "") })
+                  pendingProxyThought = __
+                } else if (isTranslatedProxyThought || _e == "🏁" || _e == "🛑" || _e == "👤") {
+                  // Canonical thoughts supersede announcements. Never guess a tool
+                  // or publish an unresolved announcement at the end of a turn.
+                  pendingProxyThought = __
+                }
+              }
               global.__res[uuid].push({ event: _e, message: m })
               if (global.__usestream && isFunction(global._mini_a_web_ssePush) && _e != "🗺️") {
                 global._mini_a_web_ssePush(uuid, "interaction", { event: _e })
               }
               // Only sync to S3 after user prompts (not on every event)
-              if (_e == "👤" && isFunction(global._mini_a_web_storeHistory)) {
+              if (_e == "👤" && global.maArgs.historyvm !== true && global.maArgs.historyvmshadow !== true && isFunction(global._mini_a_web_storeHistory)) {
                 try {
                   global._mini_a_web_storeHistory(uuid)
                 } catch(syncErr) {
@@ -1345,7 +1444,7 @@ todo:
           global.__conversations[ uuid ] = lma
         } else {
           lma = global.__conversations[ uuid ]
-          var _historyFile = global.__usehistory && isString(_hfile) ? global._mini_a_web_loadFile(_hfile) : __
+          var _historyFile = global.__usehistory && !isObject(lma._historyVm) && isString(_hfile) ? global._mini_a_web_loadFile(_hfile) : __
           if (isString(_historyFile) && io.fileExists(_historyFile)) {
             try {
               var _existingConversationPayload = io.readFileJSON(_historyFile)
@@ -1374,7 +1473,7 @@ todo:
             if (normalizedMemorySessionId.length > 0) startArgs.memorysessionid = normalizedMemorySessionId
           }
         }
-        if (global.__usehistory && isString(_hfile)) {
+        if ((global.__usehistory || startArgs.historyvm === true || startArgs.historyvmshadow === true) && isString(_hfile)) {
           startArgs.conversation = _hfile
         }
         // Only pass browser context for new conversations to avoid replacing in-memory session state
@@ -1385,6 +1484,9 @@ todo:
             var parsedPostBrowserContext = af.fromJSSLON(postData.browserContext)
             if (isMap(parsedPostBrowserContext)) startArgs.browsercontext = parsedPostBrowserContext
           }
+        }
+        lma._historyCheckpointFn = function(goal) {
+          if (isObject(lma._historyVm)) global._mini_a_web_storeHistory(uuid, goal)
         }
         var _rma = lma.start(startArgs)
 
@@ -1459,7 +1561,7 @@ todo:
           }
         }
       }
-      var _res = { content: "", status: "processing", history: [] }
+      var _res = { content: "", status: "processing", phase: "execution", history: [] }
       var __attachmentLangMap = {
         md: 'markdown', markdown: 'markdown', json: 'json', yaml: 'yaml', yml: 'yaml',
         csv: 'csv', tsv: 'tsv', xml: 'xml', html: 'html', htm: 'html', css: 'css', scss: 'scss', less: 'less',
@@ -1523,11 +1625,27 @@ todo:
       if (isDef(global.__res[ postData.uuid ])) {
         // Update last activity
         global.__lastActivity[ postData.uuid ] = Date.now()
+        var activeConversation = isDef(global.__conversations) ? global.__conversations[ postData.uuid ] : __
+        if (isDef(activeConversation) && activeConversation._planningPhase == "planning") {
+          _res.phase = "planning"
+        }
         var planState = isDef(global.__planState) ? global.__planState[ postData.uuid ] : __
         var hasActivePlan = isDef(planState) && isArray(planState.items) && planState.items.length > 0
 
         // Append all messages to content
         var _history = []
+        var activityLines = []
+        var activityWarnings = 0
+        var activityId = 0
+        function flushActivity(complete) {
+          if (activityLines.length == 0) {
+            activityWarnings = 0
+            return
+          }
+          _res.content += '\n\n<details class="answer-activity" data-activity-id="' + activityId + '" data-complete="' + complete + '"' + (complete ? '' : ' open') + '><summary>Activity' + (activityWarnings > 0 ? ' <span class="activity-warning">⚠ ' + activityWarnings + ' warning/error event(s)</span>' : '') + '</summary><div class="activity-body">' + activityLines.join('') + '</div></details>\n\n'
+          activityLines = []
+          activityWarnings = 0
+        }
         for (var i = 0; i < global.__res[ postData.uuid ].length; i++) {
           var r = global.__res[ postData.uuid ][i]
           if (isDef(r.event)) {
@@ -1536,21 +1654,29 @@ todo:
             _history.push(_h)
           }
           if (r.event == "final") {
-            if (i == global.__res[ postData.uuid ].length - 1) _res.status = "finished"
+            flushActivity(true)
+            activityId++
+            if (i == global.__res[ postData.uuid ].length - 1) {
+              _res.status = "finished"
+              _res.phase = "finished"
+            }
             _res.content += "\n" + r.message + "\n"
             //delete global.__res[ postData.uuid ]
             //break
           } else {
-            // Exclude planning (🗺️) messages from the content log; plan panel remains driven by __planState
-            if (r.event == "👤" || (r.event == "⚙️" && global.__showexecs) || (r.event == "🖥️" && global.__showexecs) || r.event == "🧩" || r.event == "💡" || r.event == "💭" || r.event == "🌀" || r.event == "🛑" || r.event == "⏳") {
-              if (r.event == "👤") {
-                _res.content += "<div style=\"text-align: right;\"><i><div style=\"display: inline-block; text-align: left;\">" + __formatUserMessage(r.message) + "</div> " + r.event + "</i>\n<br><br></div>"
-              } else {
-                _res.content += r.event + " <i><span style=\"color: var(--text); opacity: 0.60;\">" + __escapeHtml(r.message).replace(/\n/g, "<br>") + "</span></i>\n"
-              }
+            if (r.event == "👤" || r.event == "user") {
+              flushActivity(false)
+              activityId = i
+              _res.content += "<div style=\"text-align: right;\"><i><div style=\"display: inline-block; text-align: left;\">" + __formatUserMessage(r.message) + "</div> " + r.event + "</i>\n<br><br></div>"
+            } else if (isDef(r.event)) {
+              // Group only the messages that were visible before activity disclosures.
+              if (!(r.event == "🧩" || r.event == "💡" || r.event == "💭" || r.event == "🌀" || r.event == "🛑" || r.event == "⏳" || ((r.event == "⚙️" || r.event == "🖥️") && global.__showexecs))) continue
+              if (/^(⚠️|❌|❗|warn|warning|error)$/.test(r.event) || (r.event == "🤝" && /❌|❗|⚠️|failed|timeout/i.test(String(r.message)))) activityWarnings++
+              activityLines.push('<div class="activity-event">' + __escapeHtml(r.event) + ' <span>' + __escapeHtml(r.message).replace(/\n/g, '<br>') + '</span></div>')
             }
           }
         }
+        flushActivity(false)
         _res.history = _history
         if (hasActivePlan) {
           _res.plan = {
@@ -1733,6 +1859,9 @@ todo:
       }
 
       global.__res[ postData.uuid ] = sanitized
+      if (isObject(global.__conversations[ postData.uuid ]) && isObject(global.__conversations[ postData.uuid ]._historyVm)) {
+        try { global.__conversations[ postData.uuid ]._historyVm.deleteOwnedStore() } catch(ignoreLoadedHistoryVm) {}
+      }
       delete global.__conversations[ postData.uuid ]
       if (isDef(global.__subagentState) && isDef(global.__subagentState[ postData.uuid ])) delete global.__subagentState[ postData.uuid ]
       global.__lastActivity[ postData.uuid ] = Date.now()
@@ -1851,6 +1980,11 @@ jobs:
       lcjsonretries   : toNumber().isNumber().default(__)
       llmcomplexity   : toBoolean().isBoolean().default(false)
       usehistory      : toBoolean().isBoolean().default(false)
+      historyvm       : toBoolean().isBoolean().default(false)
+      historyvmmode   : isString().default("safe")
+      historyvmshadow : toBoolean().isBoolean().default(false)
+      contextvirtualization: toBoolean().isBoolean().default(false)
+      contextvirtualizationshadow: toBoolean().isBoolean().default(false)
       useattach       : toBoolean().isBoolean().default(false)
       historypath     : isString().default(".")
       historykeep     : toBoolean().isBoolean().default(false)
@@ -1968,12 +2102,25 @@ jobs:
       wikiregion     : isString().default(__)
       wikiuseversion1: toBoolean().isBoolean().default(false)
       wikiignorecertcheck: toBoolean().isBoolean().default(false)
+      wikiindexdir   : isString().default(__)
+      wikis3artifactprefix: isString().default(__)
+      s3artifactbundle: toBoolean().isBoolean().default(false)
+      wikihttpindexurl: isString().default(__)
+      wikihttptimeout: toNumber().isNumber().default(__)
+      wikiartifactrefreshsecs: toNumber().isNumber().default(__)
+      wikiretrievalv2: toBoolean().isBoolean().default(__)
+      wikiretrievalconfig: isString().default(__)
+      wikitelemetry  : toBoolean().isBoolean().default(__)
       wikilexical    : isString().default(__)
       wikisourceurl  : isString().default(__)
       wikisourcefield: isString().default(__)
       wikisourceinline: toBoolean().isBoolean().default(false)
       wikilintstaleddays: toNumber().isNumber().default(__)
       wikimounts     : isString().default(__)
+      useskillwiki   : toBoolean().isBoolean().default(false)
+      skillwikibackend: isString().default(__)
+      skillwikiroot  : isString().default(__)
+      skillwikimounts: isString().default(__)
       promptprofile  : isString().default(__)
       systempromptbudget: toNumber().isNumber().default(__)
       format         : isString().default(__)
@@ -2221,7 +2368,9 @@ jobs:
 
     global._mini_a_web_summarizeSubtaskMessage = (message) => {
       if (!isString(message)) return ""
-      var out = message.replace(/\s+/g, " ").trim()
+      // The identifier is used for grouping, not display. Keep the event icon
+      // supplied by the interaction handler while hiding the transport marker.
+      var out = message.replace(/\[subtask:[a-z0-9]+\]\s*/ig, "").replace(/\s+/g, " ").trim()
       if (out.length > 180) out = out.substring(0, 177) + "..."
       return out
     }
@@ -2316,32 +2465,19 @@ jobs:
       state.updated = now
     }
 
-    global._mini_a_web_buildHistoryPayload = (uuid) => {
+    global._mini_a_web_buildHistoryPayload = (uuid, pendingGoal) => {
       if (isUnDef(uuid)) return __
       var hfile = global.__historypath + "/c-" + uuid + ".json"
 
-      // Prefer S3 when enabled
-      if (global.__historys3enabled) {
-        var stream, str
-        try {
-          var key = global._mini_a_web_historyS3Key(uuid)
-          log("S3 history get (payload) bucket=" + global.__historys3bucket + " key=" + key)
-          stream = global.__historys3client.getObjectStream(global.__historys3bucket, key)
-          str = af.fromInputStream2String(stream)
-        } catch(getErr) {
-          // Ignore missing objects; log other errors
-          if (isDef(getErr) && String(getErr).indexOf("NoSuchKey") < 0) {
-            logErr(getErr)
-          }
-        } finally {
-          if (isDef(stream)) { try { stream.close() } catch(ignore) {} }
-        }
-        if (isDef(str)) {
-          try {
-            log("S3 history got payload for uuid=" + uuid + " size=" + str.length)
-            return str
-          } catch(convErr) { logErr(convErr) }
-        }
+      // The active writer/local cache is authoritative for uploads.
+      var agent = global.__conversations[uuid]
+      if (isObject(agent) && isObject(agent._historyVm)) {
+        if (agent._writeConversationPayload(hfile) !== true) throw new Error("Unable to checkpoint history")
+        var envelope = io.readFileJSON(hfile)
+        envelope.history_vm_snapshot = agent._historyVm.exportSnapshot()
+        if (isString(pendingGoal)) envelope.c.push({ role: "user", content: pendingGoal })
+        io.writeFileJSON(hfile, envelope, "")
+        return stringify(envelope, __, "")
       }
 
       // Otherwise try local file if present
@@ -2392,15 +2528,16 @@ jobs:
       return __
     }
 
-    global._mini_a_web_storeHistory = (uuid) => {
+    global._mini_a_web_storeHistory = (uuid, pendingGoal) => {
       if (!global.__historys3enabled) return
-      var payload = global._mini_a_web_buildHistoryPayload(uuid)
-      if (isUnDef(payload)) return
-      var stream, bytes
+      var stream
       try {
+        var payload = global._mini_a_web_buildHistoryPayload(uuid, pendingGoal)
+        if (isUnDef(payload)) return
         var key = global._mini_a_web_historyS3Key(uuid)
         log("S3 history put bucket=" + global.__historys3bucket + " key=" + key + " size=" + (isDef(payload) ? payload.length : 0))
-        global.__historys3client.putObjectStream(global.__historys3bucket, key, af.fromString2InputStream(payload), {}, "application/json")
+        stream = af.fromString2InputStream(payload)
+        global.__historys3client.putObjectStream(global.__historys3bucket, key, stream, {}, "application/json")
       } catch(storeErr) {
         logErr(storeErr)
       } finally {
@@ -2427,12 +2564,26 @@ jobs:
       if (isString(localFile) && io.fileExists(localFile)) {
         try { io.rm(localFile) } catch(ignore) {}
       }
+      var vmDir = isString(localFile) ? localFile + ".historyvm" : __
+      if (isString(vmDir) && io.fileExists(vmDir)) {
+        try {
+          var removeVm = function(file) {
+            if (file.isDirectory()) {
+              var children = file.listFiles()
+              for (var vi = 0; isDef(children) && vi < children.length; vi++) removeVm(children[vi])
+            }
+            file.delete()
+          }
+          removeVm(new java.io.File(vmDir))
+        } catch(ignoreVmDir) {}
+      }
     }
 
     global._mini_a_web_saveFile = (aFile, aMap) => {
       var uuid = global._mini_a_web_uuidFromPath(aFile)
       if (global.__historys3enabled && isDef(uuid)) {
-        // Save to S3 instead of local
+        // Retain the local checkpoint even if the remote upload fails.
+        io.writeFileJSON(aFile, aMap, "")
         var payload
         try {
           payload = stringify(aMap, __, "")
@@ -2467,9 +2618,9 @@ jobs:
           log("S3 history exists: true for key=" + key)
           return true
         } catch(getErr) {
-          // Missing object is not an error
-          try { if (String(getErr).indexOf("NoSuchKey") >= 0) log("S3 history exists: false for key=" + global._mini_a_web_historyS3Key(uuid)) } catch(ignore) {}
-          return false
+          if (isString(localFile) && io.fileExists(localFile)) return true
+          if (String(getErr).indexOf("NoSuchKey") >= 0) return false
+          throw getErr
         } finally {
           if (isDef(stream)) { try { stream.close() } catch(ignore) {} }
         }
@@ -2478,35 +2629,49 @@ jobs:
     }
 
     global._mini_a_web_loadFile = (aFile) => {
-      // Can be __
-      if (global.__historys3enabled && isString(aFile)) {
-        var uuid = global._mini_a_web_uuidFromPath(aFile)
-        if (isDef(uuid)) {
-          var stream, str
+      if (!global.__historys3enabled || !isString(aFile)) return aFile
+      var uuid = global._mini_a_web_uuidFromPath(aFile)
+      if (isUnDef(uuid)) return aFile
+      var active = global.__conversations[uuid]
+      if (isObject(active) && isObject(active._historyVm)) return aFile
+      var stream
+      try {
+        var key = global._mini_a_web_historyS3Key(uuid)
+        stream = global.__historys3client.getObjectStream(global.__historys3bucket, key)
+        var payload = jsonParse(af.fromInputStream2String(stream), __, __, true)
+        // Preserve a newer local checkpoint left by a failed upload.
+        if (isDef(payload.history_vm_snapshot)) MiniAHistoryVM.validateSnapshot(payload.history_vm_snapshot, payload.history_vm)
+        if (io.fileExists(aFile)) {
           try {
-            var key = global._mini_a_web_historyS3Key(uuid)
-            log("S3 history get (load) bucket=" + global.__historys3bucket + " key=" + key + " -> file=" + aFile)
-            stream = global.__historys3client.getObjectStream(global.__historys3bucket, key)
-            str = af.fromInputStream2String(stream)
-          } catch(getErr) {
-            // Ignore missing objects
-            if (isDef(getErr) && String(getErr).indexOf("NoSuchKey") < 0) {
-              logErr(getErr)
-            }
-          } finally {
-            if (isDef(stream)) {
-              try { stream.close() } catch(ignore) {}
-            }
-          }
-          if (isDef(str)) {
-            try {
-              log("S3 history downloaded uuid=" + uuid + " size=" + str.length + " -> " + aFile)
-              io.writeFileString(aFile, str)
-            } catch(writeErr) {
-              logErr(writeErr)
-            }
-          }
+            var cached = MiniAHistoryVM.readLocalSnapshot(aFile)
+            var remote = payload.history_vm_snapshot
+            // The first VM upload may have failed while S3 still holds legacy history.
+            if (isUnDef(remote)) return aFile
+            if (cached.conversationId === remote.conversationId && cached.sequence >= remote.sequence &&
+                (remote.sequence === 0 || cached.events[remote.sequence - 1].eventHash === remote.sourceHash)) return aFile
+          } catch(ignoreCache) {}
         }
+        MiniAHistoryVM.restorePayload(aFile, payload)
+      } catch(loadErr) {
+        var missing = String(loadErr).indexOf("NoSuchKey") >= 0
+        if (!missing) logErr(loadErr)
+        // A valid local generation can serve through an outage. Do not invent
+        // an empty session when a remote object could not be read or validated.
+        var usableLocal = false
+        if (io.fileExists(aFile)) {
+          try {
+            var local = io.readFileJSON(aFile)
+            usableLocal = isMap(local) && isArray(local.c)
+            if (usableLocal && isMap(local.history_vm) && (local.history_vm.active || local.history_vm.shadow)) {
+              MiniAHistoryVM.readLocalSnapshot(aFile)
+            }
+          } catch(ignoreLocal) { usableLocal = false }
+        }
+        if (!usableLocal && (!missing || io.fileExists(aFile) || io.fileExists(aFile + ".historyvm"))) {
+          throw new Error("Unable to resume S3 history: " + String(loadErr))
+        }
+      } finally {
+        if (isDef(stream)) { try { stream.close() } catch(ignore) {} }
       }
       return aFile
     }
@@ -2529,12 +2694,16 @@ jobs:
     }
     for (var i = 0; i < toDelete.length; i++) {
       var uuid = toDelete[i]
+      var staleAgent = global.__conversations[ uuid ]
+      if (!global.__historykeep && isObject(staleAgent) && isObject(staleAgent._historyVm)) {
+        try { staleAgent._historyVm.deleteOwnedStore() } catch(ignoreStaleVm) {}
+      }
       delete global.__lastActivity[ uuid ]
       delete global.__res[ uuid ]
       delete global.__conversations[ uuid ]
       if (isDef(global.__planState) && isDef(global.__planState[ uuid ])) delete global.__planState[ uuid ]
       if (isDef(global.__subagentState) && isDef(global.__subagentState[ uuid ])) delete global.__subagentState[ uuid ]
-      if (global.__usehistory && !global.__historykeep && isFunction(global._mini_a_web_deleteHistory)) {
+      if ((global.__usehistory || global.maArgs.historyvm === true || global.maArgs.historyvmshadow === true) && !global.__historykeep && isFunction(global._mini_a_web_deleteHistory)) {
         try {
           global._mini_a_web_deleteHistory(uuid)
         } catch(cleanErr) {

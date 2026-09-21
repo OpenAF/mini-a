@@ -1,0 +1,14 @@
+{
+  "focused": {"suite": "wikiRetrievalV2", "assertions": 1078, "passedFunctions": 29, "failures": []},
+  "full": {"suite": "wiki", "assertions": 1809, "passedFunctions": 190, "failures": []},
+  "repeat": {"assertions": 2156, "runs": 2, "sameJvm": true, "failures": []},
+  "targeted": "CORE_SCOPED_BUDGET_MAPPING_PASS",
+  "standaloneMcp": {"marker": "STANDALONE_MCP_BUDGET_PASS", "assertions": 4, "realIndexedData": true},
+  "sourceSha1": {
+    "mini-a.js": "a8f3be722f539786a04ba8e64a9db15e92151427",
+    "mini-a-utils.js": "666f5c6321e45a6979fa087483aa0ef1a626c689",
+    "mcps/mcp-wiki.yaml": "5312763df75cf886eff320150b48fe910a1a6892"
+  },
+  "scope": "Actual core option mappings executed against real Lucene; standalone MCP job body executed against real Lucene",
+  "limitations": ["not a full model conversation", "not listener or transport stress validation", "not a new performance measurement", "not live provider validation"]
+}

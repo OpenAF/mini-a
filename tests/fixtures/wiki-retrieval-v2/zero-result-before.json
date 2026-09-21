@@ -1,0 +1,22 @@
+{
+  "fixture": "indexed-zero-result",
+  "backend": "local-fs",
+  "pages": 100,
+  "samples": 10,
+  "runtime": "20260913",
+  "jvm": "26.0.2",
+  "lucene": "10.5.0",
+  "cold": {
+    "ms": 64.020708,
+    "bodyReads": 100,
+    "bytes": 6280
+  },
+  "warm": {
+    "p50": 36.144792,
+    "p95": 49.395125,
+    "p99": 49.395125,
+    "bodyReads": 1000,
+    "bytes": 62800
+  },
+  "memoryUsed": 38616576
+}

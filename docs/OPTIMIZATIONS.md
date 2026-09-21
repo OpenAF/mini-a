@@ -37,10 +37,10 @@ graph TD
 
 ### What It Does
 
-Automatically manages conversation context to prevent unbounded token growth without requiring manual configuration.
+Automatically manages conversation context to prevent unbounded token growth when a token limit is configured.
 
 **Key Features**:
-- **Smart default limit**: 50,000 tokens (auto-enabled, no configuration needed)
+- **Proactive compaction**: Set `maxcontext` (e.g. `50000`) to enable threshold-based compaction
 - **Two-tier compression**:
   - **60% threshold**: Removes duplicate observations
   - **80% threshold**: Summarizes old context
@@ -51,30 +51,30 @@ Automatically manages conversation context to prevent unbounded token growth wit
 ```
 Step 1: 5K tokens
 Step 5: 15K tokens (growing linearly)
-Step 10: 30K tokens → triggers deduplication (removes ~20% redundant entries)
-Step 12: 40K tokens → triggers summarization (compresses to ~20K tokens)
+Step 10: 30K tokens → triggers deduplication (removes ~20% redundant entries at 60% of maxcontext)
+Step 12: 40K tokens → triggers summarization (compresses to ~20K tokens at 80% of maxcontext)
 ```
 
 ### Benefits
 
-✅ **No configuration required** - works out of the box
+✅ **Proactive token management** - keeps context well within model limits
 ✅ **30-50% token reduction** on long-running goals
 ✅ **Preserves important context** (STATE, SUMMARY entries always kept)
-✅ **Backward compatible** - existing `maxcontext` parameter still works
+✅ **Configurable threshold** - easily tune via `maxcontext` parameter
 
-### Advanced Configuration
+### Configuration
 
-You can still override the default behavior:
+`maxcontext` defaults to `0` (disabled proactive threshold compaction). Enable it by specifying your desired token threshold:
 
 ```bash
-# Disable automatic management (not recommended)
-mini-a goal="..." maxcontext=0
+# Enable proactive context management with recommended 50K token threshold
+mini-a goal="..." maxcontext=50000
 
-# Set custom limit
+# Set custom limit for larger models
 mini-a goal="..." maxcontext=100000
 ```
 
-**Note**: Setting `maxcontext=0` disables automatic context management entirely. This is only recommended for very short goals that won't exceed context limits.
+**Note**: By default (`maxcontext=0`), proactive compaction is off; Mini-A handles context limits reactively via model error recovery or via `contextguard=true`. Set `maxcontext` explicitly on long-running sessions.
 
 ---
 

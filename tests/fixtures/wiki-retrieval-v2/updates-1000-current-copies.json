@@ -1,0 +1,220 @@
+{
+  "kind": "incremental-generations",
+  "mode": "portable-copy",
+  "backend": "local-fs",
+  "pages": 1000,
+  "samples": 10,
+  "runtime": "20260913",
+  "jvm": "26.0.2",
+  "sourceSha1": {
+    "wiki": "3b671f02a6fb0485207791156c4cefd692bb2e78",
+    "retrieval": "c952d4544256a6692e41258bb4765f0ba25f1ce4"
+  },
+  "observations": [
+    {
+      "millis": 644.8846669197083,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1004,
+        "copiedBytes": 1458061,
+        "reusedChecksums": 1002,
+        "reusedChecksumBytes": 1456804,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 4000,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 2000,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 499.0505840778351,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1008,
+        "copiedBytes": 1461202,
+        "reusedChecksums": 1005,
+        "reusedChecksumBytes": 1459547,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 3999,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 1999,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 494.5747079849243,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1011,
+        "copiedBytes": 1464028,
+        "reusedChecksums": 1008,
+        "reusedChecksumBytes": 1462290,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 3998,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 1998,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 505.90841603279114,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1014,
+        "copiedBytes": 1466854,
+        "reusedChecksums": 1011,
+        "reusedChecksumBytes": 1465033,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 3997,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 1997,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 535.9535830020905,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1017,
+        "copiedBytes": 1469680,
+        "reusedChecksums": 1014,
+        "reusedChecksumBytes": 1467776,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 3996,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 1996,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 507.40429186820984,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1020,
+        "copiedBytes": 1472506,
+        "reusedChecksums": 1017,
+        "reusedChecksumBytes": 1470519,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 3995,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 1995,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 520.0816671848297,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1023,
+        "copiedBytes": 1475332,
+        "reusedChecksums": 1020,
+        "reusedChecksumBytes": 1473262,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 3994,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 1994,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 539.9282081127167,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1026,
+        "copiedBytes": 1478158,
+        "reusedChecksums": 1002,
+        "reusedChecksumBytes": 1450427,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 3993,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 1993,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 511.1328749656677,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1008,
+        "copiedBytes": 1456653,
+        "reusedChecksums": 1005,
+        "reusedChecksumBytes": 1454998,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 3992,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 1992,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 479.7888340950012,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1011,
+        "copiedBytes": 1459479,
+        "reusedChecksums": 1008,
+        "reusedChecksumBytes": 1457741,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "catalogueKeysCopied": 3991,
+        "sharedPageRecords": 1000,
+        "sharedPassageRecords": 1991,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    }
+  ],
+  "linkImmutableFiles": false,
+  "buildMillis": 1900.2599999904633,
+  "latency": {
+    "p50": 507.40429186820984,
+    "p95": 644.8846669197083,
+    "p99": 644.8846669197083
+  },
+  "disk": {
+    "apparentBytes": 41011542,
+    "uniqueFileBytes": 41011542,
+    "files": 12218,
+    "estimator": "POSIX file identity and length; excludes allocation and metadata overhead"
+  },
+  "memoryUsed": 581066720,
+  "recordedHarnessSha1": "a4a5b6e5a63b7007d504e962b6964ba8679fc26c"
+}

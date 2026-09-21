@@ -2,6 +2,14 @@
 
 ## Recent Updates
 
+### Durable runs and unified trace events
+
+`durable=true` adds stable run IDs, resumable state, safe checkpoints, and a redacted JSONL trace without changing ordinary one-shot or `resume=true` conversation behaviour. The trace is built on Mini-A's existing trace/hooks seam and records lifecycle, planning, validation, replan, model/tool/shell/wiki, and orchestration events for durable runs. Use `resumerun=<runid>` to continue an interrupted run and `runstatus=<runid>` to inspect it.
+
+### Capability registry and centralized policies
+
+`capabilityselection=true` normalizes MCP tools, skills, plugins, and workers into a deterministic registry and registers only a bounded relevant MCP subset. `policy=`/`policyfile=` adds centralized, traceable restrictions for shell execution, tool/capability use, delegation, Wiki writes, and allowed HTTP domains. Defaults remain permissive, preserving existing calls until a policy is configured.
+
 ### Wiki: citation URLs on retrieval results
 
 **Problem**: wiki retrieval results only ever carried a wiki-relative path (`guides/setup.md`) and a non-opaque `wiki:` reference, so an agent answering from wiki content had no canonical origin URL to cite back to a human, even when the wiki was itself published somewhere (an internal docs site, a GitHub repo, Confluence).
@@ -24,11 +32,17 @@
 
 **Related parameters**: `memoryreflect`, `memoryreflectmodel`, `memoryreflectmin`, `memorycandidatedays`, `memorybudget`, `memorysearchbudget`, `memorysessionmaxdays`, `memorypersistevery`
 
+### Optional MCP tool capture for low-cost reply recovery
+
+Set `lcreplytool=true lcjsonretries=1` to use a `submit_reply` MCP call in place of the corrective text retry on OpenAI-compatible and Ollama adapters. The isolated tool captures one validated action for the normal dispatcher, without executing it or allowing an automatic model follow-up. Unsupported adapters retain text recovery. New `llm_calls` metrics: `lc_reply_tool_attempts` and `lc_reply_tool_successes`. This remains opt-in; live model success rates have not been measured. See [reply recovery details](REPLY-JSON.md).
+
 ### Low-cost model gets a JSON-retry before falling back to the main model
 
-**Change**: Previously, when the low-cost model's response failed to parse as valid JSON, Mini-A fell back to the main model immediately (zero retries). It now gives the low-cost model `lcjsonretries` (default: `1`) extra same-step attempts, re-prompted with a corrective note about valid JSON formatting, before escalating to the main model. Retries are "free" — they don't consume a step from `maxsteps` — and each retry attempt's token usage is tracked against `lcbudget` and the session's LC cost tracker like any other low-cost call. Set `lcjsonretries=0` to restore the previous immediate-fallback behavior.
+**Change**: Previously, when the low-cost model's response failed to parse as valid JSON, Mini-A fell back to the main model immediately (zero retries). It now gives the low-cost model `lcjsonretries` (default: `1`) extra same-step attempts, re-prompted with a corrective note about valid JSON formatting, before escalating to the main model. Retries do not consume a step from `maxsteps`, but do consume tokens and provider calls, and each retry attempt's token usage is tracked against `lcbudget` and the session's LC cost tracker like any other low-cost call. Set `lcjsonretries=0` to restore the previous immediate-fallback behavior.
 
-New metric: `lc_json_retries` (surfaced via `getMetrics().llm_calls.lc_json_retries`). `fallback_to_main_llm` now only increments once retries are exhausted.
+New metric: `lc_json_retries` (surfaced via `getMetrics().llm_calls.lc_json_retries`). `fallback_to_main_llm` increments if JSON recovery still requires the main model after the configured retry attempts.
+
+Recovery now accepts already-parsed object/array retries, sends the corrective prompt to the main fallback, and preserves the Ollama native-tools/JSON-mode restriction on retries and raw thinking calls. The reply prompt demonstrates object-valued tool parameters, and punctuation repair preserves text inside JSON strings. See [reply JSON troubleshooting](REPLY-JSON.md).
 
 **Related parameters**: `lcjsonretries`, `lcbudget`, `lcescalatedefer`, `modellock`
 
@@ -139,7 +153,7 @@ mini-a ➤ /dream memory dryrun
 mini-a ➤ /dream wiki
 ```
 
-See [USAGE.md — Dreams](USAGE.md#dreams-sleep-pass) and [CHEATSHEET.md — Dreams](CHEATSHEET.md#dreams-sleep-pass) for full parameter reference.
+See [USAGE.md — Dreams](../USAGE.md#dreams-sleep-pass) and [CHEATSHEET.md — Dreams](../CHEATSHEET.md#dreams-sleep-pass) for full parameter reference.
 
 ---
 
@@ -1418,3 +1432,17 @@ Found an issue or have suggestions?
 ✅ **Production Ready** - Thoroughly tested and validated
 
 Upgrade now and enjoy the benefits!
+# Native evaluation suites
+
+Mini-A now has a lightweight native evaluation runner. Use `eval=true` with
+`evalfile=<YAML-or-JSON-suite>` to run scenarios, capture existing execution
+metrics, apply deterministic assertions and limits, emit JSON reports, and
+compare against a saved baseline. The event and metrics report shapes are
+versioned so later observability and orchestration work can reuse them.
+
+# Adaptive orchestration foundation
+
+`orchestration=auto` now selects existing planning, advisor/model strategy,
+and evidence-gate controls using deterministic complexity and risk signals.
+Manual remains the default and explicit configuration wins. Every automatic
+selection is emitted as a structured trace decision without adding an LLM call.

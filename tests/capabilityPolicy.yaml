@@ -1,0 +1,36 @@
+jobs:
+- name: MiniA Capability and Policy Tests::Init
+  exec: args.tests = require("tests/capabilityPolicy.js")
+
+- name: MiniA Capability and Policy Tests::RegistrySelectsBoundedRelevantSubset
+  from: MiniA Capability and Policy Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testCapabilityRegistrySelectsBoundedRelevantSubset
+
+- name: MiniA Capability and Policy Tests::PolicyDeniesShellAndCapabilityAndNetwork
+  from: MiniA Capability and Policy Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPolicyDeniesShellAndCapabilityAndNetwork
+
+- name: MiniA Capability and Policy Tests::PolicyDefaultsToAllowForCompatibility
+  from: MiniA Capability and Policy Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPolicyDefaultsToAllowForCompatibility
+
+- name: MiniA Capability and Policy Tests::PolicyCoversPluginMcpAndDelegationBoundaries
+  from: MiniA Capability and Policy Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPolicyCoversPluginMcpAndDelegationBoundaries
+
+include:
+- oJobTest.yaml
+
+ojob:
+  opacks:
+  - oJob-common
+
+todo:
+- MiniA Capability and Policy Tests::RegistrySelectsBoundedRelevantSubset
+- MiniA Capability and Policy Tests::PolicyDeniesShellAndCapabilityAndNetwork
+- MiniA Capability and Policy Tests::PolicyDefaultsToAllowForCompatibility
+- MiniA Capability and Policy Tests::PolicyCoversPluginMcpAndDelegationBoundaries

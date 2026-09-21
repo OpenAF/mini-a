@@ -1,0 +1,28 @@
+{
+  "date": "2026-09-17",
+  "sourceCommit": "eba2e801ab5ab6ef6e9e285d7e314aad5def4fce",
+  "workingTree": "tests/wikiRetrievalArea8S3.js added; unrelated .package.yaml and plan files already modified or untracked",
+  "endpoint": "disposable localhost MinIO, S3-compatible API",
+  "image": "minio/minio:latest",
+  "imageId": "sha256:8f08aee614800a237906bd48114d733e5ac5bfac4ccdf731f141b0e880d7a253",
+  "command": "oaf -f tests/wikiRetrievalArea8S3.js with WIKI_AREA8_S3_URL, WIKI_AREA8_S3_BUCKET, WIKI_AREA8_S3_ACCESS_KEY and WIKI_AREA8_S3_SECRET_KEY set",
+  "exitCode": 0,
+  "checks": [
+    "initial publication and bundle",
+    "live S3 hydration and citation",
+    "unchanged ETag skips refresh",
+    "live credential denial retains pointer",
+    "corrupt object changes live ETag",
+    "live corrupt replacement retains pointer",
+    "prior evidence survives failed refresh",
+    "replacement publication and bundle",
+    "live replacement hydrates",
+    "replacement evidence served",
+    "retired evidence omitted"
+  ],
+  "limits": [
+    "localhost S3-compatible service, not public-cloud IAM or provider failure behavior",
+    "no network filesystem or physical storage power interruption",
+    "no distributed multi-writer/CAS or multi-JVM quota coordination"
+  ]
+}

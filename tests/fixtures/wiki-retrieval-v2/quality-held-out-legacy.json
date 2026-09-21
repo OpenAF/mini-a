@@ -1,0 +1,93 @@
+{
+  "mode": "legacy",
+  "split": "held-out",
+  "runtime": "20260913",
+  "samples": 6,
+  "passageRecallAtK": 0.4,
+  "mrr": 0.4,
+  "results": [
+    {
+      "query": "wikirestrictrefttl",
+      "k": 1,
+      "recall": 0,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": 1,
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "evidencePaths": [
+        "long.md"
+      ]
+    },
+    {
+      "query": "running workloads",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 1.5454545454545454,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "evidencePaths": [
+        "language.md"
+      ]
+    },
+    {
+      "query": "compatibilityswitch",
+      "k": 1,
+      "recall": 0,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": 1,
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "evidencePaths": [
+        "new.md"
+      ]
+    },
+    {
+      "query": "issuer audience credential",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0.9777777777777777,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "evidencePaths": [
+        "audience.md",
+        "issuer.md"
+      ]
+    },
+    {
+      "query": "lastmountparameter reference expiry",
+      "k": 1,
+      "recall": 0,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": 1,
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "evidencePaths": [
+        "same.md"
+      ]
+    },
+    {
+      "query": "genuineheldoutunanswerableidentifier",
+      "k": 2,
+      "recall": null,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": null,
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "zero",
+      "expectedUnanswerable": true,
+      "evidencePaths": []
+    }
+  ]
+}

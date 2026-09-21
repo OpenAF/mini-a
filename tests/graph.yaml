@@ -75,6 +75,46 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testGraphStructuralRebuildSkipsDanglingSemanticEdges
 
+- name: MiniA Graph Tests::EvidenceOwnership
+  from: MiniA Graph Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testGraphEvidenceOwnership
+
+- name: MiniA Graph Tests::UpdateDiffPreservesIncoming
+  from: MiniA Graph Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testGraphUpdateDiffPreservesIncoming
+
+- name: MiniA Graph Tests::SemanticFullRevisionAndFailure
+  from: MiniA Graph Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testGraphSemanticFullRevisionAndFailure
+
+- name: MiniA Graph Tests::UpdatePageEquivalence
+  from: MiniA Graph Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testGraphUpdatePageEquivalence
+
+- name: MiniA Graph Tests::UpdatePageNoChangeIsNoop
+  from: MiniA Graph Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testGraphUpdatePageNoChangeIsNoop
+
+- name: MiniA Graph Tests::RemovePagePrunesOrphans
+  from: MiniA Graph Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testGraphRemovePagePrunesOrphans
+
+- name: MiniA Graph Tests::CompactSaveNoReport
+  from: MiniA Graph Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testGraphCompactSaveNoReport
+
+- name: MiniA Graph Tests::SemanticBuildFallsBackWithoutLlm
+  from: MiniA Graph Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testGraphSemanticBuildFallsBackWithoutLlm
+
 todo:
 - MiniA Graph Tests::StructuralBuild
 - MiniA Graph Tests::QueryNeighbors
@@ -90,3 +130,11 @@ todo:
 - MiniA Graph Tests::SemanticInvalidation
 - MiniA Graph Tests::UpdatePreservesOtherIsolatedDocuments
 - MiniA Graph Tests::StructuralRebuildSkipsDanglingSemanticEdges
+- MiniA Graph Tests::EvidenceOwnership
+- MiniA Graph Tests::UpdateDiffPreservesIncoming
+- MiniA Graph Tests::SemanticFullRevisionAndFailure
+- MiniA Graph Tests::UpdatePageEquivalence
+- MiniA Graph Tests::UpdatePageNoChangeIsNoop
+- MiniA Graph Tests::RemovePagePrunesOrphans
+- MiniA Graph Tests::CompactSaveNoReport
+- MiniA Graph Tests::SemanticBuildFallsBackWithoutLlm

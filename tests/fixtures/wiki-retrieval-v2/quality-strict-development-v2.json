@@ -1,0 +1,77 @@
+{
+  "mode": "v2",
+  "split": "development",
+  "runtime": "20260913",
+  "samples": 3,
+  "passageRecallAtK": 1,
+  "mrr": 1,
+  "results": [
+    {
+      "query": "renewalwindowseconds",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 2.380952380952381,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "evidencePaths": [
+        "long.md"
+      ]
+    },
+    {
+      "query": "issuer audience validation",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "citationChecks": [
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        },
+        {
+          "correct": true,
+          "textCorrect": true,
+          "reasons": []
+        }
+      ],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 1.4857142857142858,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "evidencePaths": [
+        "first.md",
+        "second.md"
+      ]
+    },
+    {
+      "query": "noexistingdevelopmentanswer",
+      "k": 2,
+      "recall": null,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": null,
+      "citationChecks": [],
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "zero",
+      "expectedUnanswerable": true,
+      "evidencePaths": []
+    }
+  ],
+  "evaluationVersion": 2,
+  "recordedSourceSha1": {
+    "tests/wikiRetrievalQuality.js": "481fe082fa740ea40e24066ca61219256e8b0442",
+    "tests/wikiRetrievalEvidence.js": "019bb1e7db6e85e03798806d657eb0a411a26f33",
+    "tests/fixtures/wiki-retrieval-v2/development.json": "0f9577eb074b8927c62f8c8c4cbb483928a8bb51"
+  }
+}

@@ -1,0 +1,222 @@
+{
+  "mode": "legacy",
+  "pages": 100,
+  "samples": 20,
+  "backend": "simulated-remote-current-source",
+  "simulatedLatencyMs": 2,
+  "liveProvider": false,
+  "runtime": "20260914",
+  "jvm": "26.0.2",
+  "operations": {
+    "compactSearch": {
+      "managerConstructionMs": 16.7165,
+      "mountAttachMs": 12.291708,
+      "initializationValidationBlockReads": 0,
+      "initializationValidationBlockBytes": 0,
+      "coldMs": 113.002541,
+      "coldSourceReads": 16,
+      "coldSourceBytes": 6924,
+      "coldValidationBlockReads": 0,
+      "coldValidationBlockBytes": 0,
+      "warm": {
+        "p50": 66.967125,
+        "p95": 69.723417,
+        "p99": 70.801542,
+        "sourceReads": 320,
+        "sourceBytes": 138480,
+        "outputBytes": 52300,
+        "validationBlockReads": 0,
+        "validationBlockBytes": 0
+      },
+      "servingMetrics": null
+    },
+    "zeroSearch": {
+      "managerConstructionMs": 16.200375,
+      "mountAttachMs": 9.27525,
+      "initializationValidationBlockReads": 0,
+      "initializationValidationBlockBytes": 0,
+      "coldMs": 35.768917,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "coldValidationBlockReads": 0,
+      "coldValidationBlockBytes": 0,
+      "warm": {
+        "p50": 8.234541,
+        "p95": 9.76075,
+        "p99": 10.699792,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 1500,
+        "validationBlockReads": 0,
+        "validationBlockBytes": 0
+      },
+      "servingMetrics": null
+    },
+    "retrieve": {
+      "managerConstructionMs": 11.957458,
+      "mountAttachMs": 6.262041,
+      "initializationValidationBlockReads": 0,
+      "initializationValidationBlockBytes": 0,
+      "coldMs": 92.454625,
+      "coldSourceReads": 18,
+      "coldSourceBytes": 7790,
+      "coldValidationBlockReads": 0,
+      "coldValidationBlockBytes": 0,
+      "warm": {
+        "p50": 74.784042,
+        "p95": 80.806125,
+        "p99": 81.393167,
+        "sourceReads": 360,
+        "sourceBytes": 155800,
+        "outputBytes": 66520,
+        "validationBlockReads": 0,
+        "validationBlockBytes": 0
+      },
+      "servingMetrics": null
+    },
+    "assembleContext": {
+      "managerConstructionMs": 19.241667,
+      "mountAttachMs": 10.712917,
+      "initializationValidationBlockReads": 0,
+      "initializationValidationBlockBytes": 0,
+      "coldMs": 221.286625,
+      "coldSourceReads": 60,
+      "coldSourceBytes": 25962,
+      "coldValidationBlockReads": 0,
+      "coldValidationBlockBytes": 0,
+      "warm": {
+        "p50": 221.384666,
+        "p95": 268.794958,
+        "p99": 271.772916,
+        "sourceReads": 1200,
+        "sourceBytes": 519240,
+        "outputBytes": 1440,
+        "validationBlockReads": 0,
+        "validationBlockBytes": 0
+      },
+      "servingMetrics": null
+    },
+    "open": {
+      "managerConstructionMs": 28.558042,
+      "mountAttachMs": 8.204833,
+      "initializationValidationBlockReads": 0,
+      "initializationValidationBlockBytes": 0,
+      "coldMs": 12.405833,
+      "coldSourceReads": 1,
+      "coldSourceBytes": 431,
+      "coldValidationBlockReads": 0,
+      "coldValidationBlockBytes": 0,
+      "warm": {
+        "p50": 3.442792,
+        "p95": 3.87075,
+        "p99": 4.102042,
+        "sourceReads": 20,
+        "sourceBytes": 8620,
+        "outputBytes": 6460,
+        "validationBlockReads": 0,
+        "validationBlockBytes": 0
+      },
+      "servingMetrics": null
+    },
+    "navigate": {
+      "managerConstructionMs": 16.395958,
+      "mountAttachMs": 10.274833,
+      "initializationValidationBlockReads": 0,
+      "initializationValidationBlockBytes": 0,
+      "coldMs": 7.523042,
+      "coldSourceReads": 1,
+      "coldSourceBytes": 431,
+      "coldValidationBlockReads": 0,
+      "coldValidationBlockBytes": 0,
+      "warm": {
+        "p50": 3.352375,
+        "p95": 3.529334,
+        "p99": 3.695542,
+        "sourceReads": 20,
+        "sourceBytes": 8620,
+        "outputBytes": 4240,
+        "validationBlockReads": 0,
+        "validationBlockBytes": 0
+      },
+      "servingMetrics": null
+    },
+    "backlinks": {
+      "managerConstructionMs": 15.12525,
+      "mountAttachMs": 6.136458,
+      "initializationValidationBlockReads": 0,
+      "initializationValidationBlockBytes": 0,
+      "coldMs": 326.7885,
+      "coldSourceReads": 100,
+      "coldSourceBytes": 43280,
+      "coldValidationBlockReads": 0,
+      "coldValidationBlockBytes": 0,
+      "warm": {
+        "p50": 325.871459,
+        "p95": 343.045875,
+        "p99": 354.212042,
+        "sourceReads": 2000,
+        "sourceBytes": 865600,
+        "outputBytes": 202560,
+        "validationBlockReads": 0,
+        "validationBlockBytes": 0
+      },
+      "servingMetrics": null
+    },
+    "federation": {
+      "managerConstructionMs": 12.387709,
+      "mountAttachMs": 5.800333,
+      "initializationValidationBlockReads": 0,
+      "initializationValidationBlockBytes": 0,
+      "coldMs": 119.39475,
+      "coldSourceReads": 21,
+      "coldSourceBytes": 8335,
+      "coldValidationBlockReads": 0,
+      "coldValidationBlockBytes": 0,
+      "warm": {
+        "p50": 78.839916,
+        "p95": 79.823042,
+        "p99": 82.561625,
+        "sourceReads": 420,
+        "sourceBytes": 166700,
+        "outputBytes": 80740,
+        "validationBlockReads": 0,
+        "validationBlockBytes": 0
+      },
+      "servingMetrics": null
+    }
+  },
+  "sourceSha1": {
+    "wiki": "eb73c1b17923c67e980161d1f67cfd3a5e152e5c",
+    "knowledge": "9907ab7bad31adcd9b32cf5247e4c29f7a050170",
+    "retrieval": "36c0129fd114cc82b531321b6794890be9109c7a"
+  },
+  "lexical": {
+    "language": "english"
+  },
+  "zeroQuery": "neverpresentidentifier",
+  "initialBuild": {
+    "ms": 1895.011208,
+    "fixtureDiskBytes": 148941
+  },
+  "incrementalUpdate": {
+    "ms": 36.638833,
+    "ok": true,
+    "updateWork": null,
+    "parsedPages": null
+  },
+  "fullPublication": {
+    "ms": 1467.15525,
+    "ok": true,
+    "fixtureDiskBytes": 132333
+  },
+  "memoryUsed": 42380088,
+  "memory": {
+    "estimator": "MemoryMXBean aggregate heap sampled every 10 ms; shorter peaks may be missed",
+    "sampleIntervalMillis": 10,
+    "samples": 1483,
+    "maxSampledHeapBytes": 106209920,
+    "heapAtEndBytes": 40282936,
+    "scope": "fixture/index construction, all operations, update and publication; excludes native/JVM non-heap memory"
+  },
+  "harnessSha1": "1ce5441248871ae753677b2877403a66d41a5387"
+}

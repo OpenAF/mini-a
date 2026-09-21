@@ -1,0 +1,13 @@
+{
+  "split": "development",
+  "pages": [
+    {"path":"long.md","title":"Reference","introRepeats":120,"body":"# Operation\nRefresh the access lease with renewalwindowseconds before it expires."},
+    {"path":"first.md","title":"Issuer","body":"# Validation\nValidate the issuer claim against the configured issuer."},
+    {"path":"second.md","title":"Audience","body":"# Validation\nValidate the audience claim against the expected audience."}
+  ],
+  "queries": [
+    {"query":"renewalwindowseconds","support":["Refresh the access lease with renewalwindowseconds"],"k":1},
+    {"query":"issuer audience validation","support":["Validate the issuer claim","Validate the audience claim"],"k":2},
+    {"query":"noexistingdevelopmentanswer","support":[],"k":2}
+  ]
+}

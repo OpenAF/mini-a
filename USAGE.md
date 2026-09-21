@@ -13,7 +13,7 @@ Mini-A (Mini Agent) is a goal-oriented autonomous agent that uses Large Language
 - **OAF_MINI_A_CON_HIST_SIZE Environment Variable** (optional): Set the maximum console history size (default is JLine's default)
 - **OAF_MINI_A_LIBS Environment Variable** (optional): Comma-separated list of libraries to load automatically
 - **OAF_MINI_A_NOJSONPROMPT Environment Variable** (optional): Disable promptJSONWithStats and force promptWithStats for the main model (default: false). For Gemini main models, Mini-A now auto-enables this behavior when the variable is unset.
-- **OAF_MINI_A_LCNOJSONPROMPT Environment Variable** (optional): Disable promptJSONWithStats and force promptWithStats for the low-cost model (default: false). Required for Gemini low-cost models. Allows different settings for main and low-cost models (e.g., Gemini low-cost with Claude main)
+- **OAF_MINI_A_LCNOJSONPROMPT Environment Variable** (optional): Disable promptJSONWithStats and force promptWithStats for the low-cost model (default: false). For Gemini low-cost models, Mini-A automatically enables this behavior when the variable is unset. Allows different settings for main and low-cost models (e.g., Gemini low-cost with Claude main)
 
 ```bash
 export OAF_MODEL="(type: openai, model: gpt-4, key: 'your-api-key')"
@@ -418,12 +418,15 @@ Modes can now inherit from other modes using `include`. Use `include: <mode>` (o
 ### Built-in Presets
 
 - **`shell`** – Read-only shell access (`useshell=true`).
-- **`shellrw`** – Shell with write access enabled (`useshell=true readwrite=true`).
-- **`shellutils`** – Shell plus the Mini Utils Tool MCP utilities with docs-aware defaults (`useutils=true mini-a-docs=true usetools=true`).
-- **`chatbot`** – Lightweight conversational mode (`chatbotmode=true`).
-- **`internet`** – Tool mode with web-access MCP presets plus docs-aware utils (`usetools=true mini-a-docs=true mcp=...`).
-- **`web`** – Browser UI with tool registration and docs-aware utils (`usetools=true mini-a-docs=true`).
-- **`webfull`** – Web UI with history, attachments, diagrams, charts, ASCII sketches, and docs-aware utils enabled (`usetools=true useutils=true usestream=true mcpproxy=true mini-a-docs=true usediagrams=true usecharts=true useascii=true usemath=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` if you also want interactive map guidance in this preset.
+- **`shellrw`** – Shell with write access enabled (`useshell=true readwrite=true`, includes `shell`).
+- **`utils`** – Utilities mode (`useutils=true mini-a-docs=true usetools=true`).
+- **`shellutils`** – Shell plus the Mini Utils Tool MCP utilities with docs-aware defaults (`useutils=true mini-a-docs=true usetools=true`, includes `shell`).
+- **`internet`** – Tool mode with web-access MCP presets (time, web, weather, net) plus docs-aware utils (`usetools=true mini-a-docs=true mcpproxy=true mcp=...`).
+- **`news`** – News from the internet mode, inheriting `internet` with time, web, and RSS MCP tools (`mcpproxy=true mcp=...`).
+- **`poweruser`** – Power user mode enabling shell read-write, utils, skills, streaming, MCP proxying, history retention, advisor strategy, delegation, and standard utils (`useshell=true readwrite=true useutils=true useskills=true usestream=true ...`).
+- **`chatbot`** – Lightweight conversational mode (`chatbotmode=true usestream=true`).
+- **`web`** – Browser UI with tools, diagrams, charts, maps, vectors, math, history, attachments, and MCP proxying (`usetools=true usediagrams=true usecharts=true usemaps=true usevectors=true usemath=true usehistory=true useattach=true mcpproxy=true mcp=...`).
+- **`webfull`** – Web UI inheriting `web`, adding streaming, extended history retention, complexity estimation, and expanded MCPs (`rss`, `fin`, `oaf`, `oafp`), with planning and ASCII sketches explicitly disabled (`useplanning=false useascii=false usestream=true historykeep=true ...`).
 
 ### Creating Custom Presets
 
@@ -467,7 +470,11 @@ All of these behaviors are enabled by default. Use verbose or debug logging (`ve
 
 ## Web UI quick start
 
+Web Markdown responses encourage relevant photographs and images using `![alt text](image-url)` directly in the answer. For photo requests, the agent is instructed to retain the conversation topic, use available search or URL-fetch tools to find verified image URLs, and include captions and source links. Retrieval failures should be explained specifically instead of claiming photos cannot be displayed. This guidance applies only to web Markdown sessions (`mini-a-web` or `onport` startup); console sessions, headless workers, and structured output formats do not receive it.
+
 Mini‑A includes a simple web UI you can use from your browser. The static page lives in `public/index.md` and is served by a small HTTP server defined in `mini-a-web.yaml`.
+
+Mermaid diagrams include an **Open full screen** (⛶) control. This opens a viewer that fills the browser area: pinch with two fingers to zoom, drag with one finger to pan, or use the zoom and recenter buttons. Desktop users can also drag and zoom with the mouse wheel. Close with **×** or **Escape** to return to the conversation with the inline diagram's view preserved.
 
 Quick steps:
 
@@ -507,7 +514,7 @@ Optional flags when starting the server:
 - `usestream=true` to enable real-time token streaming via Server-Sent Events (SSE) for live response display
 - `usehistory=true` to expose the history side panel and persist conversations on disk
 - `historypath=/tmp/mini-a-history` / `historyretention=600` / `historykeep=true` to manage history storage (see comments in `mini-a-web.yaml`)
-- `historys3bucket=my-bucket historys3prefix=sessions/` to mirror history JSON files to S3 (supports `historys3url`, `historys3accesskey`, `historys3secret`, `historys3region`, `historys3useversion1`, `historys3ignorecertcheck`). History is uploaded at optimized checkpoints: immediately after user prompts and when final answers are provided, rather than on every interaction event
+- `historys3bucket=my-bucket historys3prefix=sessions/` to mirror history JSON files, including canonical VM snapshots when `historyvm=true` or `historyvmshadow=true`, to S3 (requires `usehistory=true`; supports `historys3url`, `historys3accesskey`, `historys3secret`, `historys3region`, `historys3useversion1`, `historys3ignorecertcheck`). History is uploaded at optimized checkpoints: immediately after user prompts and when final answers are provided, rather than on every interaction event
 - `useattach=true` to enable the file attachment button in the browser UI (disabled by default)
 - `maxpromptchars=120000` to set the maximum accepted prompt size in characters (default: 120,000). Applies to the user-supplied `prompt` field in each `/prompt` request body. Requests whose prompt field exceeds this limit are rejected with an error before any LLM call is made. Reduces risk from very large or malformed inputs.
 
@@ -928,7 +935,7 @@ The `start()` method accepts various configuration options:
 - **`wikilintmaxpairs`** (number, default: `250000`): Cap near-duplicate comparisons during streaming lint.
 - **`wikimounts`** (SLON/JSON, optional): Read-only wiki mounts. Array of `{name, backend, root|bucket|prefix|url|accessKey|secret|region}`. An `fs` root may be a local directory or a local `.zip`/`.okt` archive; archives expose their entry root and are always read-only. Each mount's pages appear under `@<name>/path.md` in search, read, browse, and tree. Example: `wikimounts="[{name: 'reference', backend: 'fs', root: '/shared/reference.okt'}]"`.
 - **`usewikigraph`** (boolean, default: `false`): Enable wiki knowledge-graph layer and `graph` action. Also enabled automatically when `wikigraphfalkorhost` is set.
-- **`wikigraphsemantic`** (boolean, default: `false`): Enable semantic extraction during `graph op=build`. Inside a dream pass (`dream=true`), `dreamwikimode=apply`/`plan` default this to `true` whenever `usewikigraph=true` instead of leaving it opt-in — pass `wikigraphsemantic=false` explicitly to keep those two modes structural-only. See [Wiki dream internals](#dreams-sleep-pass).
+- **`wikigraphsemantic`** (boolean, default: `false`): Enable semantic extraction during `graph op=build`. Inside a dream pass (`dream=true`), `dreamwikimode=apply`/`plan` default this to `true` whenever `usewikigraph=true` instead of leaving it opt-in — pass `wikigraphsemantic=false` explicitly to keep those two modes structural-only. See [Wiki dream internals](#wiki-dream-internals).
 - **`wikigraphcommunity`** (string, default: `louvain`): Graph community detection algorithm.
 - **`wikigraphsearchhints`** (boolean, default: `true`): Add graph-related page hints to `wiki search`.
 - **`wikigraphmounts`** (boolean, default: `true`): Add graph-related hints from attached wikis when their cached `graph.json` is available.
@@ -943,7 +950,7 @@ The `start()` method accepts various configuration options:
 
 A brand-new wiki bootstraps three pages: `AGENTS.md` (contribution rules, schema, ingestion workflow, writing style), `index.md` (catalog with summaries and section links), and `log.md` (append-only journal). Folders become browsable sub-wikis when they contain a local `index.md`.
 
-**Recommended wiki ops sequence (agent or MCP):** `context` → `search` → `read` (with `section=` for long pages) → `write`/`lint`. The `context` op returns a compact overview in <500 tokens — use it once to orient before any search. `search` returns `{path, title, description}` by default (no full content); add `contextLines>0` for snippets. Lucene-backed results also include a numeric `score`, the native Lucene relevance score, retained as an input to future hybrid ranking; scan fallback results omit it. `list withMeta=true` returns metadata for all pages in one call. Reads to mounted wikis use the `@name/path.md` syntax; writes are always to the primary wiki.
+**Recommended trusted wiki ops sequence:** `context` → `search` → `read` (with `section=` for long pages) → `write`/`lint`. `context` supplies a compact overview; use it once to orient before search. `search` returns metadata by default; add `contextLines>0` for snippets. Use `nativeScore` for engine relevance and `rankScore` for final ranking when available. The compatibility `score` is engine relevance on direct lexical adapters and final ranking on knowledge-ranked/v2 results; it is not a probability. Scan fallback never supplies native lexical relevance. `wiki op="retrieve" query="..."` returns a bounded cited evidence packet. Opt-in `wikiretrievalv2=true` uses the shared passage engine, with explicit scope, generation and budget reporting; v2 graph expansion is explicit (`expandGraph=true`), requires a current enabled graph, and follows local or cross-wiki links/shared keys within the selected federation using source-revision validation. Cross traversal honours `wikigraphcross*`; `wikigraphcrossdepth=2` adds at most one local hop after an explicit cross link. `maxGraphExpansion` (default 5, maximum 10) and `maxGraphEdges` (default 256, maximum 4096) share the request budgets; zero disables candidate expansion or traversal. Legacy graph expansion remains explicit and bounded. `list withMeta=true` returns page metadata. Mounted reads use `@name/path.md`; writes target the primary wiki. Restricted MCP exposes only bounded search/read with opaque references, not this trusted structural sequence. See [retrieval contracts and limits](docs/WIKI-RETRIEVAL-V2.md).
 
 Dynamic (runtime) mount management: `wiki op="attach" name=ext backend=fs root=/path`, `wiki op="detach" name=ext`, `wiki op="mounts"`. For an archive mount, use `root=/path/reference.zip` or `.okt`; its `index.md` and pages must be at the archive entry root. In console: `/wiki attach ext root=/path`, `/wiki detach ext`, `/wiki mounts`.
 Graph runtime operations: `graph op="build|query|neighbors|path|communities|surprise|stats|export|falkor|retrieve|answer"` and in console `/graph ...`.
@@ -957,7 +964,7 @@ For the Elasticsearch/OpenSearch wiki backend, there is no separate top-level `e
 - **`modelval`** (string): Override the validation model configuration at runtime (same format as `OAF_VAL_MODEL`). Useful when you want a dedicated validation model for one run without changing environment variables.
 - **`deescalate`** (number, default: 3): Number of consecutive successful steps required after an escalation before Mini-A automatically reverts to the low-cost model. Set to a higher value for more conservative de-escalation or `0` to disable de-escalation entirely.
 - **`lccontextlimit`** (number, default: 0 = disabled): Maximum context token count before escalating to the main model. When the estimated context size reaches this threshold, Mini-A switches to the main model for that step. Useful when the low-cost model has a smaller context window than the main model. Set to `0` to disable context-based escalation.
-- **`modellock`** (string, one of `"main"`, `"lc"`, or `"auto"` = default): Force Mini-A to always use a specific model tier for every step, bypassing all dynamic escalation and de-escalation logic. Use `modellock=main` to always use the main model (`OAF_MODEL`), `modellock=lc` to always use the low-cost model (`OAF_LC_MODEL`), or leave unset/`auto` for the default adaptive behaviour. A one-time info message is logged at startup when a lock is active.
+- **`modellock`** (string, one of `"main"`, `"lc"`, or `"auto"` = default): Select a model tier for normal steps, bypassing score-based escalation and de-escalation. Recovery paths (including invalid-JSON fallback) can still call the main model, so this is not a strict spending or provider-isolation boundary. Use `modellock=main` to select the main model (`OAF_MODEL`), `modellock=lc` to select the low-cost model (`OAF_LC_MODEL`), or leave unset/`auto` for the default adaptive behaviour. A one-time info message is logged at startup when a lock is active.
 - **`modelstrategy`** (string, one of `"default"` or `"advisor"`, default: `"default"`): Select the model orchestration profile. `default` keeps current LC-first behavior with escalation. `advisor` keeps LC as the executor and selectively calls the main model as an internal advisor for difficult steps.
 - **`advisormaxuses`** (number, default: `2`): Maximum advisor consultations per run when `modelstrategy=advisor`.
 - **`advisorenable`** (boolean, default: `true`): Master toggle for advisor consultations inside `modelstrategy=advisor` runs.
@@ -972,7 +979,9 @@ For the Elasticsearch/OpenSearch wiki backend, there is no separate top-level `e
 - **`evidencegatestrictness`** (string, one of `"low"`, `"medium"`, `"high"`, default: `"medium"`): Tuning level for evidence gate heuristics.
 - **`lcescalatedefer`** (boolean, default: `true`): When enabled, if an escalation trigger fires but the current LC model response has a confidence score ≥ 0.7 (based on JSON validity, completeness, and action specificity), Mini-A defers the escalation by one additional step. If the next step also triggers escalation, it escalates immediately. Set to `false` to disable deferral and escalate as soon as the trigger fires.
 - **`lcbudget`** (number, default: `0` = unlimited): Maximum total LC model token usage for the session. When the cumulative LC token count reaches this threshold, Mini-A permanently locks to the main model for the remainder of the session, logging a warning. Set to `0` to disable the budget cap.
-- **`lcjsonretries`** (number, default: `1`): Number of extra same-step attempts to give the low-cost model when its response fails to parse as valid JSON, before falling back to the main model. Each retry re-prompts the low-cost model with a corrective note about valid JSON formatting and does not consume a step from `maxsteps`. Set to `0` to restore the previous behavior of falling back to the main model immediately on the first invalid-JSON response.
+- **`lcreplytool`** (boolean, default: `false`): Replace corrective LC JSON retries with a capture-only `submit_reply` MCP tool call on OpenAI-compatible (`type=openai`) and Ollama adapters. Enable with `lcreplytool=true lcjsonretries=1`. OpenAI recovery requests force that tool; Ollama receives only that tool plus explicit instructions. One valid single-action payload returns to the normal dispatcher; missing, malformed, or multiple calls leave recovery unsuccessful. Unsupported adapters keep the text retry. This uses the existing `lcjsonretries` budget and LC token accounting; it requires neither `usetools=true` nor `usejsontool=true`. See [reply recovery details](docs/REPLY-JSON.md).
+
+- **`lcjsonretries`** (number, default: `1`): Number of extra same-step attempts to give the low-cost model when its response fails to parse as valid JSON, before falling back to the main model. Each retry re-prompts the low-cost model with a concrete response example and formatting instructions and does not consume a step from `maxsteps`. It does consume tokens and counts toward `lcbudget` and call/token limits. Text, already-parsed objects, and arrays are accepted; retries preserve provider JSON-mode compatibility settings. Set to `0` to restore the previous behavior of falling back to the main model immediately on the first invalid-JSON response.
 - **`llmcomplexity`** (boolean, default: `false`): When enabled, if the static heuristic assessment returns `"medium"` complexity, Mini-A fires a single short LC model call to validate the result before selecting escalation thresholds. This adds a small upfront cost but may improve threshold accuracy for ambiguous goals.
 - **`secpass`** (string): Password used to unlock OpenAF sBucket model secrets when loading saved model definitions (for example, encrypted entries managed through `modelman=true`).
 - **`memoryman`** (boolean, default: false): Launch the interactive working-memory manager TUI (`mini-a-memoryman.js`) instead of the normal console. Designed for operators using `usememory=true` with `memorych`/`memorysessionch`.
@@ -1108,7 +1117,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 
 #### Knowledge and Context
 - **`knowledge`** (string): Additional context or knowledge for the agent (can be text or file path)
-- **`maxcontext`** (number): Approximate context budget in tokens; Mini-A auto-summarizes older history when the limit is exceeded
+- **`maxcontext`** (number): Approximate context budget in tokens; Mini-A auto-summarizes older history when the limit is exceeded. Summarization uses isolated, tool-free requests between execution steps. Provider overflow recovery also replaces main and low-cost provider histories with the compact context while retaining system/developer instructions.
 - **`compressgoal`** (boolean, default: false): Compress oversized rendered goal text before execution; when disabled, Mini-A preserves the original goal verbatim
 - **`compressgoaltokens`** (number, default: 250): Estimated token threshold above which goal compression is considered when `compressgoal=true`
 - **`compressgoalchars`** (number, default: 1000): Character threshold above which goal compression is considered when `compressgoal=true`
@@ -1127,7 +1136,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
   - **ANSI color codes**: Semantic highlighting for errors (red), success (green), warnings (yellow), info (blue/cyan), with support for bold, underline, backgrounds, and combined styles. Colors are applied outside markdown code blocks for proper terminal rendering
   - **Markdown tables**: Preferred format for tabular data with colored cell content for enhanced readability
   - **Progress indicators**: Block characters (█▓▒░), fractions (▏▎▍▌▋▊▉), spinners (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏), and percentage displays with color gradients
-- **`usemaps`** (boolean, default: false): Prime the model to emit ```leaflet``` blocks that describe interactive maps (center coordinates, zoom, markers, layers). The console transcript preserves the fenced JSON, and the web UI auto-renders the configuration with Leaflet tiles, themed popups, and transparent markers.
+- **`usemaps`** (boolean, default: false): Prime the model to emit ```leaflet``` blocks that describe interactive maps (center coordinates, zoom, markers, layers). The console transcript preserves the fenced JSON, and the web UI auto-renders the configuration with Leaflet tiles, themed popups, and transparent markers. Each marker accepts `icon`: `default`, `red`, `green`, `blue`, `orange`, `yellow`, `violet`, `grey`, or `black`; omitted or unknown values use blue. Colors are preserved when switching themes.
 - **`usemath`** (boolean, default: false): Prime the model to emit LaTeX formulas using inline `$...$` or display `$$...$$` syntax. When enabled in the web server, the UI loads KaTeX + showdown-katex so math expressions render as formatted equations.
 - **`usestream`** (boolean, default: false): Enable real-time token streaming where LLM responses are displayed incrementally as they arrive. When enabled:
   - **Console mode**: Tokens are formatted with markdown and displayed immediately with smooth rendering
@@ -1136,7 +1145,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
   - **Escape handling**: Properly processes escape sequences and closing quotes in streamed JSON responses
   - **Performance**: Reduces perceived latency by showing progress before the full response completes
   - **Compatibility**: Not compatible with `showthinking=true` mode (falls back to non-streaming)
-  - **SSE event types** (web UI): The SSE stream emits `stream` events for regular LLM token output and `planner_stream` events for tokens generated during the planning phase. Clients can use the event type to visually distinguish planner output from regular answer output. The console renders `planner_stream` tokens in a distinct color for the same reason.
+  - **SSE event types** (web UI): The SSE stream emits `stream` events for regular LLM token output and `planner_stream` events for tokens generated during the planning phase. The browser automatically shows `Planning…` while planner events are active and returns to the normal execution preview afterward. `/result` also reports the authoritative `phase` (`planning`, `execution`, or `finished`), so the transition remains visible when SSE is disabled or reconnecting. The console renders `planner_stream` tokens in a distinct color for the same reason.
 
 #### Libraries and Extensions
 - **`libs`** (string): Comma-separated list of additional OpenAF libraries to load
@@ -1145,7 +1154,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
   - When running through `mini-a-con.js`, also exposes `userInput`, an interactive helper backed by OpenAF `ask*` functions (`ask`, `askEncrypt`, `ask1`, `askChoose`, `askChooseMultiple`, `askStruct`) so the model can request clarification directly from the console user
   - `filesystemQuery` read supports byte ranges (`byteStart`, `byteEnd`, `byteLength`), line windows (`lineStart`, `lineEnd`, `maxLines`, `lineSeparator`), and `countLines=true` for total line count
   - `markdownFiles` uses `operation='list'` to enumerate all `.md` files, `operation='read'` to fetch one by relative path, and `operation='search'` to grep across all docs
-- **`usestdutils`** (boolean, default: true): When `useutils=true`, expose standard Mini Utils aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names
+- **`usestdutils`** (boolean, default: false): When `useutils=true`, expose standard Mini Utils aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names
 - **`utilsroot`** (string, default: `.`): Root directory for Mini Utils Tool file operations (only when `useutils=true`)
 - **`utilsallow`** (string, optional): Comma-separated allowlist of Mini Utils Tool names to expose when `useutils=true`
 - **`utilsdeny`** (string, optional): Comma-separated denylist of Mini Utils Tool names to hide when `useutils=true`; applied after `utilsallow`
@@ -1164,13 +1173,16 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 
 #### Mode Presets
 - **`mode`** (string): Shortcut for loading a preset argument bundle from [`mini-a-modes.yaml`](mini-a-modes.yaml), `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` (custom modes override built-in ones, and the new path overrides the legacy one when both exist). Presets are merged before explicit flags, so command-line overrides always win. Bundled configurations include:
-  - `shell` – Enables read-only shell access.
-  - `shellrw` – Enables shell access with write permissions (`readwrite=true`).
-  - `shellutils` – Adds the Mini File Tool helpers as an MCP (`useutils=true mini-a-docs=true usetools=true`) exposing `init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`, and console-only `userInput` when launched through `mini-a-con`.
-  - `chatbot` – Switches to conversational mode (`chatbotmode=true`).
-  - `internet` – Registers internet-focused MCP presets with docs-aware utils (`usetools=true mini-a-docs=true mcp=...`).
-  - `web` – Optimizes for the browser UI with MCP tools registered and docs-aware utils (`usetools=true mini-a-docs=true`).
-  - `webfull` – Turns on diagrams, charts, ASCII sketches, attachments, history retention, planning, MCP proxying, streaming, and docs-aware utils for the web UI (`usetools=true useutils=true usestream=true mcpproxy=true mini-a-docs=true usediagrams=true usecharts=true useascii=true usemath=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` when you also want interactive maps baked into this preset.
+  - `shell` – Enables read-only shell access (`useshell=true`).
+  - `shellrw` – Enables shell access with write permissions (`useshell=true readwrite=true`, includes `shell`).
+  - `utils` – Enables utilities mode (`useutils=true mini-a-docs=true usetools=true`).
+  - `shellutils` – Adds the Mini File Tool helpers as an MCP (`useutils=true mini-a-docs=true usetools=true`, includes `shell`) exposing `init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`, and console-only `userInput` when launched through `mini-a-con`.
+  - `internet` – Registers internet-focused MCP presets with docs-aware utils (`usetools=true mini-a-docs=true mcpproxy=true mcp=...`).
+  - `news` – News from the internet mode, inheriting `internet` with time, web, and RSS MCP tools (`mcpproxy=true mcp=...`).
+  - `poweruser` – Power user mode enabling shell read-write, utils, skills, streaming, MCP proxying, history retention, advisor strategy, delegation, and standard utils.
+  - `chatbot` – Switches to conversational mode (`chatbotmode=true usestream=true`).
+  - `web` – Optimizes for the browser UI with tools, diagrams, charts, maps, vectors, math, history, attachments, and MCP proxying (`usetools=true usediagrams=true usecharts=true usemaps=true usevectors=true usemath=true usehistory=true useattach=true mcpproxy=true mcp=...`).
+  - `webfull` – Full web UI inheriting `web`, adding streaming, extended history retention, complexity estimation, and expanded MCPs (`rss`, `fin`, `oaf`, `oafp`), with planning and ASCII sketches explicitly disabled.
   - Modes may use `include` to inherit another preset (or multiple presets) and then override values locally.
 
 Extend or override these presets by editing the YAML file—Mini-A reloads it on each run.
@@ -1438,6 +1450,29 @@ The session ID (e.g. `session-20240601-120000-abc123`) is printed at the start o
 
 You can set `OAF_VAL_MODEL` or pass `modelval=...` to route the validation step to a dedicated model; otherwise the main model is used.
 
+## Durable Runs and Structured Traces (`durable=true`)
+
+For work that needs to survive an interrupted process outside the outer loop, enable `durable=true`. Mini-A assigns (or accepts) a stable `runid` and writes redacted state plus JSONL events under `~/.openaf-mini-a/runs/<runid>/`. Existing `resume=true` conversation behaviour is unchanged; use `resumerun=<runid>` for durable-run recovery.
+
+```bash
+mini-a goal="Review and update the implementation" durable=true runid=review-20260905
+mini-a goal="Review and update the implementation" resumerun=review-20260905
+mini-a runstatus=review-20260905
+```
+
+State records run status, safe agent/plan snapshots, checkpoints, task-DAG-compatible task records, result metadata, and metrics. The trace records run start/end, planning, validation, replan, orchestration decisions, LLM/tool/shell/wiki activity, and checkpoints with timestamps and run IDs. Durable traces redact secret-like fields, shell commands, tool arguments, and full LLM prompts/responses; they are intended for operational reconstruction, not credential storage.
+
+## Capability selection and policy runtime
+
+Set `capabilityselection=true` to build a normalized registry from current MCP tools, skills, plugins, and available workers, then expose only the deterministic, bounded subset relevant to the goal. `capabilitylimit` defaults to `8`; existing `mcpdynamic=true` behavior remains available unchanged.
+
+Use `policy=` (SLON/JSON) or `policyfile=` (JSON) for centralized restrictions. The policy is allow-by-default for compatibility, but a configured deny is enforced before shell execution, MCP/plugin/proxy tool calls, delegation setup, and every mutating Wiki operation. Supported initial rules include `shell: deny`, `delegation: deny`, `mcp: deny`, `wiki: (write: deny)`, `filesystem: (write: deny)`, `deniedTools: ["tool_name"]`, and `network: (allowDomains: ["example.com"])`. An `approval` result uses the existing shell confirmation surface and is fail-closed for non-interactive tool calls. Policy decisions are emitted through the structured trace without including secrets or unrestricted arguments.
+
+```bash
+mini-a goal="Find customer records" usetools=true capabilityselection=true capabilitylimit=4
+mini-a goal="Inspect the repository" policy="(shell: deny, delegation: deny)"
+```
+
 ### How It Works
 
 Deep research mode runs a loop of research-validate-learn cycles:
@@ -1482,10 +1517,10 @@ Mini-A supports **delegation** — the ability to spawn child Mini-A agents to h
 | `workerreginterval` | number | `30000` | Worker heartbeat interval (ms) |
 | `maxconcurrent` | number | `4` | Maximum concurrent child agents |
 | `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
-| `delegationtimeout` | number | `300000` | Default foreground wait/delegation budget (ms) |
+| `delegationtimeout` | number | `300000` | Default foreground wait budget and initial subtask stall timeout (ms); activity extends execution |
 | `delegationstalltimeout` | number | `300000` | Idle time before a running delegated subtask is considered stalled (ms) |
 | `delegationhardtimeout` | number | - | Optional absolute delegated subtask timeout regardless of activity (ms) |
-| `delegationmaxretries` | number | `2` | Default retry count for failed subtasks |
+| `delegationmaxretries` | number | `2` | Maximum execution attempts for confirmed failures, including the initial attempt |
 
 **Worker startup parameters** (used when starting a worker with `workermode=true`):
 
@@ -1852,6 +1887,8 @@ Tokens appear incrementally with markdown formatting applied in real-time.
 
 The browser receives tokens via Server-Sent Events (SSE) and renders them progressively with debounced updates (80ms) for smooth display.
 
+In web mode (`onport=...`), each answer's activity stays expanded while work is in progress and collapses when the final answer finishes, with or without streaming. Successful SSE completion collapses it immediately, without waiting for the next results poll. **Activity** groups the same thought, execution, skill, summarization, stop, and rate messages previously displayed; it does not enable additional log messages. Execution visibility still follows `showexecs`, and plans/subagents retain their existing live panels. A warning/error indicator can appear on the summary without exposing additional logs. Your expansion choice survives UI refreshes, while reopening a saved conversation starts completed sections collapsed.
+
 **Benefits:**
 - Immediate visual feedback shows the agent is working
 - Faster perceived response time for long answers
@@ -2197,6 +2234,7 @@ agent.start({
 
 #### Pattern 3: MCP with Fallbacks
 
+```bash
 # Try primary MCP, fall back to backup
 mini-a goal="fetch data" \
   mcp="[(type: remote, url: 'https://primary-mcp.example.com/mcp'), (type: remote, url: 'https://backup-mcp.example.com/mcp')]" \
@@ -2651,6 +2689,57 @@ mini-a usehistory=true historykeep=true resume=true
 
 Console history payloads now keep both `created_at` and `updated_at` timestamps in addition to the conversation entries, which makes retention and manual inspection easier.
 
+For long tool-heavy conversations, opt into history virtual memory with a writable conversation path:
+
+```bash
+mini-a conversation=chat-history.json historyvm=true goal="continue the investigation"
+```
+
+Mini-A writes append-only canonical events and checkpoints under `chat-history.json.historyvm/`. Older eligible large assistant/tool messages can then be represented by small `HISTORY_VM_REFERENCE` entries. The model receives `history_search`, `history_get`, and `history_expand` only while enabled, so it can recover exact archived text in bounded pages. User messages, system/developer instructions, recent exchanges, in-flight tool protocol data, and unknown multimodal shapes remain inline under the conservative `safe` policy. Use `/context vm` in the interactive console for object-state and token-delta diagnostics.
+
+Use `historyvmshadow=true` first to capture and estimate savings without changing provider requests or adding retrieval tool schemas. If both flags are supplied, enabled mode takes precedence. The VM is independent of `usememory`; enabling it creates retained conversation data even when history listing is disabled. `/clear` and explicit web conversation deletion remove the owned sidecar. Automatic web expiry preserves stored history when `historykeep=true`; it deletes the sidecar otherwise. `/rewind` records a new branch and default retrieval excludes the abandoned branch rather than deleting its canonical events.
+
+Phase 2 can be enabled explicitly with `historyvm=true contextvirtualization=true`. It extends the same canonical journal with stable typed handles, parent/child metadata, deterministic L0-L4 representations, structural compression, hierarchical summaries, coarse-to-fine retrieval, bounded line/section/JSON-path reads, adaptive utility-per-token assembly, typed provenance/supersession graphs, consumer-specific executor/planner/advisor/validator/delegate views, and per-consumer working-set deltas. At model-call boundaries the active projection preserves system/developer instructions, real user constraints, recent exchanges and unknown content. Older assistant messages and Mini-A's synthetic step scaffolding can be summarized or omitted; completed native tool-call groups are preserved or frozen together. Exact canonical content is restored before conversation persistence and remains retrievable with `context_search`, `context_get`, `context_expand`, `context_children`, and `context_related`.
+
+Use `historyvm=true contextvirtualization=true contextvirtualizationshadow=true` to dry-run the exact same projection while continuing to send the Phase 1 provider context. Diagnostics compare complete provider-context token estimates, object-set changes, and expected differences. Shadow values are projections, not provider-billed savings. Stable-prefix serialization and context deltas avoid local recomputation but do not imply provider prompt caching or delta-only transmission.
+
+The compatibility modes are explicit: `historyvm=false historyvmshadow=false` keeps legacy Mini-A, `historyvm=true contextvirtualization=false` selects Phase 1, and `historyvm=true contextvirtualization=true` selects Phase 2. Neither phase is silently enabled.
+
+At model-call boundaries, Mini-A supplies a compact `CURRENT CONVERSATION STATUS` snapshot from the current agent's runtime, including effective History VM and context virtualization modes. This takes precedence over child diagnostics or historical status when answering questions about the current conversation. Delegation results label their diagnostics with `diagnostics_scope: { scope: "child_execution", subtask_id: ... }`; retrieved delegation episodes keep metrics and state under `child_diagnostics`. These describe the child execution (some counters remain process-wide), not the parent's configuration. Children do not inherit the parent's History VM by default, even when they can access parent-owned history tools.
+
+Runtime projections include the active plan, selected memory, supplied knowledge,
+and authorized wiki/skill/tool results. Source snapshots are versioned and old
+versions remain retrievable. Auxiliary planner/advisor/validator/summarizer calls
+receive bounded consumer-specific excerpts without rebinding their independent
+provider histories. Delegates receive task-specific knowledge instead of the
+parent's full knowledge field; explicitly requested fork state remains explicit.
+Completed delegation results and session/period/project rollups retain provenance.
+These rollups are conversation-scoped, not a merged semantic-memory/wiki store.
+
+Configured budgets account for the serialized conversation, current prompt, tool
+schema estimates, a safety allowance and output reserve. Protected overflow stops
+the invocation rather than silently deleting constraints. Counts are application
+estimates; provider-internal tool rounds and billing remain provider-owned.
+Derived representation caches are bounded, and periodic index snapshots permit
+tail replay with journal fallback when the cache is invalid. See the
+[implementation review](https://github.com/openaf/mini-a/blob/main/development/docs/VM-IMPLEMENTATION-REVIEW.md) for verification and
+provider acceptance limits. `context_get`/`context_expand` with L4 return bounded
+exact pages; use `nextCursor` as the next `offset`.
+
+Semantic compression is available only through the `MiniAHistoryVM` module options (`semanticCompression=true` plus a `semanticCompressor` callback); normal CLI/web initialization does not wire a compressor. Deterministic representations are the runtime default. Provider-specific delta transmission, automatic wiki promotion, learned-skill publication, and an independent cross-conversation episodic index remain future work.
+
+History VM uses a writable local journal and supports S3 history mirroring in the web interface:
+
+```bash
+./mini-a-web.sh usehistory=true historyvm=true historys3bucket=my-bucket historys3prefix=sessions/
+```
+
+Each prompt checkpoint (after canonical prompt capture) and final-answer checkpoint uploads the conversation and a versioned canonical VM snapshot together in the existing S3 JSON object. `historyvmshadow=true` and opt-in `contextvirtualization=true` are also supported. A session opened on a new host, or after local cache loss, restores the journal and rebuilds derived indexes before VM initialization. Existing S3 objects without a snapshot use legacy conversation import.
+
+Uploads use current local state. Failed uploads retain the local checkpoint and retry at the next checkpoint; recovery from S3 reaches the last successful upload. Valid newer local canonical state is retained over an older matching S3 snapshot. Failed downloads or invalid snapshots preserve usable local state; without usable local state, resume reports an error. Explicit history deletion removes the remote object and local sidecar even with `historykeep=true`; automatic expiry respects `historykeep`.
+
+This supports one active writer per conversation and sequential movement between hosts, not concurrent distributed writers. Full snapshots increase storage and transfer size. Existing S3 endpoint, prefix, and credential options apply; CLI history does not gain an S3 transport. If the local journal cannot be written, Mini-A keeps content inline and reports degraded persistence; a degraded VM is not uploaded as a valid canonical snapshot. `maxcontext=0` remains unchanged: virtualization can still reduce eligible old large messages, but Mini-A does not claim a verified hard context-window bound without an effective budget.
+
 ### Context Management
 
 ```javascript
@@ -2843,7 +2932,7 @@ Mini-A records extensive counters that help track behaviour and costs:
 | `context_compression` | `prompt_context_selections`, `prompt_context_compressed`, `prompt_context_tokens_saved`, `goal_block_compressed`, `goal_block_tokens_saved`, `hook_context_compressed`, `hook_context_tokens_saved` | Automatic context compression activity. `prompt_context_selections` counts how many times compressed context was offered to the model; `*_compressed` counters increment when compression achieved >30% token reduction on the respective block; `*_tokens_saved` accumulate the tokens removed by compression across the session. |
 | `system_prompt` | `system_prompt_builds`, `system_prompt_tokens_total`, `system_prompt_tokens_last`, `system_prompt_tokens_avg`, `system_prompt_budget_applied`, `system_prompt_budget_tokens_saved`, `system_prompt_examples_dropped`, `system_prompt_skill_descriptions_dropped`, `system_prompt_tool_details_dropped`, `system_prompt_planning_details_dropped`, `system_prompt_skills_trimmed`, `system_prompt_last_meta` | System prompt construction and budget trimming. `system_prompt_builds` counts total builds; `*_tokens_*` track token cost (total, last, computed average). When the prompt exceeds `systempromptbudget`, `system_prompt_budget_applied` increments and `system_prompt_budget_tokens_saved` records savings. Each `*_dropped` counter records how many times that section was omitted (priority order: examples → skill descriptions → tool details → planning details). `system_prompt_skills_trimmed` counts trims of individual skill bodies. `system_prompt_last_meta` is the raw metadata object from the most recent build (useful for debugging budget decisions). |
 | `per_tool_usage` | `<toolName>.calls`, `<toolName>.successes`, `<toolName>.failures` | Per-tool call statistics. Keys are tool names; each entry tracks total invocations, successful completions, and failures. Useful for identifying flaky or heavily-used tools. Only tools that have been invoked at least once appear in this map. |
-| `delegation` | `total`, `running`, `completed`, `failed`, `cancelled`, `timedout`, `retried`, `worker_hint_used`, `worker_hint_matched`, `worker_hint_fallthrough`, `workers_total`, `workers_static`, `workers_dynamic`, `workers_healthy` | Subtask delegation metrics (when `usedelegation=true`). Tracks child agent lifecycle and retries. `worker_hint_used` counts subtasks where a `workerHint` was specified; `worker_hint_matched` counts those where the hint resolved to a specific worker; `worker_hint_fallthrough` counts hints that found no match and fell back to default selection. Worker pool counters reflect current composition and health. For per-subtask average duration and max nesting depth, call `agent._subtaskManager.getMetrics()` directly. |
+| `delegation` | `total`, `running`, `completed`, `failed`, `cancelled`, `timedout`, `retried`, `remote_poll_retries`, `remote_outcome_unknown`, `remote_cancel_failures`, `worker_hint_used`, `worker_hint_matched`, `worker_hint_fallthrough`, `workers_total`, `workers_static`, `workers_dynamic`, `workers_healthy` | Subtask delegation metrics (when `usedelegation=true`). `retried` counts confirmed execution retries; remote observation retries do not resubmit a goal. `remote_outcome_unknown` marks a remote task whose result could not be observed after bounded retries, and `remote_cancel_failures` records failed best-effort cancellation requests. `cancelled` is the local lifecycle result; a cancellation request cannot undo side effects already completed by a remote worker. Worker pool counters reflect current composition and health. For per-subtask average duration and max nesting depth, call `agent._subtaskManager.getMetrics()` directly. |
 | `deep_research` | `sessions`, `cycles`, `validations_passed`, `validations_failed`, `early_success`, `max_cycles_reached` | Deep research mode metrics (when `deepresearch=true`). `sessions` counts research sessions started; `cycles` accumulates all research-and-validate cycles run across sessions. `validations_passed`/`validations_failed` split LLM validation verdicts. `early_success` counts sessions that passed validation before exhausting cycles; `max_cycles_reached` counts those that hit the cycle limit without passing. |
 | `history` | `sessions_started`, `sessions_resumed`, `files_kept`, `files_deleted`, `files_deleted_by_period`, `files_deleted_by_count` | Console conversation history metrics. Tracks new vs resumed console sessions, how many history files were kept, and how many were pruned overall, by age rule, or by count rule. |
 
@@ -2883,6 +2972,7 @@ The `estimatedUSD` field is reserved for future cost estimation integration and 
 - **[Delegation Guide](docs/DELEGATION.md)** - Hierarchical task decomposition with local and remote delegation
 - **[What's New](docs/WHATS-NEW.md)** - Latest performance improvements and migration guide
 - **[MCP Documentation](mcps/README.md)** - Built-in MCP servers catalog
+- **[Virtual Skills](docs/VIRTUAL-SKILLS.md)** - Wiki-backed skill library: search/recommend/open/read a large skill corpus without loading it into context (`useskillwiki`, `mcp-skills.yaml`)
 - **[Creating MCPs](mcps/CREATING.md)** - Build custom MCP integrations
 - **[External MCPs](mcps/EXTERNAL-MCPS.md)** - Community MCP servers
 - **[Contributing Guide](CONTRIBUTING.md)** - Join the project
@@ -3197,7 +3287,7 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 6b. Every `apply` and `reorg` run finishes with a deterministic finalize pass: root and section `index.md` are regenerated from live page metadata, the metadata shards and full-text index are rebuilt, and the knowledge graph is rebuilt when `usegraph=true`.
 6c. `repair`, `reindex`, `graph`, and `indexes` are isolated building blocks that `apply`'s finalize pass composes together — none of them call an LLM by default. `dreamwikimode=repair` runs only the deterministic lint fixer (no AGENTS.md upgrade, no index/search/graph finalize). `dreamwikimode=reindex` rebuilds only the Lucene search index (`wm.reindex()`, which also rebuilds its own lightweight internal graph-hint index). `dreamwikimode=graph` rebuilds only the `usewikigraph` knowledge graph (fails with `reason: "graph-failed"` when `usewikigraph` isn't configured). `dreamwikimode=indexes` unconditionally regenerates every section/root `index.md` from current directory structure, independent of what lint happens to flag.
 
-6d. `apply` and `plan` default `wikigraphsemantic=true` whenever `usewikigraph=true` (an explicit `wikigraphsemantic=false` still opts out); `graph` and `reorg` leave it strictly opt-in. When semantic extraction runs, `MiniADreams` resolves an LLM the same way the memory dream does (`model=` or `OAF_MODEL`); if neither is configured it falls back to a deterministic regex/heuristic extractor instead of erroring, so the graph still gets semantic-style edges (provenance `AMBIGUOUS`) without an LLM call. `plan`'s dry-run proposal includes a graph preview under the same rules — it makes the same LLM calls `apply` would, but never writes `graph.json`. This resolution applies the same way whether the dream pass was started from the CLI (`mini-a dream=true ...`) or an interactive console's `/dream apply`/`/dream plan`.
+6d. `apply` and `plan` default `wikigraphsemantic=true` whenever `usewikigraph=true` (an explicit `wikigraphsemantic=false` still opts out); `graph` and `reorg` leave it strictly opt-in. When semantic extraction runs, `MiniADreams` resolves an LLM the same way the memory dream does (`model=` or `OAF_MODEL`); if neither is configured it falls back to a deterministic regex/heuristic extractor instead of erroring, so the graph still gets semantic-style edges (provenance `AMBIGUOUS`) without an LLM call. `plan` is always model-free: its dry-run proposal includes a structural graph preview and reports requested semantic work separately through `semanticRequested`, `semanticExecuted: false` and `semanticOmissionReason: "model-free-dry-run"`. It neither creates/calls an LLM nor writes `graph.json`. This resolution applies the same way whether the dream pass was started from the CLI (`mini-a dream=true ...`) or an interactive console's `/dream apply`/`/dream plan`.
 7. A `MiniAWikiManager` exposes hierarchy-aware `tree`, `browse`, `backlinks`, `move`, and `lint()` operations.
 8. A full `MiniA` agent is spawned with `maxsteps=40` by default and the following goal:
    - Start with compact context and bounded lint results; inspect one affected issue/page at a time. Use `tree`/`browse` or backlinks only when targeted evidence requires them.
@@ -3365,3 +3455,370 @@ tokens; choose `normalize`, `raw`, or `distill` explicitly when needed. Wiki sta
 to `.mini-a-wiki-state/manifest.json` and tracks section hashes, allowing a small edit to reuse
 unchanged chunks. `wikillmbudget`, `wikiingestbudget`, and `wikimaxprompttokens` defer
 over-budget enrichment. `/dream plan` is always zero-LLM and returns estimates.
+# Adaptive orchestration
+
+`orchestration=manual` is the default and preserves the current behavior.
+`orchestration=auto` applies deterministic goal-complexity and risk heuristics
+to the existing planning, advisor/model-strategy, and evidence-gate controls.
+Explicit flags such as `useplanning=false`, `modelstrategy=default`, and
+`evidencegate=false` always win. Auto decisions are available through the
+existing trace sink as structured `orchestration_decision` records; no extra
+LLM routing call is made.
+
+# Evaluation suites
+
+Run a YAML or JSON evaluation suite with the normal Mini-A entry point:
+
+```bash
+mini-a eval=true evalfile=evals/core.yaml
+```
+
+Each scenario requires `goal` and may include `args` (normal Mini-A arguments),
+`setup.context`, `setup.conversation`, `expected` answer/metric assertions, `assertions`, `llm_judge`,
+and `limits` (`cost`, `tokens`, `steps`, `time`). The runner writes a versioned
+machine-readable report with scenario events and normalized metrics. It only
+reports provider token fields Mini-A received; unknown cost remains unset.
+
+A scenario may define a `variants` array. Each named variant merges its `args`
+over the scenario and may override setup, expectations, assertions, limits,
+regression policy, or judge settings. This makes one replay run as a Phase 1,
+Phase 2 shadow, and Phase 2 active matrix without duplicating the fixture. The
+report includes within-scenario `variant_comparisons`, using `phase1` or
+`baseline` as the comparison base when present.
+
+`setup.conversation` accepts either a provider-conversation array or an envelope
+containing a `c` array. The evaluator materializes it under a scenario-owned
+temporary directory, passes its path through the normal `conversation=` flow,
+captures final metrics, and removes the fixture plus any History VM sidecar.
+This supports reproducible long-context replays without committing generated
+conversation journals.
+
+For generated long-history workloads, `setup.repeatHistory` accepts `count`
+(1–1000) and `messages`; `{{iteration}}` in those messages expands to the
+zero-based repetition number. Repeated messages precede `setup.conversation`.
+`setup.contextObjects` accepts source fixtures with `kind`, `key`, `content`,
+optional `metadata` and `count` (up to 1000). These populate only Phase 2's
+episodic source index after initialization, not durable wiki or semantic memory.
+
+When History VM is active, reports also include `metrics.history_vm` with
+ContextObjects considered/selected, L0-L4 selections, rehydrations, candidate
+and materialized tokens, budget utilization, effective-context ratio, and the
+latest Phase 2 shadow or active projection. Cumulative work is calculated from the run
+delta; latest projection gauges are read from the final snapshot. The flat
+`shadow_actual_tokens`, `shadow_projected_tokens`, and
+`shadow_expected_savings` fields make baseline comparisons convenient while
+remaining explicitly predicted rather than provider-billed token savings.
+Active reports separately expose `active_context_input_tokens`,
+`active_context_output_tokens`, and `active_context_tokens_saved`.
+
+Use `evalout=/tmp/eval.json` to save a report, `evalwritebaseline=evals/base.json`
+to create a baseline, and `evalbaseline=evals/base.json` to detect success or
+tool-failure regressions. A scenario may also set `regression` maximum deltas
+(for example `elapsed_ms` or `input_tokens`) to make resource regressions
+explicit. CI-safe tests use an injected deterministic agent;
+the CLI uses the configured model and therefore requires normal model setup.
+Set `llm_judge: { enabled: true }` for an opt-in isolated judge call; tests can
+instead inject `judgeFn` and remain fully deterministic.
+
+## Evals in oJob tests
+
+Include `mini-a-eval.yaml` to register eval scenarios as ordinary OpenAF tests.
+It also includes `oJobTest.yaml` from `oJob-common`, so evals and unit tests share
+OpenAF counters, profiling, failure history, and JSON, Markdown or JUnit reports.
+Each scenario is one test, named `suite::scenario name` (falling back to its goal).
+Use distinct scenario names within a suite for clear reports.
+
+```yaml
+include:
+- mini-a-eval.yaml
+
+ojob:
+  catch: |
+    logErr(exception)
+    exit(1)
+
+todo:
+- name: MiniA Eval
+  args:
+    suite: Answers
+    evalArgs:
+      useshell: false
+      usetools: false
+    scenarios:
+    - name: Portugal capital
+      goal: Reply with only the capital of Portugal.
+      expected: { contains: Lisbon }
+      limits: { steps: 3 }
+- oJob Test Results
+- name: oJob Generate JUnit XML
+  args:
+    resultsFile: eval-results.xml
+- Eval exit status
+
+jobs:
+- name: Eval exit status
+  exec: if (ow.loadTest().getCountFail() > 0) exit(1)
+```
+
+Run the complete example with `ojob examples/eval-ojob.yaml`. Set `OAF_MODEL`
+as for normal Mini-A runs; these scenarios call the configured provider.
+From another directory, install the Mini-A and oJob-common oPacks so their
+include files and JavaScript can be resolved.
+
+Supply exactly one of `scenario` (a single map), `scenarios` (a non-empty array),
+or `file` (an existing scenario YAML/JSON file or directory). The scenario schema
+is identical to `eval=true`; no separate assertion language is needed. For example,
+replace `scenarios` above with `file: evals/core.yaml`. Shared Mini-A settings go
+in `evalArgs`; scenario `args` and then `setup.args` override them. Top-level oJob
+arguments are not automatically passed to the agent.
+
+Optional job arguments:
+
+| Argument | Purpose |
+| --- | --- |
+| `suite` | OpenAF suite name; defaults to `Mini-A evaluations` |
+| `baseline` | Baseline report JSON filename; adds a separate baseline comparison test |
+| `output` | Write the existing full Mini-A evaluation JSON report |
+| `key` | Store that report with `$set(key, report)` for later jobs |
+
+The job also returns `args.evalReport`. Scenario failures, including invalid
+scenario definitions and agent errors, are recorded and execution continues to
+later scenarios. Missing/unreadable files, ambiguous inputs and empty suites are
+configuration errors that throw before running tests. OpenAF records test failures
+without throwing them back to oJob: place the exit-status job **after** report
+jobs to make CI fail while still saving reports. A baseline regression fails its
+own OpenAF test; `evalReport.summary` continues to count only scenario outcomes.
+
+For JavaScript tests, reuse the same adapter directly:
+
+```javascript
+load("mini-a.js")
+load("mini-a-eval.js")
+var evaluator = new MiniAEval()
+var report = evaluator.runTests(evaluator.load("evals/core.yaml"), {
+  suite: "Answers",
+  args: { useshell: false }
+})
+```
+
+Inside an existing `ow.test.test` or `oJob Test` callback, use
+`evaluator.assertResult(evaluator.runScenario(scenario, sharedArgs))` to assert
+an eval result without registering a nested test. `runTests` reuses the existing
+scenario runner and baseline comparison; it never resets OpenAF's test state.
+For deterministic tests, the existing `agentFactory`, `judgeFn`, and `nowFn`
+constructor options still work. Programmatic oJobs can pass these functions in
+`evaluatorOptions` (for example from a setup job); plain YAML does not evaluate
+function strings. Run `ojob tests/evalOpenAF.yaml` for provider-free integration
+coverage and `ojob tests/eval.yaml` for the scenario engine tests.
+
+## Opt-in inter-agent communication
+
+`agentcomms` adds live coordination within one root goal's delegation tree. It uses
+private, in-memory OpenAF channels owned by the existing `SubtaskManager`. No broker
+service, parent HTTP listener, persistent storage, or additional model is required.
+Leave the argument unset (or use `profiles: [none]`) for existing isolation: no
+communication tools, channels, inbox observations, or remote exchange calls are added.
+Existing delegation results, progress events, fork snapshots, and memory channels
+keep their existing behavior. This feature requires `usetools=true` for sending
+messages and accessing state; use `usedelegation=true` to create collaborators.
+
+### Profiles and grants
+
+Profiles compose; they do not grant access by themselves. Each declaration contains
+`profiles`, `grants`, optional `alias`, optional `delegate`, and optional `limits`.
+JSON maps and SLON strings are accepted. Declarations are copied at registration.
+
+| Profile | Required grants | Behavior |
+| --- | --- | --- |
+| `none` | None | No communication; cannot combine with other profiles |
+| `parent-relay` | `send` / `receive` | Exchange intermediate information with the immediate parent or child |
+| `direct` | `send` / `receive` | Address peers through the runtime broker, without invoking the parent LLM |
+| `pubsub` | `publish` / `subscribe` | Fan out to active subscribers of an exact topic name |
+| `shared-state` | `read` / `write` | Access exact state namespaces with version-checked updates |
+
+`send` and `receive` are arrays of runtime IDs or declared aliases. The reserved
+name `parent` resolves to the immediate parent. Both endpoints must permit the
+relationship. Topics and namespaces are exact names; wildcards are rejected. Agents
+cannot discover or address agents in another root run. Aliases must be unique among
+active agents, contain only letters, digits, underscores or hyphens, and be at most
+64 characters. Retry attempts get new runtime IDs and may reuse their revoked alias.
+
+`delegate` is the ceiling for explicitly requested child declarations. Active grants
+are **not inherited**. An omitted child declaration is `none`, even when its parent
+can communicate. A child's own delegation allowance must also fit the parent's
+ceiling. Existing tool policy can further deny operations. Worker processes impose
+an additional operator-configured ceiling. These checks protect the communication
+API; they are not a sandbox for agents already granted arbitrary in-process code.
+
+### Example: relay an early finding
+
+Start the parent with this `agentcomms` map (serialize as JSON/SLON on the command line):
+
+```json
+{
+  "profiles": ["parent-relay"],
+  "alias": "coordinator",
+  "grants": {"send": ["researcher"], "receive": ["researcher"]},
+  "delegate": {
+    "profiles": ["parent-relay"],
+    "grants": {"send": ["parent"], "receive": ["parent"]}
+  }
+}
+```
+
+The parent calls the existing `delegate-subtask` tool with:
+
+```json
+{
+  "goal": "Investigate the failure; relay an early finding if it affects my next action.",
+  "waitForResult": false,
+  "agentcomms": {
+    "profiles": ["parent-relay"],
+    "alias": "researcher",
+    "grants": {"send": ["parent"], "receive": ["parent"]}
+  }
+}
+```
+
+Startup task files use the same declaration in each entry's `args.agentcomms`.
+The child can call `agent-comms` with
+`{"action":"send","to":"parent","payload":"The error occurs before the network request."}`.
+The parent receives an attributed observation before a subsequent model call.
+Use `waitForResult=false` for parent collaboration: the existing blocking default
+cannot answer questions while waiting for a child to finish. Messages do not wake
+completed agents, invoke an extra model, or wait for a reply. A child must be able to
+continue or finish without receiving an answer.
+
+For peer review, declare `direct` on both peers and reciprocal `send`/`receive`
+aliases. For shared research, declare `pubsub`, grant producers `publish:["findings"]`
+and consumers `subscribe:["findings"]`, then call
+`{"action":"publish","topic":"findings","payload":{"source":"...","finding":"..."}}`.
+Only currently registered, active subscribers receive the publication; there is no
+implicit replay to agents registered later. A saturated subscriber rejects the
+whole fanout, so the sender receives a clear failure instead of partial delivery.
+
+### Tools and state claims
+
+`agent-comms` exposes only granted actions: `send`, `publish`, and `receive`.
+Coordination tools are bound to the current agent and called directly even with
+`mcpproxy=true`; they are excluded from the shared proxy catalog and tool-result cache.
+Messages are drained at existing model-step boundaries; explicit `receive` shares
+the same drain, so observations are not inserted twice. Received text is attributed
+external data, never a permission grant or a trusted instruction.
+
+`agent-state` exposes `get` for readable namespaces and `put`/`delete` for writable
+namespaces. For example, two agents can try to claim a work item:
+
+```json
+{"action":"put","namespace":"work","key":"item-1","expectedVersion":0,"value":{"owner":"researcher"}}
+```
+
+Exactly one creation succeeds. The other receives `conflict`; it should read the
+current value or select other work. Updates require the returned version. Deletes
+retain a version tombstone until root shutdown, preventing a stale writer from
+recreating a deleted entry with version zero. Tombstones count toward the entry
+limit. This state is separate from `memorych`, `memorysessionch`, and forked memory.
+
+Outcomes include `accepted`, `ok`, `pending`, `denied`, `unavailable`, `conflict`,
+`full`, `too_large`, `rate_limited`, `invalid`, and `expired`. A successful send means
+admission to a queue, not that the recipient has acted on it. Optional
+`correlationId` connects an application reply to its request.
+
+### Remote workers
+
+Configure each worker with `apitoken` and an explicit `agentcomms` ceiling matching
+the profiles and grants it may execute. Without both, it does not advertise
+`agent-comms-v1`. A communication-enabled task cannot fall back to a worker lacking
+that capability. Ordinary tasks retain existing worker compatibility behavior.
+
+Legacy and A2A submission carry the same versioned declaration. The parent polls the
+worker's authenticated `/comms` endpoint as part of its existing execution loop.
+A runtime-generated per-task token additionally isolates exchanges. Tokens are not
+passed to model tools or included in fork state. No worker-to-worker connection is
+needed. Remote workers return `pending` and an `operationId`; the correlated result
+arrives at a later step. One operation is confirmed per exchange batch to bound
+potential shared-state read results, alongside bounded inbox deliveries. Latency
+therefore depends on the existing polling interval and queue depth.
+
+Transport retries reuse the outstanding batch, avoiding repeated writes after lost
+responses. State stays authoritative at the root. Worker-local descendants use the
+same exchange adapter. Remote communication task failures are retried by the parent
+with a new attempt identity, rather than independently replayed by the worker.
+Messages and pending operations are transient: cancellation, expiry, worker loss,
+and root shutdown can discard them. There is no restart recovery or exactly-once
+application-processing guarantee. Use normal delegation results for final answers.
+
+### Bounds and metrics
+
+The following `limits` keys default to these ceilings; configurations may lower them:
+
+| Key | Default |
+| --- | ---: |
+| `valueBytes` | 8192 UTF-8 bytes per operation |
+| `agentPending` / `rootPending` | 64 / 512 records |
+| `storageBytes` | 4194304 channel-record bytes |
+| `perMinute` / `operations` | 60 operations per agent per minute / 1000 per run |
+| `batchRecords` / `batchBytes` | 8 / 8192 bytes |
+| `ttlMs` | 300000 milliseconds, capped by the task lifetime |
+| `stateEntries` | 128, including deletion tombstones |
+
+Envelope bytes count toward delivery limits, so the largest deliverable payload is
+slightly smaller than `batchBytes`. Remote queues also reserve envelope space. Small
+limits may reject operations with `too_large` or `full`; no silent eviction occurs.
+Communication receipt does not reset task activity, and communication-only tool
+success does not reset the main loop's no-progress budget. Existing hard task and
+model-step limits remain in force.
+
+`getMetrics().communication` and existing `metricsch` snapshots include accepted
+operations, rejection counts by reason, delivered/consumed/expired messages,
+duplicates, state conflicts, bytes, queue depth/high-water mark, state entries,
+storage bytes, latency count/sum/max, remote exchanges/retries, and estimated context
+tokens. Root snapshots own delivery counts; do not sum root and worker mirrors.
+Latency measures enqueue-to-consumption acknowledgement, including polling delay.
+
+Existing `auditch` receives `comms` events with identities, message IDs, sequences,
+action, outcome and byte counts. Communication tool logs omit payloads for both
+direct and proxy calls. Existing explicitly enabled full model/debug traces can
+still contain messages because they are part of model context; treat those sinks
+accordingly. No new payload-log sink is introduced.
+
+Validation commands (no model credentials needed):
+
+```sh
+oaf -f tests/agentComms.js
+oaf -f tests/agentCommsTransport.js  # requires permission to bind localhost ports
+ojob tests/coreFunctionality.yaml
+```
+
+For goal-level evaluation, compare identical isolated and communicating runs using
+the existing evaluation reports: answer quality, repeated tool calls, total model
+calls/tokens, elapsed time, and communication context tokens. Useful cases are early
+finding relay, peer evidence reuse, and competing work claims. Communication is not
+an automatic quality or speed improvement; enable it where these measurements show
+that collaboration pays for its overhead.
+
+Repeated wiki ingestion defaults to non-destructive upsert. Preview scoped removals
+with `ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=./wiki ingestmode=normalize ingestprune=true ingestdryrun=true`, then omit `ingestdryrun` to apply.
+A fully empty origin also requires `ingestallowemptyprune=true`. Force reprocesses
+complete sources but never bypasses ownership, permissions or budgets. See
+[Safe repeated ingestion](docs/WIKI.md#safe-repeated-ingestion) for migration,
+conflicts, recovery and single-writer backend limits.
+
+### Inline console charts
+
+Use `opack exec mini-a useasciiviz=true` to enable charts in interactive console
+answers and `/last`, including streamed answers. Mini-A uses strict JSON inside
+an `oafPrintChart` Markdown fence:
+
+```oafPrintChart
+{"type":"line","data":[2,5,3,8],"options":{"height":8,"unit":"int"},"title":"Trend"}
+```
+
+The parameters match the `printChart` tool: `type`, `data`, `options`, `title`,
+and optional axis labels. Supported types are `line`, `bars`, `printbars`,
+`sparkline`, `histogram`, `heatmap`, `bullet`, `scatter`, `boxplot`, `timeline`,
+and `statusmatrix`. Omitted width uses available console width. The tool remains
+available for interim charts while Mini-A works. Invalid or incomplete blocks
+remain readable; `/last md` and saved Markdown retain the original JSON fences.
+This option defaults to false and inline chart rendering applies to the
+interactive console.

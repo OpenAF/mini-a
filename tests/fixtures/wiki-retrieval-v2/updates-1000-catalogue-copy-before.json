@@ -1,0 +1,188 @@
+{
+  "kind": "incremental-generations",
+  "mode": "before-catalogue-copy",
+  "backend": "local-fs",
+  "pages": 1000,
+  "samples": 10,
+  "runtime": "20260913",
+  "jvm": "26.0.2",
+  "sourceSha1": {
+    "wiki": "3b671f02a6fb0485207791156c4cefd692bb2e78",
+    "retrieval": "8fcad976a400a987000ad774f67c03ddabef2ffb"
+  },
+  "observations": [
+    {
+      "millis": 860.3635840415955,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1004,
+        "copiedBytes": 1458182,
+        "reusedChecksums": 1002,
+        "reusedChecksumBytes": 1456925,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 736.5977919101715,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1008,
+        "copiedBytes": 1461323,
+        "reusedChecksums": 1005,
+        "reusedChecksumBytes": 1459668,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 600.7793748378754,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1011,
+        "copiedBytes": 1464149,
+        "reusedChecksums": 1008,
+        "reusedChecksumBytes": 1462411,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 570.8235828876495,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1014,
+        "copiedBytes": 1466975,
+        "reusedChecksums": 1011,
+        "reusedChecksumBytes": 1465154,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 572.6877090930939,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1017,
+        "copiedBytes": 1469801,
+        "reusedChecksums": 1014,
+        "reusedChecksumBytes": 1467897,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 592.0894157886505,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1020,
+        "copiedBytes": 1472627,
+        "reusedChecksums": 1017,
+        "reusedChecksumBytes": 1470640,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 592.9148328304291,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1023,
+        "copiedBytes": 1475453,
+        "reusedChecksums": 1020,
+        "reusedChecksumBytes": 1473383,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 606.7498338222504,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1026,
+        "copiedBytes": 1478279,
+        "reusedChecksums": 1002,
+        "reusedChecksumBytes": 1450548,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 580.8843331336975,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1008,
+        "copiedBytes": 1456774,
+        "reusedChecksums": 1005,
+        "reusedChecksumBytes": 1455119,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    },
+    {
+      "millis": 548.991124868393,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1011,
+        "copiedBytes": 1459600,
+        "reusedChecksums": 1008,
+        "reusedChecksumBytes": 1457862,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0,
+        "bindingBlockReads": 1,
+        "bindingReusedPages": 999
+      }
+    }
+  ],
+  "buildMillis": 2054.2178750038147,
+  "latency": {
+    "p50": 592.0894157886505,
+    "p95": 860.3635840415955,
+    "p99": 860.3635840415955
+  },
+  "disk": {
+    "apparentBytes": 41013081,
+    "uniqueFileBytes": 41013081,
+    "files": 12218,
+    "estimator": "POSIX file identity and length; excludes allocation and metadata overhead"
+  },
+  "memoryUsed": 571665544
+}

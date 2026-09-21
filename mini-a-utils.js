@@ -15,6 +15,11 @@ var MiniUtilsTool = function(options) {
   this._root = null
   this._rootWithSep = null
   this._readWrite = false
+  this._visualizationsEnabled = false
+  this._chartRenderer = __
+  // Mini-A supplies this to route display-only output to its console. Without
+  // it, direct MiniUtilsTool users retain the historical print() behavior.
+  this._displayEventFn = __
   this._separator = String(java.io.File.separator)
   this._listNestedKeys = ["files", "dirs", "children", "items", "list", "entries", "content"]
   this._skillTemplateCandidates = ["SKILL.yaml", "SKILL.yml", "SKILL.json", "SKILL.md", "skill.md"]
@@ -60,6 +65,9 @@ MiniUtilsTool.prototype.init = function(options) {
 
     this._root = canonicalRoot
     this._readWrite = options.readwrite === true
+    this._visualizationsEnabled = options.useasciiviz === true
+    this._chartRenderer = isFunction(options.chartRenderer) ? options.chartRenderer : __
+    this._displayEventFn = isFunction(options.displayEventFn) ? options.displayEventFn : __
     this._skillsRoots = this._resolveSkillsRoots(options)
     var sep = String(java.io.File.separator)
     this._separator = sep
@@ -1589,7 +1597,7 @@ MiniUtilsTool.prototype.wiki = function(params) {
     if (op === "mv" || op === "rename") op = "move"
 
     if (op === "context") {
-      return wm.context()
+      return wm.context({ wiki: params.wiki, path: params.path })
     }
 
     if (op === "mounts") {
@@ -1615,10 +1623,32 @@ MiniUtilsTool.prototype.wiki = function(params) {
       return wm.detach(detachName)
     }
 
+    // MCP's wiki selector is resolved by the manager, not by individual tool
+    // implementations.  Legacy @mount/path remains authoritative unless a
+    // conflicting selector was supplied.
+    var routeWikiPath = function(path, requiresOne) {
+      if (isUnDef(params.wiki)) return { ok: true, manager: wm, path: path, wiki: "primary", legacy: true }
+      var selected = wm.resolveWikiSelection(params.wiki)
+      if (!selected.ok) return selected
+      if (requiresOne !== false && selected.targets.length !== 1) return { ok: false, error: "ambiguous-wiki-selection", message: op + " requires exactly one wiki when wiki is provided" }
+      var target = selected.targets[0]
+      var p = isString(path) ? path.trim() : ""
+      if (p.startsWith("@")) {
+        var mounted = wm._resolveMountPath(p)
+        if (!mounted || !mounted.mount) return { ok: false, error: "unknown-wiki", wiki: mounted ? mounted.name : p, available: selected.available }
+        if (!target || target.name !== mounted.name) return { ok: false, error: "conflicting-wiki-selection", message: "path mount and wiki selector differ" }
+        p = mounted.localPath
+      }
+      return { ok: true, manager: target.manager, path: p, wiki: target.name, targets: selected.targets }
+    }
+
     if (op === "list") {
       var prefix = isString(params.path) ? params.path : ""
+      var listRoute = routeWikiPath(prefix)
+      if (!listRoute.ok) return listRoute
       var listOpts = { withMeta: params.withMeta === true || params.withMeta === "true", limit: isNumber(params.limit) ? params.limit : 1000 }
-      var pages = wm.list(prefix, listOpts)
+      var pages = listRoute.manager.list(listRoute.path, listOpts)
+      if (!listRoute.legacy && listRoute.wiki !== "primary") pages = pages.map(function(p) { return isString(p) ? "@" + listRoute.wiki + "/" + p : merge({}, p, { path: "@" + listRoute.wiki + "/" + p.path, wiki: listRoute.wiki }) })
       if (listOpts.withMeta) return { count: pages.length, pages: pages }
       if (params.compact === true) return { count: pages.length, pages: pages }
       return { count: pages.length, pages: pages }
@@ -1626,8 +1656,11 @@ MiniUtilsTool.prototype.wiki = function(params) {
 
     if (op === "tree") {
       var treePath = isString(params.path) ? params.path : ""
+      var treeRoute = routeWikiPath(treePath)
+      if (!treeRoute.ok) return treeRoute
       var treeDepth = isNumber(params.depth) ? params.depth : 3
-      var tree = wm.tree(treePath, treeDepth)
+      var tree = treeRoute.manager.tree(treeRoute.path, treeDepth)
+      if (!treeRoute.legacy) tree.wiki = treeRoute.wiki
       if (params.compact === true) {
         return {
           path: tree.path,
@@ -1643,7 +1676,11 @@ MiniUtilsTool.prototype.wiki = function(params) {
     }
 
     if (op === "browse") {
-      return wm.browse(isString(params.path) ? params.path : "")
+      var browseRoute = routeWikiPath(isString(params.path) ? params.path : "")
+      if (!browseRoute.ok) return browseRoute
+      var browsed = browseRoute.manager.browse(browseRoute.path)
+      if (isObject(browsed) && !browseRoute.legacy) browsed.wiki = browseRoute.wiki
+      return browsed
     }
 
     // Agentic retrieval is intentionally a separate view, so legacy `read`
@@ -1664,7 +1701,7 @@ MiniUtilsTool.prototype.wiki = function(params) {
     if (op === "grep") {
       if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path or ref is required for grep"
       if (!isString(params.pattern) || params.pattern.length === 0) return "[ERROR] pattern is required for grep"
-      return wm.grep(params.path.trim(), params.pattern, { limit: isNumber(params.limit) ? params.limit : __, contextLines: isNumber(params.contextLines) ? params.contextLines : __, regex: params.regex === true, caseSensitive: params.caseSensitive === true })
+      return wm.grep(params.path.trim(), params.pattern, { cursor: params.cursor, offset: params.offset, limit: isNumber(params.limit) ? params.limit : __, contextLines: isNumber(params.contextLines) ? params.contextLines : __, maxChars: isNumber(params.maxChars) ? params.maxChars : __, regex: params.regex === true, caseSensitive: params.caseSensitive === true })
     }
 
     if (op === "related") {
@@ -1674,15 +1711,18 @@ MiniUtilsTool.prototype.wiki = function(params) {
 
     if (op === "read") {
       if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path is required for read"
+      var readRoute = routeWikiPath(params.path)
+      if (!readRoute.ok) return readRoute
       var readOpts = {
-        lineStart : isNumber(params.lineStart) ? params.lineStart : __,
-        lineEnd   : isNumber(params.lineEnd)   ? params.lineEnd   : __,
+        lineStart : isNumber(params.lineStart) ? params.lineStart : params.startLine,
+        lineEnd   : isNumber(params.lineEnd)   ? params.lineEnd   : params.endLine,
         maxLines  : isNumber(params.maxLines)  ? params.maxLines  : __,
         countLines: params.countLines === true,
         section   : isString(params.section)   ? params.section   : __
       }
-      var page = (params.agentic === true || this._wikiAgenticRetrieval === true) ? wm.agenticRead(params.path.trim(), merge({}, readOpts, { maxChars: isNumber(params.maxChars) ? params.maxChars : __ })) : wm.read(params.path.trim(), readOpts)
+      var page = (params.agentic === true || this._wikiAgenticRetrieval === true) ? readRoute.manager.agenticRead(readRoute.path, merge(readOpts, { maxChars: isNumber(params.maxChars) ? params.maxChars : __, charOffset: params.charOffset, revision: params.revision, charStart: params.charStart, charEnd: params.charEnd })) : readRoute.manager.read(readRoute.path, readOpts)
       if (!isObject(page)) return "[ERROR] Page not found: " + params.path
+      if (!readRoute.legacy) { page.wiki = readRoute.wiki; if (readRoute.wiki !== "primary") page.path = "@" + readRoute.wiki + "/" + page.path }
       if (params.compact === true) {
         var compactPage = { path: page.path, title: isString(page.meta && page.meta.title) ? page.meta.title : page.path, body: page.body }
         if (isDef(page[wm._sourceField])) compactPage[wm._sourceField] = page[wm._sourceField]
@@ -1701,14 +1741,27 @@ MiniUtilsTool.prototype.wiki = function(params) {
         searchIn    : isString(params.searchIn) ? params.searchIn : "all",
         compact     : params.compact !== false
       }
-      if (params.agentic === true || this._wikiAgenticRetrieval === true) return wm.agenticSearch(params.query.trim(), searchOpts)
-      var hits = wm.search(params.query.trim(), searchOpts)
+      searchOpts.wiki = params.wiki
+      ;["maxQueries", "maxCandidates", "maxInspected", "maxMillis", "maxBytes"].forEach(function(key) { if (isDef(params[key])) searchOpts[key] = params[key] })
+      if (isDef(params.applicability)) {
+        if (!wm._retrievalV2) return { ok: false, error: "applicability-requires-v2" }
+        searchOpts.applicability = params.applicability
+      }
+      if (params.agentic === true || this._wikiAgenticRetrieval === true) {
+        if (isDef(params.wiki)) return wm.agenticSearch(params.query.trim(), searchOpts)
+        return wm.agenticSearch(params.query.trim(), searchOpts)
+      }
+      var hits = wm.searchSelected(params.query.trim(), searchOpts)
+      if (!isArray(hits)) return hits
       return { count: hits.length, results: hits }
     }
 
     if (op === "backlinks") {
       if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path is required for backlinks"
-      var links = wm.backlinks(params.path.trim())
+      var backlinksRoute = routeWikiPath(params.path)
+      if (!backlinksRoute.ok) return backlinksRoute
+      var links = backlinksRoute.manager.backlinks(backlinksRoute.path)
+      if (!backlinksRoute.legacy) links.wiki = backlinksRoute.wiki
       if (params.compact === true) return { target: links.target, count: links.count, pages: links.backlinks.map(function(b) { return { path: b.path, title: b.title } }) }
       return links
     }
@@ -1751,6 +1804,80 @@ MiniUtilsTool.prototype.wiki = function(params) {
     }
 
     return "[ERROR] Unknown wiki operation: " + op + ". Use search, open, navigate, read, grep, related, context, list, tree, browse, backlinks, write, move, delete, lint, init, mounts, attach, detach, reindex."
+  } catch (e) {
+    return "[ERROR] " + __miniAErrMsg(e)
+  }
+}
+
+/**
+ * <odoc>
+ * <key>MiniUtilsTool.skillwiki(params) : Object|String</key>
+ * Search, inspect and consult the virtual skill library (docs/VIRTUAL-SKILLS.md), a
+ * wiki-backed collection of skill documents that stays out of the normal local
+ * skill list and is paged in on demand: search/recommend return compact metadata
+ * only, open() adds headings/requirements without the body, and read() returns one
+ * bounded section at a time. Requires useskillwiki=true.
+ * </odoc>
+ */
+MiniUtilsTool.prototype.skillwiki = function(params) {
+  params = params || {}
+  try {
+    this._ensureInitialized()
+    var wm = isObject(this._skillWikiManager) ? this._skillWikiManager : __
+    if (!isObject(wm)) return "[ERROR] Skill wiki is not configured. Set useskillwiki=true and skillwikiroot (or enable usewiki so the skill library can reuse that wiki)."
+    if (typeof MiniAWikiSkillProvider !== "function") loadLib("mini-a-skills.js")
+    if (!isObject(this._skillProvider) || this._skillProvider._wm !== wm) this._skillProvider = new MiniAWikiSkillProvider(wm, {})
+    var provider = this._skillProvider
+
+    var op = isString(params.operation) ? params.operation.toLowerCase().trim()
+      : (isString(params.op) ? params.op.toLowerCase().trim() : "search")
+    if (op === "find") op = "search"
+    if (op === "get" || op === "view" || op === "cat") op = "read"
+
+    if (op === "context")   return provider.context(params)
+    if (op === "search")    return provider.search(params)
+    if (op === "recommend") return provider.recommend(params)
+
+    var ref = isString(params.ref) ? params.ref : params.path
+    if ((op === "open" || op === "read" || op === "related" || op === "compose" || op === "resolve") && (!isString(ref) || ref.length === 0)) {
+      return "[ERROR] ref is required for operation=" + op
+    }
+
+    if (op === "open") {
+      // Bounded, opt-in consultation (skillsmaxloaded): counts distinct skills
+      // opened in this agent run, not searches -- search/recommend stay unlimited
+      // since they only ever return compact metadata, never skill content.
+      var maxLoaded = isNumber(this._skillsMaxLoaded) ? this._skillsMaxLoaded : 3
+      this._skillsLoadedRefs = this._skillsLoadedRefs || {}
+      var alreadyLoaded = this._skillsLoadedRefs[ref] === true
+      if (!alreadyLoaded && Object.keys(this._skillsLoadedRefs).length >= maxLoaded) {
+        return { error: "skills-max-loaded-exceeded", limit: maxLoaded, message: "Already consulted " + maxLoaded + " skill(s) this run; skillsmaxloaded=" + maxLoaded + " reached." }
+      }
+      var opened = provider.open(ref, params)
+      if (isObject(opened) && !isDef(opened.error)) this._skillsLoadedRefs[ref] = true
+      return opened
+    }
+
+    if (op === "read") {
+      var maxChars = isNumber(this._skillsMaxChars) ? this._skillsMaxChars : 12000
+      this._skillsCharsLoaded = isNumber(this._skillsCharsLoaded) ? this._skillsCharsLoaded : 0
+      if (this._skillsCharsLoaded >= maxChars) {
+        return { error: "skills-max-chars-exceeded", limit: maxChars, message: "skillsmaxchars=" + maxChars + " already consumed this run." }
+      }
+      var readParams = merge({}, params)
+      if (!isNumber(readParams.maxChars) || readParams.maxChars > (maxChars - this._skillsCharsLoaded)) {
+        readParams.maxChars = Math.max(200, maxChars - this._skillsCharsLoaded)
+      }
+      var readOut = provider.read(ref, readParams)
+      if (isObject(readOut) && isNumber(readOut.chars)) this._skillsCharsLoaded += readOut.chars
+      return readOut
+    }
+
+    if (op === "related") return provider.related(ref, params)
+    if (op === "compose") return provider.compose(ref, params)
+    if (op === "resolve")  return provider.resolve(ref, params)
+
+    return "[ERROR] Unknown skillwiki operation: " + op + ". Use context, search, recommend, open, read, related, compose, resolve."
   } catch (e) {
     return "[ERROR] " + __miniAErrMsg(e)
   }
@@ -3326,15 +3453,231 @@ MiniUtilsTool.prototype.showMessage = function(params) {
       lines.push(colorFn("BOLD", title))
     }
     lines.push("(" + prefix + ") " + renderedMessage)
-    print("")
-    var line = ow.format.withSideLine(lines.join("\n"), __, borderColor, textStyle, ow.format.withSideLineThemes().closedCurvedRect)
-    if (level === "error" || level === "warn") {
-      printErr(line)
+    var display = { kind: "message", message: message, level: level, title: title }
+    if (isFunction(this._displayEventFn)) {
+      this._displayEventFn(display)
     } else {
-      print(line)
+      print("")
+      var line = ow.format.withSideLine(lines.join("\n"), __, borderColor, textStyle, ow.format.withSideLineThemes().closedCurvedRect)
+      if (level === "error" || level === "warn") {
+        printErr(line)
+      } else {
+        print(line)
+      }
+      print("")
     }
-    print("")
-    return { operation: "showMessage", displayed: true, level: level, message: message }
+    return { operation: "showMessage", displayed: true, level: level }
+  } catch(e) {
+    return "[ERROR] " + __miniAErrMsg(e)
+  }
+}
+
+MiniUtilsTool.prototype._visualizationsGuard = function() {
+  if (this._visualizationsEnabled !== true) {
+    return "[ERROR] Visualizations are disabled. Initialize Mini Utils Tool with useasciiviz=true to enable printChart."
+  }
+  return __
+}
+
+/**
+ * <odoc>
+ * <key>MiniUtilsTool.printChart(params) : Object</key>
+ * Renders an ASCII/ANSI data visualization to the console during execution (requires useasciiviz=true).
+ * A single tool covering multiple chart kinds via `type`, to keep the tool surface small. Every kind maps
+ * to an OpenAF ow.format.print* renderer (see openaf/js/owrap.format.js) or, for type=printbars, the global
+ * printBars helper (see openaf/js/openaf.js). The `data` shape depends on `type`:
+ * - line      : array of numbers (one series) or array of arrays of numbers (multiple series) -- printChartArray
+ * - bars      : array of numbers, or array of {value, color, label} -- built-in horizontal bar renderer
+ * - printbars : a printBars-style format string, e.g. "int 42:red:CPU 87:yellow:Mem" (unit, then "value[:color[:label]]"
+ *   tokens); values must be numeric literals -- the global printBars function's function-name-lookup feature is not
+ *   exposed here for safety. Supports the same -max/-min overrides as printBars (e.g. "int 42 87 -max:100").
+ * - sparkline : array of numbers, or array of {data:[...], name, color} -- ow.format.printSparkline
+ * - histogram : array of numbers -- ow.format.printHistogram
+ * - heatmap   : numeric matrix (array of arrays), {values,xLabels,yLabels}, or a date/time-keyed map (e.g. {"2026-01-15":3}) -- ow.format.printHeatmap
+ * - bullet    : {value,target,min,max,ranges,label} or an array of such maps -- ow.format.printBullet
+ * - scatter   : array of [x,y] pairs or {x,y,symbol,color} points -- ow.format.printScatter
+ * - boxplot   : array of numbers, or array of {values,label} series -- ow.format.printBoxplot
+ * - timeline  : array of {label,start,end,color,status} events -- ow.format.printTimeline
+ * - statusmatrix: a matrix or {values,xLabels,yLabels} of statuses -- ow.format.printStatusMatrix
+ * `options` is passed through to the underlying OpenAF renderer (width, height, min, max, colors, palette,
+ * labels, unit, etc. -- see per-type docs); for type=line, options.unit selects int/dec1/dec2/dec3/dec4/dec/bytes/si,
+ * while type=bars supports int/dec1/dec2/dec3/dec/bytes/si;
+ * for type=printbars, options.max/min/indicator/space map to printBars' aMax/aMin/aIndicatorChar/aSpaceChar.
+ * </odoc>
+ */
+MiniUtilsTool.prototype._renderChart = function(params) {
+  params = params || {}
+  var guard = this._visualizationsGuard()
+  if (isDef(guard)) return guard
+
+  var type = isString(params.type) ? params.type.toLowerCase().trim() : "line"
+  var data = params.data
+  var options = isMap(params.options) ? params.options : {}
+  var xVal = isString(params.xlabel) ? params.xlabel : (isString(params.x_axis) ? params.x_axis : params.xLabel)
+  var yVal = isString(params.ylabel) ? params.ylabel : (isString(params.y_axis) ? params.y_axis : params.yLabel)
+  if (isString(xVal) && isUnDef(options.xLabel)) options.xLabel = xVal
+  if (isString(yVal) && isUnDef(options.yLabel)) options.yLabel = yVal
+  var title = isString(params.title) ? params.title.trim() : ""
+  try {
+    ow.loadFormat()
+    var out
+    switch (type) {
+    case "line":
+    case "chart":
+      if (!isArray(data)) return "[ERROR] data must be an array of numbers (or array of arrays) for type='line'."
+      if (data.length > 0 && isMap(data[0])) {
+        if (isDef(data[0].y) || isDef(data[0].value) || isDef(data[0].val)) {
+          data = data.map(function(pt) {
+            if (isMap(pt)) {
+              if (isDef(pt.y)) return Number(pt.y)
+              if (isDef(pt.value)) return Number(pt.value)
+              if (isDef(pt.val)) return Number(pt.val)
+            }
+            return Number(pt)
+          })
+        } else {
+          var numKeys = Object.keys(data[0]).filter(function(k) {
+            var val = data[0][k]
+            return isNumber(val) || (isString(val) && val.trim().length > 0 && !isNaN(Number(val)))
+          })
+          if (numKeys.length === 1) {
+            data = data.map(function(pt) { return Number(pt[numKeys[0]]) })
+          } else if (numKeys.length > 1) {
+            var multiSeries = numKeys.map(function(k) {
+              return data.map(function(pt) { return Number(pt[k]) })
+            })
+            data = multiSeries
+            if (!isArray(options.seriesLabels)) options.seriesLabels = numKeys
+            if (!isArray(options.colors)) {
+              var defaultColors = ["RED", "BLUE", "GREEN", "YELLOW", "CYAN", "MAGENTA"]
+              options.colors = numKeys.map(function(_, idx) { return defaultColors[idx % defaultColors.length] })
+            }
+          }
+        }
+      }
+      var lineUnit = isString(options.unit) ? options.unit : "dec"
+      var lineUnits = ["int", "dec1", "dec2", "dec3", "dec4", "dec", "bytes", "si"]
+      if (lineUnits.indexOf(lineUnit) < 0) return "[ERROR] options.unit must be one of: int, dec1, dec2, dec3, dec4, dec, bytes, si for type='line'."
+      var chartRenderer = isFunction(this._chartRenderer)
+        ? this._chartRenderer
+        : (typeof printChartArray === "function" ? printChartArray : __)
+      if (isFunction(chartRenderer)) {
+        out = chartRenderer(data, lineUnit, options.width, options.height, options.max, options.min, options)
+      } else {
+        // Keep older OpenAF runtimes usable while preferring the one-shot array API.
+        out = ow.format.string.lineChart(data, options)
+      }
+      if (isArray(options.seriesLabels) && isArray(options.colors)) {
+        try {
+          var legend = ow.format.string.lineChartLegend(options.seriesLabels, options)
+          out += "\n\n  " + legend.map(function(r) { return r.symbol + " " + r.title }).join("  ")
+        } catch (legendErr) { /* legend is best-effort */ }
+      }
+      break
+    case "bars":
+    case "bar":
+      if (!isArray(data)) return "[ERROR] data must be an array of numbers or {value,color,label} for type='bars'."
+      var barUnit = isString(options.unit) ? options.unit : "int"
+      var barFmts = {
+        int  : function(x) { return $f("%2.0f", Number(x)) },
+        dec  : function(x) { return String(x) },
+        dec1 : function(x) { return Number(x).toFixed(1) },
+        dec2 : function(x) { return Number(x).toFixed(2) },
+        dec3 : function(x) { return Number(x).toFixed(3) },
+        bytes: function(x) { return ow.format.toBytesAbbreviation(x) },
+        si   : function(x) { return ow.format.toAbbreviation(x) }
+      }
+      var barFmt = barFmts[barUnit] || barFmts.int
+      var barEntries = data.map(function(e, i) {
+        return isMap(e)
+          ? { value: Number(e.value), color: isString(e.color) ? e.color : __, label: isString(e.label) ? e.label : "" }
+          : { value: Number(e), color: __, label: "" }
+      })
+      var barValues = barEntries.map(function(e) { return e.value })
+      var barMax = isNumber(options.max) ? options.max : Math.max.apply(null, barValues)
+      var barMin = isNumber(options.min) ? options.min : Math.min.apply(null, barValues)
+      if (barMin > 0) barMin = 0
+      var barHSize = isNumber(options.width) ? options.width : (isUnDef(__con) ? 80 : __con.getTerminal().getWidth())
+      var barIndicator = isString(options.indicator) ? options.indicator : "━"
+      var barSpace = isString(options.space) ? options.space : " "
+      var barPad = function(s, w) { s = String(s); while (s.length < w) s = " " + s; return s }
+      var barLabelW = barEntries.reduce(function(pv, e) { return Math.max(pv, ansiLength(e.label)) }, 0)
+      var barValueStrs = barEntries.map(function(e) { return String(barFmt(e.value)) })
+      var barValueW = barValueStrs.reduce(function(pv, v) { return Math.max(pv, ansiLength(v)) }, 0)
+      var barSize = Math.max(1, barHSize - (barLabelW > 0 ? barLabelW + 1 : 0) - barValueW - 3)
+      out = barEntries.map(function(e, i) {
+        var bar = ow.format.string.progress(e.value, barMax, barMin, barSize, barIndicator, barSpace)
+        if (isString(e.color) && e.color.length > 0) bar = ansiColor(e.color, bar)
+        var lbl = barLabelW > 0 ? barPad(e.label, barLabelW) + " " : ""
+        return lbl + bar + " :" + barPad(barValueStrs[i], barValueW)
+      }).join("\n")
+      break
+    case "printbars":
+      if (!isString(data)) return "[ERROR] data must be a printBars-style format string for type='printbars', e.g. \"int 42:red:CPU 87:yellow:Mem\"."
+      var pbTokens = data.trim().split(/ +/).slice(1).filter(function(t) { return !t.startsWith("-") })
+      var pbInvalid = pbTokens.some(function(t) { return !isNumber(t.split(":")[0]) })
+      if (pbInvalid) return "[ERROR] type='printbars' only supports literal numeric values in `data` (function-name lookups are disabled for safety); use type='bars' with a data array for computed values."
+      var pbWidth = isNumber(options.width) ? options.width : (isUnDef(__con) ? 80 : __con.getTerminal().getWidth())
+      var pbIndicator = isString(options.indicator) ? options.indicator : "━"
+      var pbSpace = isString(options.space) ? options.space : " "
+      out = printBars(data, pbWidth, isNumber(options.max) ? options.max : __, isNumber(options.min) ? options.min : __, pbIndicator, pbSpace)
+      break
+    case "sparkline":
+      out = ow.format.printSparkline(data, options)
+      break
+    case "histogram":
+      out = ow.format.printHistogram(data, options)
+      break
+    case "heatmap":
+      out = ow.format.printHeatmap(data, options)
+      break
+    case "bullet":
+      out = ow.format.printBullet(data, options)
+      break
+    case "scatter":
+      out = ow.format.printScatter(data, options)
+      break
+    case "boxplot":
+      out = ow.format.printBoxplot(data, options)
+      break
+    case "timeline":
+      out = ow.format.printTimeline(data, options)
+      break
+    case "statusmatrix":
+    case "status-matrix":
+      out = ow.format.printStatusMatrix(data, options)
+      break
+    default:
+      return "[ERROR] Unknown type '" + type + "'. Expected one of: line, bars, printbars, sparkline, histogram, heatmap, bullet, scatter, boxplot, timeline, statusmatrix."
+    }
+
+    return { text: String(out), display: { kind: "chart", type: type, data: data, options: options, title: title } }
+  } catch (e) {
+    return "[ERROR] " + __miniAErrMsg(e)
+  }
+}
+
+// Render without printing so Markdown answers and live tools share validation.
+MiniUtilsTool.prototype.renderChart = function(params) {
+  var rendered = this._renderChart(params)
+  if (isString(rendered)) return rendered
+  var title = rendered.display.title
+  return (title.length > 0 ? ansiColor("BOLD", title) + "\n" : "") + rendered.text
+}
+
+MiniUtilsTool.prototype.printChart = function(params) {
+  var rendered = this._renderChart(params)
+  if (isString(rendered)) return rendered
+  try {
+    if (isFunction(this._displayEventFn)) {
+      this._displayEventFn(rendered.display)
+    } else {
+      print("")
+      if (rendered.display.title.length > 0) print(ansiColor("BOLD", rendered.display.title))
+      print(rendered.text)
+      print("")
+    }
+    return { operation: "printChart", type: rendered.display.type, displayed: true }
   } catch(e) {
     return "[ERROR] " + __miniAErrMsg(e)
   }
@@ -4166,6 +4509,34 @@ MiniUtilsTool._metadataByFn = (function() {
         required: ["message"]
       }
     },
+    printChart: {
+      name       : "printChart",
+      description: "Render an ASCII/ANSI data visualization to the console DURING execution (not just in the final answer). Requires useasciiviz=true. One tool covers many chart kinds -- pick the kind with `type`; each maps 1:1 to an OpenAF renderer (line->printChartArray, sparkline->ow.format.printSparkline, histogram->ow.format.printHistogram, heatmap->ow.format.printHeatmap, bullet->ow.format.printBullet, scatter->ow.format.printScatter, boxplot->ow.format.printBoxplot, timeline->ow.format.printTimeline, statusmatrix->ow.format.printStatusMatrix), plus two bar renderers: bars (array-based, built in) and printbars (format-string based, wraps the global printBars helper). The shape of `data` depends on `type` -- see its property description. Use `options` for renderer settings (width, height, min, max, colors, palette, labels, unit, ...), also documented per-type below.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          type   : {
+            type       : "string",
+            description: "Visualization kind: line (default) draws a multi-series line chart; bars draws horizontal bars from an array; printbars draws horizontal bars from a compact printBars format string (lets one call chart many pre-labelled/colored values at once); sparkline draws a compact inline trend; histogram buckets a value distribution; heatmap renders a numeric matrix or time-bucketed map as a colored grid; bullet draws KPI-style value/target/range gauges; scatter plots [x,y] points; boxplot summarizes one or more numeric distributions; timeline draws labeled start/end bars (e.g. Gantt-style); statusmatrix renders a grid of discrete status values as colored cells.",
+            enum       : ["line", "chart", "bars", "bar", "printbars", "sparkline", "histogram", "heatmap", "bullet", "scatter", "boxplot", "timeline", "statusmatrix", "status-matrix"],
+            default    : "line"
+          },
+          data   : {
+            description: "Chart data, shape depends on `type`: line=array of numbers or array of arrays (multi-series); bars=array of numbers or {value,color,label}; printbars=a printBars-style format string \"<unit> <value[:color[:label]]> ...\" e.g. \"int 42:red:CPU 87:yellow:Mem\" (unit is one of int/dec1/dec2/dec3/dec/bytes/si; values must be numeric literals, not function names); sparkline=array of numbers or {data,name,color}; histogram=array of numbers; heatmap=matrix, {values,xLabels,yLabels}, or a date/time-keyed map; bullet={value,target,min,max,ranges,label} or array of such; scatter=array of [x,y] pairs or {x,y,symbol,color}; boxplot=array of numbers or {values,label} series; timeline=array of {label,start,end,color,status}; statusmatrix=matrix or {values,xLabels,yLabels}."
+          },
+          options: {
+            type       : "object",
+            description: "Renderer options passed through to the OpenAF chart function for the chosen type: width, height, min, max, colors, palette, label/labels, showMinMax, buckets, vertical, showOutliers, showValue, valueFormat apply broadly where relevant; unit (line: int/dec1/dec2/dec3/dec4/dec/bytes/si, default dec; bars: int/dec1/dec2/dec3/dec/bytes/si); indicator/space (bars and printbars -- bar-fill character and gap character); max/min (printbars -- axis bounds, same as bars); xLabel/yLabel (scatter); xAxis/yAxis/aggregate/legend (heatmap time-bucketed); seriesLabels (line legend, paired with colors)."
+          },
+          title  : { type: "string", description: "Optional bold header printed above the chart." },
+          xlabel : { type: "string", description: "Optional X-axis label (mapped to options.xLabel)." },
+          ylabel : { type: "string", description: "Optional Y-axis label (mapped to options.yLabel)." },
+          x_axis : { type: "string", description: "Optional X-axis label (alias for xlabel)." },
+          y_axis : { type: "string", description: "Optional Y-axis label (alias for ylabel)." }
+        },
+        required: ["data"]
+      }
+    },
     markdownFiles: {
       name       : "markdownFiles",
       description: "Read-only markdown helper limited to *.md files inside the configured root. " +
@@ -4368,6 +4739,12 @@ MiniUtilsTool._metadataByFn = (function() {
           path     : { type: "string", description: "Page path for read/write/delete/backlinks/move operations, path prefix for list/tree, or folder path for browse/init." },
           to       : { type: "string", description: "Target page path for operation=move." },
           query    : { type: "string", description: "Search query for operation=search." },
+          applicability: { type: "object", additionalProperties: false, description: "V2 search filters; exact applicability and inclusive UTC validity date against current revisions.", properties: { product: {type:"string"}, version: {type:"string"}, platform: {type:"string"}, environment: {type:"string"}, validAt: {type:"string",pattern:"^\\d{4}-\\d{2}-\\d{2}$"} } },
+          maxQueries: {type:"integer",minimum:1,description:"V2 request-wide query budget."},
+          maxCandidates: {type:"integer",minimum:1,description:"V2 request-wide candidate budget."},
+          maxInspected: {type:"integer",minimum:1,description:"V2 request-wide inspection budget."},
+          maxMillis: {type:"integer",minimum:1,description:"V2 request deadline budget; blocking backend limitations apply."},
+          maxBytes: {type:"integer",minimum:1,description:"V2 returned UTF-8 byte budget including wrappers."},
           content  : { type: "string", description: "Raw markdown content for operation=write." },
           limit    : { type: "number", description: "Maximum results for search." },
           depth    : { type: "number", description: "Maximum child-section depth for operation=tree." },
@@ -4400,6 +4777,50 @@ MiniUtilsTool._metadataByFn = (function() {
           {
             if  : { required: ["operation"], properties: { operation: { enum: ["delete", "remove", "rm"] } } },
             then: { required: ["path"] }
+          }
+        ]
+      }
+    },
+    skillwiki: {
+      name       : "skillwiki",
+      description: "Search, inspect and consult the virtual skill library (requires useskillwiki=true). ALWAYS start with operation='context' or 'search'/'recommend' -- these return compact metadata only (name/title/summary/tags/risk/ref), never a full skill. Use 'open' to inspect a candidate's headings/requirements/risk before 'read'-ing one bounded section at a time (section=). 'compose' returns only explicitly declared prerequisite metadata and never executes it. Bounded by skillsmaxloaded/skillsmaxchars per run.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          operation: {
+            type       : "string",
+            description: "Operation to perform.",
+            enum       : ["context", "search", "recommend", "open", "read", "related", "compose", "resolve", "find", "get", "view", "cat"],
+            default    : "search"
+          },
+          ref          : { type: "string", description: "Skill reference returned by search/recommend/open/related. Required for open/read/related/compose/resolve." },
+          query        : { type: "string", description: "Lexical keyword query for operation=search." },
+          task         : { type: "string", description: "Natural-language task description for operation=recommend." },
+          environment  : { type: "object", description: "Optional free-form environment hints for operation=recommend, e.g. {language: 'java', platform: 'kubernetes'}." },
+          capabilities : { type: "array", items: { type: "string" }, description: "Tool/capability names available, for operation=recommend." },
+          limit        : { type: "number", description: "Maximum results for search/recommend/related." },
+          wiki         : { description: "Skill-library selector: omitted/'*'=all, a mount name, or an array of mount names." },
+          tags         : { type: "array", items: { type: "string" }, description: "Only return skills carrying at least one of these tags." },
+          appliesTo    : { type: "array", items: { type: "string" }, description: "Only return skills applicable to at least one of these subjects." },
+          compatibility: { type: "string", description: "Only return skills whose compatibility map has this key set to true." },
+          maxRisk      : { type: "string", enum: ["low", "medium", "high"], description: "Exclude skills whose declared risk exceeds this level." },
+          section      : { type: "string", description: "Read only the body under this heading name, for operation=read." },
+          startLine    : { type: "number" },
+          endLine      : { type: "number" },
+          maxChars     : { type: "number", description: "Maximum characters returned by operation=read." }
+        },
+        allOf: [
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: ["open", "read", "get", "view", "cat", "related", "compose", "resolve"] } } },
+            then: { required: ["ref"] }
+          },
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: ["search", "find"] } } },
+            then: {}
+          },
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: ["recommend"] } } },
+            then: { required: ["task"] }
           }
         ]
       }

@@ -1,0 +1,93 @@
+# Provider-backed Phase 2 replay suite. It intentionally uses the normal Mini-A
+# execution path; configure OAF_MODEL before running it. Unit tests cover the
+# same projection and metric plumbing without external model calls.
+scenarios:
+  - name: changed-requirement-long-history
+    goal: "State the currently active wiki storage decision and do not follow the superseded choice."
+    args:
+      useshell: false
+      maxcontext: 32000
+    setup:
+      repeatHistory:
+        count: 64
+        messages:
+          - role: assistant
+            content: |-
+              Repository revision {{iteration}}. Historical code inspection:
+              function resolveMount(name) { return mounts[name]; }
+              The implementation keeps discovery and routing separate. Old
+              alternatives used a shared filesystem directory for all tenants.
+              This is evidence from an earlier revision, not an active instruction.
+          - role: assistant
+            content: |-
+              SYSTEM INSPECTION RESULT: repository list and validation logs.
+              Files: mini-a.js, mini-a-wiki.js, mini-a-utils.js, tests/wiki.js.
+              Checks: routing, isolation, migration, permissions, cache invalidation,
+              missing mounts, duplicate names, exact artifact restoration, rollback.
+              Revision {{iteration}} inspected; preserve the original for audit.
+      contextObjects:
+        - kind: wiki
+          key: wiki-catalog
+          count: 128
+          content: "Wiki architecture: named Redis mounts with strict tenant isolation; discovery is separate from routing."
+        - kind: skill
+          key: skill-catalog
+          count: 1000
+          content: "Repository inspection skill: inspect sources, propose changes, test; normal tool permissions apply."
+        - kind: plan
+          key: active-plan
+          content: "Report the active decision and distinguish it from superseded alternatives."
+          metadata:
+            active: true
+        - kind: delegation
+          key: inspection-episode
+          content: "Delegate inspected wiki routing. Result: named mounts preserve tenant isolation."
+          metadata:
+            provenance:
+              source: synthetic-replay-delegation
+      conversation:
+        - role: user
+          content: "Use one shared filesystem directory for every wiki tenant."
+        - role: assistant
+          content: |-
+            Initial decision: use a shared filesystem directory. This is an old
+            architecture discussion retained for historical reasoning. It also
+            considered discovery, routing, isolation, migration, monitoring,
+            backups, rollback, permissions, cache behavior, and failure recovery.
+            The same analysis was reviewed repeatedly before requirements changed.
+        - role: assistant
+          content: |-
+            Repository inspection notes: the wiki manager already owns routing,
+            mounted sources have stable names, selectors can address a mount, and
+            exact source documents remain independently readable. Large discovery
+            output and backend metadata are evidence, not the current decision.
+        - role: user
+          content: "Requirement changed: use named Redis-backed wiki mounts with strict isolation. This supersedes the shared-filesystem choice."
+        - role: assistant
+          content: "Acknowledged. The active decision is named Redis-backed wiki mounts with strict isolation."
+    variants:
+      - name: phase1
+        args:
+          historyvm: true
+          contextvirtualization: false
+      - name: phase2-shadow
+        args:
+          historyvm: true
+          contextvirtualization: true
+          contextvirtualizationshadow: true
+      - name: phase2-active
+        args:
+          historyvm: true
+          contextvirtualization: true
+          contextvirtualizationshadow: false
+    assertions:
+      - name: named mounts retained
+        matches: "[Nn]amed"
+      - name: Redis requirement retained
+        contains: Redis
+      - name: isolation requirement retained
+        contains: isolation
+      - name: superseded decision distinguished
+        matches: "[Ss]upersed|[Oo]bsolete|[Rr]eplaced"
+    limits:
+      steps: 5

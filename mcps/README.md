@@ -21,6 +21,8 @@
 | mcp-wiki   | Mini-A wiki knowledge base MCP with hierarchy navigation (discovery/read) | STDIO/HTTP | (included) | [mcp-wiki.yaml](mcp-wiki.yaml) |
 | mcp-wiki-safe | Mini-A wiki MCP restricted to opaque-reference search and bounded read excerpts (safe for untrusted clients) | STDIO/HTTP | (included) | [mcp-wiki-safe.yaml](mcp-wiki-safe.yaml) |
 | mcp-wiki-ops | Mini-A wiki maintenance MCP (lint and readwrite operations) | STDIO/HTTP | (included) | [mcp-wiki-ops.yaml](mcp-wiki-ops.yaml) |
+| mcp-skills | Virtual skill-library MCP (context/search/recommend/open/read/related over a wiki of skill documents) -- see [docs/VIRTUAL-SKILLS.md](../docs/VIRTUAL-SKILLS.md) | STDIO/HTTP | (included) | [mcp-skills.yaml](mcp-skills.yaml) |
+| mcp-skills-safe | Virtual skill-library MCP restricted to opaque-reference search/open/read/related (safe for untrusted clients) | STDIO/HTTP | (included) | [mcp-skills-safe.yaml](mcp-skills-safe.yaml) |
 | mcp-a2a    | A2A agent bridge MCP (consume external A2A agents as tools) | STDIO/HTTP | (included) | [mcp-a2a.yaml](mcp-a2a.yaml) |
 | mcp-aws-athena | AWS Athena query MCP (run queries sync or async, poll status, fetch results) | STDIO/HTTP | AWS | [mcp-aws-athena.yaml](mcp-aws-athena.yaml) |
 | mcp-proxy  | MCP proxy aggregating multiple downstream MCP connections | STDIO/HTTP | (included) | [mcp-proxy.yaml](mcp-proxy.yaml) |
@@ -80,7 +82,7 @@ mini-a goal="..." \
 
 `mcp-wiki` exposes a Mini-A wiki through read-friendly tools. External clients should start with `tree` or `browse`, then call `read` only for specific pages. Folders with `index.md` act as section sub-wikis.
 
-Read tools are optimized for retrieval: `browse`, `read`, and `search`.
+Read and discovery tools include: `context` (compact overview), `search` (full-text search), `read` (page content and frontmatter), `open` (read with link validation), `navigate` (link-relative traversal), `grep` (regex search), `related` (related pages), `browse` (section structure), `tree` (full folder hierarchy), `backlinks` (incoming page links), and `list` (enumerate pages).
 
 `audit=true` (or `OJOB_MCP_AUDIT=true`) logs every MCP tool call (tool name plus its call arguments — page paths, search queries, and so on) via OpenAF's `log()` function. It is off by default. See [Auditing MCP tool calls](#auditing-mcp-tool-calls) below — this works the same way for every MCP in this catalog, not just `mcp-wiki`/`mcp-wiki-safe`.
 
@@ -130,21 +132,31 @@ ojob mcps/mcp-wiki-safe.yaml \
 By default the opaque references returned by `search` (and the per-page issuance cooldown) live only in that one process's memory — fine for a single instance, but a problem if `mcp-wiki-safe` runs as multiple replicas behind a load balancer (e.g. a Kubernetes `Deployment`): the `read` call that consumes a reference can land on a different replica than the `search` call that issued it, and would incorrectly see `invalid-or-expired-reference`. Set `wikirestrictrefch` to a SLON/JSON OpenAF channel definition (same conventions as `auditch`, see `github.com/openaf/docs/openaf.md`) to move that state out of the process, so any replica can consume a reference issued by any other one:
 
 ```sh
-ojob mcps/mcp-wiki-safe.yaml onport=8888 label="Team wiki" wikiroot=./wiki \
+ojob mcps/mcp-wiki-safe.yaml \
+  onport=8888 \
+  label="Engineering wiki" \
+  wikiroot=./wiki \
+  wikiid=engineering \
   wikirestrictrefch="(type: 'redis', options: (host: 'redis.svc', port: 6379))"
 ```
 
-Use a channel type with real per-key operations across concurrent writers for multi-replica deployments — `redis` or `mongo` are appropriate; `simple` (the default, in-memory) and `file` are single-writer stores, fine for one instance but unsafe shared by concurrent replicas (whole-ledger overwrite races). Entries (references and page cooldowns) are discarded once their TTL/cooldown elapses, via lazy expiry on read plus a background sweep rate-limited to roughly once per `wikirestrictrefttl` seconds. `wikirestrictstate` (usage/budget counters) is independent of `wikirestrictrefch` and remains a local, per-process ledger.
+`wikiid` is the logical wiki namespace. Every replica serving Engineering must use `wikiid=engineering`; a separate deployment may use `wikiid=customer-acme` with the same Redis infrastructure and will not share opaque references or page cooldowns. If omitted, Mini-A derives a deterministic `auto-...` identifier from safe effective backend identity (for example, the canonical filesystem root or S3 bucket/prefix), so existing single-wiki setups continue to work. Explicit IDs are recommended for replicated/containerized production deployments, where paths or deployment details may differ across replicas. The effective namespace is included once in restricted-retrieval startup output.
+
+Use a channel type with real per-key operations across concurrent writers for multi-replica deployments — `redis` or `mongo` are appropriate; `simple` (the default, in-memory) and `file` are single-writer stores, fine for one instance but unsafe shared by concurrent replicas (whole-ledger overwrite races). Entries (references and page cooldowns) are discarded once their TTL/cooldown elapses, via lazy expiry on read plus a background sweep rate-limited to roughly once per `wikirestrictrefttl` seconds. Sweeping only removes expired entries in the current `wikiid` namespace. `wikirestrictstate` (usage/budget counters) is independent of `wikirestrictrefch` and remains a local, per-process ledger. Pre-namespace shared-channel entries from older versions are not consumed and are allowed to expire naturally.
 
 #### mcp-wiki-ops
 
 `mcp-wiki-ops` is a standalone companion server for wiki operations that are intentionally not part of the read-first `mcp-wiki` surface.
 
-It exposes a compact operations toolset:
+It exposes operations tools:
 
+- `context`: compact overview of wiki pages, sections, mounts, and operational stats.
 - `lint`: run wiki health checks (`broken_link`, `orphan`, `missing_index`, `index_missing_links`, `stale_index`, and related checks).
 - `edit`: full page write plus partial edit modes (`append`, `lineInsert`, `lineStart/lineEnd`, `section`).
 - `maintain`: structural operations `init`, `move`, and `delete`; `move` repairs internal links and supports redirect stubs.
+- `reindex`: rebuild the wiki Lucene search index.
+- `graph_build`: build or refresh the wiki knowledge graph (`graph.json`).
+- `graph_falkor`: sync or query wiki graph state with FalkorDB.
 
 `mcp-wiki-ops` defaults to writable mode. To force lint-only mode, set `wikiopsreadonly=true` (or `wikiaccess=ro` together with `wikiopsreadonly=true`).
 
@@ -368,6 +380,7 @@ Key tools include:
 - `random-choice`: Picks one or more elements from a provided array, with optional uniqueness guarantees.
 - `random-boolean`: Generates booleans with an optional bias probability for `true`.
 - `random-hex`: Builds hexadecimal strings of a specific length.
+- `random-password`: Generates secure random passwords with configurable length and character sets.
 
 #### mcp-ch
 
@@ -678,6 +691,7 @@ Primary tools:
 - `s3-get-object`: Retrieve object data with optional range reads or metadata fetches.
 - `s3-put-object`, `s3-delete-object`: Manage objects when `readwrite=true`.
 - `s3-presign-get`: Produce temporary GET URLs for sharing or ingestion pipelines.
+- `s3-select-object`: Query structured object content (CSV/JSON/Parquet) using SQL expressions.
 
 Example — list JSON reports under a prefix:
 

@@ -1,0 +1,11 @@
+# Deterministic example suite. Run it with a test/deterministic agent factory;
+# normal CLI evaluation runs the configured Mini-A model and tools.
+scenarios:
+  - name: concise-answer
+    goal: "Return the word ready."
+    args:
+      useshell: false
+    expected:
+      contains: ready
+    limits:
+      steps: 3

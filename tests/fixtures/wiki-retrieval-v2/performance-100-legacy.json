@@ -1,0 +1,139 @@
+{
+  "mode": "legacy",
+  "pages": 100,
+  "samples": 10,
+  "backend": "local-fs",
+  "runtime": "20260913",
+  "jvm": "26.0.2",
+  "operations": {
+    "compactSearch": {
+      "coldMs": 55.106542,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "warm": {
+        "p50": 10.1965,
+        "p95": 11.6805,
+        "p99": 11.6805,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 33570
+      },
+      "servingMetrics": null
+    },
+    "zeroSearch": {
+      "coldMs": 34.468042,
+      "coldSourceReads": 0,
+      "coldSourceBytes": 0,
+      "warm": {
+        "p50": 6.79375,
+        "p95": 7.578708,
+        "p99": 7.578708,
+        "sourceReads": 0,
+        "sourceBytes": 0,
+        "outputBytes": 750
+      },
+      "servingMetrics": null
+    },
+    "retrieve": {
+      "coldMs": 33.202458,
+      "coldSourceReads": 2,
+      "coldSourceBytes": 866,
+      "warm": {
+        "p50": 10.688375,
+        "p95": 12.555417,
+        "p99": 12.555417,
+        "sourceReads": 20,
+        "sourceBytes": 8660,
+        "outputBytes": 57430
+      },
+      "servingMetrics": null
+    },
+    "assembleContext": {
+      "coldMs": 27.425917,
+      "coldSourceReads": 20,
+      "coldSourceBytes": 8654,
+      "warm": {
+        "p50": 11.071916,
+        "p95": 12.155125,
+        "p99": 12.155125,
+        "sourceReads": 200,
+        "sourceBytes": 86540,
+        "outputBytes": 720
+      },
+      "servingMetrics": null
+    },
+    "open": {
+      "coldMs": 8.7935,
+      "coldSourceReads": 1,
+      "coldSourceBytes": 431,
+      "warm": {
+        "p50": 0.557541,
+        "p95": 1.858125,
+        "p99": 1.858125,
+        "sourceReads": 10,
+        "sourceBytes": 4310,
+        "outputBytes": 3230
+      },
+      "servingMetrics": null
+    },
+    "navigate": {
+      "coldMs": 2.14,
+      "coldSourceReads": 1,
+      "coldSourceBytes": 431,
+      "warm": {
+        "p50": 0.404333,
+        "p95": 0.815708,
+        "p99": 0.815708,
+        "sourceReads": 10,
+        "sourceBytes": 4310,
+        "outputBytes": 2120
+      },
+      "servingMetrics": null
+    },
+    "backlinks": {
+      "coldMs": 32.352541,
+      "coldSourceReads": 100,
+      "coldSourceBytes": 43280,
+      "warm": {
+        "p50": 27.292833,
+        "p95": 40.694209,
+        "p99": 40.694209,
+        "sourceReads": 1000,
+        "sourceBytes": 432800,
+        "outputBytes": 101280
+      },
+      "servingMetrics": null
+    },
+    "federation": {
+      "coldMs": 48.482291,
+      "coldSourceReads": 3,
+      "coldSourceBytes": 1299,
+      "warm": {
+        "p50": 12.227875,
+        "p95": 15.40925,
+        "p99": 15.40925,
+        "sourceReads": 30,
+        "sourceBytes": 12990,
+        "outputBytes": 64550
+      },
+      "servingMetrics": null
+    }
+  },
+  "initialBuild": {
+    "ms": 1789.338667,
+    "fixtureDiskBytes": 148877
+  },
+  "incrementalUpdate": {
+    "ms": 35.473125,
+    "ok": true,
+    "parsedPages": null
+  },
+  "fullPublication": {
+    "ms": 1395.26125,
+    "ok": true,
+    "fixtureDiskBytes": 132271
+  },
+  "memoryUsed": 100978696,
+  "comparison": "same modified checkout, flag-off versus flag-on; sequential measured runs",
+  "machine": "macOS local developer workspace"
+}

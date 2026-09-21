@@ -384,26 +384,29 @@
   }
 
   exports.testArtifactBundleHydratesAtomically = function() {
-    var dir = createTestDir(), archive = dir + "/bundle.zip"
+    var dir = createTestDir(), archive = dir + "/bundle.zip", builder, reader
     try {
+      io.mkdir(dir + "/source"); io.mkdir(dir + "/cache")
+      builder = new MiniAWikiManager({ backend: "fs", root: dir + "/source", access: "rw" })
+      builder.write("answer.md", { title: "Answer" }, "# Answer\nbundleparameter is indexed."); builder.reindex()
       var zip = new ZIP()
       try {
-        zip.putFile(".mini-a-wiki-lucene/segments_1", af.fromString2Bytes("lucene-binary-fixture"))
+        io.listFiles(builder._getLuceneIndexPath()).files.forEach(function(file) { if (file.isFile && file.filename !== "write.lock") zip.putFile(".mini-a-wiki-lucene/" + file.filename, io.readFileBytes(file.canonicalPath)) })
         zip.putFile(".mini-a-wiki-graph/graph.json", af.fromString2Bytes("{\"version\":2}"))
         zip.generate2File(archive, { compressionLevel: 0 })
-      } finally { try { zip.close() } catch(ignoreZip) {} }
-      var fake = { _getIndexRoot: function() { return dir }, _logFn: function() {} }
-      var changed = MiniAWikiManager.prototype._hydrateArtifactBundle.call(fake,
-        function() { return { etag: "fixture-v1", lastModified: "" } },
-        function() { return new java.io.FileInputStream(archive) }, "test", "bundle.zip")
-      ow.test.assert(changed, true, "a new bundle should hydrate")
-      ow.test.assert(io.readFileString(dir + "/.mini-a-wiki-lucene/segments_1"), "lucene-binary-fixture", "Lucene bundle entries should be extracted")
-      ow.test.assert(io.readFileString(dir + "/.mini-a-wiki-graph/graph.json"), "{\"version\":2}", "graph bundle entries should be extracted")
-      var unchanged = MiniAWikiManager.prototype._hydrateArtifactBundle.call(fake,
-        function() { return { etag: "fixture-v1", lastModified: "" } },
-        function() { throw "unchanged bundle must not download" }, "test", "bundle.zip")
-      ow.test.assert(unchanged, false, "unchanged bundle metadata should skip download")
-    } finally { cleanupTestDir(dir) }
+      } finally { zip.close() }
+      reader = new MiniAWikiManager({ backend: "fs", root: dir + "/cache", access: "ro" })
+      var changed = reader._hydrateArtifactBundle(function() { return { etag: "fixture-v1" } }, function() { return new java.io.FileInputStream(archive) }, "test", "bundle.zip")
+      ow.test.assert(changed, true, "a real validated bundle should hydrate")
+      ow.test.assert(reader._luceneIndexExists(), true, "activated Lucene generation is usable")
+      ow.test.assert(io.readFileString(reader._getGraphPath() + "/graph.json"), "{\"version\":2}", "graph follows the same activation pointer")
+      var unchanged = reader._hydrateArtifactBundle(function() { return { etag: "fixture-v1" } }, function() { throw "unchanged bundle must not download" }, "test", "bundle.zip")
+      ow.test.assert(unchanged, false, "unchanged metadata skips download")
+      var pointer = io.readFileString(dir + "/cache/.mini-a-wiki-bundles/current.json")
+      ow.test.assert(reader._hydrateArtifactBundle(function() { return { etag: "bad" } }, function() { return af.fromString2InputStream("not a zip") }, "test", "bundle.zip"), false, "corrupt replacement is rejected")
+      ow.test.assert(io.readFileString(dir + "/cache/.mini-a-wiki-bundles/current.json"), pointer, "failed replacement retains prior activation")
+      ow.test.assert(reader._luceneIndexExists(), true, "previous index survives refresh failure")
+    } finally { if (reader) reader.close(); if (builder) builder.close(); cleanupTestDir(dir) }
   }
 
   exports.testFsBackendReadWrite = function() {
@@ -771,8 +774,9 @@
       writePage(dir, "orphan.md", "---\ntitle: Orphan\n---\nNobody links here.")
       var wm = new MiniAWikiManager({ backend: "fs", root: dir })
       var report = wm.lint()
-      var orphans = report.issues.filter(function(i) { return i.type === "orphan" })
-      ow.test.assert(orphans.some(function(o) { return o.page === "orphan.md" }), true, "should detect orphan page")
+      var orphans = report.issues.filter(function(i) { return i.type === "structural_orphan" })
+      ow.test.assert(orphans.some(function(o) { return o.page === "orphan.md" }), true, "should detect page absent from its parent catalogue")
+      ow.test.assert(report.issues.some(function(i){return i.type === "index_missing_links" && i.target === "orphan.md"}),true,"orphan diagnostic identifies its missing index link")
     } finally {
       cleanupTestDir(dir)
     }
@@ -896,6 +900,25 @@
     ow.test.assert(warnings[0].indexOf("Failed incremental Lucene delete:") === 0, true, "generic warning should keep the original wording")
   }
 
+  exports.testLuceneWriterLockSkipsFakeChannel = function() {
+    var wm = new MiniAWikiManager({ backend: "fs", root: ".", access: "rw" })
+    wm._ensureLucene = function() { return true }
+    wm._ensureIndexRuntime = function() {}
+    wm._openLucene = function() { return __ }
+    ow.test.assert(wm._luceneSet("locked.md", "# Locked", "Locked"), false, "a held writer lock should skip the incremental write")
+    ow.test.assert(wm._luceneNeedsRebuild, true, "a skipped incremental write should request a later rebuild")
+  }
+
+  exports.testLuceneIncrementalWriteReleasesWriter = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("locked.md", { title: "Locked" }, "# Locked")
+      ow.test.assert(wm._luceneChannel, "", "an incremental write must release the Lucene writer immediately")
+      wm.close()
+    } finally { cleanupTestDir(dir) }
+  }
+
   // ── Serialise round-trip ──────────────────────────────────────────────────────
 
   exports.testWriteReadRoundTrip = function() {
@@ -966,6 +989,82 @@
     } finally {
       cleanupTestDir(dir)
     }
+  }
+
+  exports.testMountedNavigationPathsRoundTrip = function() {
+    [false, true].forEach(function(v2) {
+      var primaryDir = createTestDir(), mountedDir = createTestDir(), primary, writer
+      try {
+        writePage(primaryDir, "guides/setup.md", "---\ntitle: Wrong primary page\n---\n# Wrong primary page")
+        writePage(mountedDir, "index.md", "---\ntitle: Mounted Home\n---\n# Mounted Home")
+        writePage(mountedDir, "guides/index.md", "---\ntitle: Mounted Guides\n---\n# Mounted Guides")
+        writePage(mountedDir, "guides/setup.md", "---\ntitle: Mounted Setup\n---\n# Mounted Setup\nCorrect mounted content")
+        writePage(mountedDir, "guides/deep/page.md", "---\ntitle: Deep page\n---\n# Deep page")
+        if (v2) {
+          writer = new MiniAWikiManager({ backend: "fs", root: mountedDir, access: "rw", wikiretrievalv2: true })
+          ow.test.assert(writer.reindex().ok, true, "mounted v2 fixture builds")
+          writer.close(); writer = __
+        }
+        primary = new MiniAWikiManager({ backend: "fs", root: primaryDir, access: "ro", wikiretrievalv2: v2 })
+        ow.test.assert(primary.attach("docs", { backend: "fs", root: mountedDir }).ok, true, "mount attaches")
+        ow.test.assert(primary.tree("wiki:@docs/", 2).path, "@docs/", "tree accepts mounted wiki references")
+        ow.test.assert(primary.browse("wiki:@docs/").path, "@docs/", "browse accepts mounted wiki references")
+        ow.test.assert(primary.browse("wiki:").path, primary.browse("").path, "root reference resolves to primary")
+        var scopedContext = primary.context({ path: "wiki:@docs/" })
+        ow.test.assert(scopedContext.wiki, "docs", "context path selects mounted wiki")
+        ow.test.assert(scopedContext.retrieval.wiki, "docs", "retrieval status identifies selected wiki")
+        ow.test.assert(primary.context({ wiki: "docs" }).pages, scopedContext.pages, "explicit context selector agrees")
+        ow.test.assert(primary.context().retrieval.wiki, "primary", "default status is explicitly primary-only")
+        ow.test.assert(primary.context({wiki:"missing"}).error, "unknown-wiki", "unknown context mount does not fall back")
+        if (v2) {
+          ow.test.assert(primary.context().retrieval.search, "v2-build-required", "primary fixture has no index")
+          ow.test.assert(scopedContext.retrieval.search, "passage-v2", "mounted index is usable despite missing primary index")
+        }
+        var contextTool = __miniAMcpWikiCreateTool({root:primaryDir,access:"ro",agenticRetrieval:true}, primary)
+        ow.test.assert(contextTool.wiki({operation:"context",wiki:"docs"}).retrieval.wiki, "docs", "utility context forwards selector")
+        var savedContextTool = global.__wikiTool
+        try {
+          global.__wikiTool = contextTool
+          ;["mcps/mcp-wiki.yaml", "mcps/mcp-wiki-ops.yaml"].forEach(function(file) {
+            var job = io.readFileYAML(file).jobs.filter(function(j) { return j.name === "Wiki context overview" })[0]
+            ow.test.assert(new Function("args", job.exec)({path:"wiki:@docs/"}).retrieval.wiki, "docs", "MCP context job forwards mounted path")
+          })
+        } finally { global.__wikiTool = savedContextTool }
+        var tree = primary.tree("@docs/", 2), guides = tree.sections[0]
+        ow.test.assert(tree.path, "@docs/", "mounted root retains namespace")
+        ow.test.assert(tree.prefix, "@docs/", "tree prefix retains namespace")
+        ow.test.assert(tree.index.path, "@docs/index.md", "root index retains namespace")
+        ow.test.assert(guides.path, "@docs/guides/", "section retains namespace")
+        ow.test.assert(guides.index.path, "@docs/guides/index.md", "section index retains namespace")
+        ow.test.assert(guides.sections[0].pages[0].path, "@docs/guides/deep/page.md", "nested pages retain namespace")
+        var page = primary.agenticRead(guides.pages[0].path)
+        ow.test.assert(page.title, "Mounted Setup", "tree path reads mounted content instead of primary")
+        ow.test.assert(page.path, "@docs/guides/setup.md", "read preserves mounted identity")
+        ow.test.assert(primary.tree("@docs", 0).sections[0].index.path, "@docs/guides/index.md", "depth-limited nodes retain namespace")
+        var subtree = primary.tree(guides.path, 0)
+        ow.test.assert(subtree.prefix, "@docs/guides/", "returned section path round trips without duplicate prefix")
+        ;["@docs/guides", "@docs/guides/", "@docs/guides/setup.md"].forEach(function(path) {
+          var browse = primary.browse(path)
+          ow.test.assert(browse.path, "@docs/guides/", "browse normalizes mounted folder and page paths")
+          ow.test.assert(browse.nearest_index.path, "@docs/guides/index.md", "nearest index retains namespace")
+          ow.test.assert(browse.child_sections[0].index.path, "@docs/guides/deep/index.md", "missing child index retains namespace")
+          ow.test.assert(primary.agenticRead(browse.direct_pages[0].path).title, "Mounted Setup", "browse page round trips to mounted content")
+          browse.suggested_next_reads.forEach(function(next) {
+            ow.test.assert(next.indexOf("@docs/"), 0, "every suggested read is mount qualified")
+            ow.test.assert(isObject(primary.read(next)), true, "suggested path resolves in mounted backend")
+          })
+        })
+        ow.test.assert(primary.browse("@docs/").path, "@docs/", "mounted browse root retains namespace")
+        ow.test.assert(primary.tree("@missing/", 1).error, "mount not found: missing", "unknown mounts still fail explicitly")
+        ow.test.assert(primary.browse("@missing/").error, "mount not found: missing", "unknown browse mount still fails")
+        ow.test.assert(primary.tree("", 1).sections[0].pages[0].path, "guides/setup.md", "primary paths remain local")
+        ow.test.assert(primary._mounts[0].manager.tree("", 2).sections[0].path, "guides/", "child manager results remain local")
+      } finally {
+        if (writer) writer.close()
+        if (primary) primary.close()
+        cleanupTestDir(primaryDir); cleanupTestDir(mountedDir)
+      }
+    })
   }
 
   exports.testLintMissingIndex = function() {
@@ -1063,8 +1162,9 @@
     ow.test.assert(raw.indexOf("tree:") >= 0, true, "MCP metadata should expose tree")
     ow.test.assert(raw.indexOf("browse:") >= 0, true, "MCP metadata should expose browse")
     ow.test.assert(raw.indexOf("backlinks:") >= 0, true, "MCP metadata should expose backlinks")
-    ow.test.assert(raw.indexOf("move:") >= 0, true, "MCP metadata should expose move")
-    ow.test.assert(raw.indexOf("Wiki move page") >= 0, true, "MCP jobs should wire move")
+    ow.test.assert(/^\s+move\s*:/m.test(raw), false, "read-only MCP must not expose move")
+    var ops = io.readFileString("mcps/mcp-wiki-ops.yaml")
+    ow.test.assert(ops.indexOf("operation    : \"move\"") >= 0, true, "operations MCP should wire move")
   }
 
   exports.testMcpWikiSearchSchemasDescribeLexicalRetrieval = function() {
@@ -1298,6 +1398,49 @@
     ow.test.assert(cfg.wikilexical.indexOf("french") >= 0, true, "MCP configuration should pass lexical configuration to the wiki manager")
   }
 
+  exports.testMcpWikiRestrictedCrossWikiGraphHints = function() {
+    var dir=String(createTestDir()), writer, remote
+    try {
+      io.mkdir(dir+"/main");io.mkdir(dir+"/remote")
+      writer=new MiniAWikiManager({backend:"fs",root:dir+"/main",access:"rw",usegraph:true,wikiretrievalv2:true})
+      remote=new MiniAWikiManager({backend:"fs",root:dir+"/remote",access:"rw",wikiretrievalv2:true})
+      writer.write("seed.md",{title:"Seed"},"# Seed\nrestrictedcrossneedle [Remote](@private/private.md)")
+      remote.write("private.md",{title:"Remote"},"# Remote\nCross-wiki supporting evidence.")
+      writer.reindex();remote.reindex()
+      __miniAMcpWikiInit({wikirestrict:true,wikiroot:dir+"/main",wikiretrievalv2:true,usewikigraph:true,wikimounts:stringify([{name:"private",backend:"fs",root:dir+"/remote",usegraph:false}])},{access:"ro",readonly:true,allowRestrictedGraphHints:true})
+      var result=__miniAMcpWikiRestrictedSearch({query:"restrictedcrossneedle"}), hint=result.results.filter(function(r){return r.title==="Remote"})[0]
+      ow.test.assert(isDef(hint),true,"operator-enabled cross hint is available without target graph from multiline JSON configuration")
+      ow.test.assert(hint.description,"Related page","cross hint uses opaque description")
+      ow.test.assert(Object.keys(hint).sort().join(","),"description,reference,title","cross hint exposes no wiki, path, score or provenance")
+      ow.test.assert(stringify(result,__,"").indexOf("private"),-1,"neither target alias nor page leaks")
+      var read=__miniAMcpWikiRestrictedRead({reference:hint.reference})
+      ow.test.assert(isString(read.content) && read.content.indexOf("Cross-wiki supporting evidence")>=0,true,"opaque cross reference reads the bound destination revision")
+    } finally {if(writer)writer.close();if(remote)remote.close();if(global.__wikiManager && isFunction(global.__wikiManager.close))global.__wikiManager.close();cleanupTestDir(dir)}
+  }
+
+  exports.testMcpWikiRestrictedV2GraphHints = function() {
+    var dir=String(createTestDir()), writer
+    try {
+      writer=new MiniAWikiManager({backend:"fs",root:dir,access:"rw",usegraph:true,wikiretrievalv2:true})
+      writer.write("seed.md",{title:"Seed"},"# Seed\nrestrictedgraphneedle [Details](private.md)")
+      writer.write("private.md",{title:"Details",description:"Private authored description"},"# Details\nSupplemental evidence")
+      writer.reindex();writer.close()
+      __miniAMcpWikiInit({wikirestrict:true,wikiroot:dir,wikiretrievalv2:true,usewikigraph:false},{access:"ro",readonly:true,allowRestrictedGraphHints:false})
+      var off=__miniAMcpWikiRestrictedSearch({query:"restrictedgraphneedle",expandGraph:true})
+      ow.test.assert(isArray(off.results),true,"restricted fixture available: " + stringify(off,__,""))
+      ow.test.assert(off.results.length,1,"caller cannot opt into restricted graph traversal")
+      global.__wikiManager.close()
+      __miniAMcpWikiInit({wikirestrict:true,wikiroot:dir,wikiretrievalv2:true,usewikigraph:true},{access:"ro",readonly:true,allowRestrictedGraphHints:true})
+      var on=__miniAMcpWikiRestrictedSearch({query:"restrictedgraphneedle"})
+      ow.test.assert(on.results.length,2,"operator opt-in enables bounded V2 graph hints")
+      var related=on.results.filter(function(r){return r.title==="Details"})[0]
+      ow.test.assert(related.description,"Related page","V2 graph hint uses opaque related-page label")
+      ow.test.assert(isString(related.reference),true,"V2 graph hint carries an opaque reference")
+      ow.test.assert(Object.keys(related).sort().join(","),"description,reference,title","graph path, score, provenance and relation remain private")
+      ow.test.assert(stringify(on,__,"").indexOf("private.md"),-1,"underlying target path never disclosed")
+    } finally {if(writer)writer.close();if(global.__wikiManager && isFunction(global.__wikiManager.close))global.__wikiManager.close();cleanupTestDir(dir)}
+  }
+
   exports.testMcpWikiRestrictedGraphHintsAreOptInOpaqueReferences = function() {
     var dir = createTestDir()
     try {
@@ -1320,44 +1463,40 @@
       ow.test.assert(result.results[1].description, "Related page", "graph hints should not disclose graph relationship metadata")
       ow.test.assert(isString(result.results[1].reference), true, "graph hints should be exposed as opaque read references")
       ow.test.assert(isUnDef(result.results[1].path), true, "graph hints must not disclose their wiki paths")
+      global.__miniAMcpWiki = {restriction:new MiniAMcpWikiRestriction({wikirestrict:true,wikirestrictmetachars:6},{backend:"fs",root:dir})}
+      var capped = __miniAMcpWikiRestrictedSearch({query:"answer"})
+      ow.test.assert(capped.results[1].description,"","graph hint label cannot exceed the remaining metadata allowance")
+      ow.test.assert(capped.results.every(function(hit){return hit.title.length+hit.description.length<=6}),true,"direct and graph results share the same metadata ceiling")
     } finally {
       cleanupTestDir(dir)
     }
   }
 
   exports.testS3ArtifactsHydrateLocalSearchAndGraphCache = function() {
-    var dir = createTestDir()
+    var dir = createTestDir(), writer, reader
     try {
-      var payloads = {
-        "published/.mini-a-wiki-lucene/segments_1": "lucene-fixture",
-        "published/.mini-a-wiki-graph/graph.json": "{\"version\":2}"
+      io.mkdir(dir + "/source"); io.mkdir(dir + "/cache")
+      writer = new MiniAWikiManager({ backend: "fs", root: dir + "/source", access: "rw" })
+      writer.write("answer.md", { title: "Answer" }, "# Answer\ns3artifactparameter is indexed."); writer.reindex()
+      var payloads = {}
+      io.listFiles(writer._getLuceneIndexPath()).files.forEach(function(file) { if (file.isFile && file.filename !== "write.lock") payloads["published/.mini-a-wiki-lucene/" + file.filename] = io.readFileBytes(file.canonicalPath) })
+      payloads["published/.mini-a-wiki-graph/graph.json"] = af.fromString2Bytes("{\"version\":2}")
+      reader = new MiniAWikiManager({ backend: "fs", root: dir + "/cache", access: "ro" })
+      reader._backendType = "s3"; reader._config.bucket = "wiki-bucket"; reader._config.s3artifactprefix = "published/"; reader._config.indexdir = dir + "/cache"
+      reader._backend.client = {
+        listObjects: function(bucket,prefix) { ow.test.assert(bucket,"wiki-bucket","configured bucket used"); ow.test.assert(prefix,"published/","configured artifact prefix used"); return Object.keys(payloads).map(function(filename) { return { filename: filename } }) },
+        getObjectStream: function(bucket,key) { return new java.io.ByteArrayInputStream(payloads[key]) }
       }
-      var fake = {
-        _backendType: "s3",
-        _config: { bucket: "wiki-bucket", s3artifactprefix: "published/", indexdir: dir },
-        _getIndexRoot: function() { return dir },
-        _backend: { client: {
-          listObjects: function(bucket, prefix) {
-            ow.test.assert(bucket, "wiki-bucket", "artifact hydration should use the configured bucket")
-            ow.test.assert(prefix, "published/", "artifact hydration should use the configured prefix")
-            return Object.keys(payloads).map(function(filename) { return { filename: filename } })
-          },
-          getObjectStream: function(bucket, key) { return af.fromString2InputStream(payloads[key]) }
-        } },
-        _logFn: function() {}
-      }
-      MiniAWikiManager.prototype._hydrateS3Artifacts.call(fake)
-      ow.test.assert(io.readFileString(dir + "/.mini-a-wiki-lucene/segments_1"), "lucene-fixture", "Lucene artifact should be restored locally")
-      ow.test.assert(io.readFileString(dir + "/.mini-a-wiki-graph/graph.json"), "{\"version\":2}", "graph artifact should be restored locally")
-    } finally {
-      cleanupTestDir(dir)
-    }
+      ow.test.assert(reader._hydrateS3Artifacts(), true, "complete simulated S3 object collection is staged and validated")
+      ow.test.assert(reader._luceneIndexExists(), true, "real activated Lucene index usable")
+      ow.test.assert(io.readFileString(reader._getGraphPath()+"/graph.json"), "{\"version\":2}", "graph follows same activation")
+    } finally { if(reader)reader.close(); if(writer)writer.close(); cleanupTestDir(dir) }
   }
 
   exports.testMcpWikiRestrictedRefsAreSharedAcrossReplicasViaChannel = function() {
     var chDef = "(name: '_test_mcp_wiki_refs_" + genUUID().replace(/-/g, "") + "', type: 'simple')"
     var cfg = { backend: "fs", root: "." }
-    var baseArgs = { wikirestrict: true, wikirestrictminquerychars: 1, wikirestrictpagecooldown: 3600, wikirestrictrefch: chDef }
+    var baseArgs = { wikirestrict: true, wikiid: "wiki-a", wikirestrictminquerychars: 1, wikirestrictpagecooldown: 3600, wikirestrictrefch: chDef }
 
     // Each instance below stands in for one Kubernetes replica: they share nothing
     // with each other except the channel, so any cross-instance success here can
@@ -1381,16 +1520,64 @@
 
   exports.testMcpWikiRestrictedRefChannelSweepsExpiredEntries = function() {
     var chName = "_test_mcp_wiki_sweep_" + genUUID().replace(/-/g, "")
-    var r = new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictrefch: "(name: '" + chName + "', type: 'simple')" }, { backend: "fs", root: "." })
+    var chDef = "(name: '" + chName + "', type: 'simple')"
+    var r = new MiniAMcpWikiRestriction({ wikirestrict: true, wikiid: "wiki-a", wikirestrictrefch: chDef }, { backend: "fs", root: "." })
     var ref = r.issue("expiring-page.md")
     ow.test.assert(isString(ref), true, "reference should be issued")
 
-    // simulate the TTL having already elapsed and force an immediate sweep
-    $ch(chName).set({ kind: "ref", ref: ref }, { path: "expiring-page.md", expires: Date.now() - 1000 })
+    // Simulate an expired entry for this namespace and entries from another.
+    $ch(chName).set({ wiki: "wiki-a", kind: "ref", ref: ref }, { wiki: "wiki-a", path: "expiring-page.md", expires: Date.now() - 1000 })
+    $ch(chName).set({ wiki: "wiki-a", kind: "cooldown", hash: "valid-a" }, { wiki: "wiki-a", expires: Date.now() + 60000 })
+    $ch(chName).set({ wiki: "wiki-b", kind: "ref", ref: "expired-b" }, { wiki: "wiki-b", path: "other.md", expires: Date.now() - 1000 })
+    $ch(chName).set({ wiki: "wiki-b", kind: "cooldown", hash: "valid-b" }, { wiki: "wiki-b", expires: Date.now() + 60000 })
     r._lastSweep = 0
     r._purge()
 
-    ow.test.assert(isUnDef($ch(chName).get({ kind: "ref", ref: ref })), true, "an expired reference should be swept from the shared channel")
+    ow.test.assert(isUnDef($ch(chName).get({ wiki: "wiki-a", kind: "ref", ref: ref })), true, "an expired reference should be swept from this wiki namespace")
+    ow.test.assert(isMap($ch(chName).get({ wiki: "wiki-a", kind: "cooldown", hash: "valid-a" })), true, "a valid entry in this wiki namespace should remain")
+    ow.test.assert(isMap($ch(chName).get({ wiki: "wiki-b", kind: "ref", ref: "expired-b" })), true, "sweeping wiki-a must not remove another wiki's entries")
+    ow.test.assert(isMap($ch(chName).get({ wiki: "wiki-b", kind: "cooldown", hash: "valid-b" })), true, "sweeping wiki-a must not modify valid state in another namespace")
+  }
+
+  exports.testMcpWikiRestrictedRefChannelNamespacesIsolateWikis = function() {
+    var chName = "_test_mcp_wiki_namespaces_" + genUUID().replace(/-/g, "")
+    var chDef = "(name: '" + chName + "', type: 'simple')"
+    var cfg = { backend: "fs", root: "." }
+    var a = new MiniAMcpWikiRestriction({ wikirestrict: true, wikiid: "wiki-a", wikirestrictpagecooldown: 3600, wikirestrictrefch: chDef }, cfg)
+    var aReplica = new MiniAMcpWikiRestriction({ wikirestrict: true, wikiid: "wiki-a", wikirestrictpagecooldown: 3600, wikirestrictrefch: chDef }, cfg)
+    var b = new MiniAMcpWikiRestriction({ wikirestrict: true, wikiid: "wiki-b", wikirestrictpagecooldown: 3600, wikirestrictrefch: chDef }, cfg)
+    var refA = a.issue("docs/install.md")
+    ow.test.assert(isString(refA), true, "wiki-a should issue a reference")
+    ow.test.assert(isString(b.issue("docs/install.md")), true, "wiki-b must have an independent cooldown for an identical path")
+    ow.test.assert(isUnDef(b.consume(refA)), true, "a reference from wiki-a must not be consumable by wiki-b")
+    var grantA = aReplica.consume(refA)
+    ow.test.assert(isMap(grantA), true, "another replica with wiki-a should consume wiki-a's reference")
+
+    // A malformed/corrupt grant under wiki-a's key is still rejected unless its
+    // embedded grant binding agrees with the key's namespace.
+    var tampered = "tampered-reference"
+    $ch(chName).set({ wiki: "wiki-a", kind: "ref", ref: tampered }, { wiki: "wiki-b", path: "docs/install.md", expires: Date.now() + 60000 })
+    global.__miniAMcpWiki = { restriction: a }
+    ow.test.assert(__miniAMcpWikiRestrictedRead({ path: tampered }).error, "invalid-or-expired-reference", "a grant whose stored wiki differs from the current wiki must use the opaque-reference failure")
+  }
+
+  exports.testMcpWikiRestrictedDefaultWikiIdIsDeterministicAndSafe = function() {
+    var explicit = new MiniAMcpWikiRestriction({ wikirestrict: true, wikiid: "Engineering_Prod" }, { backend: "fs", root: "." })
+    ow.test.assert(explicit.wikiId, "engineering_prod", "explicit wiki IDs should be normalized to lowercase")
+    var invalidWikiId = false
+    try { new MiniAMcpWikiRestriction({ wikirestrict: true, wikiid: "bad wiki id" }, { backend: "fs", root: "." }) } catch(e) { invalidWikiId = String(e).indexOf("invalid wikiid") >= 0 }
+    ow.test.assert(invalidWikiId, true, "unsafe explicit wiki IDs should fail validation")
+    var fsA = new MiniAMcpWikiRestriction({ wikirestrict: true }, { backend: "fs", root: "." })
+    var fsB = new MiniAMcpWikiRestriction({ wikirestrict: true }, { backend: "fs", root: "./" })
+    var fsOther = new MiniAMcpWikiRestriction({ wikirestrict: true }, { backend: "fs", root: "tests" })
+    ow.test.assert(fsA.wikiId, fsB.wikiId, "equivalent filesystem roots should derive the same wiki namespace")
+    ow.test.assert(fsA.wikiId === fsOther.wikiId, false, "different filesystem roots should derive different wiki namespaces")
+    var s3A = new MiniAMcpWikiRestriction({ wikirestrict: true }, { backend: "s3", bucket: "docs", prefix: "public/", url: "https://key:secret@s3.example/?token=hidden" })
+    var s3B = new MiniAMcpWikiRestriction({ wikirestrict: true }, { backend: "s3", bucket: "docs", prefix: "public/", url: "https://other:password@s3.example/?token=different" })
+    var s3Other = new MiniAMcpWikiRestriction({ wikirestrict: true }, { backend: "s3", bucket: "docs", prefix: "customer/", url: "https://s3.example/" })
+    ow.test.assert(s3A.wikiId, s3B.wikiId, "credentials and URL tokens must not affect the default wiki namespace")
+    ow.test.assert(s3A.wikiId === s3Other.wikiId, false, "different S3 prefixes should derive different wiki namespaces")
+    ow.test.assert(s3A.wikiId.indexOf("secret") < 0 && s3A.wikiId.indexOf("hidden") < 0, true, "default wiki namespaces must not expose credentials or tokens")
   }
 
   exports.testMcpWikiOpsMetadataIncludesOpsTools = function() {
@@ -1473,7 +1660,7 @@
     try {
       var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
       wm.write("page.md", { title: "Page" }, "# Page\n\nFirst line.\nSecond line.\nThird line.")
-      var hits = wm.search("Second")
+      var hits = wm.search("Second", { compact: false })
       ow.test.assert(hits.length > 0, true, "should find a hit")
       ow.test.assert(isNumber(hits[0].line), true, "result should have line number")
       ow.test.assert(hits[0].line > 0, true, "line number should be positive")
@@ -1915,7 +2102,7 @@
       ow.test.assert(primary.read("@reference/guides/setup.md").meta.title, "Archive Setup", "archive mount should route reads")
       var hits = primary.search("archive-nested-keyword", { forceScan: true })
       ow.test.assert(hits.some(function(hit) { return hit.path === "@reference/guides/setup.md" }), true, "archive mount should join search")
-      ow.test.assert(primary.tree("@reference/", 2).sections[0].path, "guides/", "archive mount should build tree")
+      ow.test.assert(primary.tree("@reference/", 2).sections[0].path, "@reference/guides/", "archive mount should build tree")
       ow.test.assert(primary.browse("@reference/guides").nearest_index.exists, true, "archive mount should browse")
       ow.test.assert(primary.graph("neighbors", { path: "@reference/overview.md" }).length, 1, "archive mount should load graph state")
       var graphHints = primary.search("archive-root-keyword", { forceScan: true })
@@ -2131,17 +2318,18 @@
     ow.test.assert(stripped.indexOf("## Writing style") >= 0, true, "managed block should have Writing style")
     ow.test.assert(stripped.indexOf("## Ingestion workflow") >= 0, true, "managed block should have Ingestion workflow")
 
-    // Verify __miniAWikiAgentsTemplate is defined consistently in all three files
-    ow.test.assert(wikiJs.indexOf("__miniAWikiAgentsTemplate") >= 0,  true, "mini-a-wiki.js should define __miniAWikiAgentsTemplate")
-    ow.test.assert(mcpWiki.indexOf("__miniAWikiAgentsTemplate") >= 0, true, "mcp-wiki.yaml should define __miniAWikiAgentsTemplate")
-    ow.test.assert(mcpOps.indexOf("__miniAWikiAgentsTemplate") >= 0,  true, "mcp-wiki-ops.yaml should define __miniAWikiAgentsTemplate")
-    ow.test.assert(wikiJs.indexOf("__miniAWikiLogTemplate") >= 0,  true, "mini-a-wiki.js should define __miniAWikiLogTemplate")
-    ow.test.assert(mcpWiki.indexOf("__miniAWikiLogTemplate") >= 0, true, "mcp-wiki.yaml should define __miniAWikiLogTemplate")
-    ow.test.assert(mcpOps.indexOf("__miniAWikiLogTemplate") >= 0,  true, "mcp-wiki-ops.yaml should define __miniAWikiLogTemplate")
-    // Verify all three share the v1 stock phrase constant (used for migration detection)
-    ow.test.assert(wikiJs.indexOf("__MINI_A_WIKI_V1_STOCK_PHRASE") >= 0,  true, "mini-a-wiki.js should define V1_STOCK_PHRASE")
-    ow.test.assert(mcpWiki.indexOf("__MINI_A_WIKI_V1_STOCK_PHRASE") >= 0, true, "mcp-wiki.yaml should define V1_STOCK_PHRASE")
-    ow.test.assert(mcpOps.indexOf("__MINI_A_WIKI_V1_STOCK_PHRASE") >= 0,  true, "mcp-wiki-ops.yaml should define V1_STOCK_PHRASE")
+    // Standalone launchers delegate to one shared implementation instead of
+    // duplicating managed templates and migration constants in YAML.
+    var shared = io.readFileString("mini-a-mcp-wiki.js")
+    ow.test.assert(shared.indexOf('loadLib("mini-a-wiki.js")') >= 0,true,"shared MCP module loads the authoritative wiki implementation")
+    var launchers = ["mcps/mcp-wiki.yaml","mcps/mcp-wiki-ops.yaml"]
+    launchers.forEach(function(path){
+      var init = io.readFileYAML(path).jobs.filter(function(job){return job.name === "Init"})[0]
+      ow.test.assert(init.exec.indexOf('loadLib("mini-a-mcp-wiki.js")') >= 0,true,"launcher loads shared MCP module")
+      ow.test.assert(init.exec.indexOf("__miniAMcpWikiInit(args") >= 0,true,"launcher delegates manager construction to shared initializer")
+    })
+    ow.test.assert(wikiJs.indexOf("__miniAWikiLogTemplate") >= 0,true,"core supplies the shared log template")
+    ow.test.assert(wikiJs.indexOf("__MINI_A_WIKI_V1_STOCK_PHRASE") >= 0,true,"core retains legacy migration fingerprint")
   }
 
   // ── OKF compatibility ─────────────────────────────────────────────────────────
@@ -2513,7 +2701,7 @@
       var read = wm.agenticRead(search.results[0].ref, { section: "Heap pressure", maxChars: 80 })
       ow.test.assert(read.body.indexOf("Xmx") >= 0, true, "bounded read should contain requested section")
       ow.test.assert(read.truncated, true, "large section should expose deterministic continuation")
-      ow.test.assert(read.next.startLine > read.lineStart, true, "continuation should advance by line")
+      ow.test.assert(read.next.charOffset > read.charOffset, true, "continuation should advance within pinned range")
 
       var grep = wm.grep("troubleshooting/", "Xmx", { contextLines: 1, limit: 5 })
       ow.test.assert(grep.matches.length, 2, "grep should search a known directory without returning pages")
@@ -2533,6 +2721,33 @@
       ow.test.assert(missing.error, "section not found: missing", "read should report invalid sections explicitly")
       var noMatches = wm.grep("plain.md", "absent", {})
       ow.test.assert(noMatches.matches.length, 0, "grep should report no matches compactly")
+      wm.close()
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testBoundedRetrievalPipelineRanksEvidenceAndCitations = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikisourceurl: "https://docs.example.com/{{pathNoExt}}" })
+      wm.write("guides/cache.md", { title: "Cache guide" }, "# Cache\n\nUse cache-control max-age for static assets.")
+      wm.write("guides/database.md", { title: "Database" }, "# Database\n\nUse connection pooling for SQL queries.")
+      var result = wm.retrieve("cache", { maxCandidates: 5, maxInspected: 1, maxBytes: 300 })
+      ow.test.assert(result.stages.join(","), "query,search,inspect", "retrieval should expose only executed pipeline stages")
+      ow.test.assert(result.evidence.length, 1, "inspect budget should cap returned evidence")
+      ow.test.assert(result.evidence[0].path, "guides/cache.md", "relevance ranking should suppress unrelated documents")
+      ow.test.assert(result.evidence[0].scoreComponents.structural > 0, true, "ranking should expose deterministic structural relevance")
+      ow.test.assert(result.citations[0], "https://docs.example.com/guides/cache", "evidence should retain the source citation")
+      ow.test.assert(result.budget.used.bytes <= result.budget.limits.bytes, true, "retrieval must honor its byte budget")
+      wm.write("guides/unicode.md", { title: "Unicode" }, "# Unicode\n\n" + new Array(401).join("é"))
+      var unicode = wm.retrieve("unicode", { maxCandidates: 1, maxInspected: 1, maxBytes: 512 })
+      ow.test.assert(unicode.budget.used.bytes <= unicode.budget.limits.bytes, true, "byte budgets must also hold for multi-byte evidence")
+      wm.write("guides/related.md", { title: "Related guide" }, "# Related\n\nEvidence discovered through the knowledge graph.")
+      var nativeRelated = wm.related
+      wm.related = function() { return { backlinks: [{ path: "guides/related.md" }], graph: [] } }
+      var expanded = wm.retrieve("cache", { maxCandidates: 1, maxInspected: 2, maxGraphExpansion: 1, maxBytes: 600, expandGraph: true })
+      wm.related = nativeRelated
+      ow.test.assert(expanded.budget.used.graphExpansion, 1, "graph expansion must honor and report its separate budget")
+      ow.test.assert(expanded.ranking[1].scoreComponents.graph, 1, "graph-discovered candidates should expose graph relevance")
       wm.close()
     } finally { cleanupTestDir(dir) }
   }
@@ -2731,6 +2946,26 @@
       var safe = io.readFileString("mcps/mcp-wiki-safe.yaml")
       ow.test.assert(safe.indexOf("wikisourceurl") < 0, true, "mcp-wiki-safe.yaml must not declare wikisourceurl")
     } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testWikiSelectionRoutesOnlyChosenMounts = function() {
+    var primary = createTestDir(), a = createTestDir(), b = createTestDir()
+    try {
+      writePage(primary, "primary.md", "# Primary\ncommon-selector-keyword")
+      writePage(a, "a.md", "# A\ncommon-selector-keyword")
+      writePage(b, "b.md", "# B\ncommon-selector-keyword")
+      var wm = new MiniAWikiManager({ backend: "fs", root: primary, access: "ro" })
+      wm.attach("wikiA", { backend: "fs", root: a, label: "A docs", description: "A corpus" })
+      wm.attach("wikiB", { backend: "fs", root: b })
+      var onlyA = wm.searchSelected("common-selector-keyword", { wiki: "wikiA", limit: 10 })
+      ow.test.assert(onlyA.length, 1, "single selected mount should be the only searched manager")
+      ow.test.assert(onlyA[0].path, "@wikiA/a.md", "selected mounted paths retain their legacy prefix")
+      ow.test.assert(onlyA[0].wiki, "wikiA", "results identify their selected source")
+      var subset = wm.searchSelected("common-selector-keyword", { wiki: ["wikiA", "wikiB"], limit: 1 })
+      ow.test.assert(subset.length, 1, "selection limit remains global")
+      ow.test.assert(wm.resolveWikiSelection("missing").error, "unknown-wiki", "unknown selectors must not fall back")
+      ow.test.assert(wm.context().wikis.length, 3, "context exposes a safe primary plus mounts catalog")
+    } finally { cleanupTestDir(primary); cleanupTestDir(a); cleanupTestDir(b) }
   }
 
   return exports

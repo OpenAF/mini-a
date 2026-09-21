@@ -1,0 +1,45 @@
+# Include this file in an oJob to combine Mini-A evals with OpenAF tests.
+include:
+- oJobTest.yaml
+
+ojob:
+  opacks:
+  - oJob-common
+  loadLibs:
+  - mini-a.js
+  - mini-a-eval.js
+
+jobs:
+- name: MiniA Eval
+  help:
+    text: Runs Mini-A scenarios as OpenAF tests. Follow with oJob Test Results or a report job.
+    expects:
+    - name: scenario
+      desc: One inline scenario. Supply exactly one of scenario, scenarios or file.
+    - name: scenarios
+      desc: An array of inline scenarios using the existing eval schema.
+    - name: file
+      desc: An existing evaluation YAML/JSON file or directory.
+    - name: suite
+      desc: OpenAF test suite name (defaults to Mini-A evaluations).
+    - name: evalArgs
+      desc: Shared Mini-A arguments; scenario args and setup.args take precedence.
+    - name: baseline
+      desc: Optional baseline report JSON filename.
+    - name: output
+      desc: Optional evaluation report JSON filename.
+    - name: key
+      desc: Optional $set key for the full evaluation report.
+  exec: |
+    var sources = [args.scenario, args.scenarios, args.file].filter(function(value) { return isDef(value) })
+    if (sources.length !== 1) throw new Error("MiniA Eval requires exactly one of scenario, scenarios or file")
+    var evaluator = new MiniAEval(isMap(args.evaluatorOptions) ? args.evaluatorOptions : {})
+    var scenarios = isDef(args.file) ? evaluator.load(args.file) : (isDef(args.scenario) ? [args.scenario] : args.scenarios)
+    var baseline = isDef(args.baseline) ? io.readFileJSON(args.baseline) : __
+    args.evalReport = evaluator.runTests(scenarios, {
+      suite: args.suite,
+      args: isMap(args.evalArgs) ? args.evalArgs : {},
+      baseline: baseline
+    })
+    if (isString(args.output)) io.writeFileJSON(args.output, args.evalReport)
+    if (isString(args.key)) $set(args.key, args.evalReport)

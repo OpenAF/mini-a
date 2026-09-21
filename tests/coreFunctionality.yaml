@@ -1,6 +1,66 @@
 jobs:
+- name: MiniA Core Tests::SubtaskAmbiguousSubmissionDoesNotRetry
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskAmbiguousSubmissionDoesNotRetry
+
+- name: MiniA Core Tests::ChildDiagnosticsScope
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testChildDiagnosticsDoNotDescribeParentConversation
+
+- name: MiniA Core Tests::CurrentConversationStatus
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testCurrentConversationStatusRefreshesOnRetry
+
+- name: MiniA Core Tests::ConsoleChartMarkdown
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testConsoleChartMarkdown
+
+- name: MiniA Core Tests::ConsoleChartStreaming
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testConsoleChartStreaming
+
+- name: MiniA Core Tests::FinalAnswerPreservesConsoleChartFence
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFinalAnswerPreservesConsoleChartFence
+
+- name: MiniA Core Tests::ProxyToolThoughtDisplaysDownstreamTool
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testProxyToolThoughtDisplaysDownstreamTool
+
 - name: MiniA Core Tests::Init
   exec: args.tests = require("tests/coreFunctionality.js")
+
+- name: MiniA Core Tests::LargeSummaryChunksAndMergeStayBounded
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLargeSummaryChunksAndMergeStayBounded
+
+- name: MiniA Core Tests::SummaryRequestsAreIsolated
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSummaryRequestsAreIsolated
+
+- name: MiniA Core Tests::OverflowRecoveryResetsProviderHistories
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOverflowRecoveryResetsProviderHistories
+
+- name: MiniA Core Tests::SummaryMaintenanceUsesSafeBoundary
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSummaryMaintenanceUsesSafeBoundary
+
+- name: MiniA Core Tests::ContextTokenCacheRefreshesAfterTextReads
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testContextTokenCacheRefreshesAfterTextReads
 
 - name: MiniA Core Tests::CleanCodeBlocks
   from: MiniA Core Tests::Init
@@ -126,6 +186,11 @@ jobs:
   from: MiniA Core Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testMarkdownStreamRenderDoesNotPassWidthAsAnsiStyle
+
+- name: MiniA Core Tests::ConsoleEventTextPreservesNewlines
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testConsoleEventTextPreservesNewlines
 
 - name: MiniA Core Tests::TraceFnReceivesEventsAndPayloads
   from: MiniA Core Tests::Init
@@ -406,6 +471,36 @@ jobs:
   from: MiniA Core Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testSubtaskManagerCancelStopsLocalChildAgent
+
+- name: MiniA Core Tests::SubtaskCancellationWinsChildStopCompletion
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskCancellationWinsChildStopCompletion
+
+- name: MiniA Core Tests::SubtaskShutdownDoesNotStartQueuedWork
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskShutdownDoesNotStartQueuedWork
+
+- name: MiniA Core Tests::SubtaskCompletionPublishesResultBeforeTerminalState
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskCompletionPublishesResultBeforeTerminalState
+
+- name: MiniA Core Tests::SubtaskShutdownCancelsRemoteTask
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskShutdownCancelsRemoteTask
+
+- name: MiniA Core Tests::SubtaskRemoteOutcomeUnknownDoesNotRetry
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskRemoteOutcomeUnknownDoesNotRetry
+
+- name: MiniA Core Tests::SubtaskWorkerTotalTimeout
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskManagerEnforcesWorkerTotalTimeout
 
 - name: MiniA Core Tests::SubtaskActivePastDeadline
   from: MiniA Core Tests::Init
@@ -772,6 +867,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testWebYamlExposesHomeAndSkillParameters
 
+- name: MiniA Core Tests::WebAutoPlanningPhaseLifecycle
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWebAutoPlanningPhaseLifecycle
+
 - name: MiniA Core Tests::WarnUnknownArgsSuggestsClosestMatch
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -816,6 +916,11 @@ jobs:
   from: MiniA Core Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testShouldWarnUnknownArgsOnlyForConsoleMode
+
+- name: MiniA Core Tests::WebMarkdownImageGuidance
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWebMarkdownImageGuidanceOnlyAppliesToWebMarkdownResponses
 
 - name: MiniA Core Tests::InitSkipsUnknownArgWarningsForNonConsoleRuns
   from: MiniA Core Tests::Init
@@ -947,6 +1052,36 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testFormatTierCacheTokensRendersOnlyNonZeroCounters
 
+- name: MiniA Core Tests::JsonRepairPreservesStringPayloads
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testJsonRepairPreservesStringPayloads
+
+- name: MiniA Core Tests::JsonRecoveryRespectsProviderMode
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testJsonRecoveryRespectsProviderMode
+
+- name: MiniA Core Tests::JsonRetryAcceptsParsedResponses
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testJsonRetryAcceptsParsedResponses
+
+- name: MiniA Core Tests::ReplyPromptUsesObjectParams
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testReplyPromptUsesObjectParams
+
+- name: MiniA Core Tests::ReplyToolRecoveryUsesOneProviderRequest
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testReplyToolRecoveryUsesOneProviderRequest
+
+- name: MiniA Core Tests::ReplyCaptureRejectsInvalidAndDuplicateActions
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testReplyCaptureRejectsInvalidAndDuplicateActions
+
 include:
 - oJobTest.yaml
 
@@ -955,6 +1090,12 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Core Tests::SubtaskAmbiguousSubmissionDoesNotRetry
+- MiniA Core Tests::ChildDiagnosticsScope
+- MiniA Core Tests::CurrentConversationStatus
+- MiniA Core Tests::ConsoleChartMarkdown
+- MiniA Core Tests::ConsoleChartStreaming
+- MiniA Core Tests::FinalAnswerPreservesConsoleChartFence
 - MiniA Core Tests::CleanCodeBlocks
 - MiniA Core Tests::ParseRulesArgumentSupportsPlainText
 - MiniA Core Tests::ParseRulesArgumentSupportsBulletLists
@@ -980,6 +1121,7 @@ todo:
 - MiniA Core Tests::MarkdownStreamPreviewGeometry
 - MiniA Core Tests::ConsoleStreamReceivesPartialDeltasForPreview
 - MiniA Core Tests::MarkdownStreamRenderDoesNotPassWidthAsAnsiStyle
+- MiniA Core Tests::ConsoleEventTextPreservesNewlines
 - MiniA Core Tests::TraceFnReceivesEventsAndPayloads
 - MiniA Core Tests::SupportsPromptStreamWithStatsCompatForRawPromptStreamProviders
 - MiniA Core Tests::SupportsPromptStreamWithStatsCompatFallsBackToDirectMethods
@@ -1108,6 +1250,7 @@ todo:
 - MiniA Core Tests::WarnUnknownArgsAcceptsValidRuntimeParameters
 - MiniA Core Tests::WarnUnknownArgsAcceptsAdditionalValidParameters
 - MiniA Core Tests::WebYamlExposesHomeAndSkillParameters
+- MiniA Core Tests::WebAutoPlanningPhaseLifecycle
 - MiniA Core Tests::WarnUnknownArgsSuggestsClosestMatch
 - MiniA Core Tests::WikiToolNotVisibleWhenDisabled
 - MiniA Core Tests::WikiToolVisibleWhenEnabled
@@ -1117,6 +1260,7 @@ todo:
 - MiniA Core Tests::ProxyDispatchSchemaOmitsReadresultParamsWhenStdutilsEnabled
 - MiniA Core Tests::ResultAliasToolsBypassInlineLimitGuard
 - MiniA Core Tests::ShouldWarnUnknownArgsOnlyForConsoleMode
+- MiniA Core Tests::WebMarkdownImageGuidance
 - MiniA Core Tests::InitSkipsUnknownArgWarningsForNonConsoleRuns
 - MiniA Core Tests::InitKeepsUnknownArgWarningsForConsoleRuns
 - MiniA Core Tests::MalformedToolCallFallbackDisablesMainTools
@@ -1143,3 +1287,21 @@ todo:
 - MiniA Core Tests::KnownArgumentNamesIncludesLcJsonRetries
 - MiniA Core Tests::RecordTokenUsageTracksCacheTokensPerTier
 - MiniA Core Tests::FormatTierCacheTokensRendersOnlyNonZeroCounters
+- MiniA Core Tests::JsonRepairPreservesStringPayloads
+- MiniA Core Tests::JsonRecoveryRespectsProviderMode
+- MiniA Core Tests::JsonRetryAcceptsParsedResponses
+- MiniA Core Tests::ReplyPromptUsesObjectParams
+- MiniA Core Tests::ReplyToolRecoveryUsesOneProviderRequest
+- MiniA Core Tests::ReplyCaptureRejectsInvalidAndDuplicateActions
+- MiniA Core Tests::SubtaskCancellationWinsChildStopCompletion
+- MiniA Core Tests::SubtaskShutdownDoesNotStartQueuedWork
+- MiniA Core Tests::SubtaskCompletionPublishesResultBeforeTerminalState
+- MiniA Core Tests::SubtaskShutdownCancelsRemoteTask
+- MiniA Core Tests::SubtaskRemoteOutcomeUnknownDoesNotRetry
+- MiniA Core Tests::SubtaskWorkerTotalTimeout
+- MiniA Core Tests::SummaryRequestsAreIsolated
+- MiniA Core Tests::OverflowRecoveryResetsProviderHistories
+- MiniA Core Tests::SummaryMaintenanceUsesSafeBoundary
+- MiniA Core Tests::ContextTokenCacheRefreshesAfterTextReads
+- MiniA Core Tests::LargeSummaryChunksAndMergeStayBounded
+- MiniA Core Tests::ProxyToolThoughtDisplaysDownstreamTool

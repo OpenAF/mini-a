@@ -94,6 +94,111 @@
     return agent._buildSystemPromptWithBudget("chatbot-test", payload, agent._CHATBOT_SYSTEM_PROMPT, { args: args || {}, mode: "chatbot" })
   }
 
+  exports.testLargeSummaryChunksAndMergeStayBounded = function() {
+    var agent = createAgent(), source = io.readFileString("mini-a.js"), inputs = []
+    agent.fnI = function() {}
+    agent._use_lc = true; agent.lc_llm = {}; agent.llm = {}
+    agent._withExponentialBackoff = function(fn) { return fn() }
+    agent._promptIsolatedSummary = function(text, instructions, lc) {
+      ow.test.assert(lc, true, "Use the selected summary tier")
+      inputs.push(agent._estimateTokens(text))
+      // Force a verbose response so merge reduction is also exercised.
+      return { response: text, stats: {} }
+    }
+    var begin = source.indexOf("    var summarize = ctx => {")
+    var end = source.indexOf("    // Helper function to check and summarize context", begin)
+    var factory = new Function("args", "var runtime = {}, addCall = function() {}, registerCallUsage = function() {};\n" + source.substring(begin, end) + "\nreturn summarize;")
+    var summarize = factory.call(agent, { maxcontext: 200000, lccontextlimit: 16000 })
+    var original = new Array(667417).join("x")
+    var result = summarize(original)
+    ow.test.assert(inputs.length > 2, true, "Exercise chunk and merge passes")
+    ow.test.assert(Math.max.apply(Math, inputs) <= 7200, true, "Every request respects the smaller summary budget")
+    ow.test.assert(result.length < 12500, true, "Even an echoing model must produce bounded recovery context")
+  }
+
+  exports.testSummaryRequestsAreIsolated = function() {
+    ["openai", "ollama"].forEach(function(type) {
+      var agent = createAgent(), requests = [], instances = []
+      agent.fnI = function() {}
+      agent._oaf_model = { type: type, model: "test", key: "test-only", url: "http://localhost:1" }
+      agent._oaf_lc_model = agent._oaf_model
+      agent.llm = $llm(agent._oaf_model)
+      agent.llm.withInstructions("Executor policy")
+      agent.llm.getGPT().setConversation([{ role: "system", content: "Executor policy" }, { role: "user", content: "old tool output" }])
+      var original = stringify(agent.llm.getGPT().getConversation())
+      agent._createBareLlmInstance = function(config) {
+        var isolated = $llm(config)
+        instances.push(isolated)
+        isolated.getGPT().model._request = function(route, body) {
+          requests.push(jsonParse(stringify(body)))
+          if (requests.length === 3) throw new Error("simulated failure")
+          if (type === "openai") return { choices: [{ finish_reason: "stop", message: { role: "assistant", content: "compact notes" } }], usage: {} }
+          return { message: { role: "assistant", content: "compact notes" }, done: true }
+        }
+        return isolated
+      }
+      ow.test.assert(agent._promptIsolatedSummary("chunk one", "Summarize notes", false).response, "compact notes", "Return plain prose")
+      agent._promptIsolatedSummary("chunk two", "Summarize notes", true)
+      var failed = false
+      try { agent._promptIsolatedSummary("chunk three", "Summarize notes", false) } catch(e) { failed = true }
+      ow.test.assert(failed, true, "Propagate failure for caller fallback/retry")
+      ow.test.assert(instances.length, 3, "Each invocation gets a fresh adapter")
+      requests.forEach(function(body, index) {
+        ow.test.assert(isUnDef(body.tools) || body.tools.length === 0, true, "Summaries cannot execute tools")
+        var sent = stringify(body.messages)
+        ow.test.assert(sent.indexOf("old tool output") < 0, true, "Do not inherit executor history")
+        ow.test.assert(sent.indexOf("compact notes") < 0, true, "Do not accumulate previous chunks")
+      })
+      ow.test.assert(stringify(agent.llm.getGPT().getConversation()), original, "Success and failure leave executor untouched")
+    })
+  }
+
+  exports.testOverflowRecoveryResetsProviderHistories = function() {
+    var agent = createAgent()
+    function adapter() {
+      var history = [{ role: "system", content: "policy" }, { role: "developer", content: "constraints" }, { role: "assistant", tool_calls: [{ id: "c1" }] }, { role: "tool", tool_call_id: "c1", content: new Array(200001).join("x") }]
+      var gpt = { getConversation: function() { return history }, setConversation: function(c) { history = c } }
+      return { getGPT: function() { return gpt } }
+    }
+    agent.llm = adapter(); agent.lc_llm = adapter(); agent._llmNoTools = adapter(); agent._lcLlmNoTools = agent.lc_llm
+    agent._resetProviderHistoryAfterOverflow("source facts and decisions")
+    ;[agent.llm, agent.lc_llm, agent._llmNoTools].forEach(function(llm) {
+      var c = llm.getGPT().getConversation()
+      ow.test.assert(c.length, 3, "Replace full exchanges with one summary")
+      ow.test.assert(c[0].content, "policy", "Keep system policy")
+      ow.test.assert(c[1].content, "constraints", "Keep developer constraints")
+      ow.test.assert(c[2].content.indexOf("source facts") >= 0, true, "Retain working evidence")
+      ow.test.assert(stringify(c).length < 500, true, "Actual next provider history is compact")
+    })
+  }
+
+  exports.testSummaryMaintenanceUsesSafeBoundary = function() {
+    var source = io.readFileString("mini-a.js")
+    var begin = source.indexOf("    var finalizeToolExecution =")
+    var end = source.indexOf("    this._finalizeToolExecution = finalizeToolExecution", begin)
+    ow.test.assert(begin >= 0 && end > begin, true, "Locate tool finalizer")
+    ow.test.assert(source.substring(begin, end).indexOf("checkAndSummarizeContext()"), -1, "Concurrent callbacks must not invoke an LLM")
+    ow.test.assert(source.indexOf("markContextDirty()\n      checkAndSummarizeContext()\n      var stepStartTime") >= 0, true, "Execution boundary handles pending context")
+  }
+
+  exports.testContextTokenCacheRefreshesAfterTextReads = function() {
+    var agent = createAgent(), source = io.readFileString("mini-a.js")
+    var begin = source.indexOf("    var markContextDirty = () => {")
+    var end = source.indexOf("    var getEffectiveContextBudget", begin)
+    var factory = new Function("runtime", source.substring(begin, end) + "\nreturn { dirty: markContextDirty, text: getCachedContextText, tokens: getCachedContextTokens };")
+    var runtime = { context: [new Array(4001).join("x")], contextTextDirty: true }
+    var cache = factory.call(agent, runtime)
+    var before = cache.tokens()
+    runtime.context = ["short", "notes"]
+    cache.dirty()
+    ow.test.assert(cache.text(""), "shortnotes", "Read compact text first")
+    ow.test.assert(cache.tokens() < before, true, "Text read must not hide stale token count")
+    ow.test.assert(cache.text("\n"), "short\nnotes", "Cache must respect separator")
+    runtime.context = []
+    cache.dirty(); cache.text("")
+    ow.test.assert(cache.tokens(), agent._estimateTokens(""), "Empty history invalidates previous count")
+  }
+
   exports.testCleanCodeBlocks = function() {
     var agent = createAgent()
     var fenced = "```json\n{\"action\":\"final\"}\n```"
@@ -568,6 +673,35 @@
     ow.test.assert(events.length === 2, true, "Should capture normalized thought-like events")
     ow.test.assert(events[0].message === "first line second line", true, "Direct thought events should be single-line and trimmed")
     ow.test.assert(events[1].message === "plan this next", true, "Counter-logged think events should be single-line and trimmed")
+  }
+
+  exports.testProxyToolThoughtDisplaysDownstreamTool = function() {
+    var agent = createAgent()
+    var events = []
+    agent._fnI = function(event, message) { events.push({ event: event, message: message }) }
+    var params = { action: "call", tool: "http-request", arguments: { url: "https://example.com" } }
+    var extracted = agent._extractToolCallActions({ tool_calls: [
+      { function: { name: "proxy-dispatch", arguments: stringify(params, __, "") } }
+    ] }, ["proxy-dispatch"])
+    ow.test.assert(extracted[0].thought, "Using tool 'http-request'", "Native tool fallback should display the downstream tool")
+    ow.test.assert(extracted[0].action, "proxy-dispatch", "Display translation must preserve routing")
+    ow.test.assert(extracted[0].params.tool, "http-request", "Display translation must preserve downstream arguments")
+    agent._emitCanonicalThoughtEvent("proxy-dispatch", "Use tool 'proxy-dispatch'", "(no thought)", params)
+    ow.test.assert(events[0].message, "Using tool 'http-request'", "Action-mode thoughts should display the downstream tool")
+    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", params, "Fetch the page"), "Fetch the page", "Descriptive thoughts should be preserved")
+    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { action: "list" }, "Use tool 'proxy-dispatch'"), "Listing available tools", "Management actions describe their operation")
+    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { action: "call", tool: "" }, "Use tool 'proxy-dispatch'"), "Using tool 'proxy-dispatch'", "Missing downstream names must not invent a tool")
+    var callAliases = ["", "execute", "run", "invoke", "call_tool", " CALL "]
+    callAliases.forEach(function(action) {
+      var aliasParams = { action: action, tool: " wiki " }
+      ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", aliasParams, "Using tool 'proxy-dispatch' #2"), "Using tool 'wiki' #2", "Execution aliases should display the downstream tool")
+      ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { params: aliasParams }, "Using tool 'proxy-dispatch'"), "Using tool 'wiki'", "Nested arguments should display the downstream tool")
+    })
+    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { action: "search" }, "Using tool 'proxy-dispatch'"), "Searching available tools", "Search is a proxy operation, not a downstream call")
+    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { action: "status" }, "Using tool 'proxy-dispatch'"), "Checking tool connections", "Status should have a meaningful label")
+    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", { action: "readresult" }, "Using tool 'proxy-dispatch'"), "Reading a saved tool result", "Saved results should have a meaningful label")
+    ow.test.assert(agent._translateProxyToolThought("other-tool", params, "Use tool 'other-tool'"), "Using tool 'other-tool'", "Direct tool names should remain unchanged")
+    ow.test.assert(agent._translateProxyToolThought("proxy-dispatch", params, "Using tool 'proxy-dispatch'"), "Using tool 'http-request'", "Already normalized thoughts should translate too")
   }
 
   exports.testCanonicalThoughtEmitterSeparatesThoughtAndThink = function() {
@@ -1357,7 +1491,7 @@
       useWikiGraph: true,
       actionFieldValues: "think | wiki | graph | final (string or array for chaining)"
     }, {})
-    ow.test.assert(withGraph.prompt.indexOf("\"action\": \"think | wiki | graph | final") >= 0, true, "Prompt schema action field should include graph when useWikiGraph is true")
+    ow.test.assert(withGraph.prompt.indexOf("Choose one action: think | wiki | graph | final") >= 0, true, "Prompt action choices should include graph when useWikiGraph is true")
     ow.test.assert(withGraph.prompt.indexOf("\"graph\" - Query the wiki knowledge graph") >= 0, true, "ACTION USAGE should describe the graph action when useWikiGraph is true")
 
     var withoutGraph = renderAgentPrompt(agent, {
@@ -1531,15 +1665,37 @@
   exports.testUtilsMcpConsoleOnlyToolsToggle = function() {
     var agent = createAgent()
 
-    var nonConsole = agent._createUtilsMcpConfig({ useutils: true, __interaction_source: "mini-a-web" })
+    var nonConsole = agent._createUtilsMcpConfig({ useutils: true, useasciiviz: true, __interaction_source: "mini-a-web" })
     ow.test.assert(isMap(nonConsole) && isMap(nonConsole.options), true, "Should build utils MCP config for non-console interactions")
     ow.test.assert(isUnDef(nonConsole.options.fns.userInput), true, "Should hide userInput outside console sessions")
     ow.test.assert(isUnDef(nonConsole.options.fns.showMessage), true, "Should hide showMessage outside console sessions")
+    ow.test.assert(isUnDef(nonConsole.options.fns.printChart), true, "Should hide printChart outside web sessions")
+    ow.test.assert(isUnDef(nonConsole.options.fnsMeta.printChart), true, "Should hide printChart metadata outside web sessions")
 
-    var consoleMode = agent._createUtilsMcpConfig({ useutils: true, __interaction_source: "mini-a-con" })
+    var consoleMode = agent._createUtilsMcpConfig({ useutils: true, useasciiviz: true, __interaction_source: "mini-a-con" })
     ow.test.assert(isMap(consoleMode) && isMap(consoleMode.options), true, "Should build utils MCP config for console interactions")
     ow.test.assert(isDef(consoleMode.options.fns.userInput), true, "Should expose userInput in console sessions")
     ow.test.assert(isDef(consoleMode.options.fns.showMessage), true, "Should expose showMessage in console sessions")
+    ow.test.assert(isDef(consoleMode.options.fns.printChart), true, "Should expose printChart in console sessions when enabled")
+  }
+
+  exports.testUtilsMcpEmitsCompactDisplayEvents = function() {
+    var events = []
+    var agent = createAgent()
+    agent.fnI = function(event, message) { events.push({ event: event, message: message }) }
+    var cfg = agent._createUtilsMcpConfig({ useutils: true, useasciiviz: true, __interaction_source: "mini-a-con" })
+    var originalPrintChartArray = global.printChartArray
+    try {
+      global.printChartArray = function() { return "chart" }
+      var messageResponse = cfg.options.fns.showMessage({ message: "Do not return this message", level: "info" })
+      var chartResponse = cfg.options.fns.printChart({ type: "line", data: [1, 2] })
+      ow.test.assert(events.filter(function(e) { return e.event === "tool_display" }).length === 2, true, "Should emit display events in tool-call order")
+      ow.test.assert(messageResponse.content[0].text.indexOf("Do not return this message") < 0, true, "Message acknowledgement should not include its body")
+      ow.test.assert(chartResponse.content[0].text === '{"operation":"printChart","type":"line","displayed":true}', true, "Chart acknowledgement should be compact")
+    } finally {
+      if (isDef(originalPrintChartArray)) global.printChartArray = originalPrintChartArray
+      else delete global.printChartArray
+    }
   }
 
   exports.testProxyDispatchPropagatesDownstreamToolErrors = function() {
@@ -1896,6 +2052,7 @@
       subtasksfile: "startup.yaml",
       state: "(parent: true)",
       conversation: "conversation.md",
+      contextvirtualizationshadow: true,
       resume: true,
       resumefailed: true,
       usehistory: true,
@@ -1959,7 +2116,7 @@
 
     ;[
       "validationgoal", "valgoal", "deepresearch", "maxcycles", "subtasks", "subtasksfile",
-      "state", "conversation", "resume", "resumefailed", "usehistory", "historypath",
+      "state", "conversation", "contextvirtualizationshadow", "resume", "resumefailed", "usehistory", "historypath",
       "planfile", "plancontent", "planmode", "convertplan", "validateplan",
       "outfile", "outfileall", "outputfile",
       "mcp", "mcpconfig", "mcpdynamic", "mcpproxy", "mcpproxynative", "mcpproxythreshold",
@@ -2040,6 +2197,231 @@
     ow.test.assert(manager.metrics.running, 0, "Running metric should be decremented")
 
     manager.destroy()
+  }
+
+  exports.testSubtaskCancellationWinsChildStopCompletion = function() {
+    var manager = new SubtaskManager({}, {})
+    var subtask = { id: "cancel-race", status: "running", startedAt: new Date().getTime() }
+    manager.subtasks[subtask.id] = subtask
+    manager.runningCount = manager.metrics.running = 1
+    var completionAccepted
+    subtask.childAgent = { requestStop: function() {
+      completionAccepted = manager._completeSubtask(subtask, "test", "partial answer", {}, {})
+    } }
+    try {
+      ow.test.assert(manager.cancel(subtask.id, "Stop requested"), true, "Cancellation must claim the task before stopping the child")
+      ow.test.assert(completionAccepted, false, "A stopping child must not publish success")
+      ow.test.assert(subtask.status, "cancelled", "Cancellation must remain terminal")
+      ow.test.assert(manager.metrics.completed, 0, "Cancelled work must not count as completed")
+      ow.test.assert(manager.metrics.cancelled, 1, "Cancellation must be counted once")
+      ow.test.assert(manager.runningCount, 0, "The running slot must be released once")
+      ow.test.assert(manager.cancel(subtask.id), false, "Repeated cancellation must be ignored")
+    } finally { manager.destroy() }
+  }
+
+  exports.testSubtaskShutdownDoesNotStartQueuedWork = function() {
+    var manager = new SubtaskManager({}, {})
+    var starts = 0
+    manager._startLocalSubtask = function() { starts++ }
+    manager.subtasks.active = { id: "active", status: "running" }
+    manager.subtasks.queued = { id: "queued", goal: "queued task", status: "pending" }
+    manager.pendingQueue.push("queued")
+    manager.runningCount = manager.metrics.running = 1
+    try {
+      manager.destroy()
+      ow.test.assert(starts, 0, "Shutdown must not launch queued work when cancelling a running task")
+      ow.test.assert(manager.subtasks.active.status, "cancelled", "Shutdown must cancel active work")
+      ow.test.assert(manager.subtasks.queued.status, "cancelled", "Shutdown must cancel queued work")
+      ow.test.assert(manager.pendingQueue.length, 0, "Cancelled work must be removed from the queue")
+      ow.test.assert(manager.metrics.cancelled, 2, "Both tasks must be counted as cancelled")
+      ow.test.assert(manager.runningCount, 0, "Shutdown must release the running slot")
+      manager.destroy()
+      ow.test.assert(manager.metrics.cancelled, 2, "Repeated shutdown must not count cancellations again")
+    } finally { manager.destroy() }
+  }
+
+  exports.testSubtaskCompletionPublishesResultBeforeTerminalState = function() {
+    var manager = new SubtaskManager({}, {})
+    var subtask = { id: "completion-race", status: "running", startedAt: new Date().getTime(), error: "previous attempt" }
+    manager.subtasks[subtask.id] = subtask
+    manager.runningCount = manager.metrics.running = 1
+    var claimTerminal = manager._claimTerminal
+    var observedResult
+    manager._claimTerminal = function() {
+      var claimed = claimTerminal.apply(this, arguments)
+      if (claimed) observedResult = this.waitFor(subtask.id, 0)
+      return claimed
+    }
+    try {
+      ow.test.assert(manager._completeSubtask(subtask, "test", "final answer", { tokens: 7 }, { done: true }), true, "Completion should succeed")
+      ow.test.assert(observedResult.answer, "final answer", "A waiter observing completion must receive the answer")
+      ow.test.assert(observedResult.metrics.tokens, 7, "Completion must publish metrics with the answer")
+      ow.test.assert(observedResult.state.done, true, "Completion must publish child state with the answer")
+      ow.test.assert(isUnDef(observedResult.error), true, "Successful retries must clear the previous error before completion")
+      ow.test.assert(manager._completeSubtask(subtask, "test", "duplicate", {}, {}), false, "Duplicate completion must be ignored")
+      ow.test.assert(manager.result(subtask.id).answer, "final answer", "Duplicate completion must not overwrite the result")
+    } finally { manager.destroy() }
+  }
+
+  exports.testChildDiagnosticsDoNotDescribeParentConversation = function() {
+    var parent = createAgent()
+    var captured
+    parent._historyVm = {
+      enabled: true, shadow: false, contextVirtualization: true, conversationId: "parent-conversation",
+      upsertContextSource: function(kind, id, value) { captured = value }
+    }
+    var manager = new SubtaskManager({}, {})
+    manager.parentAgent = parent
+    var child = createAgent()
+    var childMetrics = { history_vm: child.getHistoryVmDiagnostics(), tokens: 7 }
+    var original = stringify(childMetrics, __, "")
+    try {
+      ;["local", "remote"].forEach(function(mode) {
+        var subtask = { id: mode + "-diagnostics", goal: "Inspect status", status: "running", startedAt: new Date().getTime() }
+        if (mode === "remote") { subtask.workerUrl = "http://worker"; subtask.remoteTaskId = "remote-task" }
+        manager.subtasks[subtask.id] = subtask
+        manager.runningCount = manager.metrics.running = 1
+        manager._completeSubtask(subtask, "test", "Parent VM is enabled", childMetrics, { childOnly: true })
+        var result = manager.result(subtask.id)
+        ow.test.assert(result.diagnostics_scope.scope, "child_execution", "Both local and remote completion must scope returned diagnostics")
+        ow.test.assert(result.diagnostics_scope.subtask_id, subtask.id, "Scope must identify the child")
+        ow.test.assert(result.metrics.history_vm.active, false, "Legacy metrics access must retain the child's actual values")
+        ow.test.assert(captured.child_diagnostics.diagnostics_scope.subtask_id, subtask.id, "Retrieved delegation context must retain child scope")
+        ow.test.assert(isUnDef(captured.metrics) && isUnDef(captured.state), true, "Child diagnostics must not be exposed as unscoped context fields")
+        ow.test.assert(captured.child_diagnostics.state.childOnly, true, "Child state must stay accessible in its own scope")
+      })
+      ow.test.assert(stringify(childMetrics, __, ""), original, "Scoping must not mutate incoming worker metrics")
+      var prompt = parent._prepareContextInvocation(__, "Check status. Retrieved child data: " + stringify(captured, __, ""), "executor")
+      ow.test.assert(prompt.indexOf('"scope":"current_conversation"') >= 0, true, "Parent must receive authoritative current status alongside child data")
+      ow.test.assert(parent.getCurrentConversationStatus().history_vm.active, true, "Disabled child VM must not disable parent status")
+      ow.test.assert(child.getCurrentConversationStatus().history_vm.active, false, "Child status must reflect its own VM")
+    } finally { manager.destroy() }
+  }
+
+  exports.testCurrentConversationStatusRefreshesOnRetry = function() {
+    var agent = createAgent()
+    agent._sessionArgs = { historyvm: true, secret: "must-not-leak" }
+    ow.test.assert(agent.getCurrentConversationStatus().history_vm.active, false, "Requested flags alone must not claim a running VM")
+    agent._historyVm = { enabled: true, contextVirtualization: true, conversationId: "live" }
+    ;["executor", "planner", "validator", "advisor", "summarizer"].forEach(function(consumer) {
+      var prompt = agent._prepareContextInvocation(__, "Question", consumer)
+      ow.test.assert(prompt.indexOf('"active":true') >= 0, true, "Every model consumer must receive live status")
+      agent._historyVm.degraded = true
+      var retry = agent._prepareContextInvocation(__, prompt, consumer)
+      ow.test.assert(retry.split("CURRENT CONVERSATION STATUS").length, 2, "Retries must refresh rather than duplicate the snapshot")
+      ow.test.assert(retry.indexOf('"active":true'), -1, "Retry must not retain stale active status after degradation")
+      ow.test.assert(retry.indexOf('"degraded":true') >= 0, true, "Degradation must be reported")
+      ow.test.assert(retry.indexOf("must-not-leak"), -1, "Status must not expose arbitrary configuration")
+      agent._historyVm.degraded = false
+    })
+    agent._historyVm.contextVirtualizationShadow = true
+    ow.test.assert(agent.getCurrentConversationStatus().context_virtualization.active, false, "Phase 2 shadow must not claim active projection")
+    ow.test.assert(agent.getCurrentConversationStatus().context_virtualization.shadow, true, "Phase 2 shadow must be explicit")
+    agent._historyVm.enabled = false
+    agent._historyVm.shadow = true
+    ow.test.assert(agent.getCurrentConversationStatus().history_vm.shadow, true, "Capture-only shadow must be explicit")
+    ow.test.assert(agent.getCurrentConversationStatus().context_virtualization.shadow, false, "Phase 2 requires an enabled VM")
+    agent._historyVm.enabled = true
+    agent._historyVm.shadow = false
+    agent._projectContextInvocation = function(llm, prompt) { this._historyVm.degraded = true; return prompt }
+    var failedProjection = agent._prepareContextInvocation(__, "Question", "executor")
+    ow.test.assert(failedProjection.indexOf('"active":true'), -1, "A failure during projection must refresh status before dispatch")
+    ow.test.assert(failedProjection.indexOf('"degraded":true') >= 0, true, "The same call must report projection degradation")
+  }
+
+  exports.testSubtaskShutdownCancelsRemoteTask = function() {
+    var manager = new SubtaskManager({}, {})
+    var calls = []
+    manager.remoteDelegation = true
+    manager._remoteRequest = function(workerUrl, path, payload, timeoutMs) {
+      calls.push({ workerUrl: workerUrl, path: path, payload: payload, timeoutMs: timeoutMs })
+      return {}
+    }
+    var subtask = { id: "remote-shutdown", status: "running", startedAt: new Date().getTime(), workerUrl: "http://worker", remoteTaskId: "task-1" }
+    manager.subtasks[subtask.id] = subtask
+    manager.runningCount = manager.metrics.running = 1
+    try {
+      manager.destroy()
+      ow.test.assert(subtask.status, "cancelled", "Shutdown must claim remote work as cancelled")
+      ow.test.assert(calls.length, 1, "Shutdown must request remote cancellation after disabling scheduling")
+      ow.test.assert(calls[0].path, "/cancel", "Legacy remote cancellation endpoint must be used")
+      ow.test.assert(calls[0].payload.taskId, "task-1", "Remote cancellation must target the submitted task")
+      ow.test.assert(calls[0].timeoutMs, 5000, "Remote cancellation must remain bounded during shutdown")
+    } finally { manager.destroy() }
+  }
+
+  exports.testSubtaskRemoteOutcomeUnknownDoesNotRetry = function() {
+    var manager = new SubtaskManager({}, {})
+    var calls = []
+    manager.remoteDelegation = true
+    manager._remoteRequest = function(workerUrl, path) { calls.push(path); return {} }
+    var subtask = { id: "remote-unknown", status: "running", startedAt: new Date().getTime(), workerUrl: "http://worker", remoteTaskId: "task-2", attempt: 1, maxAttempts: 2, metadata: {} }
+    manager.subtasks[subtask.id] = subtask
+    manager.runningCount = manager.metrics.running = 1
+    try {
+      ow.test.assert(manager._failRemoteOutcomeUnknown(subtask, "test", "status unavailable"), true, "Unknown remote outcome must become terminal")
+      ow.test.assert(subtask.status, "failed", "Unknown remote outcome must not return to the execution queue")
+      ow.test.assert(manager.pendingQueue.length, 0, "Unknown remote outcome must not resubmit the goal")
+      ow.test.assert(manager.metrics.retried, 0, "Unknown remote outcome must not count as an execution retry")
+      ow.test.assert(manager.metrics.remoteOutcomeUnknown, 1, "Unknown remote outcome must be metered")
+      ow.test.assert(calls[0], "/cancel", "Unknown remote outcome must attempt to stop the known task")
+    } finally { manager.destroy() }
+  }
+
+  exports.testSubtaskAmbiguousSubmissionDoesNotRetry = function() {
+    ;[false, true].forEach(function(useA2A) {
+      ;["lost-first-response", "lost-response", "missing-id", "before-submission"].forEach(function(scenario) {
+        var manager = new SubtaskManager({}, {})
+        manager.remoteDelegation = true
+        manager.useA2A = useA2A
+        manager._processQueue = function() {}
+        manager._buildChildArgs = function() { return {} }
+        manager._nextWorkerForSubtask = function() { return scenario === "before-submission" ? __ : "http://worker" }
+        var calls = []
+        manager._remoteRequest = function(workerUrl, path) {
+          calls.push(path)
+          if (scenario.indexOf("lost-") === 0) throw new Error("Connection closed after the worker accepted the task")
+          return {}
+        }
+        var subtask = { id: "submission-test", goal: "Run a side effect", status: "running", startedAt: Date.now(), deadlineMs: 1000,
+          attempt: 2, maxAttempts: 3, metadata: {}, workerUrl: "http://old-worker", remoteTaskId: scenario === "lost-first-response" ? __ : "previous-attempt" }
+        manager.subtasks[subtask.id] = subtask
+        manager.runningCount = manager.metrics.running = 1
+        try {
+          manager._startRemoteSubtask(subtask, "test")
+          $doWait(subtask._executionPromise)
+          var ambiguous = scenario !== "before-submission"
+          ow.test.assert(subtask.status, ambiguous ? "failed" : "pending", "Only failures before submission may be retried")
+          ow.test.assert(manager.metrics.remoteOutcomeUnknown, ambiguous ? 1 : 0, "Ambiguous acceptance must be reported even without a task ID")
+          ow.test.assert(manager.metrics.retried, ambiguous ? 0 : 1, "Lost responses must not cause duplicate execution")
+          ow.test.assert(calls.length, ambiguous ? 1 : 0, "A previous attempt's remote ID must never be cancelled or reused")
+          ow.test.assert(manager.runningCount, 0, "Every failed attempt must release its running slot")
+        } finally { manager.destroy() }
+      })
+    })
+  }
+
+  exports.testSubtaskManagerEnforcesWorkerTotalTimeout = function() {
+    var manager = new SubtaskManager({}, { defaultStallTimeoutMs: 300000 })
+    var now = new Date().getTime()
+    var subtask = {
+      id: "worker-total-timeout",
+      status: "running",
+      startedAt: now - 600000,
+      totalTimeoutMs: 1000,
+      totalDeadlineAt: now - 1,
+      deadlineMs: 1000,
+      stallTimeoutMs: 300000,
+      lastActivityAt: now,
+      lastActivityReason: "remote event"
+    }
+    try {
+      var reason = manager._getSubtaskTimeoutReason(subtask, now)
+      ow.test.assert(isMap(reason), true, "Worker total deadline must override recent activity")
+      ow.test.assert(reason.type, "total", "Worker deadline must be categorized as a total timeout")
+      subtask.totalDeadlineAt = new Date().getTime() + 250
+      ow.test.assert(manager._remoteObservationTimeoutMs(subtask) <= 250, true, "Remote observation must not outlive the worker total deadline")
+    } finally { manager.destroy() }
   }
 
   exports.testSubtaskManagerDoesNotTimeoutActiveSubtaskPastDeadline = function() {
@@ -3858,6 +4240,18 @@
     ow.test.assert(text.indexOf("__gHDir = function() { return _hd }") >= 0, true, "Web launcher should apply homedir before MiniA init")
   }
 
+  exports.testWebAutoPlanningPhaseLifecycle = function() {
+    var webJob = io.readFileString("mini-a-web.yaml")
+    var webUi = io.readFileString("public/index.md")
+
+    ow.test.assert(webJob.indexOf('activeConversation._planningPhase == "planning"') >= 0, true, "Web results should expose the agent's authoritative planning phase")
+    ow.test.assert(webJob.indexOf('_res.phase = "finished"') >= 0, true, "Finished web results should close the planning phase")
+    ow.test.assert(webUi.indexOf("data.phase === 'planning'") >= 0, true, "Web polling should enter planning mode from the server phase")
+    ow.test.assert(webUi.indexOf("setPlanningMode(true);") >= 0, true, "Planner SSE should enter planning mode without waiting for a poll")
+    ow.test.assert(webUi.indexOf("setPlanningMode(false);") >= 0, true, "Execution and completion paths should leave planning mode automatically")
+    ow.test.assert(webUi.indexOf("'Planning…'") >= 0, true, "The loading preview should visibly label planning mode")
+  }
+
   exports.testWarnUnknownArgsSuggestsClosestMatch = function() {
     var warnings = []
     var args = {
@@ -3882,6 +4276,43 @@
     ow.test.assert(MiniA.shouldWarnUnknownArgs({ goal: "ship it", writeReport: "writeReport.yaml" }), false, "Goal execution should suppress console-only unknown-arg warnings")
     ow.test.assert(MiniA.shouldWarnUnknownArgs({ onport: 8888, writeReport: "writeReport.yaml" }), false, "Web mode should suppress console-only unknown-arg warnings")
     ow.test.assert(MiniA.shouldWarnUnknownArgs({ exec: "/skill run", customflag: true }), false, "Template execution should suppress console-only unknown-arg warnings")
+  }
+
+  exports.testWebMarkdownImageGuidanceOnlyAppliesToWebMarkdownResponses = function() {
+    var agent = createAgent()
+    ow.test.assert(agent._shouldEncourageWebMarkdownImages({ __interaction_source: "mini-a-web", format: "md" }), true, "Web Markdown responses should receive image guidance")
+    ow.test.assert(agent._shouldEncourageWebMarkdownImages({ __interaction_source: "mini-a-web", format: "json" }), false, "Structured web responses must preserve their requested format")
+    ow.test.assert(agent._shouldEncourageWebMarkdownImages({ __interaction_source: "mini-a-con", format: "md" }), false, "Console Markdown responses should not receive web-only image guidance")
+    ow.test.assert(agent._shouldEncourageWebMarkdownImages({ onport: 12345, format: "md" }), true, "Web port startup should receive image guidance")
+    ow.test.assert(agent._shouldEncourageWebMarkdownImages({ onport: "12345", format: "md" }), true, "String web ports should receive image guidance")
+    ow.test.assert(agent._shouldEncourageWebMarkdownImages({ __interaction_source: "mini-a-con", onport: 12345, format: "md" }), false, "Explicit console source must take precedence over a web port")
+    ow.test.assert(agent._shouldEncourageWebMarkdownImages({ onport: 12345, format: "json" }), false, "Web ports must not enable image guidance for structured output")
+    ow.test.assert(agent._shouldEncourageWebMarkdownImages({ onport: 12345, workermode: true, format: "md" }), false, "Headless worker ports must not enable web image guidance")
+    ;[undefined, false, "", "invalid", 0, -1, 65536, 1.5].forEach(function(port) {
+      ow.test.assert(agent._shouldEncourageWebMarkdownImages({ onport: port, format: "md" }), false, "Missing or invalid web ports must not enable image guidance")
+    })
+
+    agent.fnI = function() {}
+    agent.init({ goal: "Explain a historical event", __interaction_source: "mini-a-web", format: "md" })
+    ow.test.assert(agent._systemInst.indexOf("standard Markdown image syntax") >= 0, true, "Web Markdown system prompts should encourage relevant image embeds")
+    ;["does not require image generation", "current conversation topic", "available search or URL-fetch tools", "never invent or guess image URLs", "outside code fences", "do not claim a license unless verified", "explain that specific limitation"].forEach(function(instruction) {
+      ow.test.assert(agent._systemInst.indexOf(instruction) >= 0, true, "Web prompt should include: " + instruction)
+    })
+
+    var portAgent = createAgent()
+    portAgent.fnI = function() {}
+    portAgent.init({ goal: "Show relevant photos", onport: 12345, format: "md" })
+    ow.test.assert(portAgent._systemInst.indexOf("standard Markdown image syntax") >= 0, true, "Port-based web initialization should include the guidance")
+
+    var consoleAgent = createAgent()
+    consoleAgent.fnI = function() {}
+    consoleAgent.init({ goal: "Show relevant photos", __interaction_source: "mini-a-con", format: "md" })
+    ow.test.assert(consoleAgent._systemInst.indexOf("standard Markdown image syntax") < 0, true, "Console system prompts should omit web image guidance")
+
+    var structuredAgent = createAgent()
+    structuredAgent.fnI = function() {}
+    structuredAgent.init({ goal: "Return structured data", __interaction_source: "mini-a-web", format: "json" })
+    ow.test.assert(structuredAgent._systemInst.indexOf("standard Markdown image syntax") < 0, true, "Structured web system prompts should omit Markdown image guidance")
   }
 
   exports.testInitSkipsUnknownArgWarningsForNonConsoleRuns = function() {
@@ -4239,6 +4670,68 @@
     resetMiniAMetrics()
   }
 
+  exports.testConsoleChartMarkdown = function() {
+    var fence = '```oafPrintChart\n{"type":"line","data":[1,2],"title":"Trend"}\n```'
+    var calls = [], chart = "  [label_*]\n  |  /\n  | /"
+    var render = function(params) { calls.push(params); return chart }
+    var fixture = "Before **bold**\n\n" + fence + "\n\nAfter\n" + fence
+    var plain = __miniAMarkdownRender(fixture, 40, { ansi: false, useasciiviz: true, renderChart: render })
+    ow.test.assert(calls.length, 2, "Every chart should render once")
+    ow.test.assert(calls[0].options.width, 40, "Default width follows console render width")
+    ow.test.assert(plain, fixture.split(fence).join(chart), "Charts retain their alignment and surrounding prose")
+    var ansi = __miniAMarkdownRender(fence, 40, { ansi: true, useasciiviz: true, renderChart: render })
+    ow.test.assert(ansi.indexOf(chart) >= 0, true, "Markdown must not interpret chart symbols or labels")
+    ow.test.assert(__miniAMarkdownRender(fence, 40, { ansi: false, renderChart: render }), fence, "Disabled charts stay literal")
+    ow.test.assert(__miniACleanCodeBlocks(fence), fence, "Chart-only answers keep their fence")
+    var invalid = ['```oafPrintChart\n{broken}\n```', '```oafPrintChart\n[]\n```', fence.slice(0, -3)]
+    invalid.forEach(function(value) {
+      ow.test.assert(__miniAMarkdownRender(value, 40, { ansi: false, useasciiviz: true, renderChart: render }), value, "Invalid and incomplete blocks remain readable")
+    })
+    ow.test.assert(__miniAMarkdownRender(fence, 40, { ansi: false, useasciiviz: true, renderChart: function() { return "[ERROR] unsupported" } }), fence, "Renderer failures preserve original JSON")
+    var nested = "````markdown example\n" + fence + "\n````"
+    ow.test.assert(__miniACleanCodeBlocks(nested), nested, "Cleanup must not expose nested chart examples")
+    var count = calls.length
+    ow.test.assert(__miniAMarkdownRender(nested, 40, { ansi: false, useasciiviz: true, renderChart: render }), nested, "Nested examples stay literal")
+    ow.test.assert(calls.length, count, "Nested charts must not invoke renderer")
+    ow.test.assert(__miniAMarkdownRender(fence, 40, { ansi: false, useasciiviz: true, renderChart: function() { return "\u001b[31mred\u001b[0m" } }), "red", "Plain charts omit ANSI color")
+  }
+
+  exports.testConsoleChartStreaming = function() {
+    var fence = '```oafPrintChart\n{"data":[1,2]}\n```'
+    ;[1, 3, 7, 50].forEach(function(size) {
+      var output = [], previews = [], calls = 0
+      var stream = __miniAMarkdownStream({ ansi: false, useasciiviz: true,
+        onUnit: function(text, kind) {
+          output.push(__miniAMarkdownRender(text, 40, { ansi: false, kind: kind, useasciiviz: true, renderChart: function() { calls++; return "CHART" } }))
+        },
+        onPreview: function(text) { previews.push(text) }
+      })
+      for (var i = 0; i < fence.length; i += size) stream.feed(fence.substring(i, i + size))
+      stream.end(); stream.end()
+      ow.test.assert(calls, 1, "Closed chart without final newline renders exactly once")
+      ow.test.assert(output.join(""), "CHART", "Streaming renders chart instead of JSON")
+      ow.test.assert(previews.join("").indexOf("data"), -1, "Chart JSON must not leak into previews")
+      output = []; calls = 0
+      stream.feed(fence.slice(0, -3)); stream.end()
+      ow.test.assert(calls, 0, "Incomplete chart never invokes renderer")
+      ow.test.assert(output.join(""), fence.slice(0, -3), "Incomplete stream preserves original block")
+    })
+  }
+
+  exports.testFinalAnswerPreservesConsoleChartFence = function() {
+    var agent = createAgent(), writes = [], originalWrite = io.writeFileString
+    var fence = '```oafPrintChart\n{"data":[1,2]}\n```'
+    agent.fnI = function() {}
+    agent._memoryAppend = agent._persistWorkingMemory = agent._persistSessionMemory = agent._recordPlanActivity = agent._logLcCostSummary = function() {}
+    agent._collectSessionKnowledgeForPlan = function() { return [] }
+    agent._memorysessionChEffective = __
+    try {
+      io.writeFileString = function(path, text) { writes.push(text) }
+      agent._processFinalAnswer(fence, { format: "md", outfile: "/tmp/chart.md", __interaction_source: "mini-a-con", useasciiviz: true })
+      ow.test.assert(writes[0], fence, "Final processing and saved Markdown retain chart fence")
+    } finally { io.writeFileString = originalWrite }
+  }
+
   exports.testMarkdownStreamIsChunkSizeInvariant = function() {
     var fixture = "A **bold value**, *italic*, `code`, and [link](https://example.test).\n- first item\n+ second item\n\n| one | two |\n| --- | --- |\n| a | b |\n\n```txt\npipe | and <tag>\n```\nprose x | y remains prose\n"
     var sizes = [1, 3, 7, 50]
@@ -4275,5 +4768,119 @@
     try { rendered = __miniAMarkdownRender("A **rendered** line", 80, { ansi: true }) } catch(e) { thrown = String(e) }
     ow.test.assert(isUnDef(thrown), true, "Markdown stream rendering must not pass width as OpenAF's defaultAnsi argument: " + thrown)
     ow.test.assert(isString(rendered), true, "Markdown stream rendering should return text")
+  }
+
+  exports.testConsoleEventTextPreservesNewlines = function() {
+    var normalized = __miniANormalizeConsoleEventText(" first\\nsecond\r\nthird ")
+    ow.test.assert(normalized, "first\nsecond\nthird", "console events must render escaped and actual newlines as separate lines")
+  }
+
+  exports.testJsonRepairPreservesStringPayloads = function() {
+    var agent = createAgent()
+    var broken = '{action:"final", "answer":"Keep ,} and {key:value} and \\"quoted\\" text",}'
+    var parsed = agent._parseModelJsonResponse(broken)
+    ow.test.assert(parsed.answer, 'Keep ,} and {key:value} and "quoted" text', "Repair must not rewrite punctuation inside strings")
+    ow.test.assert(parsed.action, "final", "Unquoted keys and trailing commas should still recover")
+  }
+
+  exports.testJsonRecoveryRespectsProviderMode = function() {
+    var agent = createAgent()
+    agent._useToolsActual = true
+    var received
+    var llm = {
+      promptWithStats: function(p) { received = p; return "plain" },
+      promptJSONWithStats: function(p) { received = p; return "json" },
+      rawPromptWithStats: function(p, a, b, flag) { received = p; return flag ? "raw-json" : "raw-plain" }
+    }
+    var prompt = agent._buildJsonRetryPrompt("original goal")
+    ow.test.assert(prompt.indexOf("original goal"), 0, "Recovery must retain the goal")
+    ow.test.assert(prompt.indexOf('[JSON RETRY NOTE]') > 0, true, "Recovery must send the correction")
+    ow.test.assert(agent._promptJsonRecovery(llm, prompt, {}, { type: "ollama" }, false), "plain", "Ollama native tools must avoid JSON mode on retry")
+    ow.test.assert(received, prompt, "The actual provider call must receive the corrective prompt")
+    ow.test.assert(agent._promptJsonRecovery(llm, prompt, { showthinking: true }, { type: "ollama" }, false), "raw-plain", "Raw recovery must also respect the tools conflict")
+    agent._useToolsActual = false
+    ow.test.assert(agent._promptJsonRecovery(llm, prompt, {}, { type: "ollama" }, false), "json", "Action mode should retain JSON mode")
+    ow.test.assert(agent._promptJsonRecovery(llm, prompt, {}, { type: "gemini" }, true), "plain", "Explicit no-JSON mode must be respected")
+  }
+
+  exports.testJsonRetryAcceptsParsedResponses = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    // Exercise the actual loop's retry normalization with deterministic adapter outputs.
+    var source = io.readFileString("mini-a.js")
+    var begin = source.indexOf("            var lcRetryRmsg = lcRetryResponseWithStats.response")
+    var end = source.indexOf("\n          }\n\n          if (lcRetryStopRequested", begin)
+    ow.test.assert(begin >= 0 && end > begin, true, "Locate the loop retry normalization")
+    var normalize = new Function("lcRetryResponseWithStats", 'var args = { showthinking: true }, rmsg, responseWithStats, stats, msg, recoveredMsgFromEnvelope, recoveredFromEnvelopeApplied = false, lcRetryStats = {}, lcJsonRetryAttempt = 1, lcJsonRetries = 1;\n' + source.substring(begin, end) + '\nreturn msg;')
+    var final = { thought: "done", action: "final", answer: "ok" }
+    ow.test.assert(normalize.call(agent, { response: final }).answer, "ok", "An already-parsed retry must be accepted without main fallback")
+    ow.test.assert(normalize.call(agent, { response: [final] })[0].answer, "ok", "An array retry must be accepted")
+    ow.test.assert(normalize.call(agent, { response: stringify(final) }).answer, "ok", "A text retry must still be parsed")
+    ow.test.assert(isUnDef(normalize.call(agent, { response: "not json" })), true, "Invalid retries must still fall through to recovery")
+  }
+
+  exports.testReplyPromptUsesObjectParams = function() {
+    var prompt = renderAgentPrompt(createAgent(), {}, {}).prompt
+    ow.test.assert(prompt.indexOf('"params" as a JSON object') >= 0, true, "Reply instructions must show object params")
+    ow.test.assert(prompt.indexOf('"params": "required') < 0, true, "The example must not teach string params")
+    ow.test.assert(prompt.indexOf('{"thought":"brief next step","action":"final","answer":"your complete answer"}') >= 0, true, "Compact profiles must retain a valid concrete final example")
+  }
+
+  exports.testReplyToolRecoveryUsesOneProviderRequest = function() {
+    ["openai", "ollama"].forEach(function(type) {
+      var modes = ["valid", "missing", "multiple", "invalid"]
+      modes.forEach(function(mode) {
+        var agent = createAgent()
+        agent.fnI = function() {}
+        agent._systemInst = "Preserve the session rules."
+        agent._actionsList = "think | shell | final (string or array for chaining)"
+        var requests = 0, bodySeen, isolated
+        var payload = { thought: "done", action: "final", answer: "captured" }
+        agent._createBareLlmInstance = function(config) {
+          isolated = $llm(config)
+          isolated.getGPT().model._request = function(route, body) {
+            requests++
+            bodySeen = body
+            var call = { id: "call1", type: "function", function: { name: "submit_reply", arguments: type === "openai" ? stringify(payload) : payload } }
+            if (mode === "invalid") call.function.arguments = "{broken"
+            var calls = mode === "missing" ? [] : (mode === "multiple" ? [call, call] : [call])
+            if (type === "openai") return { choices: [{ finish_reason: "tool_calls", message: { role: "assistant", tool_calls: calls } }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }
+            return { message: { role: "assistant", tool_calls: calls }, done: true, prompt_eval_count: 10, eval_count: 5 }
+          }
+          return isolated
+        }
+        var result = agent._promptLcReplyTool("goal context", { useshell: false }, { type: type, model: "test-model", key: "test-only", url: "http://localhost:1" })
+        ow.test.assert(mode === "valid" ? result.response.answer : result.response, mode === "valid" ? "captured" : "", "Only one valid MCP call may become a reply")
+        ow.test.assert(requests, 1, "Native tool handling must not trigger a follow-up request")
+        ow.test.assert(agent._getTotalTokens(result.stats), 15, "Recovery must preserve provider token usage")
+        ow.test.assert(bodySeen.tools.length, 1, "Only the capture tool may be exposed")
+        ow.test.assert(stringify(bodySeen.messages).indexOf("Preserve the session rules.") >= 0, true, "Recovery must retain session instructions")
+        if (type === "openai") ow.test.assert(bodySeen.tool_choice.function.name, "submit_reply", "OpenAI recovery should force the capture tool")
+      })
+    })
+  }
+
+  exports.testReplyCaptureRejectsInvalidAndDuplicateActions = function() {
+    var agent = createAgent()
+    agent._actionsList = "think | shell | wiki | final (string or array for chaining)"
+    var capture = { accepted: false }
+    var fn = agent._createReplyCaptureMcpConfig({ useshell: false }, capture).options.fns.submit_reply
+    var invalidReplies = [ { thought: "x", action: "shell", command: "echo bad" }, { thought: "x", action: "final" }, { thought: "x", action: "wiki", params: "{}" }, { thought: "x", action: ["final"], answer: "x" } ]
+    invalidReplies.forEach(function(payload) {
+      var rejected = false
+      try { fn(payload) } catch(e) { rejected = true }
+      ow.test.assert(rejected, true, "Malformed or disabled actions must be rejected")
+      ow.test.assert(capture.accepted, false, "Rejected payload must not be captured")
+    })
+    fn({ thought: "x", action: "wiki", params: { op: "search", query: "x" } })
+    var rejected = false
+    try { fn({ thought: "x", action: "final", answer: "replace" }) } catch(e) { rejected = true }
+    ow.test.assert(rejected, true, "Duplicate submission must not replace the first action")
+    ow.test.assert(capture.payload.action, "wiki", "Capture must preserve the chosen action without executing it")
+    agent._runCommand = function() { throw new Error("Capture must never execute shell") }
+    var shellCapture = { accepted: false }
+    agent._createReplyCaptureMcpConfig({ useshell: true }, shellCapture).options.fns.submit_reply({ thought: "inspect", action: "shell", command: "pwd" })
+    ow.test.assert(shellCapture.payload.command, "pwd", "Enabled shell requests must only be captured")
+    ow.test.assert(isUnDef(agent._promptLcReplyTool("goal", {}, { type: "gemini" })), true, "Unsupported adapters should use ordinary JSON recovery")
   }
 })()

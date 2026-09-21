@@ -1,0 +1,147 @@
+{
+  "kind": "incremental-generations",
+  "mode": "default",
+  "backend": "local-fs",
+  "pages": 1000,
+  "samples": 10,
+  "runtime": "20260913",
+  "jvm": "26.0.2",
+  "observations": [
+    {
+      "millis": 1022.7493748664856,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1004,
+        "copiedBytes": 1458164,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    },
+    {
+      "millis": 865.2059590816498,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1008,
+        "copiedBytes": 1461305,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    },
+    {
+      "millis": 949.2695410251617,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1011,
+        "copiedBytes": 1464131,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    },
+    {
+      "millis": 623.2846250534058,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1014,
+        "copiedBytes": 1466957,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    },
+    {
+      "millis": 535.741290807724,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1017,
+        "copiedBytes": 1469783,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    },
+    {
+      "millis": 548.6198329925537,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1020,
+        "copiedBytes": 1472609,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    },
+    {
+      "millis": 526.3512079715729,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1023,
+        "copiedBytes": 1475435,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    },
+    {
+      "millis": 563.1081249713898,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1026,
+        "copiedBytes": 1478261,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    },
+    {
+      "millis": 545.8154170513153,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1008,
+        "copiedBytes": 1456756,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    },
+    {
+      "millis": 527.0364170074463,
+      "parsedPages": 1,
+      "work": {
+        "linkedFiles": 0,
+        "linkedBytes": 0,
+        "copiedFiles": 1011,
+        "copiedBytes": 1459582,
+        "reverseTargetsVisited": 0,
+        "legacyCataloguePagesVisited": 0
+      }
+    }
+  ],
+  "buildMillis": 1917.3614161014557,
+  "latency": {
+    "p50": 548.6198329925537,
+    "p95": 1022.7493748664856,
+    "p99": 1022.7493748664856
+  },
+  "disk": {
+    "apparentBytes": 39637143,
+    "uniqueFileBytes": 39637143,
+    "files": 12218,
+    "estimator": "POSIX file identity and length; excludes allocation and metadata overhead"
+  },
+  "memoryUsed": 315104768,
+  "linkImmutableFiles": false,
+  "moduleSha1": "1922e1cd3dc1e71ee34c0270a8c3a0cb1e15f45d",
+  "comparison": "pre-increment v2 versus current default and explicit hard-link option; local real Lucene"
+}

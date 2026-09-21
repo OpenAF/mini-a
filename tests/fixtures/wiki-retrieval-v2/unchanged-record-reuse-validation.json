@@ -1,0 +1,25 @@
+{
+  "sources": {
+    "mini-a-wiki-retrieval.js": "b4c6a96684d512f78481929cd6cffaaad8163e00",
+    "tests/wikiRetrievalV2.js": "1985e0a1851638a4582c8f6cb0e45729ff874e2a"
+  },
+  "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",
+  "targeted": "UNCHANGED_RECORD_STAMP_PASS",
+  "focused": {
+    "suite": "wikiRetrievalV2",
+    "assertions": 1295,
+    "passedFunctions": 32,
+    "failures": []
+  },
+  "wiki": {
+    "suite": "wiki",
+    "assertions": 2028,
+    "passedFunctions": 193,
+    "failures": []
+  },
+  "limitations": [
+    "Corpus-sized publication remains unfinished",
+    "No latency or memory improvement measured",
+    "Source reads/hash checks and full staged validation remain required"
+  ]
+}

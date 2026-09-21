@@ -599,11 +599,132 @@
       var result = tool.showMessage({ prompt: "Compatibility alias message", level: "info" })
       ow.test.assert(isMap(result), true, "Should return a result map for prompt alias")
       ow.test.assert(result.displayed === true, true, "Should render output when prompt alias is provided")
-      ow.test.assert(result.message === "Compatibility alias message", true, "Should preserve prompt alias as the rendered message")
+      ow.test.assert(isUnDef(result.message), true, "Model-facing result should not repeat the displayed message")
     } finally {
       print = originalPrint
       printErr = originalPrintErr
     }
+  }
+
+  exports.testDisplayEventPayloadsAvoidDirectRendering = function() {
+    var events = []
+    var originalPrint = print
+    var originalPrintErr = printErr
+    var originalPrintChartArray = printChartArray
+    try {
+      print = function() { throw new Error("display event mode must not print directly") }
+      printErr = print
+      printChartArray = function() { return "chart" }
+      var tool = new MiniUtilsTool({ useasciiviz: true, displayEventFn: function(event) { events.push(event) } })
+      var messageResult = tool.showMessage({ message: "Private status", level: "success", title: "Status" })
+      var chartResult = tool.printChart({ type: "line", data: [1, 2], title: "Trend" })
+      ow.test.assert(events.length === 2, true, "Should emit one display event per display tool call")
+      ow.test.assert(events[0].kind === "message" && events[0].message === "Private status", true, "Message event should carry declarative data")
+      ow.test.assert(events[1].kind === "chart" && events[1].title === "Trend", true, "Chart event should carry declarative data")
+      ow.test.assert(isUnDef(messageResult.message) && chartResult.type === "line", true, "Acknowledgements should remain compact")
+    } finally {
+      print = originalPrint
+      printErr = originalPrintErr
+      printChartArray = originalPrintChartArray
+    }
+  }
+
+  exports.testRenderChartDoesNotDisplay = function() {
+    var events = [], received, originalPrint = print, prints = []
+    var tool = new MiniUtilsTool({ useasciiviz: true,
+      displayEventFn: function(event) { events.push(event) },
+      chartRenderer: function(data, unit, width) { received = width; return "CHART" }
+    })
+    try {
+      print = function(value) { prints.push(value) }
+      var chart = tool.renderChart({ data: [1, 2], title: "Trend", options: { width: 40 } })
+      ow.test.assert(chart.indexOf("Trend") >= 0 && chart.indexOf("CHART") >= 0, true, "Non-printing renderer includes title and chart")
+      ow.test.assert(received, 40, "Renderer forwards width")
+      ow.test.assert(prints.length + events.length, 0, "Rendering must neither print nor emit display events")
+      ow.test.assert(tool.renderChart({ type: "unknown" }).indexOf("[ERROR]"), 0, "Unknown charts preserve validation errors")
+      ow.test.assert(new MiniUtilsTool().renderChart({ data: [1] }).indexOf("[ERROR]"), 0, "Rendering retains opt-in guard")
+    } finally { print = originalPrint }
+  }
+
+  exports.testPrintChartUsesArrayRenderer = function() {
+    var received
+    try {
+      var renderer = function(data, unit, width, height, max, min, options) {
+        received = { data: data, unit: unit, width: width, height: height, max: max, min: min, options: options }
+        return "chart-array-output"
+      }
+
+      var tool = new MiniUtilsTool({ useasciiviz: true, chartRenderer: renderer })
+      var result = tool.printChart({
+        type: "line",
+        data: [1.25, 2.5],
+        options: { unit: "dec2", width: 42, height: 9, min: 1, max: 3, colors: ["GREEN"] }
+      })
+
+      ow.test.assert(isMap(result) && result.displayed === true, true, "Line chart should be displayed")
+      ow.test.assert(isMap(received), true, "Line chart should use printChartArray when available")
+      ow.test.assert(stringify(received.data) === stringify([1.25, 2.5]), true, "printChartArray should receive the chart data")
+      ow.test.assert(received.unit === "dec2", true, "printChartArray should receive the requested unit")
+      ow.test.assert(received.width === 42 && received.height === 9, true, "printChartArray should receive the requested dimensions")
+      ow.test.assert(received.min === 1 && received.max === 3, true, "printChartArray should receive the requested bounds")
+      ow.test.assert(received.options.colors[0] === "GREEN", true, "printChartArray should receive renderer options")
+    } finally {}
+  }
+
+  exports.testPrintChartNormalizesObjectPointsAndLabels = function() {
+    var received
+    try {
+      var renderer = function(data, unit, width, height, max, min, options) {
+        received = { data: data, unit: unit, options: options }
+        return "chart-array-output"
+      }
+
+      var tool = new MiniUtilsTool({ useasciiviz: true, chartRenderer: renderer })
+      var result = tool.printChart({
+        type: "line",
+        data: [{ x: 1, y: 10 }, { x: 2, y: 25 }, { x: 3, y: 15 }],
+        title: "Sample Chart",
+        xlabel: "Time",
+        ylabel: "Value"
+      })
+
+      ow.test.assert(isMap(result) && result.displayed === true, true, "Line chart should be displayed")
+      ow.test.assert(isMap(received), true, "printChartArray should be called")
+      ow.test.assert(stringify(received.data) === stringify([10, 25, 15]), true, "printChartArray should receive normalized numeric array")
+      ow.test.assert(received.options.xLabel === "Time", true, "xlabel should be mapped to options.xLabel")
+      ow.test.assert(received.options.yLabel === "Value", true, "ylabel should be mapped to options.yLabel")
+    } finally {}
+  }
+
+  exports.testPrintChartMultiSeriesObjects = function() {
+    var received
+    try {
+      var renderer = function(data, unit, width, height, max, min, options) {
+        received = { data: data, unit: unit, options: options }
+        return "chart-array-output"
+      }
+
+      var tool = new MiniUtilsTool({ useasciiviz: true, chartRenderer: renderer })
+      var result = tool.printChart({
+        type: "line",
+        data: [
+          { date: "09-07", max: 24.3, min: 18.7 },
+          { date: "09-08", max: 23.6, min: 18.4 }
+        ],
+        title: "Temperature Forecast",
+        x_axis: "Date",
+        y_axis: "Temperature (°C)"
+      })
+
+      ow.test.assert(isMap(result) && result.displayed === true, true, "Line chart should be displayed")
+      ow.test.assert(isMap(received), true, "printChartArray should be called")
+      ow.test.assert(received.data.length === 2, true, "Should extract 2 series (max and min)")
+      ow.test.assert(stringify(received.data[0]) === stringify([24.3, 23.6]), true, "Series 0 should be max")
+      ow.test.assert(stringify(received.data[1]) === stringify([18.7, 18.4]), true, "Series 1 should be min")
+      ow.test.assert(stringify(received.options.seriesLabels) === stringify(["max", "min"]), true, "seriesLabels should be ['max', 'min']")
+      ow.test.assert(received.options.xLabel === "Date", true, "x_axis should be mapped to options.xLabel")
+      ow.test.assert(received.options.yLabel === "Temperature (°C)", true, "y_axis should be mapped to options.yLabel")
+    } finally {}
   }
 
   exports.testPathSecurity = function() {

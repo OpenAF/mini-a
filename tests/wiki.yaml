@@ -1,7 +1,34 @@
 include:
 - oJobTest.yaml
+- tests/wikiRetrievalV2.yaml
 
 jobs:
+- name: MiniA Wiki Tests::McpWikiRestrictedCrossWikiGraphHints
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedCrossWikiGraphHints
+- name: MiniA Wiki Tests::McpWikiRestrictedV2GraphHints
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedV2GraphHints
+
+- name: MiniA Wiki Tests::MountedNavigationPathsRoundTrip
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testMountedNavigationPathsRoundTrip
+
+- name: MiniA Wiki Ingest Tests::LegacyContextProvenance
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testLegacyContextProvenance
+
+
+
+
+
+- name: MiniA Wiki Tests::IndexedLanguageAndTelemetry
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalContracts.js").testIndexedLanguageAndTelemetry
+
+- name: MiniA Wiki Tests::RetrievalContracts
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalContracts.js").testContracts
 
 - name: MiniA Wiki Tests::ParseFrontmatterWithYaml
   to  : oJob Test
@@ -10,6 +37,18 @@ jobs:
 - name: MiniA Wiki Tests::ParseFrontmatterWithoutBlock
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testParseFrontmatterWithoutBlock
+
+- name: MiniA Wiki Tests::LuceneWriterLockSkipsFakeChannel
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testLuceneWriterLockSkipsFakeChannel
+
+- name: MiniA Wiki Tests::LuceneIncrementalWriteReleasesWriter
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testLuceneIncrementalWriteReleasesWriter
+
+- name: MiniA Wiki Tests::BoundedRetrievalPipelineRanksEvidenceAndCitations
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testBoundedRetrievalPipelineRanksEvidenceAndCitations
 
 - name: MiniA Wiki Tests::ExtractMarkdownLinks
   to  : oJob Test
@@ -299,6 +338,14 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedRefChannelSweepsExpiredEntries
 
+- name: MiniA Wiki Tests::McpWikiRestrictedRefChannelNamespacesIsolateWikis
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedRefChannelNamespacesIsolateWikis
+
+- name: MiniA Wiki Tests::McpWikiRestrictedDefaultWikiIdIsDeterministicAndSafe
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedDefaultWikiIdIsDeterministicAndSafe
+
 - name: MiniA Wiki Tests::McpWikiOpsMetadataIncludesOpsTools
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiOpsMetadataIncludesOpsTools
@@ -493,6 +540,10 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMountSearchFanout
 
+- name: MiniA Wiki Tests::WikiSelectionRoutesOnlyChosenMounts
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testWikiSelectionRoutesOnlyChosenMounts
+
 - name: MiniA Wiki Tests::SearchScanBudgetCountCutoff
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testSearchScanBudgetCountCutoff
@@ -614,8 +665,17 @@ jobs:
   exec: args.func = require("tests/wiki.js").testS3ArtifactsHydrateLocalSearchAndGraphCache
 
 todo:
+- MiniA Wiki Tests::McpWikiRestrictedCrossWikiGraphHints
+- MiniA Wiki Tests::McpWikiRestrictedV2GraphHints
+- MiniA Wiki Ingest Tests::LegacyContextProvenance
+- MiniA Wiki Tests::WikiSelectionRoutesOnlyChosenMounts
+- MiniA Wiki Tests::IndexedLanguageAndTelemetry
+- MiniA Wiki Tests::RetrievalContracts
 - MiniA Wiki Tests::ParseFrontmatterWithYaml
 - MiniA Wiki Tests::ParseFrontmatterWithoutBlock
+- MiniA Wiki Tests::LuceneWriterLockSkipsFakeChannel
+- MiniA Wiki Tests::LuceneIncrementalWriteReleasesWriter
+- MiniA Wiki Tests::BoundedRetrievalPipelineRanksEvidenceAndCitations
 - MiniA Wiki Tests::ExtractMarkdownLinks
 - MiniA Wiki Tests::ExtractWikiStyleLinks
 - MiniA Wiki Tests::ExtractLinksDeduplicates
@@ -683,6 +743,8 @@ todo:
 - MiniA Wiki Tests::McpWikiRestrictedGraphHintsAreOptInOpaqueReferences
 - MiniA Wiki Tests::McpWikiRestrictedRefsAreSharedAcrossReplicasViaChannel
 - MiniA Wiki Tests::McpWikiRestrictedRefChannelSweepsExpiredEntries
+- MiniA Wiki Tests::McpWikiRestrictedRefChannelNamespacesIsolateWikis
+- MiniA Wiki Tests::McpWikiRestrictedDefaultWikiIdIsDeterministicAndSafe
 - MiniA Wiki Tests::McpWikiOpsMetadataIncludesOpsTools
 - MiniA Wiki Tests::FsBackendDelete
 - MiniA Wiki Tests::FsBackendDeleteNonExistent
@@ -766,3 +828,4 @@ todo:
 - MiniA Wiki Tests::PeriodicArtifactBundleRefreshReopensCachedRuntime
 - MiniA Wiki Tests::HttpBackendIsReadOnly
 - MiniA Wiki Tests::ArtifactBundleHydratesAtomically
+- MiniA Wiki Tests::MountedNavigationPathsRoundTrip

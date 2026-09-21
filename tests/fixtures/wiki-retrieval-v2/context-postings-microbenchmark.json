@@ -1,0 +1,70 @@
+{
+  "scope": "isolated parsed-Markdown posting lookup; no Lucene queries or backend operations",
+  "clock": "System.nanoTime",
+  "runtime": "20260913",
+  "jvm": "26.0.2",
+  "sourceSha1": "2a45f6465a6bed0676aaef7868ca08f168a91c07",
+  "timedBinaryAccounting": false,
+  "results": [
+    {
+      "paragraphs": 100,
+      "passages": 103,
+      "rawUtf8Bytes": 12468,
+      "parseMillis": 60.686208,
+      "linearRecordsVisited": 102,
+      "binaryComparisons": 7,
+      "linear": {
+        "samples": 1000,
+        "p50Millis": 0.016042,
+        "p95Millis": 0.023917,
+        "p99Millis": 0.0365
+      },
+      "binary": {
+        "samples": 1000,
+        "p50Millis": 0.004125,
+        "p95Millis": 0.010417,
+        "p99Millis": 0.020459
+      }
+    },
+    {
+      "paragraphs": 1000,
+      "passages": 1003,
+      "rawUtf8Bytes": 124968,
+      "parseMillis": 93.43675,
+      "linearRecordsVisited": 1002,
+      "binaryComparisons": 10,
+      "linear": {
+        "samples": 1000,
+        "p50Millis": 0.067084,
+        "p95Millis": 0.071583,
+        "p99Millis": 0.101834
+      },
+      "binary": {
+        "samples": 1000,
+        "p50Millis": 0.003292,
+        "p95Millis": 0.004125,
+        "p99Millis": 0.009583
+      }
+    },
+    {
+      "paragraphs": 10000,
+      "passages": 10003,
+      "rawUtf8Bytes": 1258968,
+      "parseMillis": 394.560958,
+      "linearRecordsVisited": 10002,
+      "binaryComparisons": 13,
+      "linear": {
+        "samples": 1000,
+        "p50Millis": 0.709875,
+        "p95Millis": 1.066375,
+        "p99Millis": 1.657042
+      },
+      "binary": {
+        "samples": 1000,
+        "p50Millis": 0.001583,
+        "p95Millis": 0.004042,
+        "p99Millis": 0.006583
+      }
+    }
+  ]
+}

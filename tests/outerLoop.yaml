@@ -32,6 +32,16 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testOuterLoopInitDefaultMaxCycles
 
+- name: MiniA Outer Loop Tests::DurableRunPersistsSafeStateAndTrace
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDurableRunPersistsSafeStateAndTrace
+
+- name: MiniA Outer Loop Tests::DurableRunResumesInterruptedState
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDurableRunResumesInterruptedState
+
 - name: MiniA Outer Loop Tests::PadCycle
   from: MiniA Outer Loop Tests::Init
   to  : oJob Test
@@ -101,6 +111,8 @@ todo:
 - MiniA Outer Loop Tests::InitCustomSessionId
 - MiniA Outer Loop Tests::InitAutoSessionId
 - MiniA Outer Loop Tests::InitDefaultMaxCycles
+- MiniA Outer Loop Tests::DurableRunPersistsSafeStateAndTrace
+- MiniA Outer Loop Tests::DurableRunResumesInterruptedState
 - MiniA Outer Loop Tests::PadCycle
 - MiniA Outer Loop Tests::CollectChangedFilesDetectsNewFiles
 - MiniA Outer Loop Tests::CollectChangedFilesDetectsDeletedFiles

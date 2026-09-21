@@ -2,6 +2,11 @@
 
 Mini-A's wiki is a Markdown knowledge base shared by agent sessions, the console, and the `mcp-wiki` servers. Enable it with `usewiki=true`; `/wiki context` is the quickest way to inspect its access mode and available retrieval features.
 
+For opt-in versioned passages, enable `wikiretrievalv2=true` and explicitly build
+with writable Dream reindex. See [retrieval v2](WIKI-RETRIEVAL-V2.md) for supported
+local backends, migration, budget differences and [measured validation](https://github.com/openaf/mini-a/blob/main/development/docs/WIKI-RETRIEVAL-V2-VALIDATION.md).
+Flag-off behavior retains the existing page engine with compatible contract repairs.
+
 ## Backends and access
 
 | Backend | Configuration | Read/write | Notes |
@@ -20,16 +25,20 @@ The console supports `/wiki list`, `read`, `search`, `write`, `delete`, `move`, 
 
 Use `tree` and `browse` for hierarchy, `backlinks` before moving a page, and `lint` before publishing structural changes. `mcp-wiki.yaml` exposes the read-oriented MCP surface; `mcp-wiki-safe.yaml` adds bounded, opaque-reference retrieval for untrusted clients. Mounts (`wikimounts`) attach other read-only wiki configurations under `@name/`.
 
+### MCP multi-wiki selection
+
+Call `context()` once to discover the compact `wikis` catalog. In `mcp-wiki.yaml`, `wiki` is optional: omitted or `"*"` searches primary plus every mount; `"primary"` selects the main wiki; a mount name selects that source; and `["linux", "kubernetes"]` selects a subset. For example, `{query: "OIDC", wiki: "kubernetes"}` routes only to that mounted manager. A selected mount accepts mount-local paths (`{wiki: "reference", path: "guides/setup.md"}`), while legacy `@reference/guides/setup.md` remains supported. Unknown, duplicate, ambiguous, and conflicting selectors are rejected. `mcp-wiki-safe.yaml` intentionally exposes none of this topology.
+
 All three MCP servers (`mcp-wiki.yaml`, `mcp-wiki-safe.yaml`, `mcp-wiki-ops.yaml`) accept `audit=true` (or `OJOB_MCP_AUDIT`) to log every tool call. For `s3`, `http`, and `es` backends this also logs each page actually fetched — backend, resolved location (`s3://bucket/key`, the joined URL, or `es:index/path`), and byte count — including internal fetches made while serving `search`, `lint`, `list`, or `reindex`, not just the top-level tool call. Local `fs` reads are not covered. `mcp-wiki-safe.yaml` only ever logs the resolved location, never the opaque reference exposed to restricted-mode callers.
 
 ## Agentic retrieval
 
-The agent-facing retrieval layer is a small, incremental protocol layered on the existing Lucene index, scan fallback, hierarchy, mounts, backends, backlinks, and optional graph. It does not create another index or document store. Its purpose is to keep irrelevant Markdown out of model context.
+The agent-facing retrieval layer is a small, incremental protocol layered on the existing Lucene index, scan fallback, hierarchy, mounts, backends, backlinks, and optional graph. With v2 disabled it uses the existing page index. V2 builds a separate derived passage index and immutable revision blocks; Markdown remains authoritative. Its purpose is to keep irrelevant Markdown out of model context.
 
-1. `search(query)` finds a small set of candidates. It returns metadata, a `wiki:path` reference, and the native Lucene `score` when Lucene supplied one; scan fallback deliberately does not invent a score.
+1. `search(query)` finds a small set of candidates. It returns metadata and a `wiki:path` reference. `nativeScore` identifies supplied engine relevance; `rankScore` identifies final ranking. The compatibility `score` depends on the surface: direct lexical adapters retain engine relevance, while knowledge-ranked and v2 results use final ranking. Scans never manufacture native lexical relevance.
 2. `open(path|ref)` returns cheap structure: front matter, title/description, byte size, links, headings, and deterministic line ranges. It never returns the Markdown body.
 3. `navigate(path|ref, section=...)` browses a directory through existing hierarchy logic, or describes a heading's parent, children, adjacent headings, and ranges.
-4. `read(path|ref, section|startLine/endLine)` returns the selected evidence. Agent reads default to a bounded character chunk and report `truncated` plus a deterministic `next.startLine` continuation instead of silently flooding context.
+4. `read(path|ref, section|startLine/endLine)` returns the selected evidence. Agent reads default to a bounded character chunk and report `truncated` plus a revision-bound `next` continuation with fixed line range and progressing `charOffset` instead of silently flooding context.
 5. `grep(path|ref, pattern)` searches one known page or directory and returns bounded matching lines with a little context.
 
 `related(path|ref)` is optional follow-up discovery: it preserves backlinks and uses graph neighbors only when graph state is available. It is useful after lexical retrieval leaves a real gap, not as a mandatory first step. `mcp-wiki-safe.yaml` remains intentionally restricted to its opaque, budgeted search/read contract and does not expose structural enumeration.
@@ -104,7 +113,7 @@ all.
 
 | Op | Functionality | Equivalent to / overlaps |
 | --- | --- | --- |
-| `context` | Overview: page count, sections, mounts, recent activity | Superset of `mounts` (also lists mounts, with less detail) |
+| `context` | Overview: page count, sections, mounts, recent activity, scoped retrieval status | Select one `wiki` or mounted `path`; defaults to primary. `retrieval.wiki` identifies the status owner. |
 | `list [prefix] [--meta]` | List pages; `--meta` adds title/description per page | |
 | `tree` | Hierarchical view with per-section index status | Coarser-grained view of the same structure as `browse` |
 | `browse` | One level of a path: child sections, direct pages, suggested next reads | |
@@ -170,7 +179,7 @@ entry point for wiki maintenance. Built-in console commands like `/wiki reindex`
 | Fix lint issues (links, indexes, headings) | `/wiki lint` (report only) | `lint` | `dreamwikimode=repair` | No |
 | Full deterministic pass | — | — | `dreamwikimode=apply` (default) | Yes if `usewikigraph=true` (defaults `wikigraphsemantic=true`; pass `wikigraphsemantic=false` to opt out) — otherwise No |
 | Structural reorg (LLM agent) | — | — | `dreamwikimode=reorg` (requires `dreamwikireorg=true`) | Yes |
-| Dry-run proposal | — | — | `dreamwikimode=plan` | Preview only if `usewikigraph=true` — computes (but never persists) the same semantic stats `apply` would write; otherwise No |
+| Dry-run proposal | — | — | `dreamwikimode=plan` | Model-free structural preview only if `usewikigraph=true`; requested semantic work is reported separately and never executed |
 
 `repair`, `reindex`, `graph`, and `indexes` are the isolated building blocks that `apply` composes: `repair`
 fixes lint-flagged issues only; `reindex` rebuilds only the Lucene search index; `graph` rebuilds only the
@@ -200,16 +209,17 @@ See [`USAGE.md`](../USAGE.md#dreams-sleep-pass) for the full dream-mode referenc
 | `repair` | `lint()` findings | Only the pages lint flagged: broken-link targets get corrected, missing/stale index links get added, heading-hierarchy violations get fixed | Lucene search index, `.mini-a-wiki-graph/graph.json`, pages lint didn't flag |
 | `apply` (default) | Everything above | `repair`'s page-level fixes, then the deterministic finalize pass: full `index.md` regeneration, `reindex()`, and — when `usewikigraph=true` — a `graph build` that now defaults `wikigraphsemantic=true` (an explicit `wikigraphsemantic=false` still opts back out) | Nothing structural — `apply` never moves, merges, or deletes pages |
 | `reorg` | A full read/write agent loop over the whole wiki (hierarchy, backlinks, lint, near-duplicates) | Any page it moves, merges, deletes, or corrects, then the same finalize pass as `apply` — but `wikigraphsemantic` stays opt-in here (defaulting the finalize pass's semantic edges is only done for `apply`/`plan`, not the already-LLM-driven `reorg`) | Nothing — this is the only mode that performs structural moves/merges/deletes |
-| `plan` | Same reads as `repair` plus a graph preview when `usewikigraph=true` | Nothing on disk — dry-run only. The returned proposal now includes a graph preview (structural stats, and semantic stats when `wikigraphsemantic` would default/resolve to `true`) computed in memory and discarded; `graph.json` is never written | All wiki state, including `graph.json` and the Lucene index |
+| `plan` | Same reads as `repair` plus a structural graph preview when `usewikigraph=true` | Nothing on disk — model-free dry-run. The proposal records requested semantic work separately from executed structural work; `graph.json` is never written | All wiki state, including `graph.json` and the Lucene index |
 
 `wikigraphsemantic` (default `false`) gates the one LLM-touching part of graph rebuilds — extracting cross-page
 concept relationships via an LLM call per changed page. It stays strictly opt-in for `graph` and `reorg`. For
 `apply` and `plan`, it now defaults to `true` whenever `usewikigraph=true` (pass `wikigraphsemantic=false`
 explicitly to keep those two modes structural-only). This applies uniformly whether you invoke `apply`/`plan`
 from the CLI (`mini-a dream=true ...`) or from an interactive console's `/dream apply`/`/dream plan`. Note that
-`plan`'s preview still makes the real LLM calls to compute what it would extract — only the write to
-`graph.json` is skipped — so a `usewikigraph=true` plan run costs the same LLM calls as the `apply` run it's
-previewing.
+`plan` remains model-free regardless of that setting. Its `graph_preview.semantic`
+and `semanticExecuted` are false; `semanticRequested` records the effective
+apply/plan request, and `semanticOmissionReason: "model-free-dry-run"` explains
+why extraction was not executed. No model is created or called by the preview.
 
 The dream pass resolves its own LLM the same way `model=`/`OAF_MODEL` works for memory dreams (see
 [Parameters](../USAGE.md#dreams-sleep-pass)). If neither is set when a semantic pass runs, extraction silently
@@ -271,7 +281,7 @@ wikiroot=/shared/wiki dreamwikimode=reindex` for a cron job that only needs the 
 
 ## Search and graph state
 
-Writable wikis maintain a Lucene index in `.mini-a-wiki-lucene/` and can maintain graph data in `.mini-a-wiki-graph/`. The index powers lexical search; graph state powers backlinks, community information, and optional related-page search hints. `wikilexical` selects language and optional explicit enhancements. Lucene-backed search results also carry a numeric `score` field (Lucene's native relevance score); results served from the scan fallback (no index available) omit it.
+Writable wikis maintain a Lucene index in `.mini-a-wiki-lucene/` and can maintain graph data in `.mini-a-wiki-graph/`. The index powers lexical search; graph state powers community information and optional related-page search hints. V2 reverse-link postings support backlinks independently of the optional graph. `wikilexical` selects language and optional explicit enhancements. Consume `nativeScore`, `rankScore`, `scoreComponents` and `retrievalMethod` when available instead of assuming the compatibility `score` is native Lucene relevance. Scan fallback has no native lexical score. See [v2 score and capability contracts](WIKI-RETRIEVAL-V2.md).
 
 Read-only wikis consume an existing Lucene index without taking a writer lock. If no index is available, local backends can fall back to scanning page contents. Static HTTP has no directory listing, so it requires the published artifact bundle described below for catalog and search.
 
@@ -294,14 +304,24 @@ Cross-wiki expansion touches no backend: it only reads each mount's already-load
 
 ## Publishing a static HTTP wiki
 
-Publish the Markdown pages at the same relative paths used by the wiki, then publish `mini-a-wiki-index.zip` at the static root (or specify `wikihttpindexurl`). The zip must contain the complete generated paths:
+Publish the Markdown pages at the same relative paths used by the wiki, then publish `mini-a-wiki-index.zip` at the static root (or specify `wikihttpindexurl`). A legacy lexical bundle contains these generated paths:
 
 ```
 .mini-a-wiki-lucene/
 .mini-a-wiki-graph/graph.json
 ```
 
-The Lucene directory must be copied as binary files; do not convert segment files through a text encoder. Mini-A downloads and atomically installs the bundle into its local `wikiindexdir` cache. Page reads remain live HTTP GET requests, while `list`, search, tree, and browse use the catalog stored in Lucene. Consequently, pages excluded from indexing are not visible in an HTTP catalog.
+V2 bundles additionally contain `.mini-a-wiki-serving/current.json`, its immutable
+generation directory (catalogue, Lucene files and raw evidence blocks), and, after
+an update, one optional `previous.json` plus its validated predecessor generation.
+The Lucene directory must be copied as binary files; do not convert segment files
+through a text encoder. Mini-A downloads and atomically installs the bundle into
+its local `wikiindexdir` cache. A v2 static HTTP reader serves validated immutable
+passage text from that bundle; it does not invent per-page GET/HEAD validation for
+a server that exposes only the bundle. Artifact authentication and refresh control
+that view. Legacy page reads remain live HTTP GET requests, while `list`, search,
+tree, and browse use the catalog stored in Lucene. Consequently, pages excluded
+from indexing are not visible in an HTTP catalog.
 
 Set `wikihttptimeout` (milliseconds, default `30000`) for HTTP request timeouts. Set `wikiaccesskey` plus `wikisecret` for Basic authentication, or only `wikisecret` for Bearer authentication. If unset, `wikisecret` may come from `OAF_MINI_A_WIKI_SECRET`.
 
@@ -382,7 +402,7 @@ normalized without a model call. Use `normalize` or `raw` to guarantee no LLM us
 `wikidreambudget`, and `wikimaxprompttokens` defer work rather than dropping it.
 
 ```sh
-mini-a ingest=true ingestsource=./docs usewiki=true wikiaccess=rw ingestmode=auto
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=/tmp/wiki ingestmode=auto
 mini-a dream=true usewiki=true dreamwikimode=plan
 ```
 
@@ -390,5 +410,124 @@ Dream plans are strictly zero-LLM: they report dirty/affected candidates and est
 and tokens. Runtime semantic extraction starts with title, headings, tags, links, identifiers,
 and section digests; it asks for selected context only when the extractor requests it. Search
 retains page compatibility while adding deterministic title/path/heading/recency score details
-with `debug=true`; `assembleContext()` returns token-bounded chunk context. Set
-`wikitelemetry=true` only to retain local aggregate query hashes/frequencies.
+with `debug=true`; `assembleContext()` returns token-bounded chunk context. With
+v2 off, these can be ingestion inputs rather than quotations from the distilled
+page: `origin`, `evidenceRole`, `quotationStatus` and `sourceLocatorStatus` make
+that boundary explicit. Legacy `path`/`anchor` remain navigation mappings, and
+`scoreOrigin` identifies the inherited parent-page score. No wiki line/revision
+citation is invented for source text. Search/state failures return an explicit
+failure envelope with `chunks: []`. V2 defaults to exact current wiki-page passages.
+Set
+`wikitelemetry=true` to retain separate aggregate search/result counters (no query hashes or text by
+default). V2 can explicitly opt into bounded question samples through its validated
+advanced configuration; see the retrieval v2 privacy and retention contract.
+# Bounded agentic retrieval
+
+`wiki op="retrieve" query="..."` composes the established Wiki primitives
+into a bounded Query → Search → Inspect → Expand → Synthesize-preparation workflow. It
+returns compact evidence entries, source citations, line ranges, ranking score
+components, and used-versus-configured budgets; it does not return whole Wiki
+content or generate an ungrounded answer.
+
+Optional bounds are `maxCandidates`, `maxInspected`, `maxGraphExpansion`, and
+`maxBytes`. Set `expandGraph=true` to spend the separate graph-expansion budget
+on backlinks, graph neighbors, and eligible mounted Wiki relations. Native
+Lucene score is retained where available; structural relevance is shown
+separately, so selection remains deterministic and inspectable.
+
+## Safe repeated ingestion
+
+Ingestion is an upsert by default. `ingestprune=false` reports missing sources and
+preserves their pages; a successful upsert does not claim that the wiki mirrors the
+source. `ingestprune=true` reconciles only artifacts owned by the same destination,
+origin and section. Individual URL sources reject prune because they are not a site
+inventory. `ingestsourceid` supplies a stable logical origin when moving a folder;
+keep the destination section stable too. Repository commits are version information,
+not new origin identities.
+
+Preview, reconcile, and explicitly authorize a confirmed empty source:
+
+```sh
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=./wiki ingestmode=normalize ingestprune=true ingestdryrun=true
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=./wiki ingestmode=normalize ingestprune=true
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=./wiki ingestmode=normalize ingestprune=true ingestallowemptyprune=true
+```
+
+A missing/inaccessible folder is never an empty inventory. Listing errors, changed
+filters or size limits, local edits, failed writes and budget deferrals block prune.
+Present excluded, oversized, empty or unreadable files are preserved. The additional
+empty authorization applies only after complete discovery of an empty folder.
+Inventory revalidation detects changes before deletion; it does not make the source
+filesystem an atomic snapshot. Do not modify the source during reconciliation.
+
+All modes rebuild complete pages. `normalize`, `raw`, and structured `auto` use no
+model. Distillation receives every current source chunk, including after section
+removals or `ingestforce=true`. Prompt overhead counts toward `wikimaxprompttokens`
+and `wikiingestbudget`/`wikillmbudget`; oversized complete sources are deferred,
+never silently truncated. Force does not authorize deletion, bypass read-only
+access, override edits, or waive budgets.
+
+Mappings and meaningful page signatures protect manual edits and dream changes.
+Conflicts preserve pages, prevent destructive work, and return unsuccessful results.
+Resolve a conflict by reviewing and restoring the last ingestion-managed version,
+or preserve the edited page separately and remove the managed destination using wiki
+tools before retrying. Never discard the manifest to bypass ownership protection.
+Moved pages with a unique unchanged ingestion binding are located and rebound;
+rewritten content or multiple bindings remain conflicts. New naming collisions use
+deterministic suffixes; ingestion cannot occupy generated `index.md` pages.
+
+The versioned manifest is the applied-state authority. The old ledger is read only
+for conservative migration; it is not updated as a separate authority. Present legacy
+records migrate only when the old origin key, expected destination and page provenance
+match. Full-source reprocessing repairs partial legacy chunk lists. A pre-migration
+state copy is kept under `.mini-a-wiki-ingest/pre-migration.json`. Ambiguous legacy
+records remain unresolved and are never automatically deleted. Corrupt manifests
+fail closed: restore a verified backup and retry after review.
+
+A journal records prepared operations, page application, manifest commitment and
+pending finalization. Re-run ingestion after an interruption to retry safely;
+already applied replacements and absent deletions are recognized. Finalization
+failure is retried without redistilling committed sources. The journal contains source
+text and wiki metadata: protect it with the same filesystem access as the wiki.
+Do not edit managed pages or state while recovery is pending; changed preconditions
+cause a conflict rather than silently overwriting them. State replacement requires
+atomic rename support; unsupported filesystems return a persistence failure.
+
+Ingestion writers sharing the same local wiki/index directory are serialized with a
+filesystem lock, and manifest changes observed during planning are rejected. This is
+not distributed coordination: remote backends with independent index caches require
+one writer/operator. Ordinary wiki tools and external writers do not acquire this
+ingestion lock; do not run them concurrently with ingestion. Each page operation
+rechecks ownership, but there is no backend-wide transaction or distributed CAS.
+The console's existing manager is reused and never closed by ingestion.
+
+Dry-run reports `planned_writes`/`planned_removals`, conflicts and budget estimates;
+`written`/`removed` contain only applied operations. It calls no LLM and creates no
+filesystem destination files, logs, timestamps or migration state. Standalone remote
+dry-run requires an already supplied manager; it refuses to initialize a remote
+artifact cache. Temporary source clones/downloads are isolated and cleaned.
+
+Results expose `status` (`complete`, `noop`, `planned`, `partial`, `blocked`, `failed`),
+`ok`, `sync_complete`, scope, discovery completeness, missing sources, blocked prune,
+conflicts, deferrals, invalidated derivatives and recovery state. Wrappers return a
+nonzero exit status for unsuccessful requested work. Dry-run never claims applied
+synchronization. Explicit `wikiaccess=ro` is preserved by all entry points.
+
+Current chunk membership and generation checks prevent retired ingestion chunks from
+returning through context assembly. Pending journals suppress affected page chunks.
+Reference-aware cleanup preserves shared records. Known dependent summaries and facts
+are invalidated; graph page hooks clear page-owned semantic caches. Artifacts without
+sufficient provenance, manual links, and copied facts in legacy pages are preserved:
+this is not a guarantee of removing every historical semantic copy. No global semantic
+consolidation is launched to perform deterministic reconciliation.
+
+A legacy source hash proves source provenance, not the absence of later manual edits.
+Migration adopts a page signature only from a saved last-write signature or a complete
+reproducible deterministic page with matching generated metadata. Legacy distillations
+without such proof remain replacement conflicts. Review and preserve the legacy page
+separately, remove the old mapped destination with wiki tools, and retry to reconstruct
+from the complete source. This conservative conflict is necessary because historical
+LLM output cannot be reproduced reliably to prove ownership of its current contents.
+
+
+See [retrieval v2 status](WIKI-RETRIEVAL-V2.md) for contract repairs and outstanding architecture work.

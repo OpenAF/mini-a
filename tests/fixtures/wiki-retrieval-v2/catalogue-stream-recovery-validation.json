@@ -1,0 +1,43 @@
+{
+  "sources": {
+    "mini-a-wiki-retrieval.js": "2300b2aba04bc8480235f3486398aee2253d9c31",
+    "tests/wikiRetrievalV2.js": "29869d61cc1ac84ce8142c11d9f90965bee4fa4d",
+    "tests/wikiRetrievalV2.yaml": "565b7afb260bd3ddee6150858b742b67784d2dce",
+    "tests/wiki.yaml": "60b432e390a5af4b4fe7675bdfa08868d9a7e1ea"
+  },
+  "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",
+  "focused": {
+    "assertions": 1234,
+    "functions": 30,
+    "failures": []
+  },
+  "wiki": {
+    "assertions": 1965,
+    "functions": 191,
+    "failures": []
+  },
+  "repeat": {
+    "runs": 2,
+    "assertions": 2468
+  },
+  "targeted": "CATALOGUE_STREAM_RECOVERY_PASS",
+  "faults": [
+    "initialization",
+    "write",
+    "close-before",
+    "close-after",
+    "write-close"
+  ],
+  "limitations": [
+    "Local injected exceptions; not hardware power loss or live provider validation",
+    "No new performance claim; prior benchmark source retained separately",
+    "Corpus-scaled publication remains unfinished"
+  ],
+  "ojob": {
+    "command": "ojob tests/wiki.yaml",
+    "passEntries": 191,
+    "failEntries": 0,
+    "errorEntries": 0
+  },
+  "sourceArchive": "catalogue-stream-recovery-runtime-snapshot.zip"
+}

@@ -64,6 +64,16 @@ help:
     desc     : Local cache directory used for downloaded S3 search and graph artifacts
     example  : "/var/cache/mini-a/wiki"
     mandatory: false
+  - name     : wikiretrievalv2
+    desc     : Opt-in versioned passage retrieval; requires compatible serving artifacts; build explicitly on writable FS/s3fs or hydrate a published bundle
+    example  : "false"
+    mandatory: false
+  - name     : wikiretrievalconfig
+    desc     : Validated SLON/JSON advanced passage, cache and artifact budgets
+    mandatory: false
+  - name     : wikitelemetry
+    desc     : Record local aggregate retrieval telemetry (off by default); read-only managers keep it in memory
+    mandatory: false
   - name     : wikilexical
     desc     : "SLON/JSON Lucene lexical configuration. Defaults to {language: 'english'}; supports inline synonyms and an optional synonymsFile."
     example  : "{ language: 'english', synonymsFile: 'synonyms.txt' }"
@@ -89,8 +99,8 @@ help:
     example  : "Team wiki"
     mandatory: true
   - name     : wikimounts
-    desc     : "SLON/JSON array of read-only wiki mounts: [{name, backend, root|bucket|prefix|url|...}]"
-    example  : "[{name: 'team', backend: 'fs', root: './team-wiki'}]"
+    desc     : "SLON/JSON array of read-only wiki mounts: [{name, label?, description?, backend, root|bucket|prefix|url|...}]. name is the stable MCP wiki selector."
+    example  : "[{name: 'team', label: 'Team docs', description: 'Curated team knowledge', backend: 'fs', root: './team-wiki'}]"
     mandatory: false
   - name     : usewikigraph
     desc     : "Enable the wiki knowledge graph. Also enabled automatically when `wikigraphfalkorhost` is provided. Search transparently appends related-page hints."
@@ -168,10 +178,12 @@ todo:
     ((fnsMeta)): &MCPFNSMETA
       context:
         name       : context
-        description: "[ORIENTATION] Get a compact overview of {{label}}: page count, sections, mounts, and recent changes. Call this once at the start of any wiki task before searching or reading."
+        description: "[ORIENTATION] Get a compact overview of {{label}}, including available wiki names for the wiki selector. Call once before searching when the relevant knowledge source is unknown."
         inputSchema:
           type      : object
-          properties: {}
+          properties:
+            wiki: { type: string, description: "One wiki name: primary or a mount name. Omitted means primary; retrieval status applies only to that wiki." }
+            path: { type: string, description: "Alternatively select a mount with @name/ or wiki:@name/." }
         annotations:
           title         : context
           readOnlyHint  : true
@@ -179,7 +191,7 @@ todo:
 
       search:
         name       : search
-        description: "[START HERE] Search {{label}} pages. This is lexical keyword retrieval, not semantic question answering: use specific keywords, names, aliases, and short phrases. A compatible Lucene index is used when available; otherwise the wiki is scanned. When enabled, graph-related pages may be appended as supplemental hints. Always call this before read. Returns path+title+description per match (no full page content). Then call read() with the most relevant path.{{#if ($wikiHasSourceUrl)}} Each result also carries a {{$wikiSourceField}} URL, that page's canonical citation source; cite it when you use the page's content.{{/if}}"
+        description: "[START HERE] Search {{label}} pages. context() lists wiki names. Omit wiki or use '*' for all wikis; use 'primary', a mount name, or an array for selected sources. Mounted paths remain @name/path.md. Returns compact matches through lexical keyword retrieval, not semantic question answering. With legacy retrieval, explicitly enabled graph-related pages may be appended as supplemental hints. Then read the best path."
         inputSchema:
           type      : object
           properties:
@@ -202,9 +214,32 @@ todo:
               type       : integer
               description: "Number of context lines before/after each match (>0 enables full per-line snippet mode)."
               default    : 0
+            applicability:
+              type: object
+              additionalProperties: false
+              description: "V2 exact applicability filters against current revisions. validAt is an inclusive UTC calendar date; this does not open historical content. Requires wikiretrievalv2=true."
+              properties:
+                product: {type: string}
+                version: {type: string}
+                platform: {type: string}
+                environment: {type: string}
+                validAt: {type: string, pattern: '^\d{4}-\d{2}-\d{2}$'}
+            maxQueries: {type: integer, minimum: 1, description: "V2 request-wide query budget."}
+            expandGraph: {type: boolean, description: "Opt in to bounded graph discovery across selected wikis, honouring wikigraphcross settings. Requires a current source graph and V2 retrieval."}
+            maxGraphExpansion: {type: integer, minimum: 0, maximum: 10, description: "V2 graph candidate attempts; default 5 when expandGraph is true."}
+            maxGraphEdges: {type: integer, minimum: 0, maximum: 4096, description: "Request-wide graph adjacency visits; default 256."}
+            maxCandidates: {type: integer, minimum: 1, description: "V2 request-wide candidate budget."}
+            maxInspected: {type: integer, minimum: 1, description: "V2 request-wide inspection budget."}
+            maxMillis: {type: integer, minimum: 1, description: "V2 request deadline budget; blocking backend limitations still apply."}
+            maxBytes: {type: integer, minimum: 1, description: "V2 returned UTF-8 byte budget including wrappers."}
             path:
               type       : string
               description: Optional single page path to scope the search.
+            wiki:
+              oneOf:
+              - { type: string }
+              - { type: array, items: { type: string } }
+              description: "Knowledge source: omitted/'*'=all, primary=main wiki, mount name=one mounted wiki, or an array of mount names."
           required  : [ query ]
         annotations:
           title         : search
@@ -220,6 +255,9 @@ todo:
             path:
               type       : string
               description: "Wiki page path to read. Use @name/path.md for mounted wikis."
+            wiki:
+              type: string
+              description: "Optional primary or mount selector; with a mount, path is mount-local. Must not conflict with @name/path."
             startLine:
               type       : integer
               description: Optional 1-based start line to read from.
@@ -237,6 +275,18 @@ todo:
               type       : boolean
               description: Return compact output (path/title/body only).
               default    : false
+            charStart:
+              type       : integer
+              description: Inclusive raw UTF-16 fragment start; copy from next.
+            charEnd:
+              type       : integer
+              description: Exclusive raw UTF-16 fragment end; copy from next.
+            charOffset:
+              type       : integer
+              description: UTF-16 character offset within the pinned selected range; copy from next.
+            revision:
+              type       : string
+              description: Revision from next; changed content returns stale-reference.
             maxChars:
               type       : integer
               description: Maximum characters returned by agentic MCP reads (default 8000; continuation is returned when exceeded).
@@ -293,6 +343,8 @@ todo:
             pattern: { type: string, description: "Literal match by default; set regex=true only when needed." }
             limit: { type: integer, default: 20 }
             contextLines: { type: integer, default: 1 }
+            maxChars: { type: integer, default: 8000, description: "UTF-16 character cap per matching-line fragment; copy next to resume a long line." }
+            cursor: { type: object, description: "Copy the cursor from next; binds scope, pattern, ordering and revision." }
             regex: { type: boolean, default: false }
             caseSensitive: { type: boolean, default: false }
           required  : [ path, pattern ]
@@ -400,8 +452,8 @@ todo:
       context  : Wiki context overview
       search   : Wiki search pages
       read     : Wiki read page
-      open     : Wiki inspect page structure
-      navigate : Wiki navigate structure
+      open     : Wiki open page
+      navigate : Wiki navigate content
       grep     : Wiki grep known content
       related  : Wiki related pages
       browse   : Wiki browse section
@@ -451,6 +503,9 @@ jobs:
       wikihttptimeout      : toNumber.isNumber.default(30000)
       wikiartifactrefreshsecs: toNumber.isNumber.default(0)
       wikiindexdir         : isString.default(__)
+      wikiretrievalv2: toBoolean.isBoolean.default(__)
+      wikiretrievalconfig: isString.default(__)
+      wikitelemetry        : toBoolean.isBoolean.default(__)
       wikilexical          : isString.default(__)
       wikisourceurl        : isString.default(__)
       wikisourcefield      : isString.default("sourceUrl")
@@ -485,7 +540,7 @@ jobs:
   check:
     in: {}
   exec : | #js
-    return global.__wikiTool.wiki({ operation: "context" })
+    return global.__wikiTool.wiki({ operation: "context", wiki: args.wiki, path: args.path })
 
 - name : Wiki list pages
   check:
@@ -494,13 +549,15 @@ jobs:
       withMeta: toBoolean.isBoolean.default(false)
       limit   : toNumber.isNumber.default(200)
       compact : toBoolean.isBoolean.default(false)
+      wiki    : default(__)
   exec : | #js
     return global.__wikiTool.wiki({
       operation: "list",
       path     : args.path,
       withMeta : args.withMeta,
       limit    : args.limit,
-      compact  : args.compact
+      compact  : args.compact,
+      wiki     : args.wiki
     })
 
 - name : Wiki tree
@@ -509,12 +566,14 @@ jobs:
       path   : isString.default("")
       depth  : toNumber.isNumber.default(3)
       compact: toBoolean.isBoolean.default(true)
+      wiki   : default(__)
   exec : | #js
     return global.__wikiTool.wiki({
       operation: "tree",
       path     : args.path,
       depth    : args.depth,
-      compact  : args.compact
+      compact  : args.compact,
+      wiki     : args.wiki
     })
 
 - name : Wiki browse section
@@ -522,11 +581,13 @@ jobs:
     in:
       path   : isString.default("")
       compact: toBoolean.isBoolean.default(true)
+      wiki   : default(__)
   exec : | #js
     return global.__wikiTool.wiki({
       operation: "browse",
       path     : args.path,
-      compact  : args.compact
+      compact  : args.compact,
+      wiki     : args.wiki
     })
 
 - name : Wiki read page
@@ -538,15 +599,27 @@ jobs:
       section   : isString.default(__)
       countLines: toBoolean.isBoolean.default(false)
       compact   : toBoolean.isBoolean.default(false)
+      wiki      : default(__)
+      charStart : toNumber.isNumber.default(__)
+      charEnd   : toNumber.isNumber.default(__)
+      charOffset: toNumber.isNumber.default(__)
+      revision  : isString.default(__)
+      maxChars  : toNumber.isNumber.default(__)
   exec : | #js
     return global.__wikiTool.wiki({
       operation : "read",
+      charStart : args.charStart,
+      charEnd   : args.charEnd,
+      charOffset: args.charOffset,
+      revision  : args.revision,
+      maxChars  : args.maxChars,
       path      : args.path,
       lineStart : args.startLine,
       lineEnd   : args.endLine,
       section   : args.section,
       countLines: args.countLines,
-      compact   : args.compact
+      compact   : args.compact,
+      wiki      : args.wiki
     })
 
 - name : Wiki search pages
@@ -558,6 +631,16 @@ jobs:
       regex        : toBoolean.isBoolean.default(false)
       contextLines : toNumber.isNumber.default(0)
       path         : isString.default("")
+      wiki         : default(__)
+      applicability: default(__)
+      maxQueries: default(__)
+      expandGraph: toBoolean.isBoolean.default(false)
+      maxGraphExpansion: default(__)
+      maxGraphEdges: default(__)
+      maxCandidates: default(__)
+      maxInspected: default(__)
+      maxMillis: default(__)
+      maxBytes: default(__)
   exec : | #js
     return global.__wikiTool.wiki({
       operation    : "search",
@@ -567,7 +650,17 @@ jobs:
       regex        : args.regex,
       contextLines : args.contextLines,
       path         : args.path,
-      compact      : args.contextLines === 0
+      compact      : args.contextLines === 0,
+      wiki         : args.wiki,
+      applicability: args.applicability,
+      maxQueries: args.maxQueries,
+      expandGraph: args.expandGraph,
+      maxGraphExpansion: args.maxGraphExpansion,
+      maxGraphEdges: args.maxGraphEdges,
+      maxCandidates: args.maxCandidates,
+      maxInspected: args.maxInspected,
+      maxMillis: args.maxMillis,
+      maxBytes: args.maxBytes
     })
 
 - name : Wiki backlinks
@@ -575,9 +668,49 @@ jobs:
     in:
       path   : isString
       compact: toBoolean.isBoolean.default(true)
+      wiki   : default(__)
   exec : | #js
     return global.__wikiTool.wiki({
       operation: "backlinks",
       path     : args.path,
-      compact  : args.compact
+      compact  : args.compact,
+      wiki     : args.wiki
     })
+
+- name : Wiki open page
+  check:
+    in:
+      path: isString
+      maxHeadings: toNumber.isNumber.default(40)
+  exec : | #js
+    return global.__wikiTool.wiki(merge(args, {operation:"open"}))
+
+- name : Wiki navigate content
+  check:
+    in:
+      path: isString
+      section: isString.default(__)
+  exec : | #js
+    return global.__wikiTool.wiki(merge(args, {operation:"navigate"}))
+
+- name : Wiki grep known content
+  check:
+    in:
+      path: isString
+      pattern: isString
+      limit: toNumber.isNumber.default(20)
+      contextLines: toNumber.isNumber.default(1)
+      maxChars: toNumber.isNumber.default(8000)
+      regex: toBoolean.isBoolean.default(false)
+      caseSensitive: toBoolean.isBoolean.default(false)
+      cursor: default(__)
+  exec : | #js
+    return global.__wikiTool.wiki(merge(args, {operation:"grep"}))
+
+- name : Wiki related pages
+  check:
+    in:
+      path: isString
+      limit: toNumber.isNumber.default(10)
+  exec : | #js
+    return global.__wikiTool.wiki(merge(args, {operation:"related"}))

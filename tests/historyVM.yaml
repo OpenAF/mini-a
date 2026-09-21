@@ -1,0 +1,254 @@
+include:
+- oJobTest.yaml
+
+jobs:
+- name: MiniA History VM Tests::CleanupSymbolicLinks
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testCleanupDoesNotFollowSymbolicLinks
+
+- name: MiniA History VM Tests::Init
+  exec: true
+
+- name: MiniA History VM Tests::Disabled
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testDisabledCreatesNoStore
+
+- name: MiniA History VM Tests::AppendResume
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testAppendResumeAndDistinctEqualEvents
+
+- name: MiniA History VM Tests::Representations
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testMultiResolutionRepresentationsAndCache
+
+- name: MiniA History VM Tests::Hierarchy
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testHierarchicalContextObjectsSurviveRestart
+
+- name: MiniA History VM Tests::PhaseOneCompatibility
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testPhaseOneDoesNotCreateRepresentationCache
+
+- name: MiniA History VM Tests::HierarchicalSummaries
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testHierarchicalSummariesInvalidateByChildVersion
+
+- name: MiniA History VM Tests::CoarseToFineSearch
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testCoarseToFineContextSearch
+
+- name: MiniA History VM Tests::StructuredReads
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testSectionRangeAndJsonPathReads
+
+- name: MiniA History VM Tests::IncrementalIndex
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testContextIndexesUpdateIncrementally
+
+- name: MiniA History VM Tests::AdaptiveBudget
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testAdaptiveBudgetAndRepresentationSelection
+
+- name: MiniA History VM Tests::ConsumerViews
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testConsumerSpecificContextViews
+
+- name: MiniA History VM Tests::ContextDeltas
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testContextDeltasAndStablePrefixReuse
+
+- name: MiniA History VM Tests::DependencyPrefetch
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testDependencyPrefetchAndHardConstraintOverflow
+
+- name: MiniA History VM Tests::TypedGraph
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testTypedGraphTraversalAndHeatPropagation
+
+- name: MiniA History VM Tests::Supersession
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testSupersessionSuppressesStaleContext
+
+- name: MiniA History VM Tests::BranchSupersession
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testSupersessionDoesNotCrossBranches
+
+- name: MiniA History VM Tests::RuntimeFlags
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testRuntimeFlagsAndToolRegistration
+
+- name: MiniA History VM Tests::ContextVirtualizationShadow
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testContextVirtualizationShadowProjectsWithoutMutatingInput
+
+- name: MiniA History VM Tests::ActiveContextVirtualization
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testActiveContextVirtualizationPreservesProtocolAndExactBacking
+
+- name: MiniA History VM Tests::ActiveContextRuntime
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testRuntimeUsesActiveContextVirtualizationOnlyWhenNotShadowing
+
+- name: MiniA History VM Tests::Compression
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testStructuralAndOptionalSemanticCompression
+
+- name: MiniA History VM Tests::LegacyImport
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testLegacyImportMarksCompletenessBoundary
+
+- name: MiniA History VM Tests::SearchRead
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testSearchAndExactPagedRead
+
+- name: MiniA History VM Tests::Projection
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testProjectionProtectsRequirementsAndCollapsesOldLargeOutput
+
+- name: MiniA History VM Tests::CorruptTail
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testCorruptTrailingWriteRebuildsSafely
+
+- name: MiniA History VM Tests::CorruptCheckpoint
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testCorruptCheckpointRebuildsFromJournal
+
+- name: MiniA History VM Tests::ConcurrentWriter
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testConcurrentWriterFailsClosed
+
+- name: MiniA History VM Tests::ExpansionTTL
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testExpansionIsBoundedAndExpires
+
+- name: MiniA History VM Tests::UnknownContent
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testUnknownStructuredContentStaysInline
+
+- name: MiniA History VM Tests::RewindBranch
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testRewindUsesNewBranchScope
+
+- name: MiniA History VM Tests::BackingFailure
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testUnavailableBackingDisablesCollapse
+
+- name: MiniA History VM Tests::LongRequestPaging
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testLongRequestPaging
+
+- name: MiniA History VM Tests::SourceVersionsSnapshot
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testSourceVersionsAndSnapshot
+
+- name: MiniA History VM Tests::NativeToolPaging
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testNativeToolPaging
+
+- name: MiniA History VM Tests::RuntimeSourcesDelegation
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testRuntimeSourceViewsAndDelegation
+
+- name: MiniA History VM Tests::RemoteSnapshots
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testRemoteSnapshots
+
+- name: MiniA History VM Tests::S3Persistence
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyS3.js").testWebPersistence
+
+- name: MiniA History VM Tests::AppendDetachesCallerData
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testAppendDetachesCallerData
+
+- name: MiniA History VM Tests::ResumeUnterminatedJournal
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testResumeUnterminatedJournal
+
+- name: MiniA History VM Tests::RecoverBranchWithoutCheckpoint
+  from: MiniA History VM Tests::Init
+  to  : oJob Test
+  exec: args.func = require("tests/historyVM.js").testRecoverBranchWithoutCheckpoint
+
+todo:
+- MiniA History VM Tests::CleanupSymbolicLinks
+- MiniA History VM Tests::AppendDetachesCallerData
+- MiniA History VM Tests::ResumeUnterminatedJournal
+- MiniA History VM Tests::RecoverBranchWithoutCheckpoint
+- MiniA History VM Tests::S3Persistence
+- MiniA History VM Tests::RemoteSnapshots
+- MiniA History VM Tests::RuntimeSourcesDelegation
+- MiniA History VM Tests::LongRequestPaging
+- MiniA History VM Tests::SourceVersionsSnapshot
+- MiniA History VM Tests::NativeToolPaging
+- MiniA History VM Tests::Disabled
+- MiniA History VM Tests::AppendResume
+- MiniA History VM Tests::Representations
+- MiniA History VM Tests::Hierarchy
+- MiniA History VM Tests::PhaseOneCompatibility
+- MiniA History VM Tests::HierarchicalSummaries
+- MiniA History VM Tests::CoarseToFineSearch
+- MiniA History VM Tests::StructuredReads
+- MiniA History VM Tests::IncrementalIndex
+- MiniA History VM Tests::AdaptiveBudget
+- MiniA History VM Tests::ConsumerViews
+- MiniA History VM Tests::ContextDeltas
+- MiniA History VM Tests::DependencyPrefetch
+- MiniA History VM Tests::TypedGraph
+- MiniA History VM Tests::Supersession
+- MiniA History VM Tests::BranchSupersession
+- MiniA History VM Tests::RuntimeFlags
+- MiniA History VM Tests::ContextVirtualizationShadow
+- MiniA History VM Tests::ActiveContextVirtualization
+- MiniA History VM Tests::ActiveContextRuntime
+- MiniA History VM Tests::Compression
+- MiniA History VM Tests::LegacyImport
+- MiniA History VM Tests::SearchRead
+- MiniA History VM Tests::Projection
+- MiniA History VM Tests::CorruptTail
+- MiniA History VM Tests::CorruptCheckpoint
+- MiniA History VM Tests::ConcurrentWriter
+- MiniA History VM Tests::ExpansionTTL
+- MiniA History VM Tests::UnknownContent
+- MiniA History VM Tests::RewindBranch
+- MiniA History VM Tests::BackingFailure

@@ -1,0 +1,29 @@
+{
+  "status": "superseded implementation attempt; not current failures",
+  "cause": "new reuse condition compared SHA256 artifact checksum with SHA1 content revision",
+  "fixedBy": "matching validated revision locator and preserving full staged SHA256/position validation",
+  "reports": [
+    {
+      "suite": "wikiRetrievalV2",
+      "assertions": 896,
+      "passedFunctions": 28,
+      "failures": [
+        {
+          "name": "testImmutableIncrementalGenerations",
+          "error": "same-revision explicit update published without rewriting its block (got false but expected true)"
+        }
+      ]
+    },
+    {
+      "suite": "wiki",
+      "assertions": 1627,
+      "passedFunctions": 189,
+      "failures": [
+        {
+          "name": "testImmutableIncrementalGenerations",
+          "error": "same-revision explicit update published without rewriting its block (got false but expected true)"
+        }
+      ]
+    }
+  ]
+}

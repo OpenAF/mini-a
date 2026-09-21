@@ -1,0 +1,23 @@
+{
+  "kind": "same-jvm-concurrent-retrieve",
+  "backend": "local-fs",
+  "liveProvider": false,
+  "pages": 1000,
+  "callers": 4,
+  "callsPerCaller": 30,
+  "samples": 120,
+  "wallMillis": 130.668625,
+  "latency": {
+    "p50": 3.463625,
+    "p95": 9.542458,
+    "p99": 14.262208
+  },
+  "errors": [],
+  "sourceSha1": {
+    "wiki": "eb73c1b17923c67e980161d1f67cfd3a5e152e5c",
+    "retrieval": "bd78bc47774ad8425fdb486c74d4f6b44ecbba85",
+    "harness": "73b49e05c4d22ce77a26d98c0ccbe1ff4fe1dd7e"
+  },
+  "runtime": "20260914",
+  "jvm": "26.0.2"
+}

@@ -1,0 +1,54 @@
+jobs:
+- name: MiniA Eval Tests::Init
+  exec: args.tests = require("tests/eval.js")
+
+- name: MiniA Eval Tests::ScenarioMetrics
+  from: MiniA Eval Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEvalScenarioCollectsMetricsAndAssertions
+
+- name: MiniA Eval Tests::FailuresAndJudge
+  from: MiniA Eval Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEvalScenarioReportsFailuresAndOptionalJudge
+
+- name: MiniA Eval Tests::SuiteAndBaseline
+  from: MiniA Eval Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEvalSuiteAndBaselineComparison
+
+- name: MiniA Eval Tests::YamlLoad
+  from: MiniA Eval Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEvalYamlDefinitionLoads
+
+- name: MiniA Eval Tests::HistoryVmShadowMetrics
+  from: MiniA Eval Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEvalNormalizesHistoryVmShadowMetrics
+
+- name: MiniA Eval Tests::ConversationReplay
+  from: MiniA Eval Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEvalMaterializesAndCleansConversationReplay
+
+- name: MiniA Eval Tests::PhaseVariantMatrix
+  from: MiniA Eval Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEvalExpandsPhaseVariantMatrix
+
+include:
+- oJobTest.yaml
+
+ojob:
+  opacks:
+  - oJob-common
+
+todo:
+- MiniA Eval Tests::ScenarioMetrics
+- MiniA Eval Tests::FailuresAndJudge
+- MiniA Eval Tests::SuiteAndBaseline
+- MiniA Eval Tests::YamlLoad
+- MiniA Eval Tests::HistoryVmShadowMetrics
+- MiniA Eval Tests::ConversationReplay
+- MiniA Eval Tests::PhaseVariantMatrix

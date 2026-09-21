@@ -1,0 +1,35 @@
+{
+  "suite": "wiki",
+  "assertions": 645,
+  "passedFunctions": 151,
+  "failures": [
+    {
+      "name": "testBootstrapCreatesAgentsAndIndexForEmptyWritableWiki",
+      "error": "AGENTS.md should link to index.md (got false but expected true)"
+    },
+    {
+      "name": "testLintOrphan",
+      "error": "should detect orphan page (got false but expected true)"
+    },
+    {
+      "name": "testLintHeadingHierarchy",
+      "error": "should detect h3 before h2 (got false but expected true)"
+    },
+    {
+      "name": "testMcpWikiMetadataIncludesHierarchyTools",
+      "error": "MCP metadata should expose move (got false but expected true)"
+    },
+    {
+      "name": "testMcpWikiSearchSchemasDescribeLexicalRetrieval",
+      "error": "search metadata should identify lexical retrieval (got false but expected true)"
+    },
+    {
+      "name": "testSearchReturnsLineNumbers",
+      "error": "result should have line number (got false but expected true)"
+    },
+    {
+      "name": "testDriftGuard",
+      "error": "mcp-wiki.yaml should define __miniAWikiAgentsTemplate (got false but expected true)"
+    }
+  ]
+}

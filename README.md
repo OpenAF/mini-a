@@ -307,6 +307,7 @@ The interactive tester provides:
 - **Interactive Tool Calling** - Call any MCP tool with custom parameters through guided prompts
 - **Advanced Config Support** - Merge extra `$mcp` options such as `shared`, `clientInfo`, `auth`, `strict`, `blacklist`, or future transport flags via JSSLON/JSON
 - **Configuration Options** - Adjust settings like debug mode, tool selection display size, and result parsing
+- **Reusable `mcp=` Output** - "Show mcp= parameter string" prints the active connection's config as a SLON string ready to paste into `mini-a mcp="..."` (mirrors how `modelman=true` prints `OAF_MODEL`/`OAF_LC_MODEL`)
 - **Library Loading** - Load additional OpenAF libraries for extended functionality using `libs=` parameter
 
 ### Available Options
@@ -435,7 +436,7 @@ Mini-A ships with complementary components:
 | `usetoolslc` | Register MCP tools only on the low-cost model | `false` |
 | `usejsontool` | Enable an optional compatibility `json` tool when `usetools=true` (helps with models that occasionally emit `json` tool calls instead of plain JSON action output) | `false` |
 | `useutils` | Auto-register Mini Utils Tool utilities as an MCP connection (`init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`, plus console-only helpers like `userInput` when running `mini-a-con`) | `false` |
-| `usestdutils` | When `useutils=true`, expose standard aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names | `true` |
+| `usestdutils` | When `useutils=true`, expose standard aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names | `false` |
 | `useskills` | Expose the Mini Utils `skills` operation; when `useutils=false`, only the skills tool is registered | `false` |
 | `utilsroot` | Root directory for Mini Utils Tool file operations (only when `useutils=true`) | `.` |
 | `utilsallow` | Comma-separated allowlist of Mini Utils Tool names to expose (only when `useutils=true`) | unset |
@@ -452,6 +453,11 @@ Mini-A ships with complementary components:
 | `contextguardbudget` | Assumed smallest context window used by `contextguard` when `maxcontext=0` | `32000` |
 | `toolresultmaxinline` | Max inline bytes kept from large tool or `readresult` outputs before spill/truncation under `contextguard` | `4096` when `contextguard=true` |
 | `readresultmaxmatches` | Max matching regions returned by `proxy-dispatch` `readresult` `op='grep'` under `contextguard` | `20` when `contextguard=true` |
+| `historyvm` | Persist exact conversation events in a conversation-owned journal and replace eligible old large provider messages with bounded, retrievable references | `false` |
+| `historyvmmode` | History VM policy mode (`safe` is the only supported mode) | `safe` |
+| `historyvmshadow` | Capture canonical events and estimate projection savings while leaving model requests unchanged | `false` |
+| `contextvirtualization` | Enable opt-in Phase 2 multi-resolution ContextObjects, typed graph retrieval, consumer-specific assembly, and active progressive provider projection; requires `historyvm=true` | `false` |
+| `contextvirtualizationshadow` | Dry-run and measure the same Phase 2 projection while continuing to send the Phase 1 provider context; requires `historyvm=true contextvirtualization=true` | `false` |
 | `mcpprogcall` | Start a per-session localhost HTTP bridge so generated scripts can list/search/call MCP tools programmatically; requires `useshell=true` for script execution | `false` |
 | `mcpprogcallport` | Port for the programmatic tool-calling bridge (`0` = auto-assign free port) | `0` |
 | `mcpprogcallmaxbytes` | Max inline JSON response size before storing oversized tool results under `/result/{id}` | `4096` |
@@ -460,6 +466,8 @@ Mini-A ships with complementary components:
 | `mcpprogcallbatchmax` | Max calls accepted per `/call-tools-batch` request | `10` |
 | `chatbotmode` | Conversational assistant mode | `false` |
 | `promptprofile` | System prompt verbosity profile (`minimal`, `balanced`, `verbose`). `balanced` omits examples/step-by-step tool-call walkthroughs and trims tool-schema descriptions to their essential clause; `verbose` restores full examples and schema detail | `minimal` in chatbot mode; `verbose` with `debug=true` outside chatbot mode; otherwise `balanced` |
+| `lcreplytool` | Use a capture-only MCP tool for LC reply recovery on OpenAI-compatible/Ollama adapters, within `lcjsonretries` | `false` |
+| `lcjsonretries` | Extra same-step low-cost retries for invalid reply JSON before main-model fallback; retries consume tokens and calls. See [reply JSON troubleshooting](docs/REPLY-JSON.md) | `1` |
 | `systempromptbudget` | Maximum estimated system-prompt token budget before low-priority sections are dropped | - |
 | `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |
 | `planstyle` | Planning style (`simple` flat steps by default, or `legacy` phase-based) | `simple` |
@@ -467,6 +475,8 @@ Mini-A ships with complementary components:
 ### Outer Loop Autonomous Coding
 
 Mini-A now supports an optional durable autonomous loop with `outerloop=true`. This keeps per-session state under `~/.openaf-mini-a/sessions/<session-id>/`, reruns fresh agent cycles, persists plan/validation artifacts, and stops only when completion + validation succeed (or safety limits are reached).
+
+For a single resumable run without enabling the outer loop, use `durable=true`. It writes redacted state and structured JSONL events to `~/.openaf-mini-a/runs/<runid>/`; resume with `resumerun=<runid>` and inspect with `runstatus=<runid>`. The existing `resume=true` conversation option retains its original meaning.
 
 Example with external instructions:
 
@@ -525,7 +535,7 @@ See [USAGE.md](USAGE.md#working-memory-structured-runtime-state) for the full me
 | `wikibackend` | Wiki backend: `fs`, `s3`, `s3fs`, `es`, or read-only `http` (`https` alias) | `fs` |
 | `wikiroot` | Filesystem wiki directory or local `.zip`/`.okt` archive when `wikibackend=fs`; archives are always read-only | `.` |
 | `wikibucket` | S3 bucket for `s3`/`s3fs` wiki backends | - |
-| `wikiprefix` | S3 key prefix for `s3`/`s3fs`, or Elasticsearch index name for `es` | - |
+| `wikiprefix` | S3 key prefix for `s3`/`s3fs`, or Elasticsearch index name for `es` | `wiki/` (S3) / `mini_a_wiki` (ES) |
 | `wikiurl` | S3 endpoint, Elasticsearch/OpenSearch base URL, or static page-server base URL when `wikibackend=http` | - |
 | `wikiaccesskey` | S3 access key, or Elasticsearch username when `wikibackend=es` | - |
 | `wikisecret` | S3 secret key, or Elasticsearch password when `wikibackend=es` | - |
@@ -572,6 +582,13 @@ See [the complete wiki guide](docs/WIKI.md) for backends, console/MCP operations
 | `wikigraphfalkoruser` | FalkorDB user | - |
 | `wikigraphfalkorpass` | FalkorDB password | - |
 
+With `wikiretrievalv2=true`, trusted search/retrieve calls can opt into one-hop
+graph discovery using `expandGraph=true`, `maxGraphExpansion` (default 5, max 10)
+and `maxGraphEdges` (default 256, max 4096). Graph evidence is source-revision
+validated; cross-wiki links and shared keys stay within the selected federation
+and share request budgets. Cross traversal honours the `wikigraphcross*` settings.
+See [retrieval contracts](docs/WIKI-RETRIEVAL-V2.md).
+
 Wiki folders become browsable sub-wikis when they contain `index.md`. Agents can use `wiki` ops `tree`, `browse`, and `backlinks` before selective `read`; read-write wikis also support `move` for link-repaired page relocation and `init path=<folder/>` for section indexes.
 
 | Option | Description | Default |
@@ -604,6 +621,11 @@ Wiki folders become browsable sub-wikis when they contain `index.md`. Agents can
 | `contextguardbudget` | Assumed smallest context window used by `contextguard` when `maxcontext=0` | `32000` |
 | `toolresultmaxinline` | Max inline bytes kept from large tool or `readresult` outputs before spill/truncation under `contextguard` | `4096` when `contextguard=true` |
 | `readresultmaxmatches` | Max matching regions returned by `proxy-dispatch` `readresult` `op='grep'` under `contextguard` | `20` when `contextguard=true` |
+| `historyvm` | Enable durable bounded conversation history; requires a writable `conversation=` path; web S3 history includes recoverable canonical snapshots | `false` |
+| `historyvmmode` | History VM policy mode (`safe` is the only supported mode) | `safe` |
+| `historyvmshadow` | Measure the VM projection without changing requests or registering retrieval tools | `false` |
+| `contextvirtualization` | Enable opt-in lazy L0-L4 representations, typed relationships, stale suppression, structured paging, consumer-specific utility-per-token budgeting, local reuse, and active provider projection; requires `historyvm=true` | `false` |
+| `contextvirtualizationshadow` | Dry-run the Phase 2 working-set projection without replacing the Phase 1 provider context; requires `historyvm=true contextvirtualization=true` | `false` |
 | `compressgoal` | Automatically compress oversized goal text before execution | `false` |
 | `compressgoaltokens` | Estimated token threshold before goal compression is considered | `250` |
 | `compressgoalchars` | Character threshold before goal compression is considered | `1000` |
@@ -674,6 +696,7 @@ Mini-A includes built-in security features:
 - **Shell Isolation** - Shell access disabled by default
 - **Sandboxing Support** - Use `usesandbox=...` presets for built-in host restrictions, or `shell=...` for Docker/Podman/custom sandboxes with stronger isolation
 - **Hook-based Guardrails** - Add `before_shell`/`after_shell` hooks to enforce organization-specific policy
+- **Centralized Policies** - Opt-in `policy=`/`policyfile=` rules consistently constrain shell, MCP tools, delegation, Wiki mutations, filesystem access, and HTTP domains; decisions are recorded in the run trace
 
 Built-in sandbox presets now report their real protection level:
 - `linux`: uses `bwrap` when available; otherwise Mini-A warns and runs unsandboxed.
@@ -709,6 +732,20 @@ Run the test suite from the repository root:
 ojob tests/autoTestAll.yaml
 ```
 
+Mini-A also supports reusable YAML/JSON evaluation suites: run
+`mini-a eval=true evalfile=evals/core.yaml` (or `ojob mini-a.yaml ...`) to
+collect normalized execution metrics, assertions, and optional baseline
+comparison. History VM runs also expose normalized working-set, representation,
+rehydration, effective-context, and shadow-projection measurements. See
+[USAGE.md](USAGE.md#evaluation-suites) for the scenario schema.
+
+For conservative automatic strategy selection, add `orchestration=auto` to a
+goal. It reuses Mini-A's existing planning, advisor, and validation paths;
+manual remains the default and explicit flags always take precedence.
+For ordinary OpenAF test jobs, include `mini-a-eval.yaml` and call `MiniA Eval`
+with inline scenarios or a suite file. See the [oJob eval guide](USAGE.md#evals-in-ojob-tests)
+and [complete YAML example](examples/eval-ojob.yaml).
+
 The run generates an `autoTestAll.results.json` file with detailed results—inspect it locally and delete it before your final commit.
 
 ## Community
@@ -724,3 +761,10 @@ Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
 ## License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+### Inter-agent communication (opt-in)
+
+Use `agentcomms` to declare bounded parent relay, peer messages, topic subscriptions,
+and versioned shared state for local or remote delegated agents. Isolation remains
+the default. Communication reuses OpenAF channels, worker polling, and existing
+audit/metrics outputs. See [configuration, examples, limits and guarantees](USAGE.md#opt-in-inter-agent-communication).

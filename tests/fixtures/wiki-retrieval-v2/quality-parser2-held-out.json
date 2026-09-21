@@ -1,0 +1,93 @@
+{
+  "mode": "v2",
+  "split": "held-out",
+  "runtime": "20260913",
+  "samples": 6,
+  "passageRecallAtK": 1,
+  "mrr": 1,
+  "results": [
+    {
+      "query": "wikirestrictrefttl",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 3.3529411764705883,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "evidencePaths": [
+        "long.md"
+      ]
+    },
+    {
+      "query": "running workloads",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 2.2666666666666666,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "evidencePaths": [
+        "language.md"
+      ]
+    },
+    {
+      "query": "compatibilityswitch",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 2.0526315789473686,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "evidencePaths": [
+        "old.md"
+      ]
+    },
+    {
+      "query": "issuer audience credential",
+      "k": 2,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 1.2941176470588236,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "evidencePaths": [
+        "audience.md",
+        "issuer.md"
+      ]
+    },
+    {
+      "query": "lastmountparameter reference expiry",
+      "k": 1,
+      "recall": 1,
+      "reciprocalRank": 1,
+      "citationRangeCorrectness": 1,
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 3.375,
+      "outcome": "hits",
+      "expectedUnanswerable": false,
+      "evidencePaths": [
+        "@last/same.md"
+      ]
+    },
+    {
+      "query": "genuineheldoutunanswerableidentifier",
+      "k": 2,
+      "recall": null,
+      "reciprocalRank": 0,
+      "citationRangeCorrectness": null,
+      "duplicateFraction": 0,
+      "usefulCharsPerEstimatedContentToken": 0,
+      "outcome": "zero",
+      "expectedUnanswerable": true,
+      "evidencePaths": []
+    }
+  ]
+}

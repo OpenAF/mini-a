@@ -1,0 +1,25 @@
+{
+  "sources": {
+    "mini-a-wiki-retrieval.js": "f7f0c96528b1ffe17c23172367d41107c59b646e",
+    "tests/wikiRetrievalV2.js": "89a8c46f94ca04c9b57e3cdb71e9bdfff48a1479"
+  },
+  "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",
+  "targeted": "EARLY_SUPPORT_DEDUP_PASS",
+  "focused": {
+    "suite": "wikiRetrievalV2",
+    "assertions": 1306,
+    "passedFunctions": 32,
+    "failures": []
+  },
+  "wiki": {
+    "suite": "wiki",
+    "assertions": 2039,
+    "passedFunctions": 193,
+    "failures": []
+  },
+  "limitations": [
+    "Exact support duplicates only; no general overlapping-range merger",
+    "No measured latency or independent quality claim",
+    "Full-plan acceptance remains incomplete"
+  ]
+}
