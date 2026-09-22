@@ -15696,6 +15696,23 @@ MiniA._IGNORED_INTERNAL_ARGUMENT_NAMES = (function() {
   return ignored
 })()
 
+// Noisy tool results are summarized by an isolated child. Keep the summary
+// evidence-bounded: a catalog proves that a tool is callable, not what records
+// or documents sit behind it. This is especially important for virtual skills,
+// whose local prompt count is intentionally separate from skillwiki context.
+MiniA._buildAutoDelegationSummaryGoal = function(goal, toolName, output) {
+  var raw = isString(output) ? output : stringify(output, __, "")
+  if (raw.length > 32768) raw = raw.substring(0, 32768) + "\n...[truncated]"
+  var goalShort = isString(goal) ? goal.substring(0, 120) : "the current goal"
+  return "Summarize the following tool output for the parent goal: " + goalShort + ". " +
+    "Output only the key facts, findings, and important details in 2-5 sentences. " +
+    "Treat the supplied output as the only evidence: do not infer configuration, activation, record counts, or absence from a tool catalog or descriptor alone. " +
+    "A listed tool is callable, but its backing data must be checked with that tool's status/context operation. " +
+    "If skillwiki is listed, its presence means the virtual skill library is enabled; whether skills are configured and their count must be verified with skillwiki operation='context', never from the local prompt skill count. " +
+    "If the output does not contain that verification, say it is unverified and identify the follow-up call instead of claiming none.\n\n" +
+    "Tool: " + toolName + "\nOutput:\n" + raw
+}
+
 MiniA._normalizeArgName = function(name) {
   var normalized = String(name || "").trim().toLowerCase()
   if (normalized.length === 0) return ""
@@ -19335,9 +19352,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             runtime._autoDelegationThisStep = (runtime._autoDelegationThisStep || 0) + 1
             try {
               var _rawForSummary = isString(observation) ? observation : stringify(rawResult, __, "")
-              if (_rawForSummary.length > 32768) _rawForSummary = _rawForSummary.substring(0, 32768) + "\n...[truncated]"
-              var _goalShort = isString(args.goal) ? args.goal.substring(0, 120) : "the current goal"
-              var _summaryGoal = "Summarize the following tool output for the parent goal: " + _goalShort + ". Output only the key facts, findings, and important details in 2-5 sentences.\n\nTool: " + toolName + "\nOutput:\n" + _rawForSummary
+              var _summaryGoal = MiniA._buildAutoDelegationSummaryGoal(args.goal, toolName, _rawForSummary)
               // Bound the foreground wait, but let the sub-agent keep running
               // as long as it continues to report activity.
               var _summaryWaitMs = isNumber(args.delegationtimeout) && args.delegationtimeout > 0

@@ -290,6 +290,12 @@ This exposes a `skillwiki` tool to the LLM (operations: `context`, `search`,
 `MiniUtilsTool` mechanism as the existing `wiki`/`graph` tools -- no MCP loopback
 required. Consultation is bounded per agent run:
 
+The presence of `skillwiki` in the available tool catalog means that the virtual
+skill library is enabled. It does not reveal the library contents or count. Status
+questions must call `skillwiki` with `operation=context` and use the returned
+`skillCount`; the ordinary local-skill prompt count belongs to the separate
+`useskills` feature and must not be used as virtual-skill status.
+
 - `skillsmaxloaded` (default 3) -- distinct skills that may be `open()`-ed.
 - `skillsmaxchars` (default 12000) -- total skill-body characters `read()` may return.
 - `skillsautolimit` (default 5) -- max results per automatic search, once auto-consultation (`skillsautosearch`) is implemented against the planner in a later phase; today the tool itself is available to the LLM at any time and is bounded the same way whether the model reaches for it directly or a future planner hook does.
