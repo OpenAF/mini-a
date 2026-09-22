@@ -37,6 +37,16 @@ jobs:
 - name: MiniA Core Tests::Init
   exec: args.tests = require("tests/coreFunctionality.js")
 
+- name: MiniA Core Tests::SkillWikiMetadataRequiresContextForStatus
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSkillWikiMetadataRequiresContextForStatus
+
+- name: MiniA Core Tests::AutoDelegationSummaryDoesNotInferSkillWikiState
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAutoDelegationSummaryDoesNotInferSkillWikiState
+
 - name: MiniA Core Tests::LargeSummaryChunksAndMergeStayBounded
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -1164,6 +1174,8 @@ todo:
 - MiniA Core Tests::SlimToolMetaForProfileTrimsDescriptionsByProfile
 - MiniA Core Tests::CreateUtilsMcpConfigShrinksSchemasForMinimalProfile
 - MiniA Core Tests::UtilsMcpSkillsToggle
+- MiniA Core Tests::SkillWikiMetadataRequiresContextForStatus
+- MiniA Core Tests::AutoDelegationSummaryDoesNotInferSkillWikiState
 - MiniA Core Tests::UtilsMcpConsoleOnlyToolsToggle
 - MiniA Core Tests::UtilsMcpSkillsLogsSourceFiles
 - MiniA Core Tests::ProxyDispatchPropagatesDownstreamToolErrors

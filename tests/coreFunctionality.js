@@ -1619,6 +1619,26 @@
     ow.test.assert(isDef(enabledWithUtils.options.fns.filesystemQuery), true, "Should keep utility tools when useutils=true")
   }
 
+  exports.testSkillWikiMetadataRequiresContextForStatus = function() {
+    var agent = createAgent()
+    agent._skillWikiManager = {}
+    var config = agent._createUtilsMcpConfig({ useutils: true, useskillwiki: true, promptprofile: "minimal" })
+    ow.test.assert(isMap(config) && isMap(config.options.fnsMeta.skillwiki), true, "Enabled skill wiki should expose metadata")
+    var description = config.options.fnsMeta.skillwiki.description
+    ow.test.assert(description.indexOf("enabled whenever this tool is present") >= 0, true, "Tool presence should explicitly prove that the virtual library is enabled")
+    ow.test.assert(description.indexOf("operation='context'") >= 0, true, "Even minimal metadata should require context for status and counts")
+    ow.test.assert(description.indexOf("local skills") >= 0, true, "Metadata should distinguish local skills from virtual skills")
+  }
+
+  exports.testAutoDelegationSummaryDoesNotInferSkillWikiState = function() {
+    var catalog = stringify({ connections: [{ alias: "c8", tools: [{ name: "skillwiki", description: "Search virtual skills" }] }] }, __, "")
+    var prompt = MiniA._buildAutoDelegationSummaryGoal("Do you have any virtual skills configured?", "proxy-dispatch", catalog)
+    ow.test.assert(prompt.indexOf("do not infer configuration") >= 0, true, "Catalog summaries should remain evidence-bounded")
+    ow.test.assert(prompt.indexOf("skillwiki operation='context'") >= 0, true, "Catalog summaries should direct virtual-skill verification")
+    ow.test.assert(prompt.indexOf("instead of claiming none") >= 0, true, "Catalog summaries should forbid unsupported absence claims")
+    ow.test.assert(prompt.indexOf(catalog) >= 0, true, "Summary prompt should retain the original tool evidence")
+  }
+
   exports.testUtilsMcpSkillsLogsSourceFiles = function() {
     var rootDir = java.io.File.createTempFile("mini-a-utils-root-", "").getCanonicalPath()
     var skillsDir = java.io.File.createTempFile("mini-a-skills-", "").getCanonicalPath()

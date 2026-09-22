@@ -4783,7 +4783,7 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     skillwiki: {
       name       : "skillwiki",
-      description: "Search, inspect and consult the virtual skill library (requires useskillwiki=true). ALWAYS start with operation='context' or 'search'/'recommend' -- these return compact metadata only (name/title/summary/tags/risk/ref), never a full skill. Use 'open' to inspect a candidate's headings/requirements/risk before 'read'-ing one bounded section at a time (section=). 'compose' returns only explicitly declared prerequisite metadata and never executes it. Bounded by skillsmaxloaded/skillsmaxchars per run.",
+      description: "The virtual skill library is enabled whenever this tool is present; for questions about whether virtual skills are configured, active, available, or how many exist, call operation='context' and report its skillCount instead of inferring from local skills or the tool inventory. Search, inspect and consult the library with operation='search' or 'recommend' -- these return compact metadata only (name/title/summary/tags/risk/ref), never a full skill. Use 'open' to inspect a candidate's headings/requirements/risk before 'read'-ing one bounded section at a time (section=). 'compose' returns only explicitly declared prerequisite metadata and never executes it. Bounded by skillsmaxloaded/skillsmaxchars per run.",
       inputSchema: {
         type      : "object",
         properties: {
