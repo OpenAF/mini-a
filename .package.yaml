@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260921'
+version: '20260922'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -198,7 +198,7 @@ filesHash:
   docs/OPTIMIZATIONS.md: 0f90df64489bf66e3f284d2f3992014f0a5b37a3
   docs/REPLY-JSON.md: 9dd6747356eb044924928dd08737a01e162e5f5c
   docs/SKILLS-YAML-FORMAT.md: 7457c1d133dea0e6ba860826339b2e8f7a23db94
-  docs/VIRTUAL-SKILLS.md: 54dcfd8993563401ffa63088dfe17bfe303308a9
+  docs/VIRTUAL-SKILLS.md: 9edfdf8c29860d05718fd6103ca7f8aa9eaf56ab
   docs/WHATS-NEW.md: 651a11a3d9c22dfefd2bc1bfb7df6e7cc6d08ece
   docs/WIKI-RETRIEVAL-V2.md: a91e551a155d17d5e5c4456e83b4e392874ebd96
   docs/WIKI.md: e1a67f235bda00b03bc45b04e92cab51330d8044
@@ -284,14 +284,14 @@ filesHash:
   mini-a-skills.js: 3525ea0289dbf89b76a3918bbe6e22f37d190d6c
   mini-a-subtask.js: e115956dc56ae411d30e6a6c5be51cad20afa1ce
   mini-a-tool-selection.js: 0e3d8ecf2182833daef108c5e8fed7cf2271590c
-  mini-a-utils.js: 56bc999f95ad49834614f6392e9c68990e16d139
+  mini-a-utils.js: 3795d17a6ced85669520e0f630bfa090b0e883cf
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 8c23492e7aa916e4a682741b355d74ee42f052d5
   mini-a-wiki-knowledge.js: b5daa7914b34c9dc7f3bbe9e69baac6ce8a3a91b
   mini-a-wiki-retrieval.js: e72295d0b6722829933f74023ab009d8f4b9cb2d
   mini-a-wiki.js: 26c164b6d832a8700156dca655c45c2b91a0480d
   mini-a-worker.yaml: e133c9b10c1d2eb10919b8aa9743a5291b6535ef
-  mini-a.js: 3c2c3a3ebda7232eb373ddf28cd6c03d5b536cbd
+  mini-a.js: a61e907d8b4d699c7783df4014e494650ce91184
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 6264473a29be854ecab08348aa34424dad7a0695
   public/index.md: e48239d0649f1474cc17b09504236cc341be3bf0
