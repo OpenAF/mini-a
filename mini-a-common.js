@@ -937,6 +937,35 @@ function __miniAParseListOption(value) {
   return value.split(",").map(function(v) { return v.trim().toLowerCase() }).filter(function(v) { return v.length > 0 })
 }
 
+// Return the candidates for the argument currently being completed after
+// `/skills `. Local skill names are always valid prefix filters; skill-library
+// operations are only valid when the optional library is configured.
+function __miniACompleteSkillsArgument(remainder, localSkillNames, skillLibraryEnabled) {
+  var raw = isString(remainder) ? remainder : ""
+  var leadingWhitespace = (raw.match(/^\s*/) || [""])[0].length
+  var argument = raw.substring(leadingWhitespace)
+  if (/\s/.test(argument)) return { candidates: [], offset: leadingWhitespace }
+
+  var prefix = argument.toLowerCase()
+  var names = isArray(localSkillNames) ? localSkillNames.slice() : []
+  if (skillLibraryEnabled === true) {
+    names = names.concat(["search", "remote", "recommend", "open", "read", "related", "context"])
+  }
+
+  var seen = {}
+  var candidates = []
+  names.forEach(function(name) {
+    if (!isString(name)) return
+    var candidate = name.trim()
+    var normalized = candidate.toLowerCase()
+    if (candidate.length === 0 || normalized.indexOf(prefix) !== 0 || seen[normalized] === true) return
+    seen[normalized] = true
+    candidates.push(candidate)
+  })
+  candidates.sort(function(a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()) })
+  return { candidates: candidates, offset: leadingWhitespace }
+}
+
 // Accept a channel definition or a native filesystem path. A path is converted
 // to the file-channel shape expected by OpenAF while structured SLON/JSON is
 // left untouched.

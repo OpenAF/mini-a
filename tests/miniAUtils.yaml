@@ -7,6 +7,11 @@ jobs:
 - name: MiniA Utils Tests::Init
   exec: args.tests = require("tests/miniAUtils.js")
 
+- name: MiniA Utils Tests::ConsoleSkillsCompletion
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testConsoleSkillsCompletion
+
 - name: MiniA Utils Tests::InitTool
   from: MiniA Utils Tests::Init
   to  : oJob Test
@@ -231,6 +236,7 @@ ojob:
 
 todo:
 - MiniA Utils Tests::RenderChartDoesNotDisplay
+- MiniA Utils Tests::ConsoleSkillsCompletion
 - MiniA Utils Tests::InitTool
 - MiniA Utils Tests::ReadFile
 - MiniA Utils Tests::ReadFileRanges

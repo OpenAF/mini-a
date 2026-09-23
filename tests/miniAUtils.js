@@ -1285,4 +1285,16 @@
       ow.test.assert(legacyCatalog.indexOf(name) < 0, true, "Legacy catalog must not include alias '" + name + "'")
     })
   }
+
+  exports.testConsoleSkillsCompletion = function() {
+    var localOnly = __miniACompleteSkillsArgument(" su", ["summarize", "review"], false)
+    ow.test.assert(localOnly.offset, 1, "Completion must preserve whitespace before the argument")
+    ow.test.assert(stringify(localOnly.candidates), stringify(["summarize"]), "Local skill names should complete as /skills prefix filters")
+
+    var withLibrary = __miniACompleteSkillsArgument("re", ["review", "search"], true)
+    ow.test.assert(stringify(withLibrary.candidates), stringify(["read", "recommend", "related", "remote", "review"]), "Configured skill-library operations should be included and deduplicated")
+
+    var afterSubcommand = __miniACompleteSkillsArgument("search doc", ["search-docs"], true)
+    ow.test.assert(afterSubcommand.candidates.length, 0, "Free-form arguments after a skill operation must not be replaced")
+  }
 })()

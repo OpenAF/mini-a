@@ -2429,6 +2429,18 @@ try {
             return candidates.isEmpty() ? -1 : Number(insertionPoint)
           }
 
+          // Handle /skills local-name and optional skill-library completions
+          if (lookupName === "skills") {
+            var skillsRemainder = uptoCursor.substring(firstSpace + 1)
+            var skillsCompletion = __miniACompleteSkillsArgument(
+              skillsRemainder,
+              Object.keys(customSkillSlashCommands),
+              isObject(getConsoleSkillWikiManager())
+            )
+            skillsCompletion.candidates.forEach(function(option) { candidates.add(option) })
+            return candidates.isEmpty() ? -1 : Number(firstSpace + 1 + skillsCompletion.offset)
+          }
+
           // Handle /wiki command completions
           if (lookupName === "wiki") {
             if (toBoolean(sessionOptions.usewiki) !== true) return -1
