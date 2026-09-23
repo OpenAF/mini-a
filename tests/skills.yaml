@@ -14,6 +14,10 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/skills.js").testSkillSearchDefaultTypeFilterExcludesOrdinaryPages
 
+- name: MiniA Skills Tests::SearchV2PreservesUnavailableStatus
+  to  : oJob Test
+  exec: args.func = require("tests/skills.js").testSkillSearchV2PreservesUnavailableStatus
+
 - name: MiniA Skills Tests::SearchTagFiltering
   to  : oJob Test
   exec: args.func = require("tests/skills.js").testSkillSearchTagFiltering
@@ -90,6 +94,7 @@ todo:
 - MiniA Skills Tests::MetadataFullFrontmatterParses
 - MiniA Skills Tests::MetadataMissingOptionalFieldsDefaultsGracefully
 - MiniA Skills Tests::SearchDefaultTypeFilterExcludesOrdinaryPages
+- MiniA Skills Tests::SearchV2PreservesUnavailableStatus
 - MiniA Skills Tests::SearchTagFiltering
 - MiniA Skills Tests::SearchAppliesToFiltering
 - MiniA Skills Tests::SearchCompatibilityFiltering

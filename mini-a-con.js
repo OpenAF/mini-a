@@ -6250,7 +6250,7 @@ try {
 
     try {
       if (sub === "context") {
-        print(colorifyText(stringify(__miniASkillContext(swm, {}), __, "  "), promptColor))
+        print(printTree(__miniASkillContext(swm, {})))
       } else if (sub === "search") {
         if (rest.length === 0) { print(colorifyText("Usage: /skills search <query>", errorColor)); return }
         var hits = __miniASkillSearch(swm, { query: rest })

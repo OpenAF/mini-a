@@ -341,7 +341,27 @@ function __miniASkillContext(wm, options, logFn) {
 // OR-of-terms lexical match while every match still comes from wm.search() itself
 // -- no parallel retrieval implementation.
 function __miniASkillRawHits(wm, query, opts, overFetch) {
-  if (wm._retrievalV2) return wm.searchSelected(query, { wiki: opts.wiki, limit: overFetch, maxCandidates: overFetch, compact: true })
+  if (wm._retrievalV2) {
+    var v2Result = wm.searchSelected(query, { wiki: opts.wiki, limit: overFetch, maxCandidates: overFetch, compact: true })
+    if (isArray(v2Result)) return v2Result
+
+    // Retrieval v2 deliberately returns a structured status instead of silently
+    // scanning when a selected source is unavailable (for example, when its
+    // serving artifacts have not been built yet). Preserve that diagnostic at
+    // the skill facade boundary instead of trying to iterate the status map.
+    var reasons = []
+    if (isMap(v2Result)) {
+      if (isString(v2Result.error) && v2Result.error.length > 0) reasons.push(v2Result.error)
+      ;(isArray(v2Result.sources) ? v2Result.sources : []).forEach(function(source) {
+        if (isMap(source) && isString(source.reason) && source.reason.length > 0 && reasons.indexOf(source.reason) < 0) reasons.push(source.reason)
+      })
+      ;(isArray(v2Result.stopReasons) ? v2Result.stopReasons : []).forEach(function(reason) {
+        if (isString(reason) && reason.length > 0 && reasons.indexOf(reason) < 0) reasons.push(reason)
+      })
+      if (reasons.length === 0 && isString(v2Result.outcome) && v2Result.outcome.length > 0) reasons.push(v2Result.outcome)
+    }
+    throw new Error("skill-search-unavailable" + (reasons.length > 0 ? ": " + reasons.join(", ") : ""))
+  }
   var terms = __miniASkillTokenize(query).filter(function(t) { return t.length >= 3 }).slice(0, 6)
   if (terms.length === 0 && query.length > 0) terms = [query]
   var byKey = {}

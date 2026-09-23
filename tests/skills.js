@@ -109,6 +109,34 @@
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 
+  exports.testSkillSearchV2PreservesUnavailableStatus = function() {
+    var dir = mkTmp(), wm
+    try {
+      writePage(dir, "commit-helper.md", {
+        type: "skill", name: "commit-helper", title: "Commit Helper"
+      }, "# Commit\nPrepare and verify a focused commit.\n")
+
+      wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro", wikiretrievalv2: true })
+      var unavailable = ""
+      try { __miniASkillSearch(wm, { query: "commit" }) } catch(e) { unavailable = String(e.message || e) }
+      ow.test.assert(unavailable.indexOf("skill-search-unavailable") >= 0, true, "v2 status should not fail with a forEach type error")
+      ow.test.assert(unavailable.indexOf("v2-build-required") >= 0, true, "v2 status should preserve the actionable build-required reason")
+      wm.close(); wm = __
+
+      var writer = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikiretrievalv2: true })
+      ow.test.assert(writer.reindex().ok, true, "v2 skill fixture should build explicitly")
+      writer.close()
+
+      wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro", wikiretrievalv2: true })
+      var hits = __miniASkillSearch(wm, { query: "commit" })
+      ow.test.assert(hits.length, 1, "indexed v2 skill search should still return results")
+      ow.test.assert(hits[0].name, "commit-helper", "indexed v2 skill search should return the matching skill")
+    } finally {
+      try { if (wm) wm.close() } catch(e) {}
+      try { io.rm(dir) } catch(e) {}
+    }
+  }
+
   exports.testSkillSearchTagFiltering = function() {
     var dir = mkTmp()
     try {
