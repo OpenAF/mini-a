@@ -178,6 +178,7 @@ files:
 - public/showdown.min.js
 - utils/graphStats.yaml
 - utils/indexStats.yaml
+- utils/wikiGraph.yaml
 filesHash:
   .gitignore: b2f52bb5498ed71251fa0d2e76d32a9b9a1a0019
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
@@ -188,7 +189,7 @@ filesHash:
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   METRICS.md: d69659b54963e9437929d15bdd2038ef48e50ae4
-  README.md: 7ccacfd658868d41e86fcd800dc942a7a05e030c
+  README.md: fb5ee37230851062e8ef29ec0d3fc95b178fb28f
   USAGE.md: 1d1828293908ec074a6fedb9fe8f75908348b6bc
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/AGENT-PLUGINS.md: af8f692ac4bc690ac9df180e86bb1a1307a5aae5
@@ -203,7 +204,7 @@ filesHash:
   docs/VIRTUAL-SKILLS.md: 9edfdf8c29860d05718fd6103ca7f8aa9eaf56ab
   docs/WHATS-NEW.md: 651a11a3d9c22dfefd2bc1bfb7df6e7cc6d08ece
   docs/WIKI-RETRIEVAL-V2.md: a91e551a155d17d5e5c4456e83b4e392874ebd96
-  docs/WIKI.md: 99d1367c2a942fb4f35e76ebbfecbe203ff6838c
+  docs/WIKI.md: 88ee99c7ec37576092e1ef66d4f2c6c33e646da9
   evals/context-virtualization.yaml: 3a58466efa06dbf3dfc028d6a4b59bfc3dcb80a6
   evals/core.yaml: 5bd4c7f5b1fc650e1b656a09f169fbaf2610a9ad
   examples/README.md: cd552b12357673bc55959b75570eada4853af74b
@@ -261,7 +262,7 @@ filesHash:
   mcps/mcp-wiki.yaml: 2ce68bc5d3b164eefdabf760c6faaebc29f5a4fc
   mini-a-capabilities.js: 04d7a4564d782981bf0b97a65fbfc563a4b4d60c
   mini-a-common.js: 2feb6045996df1585c14a01d418f968fdcebd09f
-  mini-a-con.js: 316c5be64c10dd5338a11aaf77ee91d321b24ddb
+  mini-a-con.js: 59c6ae09e053c48b5e19d51051ec8f13856c7995
   mini-a-dreams.js: dbefc96b618fe4f4cfa62142ab21f76b2d86d33c
   mini-a-eval.js: 22537fa7f12ce89b490ff35c54e055dd31afeb20
   mini-a-eval.yaml: 03938780f7fdb9f3a1ed0d3e5fbdfd58f76fe853
@@ -291,7 +292,7 @@ filesHash:
   mini-a-web.yaml: 8c23492e7aa916e4a682741b355d74ee42f052d5
   mini-a-wiki-knowledge.js: 67c24716341ee8230ccff9fefd410ea2bd018605
   mini-a-wiki-retrieval.js: fb8b3cac90b00b264c510ef4cd12822bb5d94d25
-  mini-a-wiki.js: 59cf4d0218c15eff75e573e04d2b6fa0cb2a96bf
+  mini-a-wiki.js: 4071f627afaa9e23d3e9a69cd8bd6ba884f33f23
   mini-a-worker.yaml: e133c9b10c1d2eb10919b8aa9743a5291b6535ef
   mini-a.js: 29afa78e0754630986202a0a0c5c3f3d54433149
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
@@ -300,3 +301,4 @@ filesHash:
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   utils/graphStats.yaml: ab05b70a991ac6d5440ea12487ab8d10db53ec69
   utils/indexStats.yaml: 0739be79fb72f366ec24cd22a6ebe4e1e305128c
+  utils/wikiGraph.yaml: 2f80cb21d90fd6623833e52c8572beb4a5060cbc
