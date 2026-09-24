@@ -20,6 +20,24 @@
     }
   }
 
+  exports.testSpacedSkillReferences = function() {
+    var dir = createTestDir()
+    try {
+      var folder = dir + '/My Skill'
+      io.mkdir(folder)
+      io.writeFileString(folder + '/a file.md', 'SPACE_REFERENCE_CONTENT')
+      var tool = new MiniUtilsTool({ root: dir })
+      var selected = { templatePath: folder + '/SKILL.md' }
+      var quoted = tool._preprocessSkillTemplateReferences('@"a file.md"', selected, {})
+      ow.test.assert(quoted.references[0].path, folder + '/a file.md', 'quoted skill reference preserves spaces')
+      ow.test.assert(quoted.text.indexOf('@"') === 0, true, 'resolved spaced reference stays quoted')
+      var linked = tool._preprocessSkillTemplateReferences('[reference](<a file.md>)', selected, {})
+      ow.test.assert(linked.text.indexOf('SPACE_REFERENCE_CONTENT') >= 0, true, 'angle-bracket Markdown destination supports spaces')
+      var embedded = tool._preprocessSkillTemplateReferences('@"a file.md"', selected, { virtualFiles: { 'a file.md': 'EMBEDDED_SPACE_CONTENT' } })
+      ow.test.assert(embedded.text.indexOf('EMBEDDED_SPACE_CONTENT') >= 0, true, 'virtual references preserve spaces')
+    } finally { cleanupTestDir(dir) }
+  }
+
   exports.testInit = function() {
     var testDir = createTestDir()
     try {

@@ -538,9 +538,17 @@ MiniUtilsTool.prototype._preprocessSkillTemplateReferences = function(templateTe
     }
 
     var endPos = atPos + 1
-    while (endPos < text.length && !wsPattern.test(text.charAt(endPos))) endPos++
+    var quote = text.charAt(endPos), quoted = quote === '"' || quote === "'"
+    if (quoted) {
+      endPos++
+      while (endPos < text.length && (text.charAt(endPos) !== quote || text.charAt(endPos - 1) === "\\")) endPos++
+      if (endPos === text.length) { chunks.push(text.substring(cursor)); break }
+      endPos++
+    } else {
+      while (endPos < text.length && (!wsPattern.test(text.charAt(endPos)) || text.charAt(endPos - 1) === "\\")) endPos++
+    }
     var rawToken = text.substring(atPos + 1, endPos)
-    var tokenParts = splitAttachmentToken(rawToken)
+    var tokenParts = quoted ? { filePath: rawToken.substring(1, rawToken.length - 1).replace(/\\(["'])/g, "$1"), suffix: "" } : splitAttachmentToken(rawToken.replace(/\\(\s)/g, "$1"))
     var filePath = self._normalizeSkillReferencePath(tokenParts.filePath)
     var replacement = "@" + tokenParts.filePath
     var normalizedVirtualPath = self._normalizeSkillVirtualPath(filePath)
@@ -555,7 +563,7 @@ MiniUtilsTool.prototype._preprocessSkillTemplateReferences = function(templateTe
       try {
         if (io.fileExists(resolved) && io.fileInfo(resolved).isFile === true) {
           self._recordSkillReference(references, seen, { type: "file", path: resolved, relativePath: filePath })
-          replacement = "@" + resolved
+          replacement = "@" + (/\s/.test(resolved) ? '"' + resolved.replace(/"/g, '\\"') + '"' : resolved)
         }
       } catch(ignoreResolvedSkillRefError) { }
     }
@@ -572,7 +580,8 @@ MiniUtilsTool.prototype._preprocessSkillTemplateReferences = function(templateTe
   text.replace(/\[[^\]]*\]\(([^)\n]+)\)/g, function(_, targetSpec) {
     var spec = isString(targetSpec) ? targetSpec.trim() : ""
     if (spec.length === 0) return _
-    var firstToken = spec.split(/\s+/)[0]
+    var angleTarget = spec.match(/^<([^>]+)>/)
+    var firstToken = angleTarget ? angleTarget[1] : spec.split(/\s+/)[0]
     var normalizedTarget = self._normalizeSkillReferencePath(firstToken)
     if (!isString(normalizedTarget) || normalizedTarget.length === 0) return _
     if (normalizedTarget.charAt(0) === "#") return _

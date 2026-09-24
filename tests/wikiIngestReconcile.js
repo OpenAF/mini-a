@@ -189,6 +189,121 @@
     var r = runner.run(); assert(r.ok, false, 'LLM failure fails'); assert(r.removed.length, 0, 'failed distill blocks prune'); assert(f.body('docs/a.md'), before, 'old page retained')
     assert(f.run({ ingestmode: 'distill', ingestprune: true }).ok, true, 'retry eligible')
   }) }
+  exports.testIndependentPreparedRecovery = function() { fixture(function(f) {
+    f.write('a.md', '# A\n\nOriginal scope content')
+    var runner = f.runner(), apply = runner._applyJournal
+    runner._applyJournal = function() { throw new Error('injected pause before pages') }
+    assert(runner.run().ok, false, 'prepared journal remains')
+    var journalPath = f.wiki + '/.mini-a-wiki-ingest/journal.json', original = io.readFileString(journalPath)
+    var separate = f.src + '/Other Docs'; io.mkdir(separate); io.writeFileString(separate + '/b.md', '# B\n\nIndependent scope content')
+    var independent = f.run({ ingestsource: separate, ingestsection: 'other', ingestindependent: true })
+    assert(independent.ok, true, stringify(independent))
+    assert(io.readFileString(journalPath), original, 'independent run preserves original journal bytes')
+    var beforeSources = Object.keys(f.state().sources)
+    assert(beforeSources.length, 1, 'only the independent scope is committed')
+    var listing = f.runner().manageRecovery('list')
+    assert(listing.ok, true, stringify(listing))
+    assert(listing.recoveries.length, 1, 'original recovery remains discoverable')
+    assert(listing.recoveries[0].resume_command.indexOf('/ingest recovery resume ') === 0, true, 'exact executable resume command')
+    var recovered = f.runner().manageRecovery('resume', listing.recoveries[0].id)
+    assert(recovered.ok, true, stringify(recovered))
+    assert(Object.keys(f.state().sources).length, 2, 'resumed snapshot preserves independent source records')
+    assert(isMap(f.state().sources[beforeSources[0]]), true, 'independent metadata retained')
+    assert(f.body('other/b.md').indexOf('Independent scope content') >= 0, true, 'independent page retained')
+    assert(f.body('docs/a.md').indexOf('Original scope content') >= 0, true, 'original page resumed')
+    assert(f.runner().manageRecovery('list').recoveries.length, 0, 'all completed journals removed')
+  }) }
+  exports.testMultipleRecoveryAndDiscard = function() { fixture(function(f) {
+    f.write('a.md', '# A\n\nOriginal pending page')
+    var first = f.runner(); first._finalize = function() { return { ok: false } }
+    assert(first.run().ok, false, 'first finalization pending')
+    var second = f.runner({ ingestsection: 'other', ingestindependent: true }); second._finalize = first._finalize
+    assert(second.run().ok, false, 'second scope finalization pending')
+    var entries = f.runner().manageRecovery('list').recoveries
+    assert(entries.length, 2, 'both pending scopes listed')
+    var wm = new MiniAWikiManager({ backend: 'fs', root: f.wiki, access: 'ro', wikiretrievalv2: true }, function() {})
+    try {
+      global.__miniAWikiKnowledge.install(wm)
+      assert(wm._knowledgeJournalPending(), true, 'derivative guard sees all journals')
+      var pending = wm._retrievalV2._pending()
+      assert(pending['docs/a.md'], true, 'original pending page suppressed')
+      assert(pending['other/a.md'], true, 'independent pending page suppressed')
+    } finally { wm.close() }
+    var target = entries.filter(function(e) { return e.scope.section === 'other' })[0]
+    var path = target.journal, original = io.readFileString(path)
+    assert(f.runner().manageRecovery('discard', target.id).ok, false, 'discard requires explicit confirmation')
+    assert(f.runner({ wikiaccess: 'ro' }).manageRecovery('discard', target.id, true).ok, false, 'read-only discard blocked')
+    assert(f.runner({ ingestdryrun: true }).manageRecovery('discard', target.id, true).ok, false, 'dry-run discard blocked')
+    assert(io.readFileString(path), original, 'blocked choices preserve journal')
+    var lockFile = new java.io.RandomAccessFile(f.wiki + '/.mini-a-wiki-ingest/writer.lock', 'rw'), lockChannel = lockFile.getChannel(), lock = lockChannel.lock()
+    try { assert(f.runner().manageRecovery('discard', target.id, true).ok, false, 'discard respects the active writer lock') }
+    finally { lock.release(); lockChannel.close(); lockFile.close() }
+    var discarded = f.runner().manageRecovery('discard', target.id, true)
+    assert(discarded.ok, true, stringify(discarded))
+    assert(io.readFileString(discarded.archive), original, 'discard archives exact bytes')
+    assert(io.fileExists(f.wiki + '/other/a.md'), true, 'discard does not roll back pages')
+    assert(f.runner().manageRecovery('list').recoveries.length, 1, 'only selected journal discarded')
+    io.rm(f.src)
+    var resumed = f.runner().manageRecovery('resume', entries.filter(function(e) { return e.id !== target.id })[0].id)
+    assert(resumed.ok, true, stringify(resumed))
+    assert(resumed.status, 'recovered', 'finalization can resume without original source')
+  }) }
+  exports.testIndependentOverlapAndLegacy = function() { fixture(function(f) {
+    f.write('a.md', '# A\n\nSource')
+    var runner = f.runner(); runner._applyJournal = function() { throw new Error('pause') }; runner.run()
+    var path = f.wiki + '/.mini-a-wiki-ingest/journal.json', original = io.readFileString(path)
+    var overlap = f.run({ ingestsourceid: 'different origin', ingestindependent: true })
+    assert(overlap.ok, false, 'same destination page cannot be independently ingested')
+    assert(overlap.reason, 'pending-recovery-page-conflict', stringify(overlap))
+    assert(io.fileExists(f.wiki + '/docs/a.md'), false, 'overlap is blocked before page writes')
+    assert(io.readFileString(path), original, 'overlap leaves recovery untouched')
+    var old = af.fromJson(original); delete old.scope; delete old.baseState; old.version = 1
+    io.writeFileString(path, stringify(old))
+    var listing = f.runner().manageRecovery('list')
+    assert(listing.recoveries[0].scope.unknown, true, 'old journals report unavailable scope rather than inventing one')
+    var legacyBytes = io.readFileString(path)
+    var separate = f.src + '/Other'; io.mkdir(separate); io.writeFileString(separate + '/b.md', '# B\n\nOther source')
+    var independent = f.run({ ingestsource: separate, ingestsection: 'other', ingestindependent: true })
+    assert(independent.ok, true, stringify(independent))
+    assert(io.readFileString(path), legacyBytes, 'legacy journal preserved byte for byte during independent ingestion')
+    var resumed = f.runner().manageRecovery('resume', listing.recoveries[0].id)
+    assert(resumed.ok, true, stringify(resumed))
+    assert(Object.keys(f.state().sources).length, 2, 'legacy resume preserves the independent source')
+    assert(f.body('docs/a.md').indexOf('Source') >= 0, true, 'legacy recovery resumes saved operations by ID')
+  }) }
+  exports.testRecoveryRebaseConflict = function() { fixture(function(f) {
+    f.initial(); f.write('a.md', '# A\n\nNew original content')
+    var runner = f.runner(); runner._applyJournal = function() { throw new Error('pause') }; runner.run()
+    var before = f.body('docs/a.md'), state = f.state(), key = Object.keys(state.sources).filter(function(k) { return state.sources[k].source === 'a.md' })[0]
+    state.sources[key].sourceHash = 'concurrent-edit'; f.save(state)
+    var entries = f.runner().manageRecovery('list').recoveries
+    var resumed = f.runner().manageRecovery('resume', entries[0].id)
+    assert(resumed.ok, false, 'conflicting manifest record blocks rebase')
+    assert(resumed.error.indexOf('recovery manifest conflict') >= 0, true, stringify(resumed))
+    assert(f.body('docs/a.md'), before, 'rebase conflict detected before page writes')
+    assert(f.state().sources[key].sourceHash, 'concurrent-edit', 'concurrent state preserved')
+  }) }
+  exports.testSpacedPathsAndRecoveryScope = function() { fixture(function(f) {
+    var source = f.src + '/Source  Docs'
+    io.mkdir(source)
+    io.writeFileString(source + '/a file.md', '# Spaced source\n\nContent with spaces.')
+    var args = { ingestsource: source, ingestsection: 'Team Docs / Reference', ingestsourceid: 'Logical Origin' }
+    var runner = f.runner(args)
+    runner._finalize = function() { return { ok: false, reindexed: false } }
+    assert(runner.run().ok, false, 'leave a real pending finalization')
+    var journalPath = f.wiki + '/.mini-a-wiki-ingest/journal.json'
+    var before = io.readFileString(journalPath)
+    var blocked = f.run({ ingestsource: source, ingestsection: 'Other', ingestforce: true })
+    assert(blocked.status, 'blocked', 'different scope is explicitly blocked even with force')
+    assert(blocked.reason, 'recovery-scope-mismatch', 'stable recovery reason')
+    assert(blocked.recovery.scope.source, source, 'original spaced source is reported')
+    assert(blocked.recovery.scope.sourceid, 'Logical Origin', 'logical origin is reported')
+    assert(io.readFileString(journalPath), before, 'mismatch leaves journal untouched')
+    var resumed = f.run(args)
+    assert(resumed.ok, true, stringify(resumed))
+    assert(resumed.recovered, true, 'normalized section identity resumes original journal')
+    assert(f.run(args).status, 'noop', 'space-containing source filename is idempotent')
+  }) }
   exports.testFinalizeRecovery = function() { fixture(function(f) {
     var runner = f.runner(); f.write('a.md', '# A\n\nSource'); runner._finalize = function() { return { ok: false, reindexed: false } }
     var r = runner.run(); assert(r.ok, false, 'finalize failure partial'); assert(r.status, 'partial', 'partial result'); assert(io.fileExists(f.wiki + '/.mini-a-wiki-ingest/journal.json'), true, 'pending journal retained')

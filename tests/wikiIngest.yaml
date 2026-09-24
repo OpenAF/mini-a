@@ -2,6 +2,26 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA Wiki Ingest Tests::RecoveryRebaseConflict
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testRecoveryRebaseConflict
+
+- name: MiniA Wiki Ingest Tests::IndependentOverlapAndLegacy
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testIndependentOverlapAndLegacy
+
+- name: MiniA Wiki Ingest Tests::MultipleRecoveryAndDiscard
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testMultipleRecoveryAndDiscard
+
+- name: MiniA Wiki Ingest Tests::IndependentPreparedRecovery
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testIndependentPreparedRecovery
+
+- name: MiniA Wiki Ingest Tests::SpacedPathsAndRecoveryScope
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testSpacedPathsAndRecoveryScope
+
 - name: MiniA Wiki Ingest Tests::LegacyContextProvenance
   to: oJob Test
   exec: args.func = require("tests/wikiIngestReconcile.js").testLegacyContextProvenance
@@ -239,6 +259,11 @@ jobs:
   exec: args.func = require("tests/wikiIngestReconcile.js").testPreparedRecoveryWithIncompleteOrigin
 
 todo:
+- MiniA Wiki Ingest Tests::RecoveryRebaseConflict
+- MiniA Wiki Ingest Tests::IndependentOverlapAndLegacy
+- MiniA Wiki Ingest Tests::MultipleRecoveryAndDiscard
+- MiniA Wiki Ingest Tests::IndependentPreparedRecovery
+- MiniA Wiki Ingest Tests::SpacedPathsAndRecoveryScope
 - MiniA Wiki Ingest Tests::LegacyContextProvenance
 - MiniA Wiki Ingest Tests::IngestDiscoversMarkdownAndSkipsVendorDirs
 - MiniA Wiki Ingest Tests::IngestDryRunWritesNoPages

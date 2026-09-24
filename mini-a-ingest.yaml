@@ -57,6 +57,10 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : ingestindependent
+    desc     : Allow disjoint ingestion while preserving pending recovery journals (default false)
+    mandatory: false
+    options  : ["true", "false"]
   - name     : ingestforce
     desc     : Reprocess present sources; does not enable prune or bypass conflicts/budgets
     example  : "false"
@@ -122,6 +126,7 @@ jobs:
       ingestsourceid   : isString.default(__)
       wikiaccess       : isString.default("rw")
       ingestmode       : isString.default("auto")
+      ingestindependent: toBoolean.isBoolean.default(false)
       ingestforce      : toBoolean.isBoolean.default(false)
       ingestledger     : isString.default(__)
       model            : isString.default(__)

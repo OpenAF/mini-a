@@ -890,6 +890,7 @@ try {
     ingestprune    : { type: "boolean", default: false, description: "Remove verified missing sources within this ingestion scope." },
     ingestallowemptyprune: { type: "boolean", default: false, description: "Allow pruning a confirmed empty source folder." },
     ingestsourceid : { type: "string", description: "Stable logical ingestion origin identity." },
+    ingestindependent: { type: "boolean", default: false, description: "Allow a disjoint ingestion while preserving pending recovery journals." },
     ingestforce    : { type: "boolean", default: false, description: "Re-ingest sources the ledger reports as unchanged." },
     ingestledger   : { type: "string", description: "Override the ingest ledger file path." },
     workermode     : { type: "boolean", default: false, description: "Start in worker mode for delegated agent execution." },
@@ -1963,9 +1964,18 @@ try {
       }
 
       var endPos = atPos + 1
-      while (endPos < text.length && !wsPattern.test(text.charAt(endPos))) endPos++
+      var attachmentQuote = text.charAt(endPos)
+      var quotedAttachment = attachmentQuote === '"' || attachmentQuote === "'"
+      if (quotedAttachment) {
+        endPos++
+        while (endPos < text.length && (text.charAt(endPos) !== attachmentQuote || text.charAt(endPos - 1) === "\\")) endPos++
+        if (endPos === text.length) { chunks.push(text.substring(cursor)); break }
+        endPos++
+      } else {
+        while (endPos < text.length && (!wsPattern.test(text.charAt(endPos)) || text.charAt(endPos - 1) === "\\")) endPos++
+      }
       var rawToken = text.substring(atPos + 1, endPos)
-      var tokenParts = splitAttachmentToken(rawToken)
+      var tokenParts = quotedAttachment ? { filePath: consolePathValue(rawToken), suffix: "" } : splitAttachmentToken(consolePathValue(rawToken))
       var filePath = normalizeSkillReferencePath(tokenParts.filePath)
       var replacement = "@" + tokenParts.filePath
       var normalizedVirtualPath = normalizeVirtualPath(filePath)
@@ -1980,7 +1990,7 @@ try {
         try {
           if (io.fileExists(resolved) && io.fileInfo(resolved).isFile === true) {
             recordSkillReference({ type: "file", path: resolved, relativePath: filePath })
-            replacement = "@" + resolved
+            replacement = "@" + (/\s/.test(resolved) ? '"' + resolved.replace(/"/g, '\\"') + '"' : resolved)
           }
         } catch(ignoreResolvedSkillRefError) { }
       }
@@ -1998,7 +2008,8 @@ try {
     text.replace(/\[[^\]]*\]\(([^)\n]+)\)/g, function(_, targetSpec) {
       var spec = isString(targetSpec) ? targetSpec.trim() : ""
       if (spec.length === 0) return _
-      var firstToken = spec.split(/\s+/)[0]
+      var angleTarget = spec.match(/^<([^>]+)>/)
+      var firstToken = angleTarget ? angleTarget[1] : spec.split(/\s+/)[0]
       var normalizedTarget = normalizeSkillReferencePath(firstToken)
       if (!isString(normalizedTarget) || normalizedTarget.length === 0) return _
       if (normalizedTarget.charAt(0) === "#") return _
@@ -2108,6 +2119,66 @@ try {
       argv: argv,
       argc: argv.length
     }
+  }
+
+  // Path operands use shell-style quoting without consuming ordinary Windows
+  // backslashes. Spans retain the untouched content following /wiki write.
+  function parseConsolePathArgs(raw, limit) {
+    raw = isString(raw) ? raw : ""
+    var argv = [], ends = [], value = "", quote = "", started = false
+    for (var i = 0; i < raw.length; i++) {
+      var ch = raw.charAt(i), next = raw.charAt(i + 1)
+      if (ch === "\\" && next && (next === quote || !quote && (/\s/.test(next) || next === '"' || next === "'"))) {
+        value += next; started = true; i++; continue
+      }
+      if (quote) {
+        if (ch === quote) quote = ""
+        else value += ch
+        continue
+      }
+      if ((ch === '"' || ch === "'") && (!started || value.charAt(value.length - 1) === "=")) {
+        quote = ch; started = true; continue
+      }
+      if (/\s/.test(ch)) {
+        if (started) {
+          argv.push(value); ends.push(i)
+          if (limit && argv.length >= limit) return { argv: argv, ends: ends }
+          value = ""; started = false
+        }
+      } else { value += ch; started = true }
+    }
+    if (quote) throw new Error("Unbalanced quotes in path arguments.")
+    if (started) { argv.push(value); ends.push(raw.length) }
+    return { argv: argv, ends: ends }
+  }
+
+  function consolePathValue(raw) {
+    raw = String(raw || "").trim()
+    if (/^["']/.test(raw)) {
+      var parsed = parseConsolePathArgs(raw)
+      if (parsed.argv.length !== 1) throw new Error("Expected one path; quote the complete path containing spaces.")
+      return parsed.argv[0]
+    }
+    return raw.replace(/\\(\s)/g, "$1")
+  }
+
+  function quoteConsolePath(path) {
+    return /[\s"']/.test(path) ? '"' + path.replace(/"/g, '\\"') + '"' : path
+  }
+
+  // Locate the current operand even while its closing quote has not been typed.
+  function consolePathCompletion(raw) {
+    var start = 0, quote = ""
+    for (var i = 0; i < raw.length; i++) {
+      var ch = raw.charAt(i), next = raw.charAt(i + 1)
+      if (ch === "\\" && next && (next === quote || !quote && (/\s/.test(next) || next === '"' || next === "'"))) { i++; continue }
+      if (quote) { if (ch === quote) quote = ""; continue }
+      if ((ch === '"' || ch === "'") && (i === start || raw.charAt(i - 1) === "=")) { quote = ch; continue }
+      if (/\s/.test(ch)) start = i + 1
+    }
+    var token = raw.substring(start)
+    var parsed = parseConsolePathArgs(token + quote).argv
+    return { offset: start, token: parsed[0] || "", before: parseConsolePathArgs(raw.substring(0, start)).argv }
   }
 
   function renderCustomSlashTemplate(template, parsedArgs) {
@@ -2281,12 +2352,9 @@ try {
           var lastAtPos = uptoCursor.lastIndexOf("@")
           if (lastAtPos !== -1) {
             var afterAt = uptoCursor.substring(lastAtPos + 1)
-            // Only complete if there's no space after @
-            if (afterAt.indexOf(" ") === -1 && canStartInlineShortcut(uptoCursor, lastAtPos) && countImmediateBackslashes(uptoCursor, lastAtPos) === 0) {
-              var fileCompletions = getFileCompletions(afterAt)
-              fileCompletions.forEach(function(path) {
-                candidates.add(path)
-              })
+            var attachmentCompletion = consolePathCompletion(afterAt)
+            if (attachmentCompletion.before.length === 0 && canStartInlineShortcut(uptoCursor, lastAtPos) && countImmediateBackslashes(uptoCursor, lastAtPos) === 0) {
+              getFileCompletions(attachmentCompletion.token).forEach(function(path) { candidates.add(quoteConsolePath(path)) })
               return candidates.isEmpty() ? -1 : (lastAtPos + 1)
             }
           }
@@ -2328,44 +2396,27 @@ try {
           var commandName = uptoCursor.substring(1, firstSpace)
           var lookupName = commandName.toLowerCase()
 
-          // Handle /save command completions (filename)
-          if (lookupName === "save") {
-            var remainder = uptoCursor.substring(firstSpace + 1)
-            var trimmedRemainder = remainder.replace(/^\s*/, "")
-            var insertionPoint = cursor - trimmedRemainder.length
-
-            var fileCompletions = getFileCompletions(trimmedRemainder)
-            fileCompletions.forEach(function(path) {
-              candidates.add(path)
-            })
-            return candidates.isEmpty() ? -1 : Number(insertionPoint)
-          }
-
-          // Handle /stats command completions
-          if (lookupName === "stats") {
-            var remainder = uptoCursor.substring(firstSpace + 1)
-            var trimmedRemainder = remainder.replace(/^\s*/, "")
-            var insertionPoint = cursor - trimmedRemainder.length
-            var lastSpace = trimmedRemainder.lastIndexOf(" ")
-            var token = lastSpace >= 0 ? trimmedRemainder.substring(lastSpace + 1) : trimmedRemainder
-            var tokenInsertionPoint = insertionPoint + (lastSpace >= 0 ? (lastSpace + 1) : 0)
-            var tokenLower = token.toLowerCase()
-            var fileMatch = token.match(/^(out|file|save|json)=(.*)$/i)
-
-            if (fileMatch) {
-              var keyPrefix = fileMatch[1] + "="
-              var pathPrefix = fileMatch[2]
-              var fileCompletions = getFileCompletions(pathPrefix)
-              fileCompletions.forEach(function(path) {
-                candidates.add(keyPrefix + path)
-              })
-              return candidates.isEmpty() ? -1 : Number(tokenInsertionPoint)
+          // File operand completions share the command parser's quote boundaries.
+          if (lookupName === "save" || lookupName === "ingest" || lookupName === "stats") {
+            var rawPathArgs = uptoCursor.substring(firstSpace + 1)
+            var completion = consolePathCompletion(rawPathArgs)
+            if (lookupName === "save" && !/^[\s]*["']/.test(rawPathArgs)) {
+              completion.offset = rawPathArgs.length - rawPathArgs.replace(/^\s*/, "").length
+              completion.token = consolePathValue(rawPathArgs)
             }
-
-            statsCompletions.forEach(function(mode) {
-              if (mode.indexOf(tokenLower) === 0) candidates.add(mode)
-            })
-            return candidates.isEmpty() ? -1 : Number(tokenInsertionPoint)
+            var token = completion.token, keyPrefix = "", completePath = true
+            if (lookupName === "ingest" && completion.before.length > 0) return -1
+            if (lookupName === "stats") {
+              var fileMatch = token.match(/^(out|file|save|json)=(.*)$/i)
+              completePath = !!fileMatch
+              if (fileMatch) { keyPrefix = fileMatch[1] + "="; token = fileMatch[2] }
+            }
+            if (completePath) {
+              getFileCompletions(token).forEach(function(path) { candidates.add(keyPrefix + quoteConsolePath(path)) })
+            } else {
+              statsCompletions.forEach(function(mode) { if (mode.indexOf(token.toLowerCase()) === 0) candidates.add(mode) })
+            }
+            return candidates.isEmpty() ? -1 : Number(firstSpace + 1 + completion.offset)
           }
 
           // Handle /debug filter completions
@@ -2464,10 +2515,12 @@ try {
             }
 
             if (Object.prototype.hasOwnProperty.call(wikiReadPathCommands, wikiSubcmd)) {
-              var pathPrefix = wikiParts.slice(1).join(" ")
-              var pathInsertionPoint = insertionPoint + trimmedRemainder.indexOf(pathPrefix)
-              getWikiPageCompletions(pathPrefix).forEach(function(path) {
-                candidates.add(path)
+              var pathArgsStart = trimmedRemainder.search(/\s/) + 1
+              var pathCompletion = consolePathCompletion(trimmedRemainder.substring(pathArgsStart))
+              if (pathCompletion.before.length > (wikiSubcmd === "move" ? 1 : 0)) return -1
+              var pathInsertionPoint = insertionPoint + pathArgsStart + pathCompletion.offset
+              getWikiPageCompletions(pathCompletion.token).forEach(function(path) {
+                candidates.add(quoteConsolePath(path))
               })
               return candidates.isEmpty() ? -1 : Number(pathInsertionPoint)
             }
@@ -4291,9 +4344,18 @@ try {
       }
 
       var endPos = atPos + 1
-      while (endPos < text.length && !wsPattern.test(text.charAt(endPos))) endPos++
+      var attachmentQuote = text.charAt(endPos)
+      var quotedAttachment = attachmentQuote === '"' || attachmentQuote === "'"
+      if (quotedAttachment) {
+        endPos++
+        while (endPos < text.length && (text.charAt(endPos) !== attachmentQuote || text.charAt(endPos - 1) === "\\")) endPos++
+        if (endPos === text.length) { chunks.push(text.substring(cursor)); break }
+        endPos++
+      } else {
+        while (endPos < text.length && (!wsPattern.test(text.charAt(endPos)) || text.charAt(endPos - 1) === "\\")) endPos++
+      }
       var rawToken = text.substring(atPos + 1, endPos)
-      var tokenParts = splitAttachmentToken(rawToken)
+      var tokenParts = quotedAttachment ? { filePath: consolePathValue(rawToken), suffix: "" } : splitAttachmentToken(consolePathValue(rawToken))
       var filePath = tokenParts.filePath
       var trailingSuffix = tokenParts.suffix
       var fullMatch = "@" + filePath
@@ -6168,7 +6230,7 @@ try {
       { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, mounts, attach, detach" },
       { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, report, query, retrieve, answer, neighbors, path, communities, surprise, export, stats, falkor, cross (requires usewikigraph=true)" },
       { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: plan, apply (default), reorg, repair, reindex, graph, indexes, dryrun" },
-      { command: "/ingest <source> [section]", description: "Ingest a docs folder, git repo or web page into the wiki; flags: dryrun, force" }
+      { command: "/ingest <source> [section]", description: "Ingest docs into the wiki; flags: dryrun, force, independent. No source: recovery choices." }
     ]
     helpCommands.push(
       { command: "/delegate <goal>", description: "Delegate a sub-goal to a child agent (requires usedelegation=true)" },
@@ -6245,7 +6307,7 @@ try {
     if (typeof __miniASkillSearch !== "function") loadLib("mini-a-skills.js")
     var parts = isString(subcmdRaw) ? subcmdRaw.trim().split(/\s+/) : []
     var sub  = parts.length > 0 ? parts[0].toLowerCase() : "search"
-    var rest = parts.slice(1).join(" ").trim()
+    var rest = String(subcmdRaw || "").trim().replace(/^\S+\s*/, "")
     if (sub === "remote") { sub = "search"; } // "/skills remote <query>" is an alias for "/skills search <query>"
 
     try {
@@ -6276,9 +6338,9 @@ try {
         }
       } else if (sub === "open") {
         if (rest.length === 0) { print(colorifyText("Usage: /skills open <ref>", errorColor)); return }
-        print(colorifyText(stringify(__miniASkillOpen(swm, rest, {}), __, "  "), promptColor))
+        print(colorifyText(stringify(__miniASkillOpen(swm, consolePathValue(rest), {}), __, "  "), promptColor))
       } else if (sub === "read") {
-        var readParts = rest.split(/\s+/)
+        var readParts = parseConsolePathArgs(rest).argv
         var readRef = readParts.shift()
         if (!isString(readRef) || readRef.length === 0) { print(colorifyText("Usage: /skills read <ref> [section...]", errorColor)); return }
         var section = readParts.join(" ").trim()
@@ -6287,7 +6349,7 @@ try {
         else print(colorifyText(stringify(out, __, "  "), errorColor))
       } else if (sub === "related") {
         if (rest.length === 0) { print(colorifyText("Usage: /skills related <ref>", errorColor)); return }
-        print(colorifyText(stringify(__miniASkillRelated(swm, rest, {}), __, "  "), promptColor))
+        print(colorifyText(stringify(__miniASkillRelated(swm, consolePathValue(rest), {}), __, "  "), promptColor))
       } else {
         print(colorifyText("Usage: /skills search|recommend|open|read|related|context ...", errorColor))
       }
@@ -6349,11 +6411,11 @@ try {
     }
     var parts = isString(subcmdRaw) ? subcmdRaw.trim().split(/\s+/) : []
     var sub   = parts.length > 0 ? parts[0].toLowerCase() : "list"
-    var rest  = parts.slice(1).join(" ").trim()
+    var rest  = String(subcmdRaw || "").trim().replace(/^\S+\s*/, "")
 
     try {
       if (sub === "list" || sub === "") {
-        var pages = wm.list(rest)
+        var pages = wm.list(consolePathValue(rest))
         if (pages.length === 0) {
           print(colorifyText("Wiki is empty.", hintColor))
         } else {
@@ -6361,7 +6423,7 @@ try {
           pages.forEach(function(p) { print("  " + colorifyText(p, promptColor)) })
         }
       } else if (sub === "tree") {
-        var tree = wm.tree(rest, 3)
+        var tree = wm.tree(consolePathValue(rest), 3)
         print(colorifyText("Wiki tree: " + (tree.path || "/") + " (" + tree.page_count + " pages)", accentColor))
         if (isObject(tree.index)) print("  index: " + colorifyText(tree.index.path + (tree.index.exists ? "" : " (missing)"), tree.index.exists ? promptColor : errorColor))
         tree.sections.forEach(function(s) {
@@ -6369,7 +6431,7 @@ try {
         })
         tree.pages.forEach(function(p) { print("  page: " + colorifyText(p.path, promptColor) + (p.title ? " — " + p.title : "")) })
       } else if (sub === "browse") {
-        var browse = wm.browse(rest)
+        var browse = wm.browse(consolePathValue(rest))
         print(colorifyText("Wiki browse: " + (browse.path || "/"), accentColor))
         print("  index: " + colorifyText(browse.nearest_index.path + (browse.nearest_index.exists ? "" : " (missing)"), browse.nearest_index.exists ? promptColor : errorColor))
         browse.child_sections.forEach(function(s) { print("  section: " + colorifyText(s.path, promptColor) + " pages=" + s.page_count) })
@@ -6377,7 +6439,7 @@ try {
         if (browse.suggested_next_reads.length > 0) print("  suggested: " + browse.suggested_next_reads.join(", "))
       } else if (sub === "read") {
         if (rest.length === 0) { print(colorifyText("Usage: /wiki read <path>", errorColor)); return }
-        var page = wm.read(rest)
+        var page = wm.read(consolePathValue(rest))
         if (!isObject(page)) { print(colorifyText("Page not found: " + rest, errorColor)); return }
         print(colorifyText("── " + rest + " ──", accentColor))
         if (isObject(page.meta) && isString(page.meta.title)) print(colorifyText(page.meta.title, "BOLD"))
@@ -6396,7 +6458,7 @@ try {
         }
       } else if (sub === "backlinks") {
         if (rest.length === 0) { print(colorifyText("Usage: /wiki backlinks <path>", errorColor)); return }
-        var refs = wm.backlinks(rest)
+        var refs = wm.backlinks(consolePathValue(rest))
         print(colorifyText("Backlinks to " + refs.target + " (" + refs.count + "):", accentColor))
         refs.backlinks.forEach(function(b) { print("  " + colorifyText(b.path, promptColor) + (b.title ? " — " + b.title : "")) })
       } else if (sub === "lint") {
@@ -6423,9 +6485,9 @@ try {
           return
         }
         if (rest.length === 0) { print(colorifyText("Usage: /wiki write <path> [content]", errorColor)); return }
-        var spacePos = rest.indexOf(" ")
-        var writePath = spacePos >= 0 ? rest.substring(0, spacePos).trim() : rest
-        var writeContent = spacePos >= 0 ? rest.substring(spacePos + 1) : ""
+        var writeArgs = parseConsolePathArgs(rest, 1)
+        var writePath = writeArgs.argv[0] || ""
+        var writeContent = rest.substring(writeArgs.ends[0] || 0).replace(/^\s/, "")
         if (writePath.length === 0) { print(colorifyText("Usage: /wiki write <path> [content]", errorColor)); return }
         if (writeContent.trim().length === 0) {
           print(colorifyText("Enter wiki page content. Finish with a line containing only \"\"\".", hintColor))
@@ -6443,8 +6505,8 @@ try {
           print(colorifyText("Wiki is read-only. Start with wikiaccess=rw to enable moves.", errorColor))
           return
         }
-        var moveParts = rest.split(/\s+/).filter(function(p) { return p.length > 0 })
-        if (moveParts.length < 2) { print(colorifyText("Usage: /wiki move <from.md> <to.md>", errorColor)); return }
+        var moveParts = parseConsolePathArgs(rest).argv
+        if (moveParts.length !== 2) { print(colorifyText("Usage: /wiki move <from.md> <to.md>", errorColor)); return }
         var moveResult = wm.move(moveParts[0], moveParts[1])
         if (isObject(moveResult) && moveResult.ok === true) {
           print(colorifyText("Moved " + moveResult.from + " -> " + moveResult.to + " (changed " + moveResult.pages_changed + " pages)", successColor))
@@ -6457,7 +6519,7 @@ try {
           return
         }
         if (rest.length === 0) { print(colorifyText("Usage: /wiki delete <path>", errorColor)); return }
-        var deletePath = rest.trim()
+        var deletePath = consolePathValue(rest)
         var deleteResult = wm.delete(deletePath)
         if (isObject(deleteResult) && deleteResult.ok === true) {
           print(colorifyText("Deleted " + deletePath, successColor))
@@ -6469,7 +6531,7 @@ try {
           print(colorifyText("Wiki is read-only. Start with wikiaccess=rw to enable init.", errorColor))
           return
         }
-        var initResult = wm.init(rest)
+        var initResult = wm.init(consolePathValue(rest))
         if (isObject(initResult) && initResult.ok === true) {
           if (initResult.created.length > 0) print(colorifyText("Created: " + initResult.created.join(", "), successColor))
           if (initResult.skipped.length > 0) print(colorifyText("Already exists (skipped): " + initResult.skipped.join(", "), hintColor))
@@ -6520,7 +6582,7 @@ try {
         }
       } else if (sub === "attach") {
         // Usage: /wiki attach <name> [backend=fs] [root=directory-or-archive.zip]
-        var attachParts = rest.split(/\s+/).filter(function(p) { return p.length > 0 })
+        var attachParts = parseConsolePathArgs(rest).argv
         if (attachParts.length === 0) { print(colorifyText("Usage: /wiki attach <name> [backend=fs|s3|es] [root=directory|archive.zip|archive.okt] [bucket=...] ...", errorColor)); return }
         var attachName = attachParts[0]
         var attachCfg = { access: "ro", backend: "fs" }
@@ -6568,21 +6630,21 @@ try {
     }
     var parts = isString(subcmdRaw) ? subcmdRaw.trim().split(/\s+/) : []
     var sub = parts.length > 0 ? parts[0].toLowerCase() : "stats"
-    var rest = parts.slice(1).join(" ").trim()
-    var params = { op: sub }
-    if (sub === "query" || sub === "answer" || sub === "retrieve") params.query = rest
-    if (sub === "neighbors") params.node = rest
-    if (sub === "export") params.format = rest.length > 0 ? rest : "mermaid"
-    if (sub === "path") {
-      var p = rest.split(/\s+/).filter(function(x) { return x.length > 0 })
-      if (p.length < 2) { print(colorifyText("Usage: /graph path <from> <to>", errorColor)); return }
-      params.from = p[0]
-      params.to = p[1]
-    }
-    if (sub === "build" && rest.indexOf("semantic=true") >= 0) params.semantic = true
-    if (sub === "falkor" && rest.length > 0) params.query = rest
-    if (sub === "cross") params.path = rest
+    var rest = String(subcmdRaw || "").trim().replace(/^\S+\s*/, "")
     try {
+      var params = { op: sub }
+      if (sub === "query" || sub === "answer" || sub === "retrieve") params.query = rest
+      if (sub === "neighbors") params.node = consolePathValue(rest)
+      if (sub === "export") params.format = rest.length > 0 ? rest : "mermaid"
+      if (sub === "path") {
+        var p = parseConsolePathArgs(rest).argv
+        if (p.length !== 2) { print(colorifyText("Usage: /graph path <from> <to>", errorColor)); return }
+        params.from = p[0]
+        params.to = p[1]
+      }
+      if (sub === "build" && rest.indexOf("semantic=true") >= 0) params.semantic = true
+      if (sub === "falkor" && rest.length > 0) params.query = rest
+      if (sub === "cross") params.path = consolePathValue(rest)
       var out = wm.graph(sub, params)
       if (isString(out)) print(out)
       else print(printTree(out))
@@ -6591,13 +6653,74 @@ try {
     }
   }
 
+  function printIngestRecovery(ingestArgs, commandParts, requestedSource) {
+    if (commandParts.length > 2) { print(colorifyText("Usage: /ingest recovery [resume|discard <id>]", errorColor)); return }
+    var runner = new MiniAIngest(ingestArgs, function(msg) { print(colorifyText(msg, hintColor)) })
+    var listing = runner.manageRecovery("list")
+    if (!listing.ok) { print(printTree(listing)); return }
+    var entries = listing.recoveries || []
+    entries.forEach(function(entry, index) {
+      print(colorifyText("Recovery " + (index + 1) + ": " + entry.id + " (" + entry.phase + ")", accentColor))
+      print("  Scope: " + (entry.scopeId || "unknown"))
+      print("  Source: " + entry.scope.source + " | Section: " + entry.scope.section + " | Source ID: " + (entry.scope.sourceid || "(default)"))
+      if (isArray(entry.pages)) print("  Affected pages (" + entry.pages.length + "): " + entry.pages.slice(0, 8).join(", ") + (entry.pages.length > 8 ? ", ..." : ""))
+      if (entry.scope.unknown) print("  This older journal did not record its original source/section; its saved operations can still be resumed by ID.")
+      print("  Resume: " + entry.resume_command)
+      print("  Discard: " + entry.discard_command)
+    })
+    var action = commandParts[0] || "", id = commandParts[1] || ""
+    if (!action) {
+      if (!entries.length) { print(colorifyText("No pending recovery. Use /ingest <source> [section].", hintColor)); return }
+      print(colorifyText("Choose resume <number>, discard <number>, independent, or cancel. Discard archives recovery; it does not undo pages already written.", hintColor))
+      var answer = con.readLinePrompt(colorifyText("Ingest recovery [cancel]: ", promptColor))
+      if (!isString(answer) || !answer.trim()) return
+      var choice = parseConsolePathArgs(answer).argv
+      action = String(choice[0] || "").toLowerCase()
+      var selected = Number(choice[1] || (entries.length === 1 ? 1 : 0))
+      if (action === "resume" || action === "discard") {
+        if (!entries[selected - 1]) { print(colorifyText("Choose a listed recovery number.", errorColor)); return }
+        id = entries[selected - 1].id
+      }
+    }
+    if (action === "cancel") return
+    if (action === "independent") {
+      if (requestedSource) {
+        var independentArgs = merge({}, ingestArgs); independentArgs.ingestindependent = true
+        print(printTree(new MiniAIngest(independentArgs, function(msg) { print(colorifyText(msg, hintColor)) }).run()))
+      } else {
+        print(colorifyText('Enter a source and optional section, for example: "/path/My Docs" "Team Docs"', hintColor))
+        var sourceArgs = con.readLinePrompt(colorifyText("Independent ingestion: ", promptColor))
+        if (isString(sourceArgs) && sourceArgs.trim()) printIngest(sourceArgs + " independent")
+      }
+      return
+    }
+    if (["resume", "discard"].indexOf(action) < 0 || !id) {
+      print(colorifyText("Usage: /ingest recovery [resume|discard <id>]", errorColor)); return
+    }
+    var confirmed = false
+    if (action === "discard") {
+      if (!entries.some(function(e) { return e.id === id })) { print(colorifyText("Recovery ID not found.", errorColor)); return }
+      print(colorifyText("Discard keeps already-applied pages and archives the journal. It does not roll back or mark unfinished work as synchronized.", hintColor))
+      var confirmation = con.readLinePrompt(colorifyText("Type discard " + id + " to confirm: ", promptColor))
+      confirmed = isString(confirmation) && confirmation.trim() === "discard " + id
+      if (!confirmed) { print(colorifyText("Recovery kept.", hintColor)); return }
+    }
+    print(printTree(runner.manageRecovery(action, id, confirmed)))
+  }
+
   // /ingest <source> [section] [dryrun|force]
   function printIngest(subcmdRaw) {
-    var parts   = isString(subcmdRaw) ? subcmdRaw.trim().split(/\s+/).filter(function(p) { return p.length > 0 }) : []
-    var flags   = { dryrun: false, force: false, prune: false, allowemptyprune: false, sourceid: "" }
+    var parts
+    try { parts = parseConsolePathArgs(subcmdRaw).argv } catch(e) {
+      print(colorifyText("Ingest error: " + e.message, errorColor)); return
+    }
+    var recoveryCommand = parts[0] === "recovery" ? parts.slice(1) : null
+    if (recoveryCommand) parts = []
+    var flags   = { independent: false, dryrun: false, force: false, prune: false, allowemptyprune: false, sourceid: "" }
     var operands = []
     parts.forEach(function(p) {
       var lower = p.toLowerCase()
+      if (lower === "independent") { flags.independent = true; return }
       if (lower === "dryrun") { flags.dryrun = true; return }
       if (lower === "force")  { flags.force  = true; return }
       if (lower === "prune") { flags.prune = true; return }
@@ -6606,16 +6729,16 @@ try {
       operands.push(p)
     })
 
-    if (operands.length === 0) {
-      print(colorifyText("Usage: /ingest <folder|repo-url|page-url> [section] [dryrun] [force] [prune] [allowemptyprune] [sourceid=<id>]", errorColor))
-      print(colorifyText("  Ingests a docs folder, git repo or web page into the active wiki.", hintColor))
+    if (operands.length > 2) {
+      print(colorifyText("Usage: /ingest <folder|repo-url|page-url> [section] [dryrun] [force] [prune] [allowemptyprune] [sourceid=<id>] [independent]", errorColor))
+      print(colorifyText('  Ingests a docs folder, git repo or web page into the active wiki. Quote paths with spaces: /ingest "/path/My Docs" "Team Docs"', hintColor))
       return
     }
     if (toBoolean(sessionOptions.usewiki) !== true) {
       print(colorifyText("Wiki not enabled. Start with usewiki=true and wikiroot=...", errorColor))
       return
     }
-    if (String(sessionOptions.wikiaccess || "").toLowerCase() !== "rw") {
+    if (operands.length > 0 && String(sessionOptions.wikiaccess || "").toLowerCase() !== "rw") {
       print(colorifyText("Wiki is read-only. Start with wikiaccess=rw to ingest.", errorColor))
       return
     }
@@ -6633,8 +6756,9 @@ try {
     // open for interactive search, so a second manager would contend for it.
     var ingestWikiManager = isObject(activeAgent) && isObject(activeAgent._wikiManager) ? activeAgent._wikiManager : __
     if (isObject(ingestWikiManager)) ingestArgs.wikimanager = ingestWikiManager
-    ingestArgs.ingestsource = operands[0]
+    if (operands.length) ingestArgs.ingestsource = operands[0]
     if (operands.length > 1) ingestArgs.ingestsection = operands[1]
+    if (flags.independent) ingestArgs.ingestindependent = true
     if (flags.dryrun) ingestArgs.ingestdryrun = "true"
     if (flags.force)  ingestArgs.ingestforce  = "true"
     if (flags.prune) ingestArgs.ingestprune = "true"
@@ -6642,12 +6766,17 @@ try {
     if (flags.sourceid) ingestArgs.ingestsourceid = flags.sourceid
 
     try {
+      if (recoveryCommand || operands.length === 0) {
+        printIngestRecovery(ingestArgs, recoveryCommand || [], false)
+        return
+      }
       var runner = new MiniAIngest(ingestArgs, function(msg) { print(colorifyText(msg, hintColor)) })
       var res    = runner.run()
       if (isMap(res) && res.ok === false) {
         print(colorifyText("Ingest " + String(res.status || "failed") + ": " + (isString(res.reason) ? res.reason : "see reported conflicts/failures") +
                            (isString(res.error) ? " — " + res.error : ""), errorColor))
         print(printTree(res))
+        if (res.recovery_pending === true && !flags.dryrun && toBoolean(ingestArgs.ingestdryrun) !== true) printIngestRecovery(ingestArgs, [], true)
         return
       }
       print(printTree(res))
@@ -6941,16 +7070,16 @@ try {
           continue
         }
 
-        // Parse filename from command
-        var fileName = "response.md"
-        if (commandLower.indexOf("save ") === 0) {
-          var fileArg = command.substring(5).trim()
-          if (fileArg.length > 0) {
-            fileName = fileArg
-          }
-        }
-
         try {
+          // Parse filename from command
+          var fileName = "response.md"
+          if (commandLower.indexOf("save ") === 0) {
+            var fileArg = command.substring(5).trim()
+            if (fileArg.length > 0) {
+              fileName = consolePathValue(fileArg)
+            }
+          }
+
           var content = ""
           if (isObject(lastOrigResult) || isArray(lastOrigResult)) {
             content = stringify(lastOrigResult, __, "  ")

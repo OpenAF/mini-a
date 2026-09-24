@@ -139,12 +139,12 @@ MiniAWikiManager.prototype.assembleContext = function(query, options) {
   options = isMap(options) ? options : {}
   var limit = Number(options.wikicontextchunks || options.chunks || 5), budget = Number(options.wikicontexttokens || options.tokens || 2400)
   var state = this.knowledgeLoadState(), out = [], used = 0, seen = {}, pending = {}, self = this
-  var journalPath = this._getIndexRoot() + "/.mini-a-wiki-ingest/journal.json"
   try {
-    if (io.fileExists(journalPath)) {
+    this._ingestJournalPaths().forEach(function(journalPath) {
       var journal = af.fromJson(io.readFileString(journalPath))
-      if (journal.phase !== "complete") (journal.operations || []).forEach(function(op) { pending[op.path] = true })
-    }
+      if (!isMap(journal) || !isArray(journal.operations)) throw new Error("invalid recovery journal")
+      if (journal.phase !== "complete") journal.operations.forEach(function(op) { pending[op.path] = true })
+    })
   } catch(e) { state._corrupt = true }
   if (state._corrupt) return { ok: false, error: "knowledge-state-unavailable", outcome: "unavailable", query: query, chunks: [], estimatedTokens: 0, budget: budget }
   var hits = this.search(query, { limit: Math.max(limit * 4, 20), debug: true })
@@ -174,9 +174,12 @@ MiniAWikiManager.prototype._knowledgeDerivativeMap = function(state, kind) {
   throw new Error("invalid-derivative-kind")
 }
 MiniAWikiManager.prototype._knowledgeJournalPending = function() {
-  var path = this._getIndexRoot() + "/.mini-a-wiki-ingest/journal.json"
-  if (!io.fileExists(path)) return false
-  try { var journal = af.fromJson(io.readFileString(path)); return !isMap(journal) || !isArray(journal.operations) || journal.phase !== "complete" } catch(e) { return true }
+  try {
+    return this._ingestJournalPaths().some(function(path) {
+      var journal = af.fromJson(io.readFileString(path))
+      return !isMap(journal) || !isArray(journal.operations) || journal.phase !== "complete"
+    })
+  } catch(e) { return true }
 }
 MiniAWikiManager.prototype.knowledgeRecordDerivative = function(kind, id, record, supports, options) {
   var opts = isMap(options) ? options : {}, engine = this._retrievalV2, snapshot, self = this

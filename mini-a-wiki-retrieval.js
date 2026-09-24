@@ -924,12 +924,13 @@ MiniAWikiRetrievalV2.prototype.close = function() {
   this._guard(function() { self._flushTelemetry(); self.closed = true; self.cache = {}; self.cacheOrder = []; self.cacheSizes = {}; self.cacheBytes = 0 })
 }
 MiniAWikiRetrievalV2.prototype._pending = function() {
-  var m = this.manager, path = m._getIndexRoot() + "/.mini-a-wiki-ingest/journal.json", state = m._getIndexRoot() + "/.mini-a-wiki-state/manifest.json", pending = {}, token = ""
+  var m = this.manager, paths, state = m._getIndexRoot() + "/.mini-a-wiki-state/manifest.json", pending = {}, token = ""
   var stamp = function(p) { var f = new java.io.File(p); return f.isFile() ? String(java.nio.file.Files.getLastModifiedTime(f.toPath())) + ":" + Number(f.length()) : "missing" }
-  token = stamp(path) + "|" + stamp(state)
+  try { paths = m._ingestJournalPaths() } catch(e) { return { _all: true } }
+  token = paths.map(function(path) { return path + ":" + stamp(path) }).join("|") + "|" + stamp(state)
   if (this.suppression && this.suppression.token === token) return this.suppression.pending
   try {
-    if (io.fileExists(path)) { var j = af.fromJson(io.readFileString(path)); if (!isMap(j) || !isArray(j.operations)) throw new Error("corrupt-journal"); if (j.phase !== "complete") j.operations.forEach(function(op) { pending[op.path] = true }) }
+    paths.forEach(function(path) { var j = af.fromJson(io.readFileString(path)); if (!isMap(j) || !isArray(j.operations)) throw new Error("corrupt-journal"); if (j.phase !== "complete") j.operations.forEach(function(op) { pending[op.path] = true }) })
     if (io.fileExists(state)) {
       var authority = af.fromJson(io.readFileString(state))
       if (!isMap(authority) || !isMap(authority.sources)) throw new Error("corrupt-state")

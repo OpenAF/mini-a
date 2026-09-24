@@ -461,6 +461,23 @@ MiniAWikiManager.prototype._getIndexRoot = function() {
   return home + "/.mini-a/wiki-index/" + sha1(this._getBackendIdentity())
 }
 
+// Include legacy and independent-scope journals in every recovery/read guard.
+MiniAWikiManager.prototype._ingestJournalPaths = function() {
+  var root = String(new java.io.File(this._getIndexRoot() + "/.mini-a-wiki-ingest").getCanonicalPath()), paths = []
+  if (io.fileExists(root + "/journal.json")) paths.push(root + "/journal.json")
+  if (io.fileExists(root + "/journals")) {
+    var files = new java.io.File(root + "/journals").listFiles()
+    if (files === null) throw new Error("ingestion journal directory is unreadable")
+    for (var i = 0; i < files.length; i++) {
+      if (String(files[i].getName()).match(/\.json$/)) {
+        if (!files[i].isFile()) throw new Error("invalid ingestion journal entry")
+        paths.push(String(files[i].getPath()))
+      }
+    }
+  }
+  return paths.sort()
+}
+
 MiniAWikiManager.prototype._ensureIndexRoot = function() {
   var root = this._getIndexRoot()
   // read-only wikis never create index storage: they consume whatever already exists

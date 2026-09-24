@@ -1130,6 +1130,10 @@ help:
     desc     : "Also append the rendered URL into search results' description text, for models that attend to prose more reliably than to sibling JSON keys"
     example  : "false"
     mandatory: false
+  - name     : ingestindependent
+    desc     : Allow disjoint ingestion while preserving pending recovery journals
+    mandatory: false
+    options  : ["true", "false"]
   - name     : ingestprune
     desc     : Remove verified missing ingestion sources (default false)
     mandatory: false

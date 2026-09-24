@@ -1,4 +1,8 @@
 jobs:
+- name: MiniA Utils Tests::SpacedSkillReferences
+  to: oJob Test
+  exec: args.func = require("tests/miniAUtils.js").testSpacedSkillReferences
+
 - name: MiniA Utils Tests::DocumentAndImageReaders
   from: MiniA Utils Tests::Init
   to  : oJob Test
@@ -240,6 +244,7 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Utils Tests::SpacedSkillReferences
 - MiniA Utils Tests::RenderChartDoesNotDisplay
 - MiniA Utils Tests::ConsoleSkillsCompletion
 - MiniA Utils Tests::InitTool

@@ -395,6 +395,125 @@ MiniAIngest.prototype._atomicJson = function(path, value) {
     java.nio.file.Files.move(new java.io.File(tmp).toPath(), new java.io.File(path).toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
   } finally { try { new java.io.File(tmp).delete() } catch(ignore) {} }
 }
+MiniAIngest.prototype._recoveryEntries = function(wm) {
+  var self = this
+  return wm._ingestJournalPaths().map(function(path) {
+    var journal = af.fromJson(io.readFileString(path))
+    if (!isMap(journal) || !isArray(journal.operations) || !isMap(journal.state)) throw new Error("invalid recovery journal: " + path)
+    var id = sha1(path + "|" + String(journal.generation || journal.scopeId || "legacy"))
+    var scope = isMap(journal.scope) ? journal.scope : { unknown: true, section: "unknown", source: "unknown", sourceid: "unknown" }
+    return { id: id, journal: path, scopeId: journal.scopeId, phase: journal.phase, scope: scope,
+      pages: journal.operations.map(function(op) { return op.path }),
+      resume_command: "/ingest recovery resume " + id,
+      discard_command: "/ingest recovery discard " + id,
+      record: journal }
+  })
+}
+
+MiniAIngest.prototype._recoverySummary = function(entry) {
+  var copy = {}; Object.keys(entry).forEach(function(k) { if (k !== "record") copy[k] = entry[k] })
+  return copy
+}
+
+// Three-way merge whole records, not their fields: concurrent edits to an owned
+// source/chunk/derivative are conflicts. Unrelated records remain authoritative.
+MiniAIngest.prototype._recoveryBasePath = function(wm, journal, path) {
+  return wm._getIndexRoot() + "/.mini-a-wiki-ingest/baselines/" + sha1(String(new java.io.File(path).getCanonicalPath()) + "|" + String(journal.generation || journal.scopeId || "legacy")) + ".json"
+}
+
+MiniAIngest.prototype._rebaseRecovery = function(wm, journal, path) {
+  if (["complete", "finalization-pending"].indexOf(journal.phase) >= 0) return
+  var current = wm.knowledgeLoadState(), self = this
+  if (current._corrupt) throw new Error("manifest unreadable during recovery")
+  if (current.ingestGeneration === journal.generation || self._stateFingerprint(current) === journal.baseFingerprint) return
+  var savedBase = journal.baseState, basePath = self._recoveryBasePath(wm, journal, path)
+  if (!isMap(savedBase) && io.fileExists(basePath)) savedBase = af.fromJson(io.readFileString(basePath))
+  if (!isMap(savedBase)) throw new Error("legacy recovery has no baseline; recover before independent ingestion or review/discard it")
+  var base = savedBase, target = journal.state, next = af.fromJson(stringify(current, __, ""))
+  var equal = function(a, b) { return stringify(a, __, "") === stringify(b, __, "") }
+  var dictionaries = { sources: true, chunks: true, facts: true, dependencies: true, telemetry: true }
+  var patch = function(b, t, c, out, label) {
+    var keys = {}; Object.keys(b || {}).concat(Object.keys(t || {})).forEach(function(k) { keys[k] = true })
+    Object.keys(keys).forEach(function(k) {
+      if (equal(b[k], t[k])) return
+      if (!equal(c[k], b[k]) && !equal(c[k], t[k])) throw new Error("recovery manifest conflict: " + label + k)
+      if (Object.prototype.hasOwnProperty.call(t, k)) out[k] = t[k]
+      else delete out[k]
+    })
+  }
+  var keys = {}; Object.keys(base).concat(Object.keys(target)).forEach(function(k) { keys[k] = true })
+  Object.keys(keys).forEach(function(k) {
+    if (k === "updated" || k === "ingestGeneration") return
+    if (dictionaries[k] && isMap(base[k]) && isMap(target[k]) && isMap(current[k])) patch(base[k], target[k], current[k], next[k], k + ".")
+    else if (k === "summaries" && isMap(base[k]) && isMap(target[k]) && isMap(current[k])) {
+      ["pages", "sections"].forEach(function(part) { patch(base[k][part] || {}, target[k][part] || {}, current[k][part] || {}, next[k][part], "summaries." + part + ".") })
+    } else if (!equal(base[k], target[k])) {
+      if (!equal(current[k], base[k]) && !equal(current[k], target[k])) throw new Error("recovery manifest conflict: " + k)
+      if (Object.prototype.hasOwnProperty.call(target, k)) next[k] = target[k]; else delete next[k]
+    }
+  })
+  next.ingestGeneration = journal.generation
+  journal.state = next; journal.baseState = current; journal.baseFingerprint = self._stateFingerprint(current)
+  self._atomicJson(path, journal)
+}
+
+// Read-only listing needs no source. Mutations share ingestion's local writer lock.
+MiniAIngest.prototype.manageRecovery = function(action, id, confirmed) {
+  var a = this._args, wm, owns = false, file, channel, lock, self = this
+  var result = { ok: false, status: "blocked", written: [], removed: [], chunks_removed: 0, derivatives_invalidated: [], migrated: [], repaired: [] }
+  try {
+    loadLib("mini-a-wiki.js"); loadLib("mini-a-wiki-knowledge.js")
+    if (toBoolean(a.usewiki) !== true) throw new Error("wiki is not enabled")
+    var cfg = this._buildWikiConfig()
+    if (!isMap(cfg)) throw new Error("no wiki config")
+    wm = isObject(a.wikimanager) ? a.wikimanager : Object.create(MiniAWikiManager.prototype)
+    if (!isObject(a.wikimanager)) {
+      wm._config = cfg; wm._backendType = String(cfg.backend || "fs"); wm._backend = { root: cfg.root || "." }
+      wm._archiveRoot = wm._backendType === "fs" && new java.io.File(String(cfg.root)).isFile()
+    }
+    if (action !== "list") {
+      if (String(a.wikiaccess || "").toLowerCase() !== "rw" || wm._access === "ro" || wm._archiveRoot || wm._backendType === "http") throw new Error("wiki is read-only")
+      if (toBoolean(a.ingestdryrun) === true || toBoolean(a.dryrun) === true) throw new Error("recovery mutations are unavailable in dry-run")
+      var lockPath = wm._getIndexRoot() + "/.mini-a-wiki-ingest/writer.lock"
+      if (!io.fileExists(new java.io.File(lockPath).getParent())) throw new Error("no pending recovery")
+      file = new java.io.RandomAccessFile(lockPath, "rw"); channel = file.getChannel(); lock = channel.tryLock()
+      if (!lock) throw new Error("ingestion writer busy")
+    }
+    var entries = self._recoveryEntries(wm)
+    result.recoveries = entries.map(function(e) { return self._recoverySummary(e) })
+    if (action === "list") { result.ok = true; result.status = "listed"; return result }
+    if (["resume", "discard"].indexOf(action) < 0) throw new Error("unknown recovery action")
+    var selected = entries.filter(function(e) { return e.id === id })
+    if (selected.length !== 1) throw new Error("recovery ID not found; list pending recovery again")
+    var entry = selected[0]
+    if (action === "discard") {
+      if (confirmed !== true) { result.reason = "discard-confirmation-required"; return result }
+      var archive = wm._getIndexRoot() + "/.mini-a-wiki-ingest/discarded/" + entry.id + "-" + java.util.UUID.randomUUID() + ".json"
+      var dir = new java.io.File(archive).getParentFile()
+      if (!dir.exists() && !dir.mkdirs()) throw new Error("cannot create recovery archive")
+      java.nio.file.Files.move(new java.io.File(entry.journal).toPath(), new java.io.File(archive).toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+      result.archive = archive; result.ok = true; result.status = "discarded"
+      result.recoveries = result.recoveries.filter(function(e) { return e.id !== entry.id })
+      result.message = "Recovery archived. Already-applied pages were retained; no rollback was performed."
+      return result
+    }
+    if (!isObject(a.wikimanager)) { wm = new MiniAWikiManager(cfg, function(level, msg) { self._log(msg) }); owns = true }
+    global.__miniAWikiKnowledge.install(wm)
+    self._rebaseRecovery(wm, entry.record, entry.journal)
+    if (entry.record.phase !== "complete") self._applyJournal(wm, entry.record, entry.journal, result)
+    else if (!new java.io.File(entry.journal).delete()) throw new Error("journal cleanup failed")
+    result.ok = true; result.status = "recovered"; result.recovered = true
+    result.recoveries = result.recoveries.filter(function(e) { return e.id !== entry.id })
+  } catch(e) { result.error = __miniAErrMsg(e) }
+  finally {
+    try { if (lock) lock.release() } catch(ignoreLock) {}
+    try { if (channel) channel.close() } catch(ignoreChannel) {}
+    try { if (file) file.close() } catch(ignoreFile) {}
+    if (owns && wm) try { wm.close() } catch(ignoreClose) {}
+  }
+  return result
+}
+
 MiniAIngest.prototype._invalidate = function(state, key, result) {
   var prev = state.sources[key]
   if (!isMap(prev)) return
@@ -556,12 +675,19 @@ MiniAIngest.prototype.run = function() {
     var journalPath = wm._getIndexRoot() + "/.mini-a-wiki-ingest/journal.json"
     if (!dry && !lock) acquireWriter(wm._getIndexRoot())
 
-    if (io.fileExists(journalPath)) {
-      var recovery = af.fromJson(io.readFileString(journalPath))
-      if (!isMap(recovery) || !isArray(recovery.operations) || !isMap(recovery.state)) throw new Error("invalid recovery journal")
-      result.recovery_pending = true
-      var recoveryScope = sha1(self._destinationIdentity(wm) + "|" + resolved.type + "|" + String(a.ingestsourceid || resolved.origin || resolved.root || source) + "|" + this._defaultSection(resolved, source))
-      if (recovery.scopeId && recovery.scopeId !== recoveryScope) throw new Error("pending recovery belongs to another ingestion scope; rerun its original source and section")
+    var section = this._defaultSection(resolved, source)
+    if (/(^|\/)(\.|@)/.test(section)) throw new Error("hidden or mounted ingestion sections are unsupported")
+    section = __miniAWikiNormalizePath(section + "/placeholder.md", { requireMarkdown: true }).replace(/\/placeholder.md$/, "")
+
+    var recoveryScope = sha1(self._destinationIdentity(wm) + "|" + resolved.type + "|" + String(a.ingestsourceid || resolved.origin || resolved.root || source) + "|" + section)
+    var entries = self._recoveryEntries(wm), matching = entries.filter(function(e) { return !e.scopeId || e.scopeId === recoveryScope })
+    var other = entries.filter(function(e) { return e.scopeId && e.scopeId !== recoveryScope })
+    result.recoveries = entries.map(function(e) { return self._recoverySummary(e) })
+    if (matching.length > 1) throw new Error("multiple journals match this scope; use an explicit recovery ID")
+    if (matching.length) {
+      var entry = matching[0], recovery = entry.record
+      journalPath = entry.journal
+      result.recovery_pending = true; result.recovery = self._recoverySummary(entry)
       if (resolved.root) recovery.operations.forEach(function(op) { if (op.kind === "delete") op.sourceRoot = resolved.root })
       if (dry) {
         result.scope = { id: recoveryScope }
@@ -571,15 +697,41 @@ MiniAIngest.prototype.run = function() {
         result.reason = "pending recovery must complete before a new reconciliation plan"
         result.status = "planned"; result.ok = true; return result
       }
+      self._rebaseRecovery(wm, recovery, journalPath)
       if (recovery.phase !== "complete") this._applyJournal(wm, recovery, journalPath, result)
-      else new java.io.File(journalPath).delete()
+      else if (!new java.io.File(journalPath).delete()) throw new Error("journal cleanup failed")
       result.recovered = true; result.recovery_pending = false
+    }
+    result.recoveries = other.map(function(e) { return self._recoverySummary(e) })
+    result.recovery_pending = other.length > 0
+    var reserved = {}
+    other.forEach(function(e) { if (e.phase !== "complete") e.pages.forEach(function(p) { reserved[p] = e.id }) })
+    if (other.length && toBoolean(a.ingestindependent) !== true) {
+      result.status = "blocked"; result.reason = "recovery-scope-mismatch"; result.recovery_pending = true
+      result.recovery = self._recoverySummary(other[0])
+      result.error = "pending recovery belongs to another ingestion scope; resume, discard, or explicitly choose independent ingestion"
+      return result
+    }
+    if (other.length) {
+      // Preserve old journal bytes. If its baseline is still provable, store a
+      // separate baseline so it can be merged when explicitly resumed later.
+      var currentForLegacy = wm.knowledgeLoadState(), legacyBlocked = false
+      other.forEach(function(e) {
+        if (["complete", "finalization-pending"].indexOf(e.phase) >= 0 || isMap(e.record.baseState)) return
+        var basePath = self._recoveryBasePath(wm, e.record, e.journal)
+        if (io.fileExists(basePath)) return
+        var base = currentForLegacy.ingestGeneration === e.record.generation ? e.record.state :
+          !currentForLegacy._corrupt && self._stateFingerprint(currentForLegacy) === e.record.baseFingerprint ? currentForLegacy : null
+        if (!base) legacyBlocked = true
+        else if (!dry) self._atomicJson(basePath, base)
+      })
+      if (legacyBlocked) { result.status = "blocked"; result.reason = "legacy-recovery-needs-resume"; return result }
+      journalPath = wm._getIndexRoot() + "/.mini-a-wiki-ingest/journals/" + recoveryScope + ".json"
+      result.preserved_recoveries = other.map(function(e) { return e.id })
     }
     var manifest = wm.knowledgeLoadState()
     if (manifest._corrupt) throw new Error("corrupt manifest: ownership cannot be reconstructed safely")
-    var statePath = wm._knowledgeStatePath(), baselineToken = io.fileExists(statePath) ? io.readFileString(statePath) : "", baseline = stringify(manifest, __, ""), section = this._defaultSection(resolved, source)
-    if (/(^|\/)(\.|@)/.test(section)) throw new Error("hidden or mounted ingestion sections are unsupported")
-    section = __miniAWikiNormalizePath(section + "/placeholder.md", { requireMarkdown: true }).replace(/\/placeholder.md$/, "")
+    var statePath = wm._knowledgeStatePath(), baselineToken = io.fileExists(statePath) ? io.readFileString(statePath) : "", baseline = stringify(manifest, __, "")
     var origin = String(a.ingestsourceid || resolved.origin || resolved.root || source)
     var scope = sha1(self._destinationIdentity(wm) + "|" + resolved.type + "|" + origin + "|" + section)
     result.scope = { id: scope, origin: origin, type: resolved.type, section: section }; result.section = section
@@ -678,6 +830,12 @@ MiniAIngest.prototype.run = function() {
       }
     })
     result.budget = budget.stats()
+    var overlap = result.planned_writes.concat(result.planned_removals).filter(function(p) { return reserved[p] })
+    if (overlap.length) {
+      result.status = "blocked"; result.reason = "pending-recovery-page-conflict"
+      result.conflicts = result.conflicts.concat(overlap.map(function(p) { return { page: p, recovery: reserved[p], reason: "page reserved by pending recovery" } }))
+      return result
+    }
     if (dry) { result.status = "planned"; result.ok = result.failed.length === 0 && result.conflicts.length === 0 && result.deferred.length === 0 && result.prune_blocked.length === 0; return result }
     var operations = [], generation = java.util.UUID.randomUUID().toString()
     var llmWork = pending.filter(function(p) { return p.needs && !p.deferred }), llmResults = {}
@@ -736,7 +894,7 @@ MiniAIngest.prototype.run = function() {
       }
       manifest.version = global.__miniAWikiKnowledge.versions.manifest
       manifest.ingestGeneration = generation
-      var journal = { version: 1, scopeId: scope, allowEmptyPrune: toBoolean(a.ingestallowemptyprune) === true, generation: generation, phase: "prepared", baseFingerprint: self._stateFingerprint(af.fromJson(baseline)), operations: operations, state: manifest, chunksRemoved: removedChunks, derivatives: result.planned_derivatives_invalidated, migrations: result.planned_migrations, repairs: result.planned_repairs.filter(function(p) { return operations.some(function(op) { return op.kind === "write" && op.path === p }) }) }
+      var journal = { version: 2, baseState: af.fromJson(baseline), scopeId: scope, scope: { source: source, cwd: String(new java.io.File(".").getCanonicalPath()), section: section, sourceid: String(a.ingestsourceid || ""), origin: origin, type: resolved.type }, allowEmptyPrune: toBoolean(a.ingestallowemptyprune) === true, generation: generation, phase: "prepared", baseFingerprint: self._stateFingerprint(af.fromJson(baseline)), operations: operations, state: manifest, chunksRemoved: removedChunks, derivatives: result.planned_derivatives_invalidated, migrations: result.planned_migrations, repairs: result.planned_repairs.filter(function(p) { return operations.some(function(op) { return op.kind === "write" && op.path === p }) }) }
       self._atomicJson(journalPath, journal); self._applyJournal(wm, journal, journalPath, result)
     }
     var incomplete = result.failed.length || result.conflicts.length || result.deferred.length || result.prune_blocked.length
@@ -748,6 +906,12 @@ MiniAIngest.prototype.run = function() {
     result.failed.push({ source: "execution/persistence/finalization", error: result.error })
     if (/finaliz/i.test(result.error)) result.finalization_failures.push(result.error)
     else if (/persist|atomic|journal|manifest/i.test(result.error)) result.persistence_failures.push(result.error)
+    try {
+      if (wm) {
+        result.recoveries = self._recoveryEntries(wm).map(function(e) { return self._recoverySummary(e) })
+        result.recovery_pending = result.recoveries.length > 0
+      }
+    } catch(ignoreRecoveryListing) {}
     result.status = result.written.length || result.removed.length ? "partial" : "failed"
     return result
   } finally {

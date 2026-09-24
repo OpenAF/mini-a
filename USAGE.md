@@ -256,6 +256,33 @@ To view conversation token usage:
 
 Need to revisit or store the most recent response? `/last [md]` reprints the previous final answer so you can copy it (add `md` to emit the raw Markdown instead of the formatted view), and `/save <path>` writes that answer straight to a file. When providing a path, press <kbd>Tab</kbd> to leverage the console's new filesystem auto-completion for slash commands.
 
+Paths containing spaces can be quoted with double or single quotes in console commands:
+
+```text
+/ingest "/path/My Docs" "Team Reference" dryrun
+/wiki attach reference root="/path/My Wiki.zip"
+/wiki read "Team Reference/a page.md"
+/wiki write "Team Reference/a page.md" Content keeps its original spacing.
+/wiki move "Team Reference/a page.md" "Team Reference/new page.md"
+/graph path "Team Reference/a page.md" "Team Reference/new page.md"
+/skills read "wiki:skills/my skill.md" "Usage examples"
+/save "/path/My Response.md"
+/stats out="/path/My Stats.json"
+/set conversation="/path/My Conversation.json"
+Read @"/path/My Document.md" and summarize it.
+```
+
+For multi-operand commands such as `/ingest` and `/wiki move`, quote each complete
+path separately (or escape spaces with a backslash). Single-path commands such as
+`/save` and `/wiki read` also retain their existing unquoted-path support. Use
+`./force` or `./dryrun` if an ingestion source is named like a flag. Skill templates
+can use `@"references/my notes.md"` and Markdown links such as
+`[notes](<references/my notes.md>)`. Startup shell arguments need shell quoting,
+for example `ojob mini-a.yaml wikiroot="/path/My Wiki"`; JSON/YAML tool arguments
+should contain the path as a string without extra literal quote characters.
+Comma-separated directory options still use commas as separators, not spaces.
+
+
 Need to inspect available skills quickly? `/skills` prints all discovered skills (name, type, description, and source file), and `/skills <prefix>` filters the list.
 
 ### Attaching Files in the Console
@@ -3225,6 +3252,43 @@ From the console (requires `usewiki=true wikiaccess=rw`):
 /ingest ./docs force
 ```
 
+Run `/ingest` with no arguments (or `/ingest recovery`) to inspect pending
+recovery. The console shows each original source, section, scope ID, affected
+pages, and an exact resume command, then offers `resume <number>`,
+`discard <number>`, `independent`, or `cancel`. A failed ingestion with a pending
+journal opens the same choices. Older journals may lack source/section metadata;
+their saved operations can still be resumed using the displayed recovery ID.
+
+```text
+/ingest recovery resume <id>
+/ingest recovery discard <id>
+/ingest "/path/New Docs" "New Section" independent
+```
+
+Resume replays saved work and completes manifest/index finalization without
+starting another ingestion or repeating source distillation. Configured graph
+finalization still applies. Discard asks you to type
+`discard <id>` and moves that journal into `.mini-a-wiki-ingest/discarded/`.
+**Discard does not undo already-applied pages or mark unfinished work as
+synchronized.** Later ingestion still reports ownership/manual-edit conflicts.
+
+Independent ingestion preserves other pending journals and uses a separate file
+under `.mini-a-wiki-ingest/journals/`. It blocks changes to pages reserved by
+pending recovery. Resuming an older snapshot merges unrelated manifest records
+from completed independent ingestions and rejects conflicting record changes
+before writing pages. Pending pages remain excluded from retrieval across all
+journals. The local writer lock still serializes ingestion and recovery writes;
+this is not a distributed multi-writer feature.
+
+For standalone jobs, set `ingestindependent=true` (default `false`). `force` does
+not authorize independent ingestion or bypass recovery/ownership conflicts.
+Read-only sessions can inspect recovery; resume/discard require write access and
+are blocked in dry-run. A legacy prepared journal can be preserved for independent
+ingestion only when its baseline can still be proven; that baseline is retained
+separately under `.mini-a-wiki-ingest/baselines/`. Otherwise resume or explicitly
+discard the old recovery first. Do not manually delete journals to dismiss errors.
+
+
 | Argument | Type | Default | Description |
 |---|---|---|---|
 | `ingestsource` | string | - | Folder, git repository (path or clone URL), or page URL — **required** |
@@ -3236,6 +3300,7 @@ From the console (requires `usewiki=true wikiaccess=rw`):
 | `ingestmaxfilekb` | number | `512` | Sources larger than this are **skipped**, not truncated |
 | `ingestconcurrency` | number | `4` | Parallel source distillations |
 | `ingestdryrun` | boolean | `false` | Report what would be ingested without writing |
+| `ingestindependent` | boolean | `false` | Allow a disjoint ingestion while preserving pending recovery |
 | `ingestforce` | boolean | `false` | Re-ingest sources the ledger reports as unchanged |
 | `ingestledger` | string | `<indexRoot>/.mini-a-wiki-ingest/ledger.json` | Ledger file path |
 
