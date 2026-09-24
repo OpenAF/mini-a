@@ -2,10 +2,13 @@
 help:
   text   : |
     Ingest knowledge into a Mini-A wiki from a documentation folder, a git repository
-    (local checkout or clone URL) or a web page.
+    (local checkout or clone URL) or a web page. Local sources may include text,
+    Office documents, PDFs and PNG/JPEG images. Documents use Tika; images require
+    a vision-capable OAF_MODEL. Other passive structured formats advertised by
+    the installed oafp are converted to Markdown before wiki ingestion.
 
     Discovery, filtering, chunking, the versioned manifest, writing and finalization are
-    deterministic; only the per-source distillation uses the LLM. One source produces one
+    deterministic; distillation and image descriptions use the LLM. One source produces one
     wiki page — cross-page dedup and reorganisation are left to '/dream wiki apply'.
 
     Examples:

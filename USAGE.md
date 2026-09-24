@@ -3228,9 +3228,9 @@ Each record's `md` value is YAML front matter (every non-default field: `kind`, 
 
 ## Wiki Ingestion
 
-`mini-a-ingest.js` turns an existing body of documentation into wiki pages. Discovery, filtering, chunking, the re-ingest ledger, writing and finalization are deterministic; only the per-source distillation calls the LLM.
+`mini-a-ingest.js` turns an existing body of documentation into wiki pages. Discovery, filtering, chunking, the re-ingest ledger, writing and finalization are deterministic; distillation and image descriptions call the LLM.
 
-**Sources**: a markdown/docs folder, a git repository (local checkout or clone URL), or a web page URL. The type is auto-detected; `ingesttype=` overrides.
+**Sources**: a documentation folder, a git repository (local checkout or clone URL), or a web page URL. Folders and repositories may include Markdown, plain text, HTML, DOCX/DOC, XLSX/XLS, PPTX/PPT, PDF, PNG, and JPEG files. Other supported structured file types are read through oafp, including YAML, CSV, NDJSON, JSON, SLON, NDSLON, OpenMetrics, TOML, XML, INI, DSV and TOON. The type is auto-detected; `ingesttype=` overrides.
 
 ```bash
 # a docs folder
@@ -3297,7 +3297,7 @@ discard the old recovery first. Do not manually delete journals to dismiss error
 | `ingestinclude` | string | - | Comma-separated path fragments to include |
 | `ingestexclude` | string | - | Comma-separated path fragments to exclude |
 | `ingestchunkchars` | number | `24000` | Maximum characters per distillation chunk |
-| `ingestmaxfilekb` | number | `512` | Sources larger than this are **skipped**, not truncated |
+| `ingestmaxfilekb` | number | `512` | Sources larger than this are **skipped**, not truncated; raise it for large documents or images |
 | `ingestconcurrency` | number | `4` | Parallel source distillations |
 | `ingestdryrun` | boolean | `false` | Report what would be ingested without writing |
 | `ingestindependent` | boolean | `false` | Allow a disjoint ingestion while preserving pending recovery |
@@ -3307,12 +3307,15 @@ discard the old recovery first. Do not manually delete journals to dismiss error
 ### How it works
 
 1. **Resolve** — detect the source type; shallow-clone remote repos to a temp dir and record the commit SHA.
-2. **Discover** — walk for `.md`/`.markdown`/`.mdx`/`.txt`/`.rst`/`.adoc`, skipping vendor directories (`.git`, `node_modules`, `target`, `build`, `dist`, `vendor`, `.venv`, `__pycache__`, …). `README*` and `docs/**` come first.
+2. **Discover** — walk for native text, HTML, document and image formats, then passive structured formats advertised by the installed oafp. Skip vendor directories (`.git`, `node_modules`, `target`, `build`, `dist`, `vendor`, `.venv`, `__pycache__`, …). `README*` and `docs/**` come first.
 3. **Ledger** — skip sources whose sha1 is unchanged since the last ingest (`ingestforce=true` overrides).
 4. **Chunk** — split oversized sources on `##`/`###` boundaries (paragraphs when headingless).
 5. **Distill** — one LLM call per source, in parallel batches, producing `{title, description, tags, type, body}`.
 6. **Write** — one source produces **one page**. Cross-page dedup and reorganisation are left to `/dream wiki apply`.
 7. **Finalize** — regenerate indexes, rebuild the search index and the knowledge graph, append to `log.md`.
+
+Office and PDF text extraction uses the `readDocument` utility and Tika (installed lazily unless preinstalled). Scanned PDFs need OCR, which is not enabled. PNG/JPEG descriptions use `inspectImage` and require a vision-capable `OAF_MODEL`; image text is treated as untrusted source data. Empty or truncated extraction fails that source without writing a partial page. The input size limit applies to these files too.
+For other passive structured formats, oafp parses the source into JSON shown in a fenced wiki page. NDJSON and NDSLON retain every record. Inputs that execute commands, query services or inspect the host are excluded from file ingestion even when oafp advertises them.
 
 Ingested pages carry provenance front-matter: `source`, `source_ref` (commit SHA or origin), `source_hash` (sha1 of the ingested content) and `ingested`. A later ingest of a changed source overwrites the page, so record durable additions elsewhere.
 

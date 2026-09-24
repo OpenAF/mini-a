@@ -397,9 +397,16 @@ they moved in the document. Missing/corrupt state safely starts fresh; read-only
 attempt to create it.
 
 `ingestmode=auto` is deterministic-first and is the default: well-structured Markdown is
-normalized without a model call. Use `normalize` or `raw` to guarantee no LLM use, and
+normalized without a model call. Use `normalize` or `raw` to avoid distillation calls, and
 `distill` to preserve legacy LLM distillation. `wikillmbudget`, `wikiingestbudget`,
 `wikidreambudget`, and `wikimaxprompttokens` defer work rather than dropping it.
+The ingest source reader also extracts text from DOCX/DOC, XLSX/XLS, PPTX/PPT and PDF
+through Tika, and describes PNG/JPEG through the configured vision model. Extraction
+failures and truncated documents leave their source pages untouched. The default
+`ingestmaxfilekb=512` input limit applies to these formats.
+Other passive structured formats advertised by oafp are converted to Markdown with
+a JSON code block before the normal wiki writer stores a `.md` page. Image inspection
+still calls the vision model in `normalize` and `raw` modes.
 
 ```sh
 ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=/tmp/wiki ingestmode=auto

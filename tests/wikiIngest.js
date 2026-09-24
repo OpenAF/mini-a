@@ -97,6 +97,106 @@
     } finally { cleanup(src, wiki) }
   }
 
+  exports.testIngestReadsDocumentsAndImages = function() {
+    loadLib("mini-a-utils.js")
+    var src = String(io.createTempDir("miniingest_binary_")), wiki = String(io.createTempDir("miniingest_wiki_"))
+    var originalExtractor = MiniUtilsTool.prototype._createDocumentExtractor
+    try {
+      io.writeFileString(src + "/report.docx", "document fixture")
+      io.writeFileString(src + "/budget.xlsx", "spreadsheet fixture")
+      io.writeFileString(src + "/brief.pdf", "pdf fixture")
+      var image = new java.awt.image.BufferedImage(2, 2, java.awt.image.BufferedImage.TYPE_INT_RGB)
+      javax.imageio.ImageIO.write(image, "png", new java.io.File(src + "/diagram.png"))
+      image.flush()
+      MiniUtilsTool.prototype._createDocumentExtractor = function() {
+        return { extractFile: function(path) { return { text: "Extracted " + new java.io.File(path).getName(), truncated: false } } }
+      }
+      var ing = makeIngest(src, wiki, { ingestmode: "normalize" }), images = 0
+      ing._setLlm({ promptImage: function(prompt, path) {
+        images++
+        ow.test.assert(prompt.indexOf("untrusted source data") >= 0, true, "vision prompt distrusts image text")
+        ow.test.assert(String(path).indexOf("diagram.png") >= 0, true, "image path reaches vision model")
+        return "A diagram labeled Widget"
+      } })
+      var result = ing.run()
+      ow.test.assert(result.ok, true, stringify(result))
+      ow.test.assert(result.discovered, 4, "all supported binary formats discovered")
+      ow.test.assert(images, 1, "image inspected once")
+      ow.test.assert(io.readFileString(wiki + "/" + ing._wikiPathFor(result.section, { rel: "report.docx" })).indexOf("Extracted report.docx") >= 0, true, "document text written to wiki")
+      ow.test.assert(io.readFileString(wiki + "/" + ing._wikiPathFor(result.section, { rel: "diagram.png" })).indexOf("A diagram labeled Widget") >= 0, true, "image description written to wiki")
+      var again = ing.run()
+      ow.test.assert(again.skipped_unchanged, 4, "unchanged extracted sources retain provenance")
+    } finally {
+      MiniUtilsTool.prototype._createDocumentExtractor = originalExtractor
+      cleanup(src, wiki)
+    }
+  }
+
+  exports.testIngestRejectsIncompleteDocumentExtraction = function() {
+    loadLib("mini-a-utils.js")
+    var src = String(io.createTempDir("miniingest_binary_")), wiki = String(io.createTempDir("miniingest_wiki_"))
+    var originalExtractor = MiniUtilsTool.prototype._createDocumentExtractor
+    try {
+      io.writeFileString(src + "/report.pdf", "pdf fixture")
+      MiniUtilsTool.prototype._createDocumentExtractor = function() {
+        return { extractFile: function() { return { text: "incomplete", truncated: true } } }
+      }
+      var result = makeIngest(src, wiki, { ingestmode: "normalize" }).run()
+      ow.test.assert(result.failed.length, 1, "truncated extraction fails source")
+      ow.test.assert(result.written.length, 0, "incomplete content is not written")
+    } finally {
+      MiniUtilsTool.prototype._createDocumentExtractor = originalExtractor
+      cleanup(src, wiki)
+    }
+  }
+
+  exports.testIngestUsesOafpForStructuredSources = function() {
+    var src = String(io.createTempDir("miniingest_structured_")), wiki = String(io.createTempDir("miniingest_wiki_"))
+    try {
+      var data = { "settings.yaml": "enabled: true\ncount: 2", "rows.csv": "name,age\nAda,42",
+        "events.ndjson": '{"id":1}\n{"id":2}\n', "config.json": '{"status":"ready"}',
+        "settings.slon": "(value: 4)", "stream.ndslon": "(id: 1)\n(id: 2)\n",
+        "metrics.openmetrics": "# TYPE requests_total counter\nrequests_total 3", "options.toml": "name = 'demo'" }
+      Object.keys(data).forEach(function(name) { io.writeFileString(src + "/" + name, data[name]) })
+      io.writeFileString(src + "/unsupported.zzz", "ignored")
+      var ing = makeIngest(src, wiki, { ingestmode: "normalize" })
+      loadOAFP()
+      var originalOafp = global.oafp, discovered, helpCalls = 0
+      try {
+        global.oafp = function(options) {
+          ow.test.assert(options.in, "?", "discovery only probes oafp inputs")
+          ow.test.assert(options.data, "()", "oafp help must have explicit data so it never reads console stdin")
+          helpCalls++
+          $set(options.__key, _INGEST_OAFP_FILE_INPUTS)
+        }
+        discovered = ing._discover({ root: src })
+      } finally { global.oafp = originalOafp }
+      ow.test.assert(helpCalls, 1, "discovery should query supported oafp inputs once")
+      ow.test.assert(discovered.sources.length, Object.keys(data).length, "discovery classifies structured files without reading stdin")
+      var result = ing.run()
+      ow.test.assert(result.ok, true, stringify(result))
+      ow.test.assert(result.discovered, Object.keys(data).length, "oafp-supported inputs discovered; unknown format skipped")
+      var ndjson = io.readFileString(wiki + "/" + ing._wikiPathFor(result.section, { rel: "events.ndjson" }))
+      ow.test.assert(ndjson.indexOf("# events") >= 0 && ndjson.indexOf("```json") >= 0, true, "oafp content stored as Markdown")
+      ow.test.assert(ndjson.indexOf('"id": 1') >= 0 && ndjson.indexOf('"id": 2') >= 0, true, "all NDJSON records retained")
+      var ndslon = io.readFileString(wiki + "/" + ing._wikiPathFor(result.section, { rel: "stream.ndslon" }))
+      ow.test.assert(ndslon.indexOf('"id": 1') >= 0 && ndslon.indexOf('"id": 2') >= 0, true, "all NDSLON records retained")
+      var metrics = io.readFileString(wiki + "/" + ing._wikiPathFor(result.section, { rel: "metrics.openmetrics" }))
+      ow.test.assert(metrics.indexOf("requests_total") >= 0, true, "OpenMetrics parsed")
+    } finally { cleanup(src, wiki) }
+  }
+
+  exports.testIngestKeepsInvalidStructuredSourceUnwritten = function() {
+    var src = String(io.createTempDir("miniingest_structured_")), wiki = String(io.createTempDir("miniingest_wiki_"))
+    try {
+      io.writeFileString(src + "/broken.json", "{invalid")
+      var result = makeIngest(src, wiki, { ingestmode: "normalize" }).run()
+      ow.test.assert(result.discovered, 1, "supported format discovered")
+      ow.test.assert(result.failed.length, 1, "parse failure reported for source")
+      ow.test.assert(result.written.length, 0, "invalid source does not create Markdown page")
+    } finally { cleanup(src, wiki) }
+  }
+
   exports.testIngestSkipsOversizedSources = function() {
     var src = makeSourceDir(), wiki = String(io.createTempDir("miniingest_wiki_"))
     try {
@@ -193,6 +293,8 @@
     }]
     var result = ing._distillAll(ing._llm, pending, [], 1)
     ow.test.assert(result[0].ok, false, "the failed distillation should be returned")
+    ow.test.assert(logs.some(function(msg) { return msg.indexOf("Distilling source(s) 1-1/1") >= 0 }), true,
+      "the active model batch should be reported before it returns")
     ow.test.assert(logs.join("\n").indexOf("Distillation failed for failed.md: model unavailable") >= 0, true,
       "a failed batch should be logged before the write pass")
   }

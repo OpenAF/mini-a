@@ -42,6 +42,22 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wikiIngest.js").testIngestDiscoversHtmlSources
 
+- name: MiniA Wiki Ingest Tests::IngestReadsDocumentsAndImages
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testIngestReadsDocumentsAndImages
+
+- name: MiniA Wiki Ingest Tests::IngestRejectsIncompleteDocumentExtraction
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testIngestRejectsIncompleteDocumentExtraction
+
+- name: MiniA Wiki Ingest Tests::IngestUsesOafpForStructuredSources
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testIngestUsesOafpForStructuredSources
+
+- name: MiniA Wiki Ingest Tests::IngestKeepsInvalidStructuredSourceUnwritten
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testIngestKeepsInvalidStructuredSourceUnwritten
+
 - name: MiniA Wiki Ingest Tests::IngestSkipsOversizedSources
   to  : oJob Test
   exec: args.func = require("tests/wikiIngest.js").testIngestSkipsOversizedSources
@@ -269,6 +285,10 @@ todo:
 - MiniA Wiki Ingest Tests::IngestDryRunWritesNoPages
 - MiniA Wiki Ingest Tests::IngestRespectsIncludeAndExclude
 - MiniA Wiki Ingest Tests::IngestDiscoversHtmlSources
+- MiniA Wiki Ingest Tests::IngestReadsDocumentsAndImages
+- MiniA Wiki Ingest Tests::IngestRejectsIncompleteDocumentExtraction
+- MiniA Wiki Ingest Tests::IngestUsesOafpForStructuredSources
+- MiniA Wiki Ingest Tests::IngestKeepsInvalidStructuredSourceUnwritten
 - MiniA Wiki Ingest Tests::IngestSkipsOversizedSources
 - MiniA Wiki Ingest Tests::IngestWritesOnePagePerSourceWithProvenance
 - MiniA Wiki Ingest Tests::IngestFinalizesIndexesAndSearchIndex
