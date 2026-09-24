@@ -50,6 +50,25 @@
 
   // ── Parsefrontmatter ────────────────────────────────────────────────────────
 
+  exports.testConsoleSearchPreservesV2Status = function() {
+    var dir = createTestDir(), wm
+    try {
+      writePage(dir, "ojob.md", "---\ntitle: oJob\n---\n# oJob\nRun jobs with oJob.")
+      wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikiretrievalv2: true })
+      var unavailable = ""
+      try { __miniAWikiRequireSearchHits(wm.search("ojob")) } catch(e) { unavailable = String(e.message || e) }
+      ow.test.assert(unavailable.indexOf("wiki-search-unavailable") >= 0, true, "missing index must not cause a forEach error")
+      ow.test.assert(unavailable.indexOf("v2-build-required") >= 0, true, "missing index must retain the build-required reason")
+      ow.test.assert(wm.reindex().ok, true, "fixture reindex should succeed")
+      var hits = __miniAWikiRequireSearchHits(wm.search("ojob"))
+      ow.test.assert(hits.length, 1, "indexed search should still return hits")
+      ow.test.assert(hits[0].path, "ojob.md", "indexed search should return the matching page")
+    } finally {
+      try { if (wm) wm.close() } catch(e) {}
+      cleanupTestDir(dir)
+    }
+  }
+
   exports.testParseFrontmatterWithYaml = function() {
     var wm = new MiniAWikiManager({ backend: "fs", root: "." })
     var raw = "---\ntitle: Test Page\ntags:\n  - foo\n---\n# Body\nHello."

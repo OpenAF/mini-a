@@ -6446,7 +6446,7 @@ try {
         print(page.body)
       } else if (sub === "search") {
         if (rest.length === 0) { print(colorifyText("Usage: /wiki search <query>", errorColor)); return }
-        var hits = wm.search(rest)
+        var hits = __miniAWikiRequireSearchHits(wm.search(rest))
         if (hits.length === 0) {
           print(colorifyText("No results for: " + rest, hintColor))
         } else {

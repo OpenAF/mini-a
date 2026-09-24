@@ -347,7 +347,7 @@ Scan-fallback reads are also cached per `MiniAWikiManager` instance (`wikisearch
 
 ## Utility oJobs (`utils/`)
 
-Two standalone oJobs report statistics on an existing wiki's on-disk state without going through `mini-a` or the `MiniAWikiManager` API. Both are read-only and safe to run against a live wiki (no writer lock is taken). Add `top=<n>` to change how many entries each ranked list includes (default `10`); `__format=json` prints machine-readable output instead of the default table/text rendering.
+Standalone oJobs export graphs and report statistics on an existing wiki's on-disk state without going through `mini-a` or the `MiniAWikiManager` API. The utilities read wiki data without changing its indexes (no writer lock is taken). For the statistics jobs, add `top=<n>` to change how many entries each ranked list includes (default `10`); `__format=json` prints machine-readable output instead of the default table/text rendering.
 
 ### `utils/indexStats.yaml`
 
@@ -368,6 +368,35 @@ ojob utils/graphStats.yaml file="/path/to/graph.json" top=5 __format=json
 ```
 
 `graphStats.yaml` also accepts `key=<channel-key>` instead of `file` to read graph data already loaded into an oJob pipeline/channel (falls back to `__pm`/`__pm._map` when neither `file` nor `key` is given), which is how `utils/indexStats.yaml`-style tooling can chain into it in a larger pipeline.
+
+### `utils/wikiGraph.yaml`
+
+Export a wiki into a single, self-contained HTML constellation atlas. Open the file directly in a modern browser; it works offline without a server, CDN, model, or additional assets.
+
+```sh
+# Writes wiki-graph.html in the current working directory
+ojob utils/wikiGraph.yaml dir="/path/to/wiki"
+
+# Choose an output file (or an existing output directory) and title
+ojob utils/wikiGraph.yaml dir="/path/to/wiki" output="/tmp/my-wiki.html" title="My knowledge atlas"
+```
+
+The atlas includes a starfield and force layout, wheel/pinch zoom, panning, draggable nodes, type colors and filters, relationship filtering, search, high-degree entry points, a node inspector with directional connection jumps, navigation history, neighborhood focus, random discovery, shareable node fragments, and PNG export. Inferred relationships use dashed lines. Pause/resume controls and reduced-motion preferences control layout animation. Search results and connection buttons provide keyboard navigation; shortcuts are `/` to search, `+`/`-` to zoom, `F` to fit, and `Esc` to clear selection when focus is outside an input or button. Search highlights matching stars without removing their context.
+
+When `.mini-a-wiki-graph/graph.json` exists, the exporter reads that snapshot, retaining node types, properties, edge types, and provenance. Deleted records and dangling edges are excluded. An invalid graph fails with an error rather than silently switching sources. Regenerate the wiki graph first if you need current graph data; the exporter does not rebuild it.
+
+Without a graph snapshot, it scans Markdown files recursively, reads YAML frontmatter titles/types/tags, and builds document links from `[[wiki links]]` and inline Markdown links. Wiki links prefer root-relative targets; Markdown links prefer paths relative to their source page. Extensionless links and folder `index.md` targets are supported. Hidden files/directories and symbolic links are skipped. This lightweight fallback ignores unresolved/external links and fenced/inline code; it does not perform semantic extraction, mount resolution, alias resolution, or full Markdown parsing. It embeds up to 1,200 characters of each page body for inspection. Graph exports embed all node properties, so the HTML contains that source data.
+
+Rendering and layout run locally in the browser. Large graphs can take time to settle; pause the layout and use filters to explore them. Output parent directories must already exist; an existing output HTML file is replaced.
+
+Validation:
+
+```sh
+python3 tests/wikiGraph.py
+node tests/wikiGraphUI.js /tmp/my-wiki.html
+```
+
+The first command tests real oJob exports, output locations, graph filtering, safe JSON embedding, Markdown fallback, and empty/invalid input. The second uses DOM/canvas stubs to smoke-test interaction handlers; it is not visual browser verification. For manual QA, open the export, zoom/pan/drag, search and jump between connections, toggle filters and neighborhood focus, use Back, pause/resume, save a PNG, and check a narrow/mobile viewport.
 
 ## Examples
 

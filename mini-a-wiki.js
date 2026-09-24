@@ -3949,6 +3949,25 @@ MiniAWikiManager.prototype._scanBudgetExceeded = function(scanState) {
   return scanState.scanned >= scanState.budget || new Date().getTime() >= scanState.deadline
 }
 
+// The legacy search API returns hits on success and a retrieval-v2 status when
+// the selected index is unavailable. Callers that display hits must keep the
+// status reason instead of treating the status map as an array.
+function __miniAWikiRequireSearchHits(result) {
+  if (isArray(result)) return result
+  var reasons = []
+  if (isMap(result)) {
+    if (isString(result.error) && result.error.length > 0) reasons.push(result.error)
+    ;(isArray(result.sources) ? result.sources : []).forEach(function(source) {
+      if (isMap(source) && isString(source.reason) && source.reason.length > 0 && reasons.indexOf(source.reason) < 0) reasons.push(source.reason)
+    })
+    ;(isArray(result.stopReasons) ? result.stopReasons : []).forEach(function(reason) {
+      if (isString(reason) && reason.length > 0 && reasons.indexOf(reason) < 0) reasons.push(reason)
+    })
+    if (reasons.length === 0 && isString(result.outcome) && result.outcome.length > 0) reasons.push(result.outcome)
+  }
+  throw new Error("wiki-search-unavailable" + (reasons.length > 0 ? ": " + reasons.join(", ") : ""))
+}
+
 MiniAWikiManager.prototype.search = function(query, options) {
   if (this._retrievalV2 && !(options && (options.forceScan || options.regex || options.searchIn === "body" || options.path))) { var searchV2 = this._retrievalV2.search(query, options); return searchV2.ok && !(searchV2.outcome === "partial" && !searchV2.results.length) ? searchV2.results : searchV2 }
   if (!isString(query) || query.trim().length === 0) return []

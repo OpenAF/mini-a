@@ -1,0 +1,283 @@
+# Author: Nuno Aguiar
+help:
+  text: |
+    Export a wiki as a self-contained, offline constellation graph.
+    Uses .mini-a-wiki-graph/graph.json when present; otherwise scans Markdown
+    pages and resolves local wiki/Markdown links. No model or server required.
+
+    ojob utils/wikiGraph.yaml dir=/path/to/wiki
+    ojob utils/wikiGraph.yaml dir=/path/to/wiki output=/tmp/atlas.html title="My wiki"
+  expects:
+  - name: dir
+    desc: Wiki directory
+    mandatory: true
+  - name: output
+    desc: "Output HTML file or existing directory (default: ./wiki-graph.html)"
+  - name: title
+    desc: "Atlas title (default: Wiki constellation)"
+
+todo:
+- Export wiki constellation
+
+ojob:
+  opacks:
+  - openaf: 20230512
+  logToConsole: false
+  catch: printErr(exception); exit(1)
+
+jobs:
+- name: Export wiki constellation
+  check:
+    in:
+      dir: isString
+      output: isString.default("wiki-graph.html")
+      title: isString.default("Wiki constellation")
+  exec: |
+    var rootFile = new java.io.File(args.dir)
+    if (!rootFile.isDirectory()) throw "Wiki directory not found: " + args.dir
+    var root = String(rootFile.getCanonicalPath())
+    var graphFile = root + "/.mini-a-wiki-graph/graph.json"
+    var graph, source
+    if (io.fileExists(graphFile)) {
+      graph = io.readFileJSON(graphFile)
+      if (!isMap(graph) || !isMap(graph.nodes) || !isArray(graph.edges)) throw "Invalid wiki graph: " + graphFile
+      source = "Knowledge graph snapshot"
+    } else {
+      // Read plain Markdown without creating or modifying wiki indexes. Ignore hidden
+      // directories and symbolic links so a wiki cannot pull in files outside its root.
+      graph = { nodes: {}, edges: [] }
+      source = "Markdown page links"
+      var pages = Object.create(null), links = [], seenDirs = Object.create(null)
+      var walk = function(dir) {
+        var canonical = String(new java.io.File(dir).getCanonicalPath())
+        if (seenDirs[canonical]) return
+        seenDirs[canonical] = true
+        io.listFiles(dir).files.sort(function(a, b) { return String(a.filename).localeCompare(String(b.filename)) }).forEach(function(f) {
+          if (String(f.filename).charAt(0) === ".") return
+          var file = new java.io.File(dir, f.filename)
+          if (java.nio.file.Files.isSymbolicLink(file.toPath())) return
+          if (f.isDirectory) { walk(String(file)); return }
+          if (!f.isFile || !/\.md$/i.test(f.filename)) return
+          var path = String(file.getCanonicalPath()).substring(root.length + 1).replace(/\\/g, "/")
+          var body = io.readFileString(String(file)), meta = {}, front = body.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)
+          if (front) {
+            try { meta = af.fromYAML(front[1]); if (!isMap(meta)) meta = {} } catch(e) { printErr("Invalid frontmatter in " + path + ": " + e) }
+            body = body.substring(front[0].length)
+          }
+          var heading = body.match(/^#\s+(.+)$/m)
+          var id = "doc:" + path
+          pages[path] = id
+          graph.nodes[id] = { type: String(meta.type || "document"), props: { title: String(meta.title || (heading ? heading[1] : path)), path: path, tags: meta.tags || [], summary: body.substring(0, 1200) } }
+          var text = body.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, "").replace(/`[^`\n]+`/g, "")
+          var re = /\[\[([^\]|]+)(?:\|[^\]]*)?\]\]|\[[^\]]*\]\(([^\s)]+)(?:\s+"[^"]*")?\)/g, match
+          while ((match = re.exec(text)) !== null) links.push({ from: path, target: match[1] || match[2], wiki: !!match[1] })
+        })
+      }
+      walk(root)
+      var normalize = function(path) {
+        var parts = []
+        path.split("/").forEach(function(p) { if (p === "..") parts.pop(); else if (p && p !== ".") parts.push(p) })
+        return parts.join("/")
+      }
+      var edgeKeys = Object.create(null)
+      links.forEach(function(l) {
+        var target = l.target.trim().split("#")[0].split("?")[0]
+        if (!target || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(target)) return
+        try { target = decodeURIComponent(target) } catch(e) {}
+        var local = l.from.substring(0, l.from.lastIndexOf("/") + 1) + target
+        var candidates = target.charAt(0) === "/" ? [target] : (l.wiki ? [target, local] : [local, target])
+        var to
+        candidates.some(function(c) {
+          c = normalize(c)
+          return [c, c + ".md", c.replace(/\/$/, "") + "/index.md"].some(function(p) { if (pages[p]) { to = pages[p]; return true } return false })
+        })
+        var from = pages[l.from], key = JSON.stringify([from, to])
+        if (to && !edgeKeys[key]) { edgeKeys[key] = true; graph.edges.push({ from: from, to: to, type: "links_to", provenance: "EXTRACTED" }) }
+      })
+    }
+    var nodes = [], ids = Object.create(null), skipped = 0
+    Object.keys(graph.nodes).sort().forEach(function(id) {
+      var n = graph.nodes[id]
+      if (!isMap(n) || n._deleted === true) return
+      var p = isMap(n.props) ? n.props : {}
+      ids[id] = true
+      nodes.push({ id: id, type: String(n.type || "unknown"), label: String(p.title || p.name || p.label || p.heading || id), props: p })
+    })
+    var edges = graph.edges.filter(function(e) {
+      if (!isMap(e) || e._deleted === true) return false
+      if (!ids[e.from] || !ids[e.to]) { skipped++; return false }
+      return true
+    }).map(function(e) { return { from: e.from, to: e.to, type: String(e.type || "related"), provenance: String(e.provenance || "AMBIGUOUS"), props: isMap(e.props) ? e.props : {} } })
+    var data = { title: args.title, source: source, generated: new Date().toISOString(), nodes: nodes, edges: edges, skipped: skipped }
+    // Escape HTML-sensitive characters before embedding JSON in a script element.
+    var payload = JSON.stringify(data).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029")
+    var html = `<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Wiki constellation</title>
+    <style>
+    :root{color-scheme:dark;--bg:#070c19;--panel:#10192be8;--line:#ffffff16;--muted:#99abc5;--text:#ecf3ff;--accent:#8de5df}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,sans-serif;overflow:hidden}canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none}header{position:absolute;top:30px;left:32px;pointer-events:none}h1{font-size:27px;font-weight:500;letter-spacing:-1px;margin:7px 0}small,.muted{color:var(--muted)}.eyebrow{text-transform:uppercase;letter-spacing:3px;font-size:10px;color:var(--accent)}.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;backdrop-filter:blur(18px);box-shadow:0 16px 55px #0004}.left{position:absolute;top:140px;left:24px;width:260px;max-height:calc(100dvh - 230px);overflow:auto;padding:18px}.right{position:absolute;right:24px;top:30px;width:300px;max-height:calc(100dvh - 115px);overflow:auto;padding:22px}h2{font-size:19px;font-weight:500;margin:12px 0;overflow-wrap:anywhere}h3{font-size:11px;text-transform:uppercase;letter-spacing:2px;color:var(--muted);margin:24px 0 12px}input[type=search],select{width:100%;border:1px solid #ffffff22;border-radius:10px;background:#070d1d;color:var(--text);padding:11px;font:inherit}button{background:#ffffff08;color:var(--text);border:1px solid #ffffff1c;border-radius:9px;padding:9px 12px;cursor:pointer;font:inherit}button:hover{background:#ffffff18;border-color:#8de5df88}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}button:disabled{opacity:.4;cursor:default}.row{display:flex;align-items:center;gap:8px;margin:9px 0}.row span:last-child{margin-left:auto;color:var(--muted);font-size:12px}.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}.result{width:100%;text-align:left;margin-top:5px;overflow-wrap:anywhere}.result small{display:block;margin-top:4px}.controls{position:absolute;bottom:25px;left:50%;transform:translateX(-50%);display:flex;gap:6px;padding:8px;white-space:nowrap}.footer{position:absolute;bottom:31px;left:30px;font-size:11px;color:var(--muted);pointer-events:none}.badge{display:inline-block;padding:5px 8px;border-radius:6px;background:#ffffff0b;color:var(--accent);font-size:11px}#properties{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65;font-size:12px;color:#b6c6dc}#tip{position:absolute;pointer-events:none;padding:8px 12px;background:#17233a;border:1px solid #ffffff30;border-radius:8px;display:none;max-width:300px}.empty{line-height:1.8;color:var(--muted)}#notice{position:absolute;top:48%;left:35%;max-width:30%;text-align:center;color:var(--muted)}.help{line-height:1.9;font-size:12px;color:var(--muted)}input[type=checkbox]{accent-color:var(--accent)}details summary{cursor:pointer;color:var(--muted)}@media(max-width:1000px){.right{width:245px}.left{width:210px}.footer{display:none}}@media(max-width:700px){header{top:15px;left:18px}h1{font-size:21px}.left{top:102px;left:12px;width:180px;max-height:40dvh;padding:12px}.right{top:auto;bottom:85px;right:12px;width:210px;max-height:32dvh;padding:14px}.controls{bottom:15px;gap:3px}.controls button{padding:8px}.help{display:none}#notice{left:40%;max-width:50%}}
+    </style></head><body>
+    <canvas id="sky" aria-label="Interactive wiki graph. Use search and the connection list for keyboard navigation."></canvas>
+    <header><div class="eyebrow">Mini-A / knowledge atlas</div><h1 id="title"></h1><small id="stats"></small></header>
+    <aside class="panel left" aria-label="Graph filters"><input id="search" type="search" placeholder="Find a star…" aria-label="Search nodes"><div id="results"></div><h3>Star types</h3><div id="types"></div><h3>Relationships</h3><select id="relation" aria-label="Relationship type"><option value="">All relationships</option></select><label class="row"><input id="focus" type="checkbox"> Neighborhood only</label><label class="row"><input id="labels" type="checkbox" checked> Show labels</label><details><summary>How to explore</summary><p class="help">Scroll or pinch to zoom. Drag the sky to pan; drag a star to move it. Select a star to follow its connections.<br><b>/</b> Search · <b>Esc</b> Clear<br><b>+</b> / <b>−</b> Zoom · <b>F</b> Fit</p></details></aside>
+    <aside class="panel right" aria-label="Selected node"><div class="eyebrow">Observatory</div><div id="detail"><h2>Every idea has an orbit.</h2><p class="empty">Select a star to discover its neighbors, inspect its properties, and follow the threads through your wiki.</p><h3>Brightest stars</h3><div id="hubs"></div></div></aside>
+    <div id="notice"></div><div id="tip"></div><div class="footer" id="source"></div>
+    <nav class="panel controls" aria-label="Graph controls"><button id="back" title="Previous node" disabled>← Back</button><button id="minus" aria-label="Zoom out">−</button><button id="plus" aria-label="Zoom in">+</button><button id="fit">Fit</button><button id="motion" aria-pressed="false">Pause</button><button id="random">Discover</button><button id="save" title="Save graph image">PNG ↓</button></nav>
+    <script id="graph-data" type="application/json">__WIKI_GRAPH_DATA__</script>
+    <script>
+    (function() {
+      'use strict';
+      var data = JSON.parse(document.getElementById('graph-data').textContent);
+      var $ = function(id) { return document.getElementById(id); };
+      var canvas = $('sky'), ctx = canvas.getContext('2d'), nodes = data.nodes, edges = data.edges;
+      var palette = ['#83dedb','#af9aff','#f4bf78','#ff8ca7','#83b8ff','#a9db87','#df9cdd','#e1d78d'];
+      var types = Array.from(new Set(nodes.map(function(n) { return n.type; }))).sort(), enabled = new Set(types), colors = new Map();
+      types.forEach(function(t, i) { colors.set(t, i < palette.length ? palette[i] : 'hsl(' + (i * 137.508 % 360) + ',65%,72%)'); });
+      var byId = new Map(), adjacent = new Map(), selected = null, history = [], visible = [], visibleEdges = [], visibleIds = new Set();
+      var width, height, scale = 1, panX = 0, panY = 0, paused = matchMedia('(prefers-reduced-motion: reduce)').matches, tick = 0, dirty = true;
+      var hovered = null, pointer = null, pointers = new Map(), pinch = null, query = '', relation = '', neighborhood = false;
+      var stars = Array.from({length:220}, function(_, i) { return { x: hash(i + 'x'), y: hash(i + 'y'), r: .35 + hash(i + 'r') * 1.1 }; });
+      function hash(s) { var h = 2166136261; for(var i=0;i<s.length;i++) h = Math.imul(h ^ s.charCodeAt(i),16777619); return (h >>> 0) / 4294967296; }
+      nodes.forEach(function(n, i) {
+        var angle = i * 2.3999632297, radius = 45 * Math.sqrt(i + 1);
+        n.x = Math.cos(angle) * radius; n.y = Math.sin(angle) * radius; n.vx = n.vy = 0; n.degree = 0;
+        byId.set(n.id, n); adjacent.set(n.id, []);
+      });
+      edges.forEach(function(e) { e.a = byId.get(e.from); e.b = byId.get(e.to); e.a.degree++; e.b.degree++; adjacent.get(e.from).push(e); if(e.to !== e.from) adjacent.get(e.to).push(e); });
+      $('title').textContent = data.title; document.title = data.title + ' · Wiki constellation';
+      $('source').textContent = data.source + ' · ' + data.generated.slice(0,10) + ' · Offline atlas';
+      function button(text, fn, parent, hint) { var b = document.createElement('button'); b.className = 'result'; b.textContent = text; if(hint) { var s = document.createElement('small'); s.textContent = hint; b.appendChild(s); } b.onclick = fn; parent.appendChild(b); return b; }
+      types.forEach(function(t) {
+        var label = document.createElement('label'); label.className = 'row';
+        var input = document.createElement('input'); input.type = 'checkbox'; input.checked = true; input.onchange = function() { input.checked ? enabled.add(t) : enabled.delete(t); refresh(); };
+        var dot = document.createElement('i'); dot.className = 'dot'; dot.style.background = colors.get(t);
+        var name = document.createTextNode(t), count = document.createElement('span'); count.textContent = nodes.filter(function(n) { return n.type === t; }).length;
+        label.append(input, dot, name, count); $('types').appendChild(label);
+      });
+      Array.from(new Set(edges.map(function(e) { return e.type; }))).sort().forEach(function(t) { var option = document.createElement('option'); option.value = t; option.textContent = t; $('relation').appendChild(option); });
+      nodes.slice().sort(function(a,b) { return b.degree-a.degree; }).slice(0,5).forEach(function(n) { button(n.label, function() { select(n); }, $('hubs'), n.degree + ' connections'); });
+      function refresh() {
+        var neighbors = new Set(selected ? [selected.id] : []);
+        if(selected) adjacent.get(selected.id).forEach(function(e) { if(!relation || e.type === relation) { neighbors.add(e.from); neighbors.add(e.to); } });
+        visible = nodes.filter(function(n) { return enabled.has(n.type) && (!neighborhood || !selected || neighbors.has(n.id)); });
+        visibleIds = new Set(visible.map(function(n) { return n.id; }));
+        visibleEdges = edges.filter(function(e) { return visibleIds.has(e.from) && visibleIds.has(e.to) && (!relation || e.type === relation); });
+        $('stats').textContent = visible.length.toLocaleString() + ' / ' + nodes.length.toLocaleString() + ' stars · ' + visibleEdges.length.toLocaleString() + ' connections';
+        $('notice').textContent = !nodes.length ? 'This wiki has no graph nodes or Markdown pages yet.' : !visible.length ? 'No stars match these filters.' : '';
+        search(); dirty = true;
+      }
+      function search() {
+        $('results').replaceChildren();
+        if(!query) return;
+        var matches = visible.filter(function(n) { return (n.label + ' ' + n.id + ' ' + n.type).toLowerCase().includes(query); });
+        matches.slice(0,30).forEach(function(n) { button(n.label, function() { select(n); }, $('results'), n.type); });
+        var note = document.createElement('small'); note.textContent = matches.length > 30 ? 'Showing 30 of ' + matches.length + ' matches' : matches.length + ' matches'; $('results').appendChild(note);
+      }
+      function select(n, remember) {
+        if(selected && selected !== n && remember !== false) history.push(selected.id);
+        selected = n; $('back').disabled = !history.length;
+        // Connection jumps also restore the destination type if it was filtered out.
+        enabled.add(n.type); Array.from($('types').children).forEach(function(row, i) { row.querySelector('input').checked = enabled.has(types[i]); });
+        refresh(); scale = Math.max(scale, .85); center(n); inspect();
+        try { window.history.replaceState(null, '', '#' + encodeURIComponent(n.id)); } catch(e) {}
+      }
+      function center(n) { panX = width / 2 - n.x * scale; panY = height / 2 - n.y * scale; dirty = true; }
+      function inspect() {
+        var panel = $('detail'); panel.replaceChildren();
+        var badge = document.createElement('span'); badge.className = 'badge'; badge.textContent = selected.type; badge.style.color = colors.get(selected.type);
+        var title = document.createElement('h2'); title.textContent = selected.label;
+        var id = document.createElement('small'); id.textContent = selected.id; id.style.overflowWrap = 'anywhere';
+        panel.append(badge,title,id);
+        var props = document.createElement('div'); props.id = 'properties';
+        Object.keys(selected.props).forEach(function(k) { var p = document.createElement('p'); p.textContent = k + ': ' + (typeof selected.props[k] === 'object' ? JSON.stringify(selected.props[k]) : selected.props[k]); props.appendChild(p); });
+        var heading = document.createElement('h3'); heading.textContent = 'Connections · ' + adjacent.get(selected.id).length; panel.appendChild(heading);
+        adjacent.get(selected.id).slice().sort(function(a,b) { return a.type.localeCompare(b.type); }).forEach(function(e) {
+          var outgoing = e.from === selected.id, other = outgoing ? e.b : e.a;
+          button(other.label, function() { select(other); }, panel, (outgoing ? '→ ' : '← ') + e.type + ' · ' + e.provenance);
+        });
+        if(!adjacent.get(selected.id).length) { var p = document.createElement('p'); p.className = 'empty'; p.textContent = 'An unconnected star. Discover another to continue exploring.'; panel.appendChild(p); }
+        var details = document.createElement('details'), summary = document.createElement('summary'); summary.textContent = 'Node properties'; details.append(summary,props); panel.appendChild(details);
+      }
+      function fit() {
+        if(!visible.length) return;
+        var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        visible.forEach(function(n) { minX = Math.min(minX,n.x); maxX = Math.max(maxX,n.x); minY = Math.min(minY,n.y); maxY = Math.max(maxY,n.y); });
+        var available = width > 1000 ? width - 650 : width > 700 ? width - 510 : width - 70;
+        scale = Math.min(2, Math.max(.015, Math.min(Math.max(150,available) / (maxX-minX+100), (height-220)/(maxY-minY+100))));
+        panX = width/2 - (minX+maxX)/2*scale; panY = height/2 - (minY+maxY)/2*scale; dirty = true;
+      }
+      function zoom(factor, x, y) { var next = Math.max(.015,Math.min(8,scale*factor)); panX = x-(x-panX)*next/scale; panY = y-(y-panY)*next/scale; scale=next; dirty=true; }
+      function resize() { width=innerWidth; height=innerHeight; var dpr=Math.min(devicePixelRatio||1,2); canvas.width=width*dpr; canvas.height=height*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); dirty=true; }
+      // Bounded local repulsion avoids quadratic work on large wikis.
+      function physics() {
+        var cells=new Map(), cellSize=90;
+        nodes.forEach(function(n) { var key=Math.floor(n.x/cellSize)+','+Math.floor(n.y/cellSize); if(!cells.has(key)) cells.set(key,[]); cells.get(key).push(n); });
+        var cooling = Math.max(.035,1-tick/500);
+        nodes.forEach(function(n) {
+          var cx=Math.floor(n.x/cellSize), cy=Math.floor(n.y/cellSize);
+          for(var x=cx-1;x<=cx+1;x++) for(var y=cy-1;y<=cy+1;y++) {
+            var bucket=cells.get(x+','+y)||[];
+            for(var i=0;i<Math.min(bucket.length,40);i++) { var b=bucket[i]; if(b===n) continue; var dx=n.x-b.x,dy=n.y-b.y,d2=dx*dx+dy*dy+4; n.vx+=dx/d2*9*cooling; n.vy+=dy/d2*9*cooling; }
+          }
+          n.vx-=n.x*.00008*cooling; n.vy-=n.y*.00008*cooling;
+        });
+        edges.forEach(function(e) { var dx=e.b.x-e.a.x,dy=e.b.y-e.a.y,d=Math.sqrt(dx*dx+dy*dy)||1,f=(d-90)*.0015*cooling/Math.sqrt(Math.max(e.a.degree,e.b.degree,1)); e.a.vx+=dx*f; e.a.vy+=dy*f; e.b.vx-=dx*f; e.b.vy-=dy*f; });
+        nodes.forEach(function(n) { if(pointer && pointer.node===n) return; n.vx*=.8; n.vy*=.8; n.x+=Math.max(-4,Math.min(4,n.vx)); n.y+=Math.max(-4,Math.min(4,n.vy)); });
+        tick++; dirty=true;
+      }
+      function draw(time) {
+        ctx.fillStyle='#070c19';ctx.fillRect(0,0,width,height);
+        var glow=ctx.createRadialGradient(width*.5,height*.5,10,width*.5,height*.5,width*.65);glow.addColorStop(0,'#172139');glow.addColorStop(.5,'#0d1529');glow.addColorStop(1,'#070c19');ctx.fillStyle=glow;ctx.fillRect(0,0,width,height);
+        stars.forEach(function(s) {ctx.globalAlpha=.2+s.r*.2;ctx.fillStyle='#c3d6ff';ctx.beginPath();ctx.arc(s.x*width,s.y*height,s.r,0,Math.PI*2);ctx.fill();});ctx.globalAlpha=1;
+        var near=new Set(selected?[selected.id]:[]);if(selected) adjacent.get(selected.id).forEach(function(e){near.add(e.from);near.add(e.to);});
+        visibleEdges.forEach(function(e) {
+          var active=selected&&(e.from===selected.id||e.to===selected.id);
+          ctx.strokeStyle=active?'#9be5e9':colors.get(e.a.type);ctx.globalAlpha=active?.65:selected?.055:.15;ctx.lineWidth=active?1.3:.65;
+          ctx.setLineDash(e.provenance==='INFERRED'?[3,5]:[]);ctx.beginPath();ctx.moveTo(e.a.x*scale+panX,e.a.y*scale+panY);ctx.lineTo(e.b.x*scale+panX,e.b.y*scale+panY);ctx.stroke();
+        });ctx.setLineDash([]);ctx.globalAlpha=1;
+        visible.forEach(function(n) {
+          var x=n.x*scale+panX,y=n.y*scale+panY;if(x<-100||y<-50||x>width+100||y>height+50)return;
+          var match=!query||(n.label+' '+n.id+' '+n.type).toLowerCase().includes(query), bright=(!selected||near.has(n.id))&&match;
+          var r=Math.max(2,Math.min(9,2+Math.sqrt(n.degree)*.65))*Math.max(.65,Math.sqrt(scale));
+          ctx.globalAlpha=bright?1:.16;ctx.fillStyle=colors.get(n.type);
+          if(bright){ctx.shadowBlur=n===selected?24:10;ctx.shadowColor=colors.get(n.type);}ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
+          if(n===selected||n===hovered){ctx.strokeStyle=colors.get(n.type);ctx.lineWidth=1;ctx.beginPath();ctx.arc(x,y,r+6+(paused?0:Math.sin(time/600)*1.5),0,Math.PI*2);ctx.stroke();}
+          if($('labels').checked&&bright&&(n===selected||n===hovered||scale>.8||n.degree>3&&scale>.35)){ctx.font='11px system-ui';ctx.fillStyle='#c6d7ee';var label=n.label.length>36?n.label.slice(0,34)+'…':n.label;ctx.fillText(label,x+r+7,y+4);}
+        });ctx.globalAlpha=1;
+      }
+      function frame(time) {if(!paused&&tick<600)physics();if(dirty||!paused&&selected){draw(time);dirty=false;}requestAnimationFrame(frame);}
+      function hit(x,y) {var best=null,dist=Infinity;visible.forEach(function(n){var d=Math.hypot(n.x*scale+panX-x,n.y*scale+panY-y);if(d<Math.max(10,Math.min(9,2+Math.sqrt(n.degree)*.65)*Math.max(.65,Math.sqrt(scale))+4)&&d<dist){best=n;dist=d;}});return best;}
+      canvas.onwheel=function(e){e.preventDefault();zoom(Math.exp(-e.deltaY*.001),e.clientX,e.clientY);};
+      canvas.onpointerdown=function(e){canvas.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});pointer={x:e.clientX,y:e.clientY,startX:e.clientX,startY:e.clientY,node:hit(e.clientX,e.clientY),moved:false};if(pointers.size===2){var p=Array.from(pointers.values());pinch=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);pointer.moved=true;}};
+      canvas.onpointermove=function(e){
+        if(pointers.has(e.pointerId))pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+        if(pointers.size===2){var p=Array.from(pointers.values()),d=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);if(pinch)zoom(d/pinch,(p[0].x+p[1].x)/2,(p[0].y+p[1].y)/2);pinch=d;return;}
+        if(pointer&&pointers.size){var dx=e.clientX-pointer.x,dy=e.clientY-pointer.y;if(Math.hypot(e.clientX-pointer.startX,e.clientY-pointer.startY)>4)pointer.moved=true;if(pointer.node){pointer.node.x+=dx/scale;pointer.node.y+=dy/scale;pointer.node.vx=pointer.node.vy=0;}else{panX+=dx;panY+=dy;}pointer.x=e.clientX;pointer.y=e.clientY;dirty=true;return;}
+        hovered=hit(e.clientX,e.clientY);canvas.style.cursor=hovered?'pointer':'grab';$('tip').style.display=hovered?'block':'none';if(hovered){$('tip').textContent=hovered.label+' · '+hovered.type;$('tip').style.left=Math.min(e.clientX+14,width-310)+'px';$('tip').style.top=Math.max(5,e.clientY-38)+'px';}dirty=true;
+      };
+      canvas.onpointerup=function(e){if(pointer&&!pointer.moved&&pointers.size===1){var n=hit(e.clientX,e.clientY);if(n)select(n);}pointers.delete(e.pointerId);pointer=null;pinch=null;};
+      canvas.onpointercancel=function(e){pointers.delete(e.pointerId);pointer=null;pinch=null;};
+      canvas.onpointerleave=function(){$('tip').style.display='none';hovered=null;dirty=true;};
+      $('search').oninput=function(){query=this.value.toLowerCase().trim();search();dirty=true;};
+      $('relation').onchange=function(){relation=this.value;refresh();};$('focus').onchange=function(){neighborhood=this.checked;refresh();fit();};$('labels').onchange=function(){dirty=true;};
+      $('plus').onclick=function(){zoom(1.3,width/2,height/2);};$('minus').onclick=function(){zoom(1/1.3,width/2,height/2);};$('fit').onclick=fit;
+      function motion(){ $('motion').textContent=paused?'Resume':'Pause';$('motion').setAttribute('aria-pressed',String(paused)); }
+      $('motion').onclick=function(){paused=!paused;if(!paused)tick=0;motion();dirty=true;};motion();
+      $('random').onclick=function(){if(visible.length)select(visible[Math.floor(Math.random()*visible.length)]);};
+      $('back').onclick=function(){var n=byId.get(history.pop());if(n)select(n,false);$('back').disabled=!history.length;};
+      $('save').onclick=function(){draw(performance.now());canvas.toBlob(function(blob){if(!blob)return;var url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='wiki-constellation.png';a.click();setTimeout(function(){URL.revokeObjectURL(url);},1000);});};
+      document.onkeydown=function(e){if(/INPUT|SELECT|TEXTAREA|BUTTON/.test(document.activeElement.tagName))return;if(e.key==='/'){e.preventDefault();$('search').focus();}else if(e.key==='+'||e.key==='=')$('plus').click();else if(e.key==='-')$('minus').click();else if(e.key.toLowerCase()==='f')fit();else if(e.key==='Escape'){selected=null;query='';$('search').value='';$('focus').checked=neighborhood=false;refresh();$('detail').replaceChildren();var p=document.createElement('p');p.className='empty';p.textContent='Select a star to explore its connections.';$('detail').appendChild(p);try{window.history.replaceState(null,'',location.pathname+location.search);}catch(err){}}};
+      window.onresize=function(){resize();fit();};resize();refresh();fit();
+      try{var linked=byId.get(decodeURIComponent(location.hash.slice(1)));if(linked)select(linked);}catch(e){}
+      requestAnimationFrame(frame);
+    })();
+    </script></body></html>
+    `
+    
+    var output = args.output
+    if (io.fileExists(output) && io.fileInfo(output).isDirectory) output = String(new java.io.File(output, "wiki-graph.html"))
+    if (!/\.html?$/i.test(output)) throw "Output must be an HTML file or an existing directory: " + output
+    var outputFile = new java.io.File(output).getCanonicalFile()
+    if (String(outputFile) === graphFile) throw "Output cannot replace the source graph"
+    io.writeFileString(String(outputFile), html.replace("__WIKI_GRAPH_DATA__", function() { return payload }))
+    print("Exported " + nodes.length + " nodes and " + edges.length + " edges to " + outputFile)
+    if (skipped) printErr("Skipped " + skipped + " dangling edges.")

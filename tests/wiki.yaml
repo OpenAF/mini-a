@@ -3,6 +3,10 @@ include:
 - tests/wikiRetrievalV2.yaml
 
 jobs:
+- name: MiniA Wiki Tests::ConsoleSearchPreservesV2Status
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testConsoleSearchPreservesV2Status
+
 - name: MiniA Wiki Tests::McpWikiRestrictedCrossWikiGraphHints
   to: oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedCrossWikiGraphHints
