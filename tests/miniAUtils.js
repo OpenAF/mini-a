@@ -43,6 +43,77 @@
     }
   }
 
+  exports.testDocumentAndImageReaders = function() {
+    var dir = createTestDir()
+    try {
+      var tool = new MiniUtilsTool({ root: dir })
+      io.writeFileString(dir + "/document.docx", "fixture")
+      var loads = 0
+      tool._createDocumentExtractor = function(limit) {
+        loads++
+        ow.test.assert(limit, 7, "Pass extraction character budget")
+        return { extractFile: function(path) {
+          return { text: "example", mediaType: "application/test", metadata: { title: ["Example"] }, truncated: true }
+        } }
+      }
+      var result = tool.readDocument({ path: "document.docx", maxChars: 7 })
+      ow.test.assert(result.text, "example", "Return extracted text")
+      ow.test.assert(result.truncated, true, "Preserve truncation")
+      ow.test.assert(result.metadata.title[0], "Example", "Preserve metadata")
+      ;[{ path: "../outside.docx" }, { path: "missing" }, { path: "." },
+        { path: "document.docx", maxBytes: 1 }, { path: "document.docx", maxBytes: -1 },
+        { path: "document.docx", maxChars: 0 }].forEach(function(params) {
+        ow.test.assert(tool.readDocument(params).indexOf("[ERROR]"), 0, "Reject invalid input before loading Tika")
+      })
+      ow.test.assert(loads, 1, "Invalid reads never load dependencies")
+      tool._createDocumentExtractor = function() { throw new Error("offline") }
+      ow.test.assert(tool.readDocument({ path: "document.docx" }).indexOf("opack install Tika") >= 0, true, "Explain dependency failure")
+      tool._createDocumentExtractor = function() { return { extractFile: function() { return { text: "  ", metadata: {}, truncated: false } } } }
+      ow.test.assert(tool.readDocument({ path: "document.docx" }).message.indexOf("OCR") >= 0, true, "Explain empty scans")
+      tool._createDocumentExtractor = function() { return { extractFile: function() { throw new Error("corrupt document") } } }
+      ow.test.assert(tool.readDocument({ path: "document.docx" }).indexOf("corrupt document") >= 0, true, "Report parser errors")
+
+      var bitmap = new java.awt.image.BufferedImage(2, 3, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+      javax.imageio.ImageIO.write(bitmap, "png", new java.io.File(dir + "/image.png"))
+      bitmap.flush()
+      var requests = []
+      tool._inspectImageFn = function(request) { requests.push(request); return "An image" }
+      var image = tool.inspectImage({ path: "image.png", prompt: "What is visible?" })
+      ow.test.assert(image.answer, "An image", "Return vision answer")
+      ow.test.assert(image.mediaType, "image/png", "Detect actual MIME")
+      ow.test.assert(image.width, 2, "Read width")
+      ow.test.assert(image.height, 3, "Read height")
+      ow.test.assert(requests[0].detail, "high", "Default image detail")
+      ow.test.assert(requests[0].prompt, "What is visible?", "Pass question")
+      ;[{ path: "../outside.png" }, { path: "image.png", maxBytes: 1 },
+        { path: "image.png", detail: "invalid" }, { path: "document.docx" }].forEach(function(params) {
+        ow.test.assert(tool.inspectImage(params).indexOf("[ERROR]"), 0, "Reject invalid images before vision")
+      })
+      ow.test.assert(requests.length, 1, "Invalid images never invoke model")
+      var oversized = io.readFileBytes(dir + "/image.png")
+      var header = java.nio.ByteBuffer.wrap(oversized)
+      header.putInt(16, 100000)
+      header.putInt(20, 100000)
+      var crc = new java.util.zip.CRC32()
+      crc.update(oversized, 12, 17)
+      header.putInt(29, Number(crc.getValue()) > 2147483647 ? Number(crc.getValue()) - 4294967296 : Number(crc.getValue()))
+      io.writeFileBytes(dir + "/oversized.png", oversized)
+      ow.test.assert(tool.inspectImage({ path: "oversized.png" }).indexOf("25-megapixel") >= 0, true, "Reject oversized image headers before decoding")
+      ow.test.assert(requests.length, 1, "Oversized image never reaches model")
+      var outside = java.io.File.createTempFile("mini-a-outside-", ".png")
+      try {
+        java.nio.file.Files.createSymbolicLink(new java.io.File(dir + "/escape.png").toPath(), outside.toPath())
+        ow.test.assert(tool.inspectImage({ path: "escape.png" }).indexOf("[ERROR]"), 0, "Image reader blocks escaping symlink")
+        ow.test.assert(tool.readDocument({ path: "escape.png" }).indexOf("[ERROR]"), 0, "Document reader blocks escaping symlink")
+      } finally { outside.delete() }
+
+      tool._inspectImageFn = function() { throw new Error("unsupported provider") }
+      ow.test.assert(tool.inspectImage({ path: "image.png" }).indexOf("unsupported provider") >= 0, true, "Surface vision failure")
+      tool._inspectImageFn = __
+      ow.test.assert(tool.inspectImage({ path: "image.png" }).indexOf("requires Mini-A") >= 0, true, "Standalone utils explain missing callback")
+    } finally { cleanupTestDir(dir) }
+  }
+
   exports.testReadFile = function() {
     var testDir = createTestDir()
     try {

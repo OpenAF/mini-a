@@ -1921,6 +1921,75 @@
     }
   }
 
+  exports.testDocumentAndImageTools = function() {
+    var agent = createAgent()
+    ;[false, true].forEach(function(std) {
+      var cfg = agent._createUtilsMcpConfig({ useutils: true, usestdutils: std, utilsallow: "readDocument,inspectImage" })
+      ow.test.assert(Object.keys(cfg.options.fns).sort(), ["inspectImage", "readDocument"], "Expose binary readers in both catalogs")
+      var denied = agent._createUtilsMcpConfig({ useutils: true, usestdutils: std, utilsdeny: "readDocument,inspectImage" })
+      ow.test.assert(isUnDef(denied.options.fns.inspectImage) && isUnDef(denied.options.fns.readDocument), true, "Honor denylist")
+    })
+    var file = String(java.io.File.createTempFile("mini-a-image-", ".png").getCanonicalPath())
+    try {
+      var source = new java.awt.image.BufferedImage(2, 2, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+      javax.imageio.ImageIO.write(source, "png", new java.io.File(file))
+      source.flush()
+      agent._oaf_model = { type: "openai", model: "test-vision", params: { tools: [{ type: "web_search" }], tool_choice: "required" } }
+      var calls = 0, cleaned = 0, statsCalls = 0
+      agent._createBareLlmInstance = function(config) {
+        calls++
+        ow.test.assert(isUnDef(config.params.tools) && isUnDef(config.params.tool_choice), true, "Remove provider built-in tools")
+        config.model = "isolated"
+        return {
+          promptImage: function(prompt, image, detail) {
+            ow.test.assert(prompt.indexOf("What is visible?") >= 0, true, "Send question through promptImage")
+            ow.test.assert(detail, "high", "Pass image detail")
+            var bytes = af.fromBase64(image)
+            var stream = new java.io.ByteArrayInputStream(bytes)
+            var decoded
+            try { decoded = javax.imageio.ImageIO.read(stream) } finally { stream.close() }
+            ow.test.assert(decoded.getWidth(), 2, "JPEG conversion preserves dimensions")
+            var color = new java.awt.Color(decoded.getRGB(0, 0))
+            ow.test.assert(color.getRed() > 240 && color.getGreen() > 240 && color.getBlue() > 240, true, "Composite transparency onto white")
+            decoded.flush()
+            return "Two by two image"
+          },
+          getGPT: function() { return { getLastStats: function() { return { total_tokens: 12 } }, cleanPrompt: function() { cleaned++ } } }
+        }
+      }
+      agent._recordLlmStatsMetrics = function(stats, tier) { statsCalls++; ow.test.assert(tier, "main", "Track main model usage") }
+      var cfg = agent._createUtilsMcpConfig({ useutils: true, utilsroot: String(new java.io.File(file).getParent()), utilsallow: "inspectImage" })
+      var response = cfg.options.fns.inspectImage({ path: file, prompt: "What is visible?" })
+      ow.test.assert(isUnDef(response.error), true, "Embedded dispatch succeeds")
+      ow.test.assert(jsonParse(response.content[0].text).answer, "Two by two image", "Only text reaches agent")
+      ow.test.assert(agent._oaf_model.model, "test-vision", "Keep main model config unchanged")
+      ow.test.assert(agent._oaf_model.params.tools.length, 1, "Preserve original provider tools")
+      ow.test.assert(calls, 1, "Create isolated model")
+      ow.test.assert(cleaned, 1, "Clear auxiliary conversation")
+      ow.test.assert(statsCalls, 1, "Record vision usage")
+      agent._createBareLlmInstance = function() {
+        return { promptImage: function() { throw "Not supported yet" }, getGPT: function() { return { cleanPrompt: function() { cleaned++ } } } }
+      }
+      var failure = cfg.options.fns.inspectImage({ path: file })
+      ow.test.assert(failure.error.indexOf("must support promptImage") >= 0, true, "Explain unsupported model")
+      ow.test.assert(cleaned, 2, "Clear auxiliary conversation after error")
+      // Exercise OpenAF's real promptImage adapter, replacing only its HTTP dispatch.
+      agent._createBareLlmInstance = function(config) {
+        config.key = "test-placeholder"
+        var llm = $llm(config)
+        llm.getGPT().model.rawPrompt = function(messages) {
+          var url = messages[0].content[1].image_url.url
+          ow.test.assert(url.indexOf("data:image/jpeg;base64,/9j/"), 0, "OpenAF sends actual JPEG bytes with JPEG MIME")
+          return { choices: [{ message: { content: "Adapter image answer" } }] }
+        }
+        return llm
+      }
+      var adapterResult = cfg.options.fns.inspectImage({ path: file })
+      ow.test.assert(isUnDef(adapterResult.error), true, "Real adapter dispatch: " + stringify(adapterResult))
+      ow.test.assert(jsonParse(adapterResult.content[0].text).answer, "Adapter image answer", "Real promptImage path reaches provider dispatch")
+    } finally { io.rm(file) }
+  }
+
   exports.testUtilsMcpAllowAndDenyFilters = function() {
     var agent = createAgent()
 

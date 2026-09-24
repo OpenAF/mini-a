@@ -1,4 +1,9 @@
 jobs:
+- name: MiniA Utils Tests::DocumentAndImageReaders
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDocumentAndImageReaders
+
 - name: MiniA Utils Tests::RenderChartDoesNotDisplay
   from: MiniA Utils Tests::Init
   to  : oJob Test
@@ -280,3 +285,4 @@ todo:
 - MiniA Utils Tests::DisplayEventPayloadsAvoidDirectRendering
 - MiniA Utils Tests::StdUtilsCatalog
 - MiniA Utils Tests::LegacyCatalog
+- MiniA Utils Tests::DocumentAndImageReaders

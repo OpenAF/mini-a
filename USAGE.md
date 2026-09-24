@@ -1150,6 +1150,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 #### Libraries and Extensions
 - **`libs`** (string): Comma-separated list of additional OpenAF libraries to load
 - **`useutils`** (boolean, default: false): Auto-register the Mini File Tool utilities as a dummy MCP server for quick file operations
+  - Also exposes `readDocument` (document text via lazy Tika installation) and `inspectImage` (PNG/JPEG vision via `promptImage`); see [Reading documents and images](#reading-documents-and-images)
   - Exposes `init` (configure the working root and permissions), `filesystemQuery` (read/list/search/info via the `operation` field), `filesystemModify` (write/append/delete with `operation` plus required `content` or `confirm` flags), and `markdownFiles` (list, search, or read `*.md` files within the root)
   - When running through `mini-a-con.js`, also exposes `userInput`, an interactive helper backed by OpenAF `ask*` functions (`ask`, `askEncrypt`, `ask1`, `askChoose`, `askChooseMultiple`, `askStruct`) so the model can request clarification directly from the console user
   - `filesystemQuery` read supports byte ranges (`byteStart`, `byteEnd`, `byteLength`), line windows (`lineStart`, `lineEnd`, `maxLines`, `lineSeparator`), and `countLines=true` for total line count
@@ -1160,6 +1161,49 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 - **`utilsdeny`** (string, optional): Comma-separated denylist of Mini Utils Tool names to hide when `useutils=true`; applied after `utilsallow`
 - **`mini-a-docs`** (boolean, default: false): When true (and `utilsroot` is not provided), automatically sets `utilsroot` to `getOPackPath("mini-a")` so the LLM can inspect Mini-A documentation files; the `markdownFiles` tool description will include the resolved documentation root path so the LLM can navigate docs directly
 - **`miniadocs`** (boolean, default: false): Alias for `mini-a-docs`
+
+#### Reading documents and images
+
+With `useutils=true`, `readDocument` and `inspectImage` are embedded tools in both
+normal and `usestdutils=true` catalogs. They honor `utilsroot`, `utilsallow`, and
+`utilsdeny`; neither requires `useshell=true` nor `readwrite=true`.
+
+```sh
+ojob mini-a.yaml useutils=true utilsroot=/path/to/files goal="Summarize report.docx and budget.xlsx"
+ojob mini-a.yaml useutils=true utilsroot=/path/to/files goal="Inspect diagram.png and explain its labels"
+```
+
+`readDocument({path, maxChars?, maxBytes?})` extracts text and metadata from DOCX,
+XLSX, PDF, PPTX, legacy Office files, and other formats supported by Tika's installed
+parsers. On first use it calls `includeOPack("Tika")` and `loadLib("tika.js")`, reusing
+or installing the oPack without adding JARs to Mini-A. Installation needs network
+access and permission to install oPacks; for offline deployments preinstall Tika.
+The current Tika oPack requires OpenAF 20260918+ and Java 17+.
+
+The result contains `path`, `size`, `mediaType`, `text`, `metadata`, and `truncated`.
+Defaults are 30,000 extracted characters and 20 MiB input; positive per-call
+`maxChars`/`maxBytes` override these. Check `truncated` before treating output as a
+complete document. These limits do not bound parser memory or execution time.
+OCR and embedded attachment extraction are disabled. Scanned PDFs may yield no
+text; spreadsheet extraction does not promise formula evaluation or cell-level
+layout, and document images are not inspected.
+
+`inspectImage({path, prompt?, detail?, maxBytes?})` sends a PNG or JPEG through
+OpenAF's `promptImage` using a fresh instance of the main model configuration
+(`model=` / `OAF_MODEL`). It returns `path`, `mediaType`, `width`, `height`, and
+`answer`. The default question describes the image and transcribes visible text;
+`detail` defaults to `high` (`low` and `auto` are also accepted). Defaults limit
+input to 10 MiB, with a fixed 25-megapixel ceiling checked before decoding.
+
+Vision requires both a compatible model and provider adapter. OpenAF's OpenAI,
+Gemini, and Ollama adapters provide `promptImage`; its current Anthropic adapter
+does not. Unsupported calls return an error without switching models. PNGs sent
+to OpenAI are converted in memory to JPEG with a white background to match that
+adapter's MIME handling. Use conventional `.png`/`.jpg`/`.jpeg` filenames because
+some adapters determine MIME from the filename. Only the textual answer enters
+the main agent history; provider-reported usage contributes to main-model metrics.
+For headless Java environments, set `OAF_JARGS=-Djava.awt.headless=true` when launching
+OpenAF if needed for image processing.
 
 #### Conversation Management
 - **`conversation`** (string): Path to file for loading/saving conversation history

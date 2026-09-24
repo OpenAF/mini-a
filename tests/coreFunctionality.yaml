@@ -1,4 +1,9 @@
 jobs:
+- name: MiniA Core Tests::DocumentAndImageTools
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDocumentAndImageTools
+
 - name: MiniA Core Tests::SubtaskAmbiguousSubmissionDoesNotRetry
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -1317,3 +1322,4 @@ todo:
 - MiniA Core Tests::ContextTokenCacheRefreshesAfterTextReads
 - MiniA Core Tests::LargeSummaryChunksAndMergeStayBounded
 - MiniA Core Tests::ProxyToolThoughtDisplaysDownstreamTool
+- MiniA Core Tests::DocumentAndImageTools

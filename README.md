@@ -435,7 +435,7 @@ Mini-A ships with complementary components:
 | `usetools` | Register MCP tools with the model | `false` |
 | `usetoolslc` | Register MCP tools only on the low-cost model | `false` |
 | `usejsontool` | Enable an optional compatibility `json` tool when `usetools=true` (helps with models that occasionally emit `json` tool calls instead of plain JSON action output) | `false` |
-| `useutils` | Auto-register Mini Utils Tool utilities as an MCP connection (`init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`, plus console-only helpers like `userInput` when running `mini-a-con`) | `false` |
+| `useutils` | Auto-register Mini Utils Tool utilities as an MCP connection (`init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`, [`readDocument` and `inspectImage`](USAGE.md#reading-documents-and-images), plus console-only helpers like `userInput` when running `mini-a-con`) | `false` |
 | `usestdutils` | When `useutils=true`, expose standard aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names | `false` |
 | `useskills` | Expose the Mini Utils `skills` operation; when `useutils=false`, only the skills tool is registered | `false` |
 | `utilsroot` | Root directory for Mini Utils Tool file operations (only when `useutils=true`) | `.` |
