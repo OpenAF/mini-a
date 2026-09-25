@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260924'
+version: '20260925'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -204,7 +204,7 @@ filesHash:
   docs/VIRTUAL-SKILLS.md: 9edfdf8c29860d05718fd6103ca7f8aa9eaf56ab
   docs/WHATS-NEW.md: 651a11a3d9c22dfefd2bc1bfb7df6e7cc6d08ece
   docs/WIKI-RETRIEVAL-V2.md: a91e551a155d17d5e5c4456e83b4e392874ebd96
-  docs/WIKI.md: 88ee99c7ec37576092e1ef66d4f2c6c33e646da9
+  docs/WIKI.md: 8264fa58e41ba6258e81f08bee80ade2feb0d9e8
   evals/context-virtualization.yaml: 3a58466efa06dbf3dfc028d6a4b59bfc3dcb80a6
   evals/core.yaml: 5bd4c7f5b1fc650e1b656a09f169fbaf2610a9ad
   examples/README.md: cd552b12357673bc55959b75570eada4853af74b
@@ -299,6 +299,6 @@ filesHash:
   mini-a.yaml: 2fbd6de8175f0b1cb6e9f8979b3cf7e98c4221a7
   public/index.md: e48239d0649f1474cc17b09504236cc341be3bf0
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
-  utils/graphStats.yaml: ab05b70a991ac6d5440ea12487ab8d10db53ec69
-  utils/indexStats.yaml: 0739be79fb72f366ec24cd22a6ebe4e1e305128c
+  utils/graphStats.yaml: ce32169c30db09d0e74dfffdbba7d70c27db24bc
+  utils/indexStats.yaml: 7fc4b114655146b3b3f94813949867485917bacd
   utils/wikiGraph.yaml: 2f80cb21d90fd6623833e52c8572beb4a5060cbc
