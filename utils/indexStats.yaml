@@ -2,19 +2,29 @@
 help:
   text   : |
     Given a mini-a wiki index folder (see ojob.io/mini-a) produces statistics about the
-    indexed pages (title, type, tags, links, headings, aliases, updates) as well as the
-    underlying lexical (lucene), graph and ingest indexes stored alongside it.
+    cached page metadata (title, type, tags, links, headings, aliases, updates) and the
+    underlying lexical (lucene), graph, ingest, V2 serving and knowledge state indexes.
+    V2 reports persisted telemetry and generation contracts; runtime compatibility and
+    artifact integrity are not validated. Telemetry may lag unflushed requests.
+
+    pages.source identifies the metadata store, not the retrieval mode. Page, link,
+    heading, tag and alias statistics come from .mini-a-wiki-meta; V2 generation
+    counts are under indexes.serving.current.catalogue.stats and may differ.
+    pages.recordVersions counts metadata formats; pages.versions counts frontmatter
+    version values. pages.noOutboundLinks also appears as orphans for compatibility;
+    it does not count pages with no inbound links. Missing metadata is reported as
+    pages.present=false; zero metadata counts then do not mean the wiki is empty.
 
     The folder can either be the root of the wiki (containing the ".mini-a-wiki-meta",
     ".mini-a-wiki-lucene", ".mini-a-wiki-graph" and ".mini-a-wiki-ingest" folders) or the
-    ".mini-a-wiki-meta" folder itself.
+    ".mini-a-wiki-meta" or ".mini-a-wiki-serving" folder itself.
 
     Examples:
       ojob ojob.io/mini-a/indexStats dir="/path/to/wiki"
       ojob ojob.io/mini-a/indexStats dir="/path/to/wiki" top=5 __format=json
   expects:
   - name     : dir
-    desc     : The path to the mini-a wiki root folder (or directly to its .mini-a-wiki-meta folder)
+    desc     : The path to the mini-a wiki root folder (or directly to its .mini-a-wiki-meta or .mini-a-wiki-serving folder)
     example  : "/path/to/wiki"
     mandatory: true
   - name     : top
@@ -43,32 +53,34 @@ jobs:
     var root = args.dir.replace(/[\\\/]+$/, "")
     if (!io.fileExists(root)) throw "Folder not found: " + root
 
+    if (root.match(/\.mini-a-wiki-(meta|serving)$/)) root = root.replace(/[\\\/][^\\\/]+$/, "")
     var metaDir = root + "/.mini-a-wiki-meta"
-    if (!io.fileExists(metaDir)) {
-      // args.dir might already point directly at the meta folder
-      if (root.match(/\.mini-a-wiki-meta$/)) {
-        metaDir = root
-        root = root.replace(/\/\.mini-a-wiki-meta$/, "")
-      } else {
-        throw "No mini-a wiki index found at '" + args.dir + "' (expecting a '.mini-a-wiki-meta' folder)."
-      }
+    if (!io.fileExists(metaDir) && !io.fileExists(root + "/.mini-a-wiki-serving")) {
+      throw "No mini-a wiki index found at '" + args.dir + "' (expecting metadata or V2 serving artifacts)."
     }
-
-    // Merge all meta shards into a single path -> record map
+    var warnings = []
+    var readMap = function(path) {
+      if (!io.fileExists(path)) return __
+      try {
+        var value = io.readFileJSON(path)
+        if (!isMap(value)) throw "Expected a JSON object"
+        return value
+      } catch(e) { warnings.push({ path: path, error: String(e) }); return __ }
+    }
+    // Page metadata is optional for serving-only artifact bundles.
     var pages = {}
-    io.listFiles(metaDir).files
+    if (io.fileExists(metaDir)) io.listFiles(metaDir).files
       .filter(f => f.isFile && f.filename.match(/\.json$/))
       .forEach(f => {
-        try {
-          var shard = io.readFileJSON(metaDir + "/" + f.filename)
-          if (isMap(shard)) pages = merge(pages, shard)
-        } catch(e) {}
+        var shard = readMap(metaDir + "/" + f.filename)
+        if (isMap(shard)) Object.keys(shard).forEach(p => { if (isMap(shard[p])) pages[p] = shard[p] })
       })
 
     var paths = Object.keys(pages)
 
     var totalSize       = 0
     var byType          = {}
+    var metaVersions = {}, pageVersions = {}
     var tagCounts       = {}
     var totalLinks      = 0
     var totalHeadings   = 0
@@ -82,6 +94,10 @@ jobs:
       var r = pages[p]
       if (!isMap(r)) return
 
+      var mv = isDef(r._mv) ? String(r._mv) : "unknown"
+      metaVersions[mv] = (metaVersions[mv] || 0) + 1
+      var pv = r.version || "(unspecified)"
+      pageVersions[pv] = (pageVersions[pv] || 0) + 1
       totalSize += isNumber(r.size) ? r.size : 0
 
       var t = isString(r.type) && r.type.length > 0 ? r.type : "(untyped)"
@@ -128,8 +144,17 @@ jobs:
       if (!io.fileExists(p)) return { present: false }
       var info = io.fileInfo(p)
       if (!info.isDirectory) return { present: true, sizeBytes: info.size }
-      var files = io.listFiles(p).files.filter(f => f.isFile)
-      return { present: true, files: files.length, sizeBytes: files.reduce((a, f) => a + (f.size || 0), 0) }
+      var count = 0, bytes = 0
+      var walk = function(dir) {
+        io.listFiles(dir).files.forEach(function(f) {
+          var path = dir + "/" + f.filename
+          if (java.nio.file.Files.isSymbolicLink(new java.io.File(path).toPath())) return
+          if (f.isDirectory) walk(path)
+          else if (f.isFile) { count++; bytes += Number(f.size) || 0 }
+        })
+      }
+      walk(p)
+      return { present: true, files: count, sizeBytes: bytes }
     }
 
     var graphInfo = folderStats(".mini-a-wiki-graph")
@@ -137,27 +162,90 @@ jobs:
       try {
         var g = io.readFileJSON(root + "/.mini-a-wiki-graph/graph.json")
         graphInfo.nodes = isMap(g.nodes) ? Object.keys(g.nodes).length : 0
-        graphInfo.edges = isArray(g.edges) ? g.edges.length : 0
-      } catch(e) {}
+        graphInfo.version = g.version
+        graphInfo.edges = isArray(g.edges) ? g.edges.filter(e => isMap(e) && e._deleted !== true).length : 0
+      } catch(e) { warnings.push({ path: root + "/.mini-a-wiki-graph/graph.json", error: String(e) }) }
     }
 
     var lexicalInfo = folderStats(".mini-a-wiki-lucene")
+    lexicalInfo.manifest = readMap(root + "/.mini-a-wiki-lucene/mini-a-lexical.json")
 
     var ingestInfo = folderStats(".mini-a-wiki-ingest")
     if (ingestInfo.present && io.fileExists(root + "/.mini-a-wiki-ingest/ledger.json")) {
       try {
         var ledger = io.readFileJSON(root + "/.mini-a-wiki-ingest/ledger.json")
         ingestInfo.entries = isMap(ledger) ? Object.keys(ledger).length : 0
-      } catch(e) {}
+      } catch(e) { warnings.push({ path: root + "/.mini-a-wiki-ingest/ledger.json", error: String(e) }) }
+    }
+
+    var servingInfo = folderStats(".mini-a-wiki-serving")
+    servingInfo.inspection = "offline-metadata-only"
+    servingInfo.runtimeCompatibility = "not-checked"
+    servingInfo.artifactIntegrity = "not-checked"
+    var servingRoot = root + "/.mini-a-wiki-serving"
+    var inspectPointer = function(name) {
+      var path = servingRoot + "/" + name + ".json"
+      if (!io.fileExists(path)) return { status: "pointer-absent" }
+      var pointer = readMap(path)
+      if (!pointer || pointer.schema !== 1 || !/^[a-f0-9-]{36}$/.test(String(pointer.generation))) return { status: "invalid-generation-pointer" }
+      var dir = servingRoot + "/" + pointer.generation
+      if (java.nio.file.Files.isSymbolicLink(new java.io.File(path).toPath()) ||
+          java.nio.file.Files.isSymbolicLink(new java.io.File(dir).toPath())) return { status: "unsafe-generation-path" }
+      var manifestPath = dir + "/manifest.json"
+      if (java.nio.file.Files.isSymbolicLink(new java.io.File(manifestPath).toPath())) return { status: "unsafe-generation-path" }
+      var manifest = readMap(manifestPath)
+      if (!manifest) return { status: "manifest-unavailable", generation: pointer.generation }
+      var catalogue = isMap(manifest.catalogue) ? manifest.catalogue : {}
+      var shards = {}
+      Object.keys(catalogue.shards || {}).forEach(function(k) { shards[k] = Object.keys(catalogue.shards[k] || {}).length })
+      return {
+        status: manifest.schema !== 3 ? "schema-version-mismatch" : (manifest.parser !== 6 ? "parser-version-mismatch" : "manifest-present"),
+        pointerSchema: pointer.schema, generation: pointer.generation, checksum: pointer.checksum,
+        schema: manifest.schema, parser: manifest.parser, fingerprint: manifest.fingerprint,
+        merkle: manifest.merkle, passageChars: manifest.passageChars,
+        lexical: manifest.lexical, indexContract: manifest.indexContract,
+        artifactFiles: isArray(manifest.files) ? manifest.files.length : 0,
+        artifactBytes: isArray(manifest.files) ? manifest.files.reduce((n, f) => n + (Number(f.bytes) || 0), 0) : 0,
+        catalogue: { schema: catalogue.schema, transactionFormat: catalogue.transactionFormat,
+          base: catalogue.base, depth: catalogue.depth, parent: catalogue.parent,
+          wikiId: catalogue.wikiId, stats: catalogue.stats, shards: shards }
+      }
+    }
+    servingInfo.current = inspectPointer("current")
+    servingInfo.previous = inspectPointer("previous")
+    servingInfo.status = servingInfo.current.status
+    var stateInfo = folderStats(".mini-a-wiki-state")
+    var state = readMap(root + "/.mini-a-wiki-state/manifest.json")
+    if (state) {
+      stateInfo.version = state.version
+      stateInfo.versions = state.versions
+      stateInfo.updated = state.updated
+      stateInfo.records = {}
+      ;["sources", "chunks", "pages", "dependencies", "facts"].forEach(function(k) {
+        stateInfo.records[k] = isMap(state[k]) ? Object.keys(state[k]).length : 0
+      })
+    }
+    var telemetry = readMap(root + "/.mini-a-wiki-state/telemetry.json")
+    if (telemetry) {
+      // Preserve all persisted counters, including future outcome/work/stage counters.
+      telemetry = clone(telemetry)
+      delete telemetry.query_samples
+      stateInfo.telemetry = telemetry
     }
 
     var result = {
       root : root,
       pages: {
+        source        : "page-metadata",
+        sourceDirectory: ".mini-a-wiki-meta",
+        present       : io.fileExists(metaDir),
+        recordVersions: metaVersions,
+        versions      : pageVersions,
         total         : paths.length,
         totalSizeBytes: totalSize,
         byType        : byType,
         orphans       : orphanPages.length,
+        noOutboundLinks: orphanPages.length,
         oldestUpdate  : updatedDates.length > 0 ? updatedDates[0].value : __,
         newestUpdate  : updatedDates.length > 0 ? updatedDates[updatedDates.length - 1].value : __,
         largest       : largestPages
@@ -177,10 +265,13 @@ jobs:
       },
       aliases   : totalAliases,
       supersedes: supersedesCount,
+      warnings: warnings,
       indexes: {
         graph  : graphInfo,
         lexical: lexicalInfo,
-        ingest : ingestInfo
+        ingest : ingestInfo,
+        serving: servingInfo,
+        state  : stateInfo
       }
     }
 

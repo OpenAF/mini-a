@@ -2,7 +2,8 @@
 help:
   text   : |
     Given a mini-a wiki knowledge graph JSON file (see ojob.io/mini-a) produces statistics
-    about its nodes, edges, communities and cross-document surprise links.
+    about its nodes, edges, communities and cross-document surprise links, plus the
+    graph version, deleted edges, stored summaries and semantic cache entries.
 
     The graph file is typically stored under "<wiki>/.mini-a-wiki-graph/graph.json".
 
@@ -116,13 +117,20 @@ jobs:
     var topSurprise = surprise.slice().sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, args.top)
 
     var result = {
+      version: graph.version,
       generatedAt: graph.created_at,
+      summaries: {
+        pages: isMap(graph.summaries) && isMap(graph.summaries.pages) ? Object.keys(graph.summaries.pages).length : 0,
+        communities: isMap(graph.summaries) && isMap(graph.summaries.communities) ? Object.keys(graph.summaries.communities).length : 0
+      },
+      semanticCacheEntries: isMap(graph.semantic_cache) ? Object.keys(graph.semantic_cache).length : 0,
       nodes: {
         total : nodeIds.length,
         byType: nodesByType
       },
       edges: {
         total       : edges.length,
+        deleted     : isArray(graph.edges) ? graph.edges.filter(e => isMap(e) && e._deleted === true).length : 0,
         byType      : edgesByType,
         byProvenance: edgesByProvenance
       },

@@ -351,14 +351,20 @@ Standalone oJobs export graphs and report statistics on an existing wiki's on-di
 
 ### `utils/indexStats.yaml`
 
-Given a wiki root folder (or its `.mini-a-wiki-meta` folder directly), reports page-level statistics assembled from the meta shards — counts by type, tag frequency, link totals and top inbound-referenced pages, orphan pages (no outbound links), heading/alias counts, oldest/newest `updated` timestamps, and the largest pages by size. It also summarizes the sibling `.mini-a-wiki-lucene`, `.mini-a-wiki-graph`, and `.mini-a-wiki-ingest` folders (file counts, total size, and — where readable — graph node/edge counts and ingest ledger entry counts).
+Given a wiki root folder (or its `.mini-a-wiki-meta` folder directly), reports page-level statistics assembled from the meta shards — counts by type, tag frequency, link totals and top inbound-referenced pages, pages with no outbound links (`noOutboundLinks`; also exposed as `orphans` for compatibility), heading/alias counts, oldest/newest `updated` timestamps, and the largest pages by size. It also summarizes the sibling `.mini-a-wiki-lucene`, `.mini-a-wiki-graph`, and `.mini-a-wiki-ingest` folders (file counts, total size, and — where readable — graph node/edge counts and ingest ledger entry counts).
 
 ```sh
 ojob utils/indexStats.yaml dir="/path/to/wiki"
 ojob utils/indexStats.yaml dir="/path/to/wiki" top=5 __format=json
 ```
 
+V2 serving-only roots and direct `.mini-a-wiki-serving` paths are also accepted. `indexes.serving` reports current/previous pointer status, schema/parser versions, generation IDs, lexical/index contracts, artifact sizes, and catalogue page/passage counts, lineage depth and shard counts. `indexes.state` includes knowledge versions/counts and persisted retrieval telemetry (outcomes, stop reasons, work/stage counters and restricted operations when recorded); query samples are omitted. Folder sizes include nested files. `pages.source: page-metadata` identifies `.mini-a-wiki-meta`, which is also used by freshly built V2 wikis; it does not identify the active retrieval mode. Page, link, heading, tag and alias statistics come from that metadata store and may differ from the V2 serving catalogue. When `pages.present` is false, zero metadata counts do not establish that the wiki is empty. `pages.recordVersions` counts metadata record formats, while `pages.versions` counts page frontmatter `version` values. These are offline snapshots: `manifest-present` does not establish integrity, freshness, runtime compatibility or successful fallback, and telemetry excludes unflushed activity. Missing telemetry does not mean zero queries. Unreadable metadata is reported in `warnings`.
+
+Serving status labels describe the files inspected: `pointer-absent` means the requested current/previous pointer is missing; `schema-version-mismatch` and `parser-version-mismatch` compare the manifest with the versions expected by this utility (schema 3, parser 6). They do not test the active runtime. `artifactIntegrity: not-checked` makes the inspection limit explicit. These replace the older `v2-build-required`/`absent`, `reindex-required` and `incompatible-generation` labels; `pages.source` replaces `legacy-meta`. Existing count fields are retained.
+
 ### `utils/graphStats.yaml`
+
+Also reports graph format version, deleted edge count, stored summary counts and semantic cache entries.
 
 Given a `.mini-a-wiki-graph/graph.json` file, reports node/edge/community/surprise-link statistics — node counts by type, edge counts by type and provenance (`EXTRACTED`/`INFERRED`/`AMBIGUOUS`), per-node degree (top-N, average, max, isolated-node count, graph density), the largest communities, and the top cross-document surprise links by score.
 
