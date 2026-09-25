@@ -137,3 +137,29 @@ assert.deepEqual(recoveryCalls, [
 answers = []; recoveryCalls = []; ctx.printIngest('"/tmp/New Docs" "New Section" dryrun');
 assert.deepEqual(recoveryCalls, [['run', '/tmp/New Docs', 'New Section', false]], 'dry-run does not prompt for mutation');
 console.log('Blocked ingestion recovery flow passed');
+
+// Absorption dispatch preserves quoted specification paths and exact plan IDs.
+ctx.af = { toYAML: JSON.stringify };
+ctx.MiniAAbsorb = function(args) {
+  this.run = () => { calls.push(['absorb', args.absorbop, args.absorbspec, args.absorbplan]); return { ok: true, plans: ['abc123'] }; };
+};
+vm.runInContext(extract('printAbsorb'), ctx);
+run(`printAbsorb('plan "/tmp/My Sources.json"')`, [['absorb', 'plan', '/tmp/My Sources.json', undefined]]);
+run(`printAbsorb('apply abc123')`, [['absorb', 'apply', undefined, 'abc123']]);
+run(`printAbsorb('resume abc123')`, [['absorb', 'resume', undefined, 'abc123']]);
+run(`printAbsorb('show abc123 extra')`, []);
+run(`printAbsorb('plan "unterminated')`, []);
+for (const [line, expected, offset] of [
+  ['/absorb p', ['plan'], 8],
+  ['/absorb plan "/tmp/My  Docs/a', ['"/tmp/My  Docs/a file.md"'], 13],
+  ['/absorb apply abc', ['abc123'], 14],
+  ['/absorb resume abc', ['abc123'], 15],
+  ['/absorb status ', [], -1]
+]) {
+  const items = [];
+  const position = ctx.complete(line, line.length, { add: x => items.push(x), isEmpty: () => !items.length });
+  assert.deepEqual(items, expected);
+  assert.equal(position, offset);
+}
+assert.match(source, /printAbsorb\(commandLower === "absorb"/);
+console.log('Absorption dispatch and nested completion checks passed');

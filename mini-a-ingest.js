@@ -508,6 +508,7 @@ MiniAIngest.prototype.manageRecovery = function(action, id, confirmed) {
       if (!io.fileExists(new java.io.File(lockPath).getParent())) throw new Error("no pending recovery")
       file = new java.io.RandomAccessFile(lockPath, "rw"); channel = file.getChannel(); lock = channel.tryLock()
       if (!lock) throw new Error("ingestion writer busy")
+      if (io.fileExists(wm._getIndexRoot() + "/.mini-a-wiki-absorb/journal.json")) throw new Error("unfinished absorption journal; use /absorb resume")
     }
     var entries = self._recoveryEntries(wm)
     result.recoveries = entries.map(function(e) { return self._recoverySummary(e) })
@@ -672,6 +673,7 @@ MiniAIngest.prototype.run = function() {
     if (!parent.exists() && !parent.mkdirs()) throw new Error("cannot create ingestion lock directory")
     file = new java.io.RandomAccessFile(lockPath, "rw"); channel = file.getChannel(); lock = channel.tryLock()
     if (!lock) throw new Error("ingestion writer busy")
+    if (io.fileExists(indexRoot + "/.mini-a-wiki-absorb/journal.json")) throw new Error("unfinished absorption journal; use /absorb resume")
   }
   try {
     if (isDef(a.ingestmode) && ["auto", "normalize", "distill", "raw"].indexOf(String(a.ingestmode).trim().toLowerCase()) < 0) throw new Error("invalid ingestmode")

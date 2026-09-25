@@ -1,0 +1,104 @@
+include:
+- oJobTest.yaml
+
+jobs:
+- name: Absorb::testMultipleSourcesAndRepeat
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testMultipleSourcesAndRepeat
+
+- name: Absorb::testSelectionsAndBudgets
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testSelectionsAndBudgets
+
+- name: Absorb::testConflictsAndEvidence
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testConflictsAndEvidence
+
+- name: Absorb::testDuplicatesStaleAndPermissions
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testDuplicatesStaleAndPermissions
+
+- name: Absorb::testRecoveryAndLock
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testRecoveryAndLock
+
+- name: Absorb::testLinksAndSkill
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testLinksAndSkill
+
+- name: Absorb::testRemovalRelocationAndUnsafe
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testRemovalRelocationAndUnsafe
+
+- name: Absorb::testUnavailableAndSourceStale
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testUnavailableAndSourceStale
+
+- name: Absorb::testRealFinalization
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testRealFinalization
+
+- name: Absorb::testMissingLinksAndDependencies
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testMissingLinksAndDependencies
+
+- name: Absorb::testSelectionNarrowingAndSharedSupport
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testSelectionNarrowingAndSharedSupport
+
+- name: Absorb::testInvalidSpecsAndIntegrity
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testInvalidSpecsAndIntegrity
+
+- name: Absorb::testRecoveryConflictingEditsAndProvenance
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testRecoveryConflictingEditsAndProvenance
+
+- name: Absorb::testModelFailureAndTopic
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testModelFailureAndTopic
+
+- name: Absorb::testDuplicateSectionWithEnrichment
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testDuplicateSectionWithEnrichment
+
+- name: Absorb::testPendingContributionAfterPartialUpdate
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testPendingContributionAfterPartialUpdate
+
+- name: Absorb::testRenamedAnchorsAndSymlinks
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testRenamedAnchorsAndSymlinks
+
+- name: Absorb::testRemovedSelectedHeading
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testRemovedSelectedHeading
+
+- name: Absorb::testBorrowedConsoleManager
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testBorrowedConsoleManager
+
+- name: Absorb::Results
+  exec: if (ow.test.getCountFail() > 0) exit(1)
+
+todo:
+- Absorb::testMultipleSourcesAndRepeat
+- Absorb::testSelectionsAndBudgets
+- Absorb::testConflictsAndEvidence
+- Absorb::testDuplicatesStaleAndPermissions
+- Absorb::testRecoveryAndLock
+- Absorb::testLinksAndSkill
+- Absorb::testRemovalRelocationAndUnsafe
+- Absorb::testUnavailableAndSourceStale
+- Absorb::testRealFinalization
+- Absorb::testMissingLinksAndDependencies
+- Absorb::testSelectionNarrowingAndSharedSupport
+- Absorb::testInvalidSpecsAndIntegrity
+- Absorb::testRecoveryConflictingEditsAndProvenance
+- Absorb::testModelFailureAndTopic
+- Absorb::testDuplicateSectionWithEnrichment
+- Absorb::testPendingContributionAfterPartialUpdate
+- Absorb::testRenamedAnchorsAndSymlinks
+- Absorb::testRemovedSelectedHeading
+- Absorb::testBorrowedConsoleManager
+- Absorb::Results

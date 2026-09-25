@@ -411,7 +411,7 @@ MiniAWikiManager.prototype._isHiddenPath = function(path) {
   if (p.length === 0) return false
   var bn = p.split("/").pop()
   var meta = this._indexMeta()
-  return p.split("/").some(function(part) { return /^\.mini-a-wiki-(serving|bundles|legacy|state|ingest|meta|lucene|graph)(?:$|\.)/.test(part) }) || meta.hiddenNames.indexOf(p) >= 0 || meta.hiddenNames.indexOf(bn) >= 0
+  return p.split("/").some(function(part) { return /^\.mini-a-wiki-(serving|bundles|legacy|state|ingest|absorb|meta|lucene|graph)(?:$|\.)/.test(part) }) || meta.hiddenNames.indexOf(p) >= 0 || meta.hiddenNames.indexOf(bn) >= 0
 }
 
 MiniAWikiManager.prototype._isSearchExcludedPath = function(path) {
@@ -2510,13 +2510,13 @@ var __miniAWikiFsListSerial = function(dir, normalizedPrefix, sep, work) {
     counters.directoryListings = (Number(counters.directoryListings) || 0) + 1
     for (var i = 0; children && i < children.length; i++) {
       var child = children[i], name = String(child.getName())
-      if (/^\.mini-a-wiki-(serving|bundles|legacy|state|ingest|meta|lucene|graph)(?:$|\.)/.test(name)) {
+      if (/^\.mini-a-wiki-(serving|bundles|legacy|state|ingest|absorb|meta|lucene|graph)(?:$|\.)/.test(name)) {
         counters.derivedEntriesSkipped = (Number(counters.derivedEntriesSkipped) || 0) + 1; continue
       }
       var target = String(child.getCanonicalPath())
       if (target.indexOf(boundary) !== 0) continue
       if (target.substring(boundary.length).replace(/\\/g, "/").split("/").some(function(part) {
-        return /^\.mini-a-wiki-(serving|bundles|legacy|state|ingest|meta|lucene|graph)(?:$|\.)/.test(part)
+        return /^\.mini-a-wiki-(serving|bundles|legacy|state|ingest|absorb|meta|lucene|graph)(?:$|\.)/.test(part)
       })) {
         counters.derivedEntriesSkipped = (Number(counters.derivedEntriesSkipped) || 0) + 1; continue
       }

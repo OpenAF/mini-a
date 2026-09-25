@@ -768,3 +768,9 @@ Use `agentcomms` to declare bounded parent relay, peer messages, topic subscript
 and versioned shared state for local or remote delegated agents. Isolation remains
 the default. Communication reuses OpenAF channels, worker polling, and existing
 audit/metrics outputs. See [configuration, examples, limits and guarantees](USAGE.md#opt-in-inter-agent-communication).
+
+### Local wiki absorption
+
+Use `/absorb plan <spec.json>` to propose selected knowledge from several local wikis,
+`/absorb show <id>` to review, and `/absorb apply <id>` to apply exact saved changes.
+See [ABSORB.md](ABSORB.md) for source selection, repeat runs, job arguments and recovery.

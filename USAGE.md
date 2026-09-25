@@ -3939,3 +3939,9 @@ available for interim charts while Mini-A works. Invalid or incomplete blocks
 remain readable; `/last md` and saved Markdown retain the original JSON fences.
 This option defaults to false and inline chart rendering applies to the
 interactive console.
+
+### Local wiki absorption
+
+Use `/absorb plan <spec.json>` to propose selected knowledge from several local wikis,
+`/absorb show <id>` to review, and `/absorb apply <id>` to apply exact saved changes.
+See [ABSORB.md](ABSORB.md) for source selection, repeat runs, job arguments and recovery.

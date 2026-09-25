@@ -432,7 +432,7 @@ try {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "rewind", "history", "model", "models", "stats", "debug", "skills", "edit", "editor", "wiki", "graph", "dream", "ingest", "delegate", "subtasks", "subtask", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "rewind", "history", "model", "models", "stats", "debug", "skills", "edit", "editor", "wiki", "graph", "dream", "ingest", "absorb", "delegate", "subtasks", "subtask", "exit", "quit"]
   var builtInSlashCommands  = {}
   slashCommands.forEach(function(cmd) { builtInSlashCommands[cmd] = true })
   var customSlashCommands      = {}
@@ -878,6 +878,9 @@ try {
     dreamwikimaxdepth: { type: "number", description: "Maximum folder depth considered during wiki reorg planning." },
     dreamwikilintresultlimit: { type: "number", description: "Maximum lint issues returned per dream-agent request (default 25)." },
     dreamreport    : { type: "string", description: "Optional file path to write dream JSON report output." },
+    absorboutput   : { type: "string", description: "External absorption plan directory (required for read-only planning)." },
+    absorbmaxpages : { type: "number", default: 100, description: "Maximum selected absorption pages." },
+    absorbmaxtokens: { type: "number", default: 100000, description: "Aggregate absorption model input token estimate limit." },
     ingestsource   : { type: "string", description: "Folder, git repository or page URL to ingest into the wiki." },
     ingesttype     : { type: "string", description: "Ingest source type: markdown, repo or url (auto-detected when unset)." },
     ingestsection  : { type: "string", description: "Wiki section ingested pages are written into." },
@@ -2395,6 +2398,26 @@ try {
 
           var commandName = uptoCursor.substring(1, firstSpace)
           var lookupName = commandName.toLowerCase()
+
+          if (lookupName === "absorb") {
+            var absorbCompletion = consolePathCompletion(uptoCursor.substring(firstSpace + 1))
+            var absorbChoices = []
+            if (!absorbCompletion.before.length) absorbChoices = ["plan", "show", "apply", "status", "resume"]
+            else if (absorbCompletion.before.length === 1) {
+              if (absorbCompletion.before[0] === "plan") absorbChoices = getFileCompletions(absorbCompletion.token).map(quoteConsolePath)
+              else if (["show", "apply", "resume"].indexOf(absorbCompletion.before[0]) >= 0) {
+                try {
+                  loadLib("mini-a-absorb.js")
+                  var absorbOpts = merge({}, sessionOptions)
+                  absorbOpts.absorbop = "status"
+                  if (isObject(activeAgent) && isObject(activeAgent._wikiManager)) absorbOpts.wikimanager = activeAgent._wikiManager
+                  absorbChoices = new MiniAAbsorb(absorbOpts).run().plans || []
+                } catch(ignoreAbsorbCompletion) {}
+              }
+            }
+            absorbChoices.forEach(function(value) { if (value.replace(/^["']/, "").indexOf(absorbCompletion.token) === 0) candidates.add(value) })
+            return candidates.isEmpty() ? -1 : Number(firstSpace + 1 + absorbCompletion.offset)
+          }
 
           // File operand completions share the command parser's quote boundaries.
           if (lookupName === "save" || lookupName === "ingest" || lookupName === "stats") {
@@ -6230,6 +6253,7 @@ try {
       { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, mounts, attach, detach" },
       { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, report, query, retrieve, answer, neighbors, path, communities, surprise, export, stats, falkor, cross (requires usewikigraph=true)" },
       { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: plan, apply (default), reorg, repair, reindex, graph, indexes, dryrun" },
+      { command: "/absorb plan|show|apply|status|resume [spec|id]", description: "Plan, review and apply local wiki absorption (see ABSORB.md)." },
       { command: "/ingest <source> [section]", description: "Ingest docs into the wiki; flags: dryrun, force, independent. No source: recovery choices." }
     ]
     helpCommands.push(
@@ -6706,6 +6730,22 @@ try {
       if (!confirmed) { print(colorifyText("Recovery kept.", hintColor)); return }
     }
     print(printTree(runner.manageRecovery(action, id, confirmed)))
+  }
+
+  function printAbsorb(subcmdRaw) {
+    try {
+      var parts = parseConsolePathArgs(subcmdRaw).argv, op = parts[0] || "status"
+      if (toBoolean(sessionOptions.usewiki) !== true) throw new Error("Wiki not enabled. Start with usewiki=true and wikiroot=...")
+      if (["plan", "show", "apply", "status", "resume"].indexOf(op) < 0 || parts.length !== (op === "status" ? (parts.length ? 1 : 0) : 2)) throw new Error("Usage: /absorb plan <spec.json> | show|apply|resume <plan-id> | status")
+      loadLib("mini-a-absorb.js")
+      var opts = merge({}, sessionOptions)
+      opts.absorbop = op
+      if (op === "plan") opts.absorbspec = parts[1]
+      else opts.absorbplan = parts[1]
+      if (isObject(activeAgent) && isObject(activeAgent._wikiManager)) opts.wikimanager = activeAgent._wikiManager
+      var result = new MiniAAbsorb(opts, function(msg) { print(colorifyText(msg, hintColor)) }).run()
+      print(isString(result.report) && op === "show" ? result.report : af.toYAML(result))
+    } catch(e) { print(colorifyText("Absorb error: " + e.message, errorColor)) }
   }
 
   // /ingest <source> [section] [dryrun|force]
@@ -7313,6 +7353,11 @@ try {
         printGraph(command.substring(6))
         continue
       }
+      if (commandLower === "absorb" || commandLower.indexOf("absorb ") === 0) {
+        printAbsorb(commandLower === "absorb" ? "" : command.substring(7))
+        continue
+      }
+
       if (commandLower === "ingest" || commandLower.indexOf("ingest ") === 0) {
         printIngest(commandLower === "ingest" ? "" : command.substring(7))
         continue

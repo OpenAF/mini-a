@@ -1,0 +1,43 @@
+help:
+  text: |
+    Reviewable local wiki absorption. Plan makes proposals; apply/resume never call a model.
+    ojob mini-a-absorb.yaml absorbop=plan absorbspec=./sources.json wikiroot=./wiki wikiaccess=rw
+    ojob mini-a-absorb.yaml absorbop=show absorbplan=<id> wikiroot=./wiki
+    ojob mini-a-absorb.yaml absorbop=apply absorbplan=<id> wikiroot=./wiki wikiaccess=rw
+    See ABSORB.md for selection, provenance, budgets and recovery.
+  expects:
+  - name: absorbop
+    desc: plan, show, apply, status or resume
+  - name: absorbspec
+    desc: JSON specification file (plan)
+  - name: absorbplan
+    desc: Saved plan ID (show/apply/resume)
+  - name: absorboutput
+    desc: Explicit external artifact directory, required for read-only planning
+  - name: absorbmaxpages
+    desc: Selected page budget (default 100)
+  - name: absorbmaxtokens
+    desc: Aggregate estimated input token budget (default 100000)
+  - name: wikiroot
+    desc: Existing local destination wiki directory
+  - name: wikiaccess
+    desc: Explicit rw required to apply (default ro)
+  - name: model
+    desc: Model configuration, otherwise OAF_MODEL
+
+ojob:
+  opacks:
+  - openaf: 20250915
+  logToConsole: true
+
+todo:
+- Mini-A Wiki Absorb
+
+jobs:
+- name: Mini-A Wiki Absorb
+  exec: |
+    loadLib("mini-a-common.js")
+    loadLib("mini-a-absorb.js")
+    var result = new MiniAAbsorb(args, log).run()
+    print(af.toYAML(result))
+    if (!result.ok) exit(1)
