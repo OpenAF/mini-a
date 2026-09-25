@@ -1622,7 +1622,17 @@ MiniAWikiManager.prototype._removePageIndexes = function(path) {
 }
 
 MiniAWikiManager.prototype.reindex = function() {
-  if (this._retrievalV2) return this._retrievalV2.build(isMap(this._servingBatchChanges) && io.fileExists(this._retrievalV2.root + "/current.json") ? Object.keys(this._servingBatchChanges) : __)
+  if (this._retrievalV2) {
+    var changes = isMap(this._servingBatchChanges) && io.fileExists(this._retrievalV2.root + "/current.json") ? Object.keys(this._servingBatchChanges) : __
+    var built = this._retrievalV2.build(changes)
+    // Finalization batches normally reuse the prior generation. A changed
+    // serving contract needs the same full rebuild as an explicit reindex.
+    if (isArray(changes) && built.ok === false && built.activationSucceeded === false &&
+        ["incompatible-generation", "reindex-required"].indexOf(built.error) >= 0) {
+      return this._retrievalV2.build()
+    }
+    return built
+  }
   if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
   try {
     if (!this._ensureLucene() || !this._hasEnhancedLexicalSupport()) return { ok: false, error: "Lucene oPack does not support lexicalEnhanced search; upgrade the lucene oPack before publishing an enhanced wiki index." }

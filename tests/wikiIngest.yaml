@@ -202,6 +202,9 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wikiIngestReconcile.js").testLlmFailureKeepsAppliedVersion
 
+- name: MiniA Wiki Ingest Tests::RetrievalGenerationFinalize
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testRetrievalGenerationFinalize
 - name: MiniA Wiki Ingest Tests::FinalizeRecovery
   to  : oJob Test
   exec: args.func = require("tests/wikiIngestReconcile.js").testFinalizeRecovery
@@ -325,6 +328,7 @@ todo:
 - MiniA Wiki Ingest Tests::LegacyMigration
 - MiniA Wiki Ingest Tests::AmbiguousLegacyPreserved
 - MiniA Wiki Ingest Tests::LlmFailureKeepsAppliedVersion
+- MiniA Wiki Ingest Tests::RetrievalGenerationFinalize
 - MiniA Wiki Ingest Tests::FinalizeRecovery
 - MiniA Wiki Ingest Tests::DryRunNoDestinationMutation
 - MiniA Wiki Ingest Tests::BorrowedRemoteContractsAndFailures

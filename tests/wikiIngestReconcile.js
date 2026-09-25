@@ -304,6 +304,36 @@
     assert(resumed.recovered, true, 'normalized section identity resumes original journal')
     assert(f.run(args).status, 'noop', 'space-containing source filename is idempotent')
   }) }
+  exports.testRetrievalGenerationFinalize = function() { fixture(function(f) {
+    var options = { wikiretrievalv2: true, wikilexical: { language: 'english', ngrams: true } }
+    f.write('a.md', '# A\n\nOriginal content')
+    assert(f.run(options).ok, true, 'initial v2 ingest succeeds')
+    f.write('a.md', '# A\n\nUpdated content')
+    assert(f.run(options).ok, true, 'fresh manager with identical configuration can update')
+    var serving = f.wiki + '/.mini-a-wiki-serving/'
+    var manifest = function() { return af.fromJson(io.readFileString(serving + af.fromJson(io.readFileString(serving + 'current.json')).generation + '/manifest.json')) }
+    assert(manifest().catalogue.depth > 0, true, 'compatible finalization remains incremental')
+    options.wikilexical.ngrams = false
+    f.write('a.md', '# A\n\nChanged contract content')
+    assert(f.run(options).ok, true, 'normal ingest rebuilds an incompatible generation')
+    assert(manifest().catalogue.depth, 0, 'incompatible finalization publishes a full base')
+    var runner = f.runner(options)
+    f.write('a.md', '# A\n\nRecoveryneedle content')
+    runner._finalize = function() { return { ok: false, reindexed: false } }
+    assert(runner.run().ok, false, 'leave applied pages pending finalization')
+    options.wikilexical.ngrams = true
+    var recovered = f.run(options)
+    assert(recovered.ok, true, stringify(recovered))
+    assert(recovered.recovered, true, 'incompatible serving generation can recover finalization')
+    assert(recovered.llm_calls, 0, 'recovery does not repeat distillation')
+    var wm = new MiniAWikiManager({ backend: 'fs', root: f.wiki, access: 'ro', wikiretrievalv2: true, wikilexical: options.wikilexical }, function() {})
+    try {
+      var hits = wm.agenticSearch('recoveryneedle', { limit: 5 })
+      assert(hits.ok, true, stringify(hits))
+      assert(hits.results.length > 0, true, 'rebuilt generation serves the updated page')
+    } finally { wm.close() }
+    assert(f.run(options).status, 'noop', 'recovered ingest is idempotent')
+  }) }
   exports.testFinalizeRecovery = function() { fixture(function(f) {
     var runner = f.runner(); f.write('a.md', '# A\n\nSource'); runner._finalize = function() { return { ok: false, reindexed: false } }
     var r = runner.run(); assert(r.ok, false, 'finalize failure partial'); assert(r.status, 'partial', 'partial result'); assert(io.fileExists(f.wiki + '/.mini-a-wiki-ingest/journal.json'), true, 'pending journal retained')

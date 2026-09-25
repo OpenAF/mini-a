@@ -3265,6 +3265,11 @@ their saved operations can still be resumed using the displayed recovery ID.
 /ingest "/path/New Docs" "New Section" independent
 ```
 
+With retrieval V2 enabled, finalization normally updates the existing serving
+generation incrementally. If its parser or lexical contract is incompatible,
+finalization rebuilds the search index from the current wiki Markdown. Other
+publication failures remain reported and keep recovery pending.
+
 Resume replays saved work and completes manifest/index finalization without
 starting another ingestion or repeating source distillation. Configured graph
 finalization still applies. Discard asks you to type
