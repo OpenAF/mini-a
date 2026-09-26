@@ -1134,16 +1134,25 @@ searched/inspected/consulted at any scale without loading the catalog into
 context. Reuses `usewiki`'s wiki by default -- a wiki can hold ordinary knowledge
 and skill pages side by side.
 
+### Related Parameters
+
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `useskillwiki` | boolean | `false` | Enable the virtual skill library (exposes the `skillwiki` tool and `/skills search\|recommend\|open\|read\|related` console subcommands) |
-| `skillwikibackend` | string | - | Backend for a *dedicated* skill wiki (fs/s3/s3fs/es/http); omit to reuse `usewiki`'s wiki |
-| `skillwikiroot` | string | - | Root for a dedicated skill wiki (fs backend) |
-| `skillwikimounts` | SLON/JSON | - | Read-only mounts for a dedicated skill wiki, same shape as `wikimounts` |
-| `skillsautosearch` | boolean | `false` | Reserved for future opt-in automatic skill consultation during planning |
-| `skillsautolimit` | number | `5` | Max results per automatic skill search |
+| `useskillwiki` | boolean | `false` | Must be set to `true` to enable the virtual skill library (exposes the `skillwiki` tool and `/skills context\|search\|recommend\|open\|read\|related` console subcommands) |
+| `skillwikibackend` | string | `fs` for a dedicated library | Select the backend for a dedicated skill wiki: `fs`, `s3`, `s3fs`, `es`, or `http` |
+| `skillwikiroot` | string | `.` for a dedicated library | Filesystem root for a dedicated skill wiki; prefer an explicit absolute path |
+| `skillwikimounts` | SLON/JSON | - | Read-only mounts for a dedicated skill wiki, using the same array shape as `wikimounts` |
+| `skillsautosearch` | boolean | `false` | Reserved for future opt-in automatic skill consultation during planning; not implemented |
+| `skillsautolimit` | number | `5` | Reserved maximum results per future automatic skill search; not implemented |
 | `skillsmaxloaded` | number | `3` | Max distinct skills `open()`-ed per agent run |
 | `skillsmaxchars` | number | `12000` | Max skill-body characters `read()` may return per agent run |
+
+To reuse an existing wiki and its mounts, set `usewiki=true useskillwiki=true`
+and omit `skillwikibackend`, `skillwikiroot`, and `skillwikimounts`. Supplying any
+of these source settings creates a dedicated library. `useskills` controls the
+separate local skills tool and is not required for virtual skills. Dedicated
+remote libraries use the normal `wiki*` connection and artifact parameters; see
+[virtual skill configuration](docs/VIRTUAL-SKILLS.md#configuration).
 
 ```bash
 # Reuse an existing wiki as the skill library

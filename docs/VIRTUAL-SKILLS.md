@@ -334,16 +334,18 @@ enables nor is required by `useskillwiki`.
 
 ### Configuration
 
+Related parameters for enabling, locating, and limiting the virtual skill library:
+
 | Parameter | Default | Purpose |
 |---|---|---|
-| `useskillwiki` | `false` | Enable the virtual skill library. |
-| `skillwikiroot` | Unset | Filesystem root for a dedicated library; prefer an absolute path. |
-| `skillwikibackend` | `fs` for a dedicated library | Select `fs`, `s3`, `s3fs`, `es`, or `http`. |
-| `skillwikimounts` | Unset | SLON/JSON mounts for a dedicated library, using the `wikimounts` shape. |
-| `skillsmaxloaded` | `3` | Distinct references opened through the agent's `skillwiki` tool per run. |
-| `skillsmaxchars` | `12000` | Character budget used by the agent's `skillwiki` read operation per run. |
+| `useskillwiki` | `false` | Must be set to `true` to enable the virtual skill library. |
+| `skillwikiroot` | `.` for a dedicated library | Filesystem root for a dedicated skill wiki; prefer an explicit absolute path. |
+| `skillwikibackend` | `fs` for a dedicated library | Select the backend for a dedicated skill wiki: `fs`, `s3`, `s3fs`, `es`, or `http`. |
+| `skillwikimounts` | Unset | Read-only mounts for a dedicated skill wiki, supplied as a SLON/JSON array using the `wikimounts` shape. |
+| `skillsmaxloaded` | `3` | Maximum distinct references opened through the agent's `skillwiki` tool per run. |
+| `skillsmaxchars` | `12000` | Maximum skill-body characters read through the agent's `skillwiki` tool per run. |
 | `skillsautosearch` | `false` | Reserved for planner-level consultation; not implemented. |
-| `skillsautolimit` | `5` | Reserved limit for that future automatic search. |
+| `skillsautolimit` | `5` | Reserved maximum results per future automatic skill search; not implemented. |
 
 If any dedicated `skillwiki*` source setting is supplied, Mini-A creates a separate
 manager instead of reusing `usewiki`. Its filesystem root defaults to `.` when
