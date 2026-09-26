@@ -100,6 +100,57 @@
     } finally { agent._stopAgentResources(); io.rm(root) }
   }
 
+  exports.testFlattenedBuiltInDispatchReplay = function() {
+    load("mini-a-wiki.js")
+    var root = String(io.createTempFile("mini-a-flat-dispatch-", ""))
+    io.rm(root); io.mkdir(root)
+    io.writeFileString(root + "/fixture.md", "# Evidence\nfixture-evidence-739")
+    try {
+      ;[false, true].forEach(function(chatbot) {
+        ;["flat", "params", "arguments"].forEach(function(shape) {
+          var agent = createAgent(), requests = 0, reads = 0, graphCalls = 0
+          agent.fnI = function() {}
+          var args = { goal: "Read fixture and query graph", usejsontool: true, usewiki: true, usewikigraph: true, wikiroot: root, raw: true, maxsteps: 4, usememory: false, chatbotmode: chatbot }
+          try {
+            agent.init(args)
+            agent._use_lc = false
+            var read = agent._wikiManager.agenticRead.bind(agent._wikiManager)
+            agent._wikiManager.agenticRead = function(path, opts) {
+              reads++
+              ow.test.assert(path, "fixture.md", "Dispatch preserves wiki path")
+              return read(path, opts)
+            }
+            agent._wikiManager.graph = function(op, params) {
+              graphCalls++
+              ow.test.assert(op, "retrieve", "Graph must execute requested operation instead of stats")
+              ow.test.assert(params.query, "fixture", "Dispatch preserves graph query")
+              return { evidence: "graph-evidence-739" }
+            }
+            agent.llm.promptJSONWithStats = agent.llm.promptWithStats = function(prompt) {
+              requests++
+              if (requests === 2) ow.test.assert(prompt.indexOf("fixture-evidence-739") >= 0, true, "Read content reaches model instead of page listing")
+              if (requests === 3) ow.test.assert(prompt.indexOf("graph-evidence-739") >= 0, true, "Graph result reaches model")
+              var response = { action: "final", answer: "verified fixture" }
+              if (requests < 3) {
+                var params = requests === 1 ? { op: "read", path: "fixture.md" } : { op: "retrieve", query: "fixture" }
+                response = { action: requests === 1 ? "wiki" : "graph" }
+                if (shape === "flat") response = merge(response, params)
+                else {
+                  response[shape] = params
+                  response.op = "ignored-conflicting-operation"
+                }
+              }
+              return { response: response, stats: {} }
+            }
+            ow.test.assert(agent.start(merge({}, args)), "verified fixture", "Replay completes for " + shape + ", chatbot=" + chatbot)
+            ow.test.assert(reads, 1, "Wiki read executes exactly once")
+            ow.test.assert(graphCalls, 1, "Graph retrieval executes exactly once")
+          } finally { agent._stopAgentResources() }
+        })
+      })
+    } finally { io.rm(root) }
+  }
+
   exports.testJsonModeRebuildsBothToolWrappers = function() {
     var agent = createAgent(), registrations = 0
     agent.fnI = function() {}

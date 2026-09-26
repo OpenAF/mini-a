@@ -20981,6 +20981,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         // Fallback: model used {"action":"shell","arguments":{"command":"..."}} (function-calling style)
         if (action === "shell" && commandValue.length === 0 && isMap(currentMsg.arguments) && isString(currentMsg.arguments.command)) commandValue = currentMsg.arguments.command.trim()
         paramsValue = this._normalizeActionParams(action, currentMsg, paramsValue)
+        // Built-in handlers read currentMsg.params; share the recovered payload
+        // with them as well as the generic tool dispatcher.
+        if (isMap(paramsValue)) currentMsg.params = paramsValue
 
         if (origActionRaw.length == 0) {
           var canInferFinalAction = isString(answerValue) && answerValue.trim().length > 0 && commandValue.length == 0 && isUnDef(paramsValue)
@@ -22093,6 +22096,10 @@ MiniA.prototype._runChatbotMode = function(options) {
           if (actionName.length > 0) currentMsg.action = actionName
           var lowerAction = actionName.toLowerCase()
           var thoughtValue = currentMsg.thought || currentMsg.think
+          var paramsValue = currentMsg.params
+          if (isUnDef(paramsValue) && isMap(currentMsg.arguments)) paramsValue = currentMsg.arguments
+          paramsValue = this._normalizeActionParams(lowerAction, currentMsg, paramsValue)
+          if (isMap(paramsValue)) currentMsg.params = paramsValue
 
           if (actionName.length === 0) {
             pendingPrompt = `Missing 'action' entry in the JSON object. Use one of: ${this._actionsList || (toolNames.join(" | ") || "think | final")}.`
@@ -22103,8 +22110,6 @@ MiniA.prototype._runChatbotMode = function(options) {
           var thoughtMessage = this._emitCanonicalThoughtEvent(lowerAction, thoughtValue, "(no thought)", isDef(currentMsg.params) ? currentMsg.params : currentMsg.arguments)
 
           if (toolNames.indexOf(actionName) >= 0) {
-            var paramsValue = currentMsg.params
-            if (isUnDef(paramsValue) && isMap(currentMsg.arguments)) paramsValue = currentMsg.arguments
             if (isUnDef(paramsValue) || !isMap(paramsValue)) {
               pendingPrompt = `Tool request for '${actionName}' is missing a valid 'params' object. Reply with JSON including proper params or continue without that tool.`
               handled = true

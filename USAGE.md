@@ -94,6 +94,21 @@ To load skills from additional directories, pass `extraskills=<path1>,<path2>`. 
 mini-a extraskills=/path/to/shared-skills,/path/to/project-skills
 ```
 
+### Virtual skills
+
+For a wiki-backed library, enable **virtual skills** separately:
+
+```bash
+opack exec mini-a useskillwiki=true skillwikiroot=/absolute/path/to/team-skills
+```
+
+Use `/skills context` to check the library, `/skills search <query>` to discover
+skills, and `/skills open <ref>` followed by `/skills read <ref> [section]` to
+consult one. Plain `/skills` still lists local templates. `useskills=true` does
+not enable virtual skills, and a local `skills=0` count says nothing about the
+wiki library. See the [Virtual Skills guide](docs/VIRTUAL-SKILLS.md) for a sample
+page, shared-wiki setup, limits, MCP access and troubleshooting.
+
 ### Agent Plugins
 
 Mini-A can also load skills (and MCP servers) bundled as an [Agent Plugins](https://agent-plugins.org) directory (`plugin.json` + `skills/` + `mcp.json`). Use `plugins=<dir1,dir2>` for explicit plugin directories, or `pluginsroot=<dir>` / `pluginsroots=<dir1,dir2>` for directories that each contain many plugin subfolders (default: `.openaf-mini-a/plugins`). These compose with `extraskills`/`mcp=` — they don't replace them — and a plugin's skills never win a name conflict over the default/extra skill directories. See **[docs/AGENT-PLUGINS.md](docs/AGENT-PLUGINS.md)** for the full directory layout, the `PLUGIN_ROOT`/`PLUGIN_DATA` contract, and current limitations.

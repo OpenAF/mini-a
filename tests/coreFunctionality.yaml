@@ -1,4 +1,9 @@
 jobs:
+- name: MiniA Core Tests::FlattenedBuiltInDispatchReplay
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testFlattenedBuiltInDispatchReplay
+
 - name: MiniA Core Tests::EntryPointFinalAnswerParity
   from: MiniA Core Tests::Init
   to: oJob Test
@@ -1130,6 +1135,7 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Core Tests::FlattenedBuiltInDispatchReplay
 - MiniA Core Tests::EntryPointFinalAnswerParity
 - MiniA Core Tests::JsonModeRebuildsBothToolWrappers
 - MiniA Core Tests::JsonWikiDispatchReplay
