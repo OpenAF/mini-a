@@ -495,6 +495,8 @@ Mini-A now includes resilience primitives so long-running sessions can absorb tr
 
 All of these behaviors are enabled by default. Use verbose or debug logging (`verbose=true` or `debug=true`) to watch the retry, recovery, circuit-breaker, and early stop messages in real time.
 
+The interactive console, `goal=` launcher and web server share the same agent core. All three apply `goalprefix` once before running the submitted goal and preserve visual Markdown fences. The `goal=` launcher also uses the retained original answer when OpenAF formatting returns no value. Hook file parsing and execution are shared by the console and `goal=` launcher; the web server does not automatically load local shell hooks. See [entry-point comparison](docs/ENTRY-POINT-PARITY.md) for scope and verification.
+
 ## Web UI quick start
 
 Web sessions apply `goalprefix` once per submitted goal and bind the memory-session header and initial browser context before constructing instructions. Later turns refresh goal-relevant memory and tool contracts while preserving conversation and tool results. Only one prompt runs per session UUID; overlapping prompts, clear, and history-load requests return `session busy`. Stop remains available. Idle clear and expiry close agent resources even when history is retained.

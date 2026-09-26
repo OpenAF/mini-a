@@ -9880,24 +9880,8 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
   if (isString(answer) && args.format != "raw") answer = answer.trim()
   answer = this._sanitizeFinalOutput(answer)
 
-  // Remove outer code block markers when the answer is just a single fenced block.
-  if ((args.format == "md" || structuredOutput) && args.format != "raw" && isString(answer)) {
-    var trimmed = answer.trim()
-    // Match code block: starts with ```[language]\n, ends with ``` and nothing else
-    // Capture the language and the inner body in separate groups
-    var codeBlockMatch = trimmed.match(/^```([a-zA-Z0-9_-]*)\s*\n([\s\S]*?)\n```$/)
-    if (codeBlockMatch) {
-      var lang = (codeBlockMatch[1] || "").toLowerCase()
-      var body = codeBlockMatch[2]
-      // Preserve fences for visual languages in markdown mode so the UI can render them.
-      if (args.format == "md" && (lang === "chart" || lang === "chartjs" || lang === "chart.js" || lang === "mermaid" || lang === "leaflet" || lang === "oafprintchart" || __miniAHasConsoleChartFence(trimmed))) {
-        // keep original fenced block
-        answer = trimmed
-      } else {
-        // Strip fences for ordinary code blocks, including fenced JSON payloads.
-        answer = body
-      }
-    }
+  if (args.format == "md" || structuredOutput) {
+    answer = __miniAUnwrapAnswer(answer, args.format == "md")
   }
 
   // Collect results from any completed startup sub-agents before finalizing
@@ -17703,6 +17687,7 @@ MiniA.prototype._supportsConsoleUserInput = function(args) {
  * </odoc>
  */
 MiniA.prototype.start = function(args) {
+    this._origAnswer = __
     this._lastStartArgs = args
     var sessionStartTime = now()
     var runResult = __

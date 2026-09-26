@@ -1202,7 +1202,7 @@ todo:
         var _hfile = (global.__usehistory || global.maArgs.historyvm === true || global.maArgs.historyvmshadow === true) ? global.__historypath + "/c-" + uuid + ".json" : __
 
         var startArgs = merge(global.maArgs, {
-          goal        : (isString(global.maArgs.goalprefix) ? global.maArgs.goalprefix : "") + postData.prompt,
+          goal        : __miniAPrefixGoal(postData.prompt, global.maArgs.goalprefix),
           raw         : true
         })
         if (toBoolean(startArgs.usememory) && isString(global.__memorysessionheader) && global.__memorysessionheader.length > 0 && isMap(request.header)) {
@@ -1478,14 +1478,13 @@ todo:
         var _rma = lma.start(startArgs)
 
         if (!global._mini_a_web_owns(uuid, runToken)) return
-        if (isDef(_rma.answer)) {
-          var trimmedAnswer = _rma.answer.trim();
-          if (trimmedAnswer.startsWith("```markdown") && trimmedAnswer.endsWith("```")) {
-            // Remove markdown fences
-            _rma.answer = trimmedAnswer.replace(/^```markdown\s*\n?([\s\S]+?)\n?```$/g, "$1").trim()
-          }
-        }
-        global.__res[uuid].push( { event: "final", message: (isDef(_rma) && isString(_rma.answer) && _rma.answer.trim().length > 0) ? _rma.answer : (isObject(_rma) ? af.toSLON(_rma) : _rma) } )
+        // start() can return a string, a structured result, or no result on failure.
+        // Keep typed answers intact and never dereference an absent result.
+        if (isUnDef(_rma)) throw "Agent returned no final answer"
+        var finalMessage = isObject(_rma) && isString(_rma.answer) && _rma.answer.trim().length > 0 ? _rma.answer : _rma
+        if (isString(finalMessage) && startArgs.format != "raw") finalMessage = __miniAUnwrapAnswer(finalMessage)
+        if (isObject(finalMessage)) finalMessage = af.toSLON(finalMessage)
+        global.__res[uuid].push( { event: "final", message: finalMessage } )
         if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
           global._mini_a_web_ssePush(uuid, "interaction", { event: "final" })
         }

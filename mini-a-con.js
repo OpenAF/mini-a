@@ -580,12 +580,7 @@ try {
   }
 
   function unwrapSingleMarkdownCodeBlock(text) {
-    if (!isString(text)) return text
-    if (__miniAHasConsoleChartFence(text)) return text
-    var normalized = text.replace(/\r\n/g, "\n")
-    var fencedMatch = normalized.match(/^\s*```[^\n]*\n([\s\S]*?)\n```[ \t]*\s*$/)
-    if (!isArray(fencedMatch) || fencedMatch.length < 2) return text
-    return fencedMatch[1]
+    return __miniAUnwrapAnswer(text)
   }
 
   var parameterDefinitions = {
@@ -1738,60 +1733,7 @@ try {
   }
 
   function loadHooksFromDir(dirPath, hooks) {
-    var validEvents = ["before_goal", "after_goal", "before_tool", "after_tool", "before_shell", "after_shell"]
-    try {
-      if (!io.fileExists(dirPath)) return
-      var info = io.fileInfo(dirPath)
-      if (!isObject(info) || info.isDirectory !== true) return
-      var listing = io.listFiles(dirPath)
-      if (!isObject(listing) || !isArray(listing.files)) return
-
-      listing.files.forEach(function(file) {
-        if (!isObject(file) || file.isDirectory === true) return
-        if (!isString(file.filename) || file.filename.length === 0) return
-        if (!/\.(yaml|yml|json)$/i.test(file.filename)) return
-
-        var fullPath = canonicalizePath(dirPath + "/" + file.filename)
-        try {
-          var hookDef
-          if (/\.json$/i.test(file.filename)) {
-            hookDef = io.readFileJSON(fullPath)
-          } else {
-            hookDef = io.readFileYAML(fullPath)
-          }
-          if (!isObject(hookDef)) return
-          var event = isString(hookDef.event) ? hookDef.event.trim().toLowerCase() : ""
-          if (validEvents.indexOf(event) < 0) {
-            logWarn("Hook '" + file.filename + "' has invalid or missing event type: '" + event + "'")
-            return
-          }
-          var cmd = isString(hookDef.command) ? hookDef.command.trim() : ""
-          if (cmd.length === 0) {
-            logWarn("Hook '" + file.filename + "' has no command defined.")
-            return
-          }
-          var toolFilter = []
-          if (isString(hookDef.toolFilter) && hookDef.toolFilter.trim().length > 0) {
-            toolFilter = hookDef.toolFilter.split(",").map(function(s) { return s.trim().toLowerCase() }).filter(function(s) { return s.length > 0 })
-          }
-          hooks[event].push({
-            name        : file.filename.replace(/\.(yaml|yml|json)$/i, ""),
-            file        : fullPath,
-            event       : event,
-            command     : cmd,
-            toolFilter  : toolFilter,
-            injectOutput: parseBoolean(hookDef.injectOutput) === true,
-            timeout     : (isNumber(hookDef.timeout) && hookDef.timeout > 0) ? hookDef.timeout : 5000,
-            failBlocks  : parseBoolean(hookDef.failBlocks) === true,
-            env         : isObject(hookDef.env) ? hookDef.env : {}
-          })
-        } catch (hookParseError) {
-          logWarn("Failed to parse hook file '" + file.filename + "': " + hookParseError)
-        }
-      })
-    } catch (hookLoadError) {
-      logWarn("Failed to load hooks from '" + dirPath + "': " + hookLoadError)
-    }
+    return __miniALoadHooksFromDir(dirPath, hooks)
   }
 
   function loadHooks() {
@@ -1803,44 +1745,7 @@ try {
   }
 
   function runHooks(event, contextVars) {
-    var hooksForEvent = isArray(loadedHooks[event]) ? loadedHooks[event] : []
-    if (hooksForEvent.length === 0) return { outputs: [], blocked: false }
-
-    var outputs = []
-    var blocked = false
-    var vars = isObject(contextVars) ? contextVars : {}
-
-    hooksForEvent.forEach(function(hook) {
-      if (hook.toolFilter.length > 0 && isString(vars.MINI_A_TOOL)) {
-        var toolLower = vars.MINI_A_TOOL.toLowerCase()
-        if (hook.toolFilter.indexOf(toolLower) < 0) return
-      }
-      try {
-        var env = {}
-        Object.keys(hook.env).forEach(function(k) { env[k] = String(hook.env[k]) })
-        Object.keys(vars).forEach(function(k) { env[k] = String(vars[k]) })
-        env.MINI_A_HOOK_NAME  = hook.name
-        env.MINI_A_HOOK_EVENT = event
-
-        var result = $sh(hook.command).timeout(hook.timeout).envs(env).get(0)
-        var stdout   = isString(result.stdout)   ? result.stdout.trim()   : ""
-        var stderr   = isString(result.stderr)   ? result.stderr.trim()   : ""
-        var exitCode = isNumber(result.exitcode) ? result.exitcode        : -1
-
-        if (exitCode !== 0) {
-          logWarn("Hook '" + hook.name + "' (" + event + ") exited with code " + exitCode + (stderr.length > 0 ? ": " + stderr.substring(0, 200) : ""))
-          if (hook.failBlocks) blocked = true
-        }
-        if (hook.injectOutput && stdout.length > 0) {
-          outputs.push({ hookName: hook.name, output: stdout.substring(0, 4096) })
-        }
-      } catch (hookExecError) {
-        logWarn("Hook '" + hook.name + "' (" + event + ") failed: " + hookExecError)
-        if (hook.failBlocks) blocked = true
-      }
-    })
-
-    return { outputs: outputs, blocked: blocked }
+    return __miniARunHooks(loadedHooks, event, contextVars)
   }
 
   function getCustomSlashCommandNames() {
@@ -4462,10 +4367,7 @@ try {
     }
     if (isDef(args.rtm) && isUnDef(args.rpm)) args.rpm = args.rtm
 
-    if (isString(sessionOptions.goalprefix) && sessionOptions.goalprefix.length > 0) {
-      cleanGoal = sessionOptions.goalprefix + cleanGoal
-    }
-    args.goal = cleanGoal
+    args.goal = __miniAPrefixGoal(cleanGoal, sessionOptions.goalprefix)
     args.__interaction_source = "mini-a-con"
     args.__explicitargkeys = merge({}, sessionExplicitOptions, true)
     if (isDef(args.format) && isUnDef(args.__format)) args.__format = args.format
@@ -5303,7 +5205,7 @@ try {
       // `$o(..., __format:"md")` may return undefined in an oJob console
       // context even though _processFinalAnswer retained the answer. `/last`
       // already uses this raw value; use it for the live fallback as well.
-      var displayResult = isDef(lastResult) ? lastResult : lastOrigResult
+      var displayResult = __miniAFinalResult(lastResult, lastOrigResult)
       // Render charts from original Markdown before OpenAF output formatting.
       if (_consoleChartsEnabled() && isString(lastOrigResult)) {
         displayResult = lastOrigResult

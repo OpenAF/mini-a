@@ -4931,6 +4931,31 @@
     })
   }
 
+  exports.testEntryPointFinalAnswerParity = function() {
+    var agent = createAgent(), writes = [], originalWrite = io.writeFileString
+    agent.fnI = function() {}
+    agent._memoryAppend = agent._persistWorkingMemory = agent._persistSessionMemory = agent._recordPlanActivity = agent._logLcCostSummary = function() {}
+    agent._collectSessionKnowledgeForPlan = function() { return [] }
+    agent._memorysessionChEffective = __
+    var multiple = '```js\nfirst\n```\n\nExplanation\n\n```js\nlast\n```'
+    try {
+      io.writeFileString = function(path, text) { writes.push(text) }
+      agent._processFinalAnswer(multiple, { format: "md", outfile: "/fixture" })
+      ow.test.assert(writes[0], multiple, "Multiple fenced blocks remain a complete document")
+      var fence = '```mermaid\ngraph TD; A-->B\n```'
+      agent._processFinalAnswer(fence, { format: "md", outfile: "/fixture" })
+      ow.test.assert(writes[1], fence, "Core and console preserve visual fences")
+      ow.test.assert(__miniAUnwrapAnswer(writes[1]), fence, "Console second pass preserves core visual output")
+      var raw = '```text\nraw content\n```'
+      ow.test.assert(agent._processFinalAnswer(raw, { format: "raw", raw: true }), raw, "Raw output retains fences")
+    } finally { io.writeFileString = originalWrite }
+    agent._origAnswer = "previous turn"
+    agent._beginRun = agent._finishRun = agent._finalizeRunMemory = function() {}
+    agent._runOuterLoop = function() { return "new result" }
+    ow.test.assert(agent.start({}), "new result", "Start returns current run result")
+    ow.test.assert(isUnDef(agent.getOrigAnswer()), true, "Reused agents cannot fall back to a previous turn answer")
+  }
+
   exports.testFinalAnswerPreservesConsoleChartFence = function() {
     var agent = createAgent(), writes = [], originalWrite = io.writeFileString
     var fence = '```oafPrintChart\n{"data":[1,2]}\n```'
