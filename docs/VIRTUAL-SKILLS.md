@@ -33,7 +33,7 @@ Use when reviewing a proposed code change.
 Start the console with that directory as a dedicated library:
 
 ```bash
-opack exec mini-a useskillwiki=true skillwikiroot="$(pwd)/team-skills"
+opack exec mini-a useskillswiki=true skillwikiroot="$(pwd)/team-skills"
 ```
 
 Then verify discovery and read the procedure:
@@ -52,7 +52,7 @@ prefix. Plain `/skills` continues to list local skills.
 For a goal that should consult the library, ask explicitly:
 
 ```bash
-opack exec mini-a useskillwiki=true skillwikiroot="$(pwd)/team-skills" \
+opack exec mini-a useskillswiki=true skillwikiroot="$(pwd)/team-skills" \
   goal="Use skillwiki to find and read the review-change procedure, then explain its review steps."
 ```
 
@@ -317,20 +317,23 @@ unbounded search/open/read/related -- this is the same escape hatch
 
 ## Using it from mini-a itself
 
-Opt in with `useskillwiki=true`. With no further config, it reuses the wiki
+Opt in with `useskillswiki=true`. With no further config, it reuses the wiki
 already configured via `usewiki` (a wiki can hold ordinary knowledge pages and
 skill pages side by side). Point it at a separate skill-only library instead
 with `skillwikibackend`/`skillwikiroot`/`skillwikimounts`.
 
 ```bash
-opack exec mini-a useskillwiki=true usewiki=true wikiroot=/absolute/path/to/team-wiki goal="..."
+opack exec mini-a useskillswiki=true usewiki=true wikiroot=/absolute/path/to/team-wiki goal="..."
 ```
 
 This exposes a `skillwiki` tool to the LLM (operations: `context`, `search`,
 `recommend`, `open`, `read`, `related`, `compose`, `resolve`) through the same in-process
 `MiniUtilsTool` mechanism as the existing `wiki`/`graph` tools -- no MCP loopback
 required. `useskills=true` enables the separate local `skills` tool; it neither
-enables nor is required by `useskillwiki`.
+enables nor is required by `useskillswiki`.
+`useskillswiki=true` registers `skillwiki` even with `useutils=false` and
+`useskills=false`, without enabling other utility tools. Explicit `utilsallow`
+and `utilsdeny` filters still apply, including with `usestdutils=true`.
 
 ### Configuration
 
@@ -338,7 +341,7 @@ Related parameters for enabling, locating, and limiting the virtual skill librar
 
 | Parameter | Default | Purpose |
 |---|---|---|
-| `useskillwiki` | `false` | Must be set to `true` to enable the virtual skill library. |
+| `useskillswiki` | `false` | Must be set to `true` to enable the virtual skill library. |
 | `skillwikiroot` | `.` for a dedicated library | Filesystem root for a dedicated skill wiki; prefer an explicit absolute path. |
 | `skillwikibackend` | `fs` for a dedicated library | Select the backend for a dedicated skill wiki: `fs`, `s3`, `s3fs`, `es`, or `http`. |
 | `skillwikimounts` | Unset | Read-only mounts for a dedicated skill wiki, supplied as a SLON/JSON array using the `wikimounts` shape. |
@@ -351,7 +354,7 @@ If any dedicated `skillwiki*` source setting is supplied, Mini-A creates a separ
 manager instead of reusing `usewiki`. Its filesystem root defaults to `.` when
 omitted, so set `skillwikiroot` explicitly. A dedicated filesystem library does
 not require `usewiki=true`. To reuse an existing wiki and its mounts, enable
-`usewiki=true useskillwiki=true` and omit the dedicated source settings.
+`usewiki=true useskillswiki=true` and omit the dedicated source settings.
 
 The `skillwiki` interface provides retrieval operations only. It does not author
 pages or grant the tools declared in a skill's metadata. Maintain pages and build
@@ -382,7 +385,7 @@ From the console:
 ```
 
 These subcommands only activate when a skill library is actually configured
-(`useskillwiki=true`, or an active agent with one already set up) -- otherwise
+(`useskillswiki=true`, or an active agent with one already set up) -- otherwise
 `/skills <word>` falls through unchanged to the original local-skill
 prefix-filtered listing, so no existing user needs to change anything.
 
@@ -398,6 +401,10 @@ These are JSON arguments to the `skillwiki` tool, not console commands:
 {"operation":"read","ref":"wiki:postgres-index-review.md","section":"Diagnosis","maxChars":2000}
 {"operation":"compose","ref":"wiki:postgres-index-review.md","limit":4}
 ```
+
+`recommend` requires a non-empty string `task` and returns metadata, not skill
+content. To retrieve an existing reference, use `open` with `ref`, then `read`
+with `ref` and a bounded `section`.
 
 Call them individually and use returned references for subsequent calls. `compose`
 is available through `skillwiki` and the standard MCP server, but there is no
@@ -445,7 +452,7 @@ wired in, e.g. via `mcp-skills.yaml`'s `[mcp-skills]` prefix) looks like:
 | Symptom | What to check |
 |---|---|
 | `/skills` is empty or the prompt reports `skills=0` | These describe local skills. Use `/skills context` or `skillwiki` with `operation: "context"` to inspect the virtual library. |
-| `/skills search ...` behaves like a local prefix filter | The console has no configured virtual library. Start with `useskillwiki=true` and an explicit root, or reuse an enabled wiki. |
+| `/skills search ...` behaves like a local prefix filter | The console has no configured virtual library. Start with `useskillswiki=true` and an explicit root, or reuse an enabled wiki. |
 | `skillCount` is zero | Verify the root and mounts in the process/container that serves the request. Pages need skill front matter; local skill folders and YAML bundles are not automatically imported. |
 | Count is positive but search has no matches | Check the query, selected wiki and metadata filters. A count confirms recognized pages, not successful indexed retrieval. |
 | `skill-search-unavailable: ... v2-build-required` | Build the selected library's serving generation using a writable wiki manager. The read-only skill manager cannot build it. |
@@ -493,7 +500,7 @@ latency against your own corpus before sizing a deployment.
 | `mini-a-mcp-skills.js` | MCP bootstrap reusing `mini-a-mcp-wiki.js`'s init and restricted-retrieval engine. |
 | `mcps/mcp-skills.yaml` | Unrestricted MCP server. |
 | `mcps/mcp-skills-safe.yaml` | Restricted/opaque-reference MCP server. |
-| `mini-a.js` | `_initSkillWiki`, `useskillwiki`/`skillwiki*`/`skillsauto*`/`skillsmax*` args. |
+| `mini-a.js` | `_initSkillWiki`, `useskillswiki`/`skillwiki*`/`skillsauto*`/`skillsmax*` args. |
 | `mini-a-utils.js` | `MiniUtilsTool.prototype.skillwiki` (the LLM-facing tool) with bounded consultation. |
 | `mini-a-con.js` | `/skills search\|recommend\|open\|read\|related\|context` console subcommands. |
 | `tests/skills.js`, `tests/skills.yaml` | Unit + multi-mount integration tests, including safe-mode opaque-reference behavior. |
@@ -508,7 +515,7 @@ ojob mini-a.yaml dream=true usewiki=true wikiroot=/absolute/path/to/team-skills 
   wikiaccess=rw wikiretrievalv2=true dreamwikimode=reindex \
   wikilexical="(language: english, ngrams: true)"
 
-opack exec mini-a useskillwiki=true skillwikiroot=/absolute/path/to/team-skills \
+opack exec mini-a useskillswiki=true skillwikiroot=/absolute/path/to/team-skills \
   wikiretrievalv2=true wikilexical="(language: english, ngrams: true)"
 ```
 
@@ -517,7 +524,7 @@ selected library using its effective configuration.
 
 `wikiretrievalv2=true` and `wikiretrievalconfig` reach the shared wiki manager.
 CLI, console and web launchers also pass these settings to a dedicated
-`useskillwiki=true skillwikiroot=...` manager. Build its serving generation
+`useskillswiki=true skillwikiroot=...` manager. Build its serving generation
 explicitly with a writable wiki manager before using that read-only skill
 library; `wikitelemetry=true` records aggregate restricted outcomes in memory
 for read-only MCP servers. Restricted calls consume quotas and one-shot

@@ -8308,7 +8308,7 @@ MiniA.prototype._initWiki = function(args) {
 // at a separate skill-only library while still using usewiki for team knowledge.
 MiniA.prototype._initSkillWiki = function(args) {
   this._skillWikiManager = __
-  if (toBoolean(args.useskillwiki) !== true) return
+  if (toBoolean(args.useskillswiki) !== true) return
   try {
     var hasDedicatedConfig = isString(args.skillwikiroot) || isString(args.skillwikibackend) || isDef(args.skillwikimounts)
     if (!hasDedicatedConfig && isObject(this._wikiManager)) {
@@ -10948,8 +10948,10 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     if (includeSkillsTool !== true) {
       methodNames = methodNames.filter(function(name) { return name !== "skills" })
     }
-    if (includeSkillsTool === true && args.useutils !== true) {
-      methodNames = methodNames.filter(function(name) { return name === "skills" })
+    if ((includeSkillsTool === true || toBoolean(args.useskillswiki) === true) && args.useutils !== true) {
+      methodNames = methodNames.filter(function(name) {
+        return (includeSkillsTool && name === "skills") || (toBoolean(args.useskillswiki) === true && name === "skillwiki")
+      })
     }
     if (this._supportsConsoleUserInput(args) !== true) {
       methodNames = methodNames.filter(function(name) { return name !== "userInput" })
@@ -10958,7 +10960,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     if (toBoolean(args.usewiki) !== true || !isObject(this._wikiManager)) {
       methodNames = methodNames.filter(function(name) { return name !== "wiki" })
     }
-    if (toBoolean(args.useskillwiki) !== true || !isObject(this._skillWikiManager)) {
+    if (toBoolean(args.useskillswiki) !== true || !isObject(this._skillWikiManager)) {
       methodNames = methodNames.filter(function(name) { return name !== "skillwiki" })
     }
     if (toBoolean(args.useasciiviz) !== true || supportsConsoleDisplay !== true) {
@@ -10988,7 +10990,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     if (methodNames.indexOf("skills") < 0) this._availableSkills = []
     var _STD_ALIAS_NAMES = ["read", "glob", "grep", "webfetch", "question", "skill", "todowrite", "apply_patch"]
     if (useStdUtils) {
-      var stdVisible = ["readDocument", "inspectImage", "init", "filesystemModify", "mathematics", "timeUtilities", "pathUtilities", "filesystemBatch", "validationUtilities", "systemInfo", "memoryStore", "showMessage", "markdownFiles", "wiki", "printChart"].concat(_STD_ALIAS_NAMES)
+      var stdVisible = ["readDocument", "inspectImage", "init", "filesystemModify", "mathematics", "timeUtilities", "pathUtilities", "filesystemBatch", "validationUtilities", "systemInfo", "memoryStore", "showMessage", "markdownFiles", "wiki", "skillwiki", "printChart"].concat(_STD_ALIAS_NAMES)
       var stdMap = {}
       stdVisible.forEach(function(n) { stdMap[n] = true })
       methodNames = methodNames.filter(function(name) { return stdMap[name] === true })
@@ -14044,6 +14046,11 @@ MiniA.prototype._getToolSchemaSummary = function(tool, options) {
   var paramLimit = summaryMode === "full" ? paramNames.length : summaryMode === "standard" ? 3 : 2
   var requiredNames = paramNames.filter(function(name) { return requiredList.indexOf(name) >= 0 })
   var optionalNames = paramNames.filter(function(name) { return requiredList.indexOf(name) < 0 })
+  if (info.name === "skillwiki" && summaryMode !== "full") {
+    var preferredNames = ["operation", "ref", "query"]
+    optionalNames = preferredNames.filter(function(name) { return optionalNames.indexOf(name) >= 0 })
+      .concat(optionalNames.filter(function(name) { return preferredNames.indexOf(name) < 0 }))
+  }
   var displayedNames = summaryMode === "full" ? paramNames : requiredNames.concat(optionalNames.slice(0, paramLimit))
 
   displayedNames.forEach(paramName => {
@@ -15762,7 +15769,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "wikiretrievalv2", "wikiretrievalconfig", "wikisourceurl", "wikisourcefield", "wikisourceinline", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphmounts", "wikimountgraphttlms", "wikigraphcross", "wikigraphcrossjoin", "wikigraphcrosscap", "wikigraphcrossdepth", "wikigraphcrossmaxdf", "wikigraphcrossminkeylen", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
     "dreamwikimode", "dreammemorymode", "dreamwikidryrun", "dreamwikiapproval", "dreamwikireorg",
     "dreamwikiminpages", "dreamwikimaxdepth", "dreamwikilintresultlimit", "dreamwikisurgical", "wikilintresultlimit", "dreamreport",
-    "useskillwiki", "skillwikibackend", "skillwikiroot", "skillwikimounts", "skillsautosearch", "skillsautolimit", "skillsmaxloaded", "skillsmaxchars"
+    "useskillswiki", "skillwikibackend", "skillwikiroot", "skillwikimounts", "skillsautosearch", "skillsautolimit", "skillsmaxloaded", "skillsmaxchars"
   ].forEach(function(name) {
     if (!isDef(name)) return
     var normalized = String(name).trim().toLowerCase()
@@ -16964,7 +16971,7 @@ MiniA.prototype.init = function(args) {
         aggregatedMcpConfigs = aggregatedMcpConfigs.concat(pluginMcpConfigs)
       }
 
-      if (args.useutils === true || args.useskills === true) {
+      if (args.useutils === true || args.useskills === true || args.useskillswiki === true) {
         var utilsMcpConfig = this._createUtilsMcpConfig(args)
         if (isMap(utilsMcpConfig)) aggregatedMcpConfigs.push(utilsMcpConfig)
       }
@@ -18088,7 +18095,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (args.memorysearchbudget < 1) args.memorysearchbudget = 1200
     args.memorypersistevery = _$(args.memorypersistevery, "args.memorypersistevery").isNumber().default(1)
     if (args.memorypersistevery < 1) args.memorypersistevery = 1
-    args.useskillwiki = _$(toBoolean(args.useskillwiki), "args.useskillwiki").isBoolean().default(false)
+    args.useskillswiki = _$(toBoolean(args.useskillswiki), "args.useskillswiki").isBoolean().default(false)
     args.skillwikibackend = _$(args.skillwikibackend, "args.skillwikibackend").isString().default(__)
     args.skillwikiroot = _$(args.skillwikiroot, "args.skillwikiroot").isString().default(__)
     args.skillsautosearch = _$(toBoolean(args.skillsautosearch), "args.skillsautosearch").isBoolean().default(false)

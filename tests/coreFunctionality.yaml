@@ -1,4 +1,14 @@
 jobs:
+- name: MiniA Core Tests::SkillWikiPromptGuidance
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testSkillWikiPromptGuidance
+
+- name: MiniA Core Tests::SkillWikiIndependentRegistration
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testSkillWikiIndependentRegistration
+
 - name: MiniA Core Tests::FlattenedBuiltInDispatchReplay
   from: MiniA Core Tests::Init
   to: oJob Test
@@ -1135,6 +1145,7 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Core Tests::SkillWikiPromptGuidance
 - MiniA Core Tests::FlattenedBuiltInDispatchReplay
 - MiniA Core Tests::EntryPointFinalAnswerParity
 - MiniA Core Tests::JsonModeRebuildsBothToolWrappers
@@ -1215,6 +1226,7 @@ todo:
 - MiniA Core Tests::SlimToolMetaForProfileTrimsDescriptionsByProfile
 - MiniA Core Tests::CreateUtilsMcpConfigShrinksSchemasForMinimalProfile
 - MiniA Core Tests::UtilsMcpSkillsToggle
+- MiniA Core Tests::SkillWikiIndependentRegistration
 - MiniA Core Tests::SkillWikiMetadataRequiresContextForStatus
 - MiniA Core Tests::AutoDelegationSummaryDoesNotInferSkillWikiState
 - MiniA Core Tests::UtilsMcpConsoleOnlyToolsToggle

@@ -2,6 +2,10 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA Skills Tests::RegisteredRetrieval
+  to: oJob Test
+  exec: args.func = require("tests/skills.js").testSkillWikiRegisteredRetrieval
+
 - name: MiniA Skills Tests::MetadataFullFrontmatterParses
   to  : oJob Test
   exec: args.func = require("tests/skills.js").testSkillMetadataFullFrontmatterParses
@@ -91,6 +95,7 @@ jobs:
   exec: args.func = require("tests/skills.js").testSkillRestrictedRejectsTooShortQuery
 
 todo:
+- MiniA Skills Tests::RegisteredRetrieval
 - MiniA Skills Tests::MetadataFullFrontmatterParses
 - MiniA Skills Tests::MetadataMissingOptionalFieldsDefaultsGracefully
 - MiniA Skills Tests::SearchDefaultTypeFilterExcludesOrdinaryPages

@@ -1901,7 +1901,7 @@ MiniUtilsTool.prototype.wiki = function(params) {
  * wiki-backed collection of skill documents that stays out of the normal local
  * skill list and is paged in on demand: search/recommend return compact metadata
  * only, open() adds headings/requirements without the body, and read() returns one
- * bounded section at a time. Requires useskillwiki=true.
+ * bounded section at a time. Requires useskillswiki=true.
  * </odoc>
  */
 MiniUtilsTool.prototype.skillwiki = function(params) {
@@ -1909,7 +1909,7 @@ MiniUtilsTool.prototype.skillwiki = function(params) {
   try {
     this._ensureInitialized()
     var wm = isObject(this._skillWikiManager) ? this._skillWikiManager : __
-    if (!isObject(wm)) return "[ERROR] Skill wiki is not configured. Set useskillwiki=true and skillwikiroot (or enable usewiki so the skill library can reuse that wiki)."
+    if (!isObject(wm)) return "[ERROR] Skill wiki is not configured. Set useskillswiki=true and skillwikiroot (or enable usewiki so the skill library can reuse that wiki)."
     if (typeof MiniAWikiSkillProvider !== "function") loadLib("mini-a-skills.js")
     if (!isObject(this._skillProvider) || this._skillProvider._wm !== wm) this._skillProvider = new MiniAWikiSkillProvider(wm, {})
     var provider = this._skillProvider
@@ -1921,7 +1921,12 @@ MiniUtilsTool.prototype.skillwiki = function(params) {
 
     if (op === "context")   return provider.context(params)
     if (op === "search")    return provider.search(params)
-    if (op === "recommend") return provider.recommend(params)
+    if (op === "recommend") {
+      if (!isString(params.task) || params.task.trim().length === 0) {
+        return "[ERROR] operation='recommend' requires task as a non-empty string; to open an existing reference use operation='open' with ref."
+      }
+      return provider.recommend(params)
+    }
 
     var ref = isString(params.ref) ? params.ref : params.path
     if ((op === "open" || op === "read" || op === "related" || op === "compose" || op === "resolve") && (!isString(ref) || ref.length === 0)) {
@@ -4887,7 +4892,7 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     skillwiki: {
       name       : "skillwiki",
-      description: "The virtual skill library is enabled whenever this tool is present; for questions about whether virtual skills are configured, active, available, or how many exist, call operation='context' and report its skillCount instead of inferring from local skills or the tool inventory. Search, inspect and consult the library with operation='search' or 'recommend' -- these return compact metadata only (name/title/summary/tags/risk/ref), never a full skill. Use 'open' to inspect a candidate's headings/requirements/risk before 'read'-ing one bounded section at a time (section=). 'compose' returns only explicitly declared prerequisite metadata and never executes it. Bounded by skillsmaxloaded/skillsmaxchars per run.",
+      description: "Virtual skill library enabled whenever this tool is present; verify counts with operation='context', not local skills; search(query)/recommend(task) return metadata only; use open(ref), then bounded read(ref,section). 'compose' returns declared prerequisite metadata only, never executes it. Bounded by skillsmaxloaded/skillsmaxchars per run.",
       inputSchema: {
         type      : "object",
         properties: {

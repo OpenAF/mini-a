@@ -438,7 +438,7 @@ Mini-A ships with complementary components:
 | `useutils` | Auto-register Mini Utils Tool utilities as an MCP connection (`init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`, [`readDocument` and `inspectImage`](USAGE.md#reading-documents-and-images), plus console-only helpers like `userInput` when running `mini-a-con`) | `false` |
 | `usestdutils` | When `useutils=true`, expose standard aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names | `false` |
 | `useskills` | Expose the Mini Utils `skills` operation; when `useutils=false`, only the skills tool is registered | `false` |
-| `useskillwiki` | Enable the on-demand [virtual skill library](docs/VIRTUAL-SKILLS.md); separate from local `useskills` | `false` |
+| `useskillswiki` | Enable the on-demand [virtual skill library](docs/VIRTUAL-SKILLS.md); separate from local `useskills` | `false` |
 | `skillwikiroot` | Directory for a dedicated virtual skill library; omit dedicated source settings to reuse `usewiki` | - |
 | `utilsroot` | Root directory for Mini Utils Tool file operations (only when `useutils=true`) | `.` |
 | `utilsallow` | Comma-separated allowlist of Mini Utils Tool names to expose (only when `useutils=true`) | unset |
@@ -599,7 +599,7 @@ Wiki folders become browsable sub-wikis when they contain `index.md`. Agents can
 | `usemaps` | Encourage Leaflet-based interactive map outputs for geographic data | `false` |
 | `usemath` | Encourage LaTeX-style math formulas (`$...$`, `$$...$$`) for KaTeX rendering in the web UI | `false` |
 | `usestream` | Enable real-time token streaming as LLM generates responses | `false` |
-| `mode` | Apply preset from `mini-a-modes.yaml`, `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` (supports `include` inheritance) | - |
+| `mode` | Apply preset from `mini-a-modes.yaml`, `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` (supports comma-separated names, later presets win, and `include` inheritance) | - |
 | `modelman` | Launch the interactive model definitions manager | `false` |
 | `memoryman` | Launch the interactive working-memory manager (inspect/list/search/delete/prune global+session stores) | `false` |
 | `workermode` | Launch the Worker API server (`mini-a-worker.yaml`) from the console entrypoint | `false` |

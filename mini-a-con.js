@@ -238,26 +238,32 @@ try {
       }
 
       var keys = Object.keys(presets)
-      var resolvedKey = resolveModeKey(modeName)
-
-      if (isUnDef(resolvedKey)) {
-        logWarn(`Mode '${modeName}' not found. Available modes: ${keys.join(", ")}`)
-        if (_knownModelTypes[_modeLower] === true) {
-          logWarn(`'${modeName}' looks like a model type, not a Mini-A mode preset. Use a preset name such as mode=chatbot, and configure the model separately (e.g. model=... or OAF_MODEL).`)
-        }
+      var modeNames = normalizeIncludeList(modeName)
+      if (modeNames.length === 0) {
         args.__modeApplied = true
         return
       }
-
-      var resolvedPreset
+      var resolvedKeys = []
+      var resolvedPreset = { params: {}, description: "", includes: [] }
       try {
-        resolvedPreset = resolveModeDefinition(resolvedKey, [])
+        modeNames.forEach(function(name) {
+          var modeKey = resolveModeKey(name)
+          if (isUnDef(modeKey)) throw "Mode '" + name + "' not found. Available modes: " + keys.join(", ")
+          var preset = resolveModeDefinition(modeKey, [])
+          resolvedKeys.push(modeKey)
+          resolvedPreset.params = merge(resolvedPreset.params, preset.params)
+          if (modeNames.length === 1) {
+            resolvedPreset.description = preset.description
+            resolvedPreset.includes = preset.includes
+          }
+        })
       } catch(e) {
         var modeErr = (isDef(e) && isString(e.message)) ? e.message : e
-        logWarn(`Failed to resolve mode '${resolvedKey}': ${modeErr}`)
+        logWarn(`Failed to resolve mode '${modeName}': ${modeErr}`)
         args.__modeApplied = true
         return
       }
+      var resolvedKey = resolvedKeys.join(",")
 
       var applied = []
       var skipped = []
@@ -680,7 +686,7 @@ try {
     wikigraphfalkorgraph: { type: "string", description: "FalkorDB graph name for wiki graph." },
     wikigraphfalkoruser: { type: "string", description: "FalkorDB username for wiki graph." },
     wikigraphfalkorpass: { type: "string", description: "FalkorDB password for wiki graph." },
-    useskillwiki   : { type: "boolean", default: false, description: "Enable the virtual skill library (docs/VIRTUAL-SKILLS.md). Reuses usewiki's wiki when no skillwiki* config is given." },
+    useskillswiki   : { type: "boolean", default: false, description: "Enable the virtual skill library (docs/VIRTUAL-SKILLS.md). Reuses usewiki's wiki when no skillwiki* config is given." },
     skillwikibackend: { type: "string", description: "Skill library backend: fs, s3, s3fs, es, or http. Defaults to fs. Only needed for a dedicated skill wiki separate from usewiki." },
     skillwikiroot  : { type: "string", description: "Root directory for a dedicated skill library (fs backend). Only needed when not reusing usewiki's wiki." },
     skillwikimounts: { type: "string", description: "SLON/JSON array of read-only skill-library mounts, same shape as wikimounts. Only used with a dedicated skill wiki." },
@@ -747,7 +753,7 @@ try {
     mcp            : { type: "string", description: "MCP connection definition (SLON/JSON)" },
     agent          : { type: "string", description: "Markdown agent profile path or inline content with YAML metadata to prefill args" },
     agentfile      : { type: "string", description: "Legacy alias for agent" },
-    mode           : { type: "string", description: "Apply one of the presets defined in mini-a-modes." },
+    mode           : { type: "string", description: "Apply comma-separated presets from mini-a-modes (later presets win)." },
     goal           : { type: "string", description: "Goal text to execute." },
     knowledge      : { type: "string", description: "Extra knowledge or context" },
     libs           : { type: "string", description: "Comma-separated libraries to load" },
@@ -960,7 +966,7 @@ try {
     print(colorifyText("Mini-A (version " + $from($m4a(getOPackLocalDB())).equals("name", "mini-a").at(0).version + ") options:\n", "BOLD"))
 
     const options = [
-      { option: "mode=<name>", description: "Apply one of the presets defined in mini-a-modes." },
+      { option: "mode=<name[,name...]>", description: "Apply comma-separated presets from mini-a-modes (later presets win)." },
       { option: "libs=<list>", description: "Comma-separated libs to load before launching." },
       { option: "goal=<text>", description: "Execute a single goal in CLI mode and exit when done." },
       { option: "agent=<path|markdown>", description: "Run with an agent profile in CLI mode and exit instead of opening the console." },
@@ -1553,7 +1559,7 @@ try {
   function getConsoleSkillWikiManager() {
     var swm = isObject(activeAgent) && isObject(activeAgent._skillWikiManager) ? activeAgent._skillWikiManager : __
     if (isObject(swm)) return swm
-    if (toBoolean(sessionOptions.useskillwiki) !== true) return __
+    if (toBoolean(sessionOptions.useskillswiki) !== true) return __
     var hasDedicated = isString(sessionOptions.skillwikiroot) || isString(sessionOptions.skillwikibackend) || isDef(sessionOptions.skillwikimounts)
     if (!hasDedicated) return getConsoleWikiManager()
     try {
@@ -6227,7 +6233,7 @@ try {
   function printRemoteSkills(subcmdRaw) {
     var swm = getConsoleSkillWikiManager()
     if (!isObject(swm)) {
-      print(colorifyText("Skill library is not enabled. Start with useskillwiki=true (reuses usewiki's wiki, or set skillwikiroot=<path>).", hintColor))
+      print(colorifyText("Skill library is not enabled. Start with useskillswiki=true (reuses usewiki's wiki, or set skillwikiroot=<path>).", hintColor))
       return
     }
     if (typeof __miniASkillSearch !== "function") loadLib("mini-a-skills.js")

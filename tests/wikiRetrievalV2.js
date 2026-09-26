@@ -2562,7 +2562,7 @@
       agent = Object.create(MiniA.prototype)
       agent.fnI = function() {}
       agent._wikiManager = __
-      agent._initSkillWiki({useskillwiki:true,skillwikiroot:String(dir),wikiretrievalv2:true,wikiretrievalconfig:"(passageChars: 256)",wikitelemetry:true})
+      agent._initSkillWiki({useskillswiki:true,skillwikiroot:String(dir),wikiretrievalv2:true,wikiretrievalconfig:"(passageChars: 256)",wikitelemetry:true})
       ow.test.assert(isObject(agent._skillWikiManager),true,"dedicated agent skill manager initializes")
       ow.test.assert(isObject(agent._skillWikiManager._retrievalV2),true,"dedicated agent skill manager uses v2")
       ow.test.assert(agent._skillWikiManager._config.wikitelemetry,true,"dedicated agent skill manager receives telemetry")
@@ -2570,9 +2570,9 @@
       ow.test.assert(isArray(skillResult.evidence) && skillResult.evidence.length > 0,true,"dedicated agent skill manager reads published evidence: " + stringify(skillResult.sources))
       var cli = io.readFileString("mini-a.yaml"), web = io.readFileYAML("mini-a-web.yaml")
       ow.test.assert(/wikitelemetry\s*:\s*wikitelemetry/.test(cli),true,"CLI forwards telemetry to MiniA")
-      ow.test.assert(/useskillwiki\s*:\s*useskillwiki/.test(cli),true,"CLI forwards virtual skill-library selection")
+      ow.test.assert(/useskillswiki\s*:\s*useskillswiki/.test(cli),true,"CLI forwards virtual skill-library selection")
       var webInit = web.jobs.filter(function(job){return job.name === "Init"})[0]
-      ow.test.assert(isString(webInit.check.in.wikiretrievalv2) && isString(webInit.check.in.wikitelemetry) && isString(webInit.check.in.useskillwiki),true,"web startup validates v2, telemetry and skill flags")
+      ow.test.assert(isString(webInit.check.in.wikiretrievalv2) && isString(webInit.check.in.wikitelemetry) && isString(webInit.check.in.useskillswiki),true,"web startup validates v2, telemetry and skill flags")
       var safe = io.readFileString("mcps/mcp-skills-safe.yaml")
       ow.test.assert((safe.match(/__miniAMcpWikiObserveRestricted\(/g)||[]).length,4,"restricted skill tools record aggregate outcome events")
       load("mini-a-mcp-skills.js")

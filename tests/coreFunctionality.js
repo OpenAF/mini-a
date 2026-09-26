@@ -1794,10 +1794,81 @@
     ow.test.assert(isDef(enabledWithUtils.options.fns.filesystemQuery), true, "Should keep utility tools when useutils=true")
   }
 
+  exports.testSkillWikiIndependentRegistration = function() {
+    var root = String(io.createTempFile("mini-a-skill-registration-", ""))
+    io.rm(root); io.mkdir(root)
+    try {
+      ;[false, true].forEach(function(std) {
+        var agent = createAgent()
+        agent.fnI = function() {}
+        try {
+          var args = { goal: "Inspect virtual skills", useskillswiki: true, skillwikiroot: root,
+            useutils: false, useskills: false, usestdutils: std, useshell: false,
+            usetools: false, usetoolslc: false, usememory: false }
+          agent.init(args)
+          ow.test.assert(agent.mcpToolNames.indexOf("skillwiki") >= 0, true, "Virtual skills alone must register their tool, including standard-utils mode")
+          ow.test.assert(agent.mcpToolNames.indexOf("filesystemQuery") < 0 && agent.mcpToolNames.indexOf("read") < 0 && agent.mcpToolNames.indexOf("skills") < 0, true, "Virtual skills must not enable ordinary utilities or local skills")
+          var cfg = agent._createUtilsMcpConfig(args)
+          ow.test.assert(Object.keys(cfg.options.fns).join(","), "skillwiki", "Only the opted-in virtual skill tool is exposed")
+          var result = cfg.options.fns.skillwiki({ operation: "context" })
+          ow.test.assert(isUnDef(result.error) && isArray(result.content), true, "Registered virtual skill tool executes context against its manager")
+          var both = agent._createUtilsMcpConfig({ useskills: true, useskillswiki: true, useutils: false })
+          ow.test.assert(Object.keys(both.options.fns).sort().join(","), "skills,skillwiki", "Local and virtual skills coexist without general utilities")
+          var denied = agent._createUtilsMcpConfig(merge(args, { utilsdeny: "skillwiki" }))
+          ow.test.assert(isUnDef(denied), true, "Explicit tool deny still wins")
+        } finally { agent._stopAgentResources() }
+      })
+      var disabled = createAgent()
+      disabled.fnI = function() {}
+      try {
+        disabled.init({ goal: "No skills", useutils: false, useskills: false, useskillswiki: false })
+        ow.test.assert(disabled.mcpToolNames.indexOf("skillwiki") < 0, true, "Virtual skill tool stays disabled by default")
+      } finally { disabled._stopAgentResources() }
+    } finally { io.rm(root) }
+  }
+
+  exports.testSkillWikiPromptGuidance = function() {
+    var agent = createAgent()
+    agent._skillWikiManager = {}
+    // Pre-repair balanced entry captured identically in debug.json and debuglc.json.
+    var previousBalancedEntry = "• skillwiki: The virtual skill library is enabled whenever this tool is present; for questions about whether virtual skills are configured, active, available, or how many exist, call operation='context' and report its skillCount instead of inferring from local skills or the tool inventory. Search, inspect and consult the library with operation='search' or 'recommend' -- these return compact metadata only (name/title/summary/tags/risk/ref), never a full skill. (params: appliesTo, capabilities, compatibility, ...)"
+    ;["minimal", "balanced", "verbose"].forEach(function(profile) {
+      var cfg = agent._createUtilsMcpConfig({ useutils: false, useskillswiki: true, promptprofile: profile })
+      var meta = cfg.options.fnsMeta.skillwiki
+      var summary = agent._getToolSchemaSummary(meta, { profile: profile, toolCount: 1 })
+      if (profile !== "verbose") {
+        ow.test.assert(summary.compactParamsText, profile === "minimal" ? "operation, ref, ..." : "operation, ref, query, ...", "Keep useful parameters within existing limits")
+        ow.test.assert(summary.params.length, profile === "minimal" ? 2 : 3, "Do not expand parameter limits")
+      } else {
+        ow.test.assert(summary.params.map(function(p) { return p.name }).join(","), Object.keys(meta.inputSchema.properties).sort().join(","), "Full summaries retain alphabetical ordering")
+      }
+      var unrelated = merge({}, meta)
+      unrelated.name = "unrelated"
+      var other = agent._getToolSchemaSummary(unrelated, { profile: profile, toolCount: 1 })
+      if (profile !== "verbose") ow.test.assert(other.compactParamsText, profile === "minimal" ? "appliesTo, capabilities, ..." : "appliesTo, capabilities, compatibility, ...", "Other tool ordering is unchanged")
+      var rendered = renderAgentPrompt(agent, { promptProfile: profile, actionsdesc: [summary], actionsList: "skillwiki", actionFieldValues: "think | skillwiki | final", toolCount: 1 })
+      agent._systemInst = rendered.prompt
+      var sent = {}
+      agent.llm = { withInstructions: function(text) { sent.main = text; return this } }
+      agent.lc_llm = { withInstructions: function(text) { sent.lowCost = text; return this } }
+      agent._use_lc = true
+      agent._applySystemInstructions({})
+      ;["main", "lowCost"].forEach(function(tier) {
+        var entry = sent[tier].split("\n").filter(function(line) { return line.indexOf("• skillwiki:") === 0 })[0]
+        ow.test.assert(isString(entry), true, "Render actual JSON-action entry for " + tier)
+        ;["enabled", "operation='context'", "local skills", "search(query)", "recommend(task)", "metadata only", "open(ref)", "bounded read(ref,section)"].forEach(function(text) {
+          ow.test.assert(entry.indexOf(text) >= 0, true, profile + " " + tier + " retains " + text)
+        })
+        if (profile !== "verbose") ow.test.assert(entry.length <= previousBalancedEntry.length, true, "Rendered entry stays within previous balanced size")
+        if (tier === "main") print("skillwiki " + profile + " entry: " + entry.length + " chars (previous balanced: " + previousBalancedEntry.length + ")")
+      })
+    })
+  }
+
   exports.testSkillWikiMetadataRequiresContextForStatus = function() {
     var agent = createAgent()
     agent._skillWikiManager = {}
-    var config = agent._createUtilsMcpConfig({ useutils: true, useskillwiki: true, promptprofile: "minimal" })
+    var config = agent._createUtilsMcpConfig({ useutils: true, useskillswiki: true, promptprofile: "minimal" })
     ow.test.assert(isMap(config) && isMap(config.options.fnsMeta.skillwiki), true, "Enabled skill wiki should expose metadata")
     var description = config.options.fnsMeta.skillwiki.description
     ow.test.assert(description.indexOf("enabled whenever this tool is present") >= 0, true, "Tool presence should explicitly prove that the virtual library is enabled")

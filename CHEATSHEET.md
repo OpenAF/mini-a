@@ -1138,7 +1138,7 @@ and skill pages side by side.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `useskillwiki` | boolean | `false` | Must be set to `true` to enable the virtual skill library (exposes the `skillwiki` tool and `/skills context\|search\|recommend\|open\|read\|related` console subcommands) |
+| `useskillswiki` | boolean | `false` | Must be set to `true` to enable the virtual skill library (exposes the `skillwiki` tool and `/skills context\|search\|recommend\|open\|read\|related` console subcommands) |
 | `skillwikibackend` | string | `fs` for a dedicated library | Select the backend for a dedicated skill wiki: `fs`, `s3`, `s3fs`, `es`, or `http` |
 | `skillwikiroot` | string | `.` for a dedicated library | Filesystem root for a dedicated skill wiki; prefer an explicit absolute path |
 | `skillwikimounts` | SLON/JSON | - | Read-only mounts for a dedicated skill wiki, using the same array shape as `wikimounts` |
@@ -1147,7 +1147,7 @@ and skill pages side by side.
 | `skillsmaxloaded` | number | `3` | Max distinct skills `open()`-ed per agent run |
 | `skillsmaxchars` | number | `12000` | Max skill-body characters `read()` may return per agent run |
 
-To reuse an existing wiki and its mounts, set `usewiki=true useskillwiki=true`
+To reuse an existing wiki and its mounts, set `usewiki=true useskillswiki=true`
 and omit `skillwikibackend`, `skillwikiroot`, and `skillwikimounts`. Supplying any
 of these source settings creates a dedicated library. `useskills` controls the
 separate local skills tool and is not required for virtual skills. Dedicated
@@ -1156,10 +1156,10 @@ remote libraries use the normal `wiki*` connection and artifact parameters; see
 
 ```bash
 # Reuse an existing wiki as the skill library
-mini-a.sh useskillwiki=true usewiki=true wikiroot=/shared/wiki goal="..."
+mini-a.sh useskillswiki=true usewiki=true wikiroot=/shared/wiki goal="..."
 
 # Dedicated skill-only library
-mini-a.sh useskillwiki=true skillwikiroot=./skills goal="..."
+mini-a.sh useskillswiki=true skillwikiroot=./skills goal="..."
 
 # Console
 mini-a ➤ /skills search postgres index tuning

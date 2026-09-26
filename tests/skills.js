@@ -66,6 +66,59 @@
     }, "# Procedure\nInspect declared prerequisites before choosing an operation.\n")
   }
 
+  exports.testSkillWikiRegisteredRetrieval = function() {
+    load("mini-a.js")
+    var dir = mkTmp()
+    var agent = new MiniA()
+    try {
+      basicSkillWiki(dir)
+      agent._skillWikiManager = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
+      var cfg = agent._createUtilsMcpConfig({ useutils: false, useskillswiki: true, skillsmaxloaded: 1, skillsmaxchars: 200 })
+      var call = function(params) {
+        var response = cfg.options.fns.skillwiki(params)
+        var text = response.content[0].text
+        if (text.indexOf("[ERROR]") === 0) {
+          ow.test.assert(response.error, text, "Registered wrapper preserves error convention")
+          return text
+        }
+        return jsonParse(text)
+      }
+      ;[
+        { operation: "recommend", ref: "wiki:mini-a/command-lines.md" },
+        { operation: "recommend", appliesTo: "mini-a-command-lines" },
+        { operation: "recommend", task: "" },
+        { operation: "recommend", task: " \t\n" },
+        { operation: "recommend", task: 42 },
+        { operation: "recommend", task: {} },
+        { operation: "recommend", task: null }
+      ].forEach(function(params) {
+        var result = call(params)
+        ow.test.assert(isString(result) && result.indexOf("[ERROR]") === 0, true, "Invalid recommendations return explicit errors")
+        ow.test.assert(result.indexOf("requires task") >= 0 && result.indexOf("operation='open'") >= 0, true, "Error explains task and existing-ref recovery")
+      })
+      var recommended = call({ operation: "recommend", task: "diagnose slow query" })
+      ow.test.assert(isArray(recommended) && recommended.length > 0, true, "Valid recommendation still works")
+      var hits = call({ operation: "search", query: "postgres" })
+      ow.test.assert(isArray(hits) && hits.length > 0, true, "Search returns candidates")
+      ow.test.assert(isUnDef(hits[0].body), true, "Search only returns metadata")
+      var ref = hits[0].ref
+      var opened = call({ operation: "open", ref: ref })
+      ow.test.assert(isUnDef(opened.error) && isUnDef(opened.body), true, "Open inspects metadata without content")
+      ow.test.assert(isUnDef(call({ operation: "open", ref: ref }).error), true, "Reopening the same reference costs no new slot")
+      ow.test.assert(call({ operation: "open", ref: "wiki:kafka-consumer-rebalance.md" }), "[ERROR] skills-max-loaded-exceeded", "Distinct skill limit preserved")
+      var body = call({ operation: "read", ref: ref, section: "Diagnosis", maxChars: 200 })
+      ow.test.assert(body.body.indexOf("EXPLAIN ANALYZE") >= 0 && body.body.indexOf("covering index") < 0, true, "Read only requested section")
+      ow.test.assert(body.chars <= 200, true, "Read respects character bound")
+      for (var i = 0; i < 10; i++) call({ operation: "read", ref: ref, section: "Diagnosis", maxChars: 200 })
+      ow.test.assert(call({ operation: "read", ref: ref }), "[ERROR] skills-max-chars-exceeded", "Existing cumulative loading guard remains active")
+      ow.test.assert(String(call({ operation: "write", ref: ref, content: "changed" })).indexOf("[ERROR]") === 0, true, "Tool remains retrieval only")
+      ow.test.assert(io.readFileString(dir + "/postgres-index-review.md").indexOf("EXPLAIN ANALYZE") >= 0, true, "Library content remains unchanged")
+    } finally {
+      agent._stopAgentResources()
+      try { io.rm(dir) } catch(e) {}
+    }
+  }
+
   // ── unit tests ────────────────────────────────────────────────────────────
 
   exports.testSkillMetadataFullFrontmatterParses = function() {

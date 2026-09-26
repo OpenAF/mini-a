@@ -99,7 +99,7 @@ mini-a extraskills=/path/to/shared-skills,/path/to/project-skills
 For a wiki-backed library, enable **virtual skills** separately:
 
 ```bash
-opack exec mini-a useskillwiki=true skillwikiroot=/absolute/path/to/team-skills
+opack exec mini-a useskillswiki=true skillwikiroot=/absolute/path/to/team-skills
 ```
 
 Use `/skills context` to check the library, `/skills search <query>` to discover
@@ -454,6 +454,14 @@ Key capabilities:
 Mini-A ships with reusable argument bundles so you can switch behaviors without remembering every flag. Pass `mode=<name>` with `opack exec mini-a`, `mini-a`, `mini-a.sh`, `mini-a.yaml`, or `mini-a-main.yaml` and the runtime will merge the corresponding preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) and optionally from `~/.openaf-mini-a_modes.yaml` and `~/.openaf-mini-a/modes.yaml` (custom modes override built-in ones, and `~/.openaf-mini-a/modes.yaml` overrides the legacy file when both exist) before applying any explicit flags you provide on the command line.
 
 Set `OAF_MINI_A_MODE=<name>` to pick a default preset when you do not supply `mode=` on the command line (helpful when using the `mini-a` alias). Explicit `mode=` arguments continue to take precedence over the environment variable.
+
+Pass a comma-separated list to combine presets directly, for example:
+
+```bash
+opack exec mini-a mode=shell,utils goal="your goal here"
+```
+
+`mode=a,b,c` merges presets in the same order as `include: [a, b, c]`: later presets override earlier values, including values inherited through `include`. Explicit CLI flags still win. Names are case-insensitive; whitespace and empty comma-separated entries are ignored. If any name or include cannot be resolved, no presets from the list are applied. `OAF_MINI_A_MODE` also accepts a comma-separated list.
 
 Modes can now inherit from other modes using `include`. Use `include: <mode>` (or an array / comma-separated list) to merge one or more base presets first, then override only the settings you need in the current mode.
 
@@ -1002,7 +1010,7 @@ Dynamic (runtime) mount management: `wiki op="attach" name=ext backend=fs root=/
 Graph runtime operations: `graph op="build|query|neighbors|path|communities|surprise|stats|export|falkor|retrieve|answer"` and in console `/graph ...`.
 
 For the Elasticsearch/OpenSearch wiki backend, there is no separate top-level `esurl=` runtime argument; use `wikiurl=` with `wikibackend=es`.
-- **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml), `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` to prefill a bundle of related flags
+- **`mode`** (string): Apply a preset or comma-separated list of presets from [`mini-a-modes.yaml`](mini-a-modes.yaml), `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` to prefill a bundle of related flags
 - **`agent`** (string): Path to a markdown agent profile (or inline markdown text) with YAML frontmatter metadata. Supported keys include `model`, `capabilities` (`useshell`, `readwrite`, `useutils`, `usetools`), `tools` (MCP entries such as `type: ojob`, `type: stdio` + `cmd`, `type: remote`, or `type: sse`), `constraints` (appended to `rules`), `knowledge`, `youare`, and `mini-a` (map of direct Mini-A arg overrides). When the profile uses Markdown front matter, any text after the closing `---` is used as the default `goal=` input unless you pass `goal=` explicitly. (`agentfile` remains a backward-compatible alias.)
 
 #### Dual-Model Controls
@@ -1262,7 +1270,7 @@ OpenAF if needed for image processing.
 - **`state`** (object|string): Initial structured state (JSON/SLON) injected before the first step and persisted across turns
 
 #### Mode Presets
-- **`mode`** (string): Shortcut for loading a preset argument bundle from [`mini-a-modes.yaml`](mini-a-modes.yaml), `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` (custom modes override built-in ones, and the new path overrides the legacy one when both exist). Presets are merged before explicit flags, so command-line overrides always win. Bundled configurations include:
+- **`mode`** (string): Shortcut for loading one or more comma-separated preset argument bundles from [`mini-a-modes.yaml`](mini-a-modes.yaml), `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` (custom modes override built-in ones, and the new path overrides the legacy one when both exist). Presets are merged before explicit flags, so command-line overrides always win. Bundled configurations include:
   - `shell` – Enables read-only shell access (`useshell=true`).
   - `shellrw` – Enables shell access with write permissions (`useshell=true readwrite=true`, includes `shell`).
   - `utils` – Enables utilities mode (`useutils=true mini-a-docs=true usetools=true`).
@@ -3062,7 +3070,7 @@ The `estimatedUSD` field is reserved for future cost estimation integration and 
 - **[Delegation Guide](docs/DELEGATION.md)** - Hierarchical task decomposition with local and remote delegation
 - **[What's New](docs/WHATS-NEW.md)** - Latest performance improvements and migration guide
 - **[MCP Documentation](mcps/README.md)** - Built-in MCP servers catalog
-- **[Virtual Skills](docs/VIRTUAL-SKILLS.md)** - Wiki-backed skill library: search/recommend/open/read a large skill corpus without loading it into context (`useskillwiki`, `mcp-skills.yaml`)
+- **[Virtual Skills](docs/VIRTUAL-SKILLS.md)** - Wiki-backed skill library: search/recommend/open/read a large skill corpus without loading it into context (`useskillswiki`, `mcp-skills.yaml`)
 - **[Creating MCPs](mcps/CREATING.md)** - Build custom MCP integrations
 - **[External MCPs](mcps/EXTERNAL-MCPS.md)** - Community MCP servers
 - **[Contributing Guide](CONTRIBUTING.md)** - Join the project

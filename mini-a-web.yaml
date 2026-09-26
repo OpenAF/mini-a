@@ -845,7 +845,7 @@ help:
     desc     : SLON/JSON array of read-only wiki mounts [{name, backend, root|bucket|prefix|url|...}]
     example  : "[{name: 'team', backend: 'fs', root: '/shared/team-wiki'}]"
     mandatory: false
-  - name     : useskillwiki
+  - name     : useskillswiki
     desc     : Enable the virtual skill library, reusing usewiki unless a dedicated skillwiki* source is given
     mandatory: false
   - name     : skillwikibackend
@@ -2103,7 +2103,7 @@ jobs:
       wikisourceinline: toBoolean().isBoolean().default(false)
       wikilintstaleddays: toNumber().isNumber().default(__)
       wikimounts     : isString().default(__)
-      useskillwiki   : toBoolean().isBoolean().default(false)
+      useskillswiki   : toBoolean().isBoolean().default(false)
       skillwikibackend: isString().default(__)
       skillwikiroot  : isString().default(__)
       skillwikimounts: isString().default(__)

@@ -1187,7 +1187,7 @@ help:
     desc     : SLON/JSON array of read-only wiki mounts [{name, backend, root|bucket|prefix|url|...}]
     example  : "[{name: 'team', backend: 'fs', root: '/shared/team-wiki'}]"
     mandatory: false
-  - name     : useskillwiki
+  - name     : useskillswiki
     desc     : Enable the virtual skill library, reusing usewiki unless a dedicated skillwiki* source is given
     mandatory: false
   - name     : skillwikibackend
@@ -1200,7 +1200,7 @@ help:
     desc     : SLON/JSON read-only mounts for a dedicated skill library
     mandatory: false
   - name     : mode
-    desc     : Apply one of the presets defined in mini-a-modes
+    desc     : Apply comma-separated presets from mini-a-modes (later presets win)
     example  : "chatbot"
     mandatory: false
   - name     : resume
@@ -1579,7 +1579,7 @@ jobs:
         wikisourceinline: wikisourceinline
         wikilintstaleddays: wikilintstaleddays
         wikimounts     : wikimounts
-        useskillwiki   : useskillwiki
+        useskillswiki   : useskillswiki
         skillwikibackend: skillwikibackend
         skillwikiroot  : skillwikiroot
         skillwikimounts: skillwikimounts
@@ -1866,7 +1866,7 @@ jobs:
       wikisourceinline: toBoolean.isBoolean.default(false)
       wikilintstaleddays: toNumber.isNumber.default(__)
       wikimounts     : isString.default(__)
-      useskillwiki   : toBoolean.isBoolean.default(false)
+      useskillswiki   : toBoolean.isBoolean.default(false)
       skillwikibackend: isString.default(__)
       skillwikiroot  : isString.default(__)
       skillwikimounts: isString.default(__)
