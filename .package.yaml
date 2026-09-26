@@ -137,6 +137,8 @@ files:
 - mcps/mcp-wiki-ops.yaml
 - mcps/mcp-wiki-safe.yaml
 - mcps/mcp-wiki.yaml
+- mini-a-absorb.js
+- mini-a-absorb.yaml
 - mini-a-capabilities.js
 - mini-a-common.js
 - mini-a-con.js
@@ -189,8 +191,8 @@ filesHash:
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   METRICS.md: d69659b54963e9437929d15bdd2038ef48e50ae4
-  README.md: fb5ee37230851062e8ef29ec0d3fc95b178fb28f
-  USAGE.md: 0bafc2b599ac36ee419803ccf5dc8690f30be9d1
+  README.md: 50eb725264aa2b14cd0714b88d1752ccd6b1eb08
+  USAGE.md: ad1907ec6994392421ebe04b06a3ae8798a5c6ff
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/AGENT-PLUGINS.md: af8f692ac4bc690ac9df180e86bb1a1307a5aae5
   docs/BACKEND-ENDPOINTS.md: 6e8e9693f28e24e8d8def4136901805e8bc864a8
@@ -260,15 +262,17 @@ filesHash:
   mcps/mcp-wiki-ops.yaml: 7288d863bea13e51c5a597441fc5c5c6c4d73929
   mcps/mcp-wiki-safe.yaml: 03af32b60e4336b8d8196c3ef237e14d5420f33f
   mcps/mcp-wiki.yaml: 2ce68bc5d3b164eefdabf760c6faaebc29f5a4fc
+  mini-a-absorb.js: f008e857a552633777a80ad9beb892f7b6848c9c
+  mini-a-absorb.yaml: f5c3895fc6175add22a40f33477dc81ddc325b1b
   mini-a-capabilities.js: 04d7a4564d782981bf0b97a65fbfc563a4b4d60c
   mini-a-common.js: 2feb6045996df1585c14a01d418f968fdcebd09f
-  mini-a-con.js: 59c6ae09e053c48b5e19d51051ec8f13856c7995
+  mini-a-con.js: 5e3fd3a84448d794d502048599ca857cfa28dc87
   mini-a-dreams.js: dbefc96b618fe4f4cfa62142ab21f76b2d86d33c
   mini-a-eval.js: 22537fa7f12ce89b490ff35c54e055dd31afeb20
   mini-a-eval.yaml: 03938780f7fdb9f3a1ed0d3e5fbdfd58f76fe853
   mini-a-graph.js: c03f333fb11b7709e9a478fa2245dc71dd99e247
   mini-a-history-vm.js: 763d1847b6b587e8ff1939c30302f9429a79e3a8
-  mini-a-ingest.js: 1cafbbe26a23c8cad8020a1ecc0a46d61823ccf2
+  mini-a-ingest.js: c4aa0314dc6bb760f7251c3c6f6fef624040abfd
   mini-a-ingest.yaml: 20d860e21310bf80f3cc7cec1cc6a7da43fac17b
   mini-a-mcp-skills.js: 6835e75f88fd3791444cca547eea943faf08a48f
   mini-a-mcp-wiki.js: 14ce79468f2c18da42f325f3efc9c7af7c6ad3a6
@@ -292,7 +296,7 @@ filesHash:
   mini-a-web.yaml: 8c23492e7aa916e4a682741b355d74ee42f052d5
   mini-a-wiki-knowledge.js: 67c24716341ee8230ccff9fefd410ea2bd018605
   mini-a-wiki-retrieval.js: fb8b3cac90b00b264c510ef4cd12822bb5d94d25
-  mini-a-wiki.js: d64f95e09242224da3ff2b445e2f467c7188f865
+  mini-a-wiki.js: 79156d3f70662c0bf54f245b9bc76f17ba59a492
   mini-a-worker.yaml: e133c9b10c1d2eb10919b8aa9743a5291b6535ef
   mini-a.js: 29afa78e0754630986202a0a0c5c3f3d54433149
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
