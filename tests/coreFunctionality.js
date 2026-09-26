@@ -6,6 +6,130 @@
     return new MiniA()
   }
 
+  exports.testJsonDispatchSessionMode = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    agent._oaf_model = { type: "ollama", model: "fixture" }
+    var first = { usetools: true, mcpproxy: true }
+    ow.test.assert(agent._resolveJsonToolMode(first), true, "Proxy defaults to JSON action dispatch")
+    var separate = {}
+    ow.test.assert(agent._resolveJsonToolMode(separate), true, "Separate start arguments inherit session mode")
+    ow.test.assert(agent._resolveJsonToolMode(separate), true, "Second init call retains inherited resolved mode")
+    ow.test.assert(agent._shouldUseNativeMcpProxyTools({ usejsontool: true, mcpproxy: true, mcpproxynative: true }), false, "JSON overrides proxy native default")
+    ow.test.assert(agent._resolveJsonToolMode({ usejsontool: false }), false, "Explicit false wins")
+    ow.test.assert(agent._resolveJsonToolMode({ mcpproxy: true, usetools: true }), false, "Explicit session false survives reuse")
+    var oss = createAgent(), args = {}
+    oss._resolveJsonToolMode(args)
+    oss._oaf_model = { type: "ollama", model: "gpt-oss-20b" }
+    ow.test.assert(oss._resolveJsonToolMode(args), true, "Automatic mode re-evaluates once initialization loads model")
+    agent._useToolsActual = true
+    var shim = agent._createJsonToolMcpConfig({ usejsontool: true }).options.fns.json
+    ow.test.assert(shim({ action: "wiki", params: { op: "search", query: "fixture" } }).accepted, false, "Native shim cannot acknowledge unexecuted wiki action")
+    ow.test.assert(agent._normalizeActionBatch({ action: '[{"action":"wiki","params":{"op":"search"}},{"action":"final","answer":"done"}]' }).action.length, 2, "Decode JSON-encoded batch")
+    ;['[broken', '[{}]', '[]', '[null]'].forEach(function(action) {
+      var rejected = false
+      try { agent._normalizeActionBatch({ action: action }) } catch(e) { rejected = String(e).indexOf("Invalid action batch") >= 0 }
+      ow.test.assert(rejected, true, "Malformed batches have actionable errors")
+    })
+  }
+
+  exports.testReusedPromptRefreshPreservesHistory = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    var calls = 0
+    agent._buildRelevantMemoryBlock = function(args) { calls++; return [{ section: "facts", value: "memory-for-" + args.goal + "-" + args.memorysessionid }] }
+    agent._buildValidatedToolContracts = function(args) { return [{ invocation: { tool: "fixture-" + args.goal } }] }
+    var first = { goal: "first", usememory: true, memorysessionid: "one", memoryinject: "relevant", usejsontool: true }
+    agent.init(first)
+    var conversation = [{role:"user",content:"prior question"}, {role:"tool",content:"actual fixture result"}]
+    var wrapper = function() { return {
+      getGPT: function() { return { getConversation: function() { return conversation }, setConversation: function(c) { conversation = c } } },
+      withInstructions: function(text) { conversation.push({role:"system",content:text}); return this }
+    } }
+    agent.llm = wrapper()
+    agent._applySystemInstructions(first)
+    agent.init({ goal: "second", usememory: true, memorysessionid: "two", memoryinject: "relevant" })
+    agent._applySystemInstructions({})
+    agent._applySystemInstructions({})
+    ow.test.assert(agent._systemInst.indexOf("memory-for-second-two") >= 0, true, "Refresh after binding current session")
+    ow.test.assert(agent._systemInst.indexOf("memory-for-first") < 0, true, "Remove stale memory")
+    ow.test.assert(agent._systemInst.indexOf("fixture-second") >= 0, true, "Refresh validated contracts")
+    ow.test.assert(conversation.filter(function(e) { return e.role === "system" }).length, 1, "Generated instructions are replaced")
+    ow.test.assert(conversation[1].content, "actual fixture result", "Tool history survives refresh")
+    agent._stopAgentResources()
+  }
+
+  exports.testJsonWikiDispatchReplay = function() {
+    load("mini-a-wiki.js")
+    var root = String(io.createTempFile("mini-a-dispatch-", ""))
+    io.rm(root); io.mkdir(root)
+    io.writeFileString(root + "/fixture.md", "---\ntitle: fixture-hit\n---\n# Evidence\nfixture-evidence-739")
+    var agent = createAgent(), requests = 0, searches = 0, reads = 0
+    agent.fnI = function() {}
+    var args = { goal: "Find fixture evidence", usejsontool: true, usewiki: true, wikiroot: root, raw: true, maxsteps: 6, usememory: false }
+    try {
+      agent.init(args)
+      agent._use_lc = false
+      var search = agent._wikiManager.agenticSearch.bind(agent._wikiManager)
+      var read = agent._wikiManager.agenticRead.bind(agent._wikiManager)
+      agent._wikiManager.agenticSearch = function(q, opts) { searches++; return search(q, opts) }
+      agent._wikiManager.agenticRead = function(path, opts) { reads++; return read(path, opts) }
+      agent.llm.promptJSONWithStats = agent.llm.promptWithStats = function(prompt) {
+        requests++
+        if (requests === 2) ow.test.assert(prompt.indexOf("fixture-hit") >= 0, true, "Actual fixture search reaches next model request")
+        if (requests === 3) ow.test.assert(prompt.indexOf("fixture-evidence-739") >= 0, true, "Actual fixture content reaches next model request")
+        return { response: requests === 1 ? { action: '[{"action":"wiki","params":{"op":"search","query":"fixture"}}]' }
+          : requests === 2 ? { action: "wiki", params: { op: "read", path: "fixture.md" } }
+          : { action: "final", answer: "verified fixture" }, stats: {} }
+      }
+      ow.test.assert(agent.start(merge({}, args)), "verified fixture", "Separate-object startup executes JSON actions")
+      ow.test.assert(searches, 1, "Search executes exactly once")
+      ow.test.assert(reads, 1, "Read executes exactly once")
+      var errorRequests = 0
+      agent._wikiManager.agenticSearch = function() { throw new Error("fixture-backend-unavailable") }
+      agent.llm.promptJSONWithStats = agent.llm.promptWithStats = function(prompt) {
+        errorRequests++
+        if (errorRequests === 2) {
+          ow.test.assert(prompt.indexOf("fixture-backend-unavailable") >= 0, true, "Retrieval error reaches model")
+          ow.test.assert(prompt.indexOf("No results") < 0, true, "Failure is not reported as empty search")
+        }
+        return {response: errorRequests === 1 ? {action:"wiki",params:{op:"search",query:"fixture"}} : {action:"final",answer:"retrieval failed"},stats:{}}
+      }
+      ow.test.assert(agent.start(merge({}, args)), "retrieval failed", "Error remains observable on reused session")
+
+    } finally { agent._stopAgentResources(); io.rm(root) }
+  }
+
+  exports.testJsonModeRebuildsBothToolWrappers = function() {
+    var agent = createAgent(), registrations = 0
+    agent.fnI = function() {}
+    agent._useTools = agent._useToolsMain = agent._useToolsLC = agent._use_lc = true
+    agent._oaf_model = agent._oaf_lc_model = {type:"ollama",model:"fixture"}
+    agent.mcpTools = [{name:"fixture",inputSchema:{type:"object"}}]
+    agent.mcpToolNames = ["fixture"]
+    agent.mcpToolToConnection = {fixture:"fixture-connection"}
+    agent._mcpConnections = {"fixture-connection":{}}
+    agent._createBareLlmInstance = function() {
+      var conversation = []
+      return {
+        tools: [],
+        getGPT: function() { return {getConversation:function(){return conversation},setConversation:function(c){conversation=c}} },
+        withMcpTools: function() { registrations++; this.tools.push("fixture"); return this },
+        withInstructions: function() { return this }
+      }
+    }
+    agent.llm = agent._createBareLlmInstance()
+    agent.lc_llm = agent._createBareLlmInstance()
+    agent._registerMcpToolsForGoal({usejsontool:false})
+    ow.test.assert(registrations,2,"Both model tiers register native tools")
+    agent._registerMcpToolsForGoal({usejsontool:true,mcpproxynative:true})
+    ow.test.assert(agent.llm.tools.length + agent.lc_llm.tools.length,0,"Rebuilt main and LC wrappers have no stale tools")
+    ow.test.assert(agent._useToolsActualMain || agent._useToolsActualLC,false,"Both actual-mode flags select action loop")
+    agent._registerMcpToolsForGoal({usejsontool:false})
+    ow.test.assert(registrations,4,"Explicit false restores native tools once per tier")
+    agent._stopAgentResources()
+  }
+
   var resetMiniAMetrics = function() {
     if (!isObject(global.__mini_a_metrics)) return
     Object.keys(global.__mini_a_metrics).forEach(function(key) {

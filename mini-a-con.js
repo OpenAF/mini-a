@@ -844,7 +844,7 @@ try {
     forkstatemaxbytes: { type: "number", default: 65536, description: "Maximum serialized state size shared with delegated subtasks." },
     showdelegate   : { type: "boolean", default: false, description: "Show delegate/subtask events as separate lines (default keeps them inline)" },
     toolfallback   : { type: "boolean", default: false, description: "Retry in action mode when tool-calling output is malformed." },
-    usejsontool    : { type: "boolean", description: "Enable the compatibility json tool when usetools=true." },
+    usejsontool    : { type: "boolean", description: "Use JSON action dispatch instead of native tools on both model tiers." },
     useskills      : { type: "boolean", default: false, description: "Expose the skills utility tool and auto-load high-confidence matching skills." },
     usestdutils    : { type: "boolean", default: false, description: "Enable standard-utils compatibility aliases (question, skill, todowrite, etc.)." },
     skillmaxautoload: { type: "number", default: 1, description: "Maximum number of matching skills to auto-load into runtime context." },

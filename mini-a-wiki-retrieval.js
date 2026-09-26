@@ -25,7 +25,7 @@ var MiniAWikiRetrievalV2 = function(manager, config) {
   try {
     analysis = this._analyzer()
     var effective = ow.ch.__types.searchdb.__lexicalOptions(manager._luceneLexicalOptions())
-    this.indexContract = { analyzer: String(this.analyzers.get(analysis).get(0).getClass().getName()), exactAnalyzer: "org.apache.lucene.analysis.standard.StandardAnalyzer", analysisVersion: String(Packages.org.apache.lucene.util.Version.LATEST), enhancedAsciiFolding: effective.asciiFolding, shingles: {enabled:effective.shingles.enabled,minSize:effective.shingles.minSize,maxSize:effective.shingles.maxSize}, characterNGrams: {enabled:effective.characterNGrams.enabled,minGram:effective.characterNGrams.minGram,maxGram:effective.characterNGrams.maxGram} }
+    this.indexContract = { analyzer: String(this.analyzers.get(analysis).get(0).getClass().getName()), exactAnalyzer: "org.apache.lucene.analysis.standard.StandardAnalyzer", analysisVersion: MiniAWikiRetrievalV2.majorMinorVersion(Packages.org.apache.lucene.util.Version.LATEST), enhancedAsciiFolding: effective.asciiFolding, shingles: {enabled:effective.shingles.enabled,minSize:effective.shingles.minSize,maxSize:effective.shingles.maxSize}, characterNGrams: {enabled:effective.characterNGrams.enabled,minGram:effective.characterNGrams.minGram,maxGram:effective.characterNGrams.maxGram} }
   } catch(capabilityError) { this.capabilityError = __miniAErrMsg(capabilityError); this.indexContract = { unavailable: true } }
   finally { if (analysis) this._closeAnalyzer(analysis) }
   this.fingerprint = sha1(stringify({ schema: 1, parser: 6, fields: fields, indexContract: this.indexContract }, __, ""))
@@ -43,6 +43,15 @@ MiniAWikiRetrievalV2.config = function(value) {
   })
   if (defaults.telemetryFlushQueries > 1000 || defaults.telemetryRetentionDays > 365 || defaults.passageChars < 64 || defaults.passageChars > 16000 || defaults.cacheBytes > 268435456 || defaults.maxArtifactBytes > 2147483647 || defaults.maxArtifactFiles > 1000000 || defaults.maxMillis > 120000) throw new Error("wikiretrievalconfig exceeds supported bounds")
   return defaults
+}
+// Lucene analyzers have taken no matchVersion parameter since Lucene 9, so a
+// bugfix/patch release cannot change analysis output within the same major.minor
+// line. Pinning the contract to major.minor (instead of the full patch string)
+// lets independently-upgraded readers/writers share a generation across patch
+// releases, while a real minor/major bump still forces a rebuild.
+MiniAWikiRetrievalV2.majorMinorVersion = function(v) {
+  var m = String(v).match(/^(\d+)\.(\d+)/)
+  return m ? (m[1] + "." + m[2]) : String(v)
 }
 MiniAWikiRetrievalV2.bytes = function(text) { return Number(new java.lang.String(String(text)).getBytes("UTF-8").length) }
 MiniAWikiRetrievalV2.digestText = function(text) {
@@ -818,8 +827,19 @@ MiniAWikiRetrievalV2.prototype._openSnapshot = function(dir, manifest, catalog) 
         return snapshot._catalog
       }})
     }
-    directory = this._openDirectory(dir);snapshot.directory=directory
-    reader = this._openReader(directory);snapshot.reader=reader;this.metrics.readerOpens++
+    try {
+      directory = this._openDirectory(dir);snapshot.directory=directory
+      reader = this._openReader(directory);snapshot.reader=reader;this.metrics.readerOpens++
+    } catch(openError) {
+      // The relaxed major.minor indexContract check can pass while the actual
+      // segment codecs are still unreadable by the running Lucene (e.g. a real
+      // minor-version format change slipped through, or a build metadata bug).
+      // Fold that into the same "incompatible-generation" signal callers and
+      // reindex() already know how to react to, instead of leaking a raw
+      // Lucene exception type.
+      if (this.manager._isLuceneIndexCompatibilityError(openError)) throw new Error("incompatible-generation")
+      throw openError
+    }
     var expected = catalog ? Object.keys(catalog.passages).length : Number(manifest.catalogue && manifest.catalogue.stats && manifest.catalogue.stats.passageCount)
     if (!isFinite(expected) || Number(reader.numDocs()) !== expected) throw new Error("generation-index-count-mismatch")
     if (Number(reader.numDocs()) > 0) {

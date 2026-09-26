@@ -478,7 +478,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : usejsontool
-    desc     : Register compatibility json tool when usetools=true
+    desc     : Use JSON action dispatch instead of native tools on both model tiers
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
@@ -1081,7 +1081,8 @@ todo:
       if (isDef(postData.uuid) && !global._mini_a_web_isValidUuid(postData.uuid)) {
         return ow.server.httpd.reply({ error: "invalid uuid" })
       }
-      if (isDef(postData.uuid)) delete global.__busy[postData.uuid]
+      var mutationToken = global._mini_a_web_reserve(postData.uuid)
+      if (isUnDef(mutationToken)) return ow.server.httpd.reply({ error: "session busy", uuid: postData.uuid, busy: true })
       // postData.force - to be used from the history pane to delete a specific session
       // __useHistory - if no history is being used, always clear
       if (!global.__usehistory || postData.force) {
@@ -1096,7 +1097,7 @@ todo:
           if (isFunction(global.__conversations[ postData.uuid ].clearSessionMemory)) {
             try { global.__conversations[ postData.uuid ].clearSessionMemory(postData.uuid) } catch(ignoreClearMemory) {}
           }
-          delete global.__conversations[ postData.uuid ]
+          global._mini_a_web_dispose(postData.uuid)
         }
         if (isDef(global.__lastActivity[ postData.uuid ])) {
           delete global.__lastActivity[ postData.uuid ]
@@ -1120,10 +1121,13 @@ todo:
           }
         }
       }
+      global._mini_a_web_dispose(postData.uuid)
       return ow.server.httpd.reply({ status: "cleared" })
     } catch(e) {
       printErr(e)
       return ow.server.httpd.reply({ error: e.toString() })
+    } finally {
+      if (isDef(mutationToken)) global._mini_a_web_release(postData.uuid, mutationToken)
     }
 
 # Submit a prompt
@@ -1159,14 +1163,14 @@ todo:
         _res.uuid = genUUID()
       }
 
-      if (global.__busy[_res.uuid] === true) {
+      var runToken = global._mini_a_web_reserve(_res.uuid)
+      if (isUnDef(runToken)) {
         return ow.server.httpd.reply({ error: "session busy", uuid: _res.uuid, busy: true })
       }
 
       // Initialize response storage
       if (isUnDef(global.__res[_res.uuid])) {
         global.__res[ _res.uuid ] = [ ]
-        global.__conversations[ _res.uuid ] = __
         global.__lastActivity[ _res.uuid ] = Date.now()
       } else {
         global.__lastActivity[ _res.uuid ] = Date.now()
@@ -1182,8 +1186,8 @@ todo:
       }
       // Start Mini-A interaction in a non-blocking way
       $doV(() => {
-        var uuid = _res.uuid, lma, isNewConversation = false
-        global.__busy[uuid] = true
+        var uuid = _res.uuid, lma
+        try {
         if (global.__usestream && isFunction(global._mini_a_web_initSSE)) {
           global._mini_a_web_initSSE(uuid)
         }
@@ -1197,9 +1201,32 @@ todo:
         // If history is enabled, set the history file
         var _hfile = (global.__usehistory || global.maArgs.historyvm === true || global.maArgs.historyvmshadow === true) ? global.__historypath + "/c-" + uuid + ".json" : __
 
+        var startArgs = merge(global.maArgs, {
+          goal        : (isString(global.maArgs.goalprefix) ? global.maArgs.goalprefix : "") + postData.prompt,
+          raw         : true
+        })
+        if (toBoolean(startArgs.usememory) && isString(global.__memorysessionheader) && global.__memorysessionheader.length > 0 && isMap(request.header)) {
+          var headerMemorySessionId = request.header[global.__memorysessionheader]
+          if (isDef(headerMemorySessionId)) {
+            var normalizedMemorySessionId = String(headerMemorySessionId).trim()
+            if (normalizedMemorySessionId.length > 0) startArgs.memorysessionid = normalizedMemorySessionId
+          }
+        }
+        if ((global.__usehistory || startArgs.historyvm === true || startArgs.historyvmshadow === true) && isString(_hfile)) {
+          startArgs.conversation = _hfile
+        }
+        // Only pass browser context for new conversations to avoid replacing in-memory session state
+        if (isUnDef(global.__conversations[uuid])) {
+          if (isMap(postData.browserContext)) {
+            startArgs.browsercontext = jsonParse(stringify(postData.browserContext, __, ""), __, __, true)
+          } else if (isString(postData.browserContext) && postData.browserContext.trim().length > 0) {
+            var parsedPostBrowserContext = af.fromJSSLON(postData.browserContext)
+            if (isMap(parsedPostBrowserContext)) startArgs.browsercontext = parsedPostBrowserContext
+          }
+        }
+
         // If conversation does not exist, create it
         if (isUnDef(global.__conversations[ uuid ])) {
-          isNewConversation = true
           // If history does not exist but we have history in memory, rebuild it
           if (global.__usehistory && !global._mini_a_web_historyExists(uuid) && isDef(global.__res[ uuid ]) && global.__res[ uuid ].length > 0) {
             // Try rebuilding
@@ -1222,6 +1249,7 @@ todo:
       
           // Initialize MiniA
           lma = new MiniA()
+          global.__conversations[uuid] = lma
           var pendingProxyThought = __
           lma.setInteractionFn( (e, m) => {
             try {
@@ -1438,58 +1466,18 @@ todo:
               } catch(ignorePushErr) {}
             }
           })
-          lma.init(merge(global.maArgs, {
-            conversation: global._mini_a_web_loadFile(_hfile)
-          }))
-          global.__conversations[ uuid ] = lma
+          if (isString(startArgs.conversation)) startArgs.conversation = global._mini_a_web_loadFile(startArgs.conversation)
+          lma.init(startArgs)
         } else {
           lma = global.__conversations[ uuid ]
-          var _historyFile = global.__usehistory && !isObject(lma._historyVm) && isString(_hfile) ? global._mini_a_web_loadFile(_hfile) : __
-          if (isString(_historyFile) && io.fileExists(_historyFile)) {
-            try {
-              var _existingConversationPayload = io.readFileJSON(_historyFile)
-              if (isMap(_existingConversationPayload) && isArray(_existingConversationPayload.c) && isDef(lma.llm) && isFunction(lma.llm.getGPT)) {
-                lma.llm.getGPT().setConversation(_existingConversationPayload.c)
-                if (lma._use_lc && isDef(lma.lc_llm) && isFunction(lma._copyConversationBetweenLlms)) {
-                  lma._copyConversationBetweenLlms(lma.llm, lma.lc_llm)
-                }
-              }
-            } catch(loadConversationErr) {
-              logErr(loadConversationErr)
-            }
-          }
         }
 
-        // Only load conversation from file/S3 if this is a new MiniA instance
-        // Otherwise use the in-memory conversation to preserve tool results
-        var startArgs = merge(global.maArgs, {
-          goal        : postData.prompt,
-          raw         : true
-        })
-        if (toBoolean(startArgs.usememory) && isString(global.__memorysessionheader) && global.__memorysessionheader.length > 0 && isMap(request.header)) {
-          var headerMemorySessionId = request.header[global.__memorysessionheader]
-          if (isDef(headerMemorySessionId)) {
-            var normalizedMemorySessionId = String(headerMemorySessionId).trim()
-            if (normalizedMemorySessionId.length > 0) startArgs.memorysessionid = normalizedMemorySessionId
-          }
-        }
-        if ((global.__usehistory || startArgs.historyvm === true || startArgs.historyvmshadow === true) && isString(_hfile)) {
-          startArgs.conversation = _hfile
-        }
-        // Only pass browser context for new conversations to avoid replacing in-memory session state
-        if (isNewConversation) {
-          if (isMap(postData.browserContext)) {
-            startArgs.browsercontext = jsonParse(stringify(postData.browserContext, __, ""), __, __, true)
-          } else if (isString(postData.browserContext) && postData.browserContext.trim().length > 0) {
-            var parsedPostBrowserContext = af.fromJSSLON(postData.browserContext)
-            if (isMap(parsedPostBrowserContext)) startArgs.browsercontext = parsedPostBrowserContext
-          }
-        }
         lma._historyCheckpointFn = function(goal) {
           if (isObject(lma._historyVm)) global._mini_a_web_storeHistory(uuid, goal)
         }
         var _rma = lma.start(startArgs)
 
+        if (!global._mini_a_web_owns(uuid, runToken)) return
         if (isDef(_rma.answer)) {
           var trimmedAnswer = _rma.answer.trim();
           if (trimmedAnswer.startsWith("```markdown") && trimmedAnswer.endsWith("```")) {
@@ -1512,28 +1500,22 @@ todo:
           }
         }
         log("[" + uuid + "] " + (isObject(_rma) ? af.toSLON(_rma) : _rma))
-        delete global.__busy[uuid]
+        } catch(eee) {
+          logErr(eee)
+          if (global._mini_a_web_owns(uuid, runToken)) {
+            if (isUnDef(global.__res[uuid])) global.__res[uuid] = []
+            global.__res[uuid].push({ event: "❗", message: "Agent failed: " + __miniAErrMsg(eee) })
+            if (global.__usestream && isFunction(global._mini_a_web_sseClose)) global._mini_a_web_sseClose(uuid, "error")
+            global._mini_a_web_dispose(uuid)
+          }
+        } finally { global._mini_a_web_release(uuid, runToken) }
       }).catch((eee) => {
         logErr(eee)
-        $err(eee)
-        var _failedUuid = _res.uuid
-        if (isDef(_failedUuid)) {
-          if (isUnDef(global.__res[_failedUuid])) global.__res[_failedUuid] = []
-          global.__res[_failedUuid].push({ event: "❗", message: "Agent failed: " + __miniAErrMsg(eee) })
-          if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
-            global._mini_a_web_ssePush(_failedUuid, "interaction", { event: "error" })
-          }
-          if (global.__usestream && isFunction(global._mini_a_web_sseClose)) {
-            global._mini_a_web_sseClose(_failedUuid, "error")
-          }
-          // Discard the broken MiniA instance so a retry creates a fresh one instead of reusing a failed-init agent
-          delete global.__conversations[_failedUuid]
-          delete global.__busy[_failedUuid]
-        }
+        global._mini_a_web_release(_res.uuid, runToken)
       })
     } catch(ee) {
       logErr(ee)
-      $err(ee)
+      if (isDef(runToken)) global._mini_a_web_release(_res.uuid, runToken)
     }
 
     return ow.server.httpd.reply(_res)
@@ -1841,6 +1823,9 @@ todo:
         return ow.server.httpd.reply({ error: "history must be an array" })
       }
 
+      var mutationToken = global._mini_a_web_reserve(postData.uuid)
+      if (isUnDef(mutationToken)) return ow.server.httpd.reply({ error: "session busy", uuid: postData.uuid, busy: true })
+
       // If already stored no need to load again
       if (isDef(global.__res[ postData.uuid ])) {
         logWarn("History for " + postData.uuid + " already loaded")
@@ -1862,7 +1847,7 @@ todo:
       if (isObject(global.__conversations[ postData.uuid ]) && isObject(global.__conversations[ postData.uuid ]._historyVm)) {
         try { global.__conversations[ postData.uuid ]._historyVm.deleteOwnedStore() } catch(ignoreLoadedHistoryVm) {}
       }
-      delete global.__conversations[ postData.uuid ]
+      global._mini_a_web_dispose(postData.uuid)
       if (isDef(global.__subagentState) && isDef(global.__subagentState[ postData.uuid ])) delete global.__subagentState[ postData.uuid ]
       global.__lastActivity[ postData.uuid ] = Date.now()
       if (isFunction(global._mini_a_web_storeHistory)) {
@@ -1877,6 +1862,8 @@ todo:
     } catch(e) {
       printErr(e)
       return ow.server.httpd.reply({ error: e.toString() })
+    } finally {
+      if (isDef(mutationToken)) global._mini_a_web_release(postData.uuid, mutationToken)
     }
 
 ojob:
@@ -2206,6 +2193,39 @@ jobs:
     global.__subagentState = {}
     global.__sseQueues = {}
     global.__busy = {}
+    global.__sessionLock = new java.util.concurrent.locks.ReentrantLock()
+    global.__runTokens = {}
+    global._mini_a_web_reserve = function(uuid) {
+      global.__sessionLock.lock()
+      try {
+        if (isDef(global.__runTokens[uuid])) return __
+        var token = genUUID()
+        global.__runTokens[uuid] = token
+        global.__busy[uuid] = true
+        return token
+      } finally { global.__sessionLock.unlock() }
+    }
+    global._mini_a_web_owns = function(uuid, token) {
+      global.__sessionLock.lock()
+      try { return isDef(token) && global.__runTokens[uuid] === token }
+      finally { global.__sessionLock.unlock() }
+    }
+    global._mini_a_web_release = function(uuid, token) {
+      global.__sessionLock.lock()
+      try {
+        if (global._mini_a_web_owns(uuid, token)) {
+          delete global.__runTokens[uuid]
+          delete global.__busy[uuid]
+        }
+      } finally { global.__sessionLock.unlock() }
+    }
+    global._mini_a_web_dispose = function(uuid) {
+      var agent = global.__conversations[uuid]
+      try {
+        if (isObject(agent) && isFunction(agent._stopAgentResources)) agent._stopAgentResources()
+      } finally { delete global.__conversations[uuid] }
+    }
+
     global.__webtoken = (isString(args.webtoken) && args.webtoken.trim().length > 0) ? args.webtoken.trim() : __
 
     global._mini_a_web_isValidUuid = (u) => isString(u) && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(u)
@@ -2299,9 +2319,12 @@ jobs:
     var needsWorkerRegBootstrap = isNumber(args.workerreg)
     if (!toBoolean(args.mcplazy) || needsWorkerRegBootstrap) {
       var _ma = new MiniA()
-      _ma.init( merge( global.maArgs, { mcpdynamic: false } ) )
-      if (needsWorkerRegBootstrap) global.__bootstrapAgent = _ma
-      else _ma = __
+      try {
+        _ma.init( merge( global.maArgs, { mcpdynamic: false } ) )
+        if (needsWorkerRegBootstrap) global.__bootstrapAgent = _ma
+      } finally {
+        if (global.__bootstrapAgent !== _ma) _ma._stopAgentResources()
+      }
     }
 
     global._mini_a_web_historyS3Key = (uuid) => {
@@ -2694,13 +2717,17 @@ jobs:
     }
     for (var i = 0; i < toDelete.length; i++) {
       var uuid = toDelete[i]
+      var expiryToken = global._mini_a_web_reserve(uuid)
+      if (isUnDef(expiryToken)) continue
+      try {
+      if (now() - global.__lastActivity[uuid] <= args.historyretention * 1000) continue
       var staleAgent = global.__conversations[ uuid ]
       if (!global.__historykeep && isObject(staleAgent) && isObject(staleAgent._historyVm)) {
         try { staleAgent._historyVm.deleteOwnedStore() } catch(ignoreStaleVm) {}
       }
       delete global.__lastActivity[ uuid ]
       delete global.__res[ uuid ]
-      delete global.__conversations[ uuid ]
+      global._mini_a_web_dispose(uuid)
       if (isDef(global.__planState) && isDef(global.__planState[ uuid ])) delete global.__planState[ uuid ]
       if (isDef(global.__subagentState) && isDef(global.__subagentState[ uuid ])) delete global.__subagentState[ uuid ]
       if ((global.__usehistory || global.maArgs.historyvm === true || global.maArgs.historyvmshadow === true) && !global.__historykeep && isFunction(global._mini_a_web_deleteHistory)) {
@@ -2711,6 +2738,7 @@ jobs:
         }
       }
       log("Cleaned up session " + uuid)
+      } finally { global._mini_a_web_release(uuid, expiryToken) }
     }
 
     // Clean up stale SSE queues (prevent memory leaks from abrupt disconnections)
@@ -2721,7 +2749,7 @@ jobs:
       var queue = global.__sseQueues[uuid]
       // Remove queues that are closed or haven't been updated within the timeout period
       // Also remove queues with no timestamp (defensive - shouldn't happen in normal flow)
-      if (isDef(queue) && (queue.closed || isUnDef(queue.updated) || (sseNow - queue.updated > sseTimeoutMs))) {
+      if (global.__busy[uuid] !== true && isDef(queue) && (queue.closed || isUnDef(queue.updated) || (sseNow - queue.updated > sseTimeoutMs))) {
         sseToDelete.push(uuid)
       }
     }
@@ -2735,6 +2763,8 @@ jobs:
 - name : Shutdown history S3 client
   type : shutdown
   exec : | #js
+    if (isObject(global.__bootstrapAgent)) global.__bootstrapAgent._stopAgentResources()
+    Object.keys(global.__conversations || {}).forEach(global._mini_a_web_dispose)
     if (isDef(global.__historys3client)) {
       try { global.__historys3client.close() } catch(ignore) {}
       global.__historys3client = __

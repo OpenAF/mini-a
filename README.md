@@ -434,7 +434,7 @@ Mini-A ships with complementary components:
 | `agent` | Path (or inline markdown) containing YAML frontmatter metadata (`model`, `capabilities`, `tools`, `constraints`, `knowledge`, `youare`, `mini-a`). `mini-a` can set any Mini-A args from the file. | - |
 | `usetools` | Register MCP tools with the model | `false` |
 | `usetoolslc` | Register MCP tools only on the low-cost model | `false` |
-| `usejsontool` | Enable an optional compatibility `json` tool when `usetools=true` (helps with models that occasionally emit `json` tool calls instead of plain JSON action output) | `false` |
+| `usejsontool` | Use JSON action dispatch instead of native tools on both model tiers; overrides `mcpproxynative=true` | `false` |
 | `useutils` | Auto-register Mini Utils Tool utilities as an MCP connection (`init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`, [`readDocument` and `inspectImage`](USAGE.md#reading-documents-and-images), plus console-only helpers like `userInput` when running `mini-a-con`) | `false` |
 | `usestdutils` | When `useutils=true`, expose standard aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names | `false` |
 | `useskills` | Expose the Mini Utils `skills` operation; when `useutils=false`, only the skills tool is registered | `false` |

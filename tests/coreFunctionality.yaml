@@ -1,4 +1,24 @@
 jobs:
+- name: MiniA Core Tests::JsonModeRebuildsBothToolWrappers
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testJsonModeRebuildsBothToolWrappers
+
+- name: MiniA Core Tests::JsonWikiDispatchReplay
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testJsonWikiDispatchReplay
+
+- name: MiniA Core Tests::JsonDispatchSessionMode
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testJsonDispatchSessionMode
+
+- name: MiniA Core Tests::ReusedPromptRefreshPreservesHistory
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testReusedPromptRefreshPreservesHistory
+
 - name: MiniA Core Tests::DocumentAndImageTools
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -1105,6 +1125,10 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Core Tests::JsonModeRebuildsBothToolWrappers
+- MiniA Core Tests::JsonWikiDispatchReplay
+- MiniA Core Tests::JsonDispatchSessionMode
+- MiniA Core Tests::ReusedPromptRefreshPreservesHistory
 - MiniA Core Tests::SubtaskAmbiguousSubmissionDoesNotRetry
 - MiniA Core Tests::ChildDiagnosticsScope
 - MiniA Core Tests::CurrentConversationStatus

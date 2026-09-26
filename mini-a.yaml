@@ -376,7 +376,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : usejsontool
-    desc     : Register an optional compatibility json tool when usetools=true (for models that may emit json tool calls)
+    desc     : Use JSON action dispatch instead of native tools on both model tiers
     example  : "false"
     mandatory: false
     options  : ["true", "false"]

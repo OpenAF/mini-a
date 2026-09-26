@@ -104,20 +104,33 @@ modes:
       chatbotmode: true
       usestream  : true
 
-  web    :
+  webini :
     description: "Web mode with tools"
     params     :
-      usetools   : true
-      usediagrams: true
-      usecharts  : true
-      usemaps    : true
-      usevectors : true
-      usemath    : true
+      usetools             : true
+      usediagrams          : true
+      usecharts            : true
+      usemaps              : true
+      usevectors           : true
+      usemath              : true
+      useattach            : true
+      mcpproxy             : true
+      mcpproxythreshold    : 51200
+      mcpproxytoon         : true
+      historyvm            : true
+      contextvirtualization: true
+      usestream            : true
+      usedelegation        : true
+      autodelegation       : true
+      usestdutils          : true
+      contextguard         : true
+      orchestration        : auto
+
+  web    :
+    include    : webini
+    description: "Web mode with tools"
+    params     :
       usehistory : true
-      useattach  : true
-      mcpproxy   : true
-      mcpproxythreshold: 51200
-      mcpproxytoon     : true
       mcp              :
       - type   : ojob
         options:
@@ -137,9 +150,7 @@ modes:
     description: "Web full mode"
     params     :
       useascii   : false
-      usestream  : true
       historykeep: true
-      useplanning: false 
       llmcomplexity    : true
       historykeepperiod: 10080
       historykeepcount : 15
