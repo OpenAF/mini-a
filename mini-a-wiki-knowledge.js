@@ -28,6 +28,7 @@ MiniAWikiKnowledgeBudget.prototype.stats = function() { return { limit: this.lim
 MiniAWikiManager.prototype._knowledgeStatePath = function() { return this._getIndexRoot() + "/.mini-a-wiki-state/manifest.json" }
 MiniAWikiManager.prototype._knowledgeEmptyState = function() { return { version: MINI_A_WIKI_KNOWLEDGE.manifest, versions: MINI_A_WIKI_KNOWLEDGE, sources: {}, chunks: {}, pages: {}, dependencies: {}, derivativeRegistry: { byPage: {}, byClaim: {}, claimIndexVersion: 0 }, facts: {}, summaries: { pages: {}, sections: {} }, telemetry: { queries: {}, zero_results: 0 }, updated: new Date().toISOString() } }
 MiniAWikiManager.prototype.knowledgeLoadState = function() {
+  if (this._catalog) return this._knowledgeEmptyState()
   if (this._access !== "rw" && !io.fileExists(this._knowledgeStatePath())) return this._knowledgeEmptyState()
   if (!io.fileExists(this._knowledgeStatePath())) return this._knowledgeEmptyState()
   try {

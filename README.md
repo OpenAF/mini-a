@@ -584,7 +584,8 @@ See [the complete wiki guide](docs/WIKI.md) for backends, console/MCP operations
 | `wikigraphfalkoruser` | FalkorDB user | - |
 | `wikigraphfalkorpass` | FalkorDB password | - |
 
-With `wikiretrievalv2=true`, trusted search/retrieve calls can opt into one-hop
+With `wikiretrievalv2=true` (the default; unpublished wikis retain legacy retrieval
+with a warning), trusted search/retrieve calls can opt into one-hop
 graph discovery using `expandGraph=true`, `maxGraphExpansion` (default 5, max 10)
 and `maxGraphEdges` (default 256, max 4096). Graph evidence is source-revision
 validated; cross-wiki links and shared keys stay within the selected federation

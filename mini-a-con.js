@@ -664,7 +664,7 @@ try {
     wikilintstaleddays: { type: "number", default: 90, description: "Default stale-page threshold in days for wiki lint." },
     wikilintresultlimit: { type: "number", default: 0, description: "Default maximum lint issues returned to an agent (0 returns all; dream reorg defaults to 25)." },
     wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts; fs roots may be directories or local .zip/.okt archives." },
-    wikiretrievalv2: { type: "boolean", description: "Prefer V2 passage retrieval; unpublished wikis use legacy retrieval with a warning until explicitly reindexed." },
+    wikiretrievalv2: { type: "boolean", description: "Prefer V2 passage retrieval (default true); unpublished wikis use legacy retrieval with a warning until explicitly reindexed; false forces legacy." },
     wikiretrievalconfig: { type: "string", description: "Validated SLON/JSON advanced passage/cache/artifact budgets." },
     wikitelemetry: { type: "boolean", description: "Record local aggregate wiki retrieval telemetry (off by default); writable managers persist it, read-only managers keep it in memory." },
     wikilexical    : { type: "string", description: "SLON/JSON Lucene lexical configuration; defaults to {language:'english'} and supports optional synonymsFile." },
@@ -1530,28 +1530,12 @@ try {
       } else {
         wikiCfg.root = isString(sessionOptions.wikiroot) && sessionOptions.wikiroot.trim().length > 0 ? sessionOptions.wikiroot.trim() : "."
       }
-      var wm = new MiniAWikiManager(wikiCfg, function(level, message) { if (level === "warn") logWarn(message) })
-      try {
-        var mountsRaw = __
-        if (isDef(sessionOptions.wikimounts)) mountsRaw = sessionOptions.wikimounts
-        else if (isObject(extraCLIArgs) && isDef(extraCLIArgs.wikimounts)) mountsRaw = extraCLIArgs.wikimounts
-
-        if (isString(mountsRaw) && mountsRaw.trim().length > 0) {
-          var mountsList = af.fromJSSLON(mountsRaw)
-          if (!isArray(mountsList)) mountsList = [mountsList]
-          mountsList.forEach(function(mc) {
-            if (!isMap(mc) || !isString(mc.name)) return
-            wm.attach(mc.name, merge({ access: "ro" }, mc))
-          })
-        } else if (isArray(mountsRaw)) {
-          mountsRaw.forEach(function(mc) {
-            if (!isMap(mc) || !isString(mc.name)) return
-            wm.attach(mc.name, merge({ access: "ro" }, mc))
-          })
-        }
-      } catch(ignoreWikiMountInitError) {}
+      var mountsRaw = isDef(sessionOptions.wikimounts) ? sessionOptions.wikimounts : (isObject(extraCLIArgs) ? extraCLIArgs.wikimounts : __)
+      wikiCfg = __miniAWikiPrimaryConfig(wikiCfg, sessionOptions.wikiroot, mountsRaw)
+      var wm = __miniAWikiCreatePrimary(wikiCfg, function(level, message) { if (level === "warn") logWarn(message) })
       return wm
     } catch(ignoreWikiInitError) {
+      logWarn("Wiki initialization failed: " + __miniAErrMsg(ignoreWikiInitError))
       return __
     }
   }
@@ -1590,17 +1574,11 @@ try {
         cfg.backend = "http"; cfg.url = sessionOptions.wikiurl
         cfg.accessKey = sessionOptions.wikiaccesskey; cfg.secret = sessionOptions.wikisecret
       }
-      var swm2 = new MiniAWikiManager(cfg, function(level, message) { if (level === "warn") logWarn(message) })
-      if (isString(sessionOptions.skillwikimounts) && sessionOptions.skillwikimounts.trim().length > 0) {
-        var mountsList = af.fromJSSLON(sessionOptions.skillwikimounts)
-        if (!isArray(mountsList)) mountsList = [mountsList]
-        mountsList.forEach(function(mc) {
-          if (!isMap(mc) || !isString(mc.name)) return
-          swm2.attach(mc.name, merge({ access: "ro" }, mc))
-        })
-      }
+      cfg = __miniAWikiPrimaryConfig(cfg, sessionOptions.skillwikiroot, sessionOptions.skillwikimounts)
+      var swm2 = __miniAWikiCreatePrimary(cfg, function(level, message) { if (level === "warn") logWarn(message) })
       return swm2
     } catch(ignoreSkillWikiInitError) {
+      logWarn("Skill wiki initialization failed: " + __miniAErrMsg(ignoreSkillWikiInitError))
       return __
     }
   }
@@ -2313,10 +2291,10 @@ try {
           if (lookupName === "absorb") {
             var absorbCompletion = consolePathCompletion(uptoCursor.substring(firstSpace + 1))
             var absorbChoices = []
-            if (!absorbCompletion.before.length) absorbChoices = ["plan", "show", "apply", "status", "resume"]
+            if (!absorbCompletion.before.length) absorbChoices = ["plan", "show", "apply", "status", "resume", "delete", "cancel"]
             else if (absorbCompletion.before.length === 1) {
               if (absorbCompletion.before[0] === "plan") absorbChoices = getFileCompletions(absorbCompletion.token).map(quoteConsolePath)
-              else if (["show", "apply", "resume"].indexOf(absorbCompletion.before[0]) >= 0) {
+              else if (["show", "apply", "resume", "delete", "cancel"].indexOf(absorbCompletion.before[0]) >= 0) {
                 try {
                   loadLib("mini-a-absorb.js")
                   var absorbOpts = merge({}, sessionOptions)
@@ -6170,7 +6148,7 @@ try {
       { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, compact, mounts, attach, detach" },
       { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, report, query, retrieve, answer, neighbors, path, communities, surprise, export, stats, falkor, cross (requires usewikigraph=true)" },
       { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: plan, apply (default), reorg, repair, reindex, graph, indexes, dryrun" },
-      { command: "/absorb plan|show|apply|status|resume [spec|id]", description: "Plan, review and apply local wiki absorption (see ABSORB.md)." },
+      { command: "/absorb plan|show|apply|status|resume|delete|cancel [spec|id]", description: "Plan, review and apply local wiki absorption (see ABSORB.md)." },
       { command: "/ingest <source> [section]", description: "Ingest docs into the wiki; flags: dryrun, force, independent. No source: recovery choices." }
     ]
     helpCommands.push(
@@ -6279,7 +6257,7 @@ try {
         }
       } else if (sub === "open") {
         if (rest.length === 0) { print(colorifyText("Usage: /skills open <ref>", errorColor)); return }
-        print(colorifyText(stringify(__miniASkillOpen(swm, consolePathValue(rest), {}), __, "  "), promptColor))
+        print(printTree(__miniASkillOpen(swm, consolePathValue(rest), {})))
       } else if (sub === "read") {
         var readParts = parseConsolePathArgs(rest).argv
         var readRef = readParts.shift()
@@ -6287,10 +6265,10 @@ try {
         var section = readParts.join(" ").trim()
         var out = __miniASkillRead(swm, readRef, section.length > 0 ? { section: section } : {})
         if (isString(out.body)) print(out.body)
-        else print(colorifyText(stringify(out, __, "  "), errorColor))
+        else print(printTree(out))
       } else if (sub === "related") {
         if (rest.length === 0) { print(colorifyText("Usage: /skills related <ref>", errorColor)); return }
-        print(colorifyText(stringify(__miniASkillRelated(swm, consolePathValue(rest), {}), __, "  "), promptColor))
+        print(printTree(__miniASkillRelated(swm, consolePathValue(rest), {})))
       } else {
         print(colorifyText("Usage: /skills search|recommend|open|read|related|context ...", errorColor))
       }
@@ -6484,7 +6462,7 @@ try {
           print(colorifyText("Usage: /wiki compact [dryrun|offline=true]", errorColor)); return
         }
         var compactResult = wm.compact({ dryRun: rest.trim() !== "offline=true", offline: rest.trim() === "offline=true" })
-        print(stringify(compactResult, __, "  "))
+        print(printTree(compactResult))
       } else if (sub === "reindex") {
         if (String(sessionOptions.wikiaccess || "").toLowerCase() !== "rw") {
           print(colorifyText("Wiki is read-only. Start with wikiaccess=rw to enable reindex.", errorColor))
@@ -6659,7 +6637,7 @@ try {
     try {
       var parts = parseConsolePathArgs(subcmdRaw).argv, op = parts[0] || "status"
       if (toBoolean(sessionOptions.usewiki) !== true) throw new Error("Wiki not enabled. Start with usewiki=true and wikiroot=...")
-      if (["plan", "show", "apply", "status", "resume"].indexOf(op) < 0 || parts.length !== (op === "status" ? (parts.length ? 1 : 0) : 2)) throw new Error("Usage: /absorb plan <spec.json> | show|apply|resume <plan-id> | status")
+      if (["plan", "show", "apply", "status", "resume", "delete", "cancel"].indexOf(op) < 0 || parts.length !== (op === "status" ? (parts.length ? 1 : 0) : 2)) throw new Error("Usage: /absorb plan <spec-file|quoted-inline-JSON/SLON> | show|apply|resume|delete|cancel <plan-id> | status")
       loadLib("mini-a-absorb.js")
       var opts = merge({}, sessionOptions)
       opts.absorbop = op
@@ -6667,7 +6645,7 @@ try {
       else opts.absorbplan = parts[1]
       if (isObject(activeAgent) && isObject(activeAgent._wikiManager)) opts.wikimanager = activeAgent._wikiManager
       var result = new MiniAAbsorb(opts, function(msg) { print(colorifyText(msg, hintColor)) }).run()
-      print(isString(result.report) && op === "show" ? result.report : af.toYAML(result))
+      print(isString(result.report) && op === "show" ? format.withMD(result.report) : printTree(result))
     } catch(e) { print(colorifyText("Absorb error: " + e.message, errorColor)) }
   }
 

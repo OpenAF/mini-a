@@ -376,6 +376,68 @@ var MiniAWikiManager = function(config, loggerFn, auditFn) {
   this.configure(config)
 }
 
+// Resolve mounts before constructing any filesystem backend. Invalid configuration
+// fails closed; an empty list preserves the ordinary primary default.
+var __miniAWikiPrimaryConfig = function(config, root, mountsRaw) {
+  var cfg = merge({}, config), mounts = mountsRaw
+  if (isString(mounts)) {
+    if (!mounts.trim()) mounts = []
+    else {
+      try { mounts = JSON.parse(mounts) } catch(notJson) {
+        try { mounts = af.fromJSSLON(mounts) } catch(e) { throw new Error("Invalid wikimounts configuration: " + __miniAErrMsg(e)) }
+      }
+    }
+  }
+  if (isUnDef(mounts) || mounts === null) mounts = []
+  if (isMap(mounts)) mounts = [mounts]
+  if (!isArray(mounts) || !mounts.every(function(m) { return isMap(m) && isString(m.name) && m.name.trim().length > 0 })) {
+    throw new Error("Invalid wikimounts configuration: expected an array of named mounts")
+  }
+  var backend = isString(cfg.backend) ? cfg.backend.toLowerCase().trim() : "fs"
+  cfg.__catalog = ["s3", "s3fs", "es", "http", "https"].indexOf(backend) < 0 && !(isString(root) && root.trim()) && mounts.length > 0
+  cfg.__primaryMounts = mounts
+  if (cfg.__catalog) { delete cfg.root; cfg.access = "ro" }
+  return cfg
+}
+
+var __miniAWikiCreatePrimary = function(cfg, loggerFn, auditFn) {
+  var manager = new MiniAWikiManager(cfg, loggerFn, auditFn)
+  ;(cfg.__primaryMounts || []).forEach(function(mc) {
+    var result = manager.attach(mc.name, merge({}, mc))
+    if (!result.ok) manager._logFn("warn", "mount failed for @" + mc.name + ": " + result.error)
+    else manager._logFn("info", "mounted @" + mc.name + " (" + result.pages + " pages)")
+  })
+  return manager
+}
+
+MiniAWikiManager.prototype._readOnlyError = function(message) {
+  return this._catalog ? "generated wiki catalog is read-only; configure wikiroot for persistent storage (wikiroot=. uses the current directory)" : (message || "wiki is read-only")
+}
+
+MiniAWikiManager.prototype._catalogIndex = function() {
+  var escape = function(value) { return String(value || "").replace(/[\r\n]+/g, " ").replace(/[&<>\[\]\\]/g, function(c) { return "&#" + c.charCodeAt(0) + ";" }) }
+  var lines = ["---", "title: Wiki Mount Catalog", "description: Generated read-only catalog of attached wikis.", "type: overview", "---", "", "# Wiki Mount Catalog", "", "Generated read-only primary wiki. Configure wikiroot for persistent storage.", ""]
+  this._mounts.forEach(function(m) {
+    var index, description = m.description
+    try { index = m.manager.read("index.md") } catch(ignore) {}
+    if (!description && index && index.meta) description = index.meta.description
+    lines.push("- [" + escape(m.label || m.name) + "](@" + m.name + "/" + (index ? "index.md" : "") + ")" + (description ? " — " + escape(description) : ""))
+  })
+  if (!this._mounts.length) lines.push("No wikis are currently attached.")
+  return lines.join("\n") + "\n"
+}
+
+MiniAWikiManager.prototype._makeCatalogBackend = function() {
+  var self = this
+  return {
+    list: function(prefix) { return !prefix || "index.md".indexOf(prefix) === 0 ? ["index.md"] : [] },
+    exists: function(path) { return path === "index.md" },
+    read: function(path) { return path === "index.md" ? self._catalogIndex() : __ },
+    write: function() { throw new Error(self._readOnlyError()) },
+    delete: function() { throw new Error(self._readOnlyError()) }
+  }
+}
+
 // Best-effort hook for backends that fetch page content from an external
 // store (s3, http, es). Never lets a caller-supplied audit callback break
 // retrieval. `identifier` is the backend-resolved location (s3://bucket/key,
@@ -443,6 +505,7 @@ MiniAWikiManager.prototype._ensureIndexRuntime = function() {
 }
 
 MiniAWikiManager.prototype._getBackendIdentity = function() {
+  if (this._catalog) return "catalog"
   if (this._backendType === "s3" || this._backendType === "s3fs") {
     return "s3|" + (this._config.bucket || "") + "|" + (this._config.prefix || "")
   }
@@ -454,6 +517,7 @@ MiniAWikiManager.prototype._getBackendIdentity = function() {
 }
 
 MiniAWikiManager.prototype._getIndexRoot = function() {
+  if (this._catalog) throw new Error(this._readOnlyError())
   if (this._archiveRoot && isString(this._config.indexdir) && this._config.indexdir.trim().length) return this._config.indexdir.trim()
   if (this._backendType === "fs" || this._backendType === "s3fs") return this._backend.root
   if (isString(this._config.indexdir) && this._config.indexdir.trim().length > 0) return this._config.indexdir.trim()
@@ -463,6 +527,7 @@ MiniAWikiManager.prototype._getIndexRoot = function() {
 
 // Include legacy and independent-scope journals in every recovery/read guard.
 MiniAWikiManager.prototype._ingestJournalPaths = function() {
+  if (this._catalog) return []
   var root = String(new java.io.File(this._getIndexRoot() + "/.mini-a-wiki-ingest").getCanonicalPath()), paths = []
   if (io.fileExists(root + "/journal.json")) paths.push(root + "/journal.json")
   if (io.fileExists(root + "/journals")) {
@@ -598,7 +663,7 @@ MiniAWikiManager.prototype._metaReadFastInfo = function(path) {
 
 MiniAWikiManager.prototype._metaFor = function(path, rawOpt, parsedOpt) {
   this._ensureIndexRuntime()
-  if (this._config.wikimetacache === false) {
+  if (this._catalog || this._config.wikimetacache === false) {
     var rawDirect = isString(rawOpt) ? rawOpt : this._backend.read(path)
     if (!isString(rawDirect)) return __
     var parsedDirect = isMap(parsedOpt) ? parsedOpt : this.parseFrontmatter(rawDirect)
@@ -1105,7 +1170,7 @@ MiniAWikiManager.prototype._readAllPageDocs = function() {
 // fetch with _rebuildGraphIndex. Falls back to reading pages itself when omitted,
 // preserving the original single-caller behaviour (e.g. bootstrap/init).
 MiniAWikiManager.prototype._rebuildSearchIndex = function(options, pageDocs) {
-  if (this._access !== 'rw') return { ok: false, error: "wiki is read-only" }
+  if (this._access !== 'rw') return { ok: false, error: this._readOnlyError() }
   try {
     var opts = isObject(options) ? options : {}
     var self = this
@@ -1443,7 +1508,7 @@ MiniAWikiManager.prototype._ensureLucene = function() {
 }
 
 MiniAWikiManager.prototype._rebuildLuceneIndex = function(docs, options) {
-  if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
+  if (this._access !== "rw") return { ok: false, error: this._readOnlyError() }
   if (!this._ensureLucene()) return { ok: false, error: "Lucene oPack is not available" }
   var publicationChannel, publicationLock, stagedGeneration, publicationRoot, staged = false
   try {
@@ -1559,7 +1624,7 @@ MiniAWikiManager.prototype._makeNullSearchIndex = function() {
 MiniAWikiManager.prototype._ensureSearchIndex = function() {
   if (isObject(this._searchIndex)) return this._searchIndex
   var kind = isString(this._config.wikisearch) ? String(this._config.wikisearch).toLowerCase().trim() : "auto"
-  if (kind === "none") {
+  if (this._catalog || kind === "none") {
     this._searchIndex = this._makeNullSearchIndex()
     return this._searchIndex
   }
@@ -1624,7 +1689,7 @@ MiniAWikiManager.prototype._removePageIndexes = function(path) {
 // Offline maintenance: publication locks do not track readers in other processes.
 MiniAWikiManager.prototype.compact = function(options) {
   options = options || {}
-  if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
+  if (this._access !== "rw") return { ok: false, error: this._readOnlyError() }
   if (this._backendType !== "fs" || this._archiveRoot) return { ok: false, error: "compact-requires-local-filesystem" }
   if (!this._retrievalV2) return { ok: false, error: "compact-requires-retrieval-v2" }
   if (this._knowledgeJournalPending && this._knowledgeJournalPending()) return { ok: false, error: "ingest-pending" }
@@ -1657,7 +1722,7 @@ MiniAWikiManager.prototype.reindex = function() {
     }
     return built
   }
-  if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
+  if (this._access !== "rw") return { ok: false, error: this._readOnlyError() }
   try {
     if (!this._ensureLucene() || !this._hasEnhancedLexicalSupport()) return { ok: false, error: "Lucene oPack does not support lexicalEnhanced search; upgrade the lucene oPack before publishing an enhanced wiki index." }
     var manifestStatus = this._lexicalManifestStatus()
@@ -1743,8 +1808,29 @@ MiniAWikiManager.prototype.graph = function(op, params) {
   this._maybeRefreshArtifactBundle()
   var action = isString(op) ? op.toLowerCase().trim() : (isObject(params) && isString(params.op) ? params.op.toLowerCase().trim() : "stats")
   var p = isObject(params) ? params : {}
+  if (this._catalog && ["build", "report", "falkor"].indexOf(action) >= 0) return { ok: false, error: this._readOnlyError() }
   var mountGraphRequest = (action === "neighbors" || action === "retrieve") && isString(p.path) && p.path.startsWith("@")
-  if (!isObject(this._graph) && !mountGraphRequest) return { ok: false, error: "graph is not enabled (usegraph=true)" }
+  if (this._catalog && action === "stats" && toBoolean(this._config.usegraph) === true) {
+    // A generated catalog has no graph of its own. Count mounted graphs
+    // independently; shared nodes and communities are not merged across wikis.
+    var summary = { ok: true, scope: "mounts", available: 0, nodes: 0, edges: 0, communities: 0, provenance: { EXTRACTED: 0, INFERRED: 0, AMBIGUOUS: 0 }, mounts: [] }
+    this._mounts.forEach(function(mount) {
+      var stats
+      try { stats = mount.manager.graph("stats") }
+      catch(e) { stats = { ok: false, error: __miniAErrMsg(e) } }
+      summary.mounts.push(merge(stats, { name: mount.name }))
+      if (stats.ok === false) return
+      summary.available++
+      ;["nodes", "edges", "communities"].forEach(function(key) { summary[key] += stats[key] || 0 })
+      Object.keys(summary.provenance).forEach(function(key) { summary.provenance[key] += stats.provenance[key] || 0 })
+    })
+    return summary
+  }
+  if (!isObject(this._graph) && !mountGraphRequest) {
+    if (toBoolean(this._config.usegraph) !== true) return { ok: false, error: "wiki graph is not enabled (usewikigraph=true; manager config: usegraph=true)" }
+    if (this._catalog) return { ok: false, error: "generated wiki catalog has no primary graph; use graph stats for mounted graphs or configure wikiroot for primary graph operations" }
+    return { ok: false, error: "wiki graph is enabled but no graph is loaded; read-only wikis require an existing .mini-a-wiki-graph/graph.json or configured FalkorDB; check initialization warnings" }
+  }
   // read-only wikis can query an existing graph (local graph.json or external FalkorDB)
   // but never build or persist one
   if (this._access !== "rw") {
@@ -2011,13 +2097,17 @@ MiniAWikiManager.prototype.configure = function(config) {
   this._legacyRetrievalV2 = __
   var cfg = isMap(config) ? config : {}
   if (isUnDef(cfg.wikiretrievalv2) && isString(getEnv("OAF_MINI_A_WIKI_RETRIEVAL_V2"))) cfg.wikiretrievalv2 = getEnv("OAF_MINI_A_WIKI_RETRIEVAL_V2")
+  // Keep launcher defaults unset so an explicit option or environment override wins.
+  if (isUnDef(cfg.wikiretrievalv2)) cfg.wikiretrievalv2 = true
   if (isUnDef(cfg.wikiretrievalconfig) && isString(getEnv("OAF_MINI_A_WIKI_RETRIEVAL_CONFIG"))) cfg.wikiretrievalconfig = getEnv("OAF_MINI_A_WIKI_RETRIEVAL_CONFIG")
   var validatedRetrievalConfig = toBoolean(cfg.wikiretrievalv2) === true ? global.MiniAWikiRetrievalV2.config(cfg.wikiretrievalconfig) : __
   // The explicit runtime value wins. The environment form is intentionally
   // read here too so direct manager/MCP construction has the same behaviour as
   // the Mini-A launcher.
   if (isUnDef(cfg.wikilexical) && isString(getEnv("OAF_MINI_A_WIKI_LEXICAL"))) cfg.wikilexical = getEnv("OAF_MINI_A_WIKI_LEXICAL")
-  this._lexicalConfig = __miniAWikiLexicalConfig(cfg.wikilexical, cfg.root)
+  // The catalog has no lexical index. Resolve mount-relative resources only
+  // inside each mount, never against the process working directory.
+  this._lexicalConfig = __miniAWikiLexicalConfig(cfg.__catalog ? __ : cfg.wikilexical, cfg.root)
   this._lexicalFingerprint = __miniAWikiLexicalFingerprint(this._lexicalConfig)
   // Citation URLs (wikisourceurl): opt-in Handlebars template rendering a canonical
   // origin URL onto retrieval results. See "Citation URL templating" helpers above.
@@ -2054,6 +2144,13 @@ MiniAWikiManager.prototype.configure = function(config) {
   this._searchIndex = __
   this._mounts  = isArray(this._mounts) ? this._mounts : []
   this._ensureIndexRuntime()
+  this._catalog = cfg.__catalog === true
+  if (this._catalog) {
+    this._access = "ro"
+    this._backendType = "catalog"
+    this._backend = this._makeCatalogBackend()
+    return
+  }
   this._backend = this._backendType === "s3" ? this._makeS3Backend(cfg) : (this._backendType === "es" ? this._makeEsBackend(cfg) : (this._backendType === "s3fs" ? this._makeS3FsBackend(cfg) : (this._backendType === "http" ? this._makeHttpBackend(cfg) : this._makeFsBackend(cfg))))
   // true per-instance nonce, not just the backend-identity hash: $cache(name) is a
   // process-global registry, and two managers can share the same backend identity
@@ -2071,7 +2168,8 @@ MiniAWikiManager.prototype.configure = function(config) {
   this._initializeGraph()
   this._bootstrapWiki()
   if (toBoolean(cfg.wikiretrievalv2) === true) {
-    this._retrievalV2 = new global.MiniAWikiRetrievalV2(this, validatedRetrievalConfig)
+    var unpublished = !this._hasRetrievalPublication({ root: this._getIndexRoot() + "/.mini-a-wiki-serving" })
+    this._retrievalV2 = new global.MiniAWikiRetrievalV2(this, validatedRetrievalConfig, unpublished)
     // Only an unpublished wiki is legacy. Never downgrade a published but
     // incompatible/corrupt generation, or a publication with a rollback pointer.
     if (!this._hasRetrievalPublication(this._retrievalV2)) {
@@ -2098,6 +2196,7 @@ MiniAWikiManager.prototype._refreshRetrievalMode = function() {
   var engine = this._legacyRetrievalV2
   if (this._access !== "rw") engine.root = this._activeBundleRoot() + "/.mini-a-wiki-serving"
   if (this._hasRetrievalPublication(engine)) {
+    global.__miniAWikiKnowledge.install(this)
     this._retrievalV2 = engine
     this._legacyRetrievalV2 = __
   }
@@ -2364,7 +2463,7 @@ MiniAWikiManager.prototype._indexBodyExtras = function(body) {
 // which makes repeated deterministic repair runs content-idempotent.
 // Returns { ok, regenerated:[path], skipped:[path] }.
 MiniAWikiManager.prototype.regenerateIndexes = function(options) {
-  if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
+  if (this._access !== "rw") return { ok: false, error: this._readOnlyError() }
   var opts = isObject(options) ? options : {}
   var self = this
   var out = { ok: true, regenerated: [], skipped: [] }
@@ -2525,7 +2624,7 @@ MiniAWikiManager.prototype.regenerateIndexes = function(options) {
 }
 
 MiniAWikiManager.prototype.init = function(path) {
-  if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
+  if (this._access !== "rw") return { ok: false, error: this._readOnlyError() }
   var now = new Date().toISOString()
   if (isString(path) && path.trim().length > 0) {
     try {
@@ -3530,7 +3629,7 @@ MiniAWikiManager.prototype.navigate = function(pathOrRef, options) {
 MiniAWikiManager.prototype.agenticRead = function(pathOrRef, options) {
   var path = this._agenticPath(pathOrRef), opts = isObject(options) ? options : {}
   this._refreshRetrievalMode()
-  if (path.startsWith("@") && (this._retrievalV2 || this._legacyRetrievalV2)) {
+  if (path.startsWith("@") && (this._catalog || this._retrievalV2 || this._legacyRetrievalV2)) {
     var mountedRead = this._resolveMountPath(path)
     if (!mountedRead || !mountedRead.mount) return { error: "mount-not-found" }
     var mountedResult = mountedRead.mount.manager.agenticRead(mountedRead.localPath, opts)
@@ -3801,7 +3900,7 @@ MiniAWikiManager.prototype.retrieve = function(query, options) {
 }
 
 MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {
-  if (this._access !== "rw") return { ok: false, error: "wiki is read-only (wikiaccess=ro)" }
+  if (this._access !== "rw") return { ok: false, error: this._readOnlyError("wiki is read-only (wikiaccess=ro)") }
   if (!isString(path) || path.trim().length === 0) return { ok: false, error: "path is required" }
   if (path.trim().startsWith("@")) return { ok: false, error: "mounted wikis are read-only; cannot write to " + path.trim() }
   try {
@@ -3923,7 +4022,7 @@ MiniAWikiManager.prototype._logWrite = function(path, meta) {
 }
 
 MiniAWikiManager.prototype.delete = function(path) {
-  if (this._access !== "rw") return { ok: false, error: "wiki is read-only (wikiaccess=ro)" }
+  if (this._access !== "rw") return { ok: false, error: this._readOnlyError("wiki is read-only (wikiaccess=ro)") }
   if (!isString(path) || path.trim().length === 0) return { ok: false, error: "path is required" }
   if (path.trim().startsWith("@")) return { ok: false, error: "mounted wikis are read-only; cannot delete " + path.trim() }
   try {
@@ -4082,7 +4181,11 @@ MiniAWikiManager.prototype.search = function(query, options) {
   if (options && options.__wikiNoMounts === true) options = merge(options, { wiki: "primary" })
   var retrievalEngine = this._retrievalEngineFor(options)
   if (retrievalEngine && !(options && (options.forceScan || options.regex || options.searchIn === "body" || options.path))) { var searchV2 = retrievalEngine.search(query, options); return searchV2.ok && !(searchV2.outcome === "partial" && !searchV2.results.length) ? searchV2.results : searchV2 }
-  if ((this._retrievalV2 || this._legacyRetrievalV2) && !(options && options.__wikiNoMounts === true)) return this.searchSelected(query, options)
+  // Preserve the original V1 fan-out and graph hints for an entirely legacy
+  // default scope. The selected adapter is needed for explicit or mixed scopes.
+  var selectedAdapter = this._catalog || this._retrievalV2 || this._legacyRetrievalV2 &&
+    (options && isDef(options.wiki) || (this._mounts || []).some(function(mount) { return !!mount.manager._retrievalV2 }))
+  if (selectedAdapter && !(options && options.__wikiNoMounts === true)) return this.searchSelected(query, options)
   if (options && isDef(options.applicability)) return { ok: false, error: "applicability-requires-v2" }
   if (!isString(query) || query.trim().length === 0) return []
   this._maybeRefreshArtifactBundle()
@@ -4511,7 +4614,7 @@ MiniAWikiManager.prototype.browse = function(path) {
     mounts.forEach(function(m) {
       var count = 0; try { count = m.manager._safeListPages("").length } catch(e) {}
       mountSections.push({ path: "@" + m.name + "/", name: "@" + m.name, mount: true, page_count: count,
-        index: { path: "@" + m.name + "/index.md", exists: true } })
+        index: { path: "@" + m.name + "/index.md", exists: m.manager._backend.exists("index.md") } })
     })
   }
 
@@ -4610,7 +4713,7 @@ MiniAWikiManager.prototype.move = function(from, to, options) {
 }
 
 MiniAWikiManager.prototype._movePages = function(from, to, options) {
-  if (this._access !== "rw") return { ok: false, error: "wiki is read-only (wikiaccess=ro)" }
+  if (this._access !== "rw") return { ok: false, error: this._readOnlyError("wiki is read-only (wikiaccess=ro)") }
   if (isString(from) && from.trim().startsWith("@")) return { ok: false, error: "mounted wikis are read-only; cannot move " + from.trim() }
   if (isString(to)   && to.trim().startsWith("@"))   return { ok: false, error: "mounted wikis are read-only; cannot move to " + to.trim() }
   var opts = isObject(options) ? options : {}
@@ -4969,7 +5072,7 @@ MiniAWikiManager.prototype.appendLog = function(op, title, path) {
 // - has managed markers → replace only managed region, keep user content outside
 // - already at current version → no-op
 MiniAWikiManager.prototype.upgradeAgents = function() {
-  if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
+  if (this._access !== "rw") return { ok: false, error: this._readOnlyError() }
   var CURRENT  = __MINI_A_WIKI_AGENTS_VERSION
   var MANAGED_START_STR = "<!-- mini-a:agents managed:start"
   var MANAGED_END_STR   = "<!-- mini-a:agents managed:end -->"
@@ -5038,13 +5141,22 @@ MiniAWikiManager.prototype.attach = function(name, config) {
   // Replace only after the new manager initialises; close displaced readers.
   var cfg = isMap(config) ? config : {}
   cfg.access = "ro"
+  var mountBackend = isString(cfg.backend) ? cfg.backend.toLowerCase().trim() : "fs"
+  if (this._catalog && ["s3", "s3fs", "es", "http", "https"].indexOf(mountBackend) < 0) {
+    if (!(isString(cfg.root) && cfg.root.trim())) return { ok: false, error: "filesystem mount root is required" }
+    var mountRoot = new java.io.File(cfg.root.trim())
+    if (!mountRoot.isDirectory() && !this._isArchiveRoot(cfg.root)) return { ok: false, error: "filesystem mount root must be an existing directory or .zip/.okt archive" }
+  }
   // Mounts inherit the caller's lexical contract unless they explicitly select
   // another language/rule set. This makes a single wikilexical setting apply
   // consistently to federated retrieval.
   if (isUnDef(cfg.usegraph)) cfg.usegraph = this._config.usegraph
   if (isUnDef(cfg.wikiretrievalv2)) cfg.wikiretrievalv2 = this._config.wikiretrievalv2
   if (isUnDef(cfg.wikiretrievalconfig)) cfg.wikiretrievalconfig = this._config.wikiretrievalconfig
-  if (isUnDef(cfg.wikilexical)) cfg.wikilexical = this._lexicalConfig
+  if (isUnDef(cfg.wikilexical)) cfg.wikilexical = this._catalog ? this._config.wikilexical : this._lexicalConfig
+  Object.keys(this._config).forEach(function(key) {
+    if (key.indexOf("wikigraph") === 0 && isUnDef(cfg[key])) cfg[key] = this._config[key]
+  }, this)
   cfg.wikiMountName = name
   try {
     var manager = new MiniAWikiManager(cfg, this._logFn, this._auditFn)
@@ -5138,6 +5250,7 @@ MiniAWikiManager.prototype.context = function(options) {
     return { name: m.name, pages: count, label: isString(m.label) ? m.label : m.name, description: isString(m.description) && m.description.length > 0 ? m.description : desc }
   })
   var catalog = [{ name: "primary", label: isString(this._config.label) ? this._config.label : "wiki", primary: true, readOnly: this._access !== "rw", pageCount: pages.length, description: isString(this._config.description) ? this._config.description : "" }]
+  if (this._catalog) { catalog[0].generated = true; catalog[0].label = "Wiki Mount Catalog"; catalog[0].description = "Generated read-only primary; configure wikiroot for persistent storage." }
   mountList.forEach(function(m) { catalog.push({ name: m.name, label: m.label, primary: false, readOnly: true, pageCount: m.pages, description: m.description }) })
 
   // Retrieval capability: tells the agent up-front whether search is index-backed or a full scan,

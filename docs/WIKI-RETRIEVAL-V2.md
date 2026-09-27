@@ -1,8 +1,8 @@
 # Wiki retrieval v2
 
 `wikiretrievalv2=true` prefers the shared deterministic passage engine, with
-automatic legacy retrieval for wikis that have no V2 publication. The flag remains
-disabled by default. Markdown remains authoritative; serving generations are rebuildable.
+automatic legacy retrieval for wikis that have no V2 publication. The flag defaults
+to `true`. Markdown remains authoritative; serving generations are rebuildable.
 This implementation includes local serving, compatible published-bundle readers
 and deterministic maintenance. Some acceptance items remain unverified or incomplete. See [validation](https://github.com/openaf/mini-a/blob/main/development/docs/WIKI-RETRIEVAL-V2-VALIDATION.md)
 and [baseline](https://github.com/openaf/mini-a/blob/main/development/docs/WIKI-RETRIEVAL-V2-BASELINE.md).
@@ -21,7 +21,7 @@ Each builds compatible artifacts explicitly. Ingestion finalisation uses the
 existing reindex/journal flow when configured with v2. Pending/corrupt journal
 state and inactive source evidence are suppressed during retrieval.
 
-Set the same flag on readers. When neither `current.json` nor `previous.json`
+Readers prefer V2 by default. When neither `current.json` nor `previous.json`
 exists in the serving directory, the manager keeps legacy retrieval and logs one
 warning identifying the primary wiki or mount, the `v2-build-required` reason,
 and how to enable V2. This applies to writable and read-only managers. No automatic
@@ -30,6 +30,9 @@ reindex or migration runs. Legacy retrieval retains its existing index/scan beha
 `v2-build-required`; `retrieval.search` describes the actual legacy search capability.
 
 An explicit writable reindex builds V2 even while legacy fallback is active.
+Because V2 is now the default, existing writable reindex, Dream maintenance and
+ingestion-finalization jobs publish V2 unless they set `wikiretrievalv2=false`
+or `OAF_MINI_A_WIKI_RETRIEVAL_V2=false`. Ordinary reads do not migrate V1 artifacts.
 After publication, the writer switches to V2, and existing fallback readers detect
 the publication on their next retrieval/navigation request (remote bundles follow
 the configured refresh interval). `wikiretrievalv2=false` continues to force legacy
@@ -74,8 +77,11 @@ Search preserves the highest-ranked complete candidates that fit `maxBytes`
 `output-budget` stop reason when candidates are omitted. Only a budget too small
 for the remaining response envelope returns `output-budget-too-small`.
 
-Direct configuration overrides environment defaults:
-`OAF_MINI_A_WIKI_RETRIEVAL_V2` and `OAF_MINI_A_WIKI_RETRIEVAL_CONFIG`.
+Explicit configuration overrides `OAF_MINI_A_WIKI_RETRIEVAL_V2`; when both are
+unset, `wikiretrievalv2` defaults to `true` in the shared manager. Launchers keep
+the option unset until that resolution so an environment value of `false` still
+works. `OAF_MINI_A_WIKI_RETRIEVAL_CONFIG` supplies the advanced configuration
+unless an explicit `wikiretrievalconfig` is passed.
 The flag, `wikiretrievalconfig` and `wikitelemetry` are propagated through agent,
 console, web, Dream, ingestion, wiki MCP and wiki-backed skill launchers, including
 dedicated skill libraries. Mounts inherit settings
@@ -788,7 +794,7 @@ Filesystem attribute checks are not physical/protocol I/O telemetry. External
 edit/stat and single-writer limitations still apply; this is not a source-file
 transaction or a globally simultaneous snapshot.
 
-Disable v2 to use preserved legacy artifacts; opt-in reindex never removes the last
+Disable v2 to use preserved legacy artifacts; explicit reindex never removes the last
 legacy-compatible index. To roll back v2 artifacts, stop writers/readers, restore a
 saved valid `current.json` and its complete UUID directory, then reopen managers.
 Current-view source revision checks still apply; rollback cannot make old content
@@ -914,7 +920,7 @@ skills. Feature-off operations return `v2-required` for this new action.
 - `mini-a-wiki-retrieval.js`: parser, local generation publication, managed readers, catalogue/cache, scoped ranking, evidence packing, applicability and maintenance report.
 - `mini-a-wiki.js` and `mini-a-wiki-knowledge.js`: shared hooks, contract repairs, scores, continuations, incremental publication and separate telemetry.
 - `mini-a-mcp-wiki.js`, `mini-a-mcp-skills.js`, `mini-a-utils.js`, `mini-a-skills.js`: trusted cursor adapters, restricted private grants and revision-aware wiki skill facade.
-- `mini-a.js`, `mini-a-con.js`, `mini-a-dreams.js`, launch YAML and `mcps/` schemas: consistent opt-in configuration propagation.
+- `mini-a.js`, `mini-a-con.js`, `mini-a-dreams.js`, launch YAML and `mcps/` schemas: consistent default and override propagation.
 - `tests/wikiRetrieval*.js`, suite registration and fixtures: runtime regression counts, repeat-run checks, deterministic quality and local performance harnesses.
 - Wiki/ingestion/virtual-skills documentation and `.package.yaml`: migration, measured limits and runtime packaging; pre-existing package edits retained.
 
@@ -924,7 +930,7 @@ skills. Feature-off operations return `v2-required` for this new action.
 To stream a v2 serving bundle through the supported reindex entry point:
 
 ```sh
-ojob mini-a.yaml dream=true usewiki=true wikiroot=/path/to/wiki wikiaccess=rw wikiretrievalv2=true dreamwikimode=reindex wikiretrievalconfig="(bundlePath: '/tmp/mini-a-wiki-index.zip')"
+ojob mini-a.yaml goal="Reindex wiki" dream=true usewiki=true wikiroot=/path/to/wiki wikiaccess=rw wikiretrievalv2=true dreamwikimode=reindex wikiretrievalconfig="(bundlePath: '/tmp/mini-a-wiki-index.zip')"
 ```
 
 Alternatively call `wm._retrievalV2.exportBundle(path)` explicitly. It acquires a

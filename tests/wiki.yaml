@@ -3,6 +3,26 @@ include:
 - tests/wikiRetrievalV2.yaml
 
 jobs:
+- name: MiniA Wiki Catalog Tests::GraphStats
+  to: oJob Test
+  exec: args.func = require("tests/wikiCatalog.js").testGraphStats
+
+- name: MiniA Wiki Catalog Tests::Catalog
+  to: oJob Test
+  exec: args.func = require("tests/wikiCatalog.js").testCatalog
+
+- name: MiniA Wiki Catalog Tests::Selection
+  to: oJob Test
+  exec: args.func = require("tests/wikiCatalog.js").testSelection
+
+- name: MiniA Wiki Catalog Tests::Initialization
+  to: oJob Test
+  exec: args.func = require("tests/wikiCatalog.js").testInitialization
+
+- name: MiniA Wiki Catalog Tests::PublishedRetrieval
+  to: oJob Test
+  exec: args.func = require("tests/wikiCatalog.js").testPublishedRetrieval
+
 - name: MiniA Wiki Tests::ConsoleSearchPreservesV2Status
   to: oJob Test
   exec: args.func = require("tests/wiki.js").testConsoleSearchPreservesV2Status
@@ -669,6 +689,11 @@ jobs:
   exec: args.func = require("tests/wiki.js").testS3ArtifactsHydrateLocalSearchAndGraphCache
 
 todo:
+- MiniA Wiki Catalog Tests::GraphStats
+- MiniA Wiki Catalog Tests::Catalog
+- MiniA Wiki Catalog Tests::Selection
+- MiniA Wiki Catalog Tests::Initialization
+- MiniA Wiki Catalog Tests::PublishedRetrieval
 - MiniA Wiki Tests::McpWikiRestrictedCrossWikiGraphHints
 - MiniA Wiki Tests::McpWikiRestrictedV2GraphHints
 - MiniA Wiki Ingest Tests::LegacyContextProvenance

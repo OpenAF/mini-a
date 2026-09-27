@@ -5,6 +5,10 @@ Review a saved plan, then explicitly apply it. Planning reads raw source files a
 never initializes source wikis. Apply and resume do not call a synthesis model.
 No real wiki migration is needed to try this: use disposable directories first.
 
+`absorbspec` accepts JSON, YAML (`.yaml` or `.yml`), and SLON (`.slon`)
+files. Extensions are case-insensitive; other extensions retain JSON parsing.
+All formats use the same specification structure. For example, in JSON:
+
 ```json
 {
   "sources": [
@@ -14,7 +18,44 @@ No real wiki migration is needed to try this: use disposable directories first.
 }
 ```
 
-Roots are relative to the specification file. IDs are stable user-assigned names
+A YAML specification (`sources.yaml`):
+
+```yaml
+sources:
+  - id: platform
+    root: ../platform-wiki
+    paths: [runtime/, setup.md#linux]
+    exclude: [runtime/old.md]
+  - id: operations
+    root: ../operations-wiki
+    tags: [deployment]
+    topic: runtime configuration
+```
+
+A SLON specification (`sources.slon`):
+
+```text
+(sources: [(id: platform, root: "../platform-wiki", paths: ["runtime/", "setup.md#linux"], exclude: ["runtime/old.md"]), (id: operations, root: "../operations-wiki", tags: ["deployment"], topic: "runtime configuration")])
+```
+
+Pass either file with `absorbspec=./sources.yaml` or `absorbspec=./sources.slon`,
+or use `/absorb plan ./sources.yaml` in the console.
+
+If the value does not name an existing file, `absorbspec` also accepts an inline
+JSON or SLON map, or an array of source definitions (equivalent to `sources`).
+An existing file takes precedence. Arrays are also accepted in specification files.
+For example:
+
+```sh
+ojob mini-a-absorb.yaml absorbop=plan absorbspec='{"sources":[{"id":"platform","root":"./platform-wiki","all":true}]}' wikiroot=./destination wikiaccess=rw
+ojob mini-a-absorb.yaml absorbop=plan absorbspec='[(id: platform, root: "./platform-wiki", all: true)]' wikiroot=./destination wikiaccess=rw
+```
+
+In the console, quote the entire inline value, for example
+`/absorb plan '{"sources":[{"id":"platform","root":"./platform-wiki","all":true}]}'`.
+
+Roots are relative to the specification file, or to the current working directory
+for inline specifications. IDs are stable user-assigned names
 (letters, digits, underscores and hyphens); keep the same ID when relocating a
 source. Every source needs `all: true`, `paths`, `tags`, or `topic`. Positive
 selectors form a union; exclusions win. Tags match exact frontmatter array values.
@@ -47,7 +88,18 @@ The console has equivalent commands against its active filesystem wiki:
 /absorb apply <id>
 /absorb status
 /absorb resume <id>
+/absorb delete <id>
+/absorb cancel <id>
 ```
+
+`delete <id>` removes the saved JSON plan and Markdown report; `cancel` is an
+alias. Both require `wikiaccess=rw`, including with an external `absorboutput`.
+They preserve wiki pages, baselines and receipts, and refuse deletion of a plan
+needed by an unfinished recovery journal or while the wiki writer is busy.
+Repeating deletion returns `noop`. These commands do not stop a running apply
+or undo applied changes. Blocked/incomplete plans can be deleted directly.
+The standalone equivalent is `absorbop=delete absorbplan=<id>` (or `absorbop=cancel`).
+Use the same `absorboutput` used when creating the plan.
 
 Tab completion covers subcommands, quoted specification paths and saved plan IDs.
 Use `model=...` or `OAF_MODEL` for planning synthesis. Exact duplicate detection is

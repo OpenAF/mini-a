@@ -20,6 +20,86 @@
     return { path: path, classification: "enrichment", edits: [{ before: before, after: after, evidence: ids }], evidence: ids, mappings: ids.map(function(id) { return { evidence: id, anchor: "" } }), dependencies: [] }
   }
   function run(r, op, id) { r._args.absorbop = op; r._args.absorbplan = id; return r.run() }
+  exports.testDeletePlans = function() { fixture(function(root, r) {
+    io.writeFileString(root + "/one/a.md", "# A")
+    model(r, [])
+    var p = r.run(), base = root + "/dst/.mini-a-wiki-absorb", path = base + "/plans/" + p.id
+    assert(!p.plan.complete, "fixture must be incomplete")
+    r._args.wikiaccess = "ro"
+    assert(!run(r, "delete", p.id).ok && io.fileExists(path + ".json"))
+    r._args.wikiaccess = "rw"
+    assert(!run(r, "delete", "../bad").ok)
+    io.mkdir(root + "/dst/.mini-a-wiki-ingest")
+    var file = new java.io.RandomAccessFile(root + "/dst/.mini-a-wiki-ingest/writer.lock", "rw"), lock = file.getChannel().tryLock()
+    try { assert(!run(r, "delete", p.id).ok && io.fileExists(path + ".json")) } finally { lock.release(); file.close() }
+    io.writeFileString(base + "/journal.json", JSON.stringify({ id: p.id }))
+    assert(!run(r, "cancel", p.id).ok && io.fileExists(path + ".json"))
+    io.rm(base + "/journal.json")
+    assert(run(r, "cancel", p.id).status === "deleted")
+    assert(!io.fileExists(path + ".json") && !io.fileExists(path + ".md"))
+    assert(run(r, "status").plans.indexOf(p.id) < 0)
+    assert(run(r, "delete", p.id).status === "noop")
+    model(r, [proposal("a.md", "", "# A", ["one:a.md"])])
+    p = run(r, "plan"); assert(run(r, "apply", p.id).ok)
+    var baseline = io.readFileString(base + "/baseline.json"), receipt = io.readFileString(base + "/receipts/" + p.id + ".json")
+    assert(run(r, "delete", p.id).ok)
+    assert(io.readFileString(root + "/dst/a.md") === "# A")
+    assert(io.readFileString(base + "/baseline.json") === baseline)
+    assert(io.readFileString(base + "/receipts/" + p.id + ".json") === receipt)
+    r._args.absorboutput = root + "/out"
+    p = run(r, "plan"); path = root + "/out/plans/" + p.id
+    io.rm(path + ".md")
+    java.nio.file.Files.createSymbolicLink(new java.io.File(path + ".md").toPath(), new java.io.File(root + "/one/a.md").toPath())
+    assert(!run(r, "delete", p.id).ok && io.fileExists(path + ".json"))
+    assert(io.readFileString(root + "/one/a.md") === "# A")
+    new java.io.File(path + ".md").delete()
+    assert(run(r, "delete", p.id).ok && !io.fileExists(path + ".json"))
+  }) }
+  exports.testSpecFormats = function() { fixture(function(root, r) {
+    io.writeFileString(root + "/one/a.md", "# A\nFacts")
+    model(r, [proposal("a.md", "", "# A\nFacts", ["one:a.md"])])
+    var formats = {
+      json: '{"sources":[{"id":"one","root":"one","paths":["a.md"]}]}',
+      yaml: 'sources:\n  - id: one\n    root: one\n    paths:\n      - a.md\n',
+      yml: 'sources:\n  - id: one\n    root: one\n    paths: [a.md]\n',
+      slon: '(sources: [(id: one, root: one, paths: ["a.md"])])'
+    }
+    var selected
+    Object.keys(formats).concat(["YAML", "SLON", "data"]).forEach(function(ext) {
+      r._args.absorbspec = root + "/sources." + ext
+      io.writeFileString(r._args.absorbspec, formats[ext.toLowerCase()] || formats.json)
+      var p = r.run()
+      assert(p.ok && p.plan.complete, ext + ": " + JSON.stringify(p))
+      assert(p.plan.operations.length === 1, ext + ": missing proposal")
+      if (!selected) selected = JSON.stringify(p.plan.selected)
+      assert(JSON.stringify(p.plan.selected) === selected, ext + ": selection differs")
+      io.writeFileString(r._args.absorbspec, ext.toLowerCase() === "slon" ? '(sources: [])' : '[]')
+      assert(!r.run().ok, ext + ": invalid spec accepted")
+    })
+  }) }
+  exports.testInlineSpecs = function() { fixture(function(root, r) {
+    io.writeFileString(root + "/one/a.md", "# A\nFacts")
+    model(r, [proposal("a.md", "", "# A\nFacts", ["one:a.md"])])
+    var relativeRoot = String(new java.io.File(r._canonical(".")).toPath().relativize(new java.io.File(root + "/one").toPath()))
+    var sources = [{ id: "one", root: relativeRoot, paths: ["a.md"] }]
+    var slonSources = '[(id: one, root: ' + JSON.stringify(relativeRoot) + ', paths: ["a.md"])]'
+    var inputs = [JSON.stringify({ sources: sources }), JSON.stringify(sources), '(sources: ' + slonSources + ')', slonSources, { sources: sources }, sources]
+    inputs.forEach(function(input, index) {
+      r._args.absorbspec = input
+      var p = r.run()
+      assert(p.ok && p.plan.complete, index + ": " + JSON.stringify(p))
+      assert(p.plan.operations.length === 1 && p.plan.selected[0].id === "one:a.md", "inline selection differs")
+      assert(p.plan.sources[0].root === r._canonical(root + "/one"), "inline root is not cwd-relative")
+    })
+    // A valid existing file wins even when its name looks like an inline map.
+    r._args.absorbspec = root + '/{"sources":[]}'
+    io.writeFileString(r._args.absorbspec, JSON.stringify([{ id: "one", root: "one", all: true }]))
+    assert(r.run().ok, "file precedence or file array failed")
+    ;[root + "/missing.json", "[]", "{}", "42", "null", "(sources:", '[{"id":"one"}]'].forEach(function(input) {
+      r._args.absorbspec = input
+      assert(!r.run().ok, "Invalid inline spec accepted: " + input)
+    })
+  }) }
   exports.testMultipleSourcesAndRepeat = function() { fixture(function(root, r) {
     io.writeFileString(root + "/one/a.md", "# A\nA facts")
     io.writeFileString(root + "/two/b.md", "# B\nB facts")

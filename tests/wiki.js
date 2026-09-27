@@ -2481,7 +2481,7 @@
   exports.testLexicalManifestUpgradeContract = function() {
     var dir = createTestDir()
     try {
-      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var wm = new MiniAWikiManager({ wikiretrievalv2: false, backend: "fs", root: dir, access: "rw" })
       var resetSeen = __
       wm._hasEnhancedLexicalSupport = function() { return true }
       wm._rebuildSearchIndex = function(opts) { resetSeen = opts.resetLucene; return { ok: true } }
@@ -2494,7 +2494,7 @@
       resetSeen = __
       wm.reindex()
       ow.test.assert(resetSeen, false, "matching manifests should retain the normal rebuild path")
-      var changed = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikilexical: { language: "french" } })
+      var changed = new MiniAWikiManager({ wikiretrievalv2: false, backend: "fs", root: dir, access: "rw", wikilexical: { language: "french" } })
       changed._hasEnhancedLexicalSupport = function() { return true }
       changed._rebuildSearchIndex = function(opts) { resetSeen = opts.resetLucene; return { ok: true } }
       changed._rebuildGraphIndex = function() {}
@@ -2505,7 +2505,7 @@
 
   exports.testReadOnlyLexicalManifestWarningIdentifiesMountAndReason = function() {
     var warnings = []
-    var wm = new MiniAWikiManager({ backend: "fs", root: "/published/slon", access: "ro", wikiMountName: "slon" }, function(level, msg) {
+    var wm = new MiniAWikiManager({ wikiretrievalv2: false, backend: "fs", root: "/published/slon", access: "ro", wikiMountName: "slon" }, function(level, msg) {
       if (level === "warn") warnings.push(msg)
     })
     wm._lexicalManifestStatus = function() { return { compatible: false, reason: "configuration" } }
@@ -2641,7 +2641,7 @@
   exports.testIndexBackedSearchReturnsRealSnippets = function() {
     var dir = createTestDir()
     try {
-      var rw = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var rw = new MiniAWikiManager({ wikiretrievalv2: false, backend: "fs", root: dir, access: "rw" })
       rw.write("notes/alpha.md", { title: "Alpha" }, "# Alpha\n\nline one\nThe quick brown zebrafish jumps.\nline three")
       rw.reindex()
       rw.close()

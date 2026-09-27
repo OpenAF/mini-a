@@ -2,6 +2,72 @@
   load("mini-a-common.js"); load("mini-a-wiki.js")
   var temporary = function() { var p = java.io.File.createTempFile("wiki-v2-test-", "").getCanonicalPath(); io.rm(p); io.mkdir(p); return p }
   var make = function(root, extra) { return new MiniAWikiManager(merge({ backend: "fs", root: root, access: "rw", wikiretrievalv2: true, wikiretrievalconfig: { passageChars: 256 } }, extra || {}), function() {}) }
+  exports.testRetrievalV2DefaultCompatibility = function() {
+    var dir = temporary(), writer, reader, legacy, warnings = []
+    var snapshot = function(root) {
+      var files = {}
+      var walk = function(path) {
+        io.listFiles(path).files.forEach(function(file) {
+          if (file.isDirectory) walk(String(file.canonicalPath))
+          else files[String(file.canonicalPath).substring(String(root).length)] = sha256(io.readFileBytes(String(file.canonicalPath)))
+        })
+      }
+      walk(root); return stringify(files,__,"")
+    }
+    try {
+      // Publish a real V1 wiki, then access it with the option omitted.
+      writer = make(dir,{wikiretrievalv2:false})
+      writer.write("old.md",{title:"Old reference"},"# Old\ndefaultlegacyneedle remains searchable.")
+      ow.test.assert(writer.reindex().ok,true,"legacy fixture publishes V1 index")
+      writer.close(); writer = __
+      var before = snapshot(dir)
+      legacy = make(dir,{access:"ro",wikiretrievalv2:false})
+      var legacyHits = legacy.search("defaultlegacyneedle")
+      reader = new MiniAWikiManager({backend:"fs",root:dir,access:"ro"},function(level,message){if(level==="warn")warnings.push(message)})
+      ow.test.assert(reader._config.wikiretrievalv2,true,"omitted option defaults to true")
+      ow.test.assert(reader.context().retrieval.mode,"legacy","existing V1 publication retains legacy engine")
+      ow.test.assert(stringify(reader.search("defaultlegacyneedle"),__,""),stringify(legacyHits,__,""),"default fallback preserves V1 search hits")
+      ow.test.assert(reader.retrieve("defaultlegacyneedle").evidence.length,1,"existing V1 evidence remains available")
+      ow.test.assert(warnings.filter(function(m){return m.indexOf("using legacy retrieval")>=0}).length,1,"default fallback warns once")
+      reader.close(); reader=__; legacy.close(); legacy=__
+      ow.test.assert(snapshot(dir),before,"default read-only session preserves every V1 artifact byte")
+      ow.test.assert(io.fileExists(dir+"/.mini-a-wiki-serving"),false,"no automatic V1 migration")
+      writer = new MiniAWikiManager({backend:"fs",root:dir,access:"rw"},function(){})
+      ow.test.assert(writer.context().retrieval.mode,"legacy","writable opening also preserves V1")
+      ow.test.assert(writer.write("new.md",{title:"New"},"# New\ndefaultwriteneedle").ok,true,"default writer still updates V1 pages")
+      ow.test.assert(writer.search("defaultwriteneedle").length,1,"default writer keeps the legacy index current")
+      ow.test.assert(io.fileExists(dir+"/.mini-a-wiki-serving"),false,"ordinary writes do not trigger migration")
+      ow.test.assert(writer.reindex().ok,true,"explicit reindex publishes the new default format")
+      ow.test.assert(writer.context().retrieval.mode,"v2","explicit reindex enables V2")
+      reader = new MiniAWikiManager({backend:"fs",root:dir,access:"ro"},function(){})
+      ow.test.assert(reader.context().retrieval.mode,"v2","default reader uses existing V2 publication")
+      ow.test.assert(reader.retrieve("defaultlegacyneedle").evidence.length,1,"default V2 evidence is available")
+    } finally {if(reader)reader.close();if(legacy)legacy.close();if(writer)writer.close();io.rm(dir)}
+  }
+  exports.testRetrievalV2DefaultPrecedence = function() {
+    var dir = temporary(), writer
+    try {
+      writer = make(dir)
+      writer.write("page.md",{title:"Page"},"# Page\ndefaultprecedenceneedle")
+      ow.test.assert(writer.reindex().ok,true,"precedence fixture publishes V2")
+      ;["unset","false","true"].forEach(function(envValue) {
+        var script = dir+"/precedence.js", log = dir+"/precedence.log"
+        var configs = [{backend:"fs",root:String(dir),access:"ro"},{backend:"fs",root:String(dir),access:"ro",wikiretrievalv2:false},{backend:"fs",root:String(dir),access:"ro",wikiretrievalv2:true}]
+        var expected = [envValue!=="false",false,true]
+        io.writeFileString(script,'load("mini-a-common.js");load("mini-a-wiki.js");try{var configs='+stringify(configs,__,"")+',expected='+stringify(expected,__,"")+';configs.forEach(function(c,i){var m=new MiniAWikiManager(c,function(){});try{if(toBoolean(m._config.wikiretrievalv2)!==expected[i]||m.context().retrieval.mode!==(expected[i]?"v2":"legacy"))throw new Error("precedence mismatch "+i)}finally{m.close()}});java.lang.System.exit(0)}catch(e){printErr(e);java.lang.System.exit(1)}')
+        var command = new java.util.ArrayList()
+        command.add(String(getOpenAFPath())+"/oaf");command.add("-f");command.add(script)
+        var builder = new java.lang.ProcessBuilder(command)
+        builder.directory(new java.io.File(String(java.lang.System.getProperty("user.dir"))))
+        if(envValue==="unset")builder.environment().remove("OAF_MINI_A_WIKI_RETRIEVAL_V2")
+        else builder.environment().put("OAF_MINI_A_WIKI_RETRIEVAL_V2",envValue)
+        builder.redirectErrorStream(true);builder.redirectOutput(new java.io.File(log))
+        var child = builder.start()
+        if(!child.waitFor(20,java.util.concurrent.TimeUnit.SECONDS)){child.destroyForcibly();throw new Error("precedence subprocess timeout")}
+        ow.test.assert(Number(child.exitValue()),0,"explicit option > environment > true default (env="+envValue+"): "+io.readFileString(log))
+      })
+    } finally {if(writer)writer.close();io.rm(dir)}
+  }
   exports.testAutomaticLegacyFallback = function() {
     var dir = temporary(), reader, writer, incompatible, disabled, unsafe, warnings = []
     try {

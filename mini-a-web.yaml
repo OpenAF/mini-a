@@ -813,7 +813,7 @@ help:
     desc     : Seconds between HTTP or bundled-S3 artifact metadata checks (0 disables)
     mandatory: false
   - name     : wikiretrievalv2
-    desc     : Prefer V2 passage retrieval; unpublished wikis use legacy retrieval with a warning until explicitly reindexed or supplied compatible artifacts
+    desc     : Prefer V2 passage retrieval (default true); unpublished wikis use legacy retrieval with a warning; false forces legacy behavior
     mandatory: false
   - name     : wikiretrievalconfig
     desc     : Validated SLON/JSON passage, cache and artifact settings

@@ -342,7 +342,7 @@ Related parameters for enabling, locating, and limiting the virtual skill librar
 | Parameter | Default | Purpose |
 |---|---|---|
 | `useskillswiki` | `false` | Must be set to `true` to enable the virtual skill library. |
-| `skillwikiroot` | `.` for a dedicated library | Filesystem root for a dedicated skill wiki; prefer an explicit absolute path. |
+| `skillwikiroot` | Generated catalog with nonempty `skillwikimounts`; otherwise `.` | Filesystem root for a dedicated skill wiki; prefer an explicit absolute path. |
 | `skillwikibackend` | `fs` for a dedicated library | Select the backend for a dedicated skill wiki: `fs`, `s3`, `s3fs`, `es`, or `http`. |
 | `skillwikimounts` | Unset | Read-only mounts for a dedicated skill wiki, supplied as a SLON/JSON array using the `wikimounts` shape. |
 | `skillsmaxloaded` | `3` | Maximum distinct references opened through the agent's `skillwiki` tool per run. |
@@ -511,13 +511,15 @@ latency against your own corpus before sizing a deployment.
 | `mini-a-con.js` | `/skills search\|recommend\|open\|read\|related\|context` console subcommands. |
 | `tests/skills.js`, `tests/skills.yaml` | Unit + multi-mount integration tests, including safe-mode opaque-reference behavior. |
 
-## Opt-in passage retrieval
+## Default passage retrieval
 
-Build a filesystem library from the checkout with writable access, then start
-its reader with the same retrieval and lexical settings:
+`wikiretrievalv2` defaults to `true`. Existing V1 libraries keep legacy retrieval
+with a warning until explicitly reindexed; `wikiretrievalv2=false` forces legacy
+behavior. Build a filesystem library with writable access, then start its reader
+with matching lexical settings:
 
 ```bash
-ojob mini-a.yaml dream=true usewiki=true wikiroot=/absolute/path/to/team-skills \
+ojob mini-a.yaml goal="Reindex skills" dream=true usewiki=true wikiroot=/absolute/path/to/team-skills \
   wikiaccess=rw wikiretrievalv2=true dreamwikimode=reindex \
   wikilexical="(language: english, ngrams: true)"
 
@@ -531,9 +533,10 @@ selected library using its effective configuration.
 `wikiretrievalv2=true` and `wikiretrievalconfig` reach the shared wiki manager.
 CLI, console and web launchers also pass these settings to a dedicated
 `useskillswiki=true skillwikiroot=...` manager. Build its serving generation
-explicitly with a writable wiki manager before using that read-only skill
-library; `wikitelemetry=true` records aggregate restricted outcomes in memory
-for read-only MCP servers. Restricted calls consume quotas and one-shot
+explicitly with a writable wiki manager to enable V2 in that read-only skill
+library; without a V2 publication it continues using legacy retrieval.
+`wikitelemetry=true` records aggregate restricted outcomes in memory for read-only
+MCP servers. Restricted calls consume quotas and one-shot
 references, so their MCP schemas mark them non-idempotent.
 For a dedicated remote skill backend, the normal `wiki*` connection and artifact
 arguments supply its endpoint, credentials and cache; `skillwikibackend` selects
@@ -543,3 +546,5 @@ journals, full-source reconstruction and protected pruning remain authoritative.
 Original ingestion chunks and summaries do not become wiki-range quotations.
 See [retrieval v2](WIKI-RETRIEVAL-V2.md) for effective capabilities, restricted
 presentation policy, rollout and outstanding requirements.
+
+Dedicated mounts-only skill libraries use the same generated, read-only in-memory catalog as ordinary wikis. Set `skillwikiroot=.` explicitly to include the current directory. Reusing the ordinary wiki manager shares its catalog and mounts.

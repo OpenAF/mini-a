@@ -2,7 +2,7 @@
   load("mini-a-common.js")
   load("mini-a-wiki.js")
   exports.testContracts = function() {
-    var wm = new MiniAWikiManager({ backend: "fs", root: "/tmp", access: "ro" })
+    var wm = new MiniAWikiManager({ backend: "fs", root: "/tmp", access: "ro", wikiretrievalv2: false })
     var raw = "---\ntitle: Test\n---\n# Section\n" + new Array(90).join("é") + "\n# Next\nsecret"
     wm.read = function() { return { path: "@last/test.md", raw: raw, body: raw, meta: {} } }
     var first = wm.agenticRead("test.md", { section: "Section", maxChars: 17 })

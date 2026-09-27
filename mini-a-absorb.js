@@ -15,6 +15,20 @@ MiniAAbsorb.prototype._hash = function(value) { return sha256(String(value)) }
 MiniAAbsorb.prototype._canonical = function(path) { return String(new java.io.File(String(path)).getCanonicalPath()) }
 MiniAAbsorb.prototype._inside = function(path, root) { return path === root || path.indexOf(root + "/") === 0 }
 MiniAAbsorb.prototype._json = function(path, fallback) { return io.fileExists(path) ? af.fromJson(io.readFileString(path)) : fallback }
+MiniAAbsorb.prototype._spec = function(value) {
+  var spec = value
+  if (isString(value)) {
+    if (io.fileExists(value)) {
+      var raw = io.readFileString(value)
+      spec = /\.ya?ml$/i.test(value) ? af.fromYAML(raw) : /\.slon$/i.test(value) ? af.fromSLON(raw) : af.fromJson(raw)
+    } else {
+      spec = af.fromJSSLON(value.trim())
+    }
+  }
+  if (isArray(spec)) spec = { sources: spec }
+  if (!isMap(spec)) throw new Error("Absorption specification must be a map or sources array (file or inline JSON/SLON)")
+  return spec
+}
 MiniAAbsorb.prototype._raw = function(path) { return io.fileExists(path) ? io.readFileString(path) : null }
 MiniAAbsorb.prototype._atomic = function(path, text) {
   if (this._canonical(path) !== path) throw new Error("Symlink artifact path: " + path)
@@ -194,9 +208,10 @@ MiniAAbsorb.prototype._validateLinks = function(plan, destination) {
   }
 }
 MiniAAbsorb.prototype.plan = function() {
-  var self = this, specPath = self._canonical(self._args.absorbspec), spec = self._json(specPath), destination = self._inventory(self._root), baseline = self._baseline()
+  var self = this, input = self._args.absorbspec, spec = self._spec(input), destination = self._inventory(self._root), baseline = self._baseline()
+  var specBase = isString(input) && io.fileExists(input) ? String(new java.io.File(self._canonical(input)).getParent()) : self._canonical(".")
   var plan = { version: 1, destination: self._root, created: new Date().toISOString(), sources: [], selected: [], operations: [], findings: [], duplicates: [], sourceChanges: [], modelUsage: { calls: 0, estimatedInputTokens: 0 }, complete: true, baselineHash: self._hash(JSON.stringify(baseline)) }
-  plan.selected = self._select(spec, String(new java.io.File(specPath).getParent()), plan)
+  plan.selected = self._select(spec, specBase, plan)
   var pageCount = {}, evidence = {}, pending = []
   plan.selected.forEach(function(s) { evidence[s.id] = s; pageCount[s.source + ":" + s.path] = true })
   var maxPages = Number(isDef(self._args.absorbmaxpages) ? self._args.absorbmaxpages : 100), maxTokens = Number(isDef(self._args.absorbmaxtokens) ? self._args.absorbmaxtokens : 100000)
@@ -535,6 +550,39 @@ MiniAAbsorb.prototype._apply = function(id, resume) {
     try { if (file) file.close() } catch(ignore) {}
   }
 }
+// Forget saved proposals only; applied content and recovery/provenance are retained.
+MiniAAbsorb.prototype._deletePlan = function(id) {
+  if (!/^[a-f0-9]{64}$/.test(String(id))) throw new Error("Invalid plan ID")
+  if (!this._writable) throw new Error("Deleting plans requires explicit wikiaccess=rw")
+  var lockPath = this._root + "/.mini-a-wiki-ingest/writer.lock", file, channel, lock
+  if (this._canonical(lockPath) !== lockPath) throw new Error("Symlink writer lock")
+  new java.io.File(lockPath).getParentFile().mkdirs()
+  try {
+    file = new java.io.RandomAccessFile(lockPath, "rw"); channel = file.getChannel(); lock = channel.tryLock()
+    if (!lock) throw new Error("Wiki writer busy")
+    var journal = this._json(this._state + "/journal.json")
+    if (journal && (!journal.id || journal.id === id)) throw new Error("Plan required for recovery; resume " + id + " before deleting")
+    var self = this, paths = ["md", "json"].map(function(ext) { return self._store + "/plans/" + id + "." + ext })
+    paths.forEach(function(path) {
+      var target = new java.io.File(path)
+      if (self._canonical(path) !== path || java.nio.file.Files.isSymbolicLink(target.toPath())) throw new Error("Symlink plan path")
+      if (target.exists() && !target.isFile()) throw new Error("Plan artifact is not a file")
+    })
+    var removed = []
+    paths.forEach(function(path) {
+      var target = new java.io.File(path)
+      if (target.exists()) {
+        if (!target.delete()) throw new Error("Plan cleanup failed: " + path)
+        removed.push(path)
+      }
+    })
+    return { ok: true, status: removed.length ? "deleted" : "noop", id: id, removed: removed }
+  } finally {
+    try { if (lock) lock.release() } catch(ignore) {}
+    try { if (channel) channel.close() } catch(ignore) {}
+    try { if (file) file.close() } catch(ignore) {}
+  }
+}
 MiniAAbsorb.prototype.run = function() {
   try {
     this._setup()
@@ -542,6 +590,7 @@ MiniAAbsorb.prototype.run = function() {
     if (op === "plan") return this.plan()
     if (op === "show") { var plan = this._loadPlan(id); return { ok: true, id: id, plan: plan, report: this._report(plan, id) } }
     if (op === "apply" || op === "resume") return this._apply(id, op === "resume")
+    if (op === "delete" || op === "cancel") return this._deletePlan(id)
     if (op === "status") {
       var dir = new java.io.File(this._store + "/plans"), files = dir.listFiles(), plans = []
       if (files) for (var i = 0; i < files.length; i++) if (/^[a-f0-9]{64}\.json$/.test(String(files[i].getName()))) plans.push(String(files[i].getName()).replace(/\.json$/, ""))

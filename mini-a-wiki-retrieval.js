@@ -1,10 +1,14 @@
 // Author: OpenAF
 // License: Apache 2.0
-// Derived, opt-in passage serving. Markdown remains the only editable authority.
-var MiniAWikiRetrievalV2 = function(manager, config) {
+// Derived passage serving. Markdown remains the only editable authority.
+var MiniAWikiRetrievalV2 = function(manager, config, preserveLegacyRanking) {
   this.manager = manager
+  var legacyRank = manager.knowledgeRank
   loadLib("mini-a-wiki-knowledge.js")
   global.__miniAWikiKnowledge.install(manager)
+  // Loading V2 must not add relevance scores or rerank an unpublished V1 wiki.
+  // Preserve an existing legacy/custom ranker, including its absence.
+  if (preserveLegacyRanking === true) manager.knowledgeRank = legacyRank
   this.config = MiniAWikiRetrievalV2.config(config)
   this.root = manager._getIndexRoot() + "/.mini-a-wiki-serving"
   this.lock = new java.util.concurrent.locks.ReentrantLock()

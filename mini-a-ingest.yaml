@@ -46,7 +46,7 @@ help:
     desc     : Number of parallel distillations (default 4)
     mandatory: false
   - name     : wikiretrievalv2
-    desc     : Publish opt-in page passages in one affected-page batch during FS/s3fs ingestion finalization
+    desc     : Publish V2 page passages during FS/s3fs ingestion finalization (default true); false keeps legacy indexing
     mandatory: false
   - name     : wikiretrievalconfig
     desc     : Validated SLON/JSON advanced passage, cache and artifact budgets

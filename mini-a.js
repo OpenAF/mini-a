@@ -8267,35 +8267,12 @@ MiniA.prototype._initWiki = function(args) {
         return isMap(rsp) && isMap(rsp.response) ? rsp.response : rsp
       }.bind(this)
     }
-    this._wikiManager = new MiniAWikiManager(cfg, function(level, msg) {
+    cfg = __miniAWikiPrimaryConfig(cfg, args.wikiroot, args.wikimounts)
+    this._wikiManager = __miniAWikiCreatePrimary(cfg, function(level, msg) {
       this.fnI(level || "info", "[wiki] " + msg)
     }.bind(this))
     this._wikiLintStaleDays = isNumber(args.wikilintstaleddays) ? args.wikilintstaleddays : 90
-    // Parse wikimounts: SLON/JSON array of {name, backend, root|bucket|...}
-    var wikiMountsRaw = args.wikimounts
-    if (isString(wikiMountsRaw) && wikiMountsRaw.trim().length > 0) {
-      try {
-        var wikiMountsList = af.fromJSSLON(wikiMountsRaw)
-        if (!isArray(wikiMountsList)) wikiMountsList = [wikiMountsList]
-        var self = this
-        wikiMountsList.forEach(function(mc) {
-          if (!isMap(mc) || !isString(mc.name)) return
-          var mr = self._wikiManager.attach(mc.name, merge({ access: "ro" }, mc))
-          if (isMap(mr) && mr.ok) self.fnI("info", "📎 [wiki] mounted @" + mc.name + " (" + mr.pages + " pages)")
-          else self.fnI("warn", "[wiki] mount failed for @" + mc.name + ": " + (isMap(mr) ? mr.error : "unknown"))
-        })
-      } catch(mountErr) {
-        this.fnI("warn", "[wiki] wikimounts parse error: " + __miniAErrMsg(mountErr))
-      }
-    } else if (isArray(wikiMountsRaw)) {
-      var self2 = this
-      wikiMountsRaw.forEach(function(mc) {
-        if (!isMap(mc) || !isString(mc.name)) return
-        var mr = self2._wikiManager.attach(mc.name, merge({ access: "ro" }, mc))
-        if (isMap(mr) && mr.ok) self2.fnI("info", "📎 [wiki] mounted @" + mc.name + " (" + mr.pages + " pages)")
-      })
-    }
-    this.fnI("info", `📖 [wiki] enabled (backend=${args.wikibackend}, access=${args.wikiaccess})`)
+    this.fnI("info", `📖 [wiki] enabled (backend=${this._wikiManager._backendType}, access=${this._wikiManager._access})`)
   } catch(e) {
     this.fnI("warn", `[wiki] failed to initialize: ${__miniAErrMsg(e)}`)
   }
@@ -8344,23 +8321,11 @@ MiniA.prototype._initSkillWiki = function(args) {
       cfg.backend = "http"; cfg.url = args.wikiurl
       cfg.accessKey = args.wikiaccesskey; cfg.secret = args.wikisecret
     }
-    this._skillWikiManager = new MiniAWikiManager(cfg, function(level, msg) {
+    cfg = __miniAWikiPrimaryConfig(cfg, args.skillwikiroot, args.skillwikimounts)
+    this._skillWikiManager = __miniAWikiCreatePrimary(cfg, function(level, msg) {
       this.fnI(level || "info", "[skills] " + msg)
     }.bind(this))
-    if (isString(args.skillwikimounts) && args.skillwikimounts.trim().length > 0) {
-      try {
-        var mountsList = af.fromJSSLON(args.skillwikimounts)
-        if (!isArray(mountsList)) mountsList = [mountsList]
-        var self = this
-        mountsList.forEach(function(mc) {
-          if (!isMap(mc) || !isString(mc.name)) return
-          self._skillWikiManager.attach(mc.name, merge({ access: "ro" }, mc))
-        })
-      } catch(mountErr) {
-        this.fnI("warn", "[skills] skillwikimounts parse error: " + __miniAErrMsg(mountErr))
-      }
-    }
-    this.fnI("info", `🧩 [skills] virtual skill library enabled (backend=${cfg.backend})`)
+    this.fnI("info", `🧩 [skills] virtual skill library enabled (backend=${this._skillWikiManager._backendType})`)
   } catch(e) {
     this.fnI("warn", `[skills] failed to initialize skill wiki: ${__miniAErrMsg(e)}`)
     this._skillWikiManager = __

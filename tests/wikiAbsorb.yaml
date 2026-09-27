@@ -2,6 +2,18 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: Absorb::testDeletePlans
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testDeletePlans
+
+- name: Absorb::testInlineSpecs
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testInlineSpecs
+
+- name: Absorb::testSpecFormats
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testSpecFormats
+
 - name: Absorb::testMultipleSourcesAndRepeat
   to: oJob Test
   exec: args.func = require("tests/wikiAbsorb.js").testMultipleSourcesAndRepeat
@@ -82,6 +94,9 @@ jobs:
   exec: if (ow.test.getCountFail() > 0) exit(1)
 
 todo:
+- Absorb::testDeletePlans
+- Absorb::testInlineSpecs
+- Absorb::testSpecFormats
 - Absorb::testMultipleSourcesAndRepeat
 - Absorb::testSelectionsAndBudgets
 - Absorb::testConflictsAndEvidence

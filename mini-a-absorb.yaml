@@ -7,11 +7,11 @@ help:
     See ABSORB.md for selection, provenance, budgets and recovery.
   expects:
   - name: absorbop
-    desc: plan, show, apply, status or resume
+    desc: plan, show, apply, status, resume, delete or cancel
   - name: absorbspec
-    desc: JSON specification file (plan)
+    desc: JSON, YAML (.yaml/.yml) or SLON (.slon) file, or inline JSON/SLON map or sources array (plan)
   - name: absorbplan
-    desc: Saved plan ID (show/apply/resume)
+    desc: Saved plan ID (show/apply/resume/delete/cancel)
   - name: absorboutput
     desc: Explicit external artifact directory, required for read-only planning
   - name: absorbmaxpages
@@ -21,7 +21,7 @@ help:
   - name: wikiroot
     desc: Existing local destination wiki directory
   - name: wikiaccess
-    desc: Explicit rw required to apply (default ro)
+    desc: Explicit rw required to apply or delete/cancel plans (default ro)
   - name: model
     desc: Model configuration, otherwise OAF_MODEL
 
@@ -39,5 +39,5 @@ jobs:
     loadLib("mini-a-common.js")
     loadLib("mini-a-absorb.js")
     var result = new MiniAAbsorb(args, log).run()
-    print(af.toYAML(result))
+    print(printTree(result))
     if (!result.ok) exit(1)

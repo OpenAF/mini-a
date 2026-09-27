@@ -1108,8 +1108,8 @@ help:
     example  : "300"
     mandatory: false
   - name     : wikiretrievalv2
-    desc     : Prefer V2 passage retrieval; unpublished wikis use legacy retrieval with a warning; enable V2 with an explicit writable reindex or compatible published bundle
-    example  : "false"
+    desc     : Prefer V2 passage retrieval (default true); unpublished wikis use legacy retrieval with a warning; false forces legacy behavior
+    example  : "true"
     mandatory: false
   - name     : wikiretrievalconfig
     desc     : Validated SLON/JSON advanced passage, cache and artifact budgets

@@ -145,7 +145,12 @@ ctx.MiniAAbsorb = function(args) {
 };
 vm.runInContext(extract('printAbsorb'), ctx);
 run(`printAbsorb('plan "/tmp/My Sources.json"')`, [['absorb', 'plan', '/tmp/My Sources.json', undefined]]);
+for (const spec of ['{"sources":[{"id":"one","root":"./My Wiki","all":true}]}', '[(id: one, root: "./My Wiki", all: true)]']) {
+  run(`printAbsorb(${JSON.stringify("plan '" + spec + "'")})`, [['absorb', 'plan', spec, undefined]]);
+}
 run(`printAbsorb('apply abc123')`, [['absorb', 'apply', undefined, 'abc123']]);
+run(`printAbsorb('delete abc123')`, [['absorb', 'delete', undefined, 'abc123']]);
+run(`printAbsorb('cancel abc123')`, [['absorb', 'cancel', undefined, 'abc123']]);
 run(`printAbsorb('resume abc123')`, [['absorb', 'resume', undefined, 'abc123']]);
 run(`printAbsorb('show abc123 extra')`, []);
 run(`printAbsorb('plan "unterminated')`, []);
@@ -154,6 +159,8 @@ for (const [line, expected, offset] of [
   ['/absorb plan "/tmp/My  Docs/a', ['"/tmp/My  Docs/a file.md"'], 13],
   ['/absorb apply abc', ['abc123'], 14],
   ['/absorb resume abc', ['abc123'], 15],
+  ['/absorb delete abc', ['abc123'], 15],
+  ['/absorb cancel abc', ['abc123'], 15],
   ['/absorb status ', [], -1]
 ]) {
   const items = [];

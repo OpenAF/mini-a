@@ -2,9 +2,9 @@
 
 Mini-A's wiki is a Markdown knowledge base shared by agent sessions, the console, and the `mcp-wiki` servers. Enable it with `usewiki=true`; `/wiki context` is the quickest way to inspect its access mode and available retrieval features.
 
-For opt-in versioned passages, enable `wikiretrievalv2=true` and explicitly build
-with writable Dream reindex. Unpublished wikis keep legacy retrieval with a warning
-until V2 artifacts are published; existing incompatible V2 artifacts remain errors. See [retrieval v2](WIKI-RETRIEVAL-V2.md) for supported
+`wikiretrievalv2` defaults to `true`; build versioned passages with an explicit
+writable Dream reindex. Set `wikiretrievalv2=false` to keep maintenance on V1.
+Unpublished wikis keep legacy retrieval with a warning until V2 artifacts are published; existing incompatible V2 artifacts remain errors. See [retrieval v2](WIKI-RETRIEVAL-V2.md) for supported
 local backends, migration, budget differences and [measured validation](https://github.com/openaf/mini-a/blob/main/development/docs/WIKI-RETRIEVAL-V2-VALIDATION.md).
 Flag-off behavior retains the existing page engine with compatible contract repairs.
 
@@ -25,6 +25,11 @@ Flag-off behavior retains the existing page engine with compatible contract repa
 The console supports `/wiki list`, `read`, `search`, `write`, `delete`, `move`, `tree`, `browse`, `backlinks`, `lint`, `reindex`, and `graph`. The same operations are exposed to agents through the wiki tool. Paths are wiki-relative Markdown paths such as `guides/setup.md`; traversal outside the wiki is rejected.
 
 Use `tree` and `browse` for hierarchy, `backlinks` before moving a page, and `lint` before publishing structural changes. `mcp-wiki.yaml` exposes the read-oriented MCP surface; `mcp-wiki-safe.yaml` adds bounded, opaque-reference retrieval for untrusted clients. Mounts (`wikimounts`) attach other read-only wiki configurations under `@name/`.
+
+When nonempty `wikimounts` are supplied without a nonblank `wikiroot`, the default filesystem primary becomes a generated, read-only in-memory catalog. Its `index.md` links to each successfully attached mount's index (or its browsable root when no index exists), using the mount label and description. Attach, replace, and detach operations keep the catalog current; failed or removed mounts never cause a fallback to the current directory. Navigation and federated search continue to work, including mounts using Retrieval V2. The catalog has no persistent index or graph and rejects writes and maintenance even with `wikiaccess=rw`; configure `wikiroot` to enable persistent primary storage.
+
+Set **`wikiroot=.` explicitly** to retain a current-directory primary alongside mounts. Empty mount configurations and non-filesystem primary backends retain their existing defaults. Invalid mount configuration is reported before primary initialization. This behavior applies to agent, console, web, and MCP sessions, and to dedicated `skillwikimounts` libraries without `skillwikiroot`. Attaching a mount interactively to an ordinary primary does not replace it. Restricted MCP keeps its opaque-reference rules and does not expose the generated navigation page.
+
 
 ### MCP multi-wiki selection
 
@@ -145,9 +150,11 @@ all.
 | `communities` | Cluster detection (`wikigraphcommunity`, default Louvain) | |
 | `surprise` | Cross-document "surprising" connections | |
 | `export [format]` | Export the graph (`mermaid` default, `graphml`, `neo4j`, `html`, `svg`) | |
-| `stats` | Node/edge counts summary | |
+| `stats` | Node/edge counts summary; a generated mount catalog reports per-mount stats and summed totals | |
 | `falkor [cypher]` *(rw for sync)* | Sync the graph to, or run a Cypher query against, an external FalkorDB (`wikigraphfalkor`) | |
 | `cross <path>` | Join this wiki's graph with mounted wikis' graphs at query time: explicit `@name/` links, plus shared `tag:`/`alias:`/`concept:` keys | See "Cross-wiki graph connections" below |
+
+With mounts and no `wikiroot`, `/graph stats` reports `scope: mounts`, the number of available graphs, per-mount results, and totals across available graphs. Shared nodes and communities count separately in each mount. Missing or disabled graphs appear with an error per mount and do not contribute to totals; stats never build or write a graph. `usewikigraph=true` remains required. Other primary graph operations require an explicit `wikiroot`; an enabled read-only wiki with no existing graph reports that the graph is missing rather than asking you to enable it again.
 
 ### `/dream [memory|wiki|mode] [dryrun]`
 

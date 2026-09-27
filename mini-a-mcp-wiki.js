@@ -166,7 +166,9 @@ function __miniAMcpWikiDefaultWikiId(cfg) {
   cfg = isMap(cfg) ? cfg : {}
   var backend = isString(cfg.backend) ? cfg.backend.toLowerCase() : "fs"
   var identity
-  if (backend === "fs") {
+  if (cfg.__catalog) {
+    identity = "catalog|" + stringify((cfg.__primaryMounts || []).map(function(m) { return { name: m.name, wiki: __miniAMcpWikiDefaultWikiId(m) } }), __, "")
+  } else if (backend === "fs") {
     var root = isString(cfg.root) && cfg.root.trim().length > 0 ? cfg.root.trim() : "."
     try { root = String(new java.io.File(root).getCanonicalPath()) } catch(ignoreCanonicalRoot) {}
     identity = "fs|" + root
@@ -211,7 +213,7 @@ function MiniAMcpWikiRestriction(args, cfg) {
     )
   }
   this.statePath = isString(args.wikirestrictstate) && args.wikirestrictstate.trim().length > 0 ? args.wikirestrictstate.trim() : __
-  if (this.statePath && cfg.backend === "fs") {
+  if (this.statePath && cfg.backend === "fs" && !cfg.__catalog) {
     var root = String(new java.io.File(cfg.root).getCanonicalPath())
     var state = String(new java.io.File(this.statePath).getCanonicalPath())
     if (state === root || state.startsWith(root + java.io.File.separator)) throw "restricted state must be outside wikiroot"
@@ -443,6 +445,9 @@ function __miniAMcpWikiRestrictedSearchImpl(args) {
   for (var hi = 0; hi < hits.length && candidates.length < state.policy.searchLimit; hi++) {
     var hit = hits[hi]
     if (!isMap(hit) || !isString(hit.path)) continue
+    // Generated navigation exposes mount structure; restricted clients only
+    // receive grants for authored pages through the existing opaque flow.
+    if (global.__wikiManager._catalog && hit.path === "index.md") continue
     if (state._cooldownActive(__miniAMcpWikiPageCooldownHash(hit.path))) continue
     var title = __miniAMcpWikiSafeChars(hit.title === hit.path ? "Wiki result" : hit.title, state.policy.metaChars)
     // Graph-derived hits are an explicit opt-in in mcp-wiki-safe. Keep their
@@ -627,6 +632,7 @@ function __miniAMcpWikiDefaultLabel(args, cfg) {
     if (isString(args.wikibucket) && args.wikibucket.length > 0) return "s3://" + args.wikibucket + "/" + args.wikiprefix
     return "S3 wiki"
   }
+  if (cfg.__catalog) return "Wiki Mount Catalog"
   if (cfg.backend === "http") return cfg.url || "HTTP wiki"
   return cfg.root || "wiki"
 }
@@ -657,23 +663,6 @@ function __miniAMcpWikiCreateTool(cfg, wikiManager) {
   return tool
 }
 
-function __miniAMcpWikiAttachMounts(wikiManager, mountsRaw, logPrefix) {
-  if (!isObject(wikiManager) || !isString(mountsRaw) || mountsRaw.trim().length === 0) return
-  try {
-    // JSON may be pretty-printed by configuration tools. The JSSLON parser's
-    // multiline heuristic can interpret that as a map instead of an array.
-    var mountsList
-    try { mountsList = JSON.parse(mountsRaw) } catch(notJson) { mountsList = af.fromJSSLON(mountsRaw) }
-    if (!isArray(mountsList)) mountsList = [mountsList]
-    mountsList.forEach(function(mc) {
-      if (!isMap(mc) || !isString(mc.name)) return
-      wikiManager.attach(mc.name, merge({ access: "ro" }, mc))
-    })
-  } catch(mErr) {
-    printErrnl("[" + logPrefix + "] wikimounts parse error: " + String(mErr))
-  }
-}
-
 // Same opt-in precedence as oJobMCP.yaml's per-tool-call audit (args.audit,
 // falling back to env OJOB_MCP_AUDIT): args.audit is a raw/uncoerced value
 // here since Init's check.in only declares it as default(__).
@@ -697,7 +686,7 @@ function __miniAMcpWikiBuildLoggerFn(auditEnabled, logPrefix) {
   if (!auditEnabled) return function(level, msg) {
     // Operator migration warnings must remain visible without enabling audit
     // logging. STDERR preserves the JSON-RPC stream on STDOUT.
-    if (level === "warn" && String(msg).indexOf("wikiretrievalv2=true requested") >= 0) java.lang.System.err.println("[" + logPrefix + "] " + msg)
+    if (level === "warn" && (String(msg).indexOf("wikiretrievalv2=true requested") >= 0 || String(msg).indexOf("mount failed for @") >= 0)) java.lang.System.err.println("[" + logPrefix + "] " + msg)
   }
   return function(level, msg) {
     if (level == "warn") {
@@ -717,7 +706,7 @@ function __miniAMcpWikiInit(args, options) {
     options.access = "ro"
     options.readonly = true
   }
-  var cfg = __miniAMcpWikiBuildConfig(args, options)
+  var cfg = __miniAWikiPrimaryConfig(__miniAMcpWikiBuildConfig(args, options), args.wikiroot, args.wikimounts)
   cfg.agenticRetrieval = options.agenticRetrieval === true
   if (restricted) {
     cfg.access = "ro"
@@ -743,12 +732,11 @@ function __miniAMcpWikiInit(args, options) {
   var restriction = restricted ? new MiniAMcpWikiRestriction(args, cfg) : { enabled: false }
   var logPrefix = isString(options.logPrefix) ? options.logPrefix : "mcp-wiki"
   var auditEnabled = __miniAMcpWikiAuditEnabled(args)
-  global.__wikiManager = new MiniAWikiManager(cfg,
+  global.__wikiManager = __miniAWikiCreatePrimary(cfg,
     __miniAMcpWikiBuildLoggerFn(auditEnabled, logPrefix),
     __miniAMcpWikiBuildAuditFn(auditEnabled, logPrefix))
   global.__wikiTool = __miniAMcpWikiCreateTool(cfg, global.__wikiManager)
   args.label = __miniAMcpWikiDefaultLabel(args, cfg)
-  __miniAMcpWikiAttachMounts(global.__wikiManager, args.wikimounts, logPrefix)
 
   global.__miniAMcpWiki = {
     access: cfg.access,
