@@ -1304,3 +1304,56 @@ forcibly interrupted. `sourceVerificationReads`, `sourceVerificationBytes`,
 `sourceVerificationMillis`, and `sourceVerificationCacheHits` report fallback work;
 `source-verification` audit events record success and failure. Output `maxBytes`
 continues to bound output, not source verification I/O.
+
+
+## Mounted discovery and V1 compatibility — 2026-09-27
+
+Mounts-only catalogs coordinate the existing V2 readers without creating a
+synthetic primary index. All-V2 selection uses one collector and budget; mixed
+selection retains each source's engine, with bounded base passes, source-local
+follow-up queries, and global relevance ranking. The final display limit is
+applied after merging. Synthetic catalog pages consume no search allocation.
+Native scores remain source-local diagnostics. Exact titles and original-query
+coverage outrank broad expansion matches; page discovery avoids spending its
+follow-up allocation on pages already found. Configured synonyms remain eligible
+even when another source has a strong exact match.
+
+`agenticSearch` and trusted programmatic interfaces retain rich results. Native
+agent dispatch uses `presentSearch`: up to five candidates and 4,000 serialized
+characters, including source coverage and warnings. Output caps and unavailable
+sources are not described as scan-budget exhaustion. Status metadata survives
+array-return adapters. Restricted MCP retains its opaque-reference and
+all-or-nothing disclosure rules.
+
+V2 now supplies requested `compact=false`/`contextLines` snippets from validated
+indexed passages. Case-sensitive, regex, body, path and forced scans use the
+bounded compatibility path; published V2 availability, revision and activity
+checks also apply there. Case-sensitive scans can cost more than ordinary
+indexed retrieval. A qualified `@mount/page.md` search path routes to its mount;
+a conflicting explicit selector is rejected. Applicability constraints still
+require indexed V2 selection and cannot be silently combined with scan options.
+
+With configured graph hints enabled, weak lexical coverage can trigger bounded
+expansion automatically; `expandGraph=false` wins and `expandGraph=true` requests
+it explicitly. Writable graph indexing adds title/source-identifier discovery
+keys to the existing graph adjacency index. Their joins use the `alias` join
+switch, default one-hop/five-candidate/256-edge ceilings, and the existing
+revision and permission checks. A rare derived key may join one page in a small
+wiki; an explicit zero frequency threshold disables it. Generic filenames are
+excluded. No cross-wiki page links, LLM calls, new index format, or read-time
+publication are introduced. Existing graphs remain usable; new keys require an
+authorized writable rebuild. On a new pinned generation, read-only graph state
+is refreshed lazily before expansion, with source revision checks retained. The graph's existing in-memory adjacency structure
+is reused instead of adding an independent cross-wiki cache.
+
+Native JSON action normalization preserves selectors, request budgets and read
+continuations. Both regular and chatbot read dispatch forward `charOffset`,
+`charStart`, `charEnd` and `revision`. Shared utilities also forward search path,
+force-scan and graph controls. Their schema exposes the implemented evidence
+operations and bounded-read controls; compact reads retain cursors and errors,
+and explicit selectors preserve mounted reference namespaces. `context().wikis` includes every selector, while
+its navigation summary remains capped at ten mounts and reports truncation;
+`retrieval.federation` distinguishes federation mode from the primary's mode.
+
+See [the compatibility assessment](../WIKI-FEDERATION-ASSESSMENT.md) for
+classification, test evidence, measured replay and outstanding limitations.

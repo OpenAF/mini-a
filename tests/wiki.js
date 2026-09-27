@@ -1199,7 +1199,7 @@
       ow.test.assert(raw.indexOf("not semantic question answering") >= 0, true, "query metadata should reject semantic-QA expectations")
       ow.test.assert(raw.indexOf("Prefer exact terms, names, aliases, and short phrases") >= 0, true, "query metadata should guide keyword construction")
     })
-    ow.test.assert(wiki.indexOf("graph-related pages may be appended as supplemental hints") >= 0, true, "normal wiki metadata should describe optional graph hints")
+    ow.test.assert(wiki.indexOf("Configured graph hints can add bounded related evidence") >= 0, true, "normal wiki metadata should describe optional graph hints")
     ow.test.assert(safe.indexOf("graph-related pages may be returned only as opaque supplemental references") >= 0, true, "safe wiki metadata should describe opaque optional graph hints")
   }
 

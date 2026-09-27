@@ -1,4 +1,14 @@
 jobs:
+- name: MiniA Core Tests::WikiContinuationAndBudgetForwarding
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testWikiContinuationAndBudgetForwarding
+
+- name: MiniA Core Tests::MountedWikiDiscoveryReplay
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testMountedWikiDiscoveryReplay
+
 - name: MiniA Core Tests::SubtaskRemoteAlwaysDrainsQueue
   from: MiniA Core Tests::Init
   to: oJob Test
@@ -1170,6 +1180,8 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Core Tests::WikiContinuationAndBudgetForwarding
+- MiniA Core Tests::MountedWikiDiscoveryReplay
 - MiniA Core Tests::SubtaskRemoteAlwaysDrainsQueue
 - MiniA Core Tests::SubtaskRemoteCancellationBeforeSubmission
 - MiniA Core Tests::MemoryReloadPreservesKeyedObservations

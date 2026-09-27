@@ -3,6 +3,26 @@ include:
 - tests/wikiRetrievalV2.yaml
 
 jobs:
+- name: MiniA Wiki Federation Parity::FederatedSynonyms
+  to: oJob Test
+  exec: args.func = require("tests/wikiFederationParity.js").testFederatedSynonyms
+
+- name: MiniA Wiki Federation Parity::LateMount
+  to: oJob Test
+  exec: args.func = require("tests/wikiFederationParity.js").testLateMount
+
+- name: MiniA Wiki Federation Parity::SearchOptions
+  to: oJob Test
+  exec: args.func = require("tests/wikiFederationParity.js").testSearchOptions
+
+- name: MiniA Wiki Federation Parity::DerivedConnections
+  to: oJob Test
+  exec: args.func = require("tests/wikiFederationParity.js").testDerivedConnections
+
+- name: MiniA Wiki Federation Parity::MixedCoverage
+  to: oJob Test
+  exec: args.func = require("tests/wikiFederationParity.js").testMixedCoverage
+
 - name: MiniA Wiki Catalog Tests::GraphStats
   to: oJob Test
   exec: args.func = require("tests/wikiCatalog.js").testGraphStats
@@ -689,6 +709,11 @@ jobs:
   exec: args.func = require("tests/wiki.js").testS3ArtifactsHydrateLocalSearchAndGraphCache
 
 todo:
+- MiniA Wiki Federation Parity::FederatedSynonyms
+- MiniA Wiki Federation Parity::LateMount
+- MiniA Wiki Federation Parity::SearchOptions
+- MiniA Wiki Federation Parity::DerivedConnections
+- MiniA Wiki Federation Parity::MixedCoverage
 - MiniA Wiki Catalog Tests::GraphStats
 - MiniA Wiki Catalog Tests::Catalog
 - MiniA Wiki Catalog Tests::Selection

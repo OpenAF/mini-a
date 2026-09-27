@@ -59,6 +59,52 @@
     agent._stopAgentResources()
   }
 
+  exports.testWikiContinuationAndBudgetForwarding = function() {
+    var agent=createAgent(), source=io.readFileString("mini-a.js")
+    var params={op:"read",wiki:"mounted",path:"@mounted/page.md",startLine:7,endLine:11,charOffset:13,charStart:4,charEnd:200,revision:"revision",maxQueries:2,maxCandidates:3,expandGraph:false}
+    var normalized=agent._normalizeActionParams("wiki",params)
+    ;["wiki","charOffset","charStart","charEnd","revision","maxQueries","maxCandidates","expandGraph"].forEach(function(key){ow.test.assert(normalized[key],params[key],"flattened field preserved: "+key)})
+    ;["wk","cbWk"].forEach(function(prefix) {
+      var match=new RegExp("var "+prefix+"ReadOpts = (\\{[\\s\\S]*?\\n\\s*\\})").exec(source)
+      ow.test.assert(!!match,true,"read mapping found")
+      var options=new Function(prefix+"Params","return "+match[1])(params)
+      ow.test.assert(options.lineStart,7,"startLine alias reaches reader")
+      ow.test.assert(options.lineEnd,11,"endLine alias reaches reader")
+      ;["charOffset","charStart","charEnd","revision"].forEach(function(key){ow.test.assert(options[key],params[key],"real dispatcher preserves cursor: "+key)})
+    })
+    agent._stopAgentResources()
+  }
+
+  exports.testMountedWikiDiscoveryReplay = function() {
+    load("mini-a-wiki.js")
+    var root=String(io.createTempDir("mounted-dispatch-")), writer, agent, requests=0, searches=0, reads=0
+    try {
+      io.mkdir(root+"/noise");io.mkdir(root+"/opacks")
+      ;["noise","opacks"].forEach(function(name) {
+        writer=new MiniAWikiManager({root:root+"/"+name,access:"rw",wikiretrievalv2:true},function(){})
+        writer.write("topic.md",{title:name==="opacks"?"Parquet":"Formats"},name==="opacks"?"# Parquet\nParquet oPack evidence-739 reads files.":"# Formats\nparquet is a format.")
+        writer.reindex();writer.close();writer=__
+      })
+      agent=createAgent();agent.fnI=function(){}
+      var args={goal:"is there an openaf opack to read parquet files?",usejsontool:true,usewiki:true,wikiretrievalv2:true,wikimounts:[{name:"first",root:root+"/noise"},{name:"opacks",root:root+"/opacks"}],raw:true,maxsteps:4,usememory:false}
+      agent.init(args);agent._use_lc=false
+      agent.llm.promptJSONWithStats=agent.llm.promptWithStats=function(prompt) {
+        requests++
+        if(requests===1) {searches++;return {response:{action:"wiki",params:{op:"search",query:"parquet"}},stats:{}}}
+        if(requests===2) {
+          var refs=String(prompt).match(/wiki:@[^\s"\n]+\.md/g) || []
+          ow.test.assert(refs[0],"wiki:@opacks/topic.md","first model-visible reference is relevant without selector")
+          ow.test.assert(prompt.indexOf("scoreComponents:"),-1,"model does not receive ranking internals")
+          reads++;return {response:{action:"wiki",params:{op:"read",path:refs[0],section:"Parquet",maxChars:200}},stats:{}}
+        }
+        ow.test.assert(prompt.indexOf("evidence-739")>=0,true,"bounded evidence reaches model")
+        return {response:{action:"final",answer:"Parquet confirmed from evidence-739"},stats:{}}
+      }
+      ow.test.assert(agent.start(merge({},args)),"Parquet confirmed from evidence-739","original question completes via actual dispatch")
+      ow.test.assert(searches,1,"one discovery call");ow.test.assert(reads,1,"one bounded evidence call")
+    } finally {if(writer)writer.close();if(agent)agent._stopAgentResources();io.rm(root)}
+  }
+
   exports.testJsonWikiDispatchReplay = function() {
     load("mini-a-wiki.js")
     var root = String(io.createTempFile("mini-a-dispatch-", ""))

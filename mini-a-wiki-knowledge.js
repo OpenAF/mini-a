@@ -143,12 +143,25 @@ MiniAWikiManager.prototype.assembleContext = function(query, options) {
   var selection = this.resolveWikiSelection(options.wiki)
   if (!selection.ok) return selection
   if (isDef(options.applicability)) return { ok: false, error: "applicability-requires-v2", chunks: [] }
-  if ((this._retrievalV2 || this._legacyRetrievalV2) && selection.targets.some(function(target) { return target.mounted })) {
-    var chunks = [], tokens = 0, failure, truncated = false
+  if (selection.targets.some(function(target) { return target.mounted })) {
+    var requestQueries=Math.min(64,Math.max(1,Number(options.maxQueries)||16)), requestCandidates=Math.min(512,Math.max(1,Number(options.maxCandidates)||32))
+    var deadline=Date.now()+Math.min(15000,Math.max(1,Number(options.maxMillis)||15000))
+    var discovery = this.agenticSearch(query,{wiki:options.wiki,limit:20,maxQueries:Math.max(1,requestQueries-Math.min(limit,selection.targets.length)),maxCandidates:Math.max(1,requestCandidates-limit),maxMillis:Math.max(1,deadline-Date.now())})
+    if (!discovery || !isArray(discovery.results)) return discovery
+    var sourceRank = {}
+    discovery.results.forEach(function(hit,index){var wiki=hit.wiki || (String(hit.path).match(/^@([^/]+)\//)||[])[1] || "primary";if(isUnDef(sourceRank[wiki]))sourceRank[wiki]=index})
+    selection.targets=selection.targets.filter(function(target){return !target.manager._catalog && isDef(sourceRank[target.name])})
+    selection.targets.sort(function(a,b){return sourceRank[a.name]-sourceRank[b.name]})
+    var chunks = [], tokens = 0, failure, truncated = discovery.truncated === true
+    var usedQueries=discovery.budget ? discovery.budget.used.queries : 1, usedCandidates=discovery.budget ? discovery.budget.used.candidates : discovery.results.length
+    var stopReasons=(discovery.stopReasons || []).slice()
     selection.targets.some(function(target) {
       if (chunks.length >= limit || tokens >= budget) { truncated = true; return true }
-      var localOptions = merge(options, { wiki: "primary", chunks: limit - chunks.length, wikicontextchunks: limit - chunks.length, tokens: budget - tokens, wikicontexttokens: budget - tokens })
+      if (usedQueries>=requestQueries || usedCandidates>=requestCandidates || Date.now()>=deadline) {truncated=true;stopReasons.push("context-budget");return true}
+      var localOptions = merge(options, { maxQueries:requestQueries-usedQueries, maxCandidates:requestCandidates-usedCandidates, maxMillis:Math.max(1,deadline-Date.now()), wiki: "primary", chunks: limit - chunks.length, wikicontextchunks: limit - chunks.length, tokens: budget - tokens, wikicontexttokens: budget - tokens })
       var context = target.manager.assembleContext(query, localOptions)
+      usedQueries+=context && context.requestBudget ? context.requestBudget.used.queries : 1
+      usedCandidates+=context && context.requestBudget ? context.requestBudget.used.candidates : context && context.chunks ? context.chunks.length : 0
       if (!context || context.ok === false || !isArray(context.chunks)) { failure = context || {ok:false,error:"context-unavailable"}; return true }
       truncated = truncated || context.truncated === true
       context.chunks.forEach(function(chunk) {
@@ -166,7 +179,7 @@ MiniAWikiManager.prototype.assembleContext = function(query, options) {
       return false
     })
     if (failure) return failure
-    return { query: query, chunks: chunks, estimatedTokens: tokens, budget: budget, effectiveMode: "legacy-federation", truncated: truncated }
+    return { query: query, chunks: chunks, estimatedTokens: tokens, budget: budget, effectiveMode: "legacy-federation", truncated: truncated, outcome:stopReasons.indexOf("context-budget")>=0?"partial":discovery.outcome, sources:discovery.sources, stopReasons:stopReasons, requestBudget:{limits:{maxQueries:requestQueries,maxCandidates:requestCandidates},used:{queries:usedQueries,candidates:usedCandidates}} }
   }
   var state = this.knowledgeLoadState(), out = [], used = 0, seen = {}, pending = {}, self = this
   try {
@@ -193,7 +206,7 @@ MiniAWikiManager.prototype.assembleContext = function(query, options) {
         wikiPath: c.page, quotationStatus: "not-a-verbatim-wiki-quotation", sourceLocatorStatus: "unverified", scoreOrigin: "parent-wiki-page" })
     })
   })
-  return { query: query, chunks: out, estimatedTokens: used, budget: budget }
+  return { query: query, chunks: out, estimatedTokens: used, budget: budget, requestBudget:hits.budget }
 }
 
 // Passage provenance extends the existing fact/summary authority, never the page store.

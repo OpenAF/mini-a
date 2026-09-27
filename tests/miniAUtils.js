@@ -20,6 +20,38 @@
     }
   }
 
+  exports.testWikiMountedCompactContinuation = function() {
+    var dir=String(createTestDir()), writer, wm
+    try {
+      writer=new MiniAWikiManager({root:dir,access:"rw",wikiretrievalv2:true},function(){})
+      writer.write("page.md",{title:"Evidence"},"# Evidence\nRead every character of this bounded mounted page.");ow.test.assert(writer.reindex().ok,true,"publish mounted fixture");writer.close();writer=__
+      wm=__miniAWikiCreatePrimary(__miniAWikiPrimaryConfig({wikiretrievalv2:true},__,[{name:"library",root:dir}]),function(){})
+      var tool={_ensureInitialized:function(){},_wikiManager:wm,_wikiAgenticRetrieval:true}, call=function(params){return MiniUtilsTool.prototype.wiki.call(tool,params)}
+      var first=call({operation:"read",wiki:"library",path:"wiki:@library/page.md",compact:true,maxChars:12}), text=first.body, next=first.next, steps=0
+      ow.test.assert(first.ref,"wiki:@library/page.md","explicit selector preserves public ref")
+      ow.test.assert(next.path,"wiki:@library/page.md","compact cursor retains mount namespace")
+      while(next && steps++<100){var part=call(merge(next,{operation:"read",compact:true}));text+=part.body;next=part.next}
+      ow.test.assert(text,wm.agenticRead("@library/page.md").body,"compact continuation returns every character")
+      ow.test.assert(call({operation:"read",path:"@library/page.md",compact:true,revision:"stale"}).error,"stale-reference","compact read does not swallow errors")
+      ow.test.assert(call({operation:"open",wiki:"library",path:"page.md"}).path,"@library/page.md","open honours explicit selector")
+      var metadata=MiniUtilsTool.getMetadataByFn().wiki.inputSchema
+      ;["open","navigate","grep","related","retrieve","context"].forEach(function(op){ow.test.assert(metadata.properties.operation.enum.indexOf(op)>=0,true,"schema exposes implemented retrieval operation")})
+      ;["wiki","section","revision","charOffset","expandGraph","maxGraphEdges"].forEach(function(key){ow.test.assert(isDef(metadata.properties[key]),true,"schema exposes retrieval control")})
+    } finally {if(writer)writer.close();if(wm)wm.close();cleanupTestDir(dir)}
+  }
+
+  exports.testWikiSearchOptionForwarding = function() {
+    var captured, wm={supportsRetrievalV2:function(options){return options.wiki==="published"},agenticSearch:function(query,options){captured=options;return {results:[{path:"@published/page.md"}]}}}
+    var utility={_ensureInitialized:function(){},_wikiManager:wm,_wikiAgenticRetrieval:true}
+    var result=MiniUtilsTool.prototype.wiki.call(utility,{operation:"search",query:"needle",wiki:"published",path:"@published/page.md",forceScan:true,expandGraph:false,maxGraphEdges:7,maxGraphExpansion:2,applicability:{product:"test"}})
+    ow.test.assert(result.results[0].path,"@published/page.md","utility preserves programmatic result shape")
+    ow.test.assert(captured.path,"@published/page.md","path scope propagated")
+    ow.test.assert(captured.forceScan,true,"explicit scan propagated")
+    ow.test.assert(captured.expandGraph,false,"graph disable propagated")
+    ow.test.assert(captured.maxGraphEdges,7,"graph work budget propagated")
+    ow.test.assert(captured.applicability.product,"test","selected V2 capability replaces primary-only check")
+  }
+
   exports.testSpacedSkillReferences = function() {
     var dir = createTestDir()
     try {

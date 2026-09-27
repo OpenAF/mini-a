@@ -393,7 +393,7 @@ Choose one action: {{{actionFieldValues}}}. Include only fields needed for that 
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if useMemorySearch}}
 • "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if useMemoryWrite}}
 • "memory_write" - Record durable knowledge that should survive across runs (params: {"kind":"preference|environment|procedure|pitfall|reference","value":"...","key":"optional stable key","tags":["optional"],"ttlDays":N}); use "preference" for what the user/team wants, "environment" for how this machine/repo/service is set up, "procedure" for a validated how-to, "pitfall" for something that failed and why, "reference" for a pointer to a doc/URL. Only write things worth remembering next time, not step-by-step narration.{{/if}}{{#if useWiki}}
-• "wiki" - Interact with the wiki knowledge base (params: {"op":"search|open|navigate|read|grep|related|context|list|tree|browse|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md or wiki:ref","query":"...","pattern":"...","section":"Heading Name","startLine":N,"endLine":N,"maxChars":N,"limit":N,"contextLines":N}); For mounted wikis use path="@name/" for browse/tree and wiki="name" for search/context; call mounts to discover names. Retrieval strategy: SEARCH compact candidates, OPEN promising pages, NAVIGATE headings, then READ one section/range. Use GREP for exact identifiers/errors in a known page. Do not read every search result or whole long pages; use RELATED only when lexical evidence is insufficient.{{#if wikiRw}} Before write/move/delete read AGENTS.md for rules.{{/if}}{{#if wikiSourceUrl}} Results also carry a {{wikiSourceField}} URL, that page's canonical citation source; cite it when you use the page's content.{{/if}}{{/if}}{{#if useWikiGraph}}
+• "wiki" - Interact with the wiki knowledge base (params: {"op":"retrieve|search|open|navigate|read|grep|related|context|list|tree|browse|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md or wiki:ref","query":"...","pattern":"...","section":"Heading Name","startLine":N,"endLine":N,"maxChars":N,"limit":N,"contextLines":N}); Search without a wiki selector searches all mounted wikis automatically. Use path="@name/" for navigation or wiki="name" only to narrow scope. Partial coverage cannot establish absence; retain specific query terms when retrying. Read bounded evidence before making detailed factual claims. Retrieval strategy: SEARCH compact candidates, OPEN promising pages, NAVIGATE headings, then READ one section/range. Use GREP for exact identifiers/errors in a known page. Do not read every search result or whole long pages; use RELATED only when lexical evidence is insufficient.{{#if wikiRw}} Before write/move/delete read AGENTS.md for rules.{{/if}}{{#if wikiSourceUrl}} Results also carry a {{wikiSourceField}} URL, that page's canonical citation source; cite it when you use the page's content.{{/if}}{{/if}}{{#if useWikiGraph}}
 • "graph" - Query the wiki knowledge graph (params: {"op":"stats|query|neighbors|path|communities|surprise|retrieve|answer|export|build|cross", ...}); use for relationship/graph-shaped questions, not as a substitute for wiki search. "cross" (params: {"path":"page.md"} or {"query":"..."}) joins into mounted wikis' graphs via explicit @-links and shared tags/aliases/concepts.{{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 {{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
@@ -7817,7 +7817,7 @@ MiniA.prototype._normalizeActionParams = function(actionName, message, params) {
 
   var action = isString(actionName) ? actionName.toLowerCase().trim() : ""
   var keysByAction = {
-    wiki: ["op", "path", "query", "pattern", "section", "lineStart", "lineEnd", "maxLines", "maxChars", "countLines", "limit", "offset", "regex", "caseSensitive", "contextLines", "searchIn", "depth", "withMeta", "content", "append", "lineInsert", "to", "leaveRedirect", "redirect", "overwrite", "name", "backend", "root", "bucket", "prefix", "url", "accessKey", "secret", "region", "severity", "types", "page"],
+    wiki: ["startLine", "endLine", "cursor", "wiki", "applicability", "expandGraph", "maxGraphExpansion", "maxGraphEdges", "maxQueries", "maxCandidates", "maxInspected", "maxMillis", "maxBytes", "compact", "forceScan", "charOffset", "charStart", "charEnd", "revision", "op", "path", "query", "pattern", "section", "lineStart", "lineEnd", "maxLines", "maxChars", "countLines", "limit", "offset", "regex", "caseSensitive", "contextLines", "searchIn", "depth", "withMeta", "content", "append", "lineInsert", "to", "leaveRedirect", "redirect", "overwrite", "name", "backend", "root", "bucket", "prefix", "url", "accessKey", "secret", "region", "severity", "types", "page"],
     graph: ["op", "path", "query", "limit", "semantic", "community", "format"],
     memory_search: ["query", "section", "limit", "id", "full"]
   }
@@ -21366,14 +21366,19 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           var wkQuery = isString(wkParams.query) ? wkParams.query.trim() : ""
           var wkContent = isString(wkParams.content) ? wkParams.content : ""
           var wkReadOpts = {
-            lineStart : isNumber(wkParams.lineStart)  ? wkParams.lineStart  : __,
-            lineEnd   : isNumber(wkParams.lineEnd)    ? wkParams.lineEnd    : __,
+              charOffset : wkParams.charOffset,
+              charStart : wkParams.charStart,
+              charEnd : wkParams.charEnd,
+              revision : wkParams.revision,
+            lineStart : isNumber(wkParams.lineStart)  ? wkParams.lineStart  : wkParams.startLine,
+            lineEnd   : isNumber(wkParams.lineEnd)    ? wkParams.lineEnd    : wkParams.endLine,
             maxLines  : isNumber(wkParams.maxLines)   ? wkParams.maxLines   : __,
             countLines: wkParams.countLines === true,
             section   : isString(wkParams.section)    ? wkParams.section    : __
           }
           var wkSearchOpts = {
-            limit       : isNumber(wkParams.limit)        ? wkParams.limit        : 20,
+              forceScan   : wkParams.forceScan === true,
+            limit       : isNumber(wkParams.limit)        ? wkParams.limit        : 5,
             regex       : wkParams.regex === true,
             caseSensitive: wkParams.caseSensitive === true,
             contextLines: isNumber(wkParams.contextLines) ? wkParams.contextLines : 0,
@@ -21381,7 +21386,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             wiki        : wkParams.wiki,
             applicability: wkParams.applicability,
             maxQueries: wkParams.maxQueries,
-            expandGraph: wkParams.expandGraph === true,
+            expandGraph: wkParams.expandGraph,
             maxGraphExpansion: wkParams.maxGraphExpansion,
             maxGraphEdges: wkParams.maxGraphEdges,
             maxCandidates: wkParams.maxCandidates,
@@ -21393,8 +21398,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           var wkWriteOpts = {
             append    : wkParams.append === true,
             lineInsert: isNumber(wkParams.lineInsert) ? wkParams.lineInsert : __,
-            lineStart : isNumber(wkParams.lineStart)  ? wkParams.lineStart  : __,
-            lineEnd   : isNumber(wkParams.lineEnd)    ? wkParams.lineEnd    : __,
+            lineStart : isNumber(wkParams.lineStart)  ? wkParams.lineStart  : wkParams.startLine,
+            lineEnd   : isNumber(wkParams.lineEnd)    ? wkParams.lineEnd    : wkParams.endLine,
             section   : isString(wkParams.section)    ? wkParams.section    : __
           }
           this._trace("wiki_call", { op: wkOp, params: wkParams })
@@ -21442,17 +21447,15 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               wkResult = wkPath.length === 0 ? "[ERROR] wiki related requires 'path'" : af.toTOON(this._wikiManager.related(wkPath, { limit: wkParams.limit }))
             } else if (wkOp === "retrieve") {
               global.__mini_a_metrics.wiki_ops_search.inc()
-              wkResult = wkQuery.length === 0 ? "[ERROR] wiki retrieve requires 'query'" : isDef(wkParams.applicability) && !this._wikiManager._retrievalV2 ? af.toTOON({ok:false,error:"applicability-requires-v2"}) : af.toTOON(this._wikiManager.retrieve(wkQuery, { wiki: wkParams.wiki, applicability: wkParams.applicability, maxQueries: wkParams.maxQueries, maxMillis: wkParams.maxMillis, maxCandidates: wkParams.maxCandidates, maxInspected: wkParams.maxInspected, maxGraphExpansion: wkParams.maxGraphExpansion, maxGraphEdges: wkParams.maxGraphEdges, maxBytes: wkParams.maxBytes, expandGraph: wkParams.expandGraph === true }))
+              wkResult = wkQuery.length === 0 ? "[ERROR] wiki retrieve requires 'query'" : isDef(wkParams.applicability) && !this._wikiManager.supportsRetrievalV2(wkParams) ? af.toTOON({ok:false,error:"applicability-requires-v2"}) : af.toTOON(this._wikiManager.retrieve(wkQuery, { wiki: wkParams.wiki, applicability: wkParams.applicability, maxQueries: wkParams.maxQueries, maxMillis: wkParams.maxMillis, maxCandidates: wkParams.maxCandidates, maxInspected: wkParams.maxInspected, maxGraphExpansion: wkParams.maxGraphExpansion, maxGraphEdges: wkParams.maxGraphEdges, maxBytes: wkParams.maxBytes, expandGraph: wkParams.expandGraph }))
             } else if (wkOp === "search") {
               global.__mini_a_metrics.wiki_ops_search.inc()
               if (wkQuery.length === 0) {
                 wkResult = "[ERROR] wiki search requires 'query'"
               } else {
-                var wkHits = isDef(wkParams.applicability) && !this._wikiManager._retrievalV2 ? { ok:false, error:"applicability-requires-v2" } : this._wikiManager.agenticSearch(wkQuery, wkSearchOpts)
-                wkResult = isArray(wkHits.results) && wkHits.results.length === 0 && wkHits.ok !== false && wkHits.outcome !== "partial" ? "No results for: " + wkQuery : af.toTOON(wkHits)
-                if (wkHits.truncated === true) {
-                  wkResult += "\n[NOTE] Search stopped early: scanned " + wkHits.scanned + " of the wiki's page budget (" + wkHits.scanBudget + "). Results may be incomplete; narrow the query or scope with path= to see more."
-                }
+                var wkHits = isDef(wkParams.applicability) && !this._wikiManager.supportsRetrievalV2(wkParams) ? { ok:false, error:"applicability-requires-v2" } : this._wikiManager.agenticSearch(wkQuery, wkSearchOpts)
+                wkResult = isArray(wkHits.results) && wkHits.results.length === 0 && wkHits.ok !== false && wkHits.outcome !== "partial" ? "No results for: " + wkQuery : af.toTOON(this._wikiManager.presentSearch(wkHits))
+
               }
             } else if (wkOp === "backlinks") {
               global.__mini_a_metrics.wiki_ops_search.inc()
@@ -22205,14 +22208,19 @@ MiniA.prototype._runChatbotMode = function(options) {
             var cbWkQuery = isString(cbWkParams.query) ? cbWkParams.query.trim() : ""
             var cbWkContent = isString(cbWkParams.content) ? cbWkParams.content : ""
             var cbWkReadOpts = {
-              lineStart : isNumber(cbWkParams.lineStart)  ? cbWkParams.lineStart  : __,
-              lineEnd   : isNumber(cbWkParams.lineEnd)    ? cbWkParams.lineEnd    : __,
+                charOffset : cbWkParams.charOffset,
+                charStart : cbWkParams.charStart,
+                charEnd : cbWkParams.charEnd,
+                revision : cbWkParams.revision,
+              lineStart : isNumber(cbWkParams.lineStart)  ? cbWkParams.lineStart  : cbWkParams.startLine,
+              lineEnd   : isNumber(cbWkParams.lineEnd)    ? cbWkParams.lineEnd    : cbWkParams.endLine,
               maxLines  : isNumber(cbWkParams.maxLines)   ? cbWkParams.maxLines   : __,
               countLines: cbWkParams.countLines === true,
               section   : isString(cbWkParams.section)    ? cbWkParams.section    : __
             }
             var cbWkSearchOpts = {
-              limit       : isNumber(cbWkParams.limit)        ? cbWkParams.limit        : 20,
+                forceScan   : cbWkParams.forceScan === true,
+              limit       : isNumber(cbWkParams.limit)        ? cbWkParams.limit        : 5,
               regex       : cbWkParams.regex === true,
               caseSensitive: cbWkParams.caseSensitive === true,
               contextLines: isNumber(cbWkParams.contextLines) ? cbWkParams.contextLines : 0,
@@ -22220,7 +22228,7 @@ MiniA.prototype._runChatbotMode = function(options) {
               wiki        : cbWkParams.wiki,
               applicability: cbWkParams.applicability,
               maxQueries: cbWkParams.maxQueries,
-              expandGraph: cbWkParams.expandGraph === true,
+              expandGraph: cbWkParams.expandGraph,
               maxGraphExpansion: cbWkParams.maxGraphExpansion,
               maxGraphEdges: cbWkParams.maxGraphEdges,
               maxCandidates: cbWkParams.maxCandidates,
@@ -22232,8 +22240,8 @@ MiniA.prototype._runChatbotMode = function(options) {
             var cbWkWriteOpts = {
               append    : cbWkParams.append === true,
               lineInsert: isNumber(cbWkParams.lineInsert) ? cbWkParams.lineInsert : __,
-              lineStart : isNumber(cbWkParams.lineStart)  ? cbWkParams.lineStart  : __,
-              lineEnd   : isNumber(cbWkParams.lineEnd)    ? cbWkParams.lineEnd    : __,
+              lineStart : isNumber(cbWkParams.lineStart)  ? cbWkParams.lineStart  : cbWkParams.startLine,
+              lineEnd   : isNumber(cbWkParams.lineEnd)    ? cbWkParams.lineEnd    : cbWkParams.endLine,
               section   : isString(cbWkParams.section)    ? cbWkParams.section    : __
             }
             this._trace("wiki_call", { op: cbWkOp, params: cbWkParams, source: "chatbot" })
@@ -22266,12 +22274,12 @@ MiniA.prototype._runChatbotMode = function(options) {
               } else if (cbWkOp === "related") {
                 cbWkResult = cbWkPath.length === 0 ? "[ERROR] wiki related requires 'path'" : af.toTOON(this._wikiManager.related(cbWkPath, { limit: cbWkParams.limit }))
               } else if (cbWkOp === "retrieve") {
-                cbWkResult = cbWkQuery.length === 0 ? "[ERROR] wiki retrieve requires 'query'" : isDef(cbWkParams.applicability) && !this._wikiManager._retrievalV2 ? af.toTOON({ok:false,error:"applicability-requires-v2"}) : af.toTOON(this._wikiManager.retrieve(cbWkQuery, { wiki: cbWkParams.wiki, applicability: cbWkParams.applicability, maxQueries: cbWkParams.maxQueries, maxMillis: cbWkParams.maxMillis, maxCandidates: cbWkParams.maxCandidates, maxInspected: cbWkParams.maxInspected, maxGraphExpansion: cbWkParams.maxGraphExpansion, maxGraphEdges: cbWkParams.maxGraphEdges, maxBytes: cbWkParams.maxBytes, expandGraph: cbWkParams.expandGraph === true }))
+                cbWkResult = cbWkQuery.length === 0 ? "[ERROR] wiki retrieve requires 'query'" : isDef(cbWkParams.applicability) && !this._wikiManager.supportsRetrievalV2(cbWkParams) ? af.toTOON({ok:false,error:"applicability-requires-v2"}) : af.toTOON(this._wikiManager.retrieve(cbWkQuery, { wiki: cbWkParams.wiki, applicability: cbWkParams.applicability, maxQueries: cbWkParams.maxQueries, maxMillis: cbWkParams.maxMillis, maxCandidates: cbWkParams.maxCandidates, maxInspected: cbWkParams.maxInspected, maxGraphExpansion: cbWkParams.maxGraphExpansion, maxGraphEdges: cbWkParams.maxGraphEdges, maxBytes: cbWkParams.maxBytes, expandGraph: cbWkParams.expandGraph }))
               } else if (cbWkOp === "search") {
                 if (cbWkQuery.length === 0) { cbWkResult = "[ERROR] wiki search requires 'query'" }
                 else {
-                  var cbWkHits = isDef(cbWkParams.applicability) && !this._wikiManager._retrievalV2 ? { ok:false, error:"applicability-requires-v2" } : this._wikiManager.agenticSearch(cbWkQuery, cbWkSearchOpts)
-                  cbWkResult = isArray(cbWkHits.results) && cbWkHits.results.length === 0 && cbWkHits.ok !== false && cbWkHits.outcome !== "partial" ? "No results for: " + cbWkQuery : af.toTOON(cbWkHits)
+                  var cbWkHits = isDef(cbWkParams.applicability) && !this._wikiManager.supportsRetrievalV2(cbWkParams) ? { ok:false, error:"applicability-requires-v2" } : this._wikiManager.agenticSearch(cbWkQuery, cbWkSearchOpts)
+                  cbWkResult = isArray(cbWkHits.results) && cbWkHits.results.length === 0 && cbWkHits.ok !== false && cbWkHits.outcome !== "partial" ? "No results for: " + cbWkQuery : af.toTOON(this._wikiManager.presentSearch(cbWkHits))
                 }
               } else if (cbWkOp === "backlinks") {
                 if (cbWkPath.length === 0) { cbWkResult = "[ERROR] wiki backlinks requires 'path'" }

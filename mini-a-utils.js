@@ -1717,7 +1717,7 @@ MiniUtilsTool.prototype.wiki = function(params) {
       if (!selected.ok) return selected
       if (requiresOne !== false && selected.targets.length !== 1) return { ok: false, error: "ambiguous-wiki-selection", message: op + " requires exactly one wiki when wiki is provided" }
       var target = selected.targets[0]
-      var p = isString(path) ? path.trim() : ""
+      var p = isString(path) ? wm._agenticPath(path) : ""
       if (p.startsWith("@")) {
         var mounted = wm._resolveMountPath(p)
         if (!mounted || !mounted.mount) return { ok: false, error: "unknown-wiki", wiki: mounted ? mounted.name : p, available: selected.available }
@@ -1770,6 +1770,16 @@ MiniUtilsTool.prototype.wiki = function(params) {
 
     // Agentic retrieval is intentionally a separate view, so legacy `read`
     // continues to return full documents for existing callers.
+    if (op === "retrieve") {
+      if (!isString(params.query) || !params.query.trim()) return "[ERROR] query is required for retrieve"
+      return wm.retrieve(params.query.trim(),params)
+    }
+    if (["open","navigate","grep","related"].indexOf(op)>=0 && isDef(params.wiki)) {
+      var evidenceRoute=routeWikiPath(params.path)
+      if (!evidenceRoute.ok) return evidenceRoute
+      params=merge(params,{path:evidenceRoute.wiki==="primary"?evidenceRoute.path:"@"+evidenceRoute.wiki+"/"+evidenceRoute.path})
+    }
+
     if (op === "open") {
       if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path or ref is required for open"
       var opened = wm.open(params.path.trim(), { maxHeadings: isNumber(params.maxHeadings) ? params.maxHeadings : __ })
@@ -1805,11 +1815,15 @@ MiniUtilsTool.prototype.wiki = function(params) {
         countLines: params.countLines === true,
         section   : isString(params.section)   ? params.section   : __
       }
-      var page = (params.agentic === true || this._wikiAgenticRetrieval === true) ? readRoute.manager.agenticRead(readRoute.path, merge(readOpts, { maxChars: isNumber(params.maxChars) ? params.maxChars : __, charOffset: params.charOffset, revision: params.revision, charStart: params.charStart, charEnd: params.charEnd })) : readRoute.manager.read(readRoute.path, readOpts)
+      var agenticRead = params.agentic === true || this._wikiAgenticRetrieval === true
+      var publicPath = !readRoute.legacy && readRoute.wiki !== "primary" ? "@" + readRoute.wiki + "/" + readRoute.path : readRoute.path
+      var page = agenticRead ? wm.agenticRead(publicPath, merge(readOpts, { maxChars: isNumber(params.maxChars) ? params.maxChars : __, charOffset: params.charOffset, revision: params.revision, charStart: params.charStart, charEnd: params.charEnd })) : readRoute.manager.read(readRoute.path, readOpts)
       if (!isObject(page)) return "[ERROR] Page not found: " + params.path
-      if (!readRoute.legacy) { page.wiki = readRoute.wiki; if (readRoute.wiki !== "primary") page.path = "@" + readRoute.wiki + "/" + page.path }
+      if (page.error) return page
+      if (!readRoute.legacy) { page.wiki = readRoute.wiki; if (!agenticRead && readRoute.wiki !== "primary") page.path = "@" + readRoute.wiki + "/" + page.path }
       if (params.compact === true) {
-        var compactPage = { path: page.path, title: isString(page.meta && page.meta.title) ? page.meta.title : page.path, body: page.body }
+        var compactPage = { path: page.path, title: page.title || (isString(page.meta && page.meta.title) ? page.meta.title : page.path), body: page.body }
+        ;["ref","next","truncated","revision","lineStart","lineEnd","eof"].forEach(function(key){if(isDef(page[key]))compactPage[key]=page[key]})
         if (isDef(page[wm._sourceField])) compactPage[wm._sourceField] = page[wm._sourceField]
         return compactPage
       }
@@ -1827,18 +1841,23 @@ MiniUtilsTool.prototype.wiki = function(params) {
         compact     : params.compact !== false
       }
       searchOpts.wiki = params.wiki
+      searchOpts.path = params.path
+      searchOpts.forceScan = params.forceScan === true
+      searchOpts.expandGraph = params.expandGraph
+      searchOpts.maxGraphExpansion = params.maxGraphExpansion
+      searchOpts.maxGraphEdges = params.maxGraphEdges
       ;["maxQueries", "maxCandidates", "maxInspected", "maxMillis", "maxBytes"].forEach(function(key) { if (isDef(params[key])) searchOpts[key] = params[key] })
       if (isDef(params.applicability)) {
-        if (!wm._retrievalV2) return { ok: false, error: "applicability-requires-v2" }
+        if (!wm.supportsRetrievalV2(params)) return { ok: false, error: "applicability-requires-v2" }
         searchOpts.applicability = params.applicability
       }
       if (params.agentic === true || this._wikiAgenticRetrieval === true) {
-        if (isDef(params.wiki)) return wm.agenticSearch(params.query.trim(), searchOpts)
+        if (isUnDef(params.limit)) searchOpts.limit = 5
         return wm.agenticSearch(params.query.trim(), searchOpts)
       }
       var hits = wm.searchSelected(params.query.trim(), searchOpts)
       if (!isArray(hits)) return hits
-      return { count: hits.length, results: hits }
+      return { count: hits.length, results: hits, outcome:hits.outcome, sources:hits.sources, stopReasons:hits.stopReasons, truncated:hits.truncated }
     }
 
     if (op === "backlinks") {
@@ -4835,19 +4854,40 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     wiki: {
       name       : "wiki",
-      description: "Interact with the wiki knowledge base. ALWAYS start with operation='context' for a compact overview. Use 'search' to find pages (returns path+title+description by default; add contextLines>0 for snippets), 'read' to get a page (use section= to read one heading only), 'list' with withMeta=true for metadata, 'tree'/'browse' for structure including mounts, 'mounts'/'attach'/'detach' for federated read-only wikis (@name/path.md), 'write'/'move'/'delete' to update (requires wikiaccess=rw), 'lint' to validate health, 'init' for section index creation.",
+      description: "Interact with the wiki knowledge base. Start with operation='search'; an omitted wiki selector searches all mounted wikis. Partial coverage cannot establish absence. Use context only for navigation. Use 'search' to find pages (returns path+title+description by default; add contextLines>0 for snippets), 'read' to get a page (use section= to read one heading only), 'list' with withMeta=true for metadata, 'tree'/'browse' for structure including mounts, 'mounts'/'attach'/'detach' for federated read-only wikis (@name/path.md), 'write'/'move'/'delete' to update (requires wikiaccess=rw), 'lint' to validate health, 'init' for section index creation.",
       inputSchema: {
         type      : "object",
         properties: {
           operation: {
             type       : "string",
             description: "Operation to perform (see enum for canonical and alias values).",
-            enum       : ["list", "tree", "browse", "read", "search", "backlinks", "write", "move", "delete", "lint", "init", "get", "view", "cat", "find", "refs", "references", "validate", "check", "save", "put", "create", "update", "mv", "rename", "remove", "rm"],
+            enum       : ["context", "mounts", "open", "navigate", "grep", "related", "retrieve", "list", "tree", "browse", "read", "search", "backlinks", "write", "move", "delete", "lint", "init", "get", "view", "cat", "find", "refs", "references", "validate", "check", "save", "put", "create", "update", "mv", "rename", "remove", "rm"],
             default    : "list"
           },
           path     : { type: "string", description: "Page path for read/write/delete/backlinks/move operations, path prefix for list/tree, or folder path for browse/init." },
           to       : { type: "string", description: "Target page path for operation=move." },
           query    : { type: "string", description: "Search query for operation=search." },
+          wiki: {oneOf:[{type:"string"},{type:"array",items:{type:"string"}}],description:"Omitted or '*' searches all; primary or mount names select sources."},
+          expandGraph: {type:"boolean",description:"Override configured bounded graph hints; false disables expansion."},
+          maxGraphExpansion: {type:"integer",minimum:0,maximum:10},
+          maxGraphEdges: {type:"integer",minimum:0,maximum:4096},
+          forceScan: {type:"boolean"},
+          regex: {type:"boolean"},
+          caseSensitive: {type:"boolean"},
+          contextLines: {type:"integer",minimum:0},
+          searchIn: {type:"string",enum:["all","body"]},
+          section: {type:"string"},
+          pattern: {type:"string"},
+          maxChars: {type:"integer",minimum:1},
+          maxHeadings: {type:"integer",minimum:1},
+          lineStart: {type:"integer",minimum:1},
+          lineEnd: {type:"integer",minimum:1},
+          charOffset: {type:"integer",minimum:0},
+          charStart: {type:"integer",minimum:0},
+          charEnd: {type:"integer",minimum:0},
+          revision: {type:"string"},
+          cursor: {type:"object"},
+          agentic: {type:"boolean",description:"Use bounded read/continuation contracts."},
           applicability: { type: "object", additionalProperties: false, description: "V2 search filters; exact applicability and inclusive UTC validity date against current revisions.", properties: { product: {type:"string"}, version: {type:"string"}, platform: {type:"string"}, environment: {type:"string"}, validAt: {type:"string",pattern:"^\\d{4}-\\d{2}-\\d{2}$"} } },
           maxQueries: {type:"integer",minimum:1,description:"V2 request-wide query budget."},
           maxCandidates: {type:"integer",minimum:1,description:"V2 request-wide candidate budget."},

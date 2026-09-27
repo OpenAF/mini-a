@@ -1,4 +1,12 @@
 jobs:
+- name: MiniA Utils Tests::WikiMountedCompactContinuation
+  to: oJob Test
+  exec: args.func = require("tests/miniAUtils.js").testWikiMountedCompactContinuation
+
+- name: MiniA Utils Tests::WikiSearchOptionForwarding
+  to: oJob Test
+  exec: args.func = require("tests/miniAUtils.js").testWikiSearchOptionForwarding
+
 - name: MiniA Utils Tests::SpacedSkillReferences
   to: oJob Test
   exec: args.func = require("tests/miniAUtils.js").testSpacedSkillReferences
@@ -244,6 +252,8 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Utils Tests::WikiMountedCompactContinuation
+- MiniA Utils Tests::WikiSearchOptionForwarding
 - MiniA Utils Tests::SpacedSkillReferences
 - MiniA Utils Tests::RenderChartDoesNotDisplay
 - MiniA Utils Tests::ConsoleSkillsCompletion

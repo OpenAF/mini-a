@@ -313,7 +313,7 @@ MiniAWikiGraph.prototype._compactEdges = function(force) {
 }
 
 MiniAWikiGraph.prototype._pageHash = function(p) {
-  return sha1(stringify({ body: p.body || "", meta: p.meta || {}, links: p.links || [], revision: p.revision || "" }, __, ""))
+  return sha1(stringify({ discoveryVersion: 1, body: p.body || "", meta: p.meta || {}, links: p.links || [], revision: p.revision || "" }, __, ""))
 }
 
 MiniAWikiGraph.prototype._indexPageStructural = function(p) {
@@ -327,6 +327,23 @@ MiniAWikiGraph.prototype._indexPageStructural = function(p) {
     hash: newHash,
     revision: p.revision || ""
   })
+
+  // Published, deterministic discovery keys. Query-time joins reuse the bounded
+  // adjacency index; no corpus scan, inferred prose, or edits to source pages.
+  var generic = /^(readme|index|usage|guide|reference|overview|documentation|docs|source|src|tests?|api|configuration|common|openaf|opacks?|the|and|for|with|from|this|that|file|files)$/
+  var discovery = {}, values = [p.meta && p.meta.title, p.meta && p.meta.source]
+  values.forEach(function(value) {
+    if (!isString(value)) return
+    var normalized=value.toLowerCase().replace(/\.[a-z0-9]+$/," ").replace(/[^a-z0-9_-]+/g," ").trim()
+    var keys=normalized.split(/\s+/)
+    if (keys.length>1 && keys.length<=5) keys.unshift(normalized)
+    keys.slice(0,12).forEach(function(key){if(key.length>=4 && key.length<=80 && !generic.test(key))discovery[key]=true})
+  })
+  Object.keys(discovery).slice(0,8).forEach(function(key) {
+    var id=this._id("discovery",key)
+    this._upsertNode(id,"discovery",{value:key})
+    this._addEdge(docId,id,"HAS_DISCOVERY_KEY","EXTRACTED",{derived:true})
+  },this)
 
   var tags = isMap(p.meta) && isArray(p.meta.tags) ? p.meta.tags : []
   for (var t = 0; t < tags.length; t++) {
@@ -807,7 +824,7 @@ MiniAWikiGraph.prototype.expansionCandidates = function(path, options) {
 MiniAWikiGraph.prototype.expansionJoinKeys = function(path, options) {
   var opts = options, out = [], seen = {}, self = this, node = this._state.nodes["doc:" + path]
   var add = function(id, kind, revision) {
-    if (!opts.kinds[kind] || seen[id] || id.substring(id.indexOf(":") + 1).length < opts.minKeyLen) return
+    if (!(kind === "discovery" ? opts.kinds.alias : opts.kinds[kind]) || seen[id] || id.substring(id.indexOf(":") + 1).length < opts.minKeyLen) return
     seen[id] = true; out.push({id:id,kind:kind,support:{path:path,revision:revision || ""}})
   }
   var visit = function(edges, semantic) {
@@ -819,6 +836,7 @@ MiniAWikiGraph.prototype.expansionJoinKeys = function(path, options) {
       if (semantic) {add(edge.from,"concept",edge.props.revision);add(edge.to,"concept",edge.props.revision)}
       else if (edge.type === "HAS_TAG") add(edge.to,"tag",node && node.props.revision)
       else if (edge.type === "ALIAS_OF") add(edge.from,"alias",node && node.props.revision)
+      else if (edge.type === "HAS_DISCOVERY_KEY") add(edge.to,"discovery",node && node.props.revision)
     }
   }
   if (opts.kinds.tag || opts.kinds.alias) visit(this._adj["doc:" + path] || [],false)
@@ -840,7 +858,7 @@ MiniAWikiGraph.prototype.expansionMatches = function(keys, options) {
       if (edge._deleted) continue
       if (key.kind === "concept") {owner = edge.props && edge.props.page;revision = edge.props && edge.props.revision}
       else {
-        var doc = key.kind === "tag" && edge.type === "HAS_TAG" ? edge.from : key.kind === "alias" && edge.type === "ALIAS_OF" ? edge.to : ""
+        var doc = (key.kind === "tag" && edge.type === "HAS_TAG" || key.kind === "discovery" && edge.type === "HAS_DISCOVERY_KEY") ? edge.from : key.kind === "alias" && edge.type === "ALIAS_OF" ? edge.to : ""
         if (doc.indexOf("doc:") !== 0) continue
         owner = doc.substring(4)
         var node = this._state.nodes[doc]; revision = node && node.props.revision
@@ -848,7 +866,7 @@ MiniAWikiGraph.prototype.expansionMatches = function(keys, options) {
       if (!owner || owner.indexOf("@") === 0 || owners[owner]) continue
       owners[owner] = true
       matches.push({path:owner,relation:"shared_" + key.kind,sourceSupport:key.support,targetSupport:{path:owner,revision:revision || ""}})
-      if (matches.length > maxDocs) {complete = false;break}
+      if (matches.length > (key.kind === "discovery" && opts.maxDf > 0 ? Math.max(1,maxDocs) : maxDocs)) {complete = false;break}
     }
     // An incomplete posting cannot establish that this key passes the DF filter.
     if (!complete) continue

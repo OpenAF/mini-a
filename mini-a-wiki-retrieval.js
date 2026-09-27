@@ -34,6 +34,14 @@ var MiniAWikiRetrievalV2 = function(manager, config, preserveLegacyRanking) {
   finally { if (analysis) this._closeAnalyzer(analysis) }
   this.fingerprint = sha1(stringify({ schema: 1, parser: 6, fields: fields, indexContract: this.indexContract }, __, ""))
 }
+// Request coordinator only: no mutable reader resources or synthetic publication.
+MiniAWikiRetrievalV2.coordinator = function(manager) {
+  var coordinator = Object.create(MiniAWikiRetrievalV2.prototype)
+  coordinator.manager = manager
+  coordinator.config = MiniAWikiRetrievalV2.config(manager._config.wikiretrievalconfig)
+  coordinator.closed = false
+  return coordinator
+}
 MiniAWikiRetrievalV2.config = function(value) {
   if (isString(value)) value = af.fromJSSLON(value)
   if (isUnDef(value)) value = {}
@@ -1640,7 +1648,7 @@ MiniAWikiRetrievalV2.prototype._query = function(snapshot, query, limit, expansi
     var options = ow.ch.__types.searchdb.__lexicalOptions(this.manager._luceneLexicalOptions())
     var routes = ["lexical", "exact"], omitted = [], extraAttempts = 0, seedCount = 0
     var checkDeadline = function() { if (request && Date.now() >= request.deadline) throw new Error("request-deadline-exhausted") }
-    var typedQuery = function(value) { var typed = new L.search.BooleanQuery.Builder(); typed.add(value, L.search.BooleanClause.Occur.MUST); typed.add(new L.search.TermQuery(new L.index.Term("recordType", "passage")), L.search.BooleanClause.Occur.FILTER); return typed.build() }
+    var typedQuery = function(value) { var typed = new L.search.BooleanQuery.Builder(); typed.add(value, L.search.BooleanClause.Occur.MUST); (request && request.excludePages || []).forEach(function(path){typed.add(new L.search.TermQuery(new L.index.Term("page",path)),L.search.BooleanClause.Occur.MUST_NOT)}); typed.add(new L.search.TermQuery(new L.index.Term("recordType", "passage")), L.search.BooleanClause.Occur.FILTER); return typed.build() }
     snapshot.searcher.setSimilarity(new L.search.similarities.BM25Similarity(Number(options.bm25.k1), Number(options.bm25.b)))
     var fields = java.lang.reflect.Array.newInstance(java.lang.String, 3); fields[0] = "prose"; fields[1] = "title"; fields[2] = "heading"
     var boosts = new java.util.HashMap(); boosts.put("prose", java.lang.Float.valueOf(1)); boosts.put("title", java.lang.Float.valueOf(2)); boosts.put("heading", java.lang.Float.valueOf(2))
@@ -1677,7 +1685,7 @@ MiniAWikiRetrievalV2.prototype._query = function(snapshot, query, limit, expansi
     if (expansions.length) routes.push("synonyms")
     var specs = [{enabled:options.shingles.enabled,field:"prose__shingle",route:"shingles",boost:0.6},{enabled:options.characterNGrams.enabled,field:"prose__ngram",route:"ngrams",boost:0.3}]
     specs.forEach(function(spec) {
-      if (!spec.enabled || syntax) return
+      if (!spec.enabled || syntax || request && request.trustedAlternativesOnly) return
       if (remainingAttempts < 1) { omitted.push(spec.route); return }
       checkDeadline()
       charge()
@@ -1686,7 +1694,7 @@ MiniAWikiRetrievalV2.prototype._query = function(snapshot, query, limit, expansi
       routes.push(spec.route)
     })
     var combined = builder.build(), hits, finalLimit = limit
-    var feedback = !syntax && (options.queryExpansion.enabled || options.pseudoRelevanceFeedback.enabled)
+    var feedback = !syntax && !(request && request.trustedAlternativesOnly) && (options.queryExpansion.enabled || options.pseudoRelevanceFeedback.enabled)
     if (feedback) {
       var feedbackRoute = options.pseudoRelevanceFeedback.enabled ? "pseudoRelevanceFeedback" : "queryExpansion"
       if (remainingAttempts < 1 || options.pseudoRelevanceFeedback.enabled && limit < 2) omitted.push(feedbackRoute)
@@ -1758,9 +1766,9 @@ MiniAWikiRetrievalV2.prototype._graphActive = function(hit, deadline, used) {
 MiniAWikiRetrievalV2.prototype._rank = function(hit, query) {
   var text = hit.text.toLowerCase(), page = hit.page, title = String(page.title).toLowerCase(), heading = hit.record.headingAncestry.join(" ").toLowerCase(), q = String(query).toLowerCase(), terms = MiniAWikiRetrievalV2.terms(query)
   var fraction = function(value) { return terms.length ? terms.filter(function(t) { return value.indexOf(t) >= 0 }).length / terms.length : 0 }
-  var components = { phrase: text.indexOf(q) >= 0 ? 4 : 0, coverage: 3 * fraction(text), title: fraction(title), heading: 1.5 * fraction(heading), sourceRankFusion: 1 / (60 + hit.sourceRank), expansionAgreement: (hit.expansions || []).some(function(q) { return text.indexOf(q.toLowerCase()) >= 0 }) ? 3 : 0 }
+  var components = { exactTitle: title.trim() === q.trim() ? 2 : 0, phrase: text.indexOf(q) >= 0 ? 4 : 0, coverage: 3 * fraction(text), title: fraction(title), heading: 1.5 * fraction(heading), sourceRankFusion: 1 / (60 + hit.sourceRank), expansionAgreement: (hit.expansions || []).some(function(q) { return text.indexOf(q.toLowerCase()) >= 0 }) ? 3 : 0 }
   hit.scoreComponents = components
-  hit.rankScore = components.phrase + components.coverage + components.title + components.heading + components.sourceRankFusion + components.expansionAgreement
+  hit.rankScore = components.exactTitle + components.phrase + components.coverage + components.title + components.heading + components.sourceRankFusion + components.expansionAgreement
   hit.retrievalMethod = components.phrase > 0 && /[_-]|[A-Z]/.test(String(query)) ? "exact" : "lexical"
   return hit
 }
@@ -1816,6 +1824,20 @@ MiniAWikiRetrievalV2.validityDate = function(value) {
 // never opens a new wiki, and each support keeps its own reader/permission scope.
 MiniAWikiRetrievalV2.prototype._expandGraph = function(candidates, contexts, opts, budget, used, deadline, stopReasons, measure) {
   var self = this, cfg = this.manager._config, work = {used:0,limit:budget.maxGraphEdges,truncated:false}, known = {}, seeded = {}, secondHop = []
+  contexts.forEach(function(context) {
+    var manager=context.engine.manager
+    try { context.engine._guard(function() {
+      if (manager._access !== "rw" && manager._config.usegraph === true && manager._graphServingGeneration !== context.pin.generation) {
+        manager._initializeGraph()
+        manager._graphServingGeneration=context.pin.generation
+      }
+      context.graph=manager._graph
+    },deadline) } catch(e) {
+      context.graph=__
+      context.source.status="partial";context.source.reason=Date.now()>=deadline?"graph-budget":"graph-unavailable"
+      if(stopReasons.indexOf(context.source.reason)<0)stopReasons.push(context.source.reason)
+    }
+  })
   var number = function(value, fallback, max) {return isFinite(Number(value)) && isDef(value) ? Math.max(0,Math.min(max,Math.floor(Number(value)))) : fallback}
   var crossCap = number(cfg.wikigraphcrosscap,5,10), crossUsed = 0, depth = number(cfg.wikigraphcrossdepth,1,2)
   var maxDf = isDef(cfg.wikigraphcrossmaxdf) && isFinite(Number(cfg.wikigraphcrossmaxdf)) ? Math.max(0,Math.min(1,Number(cfg.wikigraphcrossmaxdf))) : 0.25
@@ -1868,7 +1890,7 @@ MiniAWikiRetrievalV2.prototype._expandGraph = function(candidates, contexts, opt
   var seeds=candidates.slice().sort(function(a,b){return b.rankScore-a.rankScore || (a.path<b.path?-1:a.path>b.path?1:0)})
   seeds.forEach(function(hit){known[hit.path]=true})
   var discover = function(seed, context, previous) {
-    var graph=context.engine.manager._graph
+    var graph=context.graph
     if (!graph || !isFunction(graph.expansionCandidates)) {partial(context,"graph-unavailable");return}
     var base=(previous ? previous.supports : []).concat([bind(context,{path:seed.record.path,revision:seed.page.revision})])
     var accept=function(path){var route=previous && path.indexOf("@")===0 ? null : resolve(context,path);return !!route && !known[publicPath(route.context,route.path)] && (!route.cross || crossUsed<crossCap)}
@@ -1884,7 +1906,7 @@ MiniAWikiRetrievalV2.prototype._expandGraph = function(candidates, contexts, opt
     if(previous || !enabled(context) || crossUsed>=crossCap || exhausted())return
     var keys=graph.expansionJoinKeys(seed.record.path,{kinds:kinds,minKeyLen:minKeyLen,budget:work,deadline:deadline})
     for(var t=0;t<contexts.length && keys.length;t++) {
-      var target=contexts[t], targetGraph=target.engine.manager._graph
+      var target=contexts[t], targetGraph=target.graph
       if(sameWiki(context.engine.manager,target.engine.manager) || !targetGraph || !authorised(target,""))continue
       if(exhausted() || crossUsed>=crossCap){partial(context,"graph-budget");break}
       var matches=targetGraph.expansionMatches(keys,{cap:Math.min(crossCap-crossUsed,budget.maxGraphExpansion-used.graphExpansion),maxDf:maxDf,pageCount:target.pin.manifest.catalogue.stats.pageCount,budget:work,deadline:deadline,accept:function(path){return !known[publicPath(target,path)]}})
@@ -1921,13 +1943,15 @@ MiniAWikiRetrievalV2.prototype._collect = function(query, options, materialize, 
   opts._evaluationTime = evaluationTime
   var selection = this.manager.resolveWikiSelection(opts.wiki)
   if (!selection.ok) return selection
+  selection.targets = selection.targets.filter(function(target) { return !target.manager._catalog })
+  selection.targets.sort(function(a,b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0 })
   if (!isString(query) || !query.trim()) return { ok: false, error: "query-required" }
   if (query.length > 2048) return { ok: false, error: "query-too-long" }
   if (isDef(opts.applicability) && (!isMap(opts.applicability) || !Object.keys(opts.applicability).every(function(k) { return k === "validAt" ? MiniAWikiRetrievalV2.validityDate(opts.applicability[k]) !== null : ["product", "version", "platform", "environment"].indexOf(k) >= 0 && isString(opts.applicability[k]) }))) return { ok: false, error: "invalid-applicability" }
   var finite = function(value, fallback, max) { if (isUnDef(value)) return fallback; if (!isFinite(Number(value)) || Number(value) < 1) throw new Error("invalid-budget"); return Math.min(max, Math.floor(Number(value))) }
   var graphLimit = function(value, fallback, max) { if (isUnDef(value)) return fallback; if (!isFinite(Number(value)) || Number(value) < 0 || Math.floor(Number(value)) !== Number(value)) throw new Error("invalid-graph-budget"); return Math.min(max, Number(value)) }
   var budget
-  try { budget = { maxCandidates: finite(opts.maxCandidates, 32, 512), maxQueries: finite(opts.maxQueries, 16, 64), maxInspected: finite(opts.maxInspected, 32, 512), maxBytes: finite(opts.maxBytes, 16000, 64000), maxMillis: finite(opts.maxMillis, this.config.maxMillis, this.config.maxMillis), maxGraphExpansion: opts.expandGraph === true ? graphLimit(opts.maxGraphExpansion, 5, 10) : 0, maxGraphEdges: opts.expandGraph === true ? graphLimit(opts.maxGraphEdges, 256, 4096) : 0 } } catch(e) { return { ok: false, error: String(e) } }
+  try { budget = { maxCandidates: finite(opts.maxCandidates, 32, 512), maxQueries: finite(opts.maxQueries, 16, 64), maxInspected: finite(opts.maxInspected, 32, 512), maxBytes: finite(opts.maxBytes, 16000, 64000), maxMillis: finite(opts.maxMillis, this.config.maxMillis, this.config.maxMillis), maxGraphExpansion: (opts.expandGraph === true || isUnDef(opts.expandGraph) && this.manager._config.wikigraphsearchhints === true) ? graphLimit(opts.maxGraphExpansion, 5, 10) : 0, maxGraphEdges: (opts.expandGraph === true || isUnDef(opts.expandGraph) && this.manager._config.wikigraphsearchhints === true) ? graphLimit(opts.maxGraphEdges, 256, 4096) : 0 } } catch(e) { return { ok: false, error: String(e) } }
   var used = { queries: 0, candidates: 0, inspected: 0, materializedPassages: 0, bytes: 0, graphExpansion: 0, graphEdges: 0 }, deadline = evaluationTime + budget.maxMillis, vector = {}, sources = [], candidates = [], pins = [], stopReasons = [], stages = ["validate"], self = this
   var elapsed = function(at) { return Math.max(0,(Number(java.lang.System.nanoTime())-at)/1000000) }
   var timings = { validation: elapsed(started), pin: 0, search: 0, rank: 0, candidateOrdering: 0, evidenceSelection: 0, citationDecoration: 0 }
@@ -1953,12 +1977,14 @@ MiniAWikiRetrievalV2.prototype._collect = function(query, options, materialize, 
       try {
         if (stages.indexOf("pin") < 0) stages.push("pin")
         pin = measure("pin", function() { return engine.acquire(deadline) }); pins.push({ engine: engine, snapshot: pin }); vector[target.name] = pin.generation
-        var allocation = Math.max(1, Math.floor(remaining / (selection.targets.length - i))), pending = engine._pending(), permissions = {}
+        var allocation = Math.max(1, Math.floor(remaining / (selection.targets.length - i)))
+        if (selection.targets.length > 1) allocation = Math.min(allocation, Math.max(2, Math.floor(budget.maxCandidates / (selection.targets.length * 2))))
+        var pending = engine._pending(), permissions = {}
         used.queries++
         if (stages.indexOf("search") < 0) stages.push("search")
-        var queryRequest = {pending:pending,permissions:permissions,deadline:deadline,options:opts,used:used}, found
+        var queryRequest = {pending:pending,permissions:permissions,deadline:deadline,options:opts,used:used,excludePages:opts.__excludePages}, found
         try {
-          found = measure("search", function() { return engine._query(pin, query, allocation, Math.max(0, budget.maxQueries - used.queries - (selection.targets.length - i - 1)), queryRequest) })
+          found = measure("search", function() { return engine._query(pin, query, allocation, selection.targets.length > 1 || opts.__baseOnly ? 0 : Math.max(0, budget.maxQueries - used.queries), queryRequest) })
         } catch(firstUseFailure) {
           var firstUseReason = __miniAErrMsg(firstUseFailure)
           // A structural cold open may discover a corrupt selected shard only
@@ -1970,7 +1996,7 @@ MiniAWikiRetrievalV2.prototype._collect = function(query, options, materialize, 
           engine.release(pin); pins.pop()
           pin = measure("pin", function(){ return engine.acquire(deadline,true) })
           pins.push({ engine: engine, snapshot: pin }); vector[target.name] = pin.generation
-          found = measure("search", function() { return engine._query(pin, query, allocation, Math.max(0, budget.maxQueries - used.queries - (selection.targets.length - i - 1)), queryRequest) })
+          found = measure("search", function() { return engine._query(pin, query, allocation, selection.targets.length > 1 || opts.__baseOnly ? 0 : Math.max(0, budget.maxQueries - used.queries), queryRequest) })
           source.recoveredPointer = true
         }
         source.status = "searched"; source.expansions = found.expansions; source.candidates = found.hits.length
@@ -1979,7 +2005,7 @@ MiniAWikiRetrievalV2.prototype._collect = function(query, options, materialize, 
         source.passageChars = pin.manifest.passageChars
         source.requestedRoutes = ["shingles","ngrams","queryExpansion","pseudoRelevanceFeedback"].filter(function(key){return engine.manager._lexicalConfig[key] === true})
         if (engine.manager._lexicalConfig.synonyms.length) source.requestedRoutes.push("synonyms")
-        if (found.omittedRoutes.length) { source.status = "partial"; source.reason = "query-budget"; stopReasons.push("query-budget") }
+        if (found.omittedRoutes.length && selection.targets.length === 1 && !opts.__baseOnly) { source.status = "partial"; source.reason = "query-budget"; stopReasons.push("query-budget") }
         if (found.totalHits > found.hits.length) { source.candidateLimitReached = true; source.status = "partial"; source.reason = "candidate-budget"; stopReasons.push("candidate-budget") }
         used.candidates += found.hits.length
         graphSources.push({engine:engine,pin:pin,target:target,source:source,pending:pending,permissions:permissions})
@@ -1995,11 +2021,44 @@ MiniAWikiRetrievalV2.prototype._collect = function(query, options, materialize, 
         })
       } catch(e) { source.reason = __miniAErrMsg(e).substring(0, 160); source.status = source.reason === "invalid-query" ? "invalid-query" : source.reason === "query-budget-exhausted" ? "partial" : "unavailable"; stopReasons.push(source.status === "invalid-query" ? "invalid-query" : source.status === "partial" ? "query-budget" : "source-unavailable") }
     }
-    if (budget.maxGraphExpansion > 0 && candidates.length) {
+    // Widen promising sources before fuzzy expansion. Compact page discovery
+    // excludes already-seen pages so one long document cannot consume the pool.
+    var hasStrong = candidates.some(function(hit){return hit.scoreComponents.coverage === 3})
+    var followups = graphSources.filter(function(context) {
+      return context.source.candidateLimitReached || (context.source.omittedRoutes || []).indexOf("synonyms") >= 0 || !hasStrong
+    })
+    var relevance = function(context) {return candidates.filter(function(hit){return hit.wiki===context.target.name}).reduce(function(score,hit){return Math.max(score,hit.rankScore)},0)}
+    followups.sort(function(a,b){return relevance(b)-relevance(a) || (a.target.name<b.target.name?-1:1)})
+    var graphReserve = candidates.length && budget.maxGraphExpansion > 0 && (opts.expandGraph === true || !hasStrong) ? Math.min(opts.expandGraph === true ? budget.maxGraphExpansion : 1, Math.max(0,budget.maxQueries-used.queries-1)) : 0
+    if (selection.targets.length > 1) followups.forEach(function(context,index) {
+      if (used.queries >= budget.maxQueries-graphReserve || used.candidates >= budget.maxCandidates || Date.now() >= deadline) return
+      var allowance = Math.max(1,Math.floor((budget.maxCandidates-used.candidates)/(followups.length-index)))
+      var excludePages = opts.__pageDiscovery ? candidates.filter(function(hit){return hit.wiki===context.target.name}).map(function(hit){return hit.record.path}) : []
+      var remainingRoutes = hasStrong && (context.source.omittedRoutes || []).indexOf("synonyms") < 0 ? 0 : Math.max(0,budget.maxQueries-used.queries-1-graphReserve-(followups.length-index-1))
+      var extra
+      used.queries++
+      try { extra = measure("search", function() { return context.engine._query(context.pin, query, allowance, remainingRoutes, {pending:context.pending,permissions:context.permissions,deadline:deadline,options:opts,used:used,excludePages:excludePages,trustedAlternativesOnly:hasStrong}) }) }
+      catch(e) {context.source.status="partial";context.source.reason=__miniAErrMsg(e).substring(0,160);stopReasons.push("expansion-unavailable");return}
+      context.source.expansions = extra.expansions
+      context.source.candidates += extra.hits.length
+      if (extra.totalHits <= extra.hits.length && !extra.omittedRoutes.length) {context.source.status="searched";delete context.source.reason;delete context.source.candidateLimitReached}
+      extra.hits.forEach(function(hit) {
+        if (used.candidates >= budget.maxCandidates || Date.now() >= deadline) return
+        used.candidates++; used.materializedPassages++
+        if (candidates.some(function(old) { return old.wiki === context.target.name && old.record.passageId === hit.record.passageId })) return
+        hit.page = context.engine.lookupPage(context.pin,hit.record.path)
+        if (!context.engine._active(hit.page,context.pending,context.permissions,deadline,used,__,context.pin) || !context.engine._constraints(hit.page,opts)) return
+        hit.expansions=extra.expansions; hit.engine=context.engine; hit.snapshot=context.pin; hit.wiki=context.target.name
+        hit.path=context.target.mounted ? "@"+context.target.name+"/"+hit.record.path : hit.record.path
+        candidates.push(measure("rank",function(){return context.engine._rank(hit,query)}))
+      })
+    })
+    var graphWanted = opts.expandGraph === true || (isUnDef(opts.expandGraph) && this.manager._config.wikigraphsearchhints === true && !candidates.some(function(hit){return hit.scoreComponents.coverage === 3}))
+    if (graphWanted && budget.maxGraphExpansion > 0 && candidates.length) {
       stages.push("graph")
       this._expandGraph(candidates,graphSources,merge(opts,{query:query}),budget,used,deadline,stopReasons,measure)
     }
-    measure("candidateOrdering", function() { candidates.sort(function(a,b) { return b.rankScore - a.rankScore || (a.path < b.path ? -1 : a.path > b.path ? 1 : a.record.charStart - b.record.charStart) }) })
+    measure("candidateOrdering", function() { candidates.sort(function(a,b) { return (b.scoreComponents.coverage > 0 ? 1 : 0) - (a.scoreComponents.coverage > 0 ? 1 : 0) || b.rankScore - a.rankScore || (a.path < b.path ? -1 : a.path > b.path ? 1 : a.record.charStart - b.record.charStart) }) })
     var complete = sources.every(function(s) { return s.status === "searched" })
     var out = { ok: true, query: query, effectiveMode: "passage-v2", outcome: complete ? candidates.length ? "hits" : "zero" : "partial", generations: vector, sources: sources, stages: stages, timings: { unit: "milliseconds", clock: "monotonic-System.nanoTime", measured: timings }, stopReasons: stopReasons.filter(function(r,i,a) { return a.indexOf(r) === i }), budget: { limits: budget, used: used } }
     if (sources.length && sources.every(function(source) { return source.status === "invalid-query" })) { out.ok = false; out.error = "invalid-query" }
@@ -2023,7 +2082,7 @@ MiniAWikiRetrievalV2.prototype._reference = function(hit) {
   return { wiki: hit.wiki, wikiId: hit.record.wikiId, page: hit.path, revision: hit.record.revision, passageId: hit.record.passageId, generation: hit.snapshot.generation, startLine: hit.record.startLine, endLine: hit.record.endLine, charStart: hit.record.charStart, charEnd: hit.record.charEnd, positionConvention: "raw-1-based-inclusive-lines;utf16-character-offsets" }
 }
 MiniAWikiRetrievalV2.prototype.search = function(query, options) {
-  var self = this, opts = isMap(options) ? options : {}, limit = Math.min(100, Math.max(1, Number(opts.limit) || 8))
+  var self = this, opts = merge({}, isMap(options) ? options : {}, {__pageDiscovery:true}), limit = Math.min(100, Math.max(1, Number(opts.limit) || 8))
   return this._collect(query, opts, function(candidates, out, deadline, measure) {
     var seen = {}, results = []
     candidates.forEach(function(hit) {
@@ -2040,6 +2099,13 @@ MiniAWikiRetrievalV2.prototype.search = function(query, options) {
       }
       seen[hit.path] = true
       var result = { path: hit.path, ref: self.manager._agenticRef(hit.path), wiki: hit.wiki, title: String(hit.page.title).substring(0, 512), description: String(hit.page.description).substring(0, 256), summary: String(hit.page.description).substring(0, 256), nativeScore: hit.nativeScore, rankScore: hit.rankScore, score: hit.rankScore, scoreComponents: hit.scoreComponents, retrievalMethod: hit.retrievalMethod, passage: self._reference(hit) }
+      if (opts.compact === false || Number(opts.contextLines) > 0) {
+        var pattern = new RegExp(String(query).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
+        var snippet = hit.engine.manager._snippetFromContent(hit.text, pattern, Math.min(10, Math.max(0, Number(opts.contextLines) || 0)))
+        result.line = hit.record.startLine + snippet.line - 1
+        result.snippet = snippet.snippet
+        if (Number(opts.contextLines) > 0) { result.contextBefore = snippet.contextBefore; result.contextAfter = snippet.contextAfter }
+      }
       if (isNumber(opts.evidenceChars) && opts.evidenceChars > 0) {
         var selected = MiniAWikiRetrievalV2.window(hit.text, query, opts.evidenceChars, opts.evidenceLines)
         result.passage.charStart += selected.start; result.passage.charEnd = hit.record.charStart + selected.end
