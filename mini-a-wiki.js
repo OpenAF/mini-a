@@ -1621,6 +1621,23 @@ MiniAWikiManager.prototype._removePageIndexes = function(path) {
   }
 }
 
+// Offline maintenance: publication locks do not track readers in other processes.
+MiniAWikiManager.prototype.compact = function(options) {
+  options = options || {}
+  if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
+  if (this._backendType !== "fs" || this._archiveRoot) return { ok: false, error: "compact-requires-local-filesystem" }
+  if (!this._retrievalV2) return { ok: false, error: "compact-requires-retrieval-v2" }
+  if (this._knowledgeJournalPending && this._knowledgeJournalPending()) return { ok: false, error: "ingest-pending" }
+  var engine = this._retrievalV2
+  if (!io.fileExists(engine.root + "/current.json")) return { ok: false, error: "reindex-required" }
+  if (options.dryRun === true) return engine.reclaimSharedBlocks({ generations: true, dryRun: true })
+  if (options.offline !== true) return { ok: false, error: "compact-requires-offline", detail: "Stop other wiki readers and writers, then pass offline=true." }
+  var built = engine.build()
+  if (!built.ok) return { ok: false, stage: "reindex", result: built }
+  var cleanup = engine.reclaimSharedBlocks({ generations: true })
+  return { ok: cleanup.ok, generation: built.generation, cleanup: cleanup, fallbackPreserved: true }
+}
+
 MiniAWikiManager.prototype.reindex = function() {
   if (this._retrievalV2) {
     var changes = isMap(this._servingBatchChanges) && io.fileExists(this._retrievalV2.root + "/current.json") ? Object.keys(this._servingBatchChanges) : __

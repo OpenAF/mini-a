@@ -769,8 +769,10 @@ Disable v2 to use preserved legacy artifacts; opt-in reindex never removes the l
 legacy-compatible index. To roll back v2 artifacts, stop writers/readers, restore a
 saved valid `current.json` and its complete UUID directory, then reopen managers.
 Current-view source revision checks still apply; rollback cannot make old content
-current. No online rollback/cleanup command or authorised historical-view API is
-provided. Remove only unreferenced old/failed UUID directories after all readers
+current. No online rollback or authorised historical-view API is provided.
+For offline local serving-index compaction, use `/wiki compact` to preview and
+`/wiki compact offline=true` to rebuild and reclaim unreachable artifacts (see
+[compaction commands](WIKI.md#compacting-a-local-wiki-for-read-only-use)). Remove only unreferenced old/failed UUID directories after all readers
 stop, preserving current and intended rollback generations.
 Obsolete development-only parser/schema generations require reindexing. The
 current reader does not silently reinterpret them.

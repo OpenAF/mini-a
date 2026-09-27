@@ -1607,7 +1607,7 @@ try {
 
   function getWikiSubcommandCompletions() {
     var completions = ["context", "list", "tree", "browse", "read", "search", "backlinks", "lint", "mounts", "attach", "detach"]
-    if (String(sessionOptions.wikiaccess || "").toLowerCase() === "rw") completions.push("write", "move", "delete", "init", "reindex")
+    if (String(sessionOptions.wikiaccess || "").toLowerCase() === "rw") completions.push("write", "move", "delete", "init", "reindex", "compact")
     return completions
   }
 
@@ -2457,6 +2457,15 @@ try {
                 candidates.add(quoteConsolePath(path))
               })
               return candidates.isEmpty() ? -1 : Number(pathInsertionPoint)
+            }
+
+            if (wikiSubcmd === "compact") {
+              var compactPrefix = wikiParts.slice(1).join(" ")
+              if (wikiParts.length > 2) return -1
+              ;["dryrun", "offline=true"].forEach(function(option) {
+                if (option.indexOf(compactPrefix) === 0) candidates.add(option)
+              })
+              return candidates.isEmpty() ? -1 : Number(insertionPoint + trimmedRemainder.search(/\s/) + 1)
             }
 
             if (wikiSubcmd === "detach") {
@@ -6158,7 +6167,7 @@ try {
       { command: "/debug [filter]", description: "Inspect previous-goal events; filters: all, calls, answers, memory, system, prompts, responses, thinking, problems" },
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
       { command: "/edit [last]", description: "Compose and submit one goal in the configured external editor (last pre-fills the previous goal; /editor also works)" },
-      { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, mounts, attach, detach" },
+      { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, compact, mounts, attach, detach" },
       { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, report, query, retrieve, answer, neighbors, path, communities, surprise, export, stats, falkor, cross (requires usewikigraph=true)" },
       { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: plan, apply (default), reorg, repair, reindex, graph, indexes, dryrun" },
       { command: "/absorb plan|show|apply|status|resume [spec|id]", description: "Plan, review and apply local wiki absorption (see ABSORB.md)." },
@@ -6470,6 +6479,12 @@ try {
         } else {
           print(colorifyText("Wiki init failed: " + (isObject(initResult) ? initResult.error : "unknown error"), errorColor))
         }
+      } else if (sub === "compact") {
+        if (rest.trim() !== "" && rest.trim() !== "dryrun" && rest.trim() !== "offline=true") {
+          print(colorifyText("Usage: /wiki compact [dryrun|offline=true]", errorColor)); return
+        }
+        var compactResult = wm.compact({ dryRun: rest.trim() !== "offline=true", offline: rest.trim() === "offline=true" })
+        print(stringify(compactResult, __, "  "))
       } else if (sub === "reindex") {
         if (String(sessionOptions.wikiaccess || "").toLowerCase() !== "rw") {
           print(colorifyText("Wiki is read-only. Start with wikiaccess=rw to enable reindex.", errorColor))
@@ -6544,7 +6559,7 @@ try {
           print("  " + colorifyText(p.path, promptColor) + (p.title ? " — " + p.title : "") + (p.description ? "\n    " + colorifyText(p.description, hintColor) : ""))
         })
       } else {
-        print(colorifyText("Usage: /wiki [context|list|tree|browse|read|search|backlinks|delete|lint|write|move|init|reindex|mounts|attach|detach] [args]", errorColor))
+        print(colorifyText("Usage: /wiki [context|list|tree|browse|read|search|backlinks|delete|lint|write|move|init|reindex|compact|mounts|attach|detach] [args]", errorColor))
         print(colorifyText("  list --meta   show pages with title+description", hintColor))
         print(colorifyText("  attach <name> [backend=fs] [root=directory|archive.zip|archive.okt]", hintColor))
         print(colorifyText("  detach <name>", hintColor))

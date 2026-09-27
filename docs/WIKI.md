@@ -573,3 +573,37 @@ LLM output cannot be reproduced reliably to prove ownership of its current conte
 
 
 See [retrieval v2 status](WIKI-RETRIEVAL-V2.md) for contract repairs and outstanding architecture work.
+
+## Compacting a local wiki for read-only use
+
+Stop other processes reading or writing this wiki before applying compaction.
+With `wikiaccess=rw` and `wikiretrievalv2=true`, use:
+
+```text
+/wiki compact
+/wiki compact offline=true
+```
+
+The first command previews currently unreachable generation directories and blocks
+without rebuilding or deleting them. The second rebuilds the active index as a
+base generation, then reclaims unreachable serving artifacts. Preview candidates
+can differ from the post-rebuild collection. Publication locking coordinates
+writers, but does not track readers in other processes; `offline=true` confirms
+they have stopped. Read-only managers and non-local/archive backends are rejected.
+
+The same maintenance is available without a model, from the package directory:
+
+```sh
+ojob utils/wikiCompact.yaml dir=/path/to/wiki
+ojob utils/wikiCompact.yaml dir=/path/to/wiki apply=true offline=true
+```
+
+Pass the same `wikilexical` and `wikiretrievalconfig` settings used by the publisher
+and intended readers. Check `ok: true` before reopening with `wikiaccess=ro`.
+Compaction retains the previous generation and its complete dependency lineage,
+as well as locally tracked readers. It preserves Markdown, graph, metadata,
+knowledge/ingestion state, legacy indexes and downloaded bundle caches. Pending
+or corrupt ingestion journals block compaction. This is conservative serving-index
+compaction, not a smallest-possible archive or general hidden-folder purge; no
+Lucene force-merge is performed. Failed collection reports its error and can be
+retried; the rebuilt index may already have been activated.

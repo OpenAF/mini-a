@@ -1,0 +1,37 @@
+help:
+  text: |
+    Compact a local Retrieval V2 wiki without a model.
+    Preview: ojob utils/wikiCompact.yaml dir=/path/to/wiki
+    Apply after stopping other wiki processes:
+      ojob utils/wikiCompact.yaml dir=/path/to/wiki apply=true offline=true
+    Use the publisher's wikilexical and wikiretrievalconfig settings.
+    Retains fallback dependencies, source pages, graph and ingestion state.
+  expects:
+  - name: dir
+    desc: Local wiki directory
+    mandatory: true
+  - name: apply
+    desc: Rebuild and reclaim instead of preview (default false)
+  - name: offline
+    desc: Confirm other wiki readers and writers have stopped
+  - name: wikilexical
+    desc: Publisher lexical configuration
+  - name: wikiretrievalconfig
+    desc: Publisher Retrieval V2 configuration
+ojob:
+  logToConsole: false
+  catch: printErr(exception); exit(1)
+todo:
+- Compact wiki
+jobs:
+- name: Compact wiki
+  exec: |
+    load("mini-a-common.js")
+    load("mini-a-wiki.js")
+    if (!isString(args.dir) || !new java.io.File(args.dir).isDirectory()) throw "A local wiki directory is required"
+    var wm = new MiniAWikiManager({ backend:"fs", root:args.dir, access:"rw", wikiretrievalv2:true, wikilexical:args.wikilexical, wikiretrievalconfig:args.wikiretrievalconfig })
+    try {
+      var result = wm.compact({dryRun:toBoolean(args.apply) !== true, offline:toBoolean(args.offline) === true})
+      print(stringify(result, __, "  "))
+      if (!result.ok) throw "Wiki compaction failed: " + stringify(result)
+    } finally { wm.close() }

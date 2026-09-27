@@ -2,6 +2,42 @@
   load("mini-a-common.js"); load("mini-a-wiki.js")
   var temporary = function() { var p = java.io.File.createTempFile("wiki-v2-test-", "").getCanonicalPath(); io.rm(p); io.mkdir(p); return p }
   var make = function(root, extra) { return new MiniAWikiManager(merge({ backend: "fs", root: root, access: "rw", wikiretrievalv2: true, wikiretrievalconfig: { passageChars: 256 } }, extra || {}), function() {}) }
+  exports.testWikiCompact = function() {
+    ;[false, true].forEach(function(shared) {
+      var dir = temporary(), wm, reader
+      try {
+        wm = make(dir, {wikiretrievalconfig:{sharedBlockStore:shared}})
+        wm.write("a.md", {title:"Compact"}, "# Compact\ncompactneedle original")
+        ow.test.assert(wm.reindex().ok, true, "initial publication")
+        wm.write("a.md", {title:"Compact"}, "# Compact\ncompactneedle updated")
+        var engine = wm._retrievalV2, orphan = String(java.util.UUID.randomUUID())
+        io.mkdir(engine.root + "/" + orphan)
+        io.writeFileString(engine.root + "/" + orphan + "/abandoned", "residue")
+        var source = io.readFileString(dir + "/a.md"), pointer = io.readFileString(engine.root + "/current.json")
+        var preview = wm.compact({dryRun:true})
+        ow.test.assert(preview.ok, true, "preview succeeds")
+        ow.test.assert(preview.generations.indexOf(orphan) >= 0, true, "preview identifies residue")
+        ow.test.assert(io.fileExists(engine.root + "/" + orphan), true, "preview preserves residue")
+        ow.test.assert(io.readFileString(engine.root + "/current.json"), pointer, "preview preserves publication")
+        ow.test.assert(wm.compact().error, "compact-requires-offline", "requires exclusive operator intent")
+        var pending = wm._knowledgeJournalPending
+        wm._knowledgeJournalPending = function() { return true }
+        ow.test.assert(wm.compact({offline:true}).error, "ingest-pending", "pending recovery blocks compaction")
+        wm._knowledgeJournalPending = pending
+        var result = wm.compact({offline:true})
+        ow.test.assert(result.ok, true, "compact succeeds for shared=" + shared)
+        ow.test.assert(io.fileExists(engine.root + "/" + orphan), false, "compact removes residue")
+        ow.test.assert(io.readFileString(dir + "/a.md"), source, "source is unchanged")
+        var fallback = engine.acquire(__, true)
+        ow.test.assert(fallback.catalog.pages["a.md"].path, "a.md", "fallback lineage remains readable")
+        engine.release(fallback)
+        wm.close(); wm = __
+        reader = make(dir, {access:"ro",wikiretrievalconfig:{sharedBlockStore:shared}})
+        ow.test.assert(reader.retrieve("compactneedle").evidence.length > 0, true, "fresh read-only retrieval works")
+        ow.test.assert(reader.compact({offline:true}).ok, false, "read-only compaction rejected")
+      } finally { if (reader) reader.close(); if (wm) wm.close(); io.rm(dir) }
+    })
+  }
   exports.testSearchOutputBudgetPreservesCandidates = function() {
     var root = temporary(), wm
     try {

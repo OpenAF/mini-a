@@ -1223,11 +1223,12 @@ MiniAWikiRetrievalV2.prototype._markSharedReachability = function(retained) {
 // malformed or interrupted journal never authorizes deletion. The final mark
 // is made from disk while the publication lock is held, immediately before
 // each unlink, so a stale candidate list cannot race a recovered pointer.
-MiniAWikiRetrievalV2.prototype.reclaimSharedBlocks = function() {
-  if (!this.config.sharedBlockStore) return { ok: true, skipped: "shared-block-store-disabled", removed: 0 }
+MiniAWikiRetrievalV2.prototype.reclaimSharedBlocks = function(options) {
+  options = options || {}
+  if (!this.config.sharedBlockStore && options.generations !== true) return { ok: true, skipped: "shared-block-store-disabled", removed: 0 }
   var store = this.root + "/.blocks", journal = store + "/reclaim.json", reachable = {}, removed = 0, removedGenerations = 0, self = this, channel, lock
   try {
-    if (!io.fileExists(store)) return { ok: true, removed: 0 }
+    if (!io.fileExists(store) && options.generations !== true) return { ok: true, removed: 0 }
     if (io.fileExists(journal)) {
       var recovery = af.fromJson(io.readFileString(journal))
       // Schema 1 journals predate the exact-closure list. They contain no
@@ -1245,6 +1246,13 @@ MiniAWikiRetrievalV2.prototype.reclaimSharedBlocks = function() {
       var locator = "blocks/" + String(blocks[b].getName())
       if (!reachable[locator]) candidates.push(locator)
     }
+    var generationCandidates = [], children = new java.io.File(this.root).listFiles() || []
+    for (var g = 0; g < children.length; g++) {
+      var child = children[g], name = String(child.getName())
+      if (child.isDirectory() && !java.nio.file.Files.isSymbolicLink(child.toPath()) && /^[a-f0-9-]{36}$/.test(name) && !retained[name]) generationCandidates.push(name)
+    }
+    if (options.dryRun === true) return { ok: true, dryRun: true, generations: generationCandidates, blocks: candidates, retainedGenerations: Object.keys(retained) }
+    io.mkdir(store)
     this._atomic(journal, { schema: 2, phase: "planned", candidates: candidates, retainedGenerations: Object.keys(retained).sort() }, true, true)
     this._atomic(journal, { schema: 2, phase: "marked", candidates: candidates, retainedGenerations: Object.keys(retained).sort() }, true, true)
     candidates.forEach(function(locator) {
@@ -1257,7 +1265,7 @@ MiniAWikiRetrievalV2.prototype.reclaimSharedBlocks = function() {
     var children = new java.io.File(this.root).listFiles() || []
     for (var i=0; i<children.length; i++) {
       var child = children[i], generation = String(child.getName())
-      if (child.isDirectory() && /^[a-f0-9-]{36}$/.test(generation) && !retained[generation]) { io.rm(String(child.getPath())); removedGenerations++ }
+      if (child.isDirectory() && !java.nio.file.Files.isSymbolicLink(child.toPath()) && /^[a-f0-9-]{36}$/.test(generation) && !retained[generation]) { io.rm(String(child.getPath())); removedGenerations++ }
     }
     this._atomic(journal, { schema: 2, phase: "complete", candidates: candidates, retainedGenerations: Object.keys(retained).sort(), removed: removed, removedGenerations: removedGenerations }, true, true)
     java.nio.file.Files.deleteIfExists(new java.io.File(journal).toPath())
