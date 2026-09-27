@@ -1,0 +1,257 @@
+help:
+  text: Microsoft WorkIQ MCP with delegated OAuth and protected SBucket credentials
+  expects:
+  - name: op
+    desc: serve (default), login, status or logout
+  - name: profile
+    desc: Credential profile (default is default)
+  - name: auth
+    desc: oauth2 (default) or token (WORKIQ_ACCESS_TOKEN environment variable)
+  - name: tenant
+    desc: Entra tenant (default organizations; WORKIQ_TENANT is also accepted)
+  - name: clientid
+    desc: Entra client ID (default Microsoft WorkIQ public client)
+  - name: redirecturi
+    desc: Registered loopback callback URI (default http://127.0.0.1:12798/)
+  - name: readwrite
+    desc: Expose all upstream tools (default false)
+  - name: timeout
+    desc: Request and login timeout in milliseconds (default 300000)
+  - name: nobrowser
+    desc: Print the login URL without opening a browser (default false)
+  - name: secrepo
+    desc: Dedicated SBucket repository (default mini-a-workiq)
+  - name: secbucket
+    desc: SBucket bucket (default default)
+  - name: secfile
+    desc: Optional SBucket file override
+  - name: onport
+    desc: Serve local HTTP MCP on this port; otherwise STDIO
+
+todo:
+- WorkIQ Client
+- WorkIQ Init
+- (if): "isDef(args.onport)"
+  ((then)):
+  - (httpdStart): "${onport}"
+    ((host)): 127.0.0.1
+  - (httpdMCP): "${onport}"
+    ((description)): &SERVER
+      serverInfo:
+        name: mini-a-workiq
+        title: Microsoft WorkIQ
+        version: 1.0.0
+    ((fnsMeta)): &META
+      workiq:
+        name: workiq
+        description: >-
+          Discover WorkIQ tools with action=list, then invoke an exact listed tool with
+          action=call, tool and arguments matching its inputSchema. Queries run as the
+          signed-in Microsoft user. Write tools require operator configuration readwrite=true.
+        inputSchema:
+          type: object
+          properties:
+            action:
+              type: string
+              enum: [list, call]
+            tool:
+              type: string
+            arguments:
+              type: object
+          required: [action]
+        annotations:
+          readOnlyHint: false
+          idempotentHint: false
+          openWorldHint: true
+    ((fns)): &FNS
+      workiq: WorkIQ Dispatch
+  ((else)):
+  - name: WorkIQ STDIO
+    args:
+      description: *SERVER
+      fnsMeta: *META
+
+ojob:
+  opacks:
+  - openaf: 20250915
+  - oJob-common: 20250914
+  catch: printErr(String(exception)); exit(1)
+  logToConsole: false
+  argsFromEnvs: true
+  daemon: true
+
+include:
+- oJobMCP.yaml
+
+jobs:
+- name: WorkIQ Client
+  exec: | #js
+    // Microsoft WorkIQ configuration and policy. Authentication belongs to OpenAF $mcp.
+    var WorkIQ = function(args, env, factory) {
+      args = args || {}
+      env = env || getEnvs()
+      factory = factory || $mcp
+      var profile = args.profile || "default"
+      if (!/^[A-Za-z0-9_-]+$/.test(profile)) throw new Error("WorkIQ profile must contain only letters, digits, underscores or hyphens")
+      var op = args.op || "serve"
+      if ([ "login", "status", "logout", "serve" ].indexOf(op) < 0) throw new Error("WorkIQ op must be login, status, logout or serve")
+      var authMode = args.auth || "oauth2"
+      if ([ "oauth2", "token" ].indexOf(authMode) < 0) throw new Error("WorkIQ auth must be oauth2 or token")
+      var tenant = args.tenant || env.WORKIQ_TENANT || "organizations"
+      if (!/^[A-Za-z0-9.-]+$/.test(tenant)) throw new Error("Invalid WorkIQ tenant")
+      var timeout = Number(isDef(args.timeout) ? args.timeout : 300000)
+      if (!isFinite(timeout) || timeout <= 0) throw new Error("WorkIQ timeout must be positive")
+      this.readwrite = args.readwrite === true || args.readwrite === "true"
+      this.op = op
+      this.profile = profile
+      this._tools = __
+      this._loginCommand = "ojob mcps/mcp-workiq.yaml op=login profile=" + profile
+      var auth
+      if (authMode === "token") {
+        if (op !== "serve") throw new Error("WorkIQ token mode only supports op=serve; manage the supplied token externally")
+        if (!isString(env.WORKIQ_ACCESS_TOKEN) || !env.WORKIQ_ACCESS_TOKEN.trim()) throw new Error("Set WORKIQ_ACCESS_TOKEN for token mode")
+        auth = { type: "bearer", token: env.WORKIQ_ACCESS_TOKEN }
+      } else {
+        auth = {
+          type: "oauth2", grantType: "authorization_code", interactive: op === "login", callback: true,
+          clientId: args.clientid || env.WORKIQ_CLIENT_ID || "ba081686-5d24-4bc6-a0d6-d034ecffed87",
+          redirectURI: args.redirecturi || "http://127.0.0.1:12798/",
+          authURL: "https://login.microsoftonline.com/" + tenant + "/oauth2/v2.0/authorize",
+          tokenURL: "https://login.microsoftonline.com/" + tenant + "/oauth2/v2.0/token",
+          scope: "api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask offline_access",
+          sendResource: false, promptForCode: false,
+          disableOpenBrowser: args.nobrowser === true || args.nobrowser === "true",
+          loginTimeoutMs: timeout,
+          tokenStore: {
+            repo: args.secrepo || "mini-a-workiq", bucket: args.secbucket || "default", key: profile,
+            file: args.secfile, lockSecret: env.WORKIQ_SEC_LOCK_SECRET, mainSecret: env.WORKIQ_SEC_MAIN_SECRET
+          },
+          onAuthorizationURL: function(url) { printErr("Open this URL to sign in to WorkIQ:\n" + url) }
+        }
+        if (isString(env.WORKIQ_CLIENT_SECRET)) auth.clientSecret = env.WORKIQ_CLIENT_SECRET
+      }
+      this._client = factory({
+        type: "remote", url: "https://workiq.svc.cloud.microsoft/mcp", auth: auth,
+        timeout: timeout, debug: false
+      })
+      if (authMode === "oauth2" && (typeof this._client.authenticate !== "function" || typeof this._client.getAuthStatus !== "function")) {
+        this.destroy()
+        throw new Error("WorkIQ requires OpenAF $mcp with authenticate, getAuthStatus, callback and tokenStore support; upgrade OpenAF first")
+      }
+    }
+
+    WorkIQ.prototype._allowed = function(name) {
+      return this.readwrite || [ "ask", "fetch", "fetch_blob", "get_schema", "getSchema", "search_paths", "call_function", "list_agents" ].indexOf(name) >= 0
+    }
+
+    WorkIQ.prototype.runOperator = function() {
+      if (this.op === "login") return this._client.authenticate()
+      if (this.op === "logout") return this._client.clearAuth()
+      if (this.op === "status") return this._client.getAuthStatus()
+      throw new Error("Operator operation required")
+    }
+
+    WorkIQ.prototype.connect = function() {
+      try {
+        this._client.initialize()
+        this._refreshTools()
+      } catch(e) {
+        this.destroy()
+        // Do not relay transport dumps (which may contain request headers).
+        throw new Error("WorkIQ connection failed. Check network, tenant consent and credentials. For OAuth, run: " + this._loginCommand + " (repeat any tenant/client/credential-store options)")
+      }
+      return this
+    }
+
+    WorkIQ.prototype._refreshTools = function() {
+      var self = this, tools = [], cursor, seen = {}
+      do {
+        var result = self._client.listTools(isDef(cursor) ? { cursor: cursor } : {})
+        if (!isMap(result) || !isArray(result.tools)) throw new Error("Invalid WorkIQ tools/list response")
+        result.tools.forEach(function(tool) {
+          if (isMap(tool) && isString(tool.name) && self._allowed(tool.name)) {
+            var entry = clone(tool)
+            if (!self.readwrite && entry.name === "ask" && isMap(entry.inputSchema)) {
+              // Agent routing could delegate to an action-capable custom agent.
+              if (isMap(entry.inputSchema.properties)) delete entry.inputSchema.properties.agentId
+              if (isArray(entry.inputSchema.required)) entry.inputSchema.required = entry.inputSchema.required.filter(function(k) { return k !== "agentId" })
+            }
+            tools.push(entry)
+          }
+        })
+        cursor = result.nextCursor
+        if (isDef(cursor)) {
+          if (!isString(cursor) || seen[cursor]) throw new Error("Invalid WorkIQ tools/list pagination")
+          seen[cursor] = true
+        }
+      } while (isDef(cursor))
+      if (tools.length === 0) throw new Error("WorkIQ returned no permitted tools")
+      this._tools = tools
+    }
+
+    WorkIQ.prototype.dispatch = function(input) {
+      input = input || {}
+      if (input.action !== "list" && input.action !== "call") throw new Error("WorkIQ action must be list or call")
+      if (!isArray(this._tools)) throw new Error("WorkIQ is not connected")
+      if (input.action === "list") return { tools: clone(this._tools), readwrite: this.readwrite }
+      if (!isString(input.tool) || !this._allowed(input.tool) || !this._tools.some(function(t) { return t.name === input.tool })) {
+        throw new Error("WorkIQ tool is unavailable or blocked; use action=list to see permitted tools")
+      }
+      var toolArgs = isUnDef(input.arguments) ? {} : input.arguments
+      if (!isMap(toolArgs)) throw new Error("WorkIQ arguments must be an object")
+      if (!this.readwrite && input.tool === "ask" && isDef(toolArgs.agentId)) throw new Error("WorkIQ custom agent routing requires readwrite=true")
+      try {
+        var result = this._client.callTool(input.tool, toolArgs)
+        if (!isMap(result) || isDef(result.error) || (!isArray(result.content) && !isMap(result.structuredContent))) {
+          throw new Error("Invalid WorkIQ tool response")
+        }
+        return result
+      } catch(e) {
+        // No retries: an uncertain response can already have performed an action.
+        return { isError: true, content: [ { type: "text", text: "WorkIQ request failed. Check connection and sign-in status; the request was not retried." } ] }
+      }
+    }
+
+    WorkIQ.prototype.dispatchMCP = function(input) {
+      try {
+        var result = this.dispatch(input)
+        if (input.action === "call" && isArray(result.content)) return result
+        if (input.action === "call") return merge(result, { content: [ { type: "text", text: stringify(result.structuredContent, __, "") } ] })
+        return { content: [ { type: "text", text: stringify(result, __, "") } ], structuredContent: result, isError: false }
+      } catch(e) {
+        return { content: [ { type: "text", text: String(e.message || e) } ], isError: true }
+      }
+    }
+
+    WorkIQ.prototype.destroy = function() {
+      if (this._client) {
+        try { this._client.destroy() } finally { this._client = __; this._tools = __ }
+      }
+    }
+
+    global.__workIQClient = WorkIQ
+
+- name: WorkIQ Init
+  exec: | #js
+    global.__workIQ = new global.__workIQClient(args)
+    if (global.__workIQ.op !== "serve") {
+      try { print(stringify(global.__workIQ.runOperator(), __, "")) }
+      finally { global.__workIQ.destroy() }
+      exit(0)
+    }
+    global.__workIQ.connect()
+    addOnOpenAFShutdown(function() {
+      if (global.__workIQ) global.__workIQ.destroy()
+    })
+
+- name: WorkIQ STDIO
+  exec: | #js
+    ow.loadServer()
+    ow.server.mcpStdio(args.description, args.fnsMeta, {
+      workiq: function(input) { return global.__workIQ.dispatchMCP(input) }
+    }, __, { rawToolResults: true })
+
+- name: WorkIQ Dispatch
+  exec: | #js
+    // httpdMCP uses result as its explicit MCP-envelope passthrough.
+    return { result: global.__workIQ.dispatchMCP(args) }

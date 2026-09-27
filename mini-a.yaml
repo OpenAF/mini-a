@@ -1112,7 +1112,7 @@ help:
     example  : "true"
     mandatory: false
   - name     : wikiretrievalconfig
-    desc     : Validated SLON/JSON advanced passage, cache and artifact budgets
+    desc     : "Validated SLON/JSON passage, cache and artifact budgets; readPolicy auto (default) adopts published analysis for read-only V2 wikis, strict requires configured analysis to match"
     mandatory: false
   - name     : wikilexical
     desc     : #SLON/JSON Lucene lexical configuration (default `{language: 'english'}`); supports language, explicit synonyms, shingles, ngrams, queryExpansion and pseudoRelevanceFeedback"

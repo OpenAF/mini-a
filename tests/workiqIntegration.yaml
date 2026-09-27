@@ -1,0 +1,17 @@
+include:
+- oJobTest.yaml
+jobs:
+- name: WorkIQ::Wire
+  to: oJob Test
+  exec: args.func = require("tests/workiqIntegration.js").testWorkIQWire
+
+- name: WorkIQ::ExitOnFailure
+  exec: if (ow.test.getCountFail() > 0) exit(1)
+
+todo:
+- WorkIQ::Wire
+- oJob Test Results
+- WorkIQ::ExitOnFailure
+
+ojob:
+  logToConsole: false

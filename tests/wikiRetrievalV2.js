@@ -2,6 +2,176 @@
   load("mini-a-common.js"); load("mini-a-wiki.js")
   var temporary = function() { var p = java.io.File.createTempFile("wiki-v2-test-", "").getCanonicalPath(); io.rm(p); io.mkdir(p); return p }
   var make = function(root, extra) { return new MiniAWikiManager(merge({ backend: "fs", root: root, access: "rw", wikiretrievalv2: true, wikiretrievalconfig: { passageChars: 256 } }, extra || {}), function() {}) }
+  exports.testReadOnlyAnalysisAdoption = function() {
+    var dir = temporary(), writer, reader, strict, matching
+    var snapshotFiles = function(root) {
+      var files = {}, walk = function(path) { io.listFiles(path).files.forEach(function(f) {
+        if (f.isDirectory) walk(String(f.canonicalPath))
+        else files[String(f.canonicalPath).substring(root.length)] = sha256(io.readFileBytes(String(f.canonicalPath)))
+      }) }; walk(root); return stringify(files,__,"")
+    }
+    try {
+      writer = make(dir,{wikilexical:{language:"english",shingles:true,ngrams:true,synonyms:[["publisheralias","reactor"]],queryExpansion:true,pseudoRelevanceFeedback:true}})
+      writer.write("answer.md",{title:"Maintenance"},"# Maintenance\nRunning reactors use wikirestrictrefttl for reference expiry.")
+      ow.test.assert(writer.reindex().ok,true,"adoption fixture publishes")
+      writer.close(); writer = __
+      var before = snapshotFiles(dir)
+      reader = make(dir,{access:"ro"})
+      var found = reader.agenticSearch("wikirestrictref",{maxQueries:8})
+      ow.test.assert(found.results[0].path,"answer.md","omitted settings adopt ngrams and retrieve partial identifiers")
+      ow.test.assert(found.sources[0].analysis.source,"generation","source reports published settings")
+      ow.test.assert(found.sources[0].routes.indexOf("shingles") >= 0,true,"published shingles are queried")
+      ow.test.assert(found.sources[0].requestedRoutes.indexOf("queryExpansion"),-1,"publisher query expansion is not adopted")
+      ow.test.assert(found.sources[0].requestedRoutes.indexOf("pseudoRelevanceFeedback"),-1,"publisher feedback is not adopted")
+      ow.test.assert(reader.agenticSearch("publisheralias",{maxQueries:8}).results.length,0,"publisher synonyms are not imported")
+      reader.close()
+      reader = make(dir,{access:"ro",wikilexical:{language:"portuguese",shingles:false,ngrams:false,synonyms:[["readeralias","reactor"]]}})
+      var configured = stringify(reader._lexicalConfig,__,""), out = reader.agenticSearch("readeralias",{maxQueries:8})
+      ow.test.assert(out.results[0].path,"answer.md","reader synonyms remain effective with adopted English stemming")
+      ow.test.assert(out.sources[0].analyzer,"english","diagnostics reflect snapshot analyzer")
+      ow.test.assert(out.sources[0].analysis.differingFields.indexOf("analyzer") >= 0,true,"explicit differences are reported")
+      ow.test.assert(reader.agenticSearch("run",{maxQueries:8}).results[0].path,"answer.md","query uses adopted English stemming")
+      var pin = reader._retrievalV2.acquire()
+      try {
+        ow.test.assert(reader._retrievalV2._graphHit(pin,"answer.md","run").record.path,"answer.md","graph passage selection uses snapshot analysis")
+        ow.test.assert(isMap(pin.catalog.pages),true,"full validation accepts adopted contract")
+      } finally {reader._retrievalV2.release(pin)}
+      var ctx = reader.context().retrieval
+      ow.test.assert(ctx.analysis.effective.language,"english","context exposes resolved analysis")
+      ow.test.assert(ctx.lexical.effective.ngrams,true,"context reports adopted fields")
+      ow.test.assert(stringify(reader._lexicalConfig,__,""),configured,"queries do not mutate configured preferences")
+      strict = make(dir,{access:"ro",wikiretrievalconfig:{readPolicy:"strict"}})
+      var failure = strict.agenticSearch("reactor").sources[0]
+      ow.test.assert(failure.reason,"incompatible-generation","strict policy preserves mismatch rejection")
+      ow.test.assert(failure.analysis.differingFields.indexOf("characterNGrams") >= 0,true,"strict failure explains differing fields")
+      matching = make(dir,{access:"ro",wikilexical:{shingles:true,ngrams:true},wikiretrievalconfig:{readPolicy:"strict"}})
+      ow.test.assert(matching.retrieve("reactor").evidence.length,1,"strict matching reader succeeds")
+      matching.close();matching=__;strict.close();strict=__;reader.close();reader=__
+      ow.test.assert(snapshotFiles(dir),before,"read-only adoption preserves all artifact bytes")
+      var rejected = false
+      try { MiniAWikiRetrievalV2.config({readPolicy:"other"}) } catch(e) { rejected = true }
+      ow.test.assert(rejected,true,"unknown read policy is rejected")
+    } finally {if(reader)reader.close();if(strict)strict.close();if(matching)matching.close();if(writer)writer.close();io.rm(dir)}
+  }
+  exports.testReadOnlyAnalysisMountsAndGenerations = function() {
+    var dir = temporary(), en, pt, primary, catalog, reader, oldPin, newPin
+    try {
+      io.mkdir(dir+"/en");io.mkdir(dir+"/pt");io.mkdir(dir+"/primary")
+      en = make(dir+"/en",{wikilexical:{language:"english",ngrams:true}})
+      pt = make(dir+"/pt",{wikilexical:{language:"portuguese",shingles:true}})
+      en.write("english.md",{},"# Guide\nRunning horses share federationneedle.")
+      pt.write("portuguese.md",{},"# Guia\nCavalos correndo compartilham federationneedle.")
+      ow.test.assert(en.reindex().ok && pt.reindex().ok,true,"different mount contracts publish")
+      primary = make(dir+"/primary")
+      primary.write("local.md",{},"# Local\nfederationneedle")
+      primary.reindex()
+      ow.test.assert(primary.attach("en",{backend:"fs",root:dir+"/en"}).ok,true,"writable primary attaches English wiki")
+      ow.test.assert(primary.attach("pt",{backend:"fs",root:dir+"/pt"}).ok,true,"writable primary attaches Portuguese wiki")
+      var all = primary.agenticSearch("federationneedle",{maxQueries:8})
+      ow.test.assert(all.results.length,3,"federation queries each distinct contract")
+      ow.test.assert(all.sources.filter(function(s){return s.wiki === "pt"})[0].analyzer,"portuguese","mounted source has its own analyzer")
+      ow.test.assert(primary.context({wiki:"pt"}).retrieval.analysis.effective.shingles.enabled,true,"scoped mount context reports its generation")
+      catalog = __miniAWikiCreatePrimary(__miniAWikiPrimaryConfig({},__,[{name:"en",backend:"fs",root:dir+"/en"},{name:"pt",backend:"fs",root:dir+"/pt",wikiretrievalconfig:{readPolicy:"strict"}}]),function(){})
+      var partial = catalog.agenticSearch("federationneedle",{maxQueries:8})
+      ow.test.assert(partial.results.some(function(h){return h.path === "@en/english.md"}),true,"catalogue parent serves compatible mount")
+      ow.test.assert(partial.sources.filter(function(s){return s.wiki === "pt"})[0].reason,"incompatible-generation","strict mount fails independently")
+      reader = make(dir+"/en",{access:"ro"})
+      oldPin = reader._retrievalV2.acquire()
+      en.close(); en = make(dir+"/en",{wikilexical:{language:"portuguese",shingles:true}})
+      ow.test.assert(en.reindex().ok,true,"writer explicitly rebuilds a different contract")
+      newPin = reader._retrievalV2.acquire()
+      ow.test.assert(newPin.generation !== oldPin.generation,true,"same reader sees new generation")
+      ow.test.assert(oldPin.analysis.lexical.language,"english","in-flight pin retains old analysis")
+      ow.test.assert(newPin.analysis.lexical.language,"portuguese","new pin resolves new analysis")
+      ow.test.assert(reader._retrievalV2._query(oldPin,"run",5,0).hits.length,1,"old pin still queries with English stemming")
+      ow.test.assert(reader._retrievalV2._query(newPin,"federationneedle",5,0).hits.length,1,"new pin remains searchable")
+      reader._retrievalV2.release(newPin);newPin=__
+      var current = reader._retrievalV2.root+"/current.json"
+      io.writeFileString(current,"{broken")
+      var recovered = reader._retrievalV2.acquire()
+      try {
+        ow.test.assert(recovered.generation,oldPin.generation,"fallback returns predecessor")
+        ow.test.assert(recovered.analysis.lexical.language,"english","fallback keeps predecessor contract")
+        ow.test.assert(reader._retrievalV2._query(recovered,"run",5,0).hits.length,1,"fallback query uses predecessor analysis")
+      } finally {reader._retrievalV2.release(recovered)}
+      reader._retrievalV2.release(oldPin);oldPin=__
+      ow.test.assert(Number(reader._retrievalV2.analyzers.size()),0,"all query and resolver analyzers close")
+    } finally {if(reader){if(oldPin)reader._retrievalV2.release(oldPin);if(newPin)reader._retrievalV2.release(newPin);reader.close()}if(catalog)catalog.close();if(primary)primary.close();if(en)en.close();if(pt)pt.close();io.rm(dir)}
+  }
+  exports.testReadOnlyPublishedAnalyzerParameters = function() {
+    var dir = temporary(), writer, reader, adapter, original
+    try {
+      // Simulate a publisher whose supported Lucene adapter defaults differ from the reader.
+      includeOPack("lucene");loadLib("lucene.js")
+      adapter=ow.ch.__types.searchdb;original=adapter.__lexicalOptions
+      adapter.__lexicalOptions=function(value) {
+        var options=original.call(this,value)
+        options.asciiFolding=false
+        options.characterNGrams.minGram=2;options.characterNGrams.maxGram=2
+        options.shingles.minSize=2;options.shingles.maxSize=2
+        return options
+      }
+      writer=make(dir,{wikilexical:{ngrams:true,shingles:true}})
+      writer.write("accent.md",{},"# Beverage\ncafé espresso")
+      ow.test.assert(writer.reindex().ok,true,"custom parameter fixture builds a real index")
+      writer.close();writer=__
+      adapter.__lexicalOptions=original
+      reader=make(dir,{access:"ro"})
+      var result=reader.agenticSearch("fé",{maxQueries:8})
+      ow.test.assert(result.results[0].path,"accent.md","query uses published two-character grams without accent folding")
+      ow.test.assert(result.sources[0].analysis.effective.enhancedAsciiFolding,false,"diagnostics retain published folding")
+      ow.test.assert(result.sources[0].analysis.effective.characterNGrams.maxGram,2,"diagnostics retain published sizes")
+      ow.test.assert(result.sources[0].analysis.effective.shingles.maxSize,2,"shingle size follows the publisher")
+      var limited=reader.retrieve("café",{maxBytes:2300,chunks:1})
+      ow.test.assert(limited.evidence.length,1,"adopted analysis diagnostics never displace fitting evidence")
+      ow.test.assert(limited.sources[0].analysisOmitted,"output-budget","omission of optional analysis is explicit")
+    } finally {if(adapter && original)adapter.__lexicalOptions=original;if(reader)reader.close();if(writer)writer.close();io.rm(dir)}
+  }
+  exports.testReadOnlyAnalysisValidation = function() {
+    var dir = temporary(), writer, reader
+    try {
+      writer = make(dir);writer.write("answer.md",{},"# Answer\nvalidationneedle");writer.reindex()
+      reader = make(dir,{access:"ro"})
+      var engine = reader._retrievalV2, pin = engine.acquire()
+      try {
+        var rejects = function(change, expected) {
+          var m = clone(pin.manifest), error = ""; change(m)
+          m.merkle = MiniAWikiRetrievalV2.manifestMerkle(m)
+          try {engine._resolveAnalysis(m)} catch(e){error=String(e.message||e)}
+          ow.test.assert(error,expected || "incompatible-generation","reader rejects unsupported or contradictory analysis metadata")
+        }
+        rejects(function(m){m.parser=5})
+        rejects(function(m){m.indexContract.analysisVersion="0.0"})
+        rejects(function(m){m.indexContract.analyzer="arbitrary.JavaClass"})
+        rejects(function(m){delete m.lexical})
+        rejects(function(m){m.lexical.language="unknown"})
+        rejects(function(m){m.lexical.ngrams=true})
+        rejects(function(m){m.indexContract.shingles.minSize=1})
+        rejects(function(m){m.fingerprint="copied-but-invalid"})
+        var m=clone(pin.manifest);m.lexical.synonymsFile="/must/not/be/read";m.lexical.synonyms="not imported";m.merkle=MiniAWikiRetrievalV2.manifestMerkle(m)
+        ow.test.assert(engine._resolveAnalysis(m).lexical.synonyms.length,0,"publisher query settings never become file reads or synonym rules")
+        var custom=clone(pin.manifest), settings=clone(reader._lexicalConfig)
+        custom.indexContract.enhancedAsciiFolding=false;custom.indexContract.characterNGrams.minGram=2;custom.indexContract.characterNGrams.maxGram=7
+        custom.fingerprint=engine._analysisDescriptor(settings,custom.indexContract).fingerprint;custom.merkle=MiniAWikiRetrievalV2.manifestMerkle(custom)
+        var adopted=engine._resolveAnalysis(custom)
+        ow.test.assert(adopted.options.asciiFolding,false,"explicit published folding is retained")
+        ow.test.assert(adopted.options.characterNGrams.minGram,2,"explicit published sizes are retained")
+        var invalid=clone(pin.manifest);invalid.lexical.language="portuguese"
+        var error="";try{engine._resolveAnalysis(invalid)}catch(e){error=String(e.message||e)}
+        ow.test.assert(error,"manifest-merkle-failure","integrity is checked before adopting metadata")
+        var original=ow.ch.__types.searchdb.__customAnalyzer
+        try {
+          ow.ch.__types.searchdb.__customAnalyzer=__
+          var ignoredCapability=make(dir,{access:"ro",wikilexical:{ngrams:true}})
+          try {ow.test.assert(ignoredCapability.retrieve("validationneedle").evidence.length,1,"unused startup analyzer capability cannot block automatic adoption")} finally {ignoredCapability.close()}
+          rejects(function(m){m.lexical.ngrams=true;m.indexContract.characterNGrams.enabled=true})
+        } finally {ow.ch.__types.searchdb.__customAnalyzer=original}
+        var previousLimit=engine.config.maxArtifactFiles
+        engine.config.maxArtifactFiles=1
+        try {error="";try{engine._validateStructural(pin.dir,pin.manifest)}catch(e){error=String(e.message||e)};ow.test.assert(error,"incompatible-generation","adoption does not bypass artifact limits")} finally {engine.config.maxArtifactFiles=previousLimit}
+      } finally {engine.release(pin)}
+    } finally {if(reader)reader.close();if(writer)writer.close();io.rm(dir)}
+  }
   exports.testRetrievalV2DefaultCompatibility = function() {
     var dir = temporary(), writer, reader, legacy, warnings = []
     var snapshot = function(root) {
@@ -94,7 +264,7 @@
       ow.test.assert(writer.context().retrieval.mode, "v2", "writer switches after publication")
       ow.test.assert(reader.agenticSearch("legacyautoneedle").results.length, 1, "existing reader observes explicit publication")
       ow.test.assert(reader.context().retrieval.mode, "v2", "reader promotes without recreation")
-      incompatible = make(dir,{access:"ro",wikilexical:{language:"portuguese"}})
+      incompatible = make(dir,{access:"ro",wikilexical:{language:"portuguese"},wikiretrievalconfig:{readPolicy:"strict"}})
       var mismatch = incompatible.agenticSearch("legacyautoneedle")
       ow.test.assert(mismatch.sources[0].reason,"incompatible-generation","published lexical mismatch remains an error")
       ow.test.assert(incompatible.context().retrieval.mode,"v2","incompatible generation is never classified as legacy")
@@ -2754,9 +2924,10 @@
       agent = Object.create(MiniA.prototype)
       agent.fnI = function() {}
       agent._wikiManager = __
-      agent._initSkillWiki({useskillswiki:true,skillwikiroot:String(dir),wikiretrievalv2:true,wikiretrievalconfig:"(passageChars: 256)",wikitelemetry:true})
+      agent._initSkillWiki({useskillswiki:true,skillwikiroot:String(dir),wikiretrievalv2:true,wikiretrievalconfig:"(passageChars: 256, readPolicy: strict)",wikitelemetry:true})
       ow.test.assert(isObject(agent._skillWikiManager),true,"dedicated agent skill manager initializes")
       ow.test.assert(isObject(agent._skillWikiManager._retrievalV2),true,"dedicated agent skill manager uses v2")
+      ow.test.assert(agent._skillWikiManager._retrievalV2.config.readPolicy,"strict","agent entrypoint forwards readPolicy through its existing configuration")
       ow.test.assert(agent._skillWikiManager._config.wikitelemetry,true,"dedicated agent skill manager receives telemetry")
       var skillResult = agent._skillWikiManager.retrieve("areasixparameter")
       ow.test.assert(isArray(skillResult.evidence) && skillResult.evidence.length > 0,true,"dedicated agent skill manager reads published evidence: " + stringify(skillResult.sources))
@@ -2765,11 +2936,14 @@
       ow.test.assert(/useskillswiki\s*:\s*useskillswiki/.test(cli),true,"CLI forwards virtual skill-library selection")
       var webInit = web.jobs.filter(function(job){return job.name === "Init"})[0]
       ow.test.assert(isString(webInit.check.in.wikiretrievalv2) && isString(webInit.check.in.wikitelemetry) && isString(webInit.check.in.useskillswiki),true,"web startup validates v2, telemetry and skill flags")
+      ow.test.assert(/wikiretrievalconfig\s*:\s*wikiretrievalconfig/.test(cli),true,"CLI forwards retrieval configuration")
+      ow.test.assert(isString(webInit.check.in.wikiretrievalconfig),true,"web accepts retrieval configuration strings")
       var safe = io.readFileString("mcps/mcp-skills-safe.yaml")
       ow.test.assert((safe.match(/__miniAMcpWikiObserveRestricted\(/g)||[]).length,4,"restricted skill tools record aggregate outcome events")
       load("mini-a-mcp-skills.js")
-      __miniAMcpSkillsInit({wikibackend:"fs",wikiroot:String(dir),wikiretrievalv2:true,wikitelemetry:true,wikirestrict:true,wikirestrictprofile:"relaxed",label:"Skills"},{access:"ro",readonly:true,logPrefix:"area-six-test"})
+      __miniAMcpSkillsInit({wikibackend:"fs",wikiroot:String(dir),wikiretrievalv2:true,wikiretrievalconfig:"(readPolicy: strict)",wikitelemetry:true,wikirestrict:true,wikirestrictprofile:"relaxed",label:"Skills"},{access:"ro",readonly:true,logPrefix:"area-six-test"})
       var observed = [], reader = global.__wikiManager
+      ow.test.assert(reader._retrievalV2.config.readPolicy,"strict","MCP initialization accepts readPolicy")
       reader._retrievalV2._recordRestrictedTelemetry = function(operation,outcome,millis,bytes) { observed.push({operation:operation,outcome:outcome,millis:millis,bytes:bytes}) }
       var rejected = __miniAMcpWikiObserveRestricted("search",__miniAMcpSkillsRestrictedSearch,{query:42})
       ow.test.assert(rejected.error,"restricted-query-rejected","invalid skill query reaches bounded policy rejection")

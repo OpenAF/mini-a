@@ -38,7 +38,8 @@ the publication on their next retrieval/navigation request (remote bundles follo
 the configured refresh interval). `wikiretrievalv2=false` continues to force legacy
 behavior. Once a manager observes a V2 publication, missing, corrupt or incompatible
 artifacts remain explicit errors; they do not trigger a legacy downgrade. Existing
-obsolete V2 formats and mismatched lexical settings still require a writable reindex.
+obsolete V2 formats still require a compatible runtime or writable reindex. Read-only
+readers adopt supported published analysis settings by default, as described below.
 
 Each mounted wiki selects its own effective mode. A selection containing a legacy
 fallback uses the page-oriented federation adapter, with each source searched by
@@ -90,6 +91,7 @@ and rejects unknown keys, invalid booleans and non-positive/non-integer numeric 
 
 | Setting | Default | Bound/meaning |
 | --- | ---: | --- |
+| readPolicy | auto | Read-only V2 analysis: `auto` adopts published index settings; `strict` requires configured settings to match. Writable managers always use their configured contract |
 | linkImmutableFiles | true | Reuse immutable index files through hard links; false forces copies; unsupported links fall back to copies |
 | sharedBlockStore | false | Opt-in local immutable block store; reclamation uses retained-generation reachability |
 | passageChars | 1400 | 64–16000 UTF-16 units; soft structural target |
@@ -194,6 +196,30 @@ reindex for obsolete development-only generations. Read-only readers return
 `reindex-required`; they do not migrate old serving formats. A reader's `passageChars` build target need not
 match the published target: trusted source diagnostics report the generation's
 effective `passageChars` without rebuilding it.
+Read-only V2 readers default to `wikiretrievalconfig="(readPolicy: auto)"`.
+Each mount and pinned generation resolves its own language/analyzer, accent folding,
+shingles and n-grams from the validated published manifest. Explicitly different
+startup index settings are overridden for that snapshot without changing manager
+or global configuration. Published shingle sizes must be integers in 2–1024 and
+n-gram sizes in 1–1024; the reconstructed runtime contract must match the published
+fingerprint. Unsupported parser/Lucene versions, analyzer capabilities and invalid
+artifacts remain errors. There is no migration or rebuild during reads.
+
+Use `readPolicy: strict` to retain startup-contract matching for read-only readers.
+Writable managers retain configured build settings under either policy. Each mount
+inherits the parent's advanced configuration unless it supplies its own object.
+New generations and predecessor recovery resolve their own analysis; in-flight
+queries finish with the immutable settings of the snapshot they pinned.
+Synonyms (including local synonym files), query expansion, relevance feedback and
+budgets remain reader-controlled; publisher query preferences are not imported.
+
+`context().retrieval.analysis` and trusted search/retrieve `sources[].analysis`
+report `policy`, `generation`, `source` (`generation` or `configured`), `effective`
+index settings and `differingFields`. Strict incompatibility preserves the
+`incompatible-generation` identifier and reports differing fields. Small output
+budgets can replace detailed source analysis with `analysisOmitted: "output-budget"`
+to retain useful evidence; scoped context still exposes the settings.
+
 Query-only synonym/feedback settings can change without reindexing when the
 effective indexed analyzer and fields remain compatible; they are deliberately
 excluded from the indexing fingerprint.

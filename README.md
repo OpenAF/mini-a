@@ -545,7 +545,8 @@ See [USAGE.md](USAGE.md#working-memory-structured-runtime-state) for the full me
 | `wikiuseversion1` | Use S3 signature v1/path-style compatibility for wiki access | `false` |
 | `wikiignorecertcheck` | Disable TLS certificate checks for wiki S3 access | `false` |
 | `wikiindexdir` | Override local index/cache root for non-filesystem wiki indexes | - |
-| `wikilexical` | SLON/JSON lexical configuration for Lucene (`language` defaults to `english`; inline `synonyms` and optional `synonymsFile` rules supported; enhanced features are opt-in) | `{ language: "english" }` |
+| `wikiretrievalconfig` | V2 budgets and read policy. `readPolicy: "auto"` adopts each published generation's index analysis for read-only wikis and mounts; `"strict"` requires configured analysis to match. Query preferences remain reader-controlled; writable build settings are unchanged. | `{ readPolicy: "auto" }` |
+| `wikilexical` | SLON/JSON lexical configuration for Lucene (`language` defaults to `english`; inline `synonyms` and optional `synonymsFile` rules supported; enhanced build/query features are opt-in; read-only V2 index analysis follows the published generation by default) | `{ language: "english" }` |
 | `wikisourceurl` | Optional Handlebars template rendering a page's canonical citation URL onto retrieval results (field `sourceUrl`, or `wikisourcefield`); never applied under `mcp-wiki-safe.yaml` restriction | - |
 | `wikisourcefield` | Result field name the rendered citation URL is written to | `sourceUrl` |
 | `wikisourceinline` | Also append the rendered URL into search results' description text | `false` |
@@ -777,3 +778,6 @@ audit/metrics outputs. See [configuration, examples, limits and guarantees](USAG
 Use `/absorb plan <spec.json>` to propose selected knowledge from several local wikis,
 `/absorb show <id>` to review, and `/absorb apply <id>` to apply exact saved changes.
 See [ABSORB.md](ABSORB.md) for source selection, repeat runs, job arguments and recovery.
+
+Microsoft 365 work context is available through the [WorkIQ MCP connector](docs/WORKIQ.md),
+with browser sign-in, SBucket credential persistence and read-only tools by default.

@@ -1,6 +1,18 @@
 include:
 - oJobTest.yaml
 jobs:
+- name: MiniA Wiki V2::ReadOnlyPublishedAnalyzerParameters
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testReadOnlyPublishedAnalyzerParameters
+- name: MiniA Wiki V2::ReadOnlyAnalysisAdoption
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testReadOnlyAnalysisAdoption
+- name: MiniA Wiki V2::ReadOnlyAnalysisMountsAndGenerations
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testReadOnlyAnalysisMountsAndGenerations
+- name: MiniA Wiki V2::ReadOnlyAnalysisValidation
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testReadOnlyAnalysisValidation
 - name: MiniA Wiki V2::RetrievalV2DefaultCompatibility
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testRetrievalV2DefaultCompatibility
@@ -184,6 +196,10 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testFederatedRetryBudget
 todo:
+- MiniA Wiki V2::ReadOnlyPublishedAnalyzerParameters
+- MiniA Wiki V2::ReadOnlyAnalysisAdoption
+- MiniA Wiki V2::ReadOnlyAnalysisMountsAndGenerations
+- MiniA Wiki V2::ReadOnlyAnalysisValidation
 - MiniA Wiki V2::RetrievalV2DefaultCompatibility
 - MiniA Wiki V2::RetrievalV2DefaultPrecedence
 - MiniA Wiki V2::AutomaticLegacyFallback

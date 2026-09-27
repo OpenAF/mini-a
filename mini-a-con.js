@@ -665,7 +665,7 @@ try {
     wikilintresultlimit: { type: "number", default: 0, description: "Default maximum lint issues returned to an agent (0 returns all; dream reorg defaults to 25)." },
     wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts; fs roots may be directories or local .zip/.okt archives." },
     wikiretrievalv2: { type: "boolean", description: "Prefer V2 passage retrieval (default true); unpublished wikis use legacy retrieval with a warning until explicitly reindexed; false forces legacy." },
-    wikiretrievalconfig: { type: "string", description: "Validated SLON/JSON advanced passage/cache/artifact budgets." },
+    wikiretrievalconfig: { type: "string", description: "Validated SLON/JSON passage/cache/artifact budgets; readPolicy auto (default) adopts published analysis for read-only V2 wikis, strict requires a configured match." },
     wikitelemetry: { type: "boolean", description: "Record local aggregate wiki retrieval telemetry (off by default); writable managers persist it, read-only managers keep it in memory." },
     wikilexical    : { type: "string", description: "SLON/JSON Lucene lexical configuration; defaults to {language:'english'} and supports optional synonymsFile." },
     usewikigraph   : { type: "boolean", default: false, description: "Enable the wiki knowledge graph for structural and semantic page relationships." },

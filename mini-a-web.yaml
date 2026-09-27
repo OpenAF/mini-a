@@ -816,7 +816,7 @@ help:
     desc     : Prefer V2 passage retrieval (default true); unpublished wikis use legacy retrieval with a warning; false forces legacy behavior
     mandatory: false
   - name     : wikiretrievalconfig
-    desc     : Validated SLON/JSON passage, cache and artifact settings
+    desc     : "Validated SLON/JSON passage, cache and artifact budgets; readPolicy auto (default) adopts published analysis for read-only V2 wikis, strict requires configured analysis to match"
     mandatory: false
   - name     : wikitelemetry
     desc     : Record local aggregate wiki retrieval telemetry (off by default); writable managers persist it, read-only managers keep it in memory

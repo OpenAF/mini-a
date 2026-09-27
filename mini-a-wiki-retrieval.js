@@ -22,17 +22,11 @@ var MiniAWikiRetrievalV2 = function(manager, config, preserveLegacyRanking) {
   var closeFailures=new java.util.concurrent.atomic.AtomicLong(0)
   this._closeFailures=closeFailures
   Object.defineProperty(this.metrics,"resourceCloseFailures",{enumerable:true,get:function(){return Number(closeFailures.get())}})
-  var fields = ["prose", "title", "heading", "exact"]
-  if (manager._lexicalConfig.shingles) fields.push("prose__shingle")
-  if (manager._lexicalConfig.ngrams) fields.push("prose__ngram")
-  var analysis
   try {
-    analysis = this._analyzer()
-    var effective = ow.ch.__types.searchdb.__lexicalOptions(manager._luceneLexicalOptions())
-    this.indexContract = { analyzer: String(this.analyzers.get(analysis).get(0).getClass().getName()), exactAnalyzer: "org.apache.lucene.analysis.standard.StandardAnalyzer", analysisVersion: MiniAWikiRetrievalV2.majorMinorVersion(Packages.org.apache.lucene.util.Version.LATEST), enhancedAsciiFolding: effective.asciiFolding, shingles: {enabled:effective.shingles.enabled,minSize:effective.shingles.minSize,maxSize:effective.shingles.maxSize}, characterNGrams: {enabled:effective.characterNGrams.enabled,minGram:effective.characterNGrams.minGram,maxGram:effective.characterNGrams.maxGram} }
+    this.configuredAnalysis = this._analysisDescriptor(manager._lexicalConfig)
+    this.indexContract = this.configuredAnalysis.indexContract
+    this.fingerprint = this.configuredAnalysis.fingerprint
   } catch(capabilityError) { this.capabilityError = __miniAErrMsg(capabilityError); this.indexContract = { unavailable: true } }
-  finally { if (analysis) this._closeAnalyzer(analysis) }
-  this.fingerprint = sha1(stringify({ schema: 1, parser: 6, fields: fields, indexContract: this.indexContract }, __, ""))
 }
 // Request coordinator only: no mutable reader resources or synthetic publication.
 MiniAWikiRetrievalV2.coordinator = function(manager) {
@@ -46,8 +40,9 @@ MiniAWikiRetrievalV2.config = function(value) {
   if (isString(value)) value = af.fromJSSLON(value)
   if (isUnDef(value)) value = {}
   if (!isMap(value)) throw new Error("wikiretrievalconfig must be a SLON/JSON object")
-  var defaults = { passageChars: 1400, cacheBytes: 8388608, maxArtifactBytes: 268435456, maxArtifactFiles: 100000, maxMillis: 15000, telemetryFlushQueries: 16, telemetryRetentionDays: 30, linkImmutableFiles: true, sharedBlockStore: false, telemetrySampleQueries: false }
+  var defaults = { readPolicy: "auto", passageChars: 1400, cacheBytes: 8388608, maxArtifactBytes: 268435456, maxArtifactFiles: 100000, maxMillis: 15000, telemetryFlushQueries: 16, telemetryRetentionDays: 30, linkImmutableFiles: true, sharedBlockStore: false, telemetrySampleQueries: false }
   Object.keys(value).forEach(function(k) {
+    if (k === "readPolicy") { if (value[k] !== "auto" && value[k] !== "strict") throw new Error("Invalid wikiretrievalconfig option: " + k); defaults[k] = value[k]; return }
     if (k === "bundlePath") { if (!isString(value[k]) || !value[k].trim().length || value[k].length > 4096) throw new Error("Invalid wikiretrievalconfig option: " + k); defaults[k] = value[k]; return }
     if (k === "linkImmutableFiles" || k === "sharedBlockStore" || k === "telemetrySampleQueries") { if (!isBoolean(value[k])) throw new Error("Invalid wikiretrievalconfig option: " + k); defaults[k] = value[k]; return }
     if (isUnDef(defaults[k]) || !isFinite(Number(value[k])) || Number(value[k]) !== Math.floor(Number(value[k])) || Number(value[k]) < 1) throw new Error("Invalid wikiretrievalconfig option: " + k)
@@ -55,6 +50,59 @@ MiniAWikiRetrievalV2.config = function(value) {
   })
   if (defaults.telemetryFlushQueries > 1000 || defaults.telemetryRetentionDays > 365 || defaults.passageChars < 64 || defaults.passageChars > 16000 || defaults.cacheBytes > 268435456 || defaults.maxArtifactBytes > 2147483647 || defaults.maxArtifactFiles > 1000000 || defaults.maxMillis > 120000) throw new Error("wikiretrievalconfig exceeds supported bounds")
   return defaults
+}
+// A reader's analysis belongs to its pinned generation, never to mutable manager state.
+MiniAWikiRetrievalV2.prototype._analysisDescriptor = function(lexical, overrides) {
+  if (!this.manager._ensureLucene()) throw new Error("lucene-unavailable")
+  var options = this.manager._luceneLexicalOptions(lexical)
+  if (overrides) {
+    options.asciiFolding = overrides.enhancedAsciiFolding
+    options.shingles = clone(overrides.shingles)
+    options.characterNGrams = clone(overrides.characterNGrams)
+  }
+  var effective = ow.ch.__types.searchdb.__lexicalOptions(options), analyzer
+  try {
+    analyzer = this._analyzer(lexical, effective)
+    var contract = { analyzer: String(this.analyzers.get(analyzer).get(0).getClass().getName()), exactAnalyzer: "org.apache.lucene.analysis.standard.StandardAnalyzer", analysisVersion: MiniAWikiRetrievalV2.majorMinorVersion(Packages.org.apache.lucene.util.Version.LATEST), enhancedAsciiFolding: effective.asciiFolding, shingles: {enabled:effective.shingles.enabled,minSize:effective.shingles.minSize,maxSize:effective.shingles.maxSize}, characterNGrams: {enabled:effective.characterNGrams.enabled,minGram:effective.characterNGrams.minGram,maxGram:effective.characterNGrams.maxGram} }
+    var fields = ["prose", "title", "heading", "exact"]
+    if (lexical.shingles) fields.push("prose__shingle")
+    if (lexical.ngrams) fields.push("prose__ngram")
+    return { lexical: clone(lexical), options: effective, indexContract: contract, fingerprint: sha1(stringify({ schema: 1, parser: 6, fields: fields, indexContract: contract }, __, "")) }
+  } finally { if (analyzer) this._closeAnalyzer(analyzer) }
+}
+MiniAWikiRetrievalV2.prototype._resolveAnalysis = function(manifest) {
+  var policy = this.manager._access === "ro" ? this.config.readPolicy : "strict"
+  var failure = function(fields) {
+    var error = new Error("incompatible-generation")
+    error.analysis = { policy: policy, generation: manifest && manifest.generation, source: policy === "auto" ? "generation" : "configured", differingFields: fields }
+    throw error
+  }
+  if (!isMap(manifest) || manifest.schema !== 3 || manifest.parser !== 6) failure(["schema/parser"])
+  if (!/^[a-f0-9]{64}$/.test(manifest.merkle || "") || MiniAWikiRetrievalV2.manifestMerkle(manifest) !== manifest.merkle) throw new Error("manifest-merkle-failure")
+  var resolved = this.configuredAnalysis, contract = manifest.indexContract, lexical = manifest.lexical
+  if (policy === "auto") {
+    // Select only index settings. Publisher synonyms/files and query preferences are not inputs.
+    if (!isMap(lexical) || __MINI_A_WIKI_LEXICAL_LANGUAGES.indexOf(lexical.language) < 0 || typeof lexical.shingles !== "boolean" || typeof lexical.ngrams !== "boolean" || !isMap(contract) || typeof contract.enhancedAsciiFolding !== "boolean") failure(["lexical/indexContract"])
+    var sizes = function(value, minKey, maxKey, minimum) {
+      return isMap(value) && typeof value.enabled === "boolean" && typeof value[minKey] === "number" && typeof value[maxKey] === "number" && isFinite(value[minKey]) && isFinite(value[maxKey]) && Math.floor(value[minKey]) === value[minKey] && Math.floor(value[maxKey]) === value[maxKey] && value[minKey] >= minimum && value[maxKey] >= value[minKey] && value[maxKey] <= 1024
+    }
+    if (!sizes(contract.shingles, "minSize", "maxSize", 2) || !sizes(contract.characterNGrams, "minGram", "maxGram", 1) || lexical.shingles !== contract.shingles.enabled || lexical.ngrams !== contract.characterNGrams.enabled) failure(["shingles/characterNGrams"])
+    var effective = clone(this.manager._lexicalConfig)
+    effective.language = lexical.language; effective.shingles = lexical.shingles; effective.ngrams = lexical.ngrams
+    try { resolved = this._analysisDescriptor(effective, contract) }
+    catch(e) { failure(["analyzer-capability: " + __miniAErrMsg(e)]) }
+  }
+  var differences = function(expected, actual) {
+    var keys = Object.keys(expected || {}).concat(Object.keys(actual || {}))
+    return keys.filter(function(key, index) { return keys.indexOf(key) === index && stringify((expected || {})[key],__,"") !== stringify((actual || {})[key],__,"") })
+  }
+  if (!resolved) failure(["analyzer-capability"])
+  var incompatible = differences(contract, resolved.indexContract)
+  if (manifest.fingerprint !== resolved.fingerprint) incompatible.push("fingerprint")
+  if (incompatible.length || stringify(contract,__,"") !== stringify(resolved.indexContract,__,"")) failure(incompatible.length ? incompatible : ["indexContract"])
+  var differing = differences(contract, this.indexContract)
+  return MiniAWikiRetrievalV2.immutable({ lexical: clone(resolved.lexical), options: clone(resolved.options), indexContract: clone(resolved.indexContract), fingerprint: resolved.fingerprint,
+    status: { policy: policy, generation: manifest.generation, source: policy === "auto" ? "generation" : "configured", effective: merge({ language: resolved.lexical.language }, clone(resolved.indexContract)), differingFields: differing } })
 }
 // Lucene analyzers have taken no matchVersion parameter since Lucene 9, so a
 // bugfix/patch release cannot change analysis output within the same major.minor
@@ -591,7 +639,9 @@ MiniAWikiRetrievalV2.prototype._resolveCatalogue = function(dir, manifest, seen)
   else {
     var parentDir = this.root + "/" + manifest.catalogue.parent.generation, parentManifestPath = parentDir + "/manifest.json"
     if (!io.fileExists(parentManifestPath) || java.nio.file.Files.isSymbolicLink(new java.io.File(parentDir).toPath()) || MiniAWikiRetrievalV2.digest(parentManifestPath) !== manifest.catalogue.parent.checksum) throw new Error("catalogue-parent-unavailable")
-    var parentManifest = af.fromJson(io.readFileString(parentManifestPath)); catalog = this._resolveCatalogue(parentDir, parentManifest, seen)
+    var parentManifest = af.fromJson(io.readFileString(parentManifestPath))
+    if (parentManifest.parser !== manifest.parser || parentManifest.fingerprint !== manifest.fingerprint || stringify(parentManifest.indexContract,__,"") !== stringify(manifest.indexContract,__,"") || MiniAWikiRetrievalV2.manifestMerkle(parentManifest) !== parentManifest.merkle) throw new Error("invalid-catalogue-lineage")
+    catalog = this._resolveCatalogue(parentDir, parentManifest, seen)
   }
   var self = this
   ;["pages", "passages", "reverseLinks", "moveReverse", "blockRefs"].forEach(function(name) {
@@ -641,9 +691,10 @@ MiniAWikiRetrievalV2.prototype.lookupMoveLinks = function(snapshot, path) { retu
 MiniAWikiRetrievalV2.prototype.lookupBlockReference = function(snapshot, locator) { return this._lookupCatalogue(snapshot.dir, snapshot.manifest, "blockRefs", locator) }
 MiniAWikiRetrievalV2.prototype._validate = function(dir, manifest, validatedParent, prepared) {
   if (!isMap(manifest) || manifest.schema !== 3) throw new Error("reindex-required")
-  if (manifest.parser !== 6 || manifest.fingerprint !== this.fingerprint || stringify(manifest.indexContract,__,"") !== stringify(this.indexContract,__,"") || !isArray(manifest.files) || manifest.files.length > this.config.maxArtifactFiles) throw new Error("incompatible-generation")
+  if (manifest.parser !== 6) throw new Error("incompatible-generation")
   this._catalogueDescriptor(manifest)
-  if (!/^[a-f0-9]{64}$/.test(manifest.merkle || "") || MiniAWikiRetrievalV2.manifestMerkle(manifest) !== manifest.merkle) throw new Error("manifest-merkle-failure")
+  this._resolveAnalysis(manifest)
+  if (!isArray(manifest.files) || manifest.files.length > this.config.maxArtifactFiles) throw new Error("incompatible-generation")
   var count = 0, seen = {}, checksums={}, blockRecords={}, verifiedBlocks={}, self = this
   manifest.files.forEach(function(record) {
     if (!isMap(record) || seen[record.path] || !isFinite(record.bytes) || record.bytes < 0 || !/^[a-f0-9]{64}$/.test(record.checksum)) throw new Error("invalid-generation-manifest")
@@ -748,8 +799,9 @@ MiniAWikiRetrievalV2.prototype._validate = function(dir, manifest, validatedPare
 // Cold open checks only the immutable envelope and reader contract.  Shard and
 // block bytes are intentionally left for the resolver/body paths so opening a
 // reader never walks a corpus-sized catalogue.
-MiniAWikiRetrievalV2.prototype._validateStructural = function(dir, manifest) {
-  if (!isMap(manifest) || manifest.schema !== 3 || manifest.parser !== 6 || manifest.fingerprint !== this.fingerprint || stringify(manifest.indexContract,__,'') !== stringify(this.indexContract,__, '') || !isArray(manifest.files) || manifest.files.length > this.config.maxArtifactFiles) throw new Error('incompatible-generation')
+MiniAWikiRetrievalV2.prototype._validateStructural = function(dir, manifest, analysis) {
+  analysis = analysis || this._resolveAnalysis(manifest)
+  if (!isArray(manifest.files) || manifest.files.length > this.config.maxArtifactFiles) throw new Error("incompatible-generation")
   this._catalogueDescriptor(manifest)
   if (!/^[a-f0-9]{64}$/.test(manifest.merkle || '') || MiniAWikiRetrievalV2.manifestMerkle(manifest) !== manifest.merkle) throw new Error('manifest-merkle-failure')
   var seen={}, total=0, self=this
@@ -772,7 +824,7 @@ MiniAWikiRetrievalV2.prototype._validateStructural = function(dir, manifest) {
     var parentDir = this.root + '/' + descriptor.parent.generation, parentPath = parentDir + '/manifest.json'
     if (!io.fileExists(parentPath) || java.nio.file.Files.isSymbolicLink(new java.io.File(parentDir).toPath()) || MiniAWikiRetrievalV2.digest(parentPath) !== descriptor.parent.checksum) throw new Error('catalogue-parent-unavailable')
     cursor = af.fromJson(io.readFileString(parentPath)); cursorDir = parentDir
-    if (!isMap(cursor) || cursor.schema !== 3 || cursor.parser !== 6 || cursor.fingerprint !== this.fingerprint || !/^[a-f0-9]{64}$/.test(cursor.merkle || '') || MiniAWikiRetrievalV2.manifestMerkle(cursor) !== cursor.merkle) throw new Error('invalid-catalogue-lineage')
+    if (!isMap(cursor) || cursor.schema !== 3 || cursor.parser !== 6 || cursor.fingerprint !== analysis.fingerprint || stringify(cursor.indexContract,__,"") !== stringify(analysis.indexContract,__,"") || !/^[a-f0-9]{64}$/.test(cursor.merkle || '') || MiniAWikiRetrievalV2.manifestMerkle(cursor) !== cursor.merkle) throw new Error('invalid-catalogue-lineage')
   }
   return __
 }
@@ -817,7 +869,7 @@ MiniAWikiRetrievalV2.prototype._validatePublication = function(dir, manifest, pr
 }
 MiniAWikiRetrievalV2.prototype._openDirectory = function(dir) { return Packages.org.apache.lucene.store.FSDirectory.open(java.nio.file.Paths.get(dir+"/index")) }
 MiniAWikiRetrievalV2.prototype._openReader = function(directory) { return Packages.org.apache.lucene.index.DirectoryReader.open(directory) }
-MiniAWikiRetrievalV2.prototype._openSnapshot = function(dir, manifest, catalog) {
+MiniAWikiRetrievalV2.prototype._openSnapshot = function(dir, manifest, catalog, analysis) {
   if(this.closed)throw new Error("retrieval-closed")
   if (!this.manager._ensureLucene()) throw new Error("lucene-unavailable")
   this._drainPendingClosures()
@@ -830,6 +882,7 @@ MiniAWikiRetrievalV2.prototype._openSnapshot = function(dir, manifest, catalog) 
     var routing = this._catalogueDescriptor(manifest)
     if (!Object.isFrozen(manifest)) Object.defineProperty(manifest,"_validatedCatalogue",{value:routing,enumerable:false})
     MiniAWikiRetrievalV2.immutable(manifest)
+    snapshot.analysis = analysis || this._resolveAnalysis(manifest)
     snapshot.generation=manifest.generation;snapshot.dir=dir;snapshot.manifest=manifest
     if (catalog) snapshot.catalog=catalog
     else {
@@ -856,8 +909,8 @@ MiniAWikiRetrievalV2.prototype._openSnapshot = function(dir, manifest, catalog) 
     if (!isFinite(expected) || Number(reader.numDocs()) !== expected) throw new Error("generation-index-count-mismatch")
     if (Number(reader.numDocs()) > 0) {
       var infos = L.index.FieldInfos.getMergedFieldInfos(reader), required = ["id","page","recordType","prose","exact","title","heading","text"]
-      if (this.manager._lexicalConfig.shingles) required.push("prose__shingle")
-      if (this.manager._lexicalConfig.ngrams) required.push("prose__ngram")
+      if (snapshot.analysis.lexical.shingles) required.push("prose__shingle")
+      if (snapshot.analysis.lexical.ngrams) required.push("prose__ngram")
       required.forEach(function(field){var info = infos.fieldInfo(field); if (!info || field !== "text" && String(info.getIndexOptions()) === "NONE") throw new Error("generation-index-field-missing: " + field)})
     }
     snapshot.manifestChecksum=MiniAWikiRetrievalV2.digest(dir+"/manifest.json");snapshot.searcher=new L.search.IndexSearcher(reader)
@@ -936,8 +989,8 @@ MiniAWikiRetrievalV2.prototype.acquire = function(deadline, preferPrevious) {
           var dir = self.root + "/" + pointer.generation, manifestPath = dir + "/manifest.json"
           if (java.nio.file.Files.isSymbolicLink(new java.io.File(dir).toPath()) || java.nio.file.Files.isSymbolicLink(new java.io.File(manifestPath).toPath()) || String(new java.io.File(dir).getCanonicalPath()).indexOf(String(new java.io.File(self.root).getCanonicalPath()) + "/") !== 0) throw new Error("unsafe-generation-path")
           if (MiniAWikiRetrievalV2.digest(manifestPath) !== pointer.checksum) throw new Error("generation-integrity-failure")
-          var manifest = af.fromJson(io.readFileString(manifestPath)), catalog = self._validateStructural(dir, manifest)
-          cached = self._openSnapshot(dir, manifest, catalog); cached._managed = true; cached.recoveredPointer = candidate.fallback === true; self.serving.push(cached)
+          var manifest = af.fromJson(io.readFileString(manifestPath)), analysis = self._resolveAnalysis(manifest), catalog = self._validateStructural(dir, manifest, analysis)
+          cached = self._openSnapshot(dir, manifest, catalog, analysis); cached._managed = true; cached.recoveredPointer = candidate.fallback === true; self.serving.push(cached)
         }
         cached.refs++; return cached
       } catch(e) {
@@ -1095,16 +1148,17 @@ MiniAWikiRetrievalV2.prototype._body = function(snapshot, page, deadline, used) 
     return text
   }, deadline)
 }
-MiniAWikiRetrievalV2.prototype._analyzer = function() {
+MiniAWikiRetrievalV2.prototype._analyzer = function(lexical, options) {
+  lexical = lexical || this.manager._lexicalConfig
   if (!this.manager._ensureLucene()) throw new Error("lucene-unavailable")
   var adapter = ow.ch.__types.searchdb
-  if (!isFunction(adapter.__toAnalyzer) || !isFunction(adapter.__lexicalOptions) || (this.manager._lexicalConfig.shingles || this.manager._lexicalConfig.ngrams) && !isFunction(adapter.__customAnalyzer)) throw new Error("analyzer-capability-unavailable")
-  var primary = adapter.__toAnalyzer({ analyzer: this.manager._lexicalConfig.language }), fields = new java.util.HashMap(), exact = new Packages.org.apache.lucene.analysis.standard.StandardAnalyzer()
+  if (!isFunction(adapter.__toAnalyzer) || !isFunction(adapter.__lexicalOptions) || (lexical.shingles || lexical.ngrams) && !isFunction(adapter.__customAnalyzer)) throw new Error("analyzer-capability-unavailable")
+  var primary = adapter.__toAnalyzer({ analyzer: lexical.language }), fields = new java.util.HashMap(), exact = new Packages.org.apache.lucene.analysis.standard.StandardAnalyzer()
   fields.put("exact", exact)
   var delegates = new java.util.ArrayList(), wrapper
   delegates.add(primary); delegates.add(exact)
   try {
-    var options = adapter.__lexicalOptions(this.manager._luceneLexicalOptions())
+    options = options || adapter.__lexicalOptions(this.manager._luceneLexicalOptions(lexical))
     if (options.shingles.enabled) { var shingle = adapter.__customAnalyzer("shingle", options); fields.put("prose__shingle", shingle); delegates.add(shingle) }
     if (options.characterNGrams.enabled) { var ngram = adapter.__customAnalyzer("ngram", options); fields.put("prose__ngram", ngram); delegates.add(ngram) }
     wrapper = new Packages.org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper(primary, fields)
@@ -1643,9 +1697,9 @@ MiniAWikiRetrievalV2.terms = function(query) {
   return out
 }
 MiniAWikiRetrievalV2.prototype._query = function(snapshot, query, limit, expansionBudget, request) {
-  var L = Packages.org.apache.lucene, analyzer = this._analyzer()
+  var L = Packages.org.apache.lucene, analyzer = this._analyzer(snapshot.analysis.lexical, snapshot.analysis.options)
   try {
-    var options = ow.ch.__types.searchdb.__lexicalOptions(this.manager._luceneLexicalOptions())
+    var options = snapshot.analysis.options
     var routes = ["lexical", "exact"], omitted = [], extraAttempts = 0, seedCount = 0
     var checkDeadline = function() { if (request && Date.now() >= request.deadline) throw new Error("request-deadline-exhausted") }
     var typedQuery = function(value) { var typed = new L.search.BooleanQuery.Builder(); typed.add(value, L.search.BooleanClause.Occur.MUST); (request && request.excludePages || []).forEach(function(path){typed.add(new L.search.TermQuery(new L.index.Term("page",path)),L.search.BooleanClause.Occur.MUST_NOT)}); typed.add(new L.search.TermQuery(new L.index.Term("recordType", "passage")), L.search.BooleanClause.Occur.FILTER); return typed.build() }
@@ -1667,7 +1721,7 @@ MiniAWikiRetrievalV2.prototype._query = function(snapshot, query, limit, expansi
     var expansionLimit = Math.min(8, remainingAttempts)
     var charge = function() { extraAttempts++; remainingAttempts--; if (request && request.used) request.used.queries++ }
     // Explicit Lucene constraints must not be broadened by escaped alternatives.
-    var expansions = [], alternatives = [], q = String(query).toLowerCase(), rules = syntax ? [] : this.manager._lexicalConfig.synonyms
+    var expansions = [], alternatives = [], q = String(query).toLowerCase(), rules = syntax ? [] : snapshot.analysis.lexical.synonyms
     for (var r = 0; r < rules.length && alternatives.length < 8; r++) {
       for (var t = 0; t < rules[r].length && alternatives.length < 8; t++) {
         var term = String(rules[r][t]).toLowerCase()
@@ -1742,7 +1796,7 @@ MiniAWikiRetrievalV2.prototype._query = function(snapshot, query, limit, expansi
 }
 // Select one query-ranked stored passage from a discovered page without a body scan.
 MiniAWikiRetrievalV2.prototype._graphHit = function(snapshot, path, query) {
-  var L = Packages.org.apache.lucene, analyzer = this._analyzer()
+  var L = Packages.org.apache.lucene, analyzer = this._analyzer(snapshot.analysis.lexical, snapshot.analysis.options)
   try {
     var builder = new L.search.BooleanQuery.Builder()
     builder.add(new L.search.TermQuery(new L.index.Term("recordType","passage")),L.search.BooleanClause.Occur.FILTER)
@@ -1972,7 +2026,7 @@ MiniAWikiRetrievalV2.prototype._collect = function(query, options, materialize, 
       if (remaining < 1 || used.queries >= budget.maxQueries || new Date().getTime() >= deadline) { source.reason = "budget"; if (stopReasons.indexOf("budget") < 0) stopReasons.push("budget"); continue }
       var engine = target.manager._retrievalV2
       if (!engine) { source.status = "unavailable"; source.reason = "v2-build-required"; continue }
-      if (engine.capabilityError) { source.status = "unavailable"; source.reason = engine.capabilityError.substring(0,160); continue }
+      if (engine.capabilityError && !(engine.manager._access === "ro" && engine.config.readPolicy === "auto")) { source.status = "unavailable"; source.reason = engine.capabilityError.substring(0,160); continue }
       var pin
       try {
         if (stages.indexOf("pin") < 0) stages.push("pin")
@@ -2001,10 +2055,11 @@ MiniAWikiRetrievalV2.prototype._collect = function(query, options, materialize, 
         }
         source.status = "searched"; source.expansions = found.expansions; source.candidates = found.hits.length
         source.routes = found.routes; source.omittedRoutes = found.omittedRoutes; source.feedbackCandidates = found.seedCount
-        source.analyzer = engine.manager._lexicalConfig.language
+        source.analysis = clone(pin.analysis.status)
+        source.analyzer = pin.analysis.lexical.language
         source.passageChars = pin.manifest.passageChars
-        source.requestedRoutes = ["shingles","ngrams","queryExpansion","pseudoRelevanceFeedback"].filter(function(key){return engine.manager._lexicalConfig[key] === true})
-        if (engine.manager._lexicalConfig.synonyms.length) source.requestedRoutes.push("synonyms")
+        source.requestedRoutes = ["shingles","ngrams","queryExpansion","pseudoRelevanceFeedback"].filter(function(key){return pin.analysis.lexical[key] === true})
+        if (pin.analysis.lexical.synonyms.length) source.requestedRoutes.push("synonyms")
         if (found.omittedRoutes.length && selection.targets.length === 1 && !opts.__baseOnly) { source.status = "partial"; source.reason = "query-budget"; stopReasons.push("query-budget") }
         if (found.totalHits > found.hits.length) { source.candidateLimitReached = true; source.status = "partial"; source.reason = "candidate-budget"; stopReasons.push("candidate-budget") }
         used.candidates += found.hits.length
@@ -2019,7 +2074,7 @@ MiniAWikiRetrievalV2.prototype._collect = function(query, options, materialize, 
           if (stages.indexOf("rank") < 0) stages.push("rank")
           candidates.push(measure("rank", function() { return engine._rank(hit, query) }))
         })
-      } catch(e) { source.reason = __miniAErrMsg(e).substring(0, 160); source.status = source.reason === "invalid-query" ? "invalid-query" : source.reason === "query-budget-exhausted" ? "partial" : "unavailable"; stopReasons.push(source.status === "invalid-query" ? "invalid-query" : source.status === "partial" ? "query-budget" : "source-unavailable") }
+      } catch(e) { if (e.analysis) source.analysis = e.analysis; source.reason = __miniAErrMsg(e).substring(0, 160); source.status = source.reason === "invalid-query" ? "invalid-query" : source.reason === "query-budget-exhausted" ? "partial" : "unavailable"; stopReasons.push(source.status === "invalid-query" ? "invalid-query" : source.status === "partial" ? "query-budget" : "source-unavailable") }
     }
     // Widen promising sources before fuzzy expansion. Compact page discovery
     // excludes already-seen pages so one long document cannot consume the pool.
@@ -2124,11 +2179,18 @@ MiniAWikiRetrievalV2.prototype.search = function(query, options) {
     return measure("envelopePacking", function() { return self._packSearch(out) })
   })
 }
+// Detailed settings are available through context even when the answer budget is small.
+MiniAWikiRetrievalV2.prototype._omitAnalysisDiagnostics = function(out) {
+  (out.sources || []).forEach(function(source) {
+    if (source.analysis) { delete source.analysis; source.analysisOmitted = "output-budget" }
+  })
+}
 MiniAWikiRetrievalV2.prototype._packSearch = function(out) {
   var size = function() {
     for (var account = 0; account < 4; account++) out.budget.used.bytes = MiniAWikiRetrievalV2.bytes(stringify(out, __, ""))
     return MiniAWikiRetrievalV2.bytes(stringify(out, __, ""))
   }
+  if (size() > out.budget.limits.maxBytes) this._omitAnalysisDiagnostics(out)
   // Preserve the highest-ranked complete candidates and their source diagnostics.
   // A large result set must not turn a successful search into a total failure.
   while (size() > out.budget.limits.maxBytes && out.results.length > 0) {
@@ -2323,10 +2385,11 @@ MiniAWikiRetrievalV2.prototype._packEvidence = function(out, windows, query, tok
   var evidence = out.evidence
   // Final accounting includes the entire envelope, not just passage records.
   var serialized = stringify(out, __, ""), cap = out.budget.limits.maxBytes
-  if ((MiniAWikiRetrievalV2.bytes(serialized) > cap || Math.ceil(serialized.length / 4) > tokenLimit) && evidence.length) {
+  if (MiniAWikiRetrievalV2.bytes(serialized) > cap || Math.ceil(serialized.length / 4) > tokenLimit) {
     // Diagnostics are optional; do not discard the only useful quote merely
     // to retain timing fields. The private request record still has them.
-    delete out.timings; out.timingsOmitted = "output-budget"
+    if (evidence.length) { delete out.timings; out.timingsOmitted = "output-budget" }
+    this._omitAnalysisDiagnostics(out)
     serialized = stringify(out, __, "")
   }
   while ((MiniAWikiRetrievalV2.bytes(serialized) > cap || Math.ceil(serialized.length / 4) > tokenLimit) && evidence.length) {

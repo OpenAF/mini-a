@@ -607,7 +607,9 @@ ojob utils/wikiCompact.yaml dir=/path/to/wiki apply=true offline=true
 ```
 
 Pass the same `wikilexical` and `wikiretrievalconfig` settings used by the publisher
-and intended readers. Check `ok: true` before reopening with `wikiaccess=ro`.
+for this writable maintenance operation. Check `ok: true` before reopening with
+`wikiaccess=ro`. Read-only V2 readers adopt the published index analysis by default;
+`wikiretrievalconfig="(readPolicy: strict)"` instead requires matching reader settings.
 Compaction retains the previous generation and its complete dependency lineage,
 as well as locally tracked readers. It preserves Markdown, graph, metadata,
 knowledge/ingestion state, legacy indexes and downloaded bundle caches. Pending

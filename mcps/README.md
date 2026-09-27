@@ -25,6 +25,7 @@
 | mcp-skills-safe | Virtual skill-library MCP restricted to opaque-reference search/open/read/related (safe for untrusted clients) | STDIO/HTTP | (included) | [mcp-skills-safe.yaml](mcp-skills-safe.yaml) |
 | mcp-a2a    | A2A agent bridge MCP (consume external A2A agents as tools) | STDIO/HTTP | (included) | [mcp-a2a.yaml](mcp-a2a.yaml) |
 | mcp-aws-athena | AWS Athena query MCP (run queries sync or async, poll status, fetch results) | STDIO/HTTP | AWS | [mcp-aws-athena.yaml](mcp-aws-athena.yaml) |
+| mcp-workiq | Microsoft WorkIQ with delegated OAuth and protected credentials | STDIO/HTTP | Updated OpenAF | [Setup](../docs/WORKIQ.md) |
 | mcp-proxy  | MCP proxy aggregating multiple downstream MCP connections | STDIO/HTTP | (included) | [mcp-proxy.yaml](mcp-proxy.yaml) |
 | mcp-oaf    | OpenAF / oJob / oAFp documentation MCP | STDIO/HTTP | (included) | [mcp-oaf.yaml](mcp-oaf.yaml)       |
 | mcp-oaf-browse | Generic browse MCP backed by the oJob-common HTTP Browse API | STDIO/HTTP | (included) | [mcp-oaf-browse.yaml](mcp-oaf-browse.yaml) |

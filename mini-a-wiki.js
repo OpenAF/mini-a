@@ -1479,17 +1479,18 @@ MiniAWikiManager.prototype._luceneOptions = function() {
   }
 }
 
-MiniAWikiManager.prototype._luceneLexicalOptions = function() {
+MiniAWikiManager.prototype._luceneLexicalOptions = function(lexical) {
+  lexical = lexical || this._lexicalConfig
   return {
-    language: this._lexicalConfig.language,
+    language: lexical.language,
     synonyms: {
-      enabled: this._lexicalConfig.synonyms.length > 0,
-      rules: this._lexicalConfig.synonyms.map(function(rule) { return rule.join(",") })
+      enabled: lexical.synonyms.length > 0,
+      rules: lexical.synonyms.map(function(rule) { return rule.join(",") })
     },
-    shingles: { enabled: this._lexicalConfig.shingles === true },
-    characterNGrams: { enabled: this._lexicalConfig.ngrams === true },
-    queryExpansion: { enabled: this._lexicalConfig.queryExpansion === true },
-    pseudoRelevanceFeedback: { enabled: this._lexicalConfig.pseudoRelevanceFeedback === true }
+    shingles: { enabled: lexical.shingles === true },
+    characterNGrams: { enabled: lexical.ngrams === true },
+    queryExpansion: { enabled: lexical.queryExpansion === true },
+    pseudoRelevanceFeedback: { enabled: lexical.pseudoRelevanceFeedback === true }
   }
 }
 
@@ -5260,9 +5261,8 @@ MiniAWikiManager.prototype.attach = function(name, config) {
     var mountRoot = new java.io.File(cfg.root.trim())
     if (!mountRoot.isDirectory() && !this._isArchiveRoot(cfg.root)) return { ok: false, error: "filesystem mount root must be an existing directory or .zip/.okt archive" }
   }
-  // Mounts inherit the caller's lexical contract unless they explicitly select
-  // another language/rule set. This makes a single wikilexical setting apply
-  // consistently to federated retrieval.
+  // Inherit reader preferences; V2 auto readers resolve index analysis per generation.
+  // Explicit mount options can select strict matching or different query preferences.
   if (isUnDef(cfg.usegraph)) cfg.usegraph = this._config.usegraph
   if (isUnDef(cfg.wikiretrievalv2)) cfg.wikiretrievalv2 = this._config.wikiretrievalv2
   if (isUnDef(cfg.wikiretrievalconfig)) cfg.wikiretrievalconfig = this._config.wikiretrievalconfig
@@ -5371,9 +5371,9 @@ MiniAWikiManager.prototype.context = function(options) {
   this._refreshRetrievalMode()
   var searchStatus = "scan", lexicalCapabilities = { requested: clone(this._lexicalConfig), effective: { language: "standard", synonyms: false, shingles: false, ngrams: false, queryExpansion: false, pseudoRelevanceFeedback: false } }
   if (this._retrievalV2) {
-    var capabilityPin
-    try { capabilityPin = this._retrievalV2.acquire(); searchStatus = "passage-v2"; lexicalCapabilities.effective.language = this._lexicalConfig.language; lexicalCapabilities.effective.synonyms = this._lexicalConfig.synonyms.length > 0; ["shingles","ngrams","queryExpansion","pseudoRelevanceFeedback"].forEach(function(key){lexicalCapabilities.effective[key]=this._lexicalConfig[key]===true},this) }
-    catch(capabilityError) { searchStatus = __miniAErrMsg(capabilityError); lexicalCapabilities.effective = { available: false } }
+    var capabilityPin, analysisStatus
+    try { capabilityPin = this._retrievalV2.acquire(); searchStatus = "passage-v2"; analysisStatus = clone(capabilityPin.analysis.status); lexicalCapabilities.effective.language = capabilityPin.analysis.lexical.language; lexicalCapabilities.effective.synonyms = capabilityPin.analysis.lexical.synonyms.length > 0; ["shingles","ngrams","queryExpansion","pseudoRelevanceFeedback"].forEach(function(key){lexicalCapabilities.effective[key]=capabilityPin.analysis.lexical[key]===true}) }
+    catch(capabilityError) { analysisStatus = capabilityError.analysis; searchStatus = __miniAErrMsg(capabilityError); lexicalCapabilities.effective = { available: false } }
     finally { if (capabilityPin) this._retrievalV2.release(capabilityPin) }
   } else {
     try { searchStatus = this._searchIndexStatus(); var publishedCapabilities = this._lexicalManifest(); if (publishedCapabilities && publishedCapabilities.lexical) lexicalCapabilities.effective.language = publishedCapabilities.lexical.language } catch(e) {}
@@ -5411,6 +5411,7 @@ MiniAWikiManager.prototype.context = function(options) {
       federation: mounts.length ? { mode: this._retrievalEngineFor() ? "passage-v2" : "mixed-or-legacy", sources: mounts.map(function(m){return {wiki:m.name,mode:m.manager._retrievalV2?"v2":"legacy"}}) } : __,
       fallbackReason: this._legacyRetrievalV2 ? "v2-build-required" : __,
       lexical: lexicalCapabilities,
+      analysis: analysisStatus,
       graph  : graphStatus,
       entries: entryPoints
     },

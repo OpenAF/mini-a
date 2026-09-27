@@ -1,0 +1,25 @@
+include:
+- oJobTest.yaml
+jobs:
+- name: WorkIQ::ReadOnly
+  to: oJob Test
+  exec: args.func = require("tests/workiq.js").testReadOnlyDispatch
+- name: WorkIQ::WritesAndErrors
+  to: oJob Test
+  exec: args.func = require("tests/workiq.js").testWriteOptInAndErrors
+- name: WorkIQ::Configuration
+  to: oJob Test
+  exec: args.func = require("tests/workiq.js").testConfigurationAndOperator
+
+- name: WorkIQ::ExitOnFailure
+  exec: if (ow.test.getCountFail() > 0) exit(1)
+
+todo:
+- WorkIQ::ReadOnly
+- WorkIQ::WritesAndErrors
+- WorkIQ::Configuration
+- oJob Test Results
+- WorkIQ::ExitOnFailure
+
+ojob:
+  logToConsole: false

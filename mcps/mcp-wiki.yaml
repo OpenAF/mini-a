@@ -69,7 +69,7 @@ help:
     example  : "true"
     mandatory: false
   - name     : wikiretrievalconfig
-    desc     : Validated SLON/JSON advanced passage, cache and artifact budgets
+    desc     : "Validated SLON/JSON passage, cache and artifact budgets; readPolicy auto (default) adopts published analysis for read-only V2 wikis, strict requires configured analysis to match"
     mandatory: false
   - name     : wikitelemetry
     desc     : Record local aggregate retrieval telemetry (off by default); read-only managers keep it in memory
