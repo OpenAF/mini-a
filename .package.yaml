@@ -182,6 +182,7 @@ files:
 - public/showdown.min.js
 - utils/graphStats.yaml
 - utils/indexStats.yaml
+- utils/wikiCompact.yaml
 - utils/wikiGraph.yaml
 filesHash:
   .gitignore: b2f52bb5498ed71251fa0d2e76d32a9b9a1a0019
@@ -209,8 +210,8 @@ filesHash:
   docs/SKILLS-YAML-FORMAT.md: 7457c1d133dea0e6ba860826339b2e8f7a23db94
   docs/VIRTUAL-SKILLS.md: 0a1d6913e651640b06596144b949aee254ddc077
   docs/WHATS-NEW.md: 651a11a3d9c22dfefd2bc1bfb7df6e7cc6d08ece
-  docs/WIKI-RETRIEVAL-V2.md: a91e551a155d17d5e5c4456e83b4e392874ebd96
-  docs/WIKI.md: 8264fa58e41ba6258e81f08bee80ade2feb0d9e8
+  docs/WIKI-RETRIEVAL-V2.md: 67060c31701800ad0d953fe2e6c6f5d59ca069e8
+  docs/WIKI.md: ac12fc204c5fe724be3bc95e86225f8428789d04
   evals/context-virtualization.yaml: 3a58466efa06dbf3dfc028d6a4b59bfc3dcb80a6
   evals/core.yaml: 5bd4c7f5b1fc650e1b656a09f169fbaf2610a9ad
   examples/README.md: cd552b12357673bc55959b75570eada4853af74b
@@ -270,7 +271,7 @@ filesHash:
   mini-a-absorb.yaml: f5c3895fc6175add22a40f33477dc81ddc325b1b
   mini-a-capabilities.js: 04d7a4564d782981bf0b97a65fbfc563a4b4d60c
   mini-a-common.js: 3076578f8128d61a859d116e277493f88ae35611
-  mini-a-con.js: 8655636ffb07bea898c0a56f9e153143b3cab740
+  mini-a-con.js: a8c9c87da36e6bc4fec8263ced3b091efa05b348
   mini-a-dreams.js: dbefc96b618fe4f4cfa62142ab21f76b2d86d33c
   mini-a-eval.js: 22537fa7f12ce89b490ff35c54e055dd31afeb20
   mini-a-eval.yaml: 03938780f7fdb9f3a1ed0d3e5fbdfd58f76fe853
@@ -299,8 +300,8 @@ filesHash:
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 8dfbbff7e675a109bea968e7d935ed7f26e18846
   mini-a-wiki-knowledge.js: 67c24716341ee8230ccff9fefd410ea2bd018605
-  mini-a-wiki-retrieval.js: def5c25770ccdc99a0471a75e4df9e8668d4646c
-  mini-a-wiki.js: 79156d3f70662c0bf54f245b9bc76f17ba59a492
+  mini-a-wiki-retrieval.js: ef39fd1a449e6a37fac4199d664adac9780f43ad
+  mini-a-wiki.js: c1499d96cb8c3d05bd392b5194e4442c50c50ca9
   mini-a-worker.yaml: e133c9b10c1d2eb10919b8aa9743a5291b6535ef
   mini-a.js: 5af706279b401c9978f3f10e2f4120901ec40fca
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
@@ -309,4 +310,5 @@ filesHash:
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   utils/graphStats.yaml: ce32169c30db09d0e74dfffdbba7d70c27db24bc
   utils/indexStats.yaml: 7fc4b114655146b3b3f94813949867485917bacd
+  utils/wikiCompact.yaml: 9ed9b7842cd43d045c7b556539e15ed7ba392b06
   utils/wikiGraph.yaml: 2f80cb21d90fd6623833e52c8572beb4a5060cbc
