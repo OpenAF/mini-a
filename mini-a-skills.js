@@ -140,7 +140,15 @@ function __miniASkillCacheSet(store, key, value) {
 }
 
 function __miniASkillWikiIdentity(wm) {
-  try { return isFunction(wm._getBackendIdentity) ? wm._getBackendIdentity() : "wiki" } catch(e) { return "wiki" }
+  var identity = function(manager) {
+    try { return isFunction(manager._getBackendIdentity) ? manager._getBackendIdentity() : "wiki" } catch(e) { return "wiki" }
+  }
+  // A mounted reference is resolved by the whole library configuration, not just
+  // the primary backend. Separate managers can mount different libraries under
+  // the same name while sharing their primary root.
+  return JSON.stringify([identity(wm), (isArray(wm._mounts) ? wm._mounts : []).map(function(m) {
+    return [m.name, identity(m.manager)]
+  })])
 }
 
 // ── normalized virtual skill model (§2) ──────────────────────────────────────
@@ -220,11 +228,9 @@ function __miniASkillNormalize(wikiName, localPath, record, extra) {
 // ── multi-wiki metadata resolution ───────────────────────────────────────────
 function __miniASkillTargetsByName(wm, wikiSelector) {
   var targets = {}
-  try {
-    var selection = wm.resolveWikiSelection(wikiSelector)
-    if (selection.ok) selection.targets.forEach(function(t) { targets[t.name] = t.manager })
-  } catch(e) {}
-  if (!isDef(targets.primary)) targets.primary = wm
+  var selection = wm.resolveWikiSelection(wikiSelector)
+  if (!selection.ok) throw new Error(selection.error || "invalid-wiki")
+  selection.targets.forEach(function(t) { targets[t.name] = t.manager })
   return targets
 }
 
@@ -240,6 +246,17 @@ function __miniASkillResolveHitMeta(wm, targetsByName, hit) {
   var meta
   try { meta = manager._retrievalV2 ? manager.open(localPath).frontmatter : manager._metaFor(localPath) } catch(e) { meta = __ }
   if (!isMap(meta)) return __
+  // V2 open returns authored frontmatter; legacy _metaFor returns a normalized
+  // record. Normalize aliases before filtering, ranking, and dependency lookup.
+  if (manager._retrievalV2) {
+    meta = merge({}, meta)
+    var appliesTo = isDef(meta.applies_to) ? meta.applies_to : meta.appliesTo
+    var intent = isDef(meta.intent) ? meta.intent : meta.intents
+    meta.appliesTo = isArray(appliesTo) ? appliesTo : (isString(appliesTo) ? [appliesTo] : [])
+    meta.intent = isArray(intent) ? intent : (isString(intent) ? [intent] : [])
+    meta.skillId = isString(meta.id) ? meta.id : ""
+    meta.version = isDef(meta.version) ? String(meta.version) : ""
+  }
   return { manager: manager, wikiName: wikiName, localPath: localPath, meta: meta }
 }
 
@@ -390,16 +407,18 @@ function __miniASkillSearch(wm, options, logFn) {
   var typeFilter = isDef(opts.type) ? String(opts.type).trim().toLowerCase() : "skill"
   var overFetch = Math.min(Math.max(limit * 5, 40), 200)
 
+  var targetsByName = __miniASkillTargetsByName(wm, opts.wiki)
   var hits = query.length === 0 ? __miniASkillListAll(wm, opts.wiki, overFetch) : __miniASkillRawHits(wm, query, opts, overFetch)
 
-  var targetsByName = __miniASkillTargetsByName(wm, opts.wiki)
   var queryTerms = __miniASkillTokenize(query)
   var results = []
   hits.forEach(function(hit, idx) {
     var resolved = __miniASkillResolveHitMeta(wm, targetsByName, hit)
     if (!resolved) return
     var meta = resolved.meta
-    if (typeFilter !== "*" && typeFilter.length > 0 && String(meta.type || "").toLowerCase() !== typeFilter) return
+    if (typeFilter === "skill") {
+      if (!__miniASkillIsSkillMeta(meta)) return
+    } else if (typeFilter !== "*" && typeFilter.length > 0 && String(meta.type || "").trim().toLowerCase() !== typeFilter) return
     if (!__miniASkillPassesFilters(meta, opts)) return
     var nativeScore = isNumber(hit.nativeScore) ? hit.nativeScore : isUnDef(hit.rankScore) && isNumber(hit.score) ? hit.score
       : (isNumber(hit._termHits) && isNumber(hit._termCount) && hit._termCount > 0 ? hit._termHits / hit._termCount : __)
@@ -443,7 +462,7 @@ function __miniASkillRecommend(wm, options, logFn) {
 function __miniASkillOpen(wm, ref, options, logFn) {
   var opts = isObject(options) ? options : {}
   var ttl = wm._retrievalV2 ? 0 : (isNumber(opts.cacheTtlMs) && opts.cacheTtlMs >= 0 ? opts.cacheTtlMs : 15000)
-  var cacheKey = __miniASkillWikiIdentity(wm) + "|" + String(ref)
+  var cacheKey = __miniASkillWikiIdentity(wm) + "|" + String(ref) + "|" + String(opts.maxHeadings)
   if (ttl > 0) {
     var cached = __miniASkillCacheGet(__miniASkillOpenCache, cacheKey, ttl)
     if (isDef(cached)) return cached

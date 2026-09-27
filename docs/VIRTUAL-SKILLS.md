@@ -430,7 +430,9 @@ Linked supporting pages remain separate (`virtualFiles` is empty).
 Skill libraries use ordinary wiki mounts. `search`/`recommend`'s `wiki` parameter
 accepts `"*"` (all), a single name, or an array, exactly like `mcp-wiki.yaml`'s
 `wiki` selector; every result carries the source `wiki` name and mount-prefixed
-`ref` (`wiki:@devops/...`). `related()` reuses the existing cross-wiki graph join
+`ref` (`wiki:@devops/...`). The selector also applies when browsing without a
+query: selecting one mount excludes the primary wiki. Invalid selectors return
+an error. `related()` reuses the existing cross-wiki graph join
 (`wikigraphcross`) so `coding/java-jfr` can surface a connection to
 `devops/kubernetes-cpu-throttling` in a different mount without a second graph.
 
@@ -461,7 +463,9 @@ wired in, e.g. via `mcp-skills.yaml`'s `[mcp-skills]` prefix) looks like:
 | Safe MCP reports `invalid-or-expired-reference` | Search again and pass the fresh reference returned by each operation to the next call. References are one-shot. |
 
 Legacy skill counts are cached for 30 seconds by default; the provider disables
-that count cache under retrieval v2. Tool catalogs and MCP proxy tool searches
+that count cache under retrieval v2. Legacy descriptor, read, and count caches
+include mounted-library identities; descriptor caches also distinguish heading
+limits. Tool catalogs and MCP proxy tool searches
 show available operations, not the contents of the skill library.
 
 ## Scale
@@ -471,7 +475,9 @@ require a growing tool catalog or loading every procedure into a prompt. Counts
 and metadata-only browsing can still scan page records, and cold-cache cost grows
 with the corpus. Retrieval mode and available indexes determine search behavior.
 
-`tests/skills.yaml` covers a small corpus across multiple mounts. It does not
+`tests/skills.yaml` covers a small corpus across multiple mounts, V2 metadata
+aliases and prerequisite composition, schema-only discovery, mount-only browsing,
+and cache isolation between libraries and heading limits. It does not
 establish performance at 100k or 1M pages; benchmark index time, size and query
 latency against your own corpus before sizing a deployment.
 

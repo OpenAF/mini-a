@@ -119,6 +119,82 @@
     }
   }
 
+  exports.testSkillV2MetadataParity = function() {
+    var dir = mkTmp(), wm
+    try {
+      basicSkillWiki(dir)
+      writePage(dir, "alias-skill.md", { schema: "mini-a.skill/v1", id: "skill:stable-id", name: "alias-skill", intents: "diagnose aliases", appliesTo: "aliases", version: 2 }, "# Procedure\nDiagnose aliases.\n")
+      wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikiretrievalv2: true })
+      ow.test.assert(wm.reindex().ok, true, "Build real V2 artifacts")
+      var hits = __miniASkillSearch(wm, { query: "postgres", appliesTo: ["postgres"] })
+      ow.test.assert(hits.length, 1, "V2 applies_to filtering preserves authored metadata")
+      ow.test.assert(hits[0].skillId, "skill:postgres-index-review", "V2 preserves dependency IDs")
+      ow.test.assert(hits[0].version, "1", "V2 normalizes numeric versions")
+      ow.test.assert(hits[0].intents.length, 3, "V2 preserves intents")
+      var aliases = __miniASkillSearch(wm, { query: "aliases", appliesTo: ["aliases"] })
+      ow.test.assert(aliases.length, 1, "V2 discovers schema-only skills with scalar aliases")
+      ow.test.assert(aliases[0].intents, ["diagnose aliases"], "V2 normalizes scalar intents")
+      ow.test.assert(aliases[0].skillId, "skill:stable-id", "ID need not equal the skill name")
+      ow.test.assert(__miniASkillCompose(wm, "wiki:database-maintenance.md", { limit: 2 }).dependencies.length, 2, "V2 composition resolves declared prerequisites")
+    } finally { if (wm) wm.close(); io.rm(dir) }
+  }
+
+  exports.testSkillSchemaOnlyDiscovery = function() {
+    var dir = mkTmp(), wm
+    try {
+      writePage(dir, "schema-only.md", { schema: "mini-a.skill/v1", name: "schema-only", intents: "diagnose database", applies_to: "postgres" }, "# Procedure\nDiagnose database.\n")
+      wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
+      ow.test.assert(__miniASkillSearch(wm, { query: "diagnose" }).length, 1, "Schema-only skills accepted by open must also be discoverable")
+      ow.test.assert(__miniASkillSearch(wm, {}).length, 1, "Schema-only skills appear in browsing")
+    } finally { if (wm) wm.close(); io.rm(dir) }
+  }
+
+  exports.testSkillBrowseHonorsMountSelection = function() {
+    var dir = mkTmp(), mount = mkTmp(), wm
+    try {
+      basicSkillWiki(dir)
+      writePage(mount, "remote.md", { type: "skill", name: "remote" }, "# Remote\nRemote instructions.\n")
+      wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
+      wm.attach("remote", { backend: "fs", root: mount, access: "ro" })
+      var hits = __miniASkillSearch(wm, { wiki: "remote" })
+      ow.test.assert(hits.length, 1, "Mount-only browsing must exclude primary skills")
+      ow.test.assert(hits[0].wiki, "remote", "Selected mount is preserved")
+      var error = ""
+      try { __miniASkillSearch(wm, { wiki: "missing" }) } catch(e) { error = String(e) }
+      ow.test.assert(error.indexOf("unknown-wiki") >= 0, true, "Invalid selection must not silently browse primary")
+    } finally { if (wm) wm.close(); io.rm(dir); io.rm(mount) }
+  }
+
+  exports.testSkillCacheHonorsHeadingLimit = function() {
+    var dir = mkTmp(), wm
+    try {
+      basicSkillWiki(dir)
+      wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
+      var ref = "wiki:postgres-index-review.md"
+      __miniASkillOpen(wm, ref, { maxHeadings: 1 })
+      ow.test.assert(__miniASkillOpen(wm, ref, { maxHeadings: 3 }).headings.length, 3, "Cached heading limits must not override later requests")
+    } finally { if (wm) wm.close(); io.rm(dir) }
+  }
+
+  exports.testSkillCacheSeparatesMounts = function() {
+    var dir = mkTmp(), first = mkTmp(), second = mkTmp(), a, b
+    try {
+      basicSkillWiki(first)
+      writePage(second, "postgres-index-review.md", { type: "skill", name: "different-skill" }, "# Different\nDifferent instructions.\n")
+      a = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
+      b = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
+      a.attach("remote", { backend: "fs", root: first, access: "ro" })
+      b.attach("remote", { backend: "fs", root: second, access: "ro" })
+      var ref = "wiki:@remote/postgres-index-review.md"
+      __miniASkillOpen(a, ref, {})
+      ow.test.assert(__miniASkillOpen(b, ref, {}).name, "different-skill", "Same primary root must not share mounted descriptors")
+      __miniASkillRead(a, ref, {})
+      ow.test.assert(__miniASkillRead(b, ref, {}).body.indexOf("Different instructions") >= 0, true, "Mounted read cache must use the actual library")
+      ow.test.assert(__miniASkillContext(a, {}).skillCount, 4, "First mount has four skills")
+      ow.test.assert(__miniASkillContext(b, {}).skillCount, 1, "Context cache must include mounted libraries")
+    } finally { if (a) a.close(); if (b) b.close(); io.rm(dir); io.rm(first); io.rm(second) }
+  }
+
   // ── unit tests ────────────────────────────────────────────────────────────
 
   exports.testSkillMetadataFullFrontmatterParses = function() {

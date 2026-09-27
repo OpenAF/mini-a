@@ -377,11 +377,11 @@ function mainOAFModel(args) {
             print()
             var _name = ask("📥 Name of the definition to import: ")
             if (isUnDef(_name) || _name.length == 0) break
-            var _obj  = ask("📥 Paste the definition content (in SLON/JSON format): ")
-            _obj = af.fromJSSLON(_obj)
-            if (isMap(_obj)) {
+            var _importDef = ask("📥 Paste the definition content (in SLON/JSON format): ")
+            _importDef = af.fromJSSLON(_importDef)
+            if (isMap(_importDef)) {
               print("💾 Importing definition '" + _name + "'...")
-              _sec.set(_name, _obj, "models")
+              _sec.set(_name, _importDef, "models")
             } else {
               printErr("❌ Invalid definition format.")
             }
@@ -415,6 +415,11 @@ function mainOAFModel(args) {
             if (_oldName >= 0 && _oldName < _lst.length) {
             var _newName = ask("✨ New name for the definition '" + _lst[_oldName] + "': ")
                 if (isDef(_newName) && _newName.length > 0) {
+                    if (_newName === _lst[_oldName]) break
+                    if (_lst.indexOf(_newName) >= 0) {
+                        printErr("❌ A definition named '" + _newName + "' already exists.")
+                        break
+                    }
                     print("💾 Renaming definition '" + _lst[_oldName] + "' to '" + _newName + "'...")
                     var _def = _sec.get( _lst[_oldName], "models" )
                     _sec.set( _newName, _def, "models" )

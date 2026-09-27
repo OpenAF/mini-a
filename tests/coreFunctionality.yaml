@@ -1,4 +1,29 @@
 jobs:
+- name: MiniA Core Tests::SubtaskRemoteAlwaysDrainsQueue
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testSubtaskRemoteAlwaysDrainsQueue
+
+- name: MiniA Core Tests::SubtaskRemoteCancellationBeforeSubmission
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testSubtaskRemoteCancellationBeforeSubmission
+
+- name: MiniA Core Tests::MemoryReloadPreservesKeyedObservations
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testMemoryReloadPreservesKeyedObservations
+
+- name: MiniA Core Tests::MemoryExpiredDuplicateDoesNotHideFreshObservation
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testMemoryExpiredDuplicateDoesNotHideFreshObservation
+
+- name: MiniA Core Tests::SubtaskStoppedManagerRejectsNewWork
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testSubtaskStoppedManagerRejectsNewWork
+
 - name: MiniA Core Tests::SkillWikiPromptGuidance
   from: MiniA Core Tests::Init
   to: oJob Test
@@ -1145,6 +1170,11 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Core Tests::SubtaskRemoteAlwaysDrainsQueue
+- MiniA Core Tests::SubtaskRemoteCancellationBeforeSubmission
+- MiniA Core Tests::MemoryReloadPreservesKeyedObservations
+- MiniA Core Tests::MemoryExpiredDuplicateDoesNotHideFreshObservation
+- MiniA Core Tests::SubtaskStoppedManagerRejectsNewWork
 - MiniA Core Tests::SkillWikiPromptGuidance
 - MiniA Core Tests::FlattenedBuiltInDispatchReplay
 - MiniA Core Tests::EntryPointFinalAnswerParity

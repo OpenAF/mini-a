@@ -158,7 +158,9 @@ MiniAMemoryManager.prototype.init = function(seedMemory) {
     var section = sections[i]
     if (!isArray(srcSections[section])) continue
     for (var j = 0; j < srcSections[section].length; j++) {
-      this.append(section, srcSections[section][j], { silent: true })
+      // Restoring records must preserve their IDs, keys, and scopes even when
+      // two observations happen to carry identical text.
+      this.append(section, srcSections[section][j], { silent: true, noDedup: true })
     }
   }
   this._touch()
@@ -227,9 +229,9 @@ MiniAMemoryManager.prototype.append = function(section, entry, options) {
   var beforeLength = list.length
   var normalized = this._normalizeEntry(entry, opts)
 
-  if (this._config.dedup === true && opts.noDedup !== true) {
+  if (this._config.dedup === true && opts.noDedup !== true && !this._isExpired(normalized)) {
     for (var i = list.length - 1; i >= 0; i--) {
-      if (this._isNearDuplicate(list[i].value, normalized.value)) {
+      if (!this._isExpired(list[i]) && this._isNearDuplicate(list[i].value, normalized.value)) {
         list[i].updatedAt = new Date().toISOString()
         if (isArray(normalized.evidenceRefs) && normalized.evidenceRefs.length > 0) {
           list[i].evidenceRefs = (list[i].evidenceRefs || []).concat(normalized.evidenceRefs)
@@ -364,7 +366,7 @@ MiniAMemoryManager.prototype.findNearDuplicate = function(section, value) {
   var list = this._getSection(section)
   if (!isArray(list)) return __
   for (var i = list.length - 1; i >= 0; i--) {
-    if (this._isNearDuplicate(list[i].value, value)) return list[i]
+    if (!this._isExpired(list[i]) && this._isNearDuplicate(list[i].value, value)) return list[i]
   }
   return __
 }

@@ -6,6 +6,7 @@
     var start = yaml.indexOf("    global._mini_a_web_buildHistoryPayload =")
     var source = yaml.substring(start, yaml.indexOf("\n# ---------------------------------------", start))
     var keys = ["__historypath", "__historys3enabled", "__historys3bucket", "__historys3client", "__conversations", "__res", "maArgs", "__usehistory", "__historykeep", "__lastActivity", "__busy", "__planState", "__subagentState", "_mini_a_web_checkToken", "_mini_a_web_isValidUuid", "_mini_a_web_historyS3Key", "_mini_a_web_uuidFromPath", "_mini_a_web_buildHistoryPayload", "_mini_a_web_storeHistory", "_mini_a_web_saveFile", "_mini_a_web_loadFile", "_mini_a_web_historyExists", "_mini_a_web_deleteHistory"]
+    keys = keys.concat(["__sessionLock", "__runTokens", "_mini_a_web_reserve", "_mini_a_web_owns", "_mini_a_web_release", "_mini_a_web_dispose"])
     var saved = {}
     keys.forEach(function(key) { saved[key] = global[key] })
     var objects = {}, failGet = false, failPut = false, gets = 0
@@ -39,6 +40,11 @@
         },
         removeObject: function(bucket, key) { delete objects[key] }
       }
+      // Clear and expiry use the production session ownership helpers.
+      global.__sessionLock = new java.util.concurrent.locks.ReentrantLock()
+      global.__runTokens = {}
+      var helpersStart = yaml.indexOf("    global._mini_a_web_reserve =")
+      eval(yaml.substring(helpersStart, yaml.indexOf("    global.__webtoken =", helpersStart)))
       eval(source)
       var vm = new MiniAHistoryVM({ enabled: true, contextVirtualization: true, conversationPath: path })
       var history = [{ role: "user", content: "First" }, { role: "assistant", content: "Exact older answer" }]

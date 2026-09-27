@@ -2,6 +2,26 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA Skills Tests::CacheHonorsHeadingLimit
+  to: oJob Test
+  exec: args.func = require("tests/skills.js").testSkillCacheHonorsHeadingLimit
+
+- name: MiniA Skills Tests::V2MetadataParity
+  to: oJob Test
+  exec: args.func = require("tests/skills.js").testSkillV2MetadataParity
+
+- name: MiniA Skills Tests::SchemaOnlyDiscovery
+  to: oJob Test
+  exec: args.func = require("tests/skills.js").testSkillSchemaOnlyDiscovery
+
+- name: MiniA Skills Tests::BrowseHonorsMountSelection
+  to: oJob Test
+  exec: args.func = require("tests/skills.js").testSkillBrowseHonorsMountSelection
+
+- name: MiniA Skills Tests::CacheSeparatesMounts
+  to: oJob Test
+  exec: args.func = require("tests/skills.js").testSkillCacheSeparatesMounts
+
 - name: MiniA Skills Tests::RegisteredRetrieval
   to: oJob Test
   exec: args.func = require("tests/skills.js").testSkillWikiRegisteredRetrieval
@@ -95,6 +115,11 @@ jobs:
   exec: args.func = require("tests/skills.js").testSkillRestrictedRejectsTooShortQuery
 
 todo:
+- MiniA Skills Tests::CacheHonorsHeadingLimit
+- MiniA Skills Tests::V2MetadataParity
+- MiniA Skills Tests::SchemaOnlyDiscovery
+- MiniA Skills Tests::BrowseHonorsMountSelection
+- MiniA Skills Tests::CacheSeparatesMounts
 - MiniA Skills Tests::RegisteredRetrieval
 - MiniA Skills Tests::MetadataFullFrontmatterParses
 - MiniA Skills Tests::MetadataMissingOptionalFieldsDefaultsGracefully

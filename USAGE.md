@@ -414,7 +414,9 @@ Key capabilities:
 - **Quick sharing** — Use the dedicated **Export definition** action to print
   the encrypted definition's SLON/JSON payload for backup or transfer.
 - **Import/rename/delete** — Quickly migrate existing definitions, update
-  their names, or prune unused entries.
+  their names, or prune unused entries. Renaming to the same name leaves the
+  definition unchanged; renaming to another saved name is rejected. Importing
+  saves a definition without selecting it as the active console model.
 
 The flag works with `opack exec mini-a`, the optional `mini-a` alias, and all
 oJob wrappers (for example `ojob mini-a.yaml modelman=true`).
@@ -939,7 +941,7 @@ The `start()` method accepts various configuration options:
 - **`memorymaxpersection`** (number, default: 80): Max entries retained per memory section before compaction.
 - **`memorymaxentries`** (number, default: 500): Global cap across all sections; compaction preserves decisions/evidence preferentially.
 - **`memorycompactevery`** (number, default: 8): Trigger compaction every N memory mutations.
-- **`memorydedup`** (boolean, default: true): Deduplicate near-identical entries during append.
+- **`memorydedup`** (boolean, default: true): Deduplicate near-identical, unexpired entries during append. Restoring a saved memory snapshot preserves distinct record IDs, keys, and scopes even when their text is identical.
 - **`memoryartifactttldays`** (number, default: `7`): Expiry window for normalized tool and network observations. Expired entries are excluded from search and prompt injection, then removed during maintenance.
 - **`memoryindexttldays`** (number, default: `1`): Shorter expiry window for list, search, and index snapshots.
 - **`memorypromote`** (string, default: `""`): Comma-separated list of memory sections to auto-promote from the session store to the global store at session end. Uses a refresh-or-append strategy: near-duplicate global entries have their `confirmedAt` and `confirmCount` updated rather than duplicated; entirely new entries are appended. `memoryuser=true` sets this to `facts,decisions,summaries`. Set to `""` to disable promotion.

@@ -162,6 +162,7 @@ SubtaskManager.prototype._getSubtaskTimeoutReason = function(subtask, now) {
  * <key>SubtaskManager.destroy()</key>
  * Signals the watchdog thread to stop running.
  * Call this when the SubtaskManager is no longer needed to free the background thread.
+ * The stopped manager rejects subsequent submit() and start() calls.
  * </odoc>
  */
 SubtaskManager.prototype.destroy = function() {
@@ -1215,8 +1216,10 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
     subtask.workerUrl = __
     subtask.remoteTaskId = __
     try {
+      if (subtask.status !== "running") return
       var mergedArgs = parent._buildChildArgs(subtask)
       var workerUrl = parent._nextWorkerForSubtask(subtask, mergedArgs)
+      if (subtask.status !== "running") return
       if (!isString(workerUrl) || workerUrl.length === 0) {
         throw new Error(isString(parent._lastWorkerSelectionError) && parent._lastWorkerSelectionError.length > 0 ? parent._lastWorkerSelectionError : "No healthy remote workers available")
       }
@@ -1236,6 +1239,7 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
         commsWire = { version: 1, token: subtask.commsToken, id: subtask.comms.id, config: subtask.comms.config }
       }
       var taskResponse
+      if (subtask.status !== "running") return
       if (parent.useA2A) {
         submissionAttempted = true
         taskResponse = parent._remoteRequest(workerUrl, "/message:send", {
@@ -1433,11 +1437,11 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
         if (submissionAttempted) parent._failRemoteOutcomeUnknown(subtask, prefix, error)
         else parent._failOrRetrySubtask(subtask, prefix, error)
       }
+    } finally {
+      // Every remote terminal/retry branch returns from the callback. Always
+      // fill the released slot, including when observation fails.
+      try { parent._processQueue() } catch(ignoreQueue) {}
     }
-
-    try {
-      parent._processQueue()
-    } catch(ignoreQueue) {}
   })
 }
 
@@ -1454,6 +1458,7 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
  * </odoc>
  */
 SubtaskManager.prototype.submit = function(goal, childArgs, opts) {
+  if (this._running !== true) throw new Error("Subtask manager stopped")
   if (!isString(goal) || goal.trim().length === 0) {
     throw new Error("Goal is required and must be a non-empty string")
   }
@@ -1527,6 +1532,7 @@ SubtaskManager.prototype.submit = function(goal, childArgs, opts) {
  * </odoc>
  */
 SubtaskManager.prototype.start = function(subtaskId) {
+  if (this._running !== true) throw new Error("Subtask manager stopped")
   var subtask = this.subtasks[subtaskId]
   if (isUnDef(subtask)) {
     throw new Error("Subtask " + subtaskId + " not found")
@@ -1539,6 +1545,7 @@ SubtaskManager.prototype.start = function(subtaskId) {
   var started = false
   var manager = this
   sync(function() {
+    if (manager._running !== true) throw new Error("Subtask manager stopped")
     if (subtask.status !== "pending") return
 
     // Check concurrency limit

@@ -1,0 +1,15 @@
+include:
+- oJobTest.yaml
+
+jobs:
+- name: MiniA Model Manager Tests::RenamePreservesDefinitions
+  to: oJob Test
+  exec: args.func = require("tests/modelManager.js").testRenamePreservesDefinitions
+
+- name: MiniA Model Manager Tests::ImportDoesNotSelectModel
+  to: oJob Test
+  exec: args.func = require("tests/modelManager.js").testImportDoesNotSelectModel
+
+todo:
+- MiniA Model Manager Tests::RenamePreservesDefinitions
+- MiniA Model Manager Tests::ImportDoesNotSelectModel

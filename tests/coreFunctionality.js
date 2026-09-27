@@ -2316,7 +2316,7 @@
     ow.test.assert(manager._running, false, "Destroy should stop the watchdog loop")
     ow.test.assert(cancelReason, "Subtask manager stopped", "Destroy should interrupt the watchdog immediately")
     ow.test.assert(executionCancelReason, "Subtask manager stopped", "Destroy should interrupt active subtask execution")
-    ow.test.assert(remoteCancelCalled, false, "Shutdown should not wait for a remote cancellation request")
+    ow.test.assert(remoteCancelCalled, true, "Shutdown should request cancellation of submitted remote work")
   }
 
   exports.testStopAgentResourcesDestroysSubtaskManager = function() {
@@ -2701,6 +2701,87 @@
       ow.test.assert(manager.metrics.remoteOutcomeUnknown, 1, "Unknown remote outcome must be metered")
       ow.test.assert(calls[0], "/cancel", "Unknown remote outcome must attempt to stop the known task")
     } finally { manager.destroy() }
+  }
+
+  exports.testSubtaskRemoteAlwaysDrainsQueue = function() {
+    ;[false, true].forEach(function(useA2A) {
+      ;["completed", "failed", "timeout", "cancelled", "unavailable"].forEach(function(outcome) {
+        var manager = new SubtaskManager({}, { maxConcurrent: 1 })
+        manager.remoteDelegation = true
+        manager.useA2A = useA2A
+        manager.remotePollIntervalMs = 1
+        manager._startWatchdog = function() {}
+        manager._buildChildArgs = function() { return {} }
+        manager._nextWorkerForSubtask = function() { return "http://fixture" }
+        var states = { completed: "TASK_STATE_COMPLETED", failed: "TASK_STATE_FAILED", timeout: "TASK_STATE_FAILED", cancelled: "TASK_STATE_CANCELED" }
+        manager._remoteGet = function() {
+          if (outcome === "unavailable") throw new Error("offline")
+          return { task: { status: { state: states[outcome], reason: outcome } } }
+        }
+        manager._remoteRequest = function(url, path) {
+          if (path === "/task") return { taskId: "fixture" }
+          if (path === "/message:send") return { task: { id: "fixture" } }
+          if (path === "/status") {
+            if (outcome === "unavailable") throw new Error("offline")
+            return { status: outcome }
+          }
+          if (path === "/result") return { result: { answer: "done" } }
+          return {}
+        }
+        var first = manager.submit("first", {}, { maxAttempts: 1 })
+        var second = manager.submit("second")
+        var launched = []
+        var remoteStart = manager._startRemoteSubtask
+        manager._startRemoteSubtask = function(task, prefix) {
+          if (task.id === first) return remoteStart.call(manager, task, prefix)
+          launched.push(task.id)
+        }
+        try {
+          manager.start(first)
+          $doWait(manager.subtasks[first]._executionPromise)
+          ow.test.assert(launched.indexOf(second) >= 0, true, "Remote " + outcome + " must launch queued work (A2A=" + useA2A + ")")
+          ow.test.assert(manager.runningCount, 1, "Only the queued task occupies a slot")
+        } finally { manager.destroy() }
+      })
+    })
+  }
+
+  exports.testSubtaskRemoteCancellationBeforeSubmission = function() {
+    ;[false, true].forEach(function(useA2A) {
+      ;["before-callback", "during-selection", "in-flight"].forEach(function(timing) {
+        var manager = new SubtaskManager({}, {})
+        manager.remoteDelegation = true
+        manager.useA2A = useA2A
+        manager._startWatchdog = function() {}
+        manager._processQueue = function() {}
+        manager._buildChildArgs = function() { return {} }
+        var id = manager.submit("must not execute")
+        var task = manager.subtasks[id]
+        task.status = "running"
+        manager.runningCount = manager.metrics.running = 1
+        manager._nextWorkerForSubtask = function() {
+          if (timing === "during-selection") manager.cancel(id)
+          return "http://fixture"
+        }
+        var submissions = 0, cancellations = 0
+        manager._remoteRequest = function(url, path) {
+          if (path === "/task" || path === "/message:send") {
+            submissions++
+            if (timing === "in-flight") manager.cancel(id)
+          }
+          if (path === "/cancel" || path === "/tasks:cancel") cancellations++
+          return useA2A ? { task: { id: "late" } } : { taskId: "late" }
+        }
+        try {
+          if (timing === "before-callback") manager.cancel(id)
+          manager._startRemoteSubtask(task, "test")
+          $doWait(task._executionPromise)
+          ow.test.assert(submissions, timing === "in-flight" ? 1 : 0, "Cancellation " + timing + " prevents new submissions (A2A=" + useA2A + ")")
+          ow.test.assert(cancellations, timing === "in-flight" ? 1 : 0, "Cancel late-accepted work when its ID becomes known")
+          ow.test.assert(task.status, "cancelled", "Cancellation remains terminal")
+        } finally { manager.destroy() }
+      })
+    })
   }
 
   exports.testSubtaskAmbiguousSubmissionDoesNotRetry = function() {
@@ -3677,6 +3758,46 @@
     try { $ch(sessionChannelName).destroy() } catch(ignoreDestroy) {}
   }
 
+  exports.testMemoryReloadPreservesKeyedObservations = function() {
+    var mgr = new MiniAMemoryManager({ enabled: true, compactEvery: 100 })
+    mgr.upsert("artifacts", "service:a", { value: "Service is healthy", taskScope: "a" })
+    mgr.upsert("artifacts", "service:b", { value: "Service is healthy", taskScope: "b" })
+    var saved = mgr.snapshot()
+    var restored = new MiniAMemoryManager({ enabled: true, compactEvery: 100 })
+    restored.init(saved)
+    var entries = restored.getSectionEntries("artifacts")
+    ow.test.assert(entries.length, 2, "Reload must not merge distinct keyed observations with identical text")
+    ow.test.assert(entries.map(function(e) { return e.key }).sort(), ["service:a", "service:b"], "Stable keys survive reload")
+    ow.test.assert(entries.map(function(e) { return e.id }), saved.sections.artifacts.map(function(e) { return e.id }), "Reload preserves record IDs")
+  }
+
+  exports.testMemoryExpiredDuplicateDoesNotHideFreshObservation = function() {
+    var mgr = new MiniAMemoryManager({ enabled: true, compactEvery: 100 })
+    mgr.append("facts", { value: "The service is healthy", expiresAt: new Date(Date.now() - 1000).toISOString() })
+    ow.test.assert(isUnDef(mgr.findNearDuplicate("facts", "The service is healthy")), true, "Expired entries are not confirmation candidates")
+    var fresh = mgr.append("facts", { value: "The service is healthy", expiresAt: new Date(Date.now() + 60000).toISOString() })
+    ow.test.assert(mgr.getSectionEntries("facts").length, 1, "Fresh observation must not be swallowed by expired duplicate")
+    ow.test.assert(mgr._isExpired(fresh), false, "New observation has a current expiry")
+    mgr.compact()
+    ow.test.assert(mgr.getSectionEntries("facts")[0].id, fresh.id, "Compaction retains the fresh observation")
+  }
+
+  exports.testSubtaskStoppedManagerRejectsNewWork = function() {
+    var manager = new SubtaskManager({}, {})
+    var starts = 0, rejected = false
+    manager._startLocalSubtask = function() { starts++ }
+    manager.destroy()
+    try { manager.submitAndRun("late submission", {}, {}) } catch(e) { rejected = /stopped/i.test(String(e)) }
+    ow.test.assert(rejected, true, "Stopped manager must reject new submissions")
+    ow.test.assert(starts, 0, "Stopped manager cannot launch unmonitored work")
+    ow.test.assert(manager.pendingQueue.length, 0, "Rejected work must not be queued")
+    manager.subtasks.late = { id: "late", status: "pending", args: {}, goal: "late" }
+    rejected = false
+    try { manager.start("late") } catch(e) { rejected = /stopped/i.test(String(e)) }
+    ow.test.assert(rejected, true, "Direct start must also reject a stopped manager")
+    ow.test.assert(starts, 0, "Direct start cannot bypass shutdown")
+  }
+
   exports.testMemoryKeyedUpsertAndExpiry = function() {
     var mgr = new MiniAMemoryManager({ enabled: true, compactEvery: 100 })
     mgr.init({ sections: { artifacts: [{ value: "legacy entry" }] } })
@@ -4380,8 +4501,7 @@
     var agent = createAgent()
     agent.fnI = function() {}
 
-    var originalUserDir = String(java.lang.System.getProperty("user.dir", "") || "")
-    var tempRoot = String(io.createTempFile("mini-a-agents-", ""))
+    var tempRoot = String(new java.io.File(String(io.createTempFile("mini-a-agents-", ""))).getCanonicalPath())
     io.rm(tempRoot)
     io.mkdir(tempRoot)
 
@@ -4390,7 +4510,13 @@
     io.writeFileString(tempRoot + "/AGENTS.md", "- Always verify changes\n- Keep edits minimal")
 
     try {
-      java.lang.System.setProperty("user.dir", nestedDir)
+      // Changing user.dir does not change the process working directory on all
+      // JVMs. Keep the actual nearest-file traversal, rooted in this fixture.
+      var findNearest = agent._findNearestAgentsInstructionsPath
+      agent._findNearestAgentsInstructionsPath = function(startDir) {
+        ow.test.assert(startDir, ".", "Auto rules should start from the working directory")
+        return findNearest.call(this, nestedDir)
+      }
 
       var unrelatedRoot = String(io.createTempFile("mini-a-agents-unrelated-", ""))
       io.rm(unrelatedRoot)
@@ -4411,7 +4537,6 @@
       var parsedAfterSecondApply = agent._parseRulesArgument(args.rules)
       ow.test.assert(parsedAfterSecondApply.length, 2, "Auto AGENTS rules should not duplicate when applied more than once")
     } finally {
-      java.lang.System.setProperty("user.dir", originalUserDir)
       try { io.rm(tempRoot) } catch(ignoreCleanup) {}
       try { if (isString(unrelatedRoot) && unrelatedRoot.length > 0) io.rm(unrelatedRoot) } catch(ignoreCleanup2) {}
     }

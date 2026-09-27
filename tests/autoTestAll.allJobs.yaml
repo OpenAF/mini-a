@@ -11,6 +11,7 @@ include:
 - tests/historyVM.yaml
 - tests/mcpAuth.yaml
 - tests/miniAUtils.yaml
+- tests/modelManager.yaml
 - tests/outerLoop.yaml
 - tests/progToolCall.yaml
 - tests/skills.yaml
