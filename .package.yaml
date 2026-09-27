@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260926'
+version: '20260927'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -194,7 +194,7 @@ filesHash:
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   METRICS.md: d69659b54963e9437929d15bdd2038ef48e50ae4
   README.md: 64ef95d94aee0fc4dc5d20e28cfe83401e877c54
-  USAGE.md: 2992f34f5171565eb7fb5407b4e6b16c272a011f
+  USAGE.md: d576bdb1a205666c3d672ea49eeefa33d7817a0f
   docs/ABSORB.md: 2355aa047e47ef2134f8b9999c38bf7a4e1b6713
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/AGENT-PLUGINS.md: af8f692ac4bc690ac9df180e86bb1a1307a5aae5
@@ -207,7 +207,7 @@ filesHash:
   docs/PATH-INPUT-AUDIT.md: 3a874f9300b85f41beccd20332a3d4c04b16fcc3
   docs/REPLY-JSON.md: 9dd6747356eb044924928dd08737a01e162e5f5c
   docs/SKILLS-YAML-FORMAT.md: 7457c1d133dea0e6ba860826339b2e8f7a23db94
-  docs/VIRTUAL-SKILLS.md: 152b8cf93b56f1bf6efa539f2503f33a950da293
+  docs/VIRTUAL-SKILLS.md: 0a1d6913e651640b06596144b949aee254ddc077
   docs/WHATS-NEW.md: 651a11a3d9c22dfefd2bc1bfb7df6e7cc6d08ece
   docs/WIKI-RETRIEVAL-V2.md: a91e551a155d17d5e5c4456e83b4e392874ebd96
   docs/WIKI.md: 8264fa58e41ba6258e81f08bee80ade2feb0d9e8
@@ -281,9 +281,9 @@ filesHash:
   mini-a-mcp-skills.js: 6835e75f88fd3791444cca547eea943faf08a48f
   mini-a-mcp-wiki.js: 14ce79468f2c18da42f325f3efc9c7af7c6ad3a6
   mini-a-mcptest.js: dc9ca2dbb5c070eac462c8efc0a83c408712d489
-  mini-a-memory.js: 9cfa9a66c3798124f34933bf0a7f8f7f23dc57a7
+  mini-a-memory.js: 0d35042c9ac24a6f277bbaa4422374a168fd8116
   mini-a-memoryman.js: a943c4a3f946140f3585940d53eda148fc47e4ab
-  mini-a-modelman.js: 521d0a5f93e97d137d71c22617b15ea312beb7a2
+  mini-a-modelman.js: 893127cfdbd0c007a090e4aa193129155828bc95
   mini-a-modes.yaml: ce7ed10453265412c256bc85689399080d2e9615
   mini-a-orchestration.js: 89cf3571fe3d5cfdff7f53b7b840ce036e38685f
   mini-a-plugins.js: a218cd3d66e80a2626749c4e0440764aa966f58a
@@ -292,8 +292,8 @@ filesHash:
   mini-a-response.js: 14d6bbe7dfd7cb9438624954638c8b5148b5b954
   mini-a-router.js: 381d0f2d34864fdca03d5d4f528fa0f827bbed48
   mini-a-sandbox.js: 2844520cfb6595675d7773b29af0943fcc6ed6dd
-  mini-a-skills.js: 50bbe8eda720356b48b3f037da9a0d8479629ca0
-  mini-a-subtask.js: e115956dc56ae411d30e6a6c5be51cad20afa1ce
+  mini-a-skills.js: d09816529a83bfa2f4a26b211cf04e207d620c73
+  mini-a-subtask.js: b63d88a6aba3c910f2f5dbd00bce6bb7b93736d9
   mini-a-tool-selection.js: 0e3d8ecf2182833daef108c5e8fed7cf2271590c
   mini-a-utils.js: d71c863276870bba9f40a6c39c07acf4ed44b74e
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
