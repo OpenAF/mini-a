@@ -55,11 +55,15 @@
     try {
       writePage(dir, "ojob.md", "---\ntitle: oJob\n---\n# oJob\nRun jobs with oJob.")
       wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikiretrievalv2: true })
+      ow.test.assert(__miniAWikiRequireSearchHits(wm.search("ojob")).length, 1, "unpublished wiki uses legacy search")
+      ow.test.assert(wm.reindex().ok, true, "fixture publishes V2")
+      var pointerPath = wm._retrievalV2.root + "/current.json", pointer = io.readFileString(pointerPath)
+      io.rm(pointerPath)
       var unavailable = ""
       try { __miniAWikiRequireSearchHits(wm.search("ojob")) } catch(e) { unavailable = String(e.message || e) }
       ow.test.assert(unavailable.indexOf("wiki-search-unavailable") >= 0, true, "missing index must not cause a forEach error")
       ow.test.assert(unavailable.indexOf("v2-build-required") >= 0, true, "missing index must retain the build-required reason")
-      ow.test.assert(wm.reindex().ok, true, "fixture reindex should succeed")
+      io.writeFileString(pointerPath, pointer)
       var hits = __miniAWikiRequireSearchHits(wm.search("ojob"))
       ow.test.assert(hits.length, 1, "indexed search should still return hits")
       ow.test.assert(hits[0].path, "ojob.md", "indexed search should return the matching page")
@@ -1036,7 +1040,7 @@
         ow.test.assert(primary.context().retrieval.wiki, "primary", "default status is explicitly primary-only")
         ow.test.assert(primary.context({wiki:"missing"}).error, "unknown-wiki", "unknown context mount does not fall back")
         if (v2) {
-          ow.test.assert(primary.context().retrieval.search, "v2-build-required", "primary fixture has no index")
+          ow.test.assert(primary.context().retrieval.fallbackReason, "v2-build-required", "primary fixture uses legacy fallback without V2 artifacts")
           ow.test.assert(scopedContext.retrieval.search, "passage-v2", "mounted index is usable despite missing primary index")
         }
         var contextTool = __miniAMcpWikiCreateTool({root:primaryDir,access:"ro",agenticRetrieval:true}, primary)

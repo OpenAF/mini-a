@@ -358,13 +358,14 @@ function __miniASkillContext(wm, options, logFn) {
 // OR-of-terms lexical match while every match still comes from wm.search() itself
 // -- no parallel retrieval implementation.
 function __miniASkillRawHits(wm, query, opts, overFetch) {
+  if (isFunction(wm._refreshRetrievalMode)) wm._refreshRetrievalMode()
   if (wm._retrievalV2) {
     var v2Result = wm.searchSelected(query, { wiki: opts.wiki, limit: overFetch, maxCandidates: overFetch, compact: true })
     if (isArray(v2Result)) return v2Result
 
     // Retrieval v2 deliberately returns a structured status instead of silently
     // scanning when a selected source is unavailable (for example, when its
-    // serving artifacts have not been built yet). Preserve that diagnostic at
+    // serving publication is missing or incompatible). Preserve that diagnostic at
     // the skill facade boundary instead of trying to iterate the status map.
     var reasons = []
     if (isMap(v2Result)) {
@@ -386,7 +387,12 @@ function __miniASkillRawHits(wm, query, opts, overFetch) {
     var searchOpts = { limit: overFetch, compact: true, contextLines: 0, wiki: opts.wiki }
     var raw
     try { raw = isDef(opts.wiki) ? wm.searchSelected(term, searchOpts) : wm.search(term, searchOpts) } catch(e) { raw = [] }
-    if (!isArray(raw)) return
+    if (!isArray(raw)) {
+      if (wm._retrievalV2 || wm._legacyRetrievalV2) {
+        try { __miniAWikiRequireSearchHits(raw) } catch(e) { throw new Error("skill-search-unavailable: " + __miniAErrMsg(e)) }
+      }
+      return
+    }
     raw.forEach(function(hit) {
       var key = (isString(hit.wiki) ? hit.wiki : "primary") + "|" + hit.path
       if (!byKey[key]) byKey[key] = merge(hit, { _termHits: 0, _termCount: terms.length })

@@ -1639,6 +1639,13 @@ MiniAWikiManager.prototype.compact = function(options) {
 }
 
 MiniAWikiManager.prototype.reindex = function() {
+  if (this._legacyRetrievalV2) {
+    var initial = this._legacyRetrievalV2.build()
+    // A failed first build leaves legacy retrieval active unless publication
+    // actually completed. Read-only attempts never change the effective mode.
+    this._refreshRetrievalMode()
+    return initial
+  }
   if (this._retrievalV2) {
     var changes = isMap(this._servingBatchChanges) && io.fileExists(this._retrievalV2.root + "/current.json") ? Object.keys(this._servingBatchChanges) : __
     var built = this._retrievalV2.build(changes)
@@ -1876,6 +1883,8 @@ MiniAWikiManager.prototype._withWikiIdentity = function(results, name) {
     var out = merge({}, hit)
     out.wiki = name
     if (name !== "primary" && !String(out.path || "").startsWith("@")) out.path = "@" + name + "/" + out.path
+    if (isString(out.ref)) out.ref = "wiki:" + out.path
+    if (isMap(out.passage)) out.passage.wiki = name
     return out
   })
 }
@@ -1884,24 +1893,33 @@ MiniAWikiManager.prototype._withWikiIdentity = function(results, name) {
 // the single global cap is applied after the stable merge. Lucene scores remain
 // native (and are not normalized across independent indexes).
 MiniAWikiManager.prototype.searchSelected = function(query, options) {
+  var retrievalEngine = this._retrievalEngineFor(options)
   if (options && isDef(options.applicability)) {
-    if (!this._retrievalV2) return {ok:false,error:"applicability-requires-v2"}
+    if (!retrievalEngine) return {ok:false,error:"applicability-requires-v2"}
     if (options.forceScan || options.regex || options.path || options.searchIn === "body") return {ok:false,error:"applicability-indexed-search-required"}
   }
-  if (this._retrievalV2 && !(options && (options.forceScan || options.regex || options.path || options.searchIn === "body"))) { var selectedV2 = this._retrievalV2.search(query, options); return selectedV2.ok && !(selectedV2.outcome === "partial" && !selectedV2.results.length) ? selectedV2.results : selectedV2 }
+  if (retrievalEngine && !(options && (options.forceScan || options.regex || options.path || options.searchIn === "body"))) { var selectedV2 = retrievalEngine.search(query, options); return selectedV2.ok && !(selectedV2.outcome === "partial" && !selectedV2.results.length) ? selectedV2.results : selectedV2 }
   var opts = isObject(options) ? options : {}
   var selection = this.resolveWikiSelection(opts.wiki)
   if (!selection.ok) return selection
   var limit = isNumber(opts.limit) && opts.limit > 0 ? opts.limit : 20
-  var all = []
-  selection.targets.forEach(function(target) {
+  var all = [], failure, truncated = false
+  var scanState = { scanned: 0, budget: Number(this._config.wikisearchscanbudget) > 0 ? Number(this._config.wikisearchscanbudget) : 1000,
+    deadline: Date.now() + (Number(this._config.wikisearchscanmaxms) > 0 ? Number(this._config.wikisearchscanmaxms) : 15000), truncated: false }
+  selection.targets.some(function(target) {
     var localOpts = merge(opts, { limit: limit, __wikiNoMounts: true })
+    localOpts.__scanState = scanState
     delete localOpts.wiki
     var hits = target.manager.search(query, localOpts)
+    // Never hide a published source failure behind a successful legacy source.
+    if (!isArray(hits)) { failure = hits; return true }
+    truncated = truncated || hits.truncated === true
     all = all.concat(this._withWikiIdentity(hits, target.name))
+    return false
   }, this)
+  if (isDef(failure)) return failure
   var out = all.slice(0, limit)
-  if (all.truncated === true) out.truncated = true
+  if (truncated || scanState.truncated || all.length > limit) { out.truncated = true; out.scanned = scanState.scanned; out.scanBudget = scanState.budget }
   return out
 }
 
@@ -1988,7 +2006,9 @@ MiniAWikiManager.prototype._normalizeRetrievalPath = function(path) { return __m
 
 MiniAWikiManager.prototype.configure = function(config) {
   if (this._retrievalV2) this._retrievalV2.close()
+  if (this._legacyRetrievalV2) this._legacyRetrievalV2.close()
   this._retrievalV2 = __
+  this._legacyRetrievalV2 = __
   var cfg = isMap(config) ? config : {}
   if (isUnDef(cfg.wikiretrievalv2) && isString(getEnv("OAF_MINI_A_WIKI_RETRIEVAL_V2"))) cfg.wikiretrievalv2 = getEnv("OAF_MINI_A_WIKI_RETRIEVAL_V2")
   if (isUnDef(cfg.wikiretrievalconfig) && isString(getEnv("OAF_MINI_A_WIKI_RETRIEVAL_CONFIG"))) cfg.wikiretrievalconfig = getEnv("OAF_MINI_A_WIKI_RETRIEVAL_CONFIG")
@@ -2050,7 +2070,53 @@ MiniAWikiManager.prototype.configure = function(config) {
   this._artifactLastCheckAt = new Date().getTime()
   this._initializeGraph()
   this._bootstrapWiki()
-  if (toBoolean(cfg.wikiretrievalv2) === true) this._retrievalV2 = new global.MiniAWikiRetrievalV2(this, validatedRetrievalConfig)
+  if (toBoolean(cfg.wikiretrievalv2) === true) {
+    this._retrievalV2 = new global.MiniAWikiRetrievalV2(this, validatedRetrievalConfig)
+    // Only an unpublished wiki is legacy. Never downgrade a published but
+    // incompatible/corrupt generation, or a publication with a rollback pointer.
+    if (!this._hasRetrievalPublication(this._retrievalV2)) {
+      this._legacyRetrievalV2 = this._retrievalV2
+      this._retrievalV2 = __
+      var wikiName = isString(cfg.wikiMountName) ? "@" + cfg.wikiMountName : "primary"
+      this._logFn("warn", "[wiki " + wikiName + "] wikiretrievalv2=true requested, but no V2 serving generation exists (v2-build-required); using legacy retrieval. Run an explicit writable V2 reindex or publish compatible artifacts to enable V2.")
+    }
+  }
+}
+
+MiniAWikiManager.prototype._hasRetrievalPublication = function(engine) {
+  return ["current.json", "previous.json"].some(function(name) {
+    var path = engine.root + "/" + name
+    return io.fileExists(path) || java.nio.file.Files.isSymbolicLink(new java.io.File(path).toPath())
+  })
+}
+
+// A fallback reader can observe a later explicit build or refreshed bundle.
+// Once a publication exists, V2 owns errors; its removal must not trigger scans.
+MiniAWikiManager.prototype._refreshRetrievalMode = function() {
+  if (!this._legacyRetrievalV2) return
+  this._maybeRefreshArtifactBundle()
+  var engine = this._legacyRetrievalV2
+  if (this._access !== "rw") engine.root = this._activeBundleRoot() + "/.mini-a-wiki-serving"
+  if (this._hasRetrievalPublication(engine)) {
+    this._retrievalV2 = engine
+    this._legacyRetrievalV2 = __
+  }
+}
+
+// Mixed selections use the existing page-oriented federation adapter. Each
+// source still searches with its own effective engine; no V2 failure is scanned.
+MiniAWikiManager.prototype._retrievalEngineFor = function(options) {
+  this._refreshRetrievalMode()
+  var engine = this._retrievalV2 || this._legacyRetrievalV2
+  if (!engine) return __
+  var selection = this.resolveWikiSelection(options && options.__wikiNoMounts === true ? "primary" : options && options.wiki)
+  if (!selection.ok) return engine
+  var legacy = false
+  selection.targets.forEach(function(target) {
+    target.manager._refreshRetrievalMode()
+    if (target.manager._legacyRetrievalV2) legacy = true
+  })
+  return legacy ? __ : engine
 }
 
 MiniAWikiManager.prototype._initializeGraph = function() {
@@ -3065,6 +3131,7 @@ MiniAWikiManager.prototype._makeS3FsBackend = function(cfg) {
 
 MiniAWikiManager.prototype.close = function() {
   if (this._retrievalV2) this._retrievalV2.close()
+  if (this._legacyRetrievalV2) this._legacyRetrievalV2.close()
   var self = this
   Object.keys(this._metaDirty || {}).forEach(function(k) { self._saveMetaShard(k) })
   if (isObject(this._searchIndex)) { try { this._searchIndex.close() } catch(ignoreIdxClose) {} }
@@ -3371,11 +3438,12 @@ MiniAWikiManager.prototype._agenticLog = function(name, details) {
 // bodies/snippets are never included. `ref` is a stateless stable convenience;
 // paths remain valid (including @mount paths).
 MiniAWikiManager.prototype.agenticSearch = function(query, options) {
+  var retrievalEngine = this._retrievalEngineFor(options)
   if (options && isDef(options.applicability)) {
-    if (!this._retrievalV2) return {ok:false,error:"applicability-requires-v2"}
+    if (!retrievalEngine) return {ok:false,error:"applicability-requires-v2"}
     if (options.forceScan || options.regex || options.path || options.searchIn === "body") return {ok:false,error:"applicability-indexed-search-required"}
   }
-  if (this._retrievalV2 && !(options && (options.forceScan || options.regex || options.path || options.searchIn === "body"))) return this._retrievalV2.search(query, options)
+  if (retrievalEngine && !(options && (options.forceScan || options.regex || options.path || options.searchIn === "body"))) return retrievalEngine.search(query, options)
   var opts = isObject(options) ? options : {}
   var limit = isNumber(opts.limit) && opts.limit > 0 ? Math.min(Math.floor(opts.limit), 20) : 8
   var searchOptions = merge(opts, { limit: limit, compact: true, contextLines: 0 })
@@ -3399,20 +3467,22 @@ MiniAWikiManager.prototype.agenticSearch = function(query, options) {
   var engine = this._searchIndexStatus()
   this._agenticLog("search", { query: query, backend: engine, results: results.length, topScore: results.length > 0 ? results[0].score : __ })
   var out = { query: query, backend: engine, results: results }
+  if (this._retrievalV2 || this._legacyRetrievalV2) out.effectiveMode = "legacy-federation"
   if (hits.truncated === true) { out.truncated = true; out.scanned = hits.scanned; out.scanBudget = hits.scanBudget }
   return out
 }
 
 MiniAWikiManager.prototype.open = function(pathOrRef, options) {
   var path = this._agenticPath(pathOrRef)
+  this._refreshRetrievalMode()
+  if (path.startsWith("@")) {
+    var mountedOpen = this._resolveMountPath(path)
+    if (!mountedOpen || !mountedOpen.mount) return { error: "mount-not-found" }
+    var opened = mountedOpen.mount.manager.open(mountedOpen.localPath, options)
+    if (opened && !opened.error) { opened.path = path; opened.ref = this._agenticRef(path); this._decorateEntry(opened) }
+    return opened
+  }
   if (this._retrievalV2) {
-    if (path.startsWith("@")) {
-      var mountedOpen = this._resolveMountPath(path)
-      if (!mountedOpen || !mountedOpen.mount) return { error: "mount-not-found" }
-      var openedV2 = mountedOpen.mount.manager.open(mountedOpen.localPath, options)
-      if (openedV2 && !openedV2.error) { openedV2.path = path; openedV2.ref = this._agenticRef(path); this._decorateEntry(openedV2) }
-      return openedV2
-    }
     return this._decorateEntry(this._retrievalV2.open(path, options))
   }
   var page = this.read(path)
@@ -3459,6 +3529,17 @@ MiniAWikiManager.prototype.navigate = function(pathOrRef, options) {
 
 MiniAWikiManager.prototype.agenticRead = function(pathOrRef, options) {
   var path = this._agenticPath(pathOrRef), opts = isObject(options) ? options : {}
+  this._refreshRetrievalMode()
+  if (path.startsWith("@") && (this._retrievalV2 || this._legacyRetrievalV2)) {
+    var mountedRead = this._resolveMountPath(path)
+    if (!mountedRead || !mountedRead.mount) return { error: "mount-not-found" }
+    var mountedResult = mountedRead.mount.manager.agenticRead(mountedRead.localPath, opts)
+    if (!mountedResult) return mountedResult
+    var qualified = this._qualifyMountedNavigation(mountedResult, mountedRead.name)
+    if (isString(qualified.ref)) qualified.ref = this._agenticRef(path)
+    if (isMap(qualified.next)) qualified.next.path = this._agenticRef(path)
+    return qualified
+  }
   var pinnedDescriptor
   if (this._retrievalV2) {
     pinnedDescriptor = this.open(path)
@@ -3639,7 +3720,8 @@ MiniAWikiManager.prototype._rankRetrievalCandidates = function(results, query) {
 }
 
 MiniAWikiManager.prototype.retrieve = function(query, options) {
-  if (this._retrievalV2) return this._retrievalV2.retrieve(query, options)
+  var retrievalEngine = this._retrievalEngineFor(options)
+  if (retrievalEngine) return retrievalEngine.retrieve(query, options)
   var opts = isObject(options) ? options : {}
   var budgets = {
     queries: isNumber(opts.maxQueries) ? Math.max(1, Math.floor(opts.maxQueries)) : 1,
@@ -3712,6 +3794,7 @@ MiniAWikiManager.prototype.retrieve = function(query, options) {
     expansion: graphExpansion,
     budget: { limits: budgets, used: { queries: 1, candidatePages: search.results.length, inspectedPages: evidence.length, graphExpansion: graphExpansion.length, bytes: usedBytes } }
   }
+  if (search.effectiveMode) out.effectiveMode = search.effectiveMode
   if (search.truncated === true || evidence.length < ranked.length || usedBytes >= budgets.bytes) out.truncated = true
   this._agenticLog("retrieve", { query: query, candidates: ranked.length, inspected: evidence.length, bytes: usedBytes })
   return out
@@ -3996,7 +4079,11 @@ function __miniAWikiRequireSearchHits(result) {
 }
 
 MiniAWikiManager.prototype.search = function(query, options) {
-  if (this._retrievalV2 && !(options && (options.forceScan || options.regex || options.searchIn === "body" || options.path))) { var searchV2 = this._retrievalV2.search(query, options); return searchV2.ok && !(searchV2.outcome === "partial" && !searchV2.results.length) ? searchV2.results : searchV2 }
+  if (options && options.__wikiNoMounts === true) options = merge(options, { wiki: "primary" })
+  var retrievalEngine = this._retrievalEngineFor(options)
+  if (retrievalEngine && !(options && (options.forceScan || options.regex || options.searchIn === "body" || options.path))) { var searchV2 = retrievalEngine.search(query, options); return searchV2.ok && !(searchV2.outcome === "partial" && !searchV2.results.length) ? searchV2.results : searchV2 }
+  if ((this._retrievalV2 || this._legacyRetrievalV2) && !(options && options.__wikiNoMounts === true)) return this.searchSelected(query, options)
+  if (options && isDef(options.applicability)) return { ok: false, error: "applicability-requires-v2" }
   if (!isString(query) || query.trim().length === 0) return []
   this._maybeRefreshArtifactBundle()
   var opts       = isObject(options) ? options : {}
@@ -4444,6 +4531,7 @@ MiniAWikiManager.prototype.browse = function(path) {
 }
 
 MiniAWikiManager.prototype.backlinks = function(path) {
+  this._refreshRetrievalMode()
   if (this._retrievalV2) return this._retrievalV2.backlinks(path)
   var target
   try { target = __miniAWikiNormalizePath(path, { requireMarkdown: true }) } catch(e) { return { target: path, count: 0, backlinks: [] } }
@@ -5054,6 +5142,7 @@ MiniAWikiManager.prototype.context = function(options) {
 
   // Retrieval capability: tells the agent up-front whether search is index-backed or a full scan,
   // and whether a knowledge graph is available as an entry point.
+  this._refreshRetrievalMode()
   var searchStatus = "scan", lexicalCapabilities = { requested: clone(this._lexicalConfig), effective: { language: "standard", synonyms: false, shingles: false, ngrams: false, queryExpansion: false, pseudoRelevanceFeedback: false } }
   if (this._retrievalV2) {
     var capabilityPin
@@ -5090,6 +5179,8 @@ MiniAWikiManager.prototype.context = function(options) {
     retrieval: {
       wiki   : "primary",
       search : searchStatus,
+      mode   : this._retrievalV2 ? "v2" : "legacy",
+      fallbackReason: this._legacyRetrievalV2 ? "v2-build-required" : __,
       lexical: lexicalCapabilities,
       graph  : graphStatus,
       entries: entryPoints
@@ -5100,7 +5191,8 @@ MiniAWikiManager.prototype.context = function(options) {
 }
 
 MiniAWikiManager.prototype.assembleContext = function(query, options) {
-  if (this._retrievalV2) return this._retrievalV2.assemble(query, options)
+  var retrievalEngine = this._retrievalEngineFor(options)
+  if (retrievalEngine) return retrievalEngine.assemble(query, options)
   return { ok: false, error: "knowledge-extension-required" }
 }
 // Explicit identity allows another module scope to install the extension without

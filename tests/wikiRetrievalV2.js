@@ -2,6 +2,96 @@
   load("mini-a-common.js"); load("mini-a-wiki.js")
   var temporary = function() { var p = java.io.File.createTempFile("wiki-v2-test-", "").getCanonicalPath(); io.rm(p); io.mkdir(p); return p }
   var make = function(root, extra) { return new MiniAWikiManager(merge({ backend: "fs", root: root, access: "rw", wikiretrievalv2: true, wikiretrievalconfig: { passageChars: 256 } }, extra || {}), function() {}) }
+  exports.testAutomaticLegacyFallback = function() {
+    var dir = temporary(), reader, writer, incompatible, disabled, unsafe, warnings = []
+    try {
+      io.writeFileString(dir + "/old.md", "---\ntitle: Old reference\n---\n# Old\nlegacyautoneedle answer.\n")
+      io.writeFileString(dir + "/link.md", "# Link\n[Old](old.md)\n")
+      reader = new MiniAWikiManager({backend:"fs",root:dir,access:"ro",wikiretrievalv2:true}, function(level,message) { if(level === "warn") warnings.push(message) })
+      ow.test.assert(reader.context().retrieval.mode, "legacy", "unpublished wiki stays legacy")
+      ow.test.assert(reader.context().retrieval.fallbackReason, "v2-build-required", "fallback reason is inspectable")
+      ow.test.assert(reader.search("legacyautoneedle").length, 1, "legacy search works without publication")
+      ow.test.assert(reader.retrieve("legacyautoneedle").evidence.length, 1, "legacy evidence retrieval works")
+      ow.test.assert(reader.open("old.md").title, "Old reference", "legacy navigation works")
+      ow.test.assert(reader.backlinks("old.md").count, 1, "legacy backlinks work")
+      ow.test.assert(reader.agenticSearch("legacyautoneedle", {applicability:{version:"1"}}).error, "applicability-requires-v2", "fallback does not silently discard V2 constraints")
+      ow.test.assert(warnings.filter(function(m){return m.indexOf("using legacy retrieval") >= 0}).length, 1, "fallback warns once per manager")
+      ow.test.assert(warnings[0].indexOf("primary") >= 0, true, "warning identifies the wiki")
+      ow.test.assert(reader.reindex().ok, false, "read-only fallback cannot build")
+      ow.test.assert(io.fileExists(dir + "/.mini-a-wiki-serving"), false, "reads do not create V2 artifacts")
+      writer = make(dir)
+      writer._legacyRetrievalV2._beforeActivate = function(){throw new Error("injected first publication failure")}
+      ow.test.assert(writer.reindex().ok,false,"failed first build is reported")
+      ow.test.assert(writer.context().retrieval.mode,"legacy","failed first build retains legacy retrieval")
+      delete writer._legacyRetrievalV2._beforeActivate
+      ow.test.assert(writer.reindex().ok, true, "explicit reindex builds V2 despite legacy effective mode")
+      ow.test.assert(writer.context().retrieval.mode, "v2", "writer switches after publication")
+      ow.test.assert(reader.agenticSearch("legacyautoneedle").results.length, 1, "existing reader observes explicit publication")
+      ow.test.assert(reader.context().retrieval.mode, "v2", "reader promotes without recreation")
+      incompatible = make(dir,{access:"ro",wikilexical:{language:"portuguese"}})
+      var mismatch = incompatible.agenticSearch("legacyautoneedle")
+      ow.test.assert(mismatch.sources[0].reason,"incompatible-generation","published lexical mismatch remains an error")
+      ow.test.assert(incompatible.context().retrieval.mode,"v2","incompatible generation is never classified as legacy")
+      disabled = make(dir,{access:"ro",wikiretrievalv2:false})
+      ow.test.assert(disabled.context().retrieval.mode,"legacy","explicit false remains legacy even with a publication")
+      ow.test.assert(isUnDef(disabled.context().retrieval.fallbackReason),true,"explicit false is not automatic fallback")
+      // Once V2 is published, missing/corrupt artifacts remain errors, not scans.
+      io.writeFileString(dir + "/.mini-a-wiki-serving/current.json", "{}")
+      ow.test.assert(isArray(reader.search("legacyautoneedle")), false, "corrupt publication never falls back")
+      ow.test.assert(reader.context().retrieval.mode, "v2", "published mode remains V2 on corruption")
+      io.rm(dir + "/.mini-a-wiki-serving/current.json")
+      java.nio.file.Files.createSymbolicLink(java.nio.file.Paths.get(dir + "/.mini-a-wiki-serving/current.json"),java.nio.file.Paths.get("missing-pointer"))
+      unsafe = make(dir,{access:"ro"})
+      ow.test.assert(unsafe.context().retrieval.mode,"v2","broken publication symlink is not legacy")
+      ow.test.assert(unsafe.agenticSearch("legacyautoneedle").sources[0].status,"unavailable","unsafe pointer is explicitly unavailable")
+    } finally { if(reader)reader.close();if(writer)writer.close();if(incompatible)incompatible.close();if(disabled)disabled.close();if(unsafe)unsafe.close();io.rm(dir) }
+  }
+  exports.testAutomaticLegacyMixedMounts = function() {
+    var dir = temporary(), primary, writer, legacy, warnings = []
+    try {
+      io.mkdir(dir + "/v2"); io.mkdir(dir + "/old")
+      writer = make(dir + "/v2")
+      writer.write("v2.md", {title:"Indexed reference"}, "# Indexed\nmixedautoneedle indexed answer.")
+      ow.test.assert(writer.reindex().ok,true,"indexed fixture builds")
+      io.writeFileString(dir + "/old/old.md", "---\ntitle: Legacy reference\n---\n# Legacy\nmixedautoneedle legacy answer.\n")
+      primary = new MiniAWikiManager({backend:"fs",root:dir+"/v2",access:"ro",wikiretrievalv2:true},function(level,message){if(level==="warn")warnings.push(message)})
+      ow.test.assert(primary.attach("old",{root:dir+"/old"}).ok,true,"legacy mount attaches")
+      var hits = primary.agenticSearch("mixedautoneedle",{wiki:"*"}).results
+      ow.test.assert(hits.length,2,"mixed federation includes both modes")
+      hits.forEach(function(hit){ow.test.assert(primary.agenticRead(hit.ref).body.indexOf("mixedautoneedle")>=0,true,"mixed references round trip")})
+      var fragment = primary.agenticRead("@old/old.md", {section:"Legacy",maxChars:12}), joined = fragment.body, cursor = fragment.next
+      while (cursor) { fragment = primary.agenticRead(cursor.path,cursor); joined += fragment.body; cursor = fragment.next }
+      ow.test.assert(joined,"# Legacy\nmixedautoneedle legacy answer.\n","mounted fallback cursors preserve every character")
+      var context = primary.assembleContext("mixedautoneedle",{wiki:"*"})
+      ow.test.assert(context.chunks.some(function(c){return c.path==="v2.md"}),true,"mixed context retains indexed passages")
+      ow.test.assert(primary.retrieve("mixedautoneedle",{wiki:"old"}).evidence[0].path,"@old/old.md","legacy-only scope excludes primary")
+      ow.test.assert(primary.agenticSearch("mixedautoneedle",{wiki:"primary"}).generations.primary.length>0,true,"V2-only scope retains V2 pipeline")
+      ow.test.assert(warnings.some(function(m){return m.indexOf("@old")>=0&&m.indexOf("using legacy retrieval")>=0}),true,"mount warning identifies source")
+      legacy = make(dir+"/old",{access:"ro"})
+      ow.test.assert(legacy.attach("indexed",{root:dir+"/v2"}).ok,true,"V2 mount under legacy primary")
+      var remote=legacy.agenticSearch("mixedautoneedle",{wiki:"indexed"})
+      ow.test.assert(remote.results[0].path,"@indexed/v2.md","V2-only mount scope uses V2")
+      ow.test.assert(legacy.agenticRead(remote.results[0].ref).body.indexOf("mixedautoneedle")>=0,true,"legacy primary reads V2 mount")
+      ow.test.assert(legacy.agenticSearch("mixedautoneedle").results.length,2,"legacy primary includes both modes")
+      load("mini-a-mcp-wiki.js")
+      ;[primary,legacy].forEach(function(manager) {
+        global.__wikiManager = manager
+        global.__miniAMcpWiki = {restriction:new MiniAMcpWikiRestriction({wikirestrict:true,wikirestrictpagecooldown:0},{backend:"fs",root:manager._backend.root})}
+        var found = __miniAMcpWikiRestrictedSearch({query:"mixedautoneedle"})
+        ow.test.assert(found.results.length,2,"restricted mixed search preserves both sources")
+        found.results.forEach(function(hit) {
+          ow.test.assert(Object.keys(hit).sort().join(","),"description,reference,title","restricted fallback retains opaque metadata")
+          ow.test.assert(__miniAMcpWikiRestrictedRead({path:hit.reference}).content.indexOf("mixedautoneedle")>=0,true,"restricted mixed grants remain readable")
+        })
+      })
+      io.writeFileString(dir+"/v2/.mini-a-wiki-serving/current.json","{}")
+      ow.test.assert(isArray(primary.search("mixedautoneedle")),false,"mixed adapter preserves published-source errors")
+      load("mini-a-skills.js")
+      var skillFailure = ""
+      try { __miniASkillSearch(legacy,{query:"mixedautoneedle",type:"*"}) } catch(e) { skillFailure=String(e) }
+      ow.test.assert(skillFailure.indexOf("skill-search-unavailable")>=0,true,"legacy-primary skill facade preserves published mount errors")
+    } finally {global.__wikiManager=__;global.__miniAMcpWiki=__;if(primary)primary.close();if(legacy)legacy.close();if(writer)writer.close();io.rm(dir)}
+  }
   exports.testWikiCompact = function() {
     ;[false, true].forEach(function(shared) {
       var dir = temporary(), wm, reader
@@ -685,7 +775,7 @@
       var unknown = root.retrieve("expiry",{wiki:"unknown"})
       ow.test.assert(unknown.ok,false,"unknown selector rejected")
       root.attach("broken",{root:dir+"/missing",backend:"fs"})
-      ow.test.assert(root.retrieve("expiry",{wiki:["last","broken"]}).outcome,"partial","missing artifacts reported independently")
+      ow.test.assert(root.retrieve("expiry",{wiki:["last","broken"]}).evidence.length > 0,true,"unpublished mount uses legacy adapter while indexed evidence remains available")
       mounts[2].write("version.md",{title:"Old correct",applicability:{product:"Mini-A",version:"1"}},"# Guide\nversionmarker old instruction")
       mounts[2].write("new.md",{title:"New incompatible",applicability:{product:"Mini-A",version:"2"}},"# Guide\nversionmarker new instruction")
       var applicable = mounts[2].retrieve("versionmarker",{applicability:{version:"1"}})
@@ -1134,10 +1224,10 @@
     var dir = temporary(), wm, old
     try {
       wm=make(dir,{wikiretrievalconfig:{passageChars:256}})
-      ow.test.assert(wm._retrievalV2.config.linkImmutableFiles,true,"immutable file reuse is enabled by default")
       wm.write("changed.md",{title:"Changed"},"# Changed\noldgenerationparameter is supported.")
       wm.write("stable.md",{title:"Stable"},"# Stable\nstableparameter remains valid. See [guidance](changed.md).")
       ow.test.assert(wm.reindex().ok,true,"immutable reuse fixture published")
+      ow.test.assert(wm._retrievalV2.config.linkImmutableFiles,true,"immutable file reuse is enabled by default")
       old=wm._retrievalV2.acquire()
       var original=clone(old.manifest), oldText=wm._retrievalV2._query(old,"oldgenerationparameter",5,0).hits[0].text
       var untouched=old.catalog.pages["stable.md"].locator

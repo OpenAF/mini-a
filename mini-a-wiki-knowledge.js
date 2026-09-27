@@ -135,9 +135,38 @@ MiniAWikiManager.prototype.knowledgeStats = function(resetTelemetry) {
   return { versions: MINI_A_WIKI_KNOWLEDGE, sources: Object.keys(s.sources).length, chunks: Object.keys(s.chunks).length, facts: Object.keys(s.facts).length, summaries: Object.keys(s.summaries.pages).length, telemetry: this._knowledgeLoadTelemetry() }
 }
 MiniAWikiManager.prototype.assembleContext = function(query, options) {
-  if (this._retrievalV2) return this._retrievalV2.assemble(query, options)
+  var retrievalEngine = this._retrievalEngineFor(options)
+  if (retrievalEngine) return retrievalEngine.assemble(query, options)
   options = isMap(options) ? options : {}
   var limit = Number(options.wikicontextchunks || options.chunks || 5), budget = Number(options.wikicontexttokens || options.tokens || 2400)
+  var selection = this.resolveWikiSelection(options.wiki)
+  if (!selection.ok) return selection
+  if (isDef(options.applicability)) return { ok: false, error: "applicability-requires-v2", chunks: [] }
+  if ((this._retrievalV2 || this._legacyRetrievalV2) && selection.targets.some(function(target) { return target.mounted })) {
+    var chunks = [], tokens = 0, failure, truncated = false
+    selection.targets.some(function(target) {
+      if (chunks.length >= limit || tokens >= budget) { truncated = true; return true }
+      var localOptions = merge(options, { wiki: "primary", chunks: limit - chunks.length, wikicontextchunks: limit - chunks.length, tokens: budget - tokens, wikicontexttokens: budget - tokens })
+      var context = target.manager.assembleContext(query, localOptions)
+      if (!context || context.ok === false || !isArray(context.chunks)) { failure = context || {ok:false,error:"context-unavailable"}; return true }
+      truncated = truncated || context.truncated === true
+      context.chunks.forEach(function(chunk) {
+        var cost = Number(chunk.estimatedTokens) || Math.ceil(String(chunk.text || "").length / 4)
+        if (chunks.length >= limit || tokens + cost > budget) { truncated = true; return }
+        var item = clone(chunk)
+        if (target.mounted) {
+          ;["path", "wikiPath"].forEach(function(key) { if (isString(item[key])) item[key] = "@" + target.name + "/" + item[key] })
+          if (isString(item.ref)) item.ref = "wiki:" + item.path
+          if (isMap(item.passage)) item.passage.wiki = target.name
+        }
+        item.wiki = target.name
+        chunks.push(item); tokens += cost
+      })
+      return false
+    })
+    if (failure) return failure
+    return { query: query, chunks: chunks, estimatedTokens: tokens, budget: budget, effectiveMode: "legacy-federation", truncated: truncated }
+  }
   var state = this.knowledgeLoadState(), out = [], used = 0, seen = {}, pending = {}, self = this
   try {
     this._ingestJournalPaths().forEach(function(journalPath) {
@@ -147,7 +176,7 @@ MiniAWikiManager.prototype.assembleContext = function(query, options) {
     })
   } catch(e) { state._corrupt = true }
   if (state._corrupt) return { ok: false, error: "knowledge-state-unavailable", outcome: "unavailable", query: query, chunks: [], estimatedTokens: 0, budget: budget }
-  var hits = this.search(query, { limit: Math.max(limit * 4, 20), debug: true })
+  var hits = this.searchSelected(query, merge(options, { limit: Math.max(limit * 4, 20), debug: true }))
   if (!isArray(hits)) return { ok: false, error: hits && hits.error || "search-unavailable", outcome: hits && hits.outcome || "unavailable", query: query, chunks: [], estimatedTokens: 0, budget: budget }
   hits.forEach(function(h) {
     if (pending[h.path]) return

@@ -246,10 +246,7 @@
       }, "# Commit\nPrepare and verify a focused commit.\n")
 
       wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro", wikiretrievalv2: true })
-      var unavailable = ""
-      try { __miniASkillSearch(wm, { query: "commit" }) } catch(e) { unavailable = String(e.message || e) }
-      ow.test.assert(unavailable.indexOf("skill-search-unavailable") >= 0, true, "v2 status should not fail with a forEach type error")
-      ow.test.assert(unavailable.indexOf("v2-build-required") >= 0, true, "v2 status should preserve the actionable build-required reason")
+      ow.test.assert(__miniASkillSearch(wm, {query:"commit"}).length, 1, "unpublished skill wiki uses legacy retrieval")
       wm.close(); wm = __
 
       var writer = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikiretrievalv2: true })
@@ -257,6 +254,13 @@
       writer.close()
 
       wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro", wikiretrievalv2: true })
+      var pointerPath = wm._retrievalV2.root + "/current.json", pointer = io.readFileString(pointerPath)
+      io.rm(pointerPath)
+      var unavailable = ""
+      try { __miniASkillSearch(wm, { query: "commit" }) } catch(e) { unavailable = String(e.message || e) }
+      ow.test.assert(unavailable.indexOf("skill-search-unavailable") >= 0, true, "published V2 failure remains actionable")
+      ow.test.assert(unavailable.indexOf("v2-build-required") >= 0, true, "published V2 never silently downgrades")
+      io.writeFileString(pointerPath, pointer)
       var hits = __miniASkillSearch(wm, { query: "commit" })
       ow.test.assert(hits.length, 1, "indexed v2 skill search should still return results")
       ow.test.assert(hits[0].name, "commit-helper", "indexed v2 skill search should return the matching skill")

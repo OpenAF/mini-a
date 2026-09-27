@@ -1,6 +1,12 @@
 include:
 - oJobTest.yaml
 jobs:
+- name: MiniA Wiki V2::AutomaticLegacyFallback
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testAutomaticLegacyFallback
+- name: MiniA Wiki V2::AutomaticLegacyMixedMounts
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testAutomaticLegacyMixedMounts
 - name: MiniA Wiki V2::WikiCompact
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testWikiCompact
@@ -172,6 +178,8 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testFederatedRetryBudget
 todo:
+- MiniA Wiki V2::AutomaticLegacyFallback
+- MiniA Wiki V2::AutomaticLegacyMixedMounts
 - MiniA Wiki V2::WikiCompact
 - MiniA Wiki V2::SearchOutputBudgetPreservesCandidates
 - MiniA Wiki V2::SourceIdentityFallback

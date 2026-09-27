@@ -1,7 +1,8 @@
 # Wiki retrieval v2
 
-`wikiretrievalv2=true` enables a shared deterministic passage engine. It is disabled
-by default. Markdown remains authoritative; serving generations are rebuildable.
+`wikiretrievalv2=true` prefers the shared deterministic passage engine, with
+automatic legacy retrieval for wikis that have no V2 publication. The flag remains
+disabled by default. Markdown remains authoritative; serving generations are rebuildable.
 This implementation includes local serving, compatible published-bundle readers
 and deterministic maintenance. Some acceptance items remain unverified or incomplete. See [validation](https://github.com/openaf/mini-a/blob/main/development/docs/WIKI-RETRIEVAL-V2-VALIDATION.md)
 and [baseline](https://github.com/openaf/mini-a/blob/main/development/docs/WIKI-RETRIEVAL-V2-BASELINE.md).
@@ -11,7 +12,7 @@ and [baseline](https://github.com/openaf/mini-a/blob/main/development/docs/WIKI-
 Use the supported unattended Dream maintenance entry point:
 
 ```sh
-ojob mini-a.yaml dream=true usewiki=true wikiroot=/path/to/wiki wikiaccess=rw wikiretrievalv2=true dreamwikimode=reindex
+ojob mini-a.yaml goal="Reindex wiki" dream=true usewiki=true wikiroot=/path/to/wiki wikiaccess=rw wikiretrievalv2=true dreamwikimode=reindex
 ```
 
 Alternatively use the interactive
@@ -20,16 +21,38 @@ Each builds compatible artifacts explicitly. Ingestion finalisation uses the
 existing reindex/journal flow when configured with v2. Pending/corrupt journal
 state and inactive source evidence are suppressed during retrieval.
 
-Set the same flag on readers. Missing artifacts return `v2-build-required` in
-trusted source status; they do not trigger a corpus scan or automatic migration.
-Incompatible lexical/schema fingerprints are unavailable explicitly. Every
-selected wiki needs its own compatible writable build. Read-only managers never
+Set the same flag on readers. When neither `current.json` nor `previous.json`
+exists in the serving directory, the manager keeps legacy retrieval and logs one
+warning identifying the primary wiki or mount, the `v2-build-required` reason,
+and how to enable V2. This applies to writable and read-only managers. No automatic
+reindex or migration runs. Legacy retrieval retains its existing index/scan behavior.
+`context().retrieval.mode` reports `legacy` and `fallbackReason` reports
+`v2-build-required`; `retrieval.search` describes the actual legacy search capability.
+
+An explicit writable reindex builds V2 even while legacy fallback is active.
+After publication, the writer switches to V2, and existing fallback readers detect
+the publication on their next retrieval/navigation request (remote bundles follow
+the configured refresh interval). `wikiretrievalv2=false` continues to force legacy
+behavior. Once a manager observes a V2 publication, missing, corrupt or incompatible
+artifacts remain explicit errors; they do not trigger a legacy downgrade. Existing
+obsolete V2 formats and mismatched lexical settings still require a writable reindex.
+
+Each mounted wiki selects its own effective mode. A selection containing a legacy
+fallback uses the page-oriented federation adapter, with each source searched by
+its own engine and mount-qualified references preserved. Such search/retrieve results
+report `effectiveMode: "legacy-federation"`; selecting only indexed V2 sources retains
+the V2 pipeline. Mixed requests use legacy aggregate ranking and evidence budgets,
+not V2's shared passage-ranking/budget contract. V2-only applicability constraints
+are rejected when the selection requires legacy fallback. Published-source errors
+are propagated rather than hidden by other sources' successful searches.
+
+Every wiki needs its own compatible publication to use V2. Read-only managers never
 build. Local `fs` directories and `s3fs` filesystem views can build. HTTP/S3
 readers hydrate compatible published artifacts with the existing bundle/cache options.
-ZIP/OKT readers require an explicit writable `wikiindexdir` cache and an archive
-containing compatible serving artifacts plus the original source Markdown. Native
-ES storage can consume compatible locally hydrated artifacts; native ES/OpenSearch
-search remains separate. Missing/incompatible artifacts never trigger a migration.
+ZIP/OKT readers need an explicit writable `wikiindexdir` cache and an archive
+containing compatible serving artifacts plus original source Markdown to use V2;
+old archives continue through legacy retrieval. Native ES storage can consume
+compatible locally hydrated artifacts; native ES/OpenSearch search remains separate.
 
 ### Mounted wiki navigation and response budgets
 
@@ -44,7 +67,7 @@ Use `wiki op=mounts` to discover names, then scope search to the intended wiki:
 `tree` and `browse` also accept `wiki:@oaf/` references. Context accepts a single
 `wiki` selector or a mounted `path`; its `retrieval.wiki` identifies the wiki whose
 status is reported. Without a selector, context describes `primary`, so a primary
-`v2-build-required` status does not imply that mounted indexes are missing.
+`fallbackReason: "v2-build-required"` does not imply that mounted indexes are missing.
 
 Search preserves the highest-ranked complete candidates that fit `maxBytes`
 (default 16000), returning `outcome: partial`, `truncated: true`, and an

@@ -422,8 +422,9 @@ function __miniAMcpWikiRestrictedSearchImpl(args) {
   state._event("search", q)
   var hits
   try {
-    if (global.__wikiManager._retrievalV2) {
-      var improved = global.__wikiManager._retrievalV2.search(q, { limit: state.policy.searchLimit, expandGraph: !!global.__wikiManager._config && global.__wikiManager._config.wikigraphsearchhints === true, maxGraphExpansion: 5, maxGraphEdges: 256, evidenceChars: state.policy.readChars, evidenceLines: state.policy.readLines, __wikiSuppressSource: true })
+    var retrievalEngine = isFunction(global.__wikiManager._retrievalEngineFor) ? global.__wikiManager._retrievalEngineFor() : global.__wikiManager._retrievalV2
+    if (retrievalEngine) {
+      var improved = retrievalEngine.search(q, { limit: state.policy.searchLimit, expandGraph: !!global.__wikiManager._config && global.__wikiManager._config.wikigraphsearchhints === true, maxGraphExpansion: 5, maxGraphEdges: 256, evidenceChars: state.policy.readChars, evidenceLines: state.policy.readLines, __wikiSuppressSource: true })
       if (!improved.ok || improved.outcome === "partial" && !improved.results.length) return __miniAMcpWikiRestrictedError("restricted-unavailable")
       hits = improved.results
     } else hits = global.__wikiManager.search(q, { limit: state.policy.searchLimit, regex: false, caseSensitive: false, contextLines: 0, compact: true, path: "" }) } catch(e) { return __miniAMcpWikiRestrictedError("restricted-unavailable") }
@@ -436,6 +437,7 @@ function __miniAMcpWikiRestrictedSearchImpl(args) {
   // restricted-budget-exhausted error, no partial/truncated success) with no such side effect
   // on rejection. Reference tokens are a fixed-length sha256-truncated hex string (see
   // MiniAMcpWikiRestriction.prototype.issue) so their length can be counted before issuing.
+  if (!isArray(hits)) return __miniAMcpWikiRestrictedError("restricted-unavailable")
   var REF_LEN = 32
   var candidates = [], chars = 0
   for (var hi = 0; hi < hits.length && candidates.length < state.policy.searchLimit; hi++) {
@@ -692,7 +694,11 @@ function __miniAMcpWikiBuildAuditFn(auditEnabled, logPrefix) {
 }
 
 function __miniAMcpWikiBuildLoggerFn(auditEnabled, logPrefix) {
-  if (!auditEnabled) return function() {}
+  if (!auditEnabled) return function(level, msg) {
+    // Operator migration warnings must remain visible without enabling audit
+    // logging. STDERR preserves the JSON-RPC stream on STDOUT.
+    if (level === "warn" && String(msg).indexOf("wikiretrievalv2=true requested") >= 0) java.lang.System.err.println("[" + logPrefix + "] " + msg)
+  }
   return function(level, msg) {
     if (level == "warn") {
       try { logWarn("[" + logPrefix + "] " + level + ": " + msg) } catch(e) {}

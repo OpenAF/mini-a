@@ -3,7 +3,8 @@
 Mini-A's wiki is a Markdown knowledge base shared by agent sessions, the console, and the `mcp-wiki` servers. Enable it with `usewiki=true`; `/wiki context` is the quickest way to inspect its access mode and available retrieval features.
 
 For opt-in versioned passages, enable `wikiretrievalv2=true` and explicitly build
-with writable Dream reindex. See [retrieval v2](WIKI-RETRIEVAL-V2.md) for supported
+with writable Dream reindex. Unpublished wikis keep legacy retrieval with a warning
+until V2 artifacts are published; existing incompatible V2 artifacts remain errors. See [retrieval v2](WIKI-RETRIEVAL-V2.md) for supported
 local backends, migration, budget differences and [measured validation](https://github.com/openaf/mini-a/blob/main/development/docs/WIKI-RETRIEVAL-V2-VALIDATION.md).
 Flag-off behavior retains the existing page engine with compatible contract repairs.
 

@@ -85,7 +85,7 @@ help:
     example  : "false"
     mandatory: false
   - name     : wikiretrievalv2
-    desc     : Opt-in versioned passage retrieval; requires compatible serving artifacts; build explicitly on writable FS/s3fs or hydrate a published bundle
+    desc     : Prefer V2 passage retrieval; unpublished wikis use legacy retrieval with a warning; enable V2 with an explicit writable reindex or compatible published bundle
     example  : "false"
     mandatory: false
   - name     : wikiretrievalconfig

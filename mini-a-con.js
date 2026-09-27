@@ -664,7 +664,7 @@ try {
     wikilintstaleddays: { type: "number", default: 90, description: "Default stale-page threshold in days for wiki lint." },
     wikilintresultlimit: { type: "number", default: 0, description: "Default maximum lint issues returned to an agent (0 returns all; dream reorg defaults to 25)." },
     wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts; fs roots may be directories or local .zip/.okt archives." },
-    wikiretrievalv2: { type: "boolean", description: "Opt-in versioned passage retrieval (requires explicit writable reindex)." },
+    wikiretrievalv2: { type: "boolean", description: "Prefer V2 passage retrieval; unpublished wikis use legacy retrieval with a warning until explicitly reindexed." },
     wikiretrievalconfig: { type: "string", description: "Validated SLON/JSON advanced passage/cache/artifact budgets." },
     wikitelemetry: { type: "boolean", description: "Record local aggregate wiki retrieval telemetry (off by default); writable managers persist it, read-only managers keep it in memory." },
     wikilexical    : { type: "string", description: "SLON/JSON Lucene lexical configuration; defaults to {language:'english'} and supports optional synonymsFile." },
@@ -1530,7 +1530,7 @@ try {
       } else {
         wikiCfg.root = isString(sessionOptions.wikiroot) && sessionOptions.wikiroot.trim().length > 0 ? sessionOptions.wikiroot.trim() : "."
       }
-      var wm = new MiniAWikiManager(wikiCfg)
+      var wm = new MiniAWikiManager(wikiCfg, function(level, message) { if (level === "warn") logWarn(message) })
       try {
         var mountsRaw = __
         if (isDef(sessionOptions.wikimounts)) mountsRaw = sessionOptions.wikimounts
@@ -1590,7 +1590,7 @@ try {
         cfg.backend = "http"; cfg.url = sessionOptions.wikiurl
         cfg.accessKey = sessionOptions.wikiaccesskey; cfg.secret = sessionOptions.wikisecret
       }
-      var swm2 = new MiniAWikiManager(cfg)
+      var swm2 = new MiniAWikiManager(cfg, function(level, message) { if (level === "warn") logWarn(message) })
       if (isString(sessionOptions.skillwikimounts) && sessionOptions.skillwikimounts.trim().length > 0) {
         var mountsList = af.fromJSSLON(sessionOptions.skillwikimounts)
         if (!isArray(mountsList)) mountsList = [mountsList]
