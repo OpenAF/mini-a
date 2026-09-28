@@ -16831,23 +16831,9 @@ MiniA.prototype.init = function(args) {
       this.fnI("info", `Memory-reflection model enabled: ${this._getConfiguredModelName(this._oaf_reflect_model, "unknown")} (${this._oaf_reflect_model.type})`)
     }
 
-    var needsBedrock = function(modelConfig) {
-      return isMap(modelConfig) && isString(modelConfig.type) && modelConfig.type.toLowerCase() === "bedrock"
-    }
-
-    if (needsBedrock(this._oaf_model) || needsBedrock(this._oaf_lc_model) || needsBedrock(this._oaf_val_model) || needsBedrock(this._oaf_reflect_model)) {
-      includeOPack("AWS")
-      loadLib("aws.js")
-    }
-
-    var needsGhcopilot = function(modelConfig) {
-      return isMap(modelConfig) && isString(modelConfig.type) && modelConfig.type.toLowerCase() === "ghcopilot"
-    }
-
-    if (needsGhcopilot(this._oaf_model) || needsGhcopilot(this._oaf_lc_model) || needsGhcopilot(this._oaf_val_model) || needsGhcopilot(this._oaf_reflect_model)) {
-      includeOPack("ghcopilot")
-      loadLib("ghcopilot.js")
-    }
+    ;[this._oaf_model, this._oaf_lc_model, this._oaf_val_model, this._oaf_reflect_model].forEach(function(config) {
+      __miniAEnsureModelProvider(config)
+    })
 
     var applyPromptCachingDefault = function(modelConfig) {
       if (!isMap(modelConfig)) return

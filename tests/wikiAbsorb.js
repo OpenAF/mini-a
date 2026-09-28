@@ -20,6 +20,69 @@
     return { path: path, classification: "enrichment", edits: [{ before: before, after: after, evidence: ids }], evidence: ids, mappings: ids.map(function(id) { return { evidence: id, anchor: "" } }), dependencies: [] }
   }
   function run(r, op, id) { r._args.absorbop = op; r._args.absorbplan = id; return r.run() }
+  exports.testModelConfiguration = function() { fixture(function(root, r) {
+    io.writeFileString(root + "/one/a.md", "# A")
+    var config = { type: "mock", model: "absorb-test" }, received, secretCalls = 0, providerLoads = []
+    var registry = { mock: {}, openai: {} }, packPaths = { ghcopilot: "/packs/ghcopilot", AWS: "/packs/AWS", Custom: "/packs/Custom" }
+    var ensureProvider = new Function("ow", "getOPackPaths", "getOPackPath", "includeOPack", "loadLib", "return (" + String(__miniAEnsureModelProvider) + ")")(
+      { loadAI: function() {}, ai: { __gpttypes: registry } }, function() { return packPaths }, function(name) { return packPaths[name] },
+      function(name) { providerLoads.push(name) }, function(path) {
+        providerLoads.push(path)
+        var type = path.indexOf("/AWS/") >= 0 ? "bedrock" : path.split("/").pop().replace(/\.js$/, "")
+        registry[type] = {}
+      })
+    var mockSec = function(bucket, repo, file, password) {
+      assert(bucket === "mini-a" && repo === "models" && password === "test-password")
+      return { get: function(key, section) {
+        secretCalls++
+        assert(section === "models")
+        return key === "saved-model" ? config : undefined
+      } }
+    }
+    var mockLlm = function(cfg) {
+      var provider = cfg.type.toLowerCase()
+      if (provider === "ghcopilot" || provider === "bedrock" || provider === "custom") {
+        assert(providerLoads.join(",") === ({ ghcopilot: "ghcopilot,/packs/ghcopilot/ghcopilot.js", bedrock: "AWS,/packs/AWS/aws.js", custom: "Custom,/packs/Custom/custom.js" })[provider], "Provider must be registered before model construction")
+      } else assert(providerLoads.length === 0, "Built-in providers must not load optional oPacks")
+      received = cfg
+      return { promptJSONWithStats: function() {
+        return { response: { proposals: [proposal("a.md", "", "# A", ["one:a.md"])], findings: [] } }
+      } }
+    }
+    // OpenAF's global $llm accessor cannot be replaced reliably. Bind the real
+    // loader to local provider/secret doubles without invoking a live provider.
+    r._ingest._buildLlm = new Function("$llm", "$sec", "__miniAEnsureModelProvider", "return (" + String(MiniAIngest.prototype._buildLlm) + ")")(mockLlm, mockSec, ensureProvider)
+    r._ingest._getEnv = new Function("getEnv", "return (" + String(MiniAIngest.prototype._getEnv) + ")")(function(name) {
+      assert(name === "OAF_MODEL")
+      return "saved-model"
+    })
+    r._ingest._args.secpass = "test-password"
+    ;[undefined, "saved-model", JSON.stringify(config), '(type: mock, model: absorb-test)', config].forEach(function(value) {
+      r._ingest._args.model = value
+      var result = r.run()
+      assert(result.ok && result.plan.complete, "Model configuration did not produce a complete plan: " + JSON.stringify(result))
+      assert(result.plan.modelUsage.calls === 1 && received.model === config.model)
+    })
+    assert(secretCalls === 2, "Explicit definitions must take precedence over the environment reference")
+    ;["ghcopilot", "bedrock", "custom", "openai"].forEach(function(type) {
+      providerLoads = []
+      config.type = type
+      // Resolve through OAF_MODEL so registration also follows secret lookup.
+      r._ingest._args.model = undefined
+      var planned = r.run()
+      assert(planned.ok && planned.plan.complete && planned.plan.modelUsage.calls === 1, "Provider plan failed: " + type)
+    })
+    providerLoads = []
+    ensureProvider({ type: "custom" })
+    assert(providerLoads.length === 0, "Registered providers must not be reloaded")
+    var unknownFailed = false
+    try { ensureProvider({ type: "unknown-provider" }) } catch(e) { unknownFailed = String(e).indexOf("libs=") >= 0 }
+    assert(unknownFailed && providerLoads.length === 0, "Unknown providers need an actionable error without installing a guessed package")
+    r._ingest._args.model = "missing-reference"
+    var blocked = r.run()
+    assert(!blocked.plan.complete && blocked.plan.modelUsage.calls === 0)
+  }) }
+
   exports.testDeletePlans = function() { fixture(function(root, r) {
     io.writeFileString(root + "/one/a.md", "# A")
     model(r, [])

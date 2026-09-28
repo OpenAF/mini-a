@@ -2,6 +2,10 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: Absorb::testModelConfiguration
+  to: oJob Test
+  exec: args.func = require("tests/wikiAbsorb.js").testModelConfiguration
+
 - name: Absorb::testDeletePlans
   to: oJob Test
   exec: args.func = require("tests/wikiAbsorb.js").testDeletePlans
@@ -94,6 +98,7 @@ jobs:
   exec: if (ow.test.getCountFail() > 0) exit(1)
 
 todo:
+- Absorb::testModelConfiguration
 - Absorb::testDeletePlans
 - Absorb::testInlineSpecs
 - Absorb::testSpecFormats

@@ -602,6 +602,26 @@ function __miniALoadLibraries(libsString, logFn, errFn) {
   })
 }
 
+// Reuse registered providers, otherwise load their installed oPack entry point.
+// Type/package name exceptions belong here, not in individual model callers.
+function __miniAEnsureModelProvider(config) {
+  if (!isMap(config) || !isString(config.type)) return
+  ow.loadAI()
+  var type = config.type.toLowerCase()
+  if (isDef(ow.ai.__gpttypes[type])) return
+  var aliases = { bedrock: { pack: "AWS", lib: "aws.js" } }
+  var entry = Object.prototype.hasOwnProperty.call(aliases, type) ? aliases[type] : __, paths = getOPackPaths()
+  if (!entry && /^[a-z0-9_-]+$/.test(type)) {
+    var pack = Object.keys(paths).filter(function(name) { return name.toLowerCase() === type })[0]
+    if (isDef(pack)) entry = { pack: pack, lib: type + ".js" }
+    else if (type === "ghcopilot") entry = { pack: "ghcopilot", lib: "ghcopilot.js" }
+  }
+  if (!entry) throw new Error("Unregistered model provider '" + type + "'. Install its oPack or load its registration library with libs=@oPack/library.js.")
+  includeOPack(entry.pack)
+  loadLib(getOPackPath(entry.pack) + "/" + entry.lib)
+  if (isUnDef(ow.ai.__gpttypes[type])) throw new Error("Library '" + entry.lib + "' did not register model provider '" + type + "'. Use libs=@oPack/library.js for a custom entry point.")
+}
+
 function __miniACleanCodeBlocks(text) {
   if (!isString(text)) return text
   var trimmed = String(text).trim()

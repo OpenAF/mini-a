@@ -102,7 +102,16 @@ The standalone equivalent is `absorbop=delete absorbplan=<id>` (or `absorbop=can
 Use the same `absorboutput` used when creating the plan.
 
 Tab completion covers subcommands, quoted specification paths and saved plan IDs.
-Use `model=...` or `OAF_MODEL` for planning synthesis. Exact duplicate detection is
+Use `model=...` or `OAF_MODEL` for planning synthesis. Model definitions accept
+JSON/SLON or a saved reference in the `mini-a` secure bucket's `models` repository,
+with `secpass` when needed, as in the console. Provider registration is shared
+with the agent: already registered providers are reused; otherwise an installed
+oPack matching the provider type loads its `<type>.js` entry point (package names
+are matched without case). Bedrock uses `AWS/aws.js`. For a different package
+name or entry point, pass `libs=@oPack/library.js`. The existing automatic oPack
+inclusion for `ghcopilot` and `AWS` is retained.
+
+Exact duplicate detection is
 model-free; any remaining synthesis requires a model. A single bounded call sees
 all selected contributions together and the destination inventory, allowing
 several sources to enrich one page or one source to support several pages.

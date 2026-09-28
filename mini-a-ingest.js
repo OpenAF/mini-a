@@ -24,16 +24,29 @@ MiniAIngest.prototype._setLlm = function(llmInstance) {
 }
 
 MiniAIngest.prototype._getEnv = function(name) {
-  try { return String(java.lang.System.getenv(name) || "") } catch(e) { return "" }
+  try { return String(getEnv(name) || "") } catch(e) { return "" }
 }
 
 MiniAIngest.prototype._buildLlm = function() {
   if (isObject(this._llm)) return this._llm
-  var raw = isString(this._args.model) && this._args.model.trim().length > 0 ? this._args.model.trim() : this._getEnv("OAF_MODEL")
-  if (!isString(raw) || raw.trim().length === 0) return __
+  var raw = isMap(this._args.model) || (isString(this._args.model) && this._args.model.trim().length > 0) ? this._args.model : this._getEnv("OAF_MODEL")
+  if (isUnDef(raw) || (isString(raw) && raw.trim().length === 0)) return __
   try {
-    var cfg = raw.trim().charAt(0) === "{" ? jsonParse(raw, __, __, true) : af.fromSLON(raw)
-    if (!isMap(cfg)) return __
+    var cfg = raw
+    if (isString(cfg)) {
+      cfg = cfg.trim()
+      try { cfg = af.fromJSSLON(cfg) } catch(ignoreParse) { cfg = raw.trim() }
+    }
+    if (isString(cfg)) {
+      try { cfg = $sec("mini-a", "models", __, this._args.secpass).get(cfg, "models") } catch(ignoreReference) { cfg = __ }
+    }
+    if (!isMap(cfg)) {
+      this._log("[ingest] Could not resolve model configuration. Use a model map or a saved mini-a/models reference.")
+      return __
+    }
+    var self = this
+    __miniALoadLibraries(this._args.libs, function(msg) { self._log(msg) }, function(msg) { throw new Error(msg) })
+    __miniAEnsureModelProvider(cfg)
     return $llm(cfg)
   } catch(e) {
     this._log("[ingest] Could not build LLM: " + __miniAErrMsg(e))
