@@ -1271,6 +1271,9 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : dreamwikiinstructions
+    desc     : Additional operator guidance appended to the wiki reorg objective
+    mandatory: false
   - name     : dreamwikiapproval
     desc     : Wiki reorg approval mode (auto, ask, never)
     example  : "ask"
@@ -1599,6 +1602,7 @@ jobs:
         dreamwikimode  : dreamwikimode
         dreammemorymode: dreammemorymode
         dreamwikidryrun: dreamwikidryrun
+        dreamwikiinstructions: dreamwikiinstructions
         dreamwikiapproval: dreamwikiapproval
         dreamwikireorg : dreamwikireorg
         dreamreport    : dreamreport
@@ -1886,6 +1890,7 @@ jobs:
       dreamwikimode  : isString.default(__)
       dreammemorymode: isString.default(__)
       dreamwikidryrun: toBoolean.isBoolean.default(false)
+      dreamwikiinstructions: isString.default(__)
       dreamwikiapproval: isString.default(__)
       dreamwikireorg : toBoolean.isBoolean.default(false)
       dreamreport    : isString.default(__)

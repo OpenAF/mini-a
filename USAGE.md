@@ -3262,6 +3262,33 @@ Each record's `md` value is YAML front matter (every non-default field: `kind`, 
 
 ---
 
+## Wiki operations manager
+
+Run `mini-a wikiman=true` (or `opack exec mini-a wikiman=true`) to select a wiki and use guided maintenance menus. To supply a target at launch:
+
+```sh
+mini-a wikiman=true wikiroot="/path/My Wiki" wikiaccess=rw usewikigraph=true
+```
+
+Inspection works without a model. Access defaults to `ro`; the manager requires an explicit root or configured backend and never silently selects the current directory. Configured mounts remain read-only. To maintain a mounted wiki, explicitly configure its root/backend as the primary with `wikiaccess=rw`.
+
+Menus cover inspection and bounded reads/lint, managed page editing/moves/deletion, search and directory indexes, compaction, graph exploration/builds/exports, wiki Dream modes, ingestion and absorption/recovery. With only a primary wiki configured, the manager opens the operations menu directly. **Graph statistics (/graph stats)** uses the console statistics operation; stored graph file diagnostics are listed separately. Session settings and mount attachments are temporary. Unavailable actions explain their backend/access requirements. Within each category, toggle **Advanced options** for operation options or **Session → Adjust session settings** for connection and graph settings. Enter `/back` at text prompts to cancel; menus include Back/Exit.
+
+Menu options use emoji labels and the standard Mini-A green/pink branding. Categories stay open after an operation, with the last operation first for quick repeats. Advanced options are off by default and can be toggled within the category. Unavailable actions show their reason when selected. Running/completed/failed headings and elapsed time accompany compact result previews; **Show last result details** and session history retain full output. Compaction retains its complete preview before approval. Terminal-width dashed separators distinguish results, replay commands, and the current-wiki summary; the summary uses compact SLON with yellow double side lines, a pale cream background, and black text. Before execution begins, each operation prints a dark-gray, italic command without side lines or surrounding parentheses, with shell continuations between arguments for easy copying. History/export retains the plain command. The command uses the same dispatcher. The printed command changes to the package directory with `cd`, so it can be pasted from another working directory. From the checkout/package directory, the equivalent direct invocations are:
+
+```sh
+ojob utils/wikiOps.yaml operation=wiki.lint wikiroot="/path/My Wiki"
+ojob utils/wikiOps.yaml operation=wiki.reindex wikiroot="/path/My Wiki" wikiaccess=rw confirm=true
+```
+
+Writes require review and `confirm=true` in noninteractive runs. Reorg asks two default-No questions: confirm the target/objective/limits, then acknowledge an external recovery point and authorize live edits. The runner also requires `backupconfirmed=true dreamwikireorg=true dreamwikiapproval=auto`. Optional `dreamwikiinstructions` appends guidance to the existing reorg goal; tool restrictions remain in effect. Replaying a command reproduces configuration, not necessarily the same LLM edits.
+
+Compaction previews first and requires confirmation that other readers/writers have stopped (`params='{"dryRun":false,"offline":true}'`). A failed or interrupted mutation may leave partial changes. Ingestion recovery discard and absorption plan delete/cancel do **not** undo written pages. Use their existing recovery actions; reorg has no general rollback.
+
+Page editing imports a content file or opens `editor=` / `$EDITOR` (default `vi`) without invoking a shell. The reviewed content is snapshotted in a temporary file. **Session → Run history / export** saves a sanitized JSON run record; page-write exports also preserve the content next to the record. Unexported editor snapshots are removed on exit. No connection profiles or history are saved automatically.
+
+Commands refer to sensitive argument values through `MINIA_WIKIOPS_<ARGUMENT>` environment variables, listing the required variables without printing their values. Existing `OAF_MODEL` configuration and saved model aliases remain usable. Launch modes such as `modelman`, `mcptest`, Dream, web, worker, and goal/exec cannot be combined with `wikiman=true`.
+
 ## Wiki Ingestion
 
 `mini-a-ingest.js` turns an existing body of documentation into wiki pages. Discovery, filtering, chunking, the re-ingest ledger, writing and finalization are deterministic; distillation and image descriptions call the LLM.
@@ -3408,6 +3435,7 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 | `dreammemorymode` | string | `apply` | Memory dream mode: `plan` or `apply` |
 | `dreamwikidryrun` | boolean | `false` | Propose wiki changes without writing (opt-out of `apply`) |
 | `dreamwikiapproval` | string | `ask` | Reorg approval mode: `auto`, `ask`, `never` |
+| `dreamwikiinstructions` | string | _(none)_ | Additional operator guidance appended to the wiki reorg objective |
 | `dreamwikireorg` | boolean | `false` | Allow structural reorg operations |
 | `dreammaxsteps` | number | `40` for `reorg` | Maximum structural-reorg agent steps; other wiki dream modes are deterministic or proposal-only |
 | `dreamreport` | string | - | Optional file path to write JSON run report |

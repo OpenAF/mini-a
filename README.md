@@ -406,6 +406,7 @@ Mini-A ships with complementary components:
 - **`mini-a-con.js`** - Interactive console available through `opack exec mini-a` (or the `mini-a` alias)
 - **`mini-a-mcptest.js`** - Interactive MCP server tester for testing and debugging MCP servers — launched via `mini-a mcptest=true`
 - **`mini-a-memoryman.js`** - Interactive working-memory manager for inspecting and maintaining persisted global/session memories — launched via `mini-a memoryman=true`
+- **`mini-a-wikiman.js`** - Guided wiki, graph, Dream and ingestion maintenance menus with replayable CLI commands; run `mini-a wikiman=true wikiroot=/path/to/wiki wikiaccess=rw` (see [usage](USAGE.md#wiki-operations-manager))
 - **`mini-a-modelman.js`** - Interactive model/config manager, also reachable from the console via `/model` — launched via `mini-a modelman=true`
 - **`mini-a-dreams.js`** - Dream engine for memory/wiki consolidation with mode routing, reorg gates, and structured output/reporting — launched via `mini-a dream=true` or `/dream`
 - **`mini-a.sh`** - Shell wrapper script for running directly from a cloned repository

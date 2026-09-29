@@ -238,7 +238,7 @@ SubtaskManager._PARENT_ONLY_CHILD_ARG_NAMES = [
   "workerreg", "workerregtoken", "workerregurl", "workerreginterval",
   "mcpprogcall", "mcpprogcallport", "mcpprogcallmaxbytes", "mcpprogcallresultttl",
   "mcpprogcalltools", "mcpprogcallbatchmax",
-  "onport", "web", "modelman", "mcptest", "memoryman", "workermode", "path"
+  "onport", "web", "modelman", "mcptest", "memoryman", "wikiman", "wikitarget", "workermode", "path"
 ]
 
 SubtaskManager.prototype._stripInheritedParentOnlyArgs = function(mergedArgs, explicitArgs) {
