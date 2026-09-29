@@ -109,12 +109,12 @@ MiniAWikiRetrievalV2.prototype._resolveAnalysis = function(manifest) {
   }
   var differences = function(expected, actual) {
     var keys = Object.keys(expected || {}).concat(Object.keys(actual || {}))
-    return keys.filter(function(key, index) { return keys.indexOf(key) === index && stringify((expected || {})[key],__,"") !== stringify((actual || {})[key],__,"") })
+    return keys.filter(function(key, index) { return keys.indexOf(key) === index && !MiniAWikiRetrievalV2.sameMetadata((expected || {})[key], (actual || {})[key]) })
   }
   if (!resolved) failure(["analyzer-capability"])
   var incompatible = differences(contract, resolved.indexContract)
   if (manifest.fingerprint !== resolved.fingerprint) incompatible.push("fingerprint")
-  if (incompatible.length || stringify(contract,__,"") !== stringify(resolved.indexContract,__,"")) failure(incompatible.length ? incompatible : ["indexContract"])
+  if (incompatible.length || !MiniAWikiRetrievalV2.sameMetadata(contract, resolved.indexContract)) failure(incompatible.length ? incompatible : ["indexContract"])
   var differing = differences(contract, this.indexContract)
   return MiniAWikiRetrievalV2.immutable({ lexical: clone(resolved.lexical), options: clone(resolved.options), indexContract: clone(resolved.indexContract), fingerprint: resolved.fingerprint,
     status: { policy: policy, generation: manifest.generation, source: policy === "auto" ? "generation" : "configured", effective: merge({ language: resolved.lexical.language }, clone(resolved.indexContract)), differingFields: differing } })
@@ -152,13 +152,24 @@ MiniAWikiRetrievalV2.digest = function(path) {
   for (var i = 0; i < bytes.length; i++) out += ("0" + ((Number(bytes[i]) + 256) % 256).toString(16)).slice(-2)
   return out
 }
-// The serving manifest is signed by a deterministic, content-addressed root.
-// Do not include `merkle` itself: callers must be able to recompute it before
-// opening a Lucene reader or following an ancestor.
+// New manifests use recursively ordered JSON, independent of map iteration
+// order after parsing or process restart. Unmarked manifests retain their
+// original hashing contract; never accept a failed hash using another format.
 MiniAWikiRetrievalV2.manifestMerkle = function(manifest) {
   var copy = {}, keys = Object.keys(manifest).filter(function(key) { return key !== "merkle" }).sort()
   keys.forEach(function(key) { copy[key] = manifest[key] })
-  return MiniAWikiRetrievalV2.digestText(stringify(copy, __, ""))
+  if (isUnDef(manifest.merkleFormat)) return MiniAWikiRetrievalV2.digestText(stringify(copy, __, ""))
+  if (manifest.merkleFormat !== "canonical-json-v1") throw new Error("unsupported-manifest-merkle-format")
+  // Normalize omitted fields and JSON scalar types before ordering objects.
+  // Emit JSON directly: a runtime serializer must not reorder the sorted maps.
+  var canonical = function(value) {
+    if (isArray(value)) return "[" + value.map(canonical).join(",") + "]"
+    if (isMap(value)) return "{" + Object.keys(value).sort().map(function(key) {
+      return JSON.stringify(key) + ":" + canonical(value[key])
+    }).join(",") + "}"
+    return JSON.stringify(value)
+  }
+  return MiniAWikiRetrievalV2.digestText(canonical(JSON.parse(JSON.stringify(copy))))
 }
 MiniAWikiRetrievalV2.slug = function(text) {
   return String(new java.lang.String(String(text).toLowerCase()).replaceAll("[^\\p{L}\\p{N} _-]", "")).trim().replace(/\s+/g, "-") || "section"
@@ -655,7 +666,7 @@ MiniAWikiRetrievalV2.prototype._resolveCatalogue = function(dir, manifest, seen)
     var parentDir = this.root + "/" + manifest.catalogue.parent.generation, parentManifestPath = parentDir + "/manifest.json"
     if (!io.fileExists(parentManifestPath) || java.nio.file.Files.isSymbolicLink(new java.io.File(parentDir).toPath()) || MiniAWikiRetrievalV2.digest(parentManifestPath) !== manifest.catalogue.parent.checksum) throw new Error("catalogue-parent-unavailable")
     var parentManifest = af.fromJson(io.readFileString(parentManifestPath))
-    if (parentManifest.parser !== manifest.parser || parentManifest.fingerprint !== manifest.fingerprint || stringify(parentManifest.indexContract,__,"") !== stringify(manifest.indexContract,__,"") || MiniAWikiRetrievalV2.manifestMerkle(parentManifest) !== parentManifest.merkle) throw new Error("invalid-catalogue-lineage")
+    if (parentManifest.parser !== manifest.parser || parentManifest.fingerprint !== manifest.fingerprint || !MiniAWikiRetrievalV2.sameMetadata(parentManifest.indexContract, manifest.indexContract) || MiniAWikiRetrievalV2.manifestMerkle(parentManifest) !== parentManifest.merkle) throw new Error("invalid-catalogue-lineage")
     catalog = this._resolveCatalogue(parentDir, parentManifest, seen)
   }
   var self = this
@@ -839,7 +850,7 @@ MiniAWikiRetrievalV2.prototype._validateStructural = function(dir, manifest, ana
     var parentDir = this.root + '/' + descriptor.parent.generation, parentPath = parentDir + '/manifest.json'
     if (!io.fileExists(parentPath) || java.nio.file.Files.isSymbolicLink(new java.io.File(parentDir).toPath()) || MiniAWikiRetrievalV2.digest(parentPath) !== descriptor.parent.checksum) throw new Error('catalogue-parent-unavailable')
     cursor = af.fromJson(io.readFileString(parentPath)); cursorDir = parentDir
-    if (!isMap(cursor) || cursor.schema !== 3 || cursor.parser !== 6 || cursor.fingerprint !== analysis.fingerprint || stringify(cursor.indexContract,__,"") !== stringify(analysis.indexContract,__,"") || !/^[a-f0-9]{64}$/.test(cursor.merkle || '') || MiniAWikiRetrievalV2.manifestMerkle(cursor) !== cursor.merkle) throw new Error('invalid-catalogue-lineage')
+    if (!isMap(cursor) || cursor.schema !== 3 || cursor.parser !== 6 || cursor.fingerprint !== analysis.fingerprint || !MiniAWikiRetrievalV2.sameMetadata(cursor.indexContract, analysis.indexContract) || !/^[a-f0-9]{64}$/.test(cursor.merkle || '') || MiniAWikiRetrievalV2.manifestMerkle(cursor) !== cursor.merkle) throw new Error('invalid-catalogue-lineage')
   }
   return __
 }
@@ -1622,7 +1633,7 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
     // Schema 3 is the sole local serving format.  A full reindex is a
     // depth-zero base; an incremental build is a delta over its predecessor.
     var schema = 3
-    var manifest = { schema: schema, parser: 6, passageChars: this.config.passageChars, generation: generation, fingerprint: this.fingerprint, lexical: m._lexicalConfig, indexContract: this.indexContract, files: [] }
+    var manifest = { schema: schema, merkleFormat: "canonical-json-v1", parser: 6, passageChars: this.config.passageChars, generation: generation, fingerprint: this.fingerprint, lexical: m._lexicalConfig, indexContract: this.indexContract, files: [] }
     // Turn publication-local reachability counters into immutable routed
     // descriptors only after all page mutations have completed.  This keeps
     // updates bounded while making every reference independently verifiable.
@@ -2666,7 +2677,7 @@ MiniAWikiRetrievalV2.prototype._bundleBase = function(manifest, catalog) {
   Object.keys(bundleCatalog.blockRefs || {}).sort().forEach(function(locator) { var record = bundleCatalog.blockRefs[locator]; base.files.push({path:locator,bytes:record.bytes,checksum:record.checksum}) })
   base.files.sort(function(a,b) { return a.path < b.path ? -1 : a.path > b.path ? 1 : 0 })
   base.catalogue = { schema:3, transactionFormat:"routed-delta-v1", base:true, wikiId:bundleCatalog.wikiId, shards:shards, depth:0, stats:{pageCount:Object.keys(bundleCatalog.pages || {}).length,passageCount:Object.keys(bundleCatalog.passages || {}).length} }
-  delete base.catalogue.parent; base.merkle = MiniAWikiRetrievalV2.manifestMerkle(base)
+  delete base.catalogue.parent; base.merkleFormat = "canonical-json-v1"; base.merkle = MiniAWikiRetrievalV2.manifestMerkle(base)
   return { manifest:base, texts:texts }
 }
 MiniAWikiRetrievalV2.prototype.exportBundle = function(destination) {
