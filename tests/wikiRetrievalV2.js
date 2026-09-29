@@ -1594,6 +1594,23 @@
       try {engine._validate(pin.dir,pin.manifest)}finally{global.MiniAWikiRetrievalV2.digest=digestFunction;engine._readVerifiedBlock=combinedFunction}
       ow.test.assert(combinedBlockCalls,1,"fresh validation materializes the evidence block in one checksum-bound read")
       ow.test.assert(digestBlockCalls,0,"fresh validation does not open evidence blocks separately for hashing")
+      var reordered=clone(pin.catalog), reorderedMeta={}
+      Object.keys(reordered.pages["bound.md"].metadata).reverse().forEach(function(key) {
+        reorderedMeta[key]=reordered.pages["bound.md"].metadata[key]
+      })
+      reordered.pages["bound.md"].metadata=reorderedMeta
+      var reorderedPatch=patchCatalogue(engine,pin,reordered)
+      try {
+        engine._validate(pin.dir,reorderedPatch.manifest)
+        engine._validatePublication(pin.dir,reorderedPatch.manifest,{catalog:reordered,changedPaths:{"bound.md":true}})
+        engine._validatePageMetadata({dir:pin.dir,manifest:reorderedPatch.manifest},reordered.pages["bound.md"])
+      } finally {reorderedPatch.restore()}
+      var sameMetadata=global.MiniAWikiRetrievalV2.sameMetadata
+      ow.test.assert(sameMetadata({nested:{a:1,b:2},items:[{x:1,y:2},null]}, {items:[{y:2,x:1},null],nested:{b:2,a:1}}),true,"nested object order is immaterial")
+      ow.test.assert(sameMetadata({items:[1,2]}, {items:[2,1]}),false,"array order remains bound")
+      ow.test.assert(sameMetadata({value:1}, {value:"1"}),false,"scalar types remain bound")
+      ow.test.assert(sameMetadata({value:null}, {}),false,"missing and null fields differ")
+      ow.test.assert(sameMetadata({nested:{a:1}}, {nested:{a:2}}),false,"nested values remain bound")
       var cases=[
         {name:"text hash",error:"passage-revision-binding-failure",change:function(c){c.passages[id].textHash=sha1("forged evidence")}},
         {name:"character offset",error:"passage-revision-binding-failure",change:function(c){c.passages[id].charStart++}},
