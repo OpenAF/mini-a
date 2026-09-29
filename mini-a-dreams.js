@@ -1434,7 +1434,7 @@ MiniADreams.prototype._buildWikiConfig = function() {
   if (!toBoolean(a.usewiki)) return __
   var backend = this._argStr(a.wikibackend).length > 0 ? this._argStr(a.wikibackend).toLowerCase() : "fs"
   if (backend === "https") backend = "http"
-  var cfg = { access: "rw", backend: backend, indexdir: a.wikiindexdir, s3artifactprefix: a.wikis3artifactprefix, s3artifactbundle: toBoolean(a.s3artifactbundle) === true, wikihttpindexurl: a.wikihttpindexurl, wikihttptimeout: a.wikihttptimeout, wikiartifactrefreshsecs: a.wikiartifactrefreshsecs, wikilexical: a.wikilexical, wikiretrievalv2: a.wikiretrievalv2, wikiretrievalconfig: a.wikiretrievalconfig, wikitelemetry: a.wikitelemetry }
+  var cfg = __miniAWikiConfigFromArgs(a, { access: "rw", backend: backend, usegraph: this._wikiGraphEnabled(), s3artifactbundle: toBoolean(a.s3artifactbundle) === true })
   // carry graph settings so _finalizeWiki can rebuild the knowledge graph.
   // The user-facing arg is usewikigraph (usegraph is the wiki-manager config key).
   if (this._wikiGraphEnabled()) {
@@ -1461,28 +1461,14 @@ MiniADreams.prototype._buildWikiConfig = function() {
       }
     }
   }
-  if (backend === "fs") {
-    cfg.root = this._argStr(a.wikiroot).length > 0 ? this._argStr(a.wikiroot) : "."
-    // apply mode writes; make an implicit "dream the current directory" impossible to miss
-    if (cfg.root === ".") this._log("[dreams:wiki] No wikiroot given — using the current directory as the wiki root.")
-  } else if (backend === "s3" || backend === "s3fs") {
-    cfg.bucket     = a.wikibucket
-    cfg.prefix     = this._argStr(a.wikiprefix).length > 0 ? this._argStr(a.wikiprefix) : "wiki/"
-    cfg.url        = this._argStr(a.wikiurl).length > 0 ? this._argStr(a.wikiurl) : "https://s3.amazonaws.com"
-    cfg.accessKey  = a.wikiaccesskey
-    cfg.secret     = a.wikisecret
-    cfg.region     = a.wikiregion
+  if (backend === "fs" && cfg.root === ".") this._log("[dreams:wiki] No wikiroot given — using the current directory as the wiki root.")
+  if (backend === "s3" || backend === "s3fs") {
+    cfg.prefix = this._argStr(a.wikiprefix).length > 0 ? this._argStr(a.wikiprefix) : "wiki/"
+    cfg.url = this._argStr(a.wikiurl).length > 0 ? this._argStr(a.wikiurl) : "https://s3.amazonaws.com"
     cfg.useVersion1 = toBoolean(a.wikiuseversion1) === true
     cfg.ignoreCertCheck = toBoolean(a.wikiignorecertcheck) === true
   } else if (backend === "es") {
-    cfg.esurl   = this._argStr(a.wikiurl).length > 0 ? this._argStr(a.wikiurl) : "http://localhost:9200"
-    cfg.esindex = this._argStr(a.wikiprefix).length > 0 ? this._argStr(a.wikiprefix) : "mini_a_wiki"
-    cfg.esuser  = a.wikiaccesskey
-    cfg.espass  = a.wikisecret
-  } else if (backend === "http") {
-    cfg.url       = this._argStr(a.wikiurl)
-    cfg.accessKey = a.wikiaccesskey
-    cfg.secret    = a.wikisecret
+    cfg.esurl = this._argStr(a.wikiurl).length > 0 ? this._argStr(a.wikiurl) : "http://localhost:9200"
   }
   return cfg
 }

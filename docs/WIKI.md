@@ -8,6 +8,79 @@ Unpublished wikis keep legacy retrieval with a warning until V2 artifacts are pu
 local backends, migration, budget differences and [measured validation](https://github.com/openaf/mini-a/blob/main/development/docs/WIKI-RETRIEVAL-V2-VALIDATION.md).
 Flag-off behavior retains the existing page engine with compatible contract repairs.
 
+## Choose how to use your wiki
+
+| Entry point | Use it for | Access |
+| --- | --- | --- |
+| Mini-A console (`mini-a usewiki=true wikiroot=/path/to/wiki`) | Interactive reading, inspection, editing and maintenance | Read-only by default; add `wikiaccess=rw` for editing |
+| Trusted MCP (`mcp-wiki.yaml`) | Agent retrieval, structure and mounted-wiki discovery | Read-only; use `mcp-wiki-ops.yaml` for authorized writes |
+| Restricted MCP (`mcp-wiki-safe.yaml`) | Clients that should receive only small evidence excerpts | Read-only, budgeted search/read with opaque references |
+
+All MCP descriptors live under `mcps/`. The trusted and restricted servers serve
+different access needs; neither requires exposing editing tools to readers.
+
+### Connect and read
+
+```sh
+mini-a usewiki=true wikiroot=/path/to/wiki
+```
+
+In the console, run `/wiki context`, then `/wiki search <query>` and
+`/wiki read <path>`. `/wiki context wiki=<mount>` inspects one mounted wiki;
+`/wiki context path=@<mount>/` is equivalent. Context displays access, retrieval
+mode, published analysis, fallback reason and a next action when maintenance is
+needed. `/wiki list --meta` shows titles and descriptions; quote prefixes containing
+spaces, for example `/wiki list "team guides/" --meta`.
+
+A partial-search warning means the displayed results do not establish absence
+elsewhere. Inspect the reported source coverage and stop reasons before concluding
+that the wiki contains no answer. The [agent retrieval protocol](#agentic-retrieval)
+adds bounded `open`, `navigate`, `grep` and evidence reads; those are tool operations,
+not additional `/wiki` console subcommands.
+
+### Create and edit
+
+Start with `mini-a usewiki=true wikiaccess=rw wikiroot=/path/to/wiki`.
+Use `/wiki init` to scaffold, `/wiki write <path> <content>` to edit, and
+`/wiki lint` to inspect consistency. Check `/wiki backlinks <path>` before moving
+or deleting a page. Mounts remain read-only; edits target the primary wiki.
+
+### Ingest and synchronize
+
+Use [repeated ingestion](#safe-repeated-ingestion) for imported documents and source
+synchronization, or [absorption](ABSORB.md) to review and apply a multi-source plan.
+Keep imported-page ownership and prune rules separate from manual editing.
+
+### Maintain and publish
+
+| Intended result | Operation |
+| --- | --- |
+| Rebuild search artifacts / publish V2 locally | `/wiki reindex` in a writable session |
+| Regenerate navigational `index.md` pages | `dreamwikimode=indexes` |
+| Rebuild optional relationship graph | `/graph build` with `usewikigraph=true` |
+| Inspect consistency without fixes | `/wiki lint` |
+| Preview maintenance | `/dream plan` |
+| Apply the maintenance pass | `/dream apply`; graph-enabled apply may use an LLM unless `wikigraphsemantic=false` |
+| Preview / reclaim unused local artifacts | `/wiki compact` / `/wiki compact offline=true` after stopping other readers and writers |
+
+Building search artifacts does not publish them to an HTTP server. Follow the
+[HTTP publishing steps](#publishing-a-static-http-wiki) or [S3 bundle guidance](#s3-artifact-bundles)
+for distribution. See [maintenance modes](#operational-and-maintenance-modes) for
+batch commands and exactly what each operation changes.
+
+### Troubleshoot
+
+- `legacy` / `v2-build-required`: unpublished content is still readable; ask the
+  publisher for a writable reindex to enable V2.
+- An incompatible or corrupt published generation: inspect the retrieval error;
+  validate or rebuild the publisher's artifacts. Readers do not silently downgrade.
+- Writes refused: inspect access and backend in context; mounts, HTTP, archives and
+  generated mount catalogs cannot be edited. Use an explicit writable primary root.
+- Partial search: inspect source status and budget stop reasons; narrow the query or
+  select a specific wiki through the trusted tool interface.
+- Unexpected model activity: inspect graph semantic settings and Dream mode;
+  reorganization is model-driven, while ordinary search reindexing is model-free.
+
 ## Backends and access
 
 | Backend | Configuration | Read/write | Notes |
@@ -119,7 +192,7 @@ all.
 
 | Op | Functionality | Equivalent to / overlaps |
 | --- | --- | --- |
-| `context` | Overview: page count, sections, mounts, recent activity, scoped retrieval status | Select one `wiki` or mounted `path`; defaults to primary. `retrieval.wiki` identifies the status owner. |
+| `context [wiki=<name>\|path=@<name>/]` | Overview: page count, sections, mounts, recent activity, scoped retrieval status | Select one `wiki` or mounted `path`; defaults to primary. `retrieval.wiki` identifies the status owner. |
 | `list [prefix] [--meta]` | List pages; `--meta` adds title/description per page | |
 | `tree` | Hierarchical view with per-section index status | Coarser-grained view of the same structure as `browse` |
 | `browse` | One level of a path: child sections, direct pages, suggested next reads | |
@@ -131,7 +204,8 @@ all.
 | `move <from> <to>` *(rw)*, alias `mv` | Rename/move a page and rewrite inbound links | |
 | `delete <path>` *(rw)*, aliases `remove`, `rm` | Delete a page | |
 | `init` *(rw)* | Scaffold the initial wiki structure (`AGENTS.md`, root `index.md`) | |
-| `reindex` *(rw)* | Rebuild the Lucene search index | Same call as `dreamwikimode=reindex`; also runs as one step of `dreamwikimode=apply` |
+| `reindex` *(rw)* | Rebuild the active search engine; publish V2 when enabled | Same call as `dreamwikimode=reindex`; also runs as one step of `dreamwikimode=apply` |
+| `compact [dryrun\|offline=true]` *(rw, local V2)* | Preview unused artifacts, or rebuild and reclaim after other readers/writers stop | See [compaction](#compacting-a-local-wiki-for-read-only-use) |
 | `mounts` | List attached external wikis | Subset of `context` |
 | `attach <name> [backend=] [root=] ...` | Attach a read-only external wiki under `@name/` | |
 | `detach <name>` | Remove a mount | |
@@ -175,8 +249,9 @@ With mounts and no `wikiroot`, `/graph stats` reports `scope: mounts`, the numbe
 ## Operational and maintenance modes
 
 Beyond interactive `/wiki` commands, maintenance work can also run unattended via
-`mini-a dream=true usewiki=true dreamwikimode=<mode>` — this is the only supported batch/non-interactive
-entry point for wiki maintenance. Built-in console commands like `/wiki reindex` are interactive-only:
+`mini-a dream=true usewiki=true dreamwikimode=<mode>`. Dedicated utility jobs also
+provide batch operations, including `utils/wikiCompact.yaml` for local compaction
+and the [graph/inspection utilities](#utility-ojobs-utils). Built-in console commands like `/wiki reindex` are interactive-only:
 `exec="/wiki reindex"` is rejected (`exec=` only supports custom commands/skills, not built-ins).
 
 | Operation | Console command | Agent tool op | Batch (`dream=true`) | Uses LLM? |
@@ -289,7 +364,7 @@ wikiroot=/shared/wiki dreamwikimode=reindex` for a cron job that only needs the 
 
 ## Search and graph state
 
-Writable wikis maintain a Lucene index in `.mini-a-wiki-lucene/` and can maintain graph data in `.mini-a-wiki-graph/`. The index powers lexical search; graph state powers community information and optional related-page search hints. V2 reverse-link postings support backlinks independently of the optional graph. `wikilexical` selects language and optional explicit enhancements. Consume `nativeScore`, `rankScore`, `scoreComponents` and `retrievalMethod` when available instead of assuming the compatibility `score` is native Lucene relevance. Scan fallback has no native lexical score. See [v2 score and capability contracts](WIKI-RETRIEVAL-V2.md).
+V2 search generations live in `.mini-a-wiki-serving/`; legacy search uses `.mini-a-wiki-lucene/`. Writable wikis can also maintain graph data in `.mini-a-wiki-graph/`. The index powers lexical search; graph state powers community information and optional related-page search hints. V2 reverse-link postings support backlinks independently of the optional graph. `wikilexical` selects language and optional explicit enhancements. Consume `nativeScore`, `rankScore`, `scoreComponents` and `retrievalMethod` when available instead of assuming the compatibility `score` is native Lucene relevance. Scan fallback has no native lexical score. See [v2 score and capability contracts](WIKI-RETRIEVAL-V2.md).
 
 Read-only wikis consume an existing Lucene index without taking a writer lock. If no index is available, local backends can fall back to scanning page contents. Static HTTP has no directory listing, so it requires the published artifact bundle described below for catalog and search.
 
@@ -617,3 +692,26 @@ or corrupt ingestion journals block compaction. This is conservative serving-ind
 compaction, not a smallest-possible archive or general hidden-folder purge; no
 Lucene force-merge is performed. Failed collection reports its error and can be
 retried; the rebuilt index may already have been activated.
+
+## Programmatic compatibility APIs
+
+Some helpers are available to embedded OpenAF consumers without a console command:
+`knowledgeStats`, `knowledgeRecordDerivative`, `knowledgeGetDerivative`, and
+`knowledgeReconcileDerivatives`. They remain tested APIs; absence of a console or
+MCP caller does not make their persisted state disposable. Derivative registration
+requires valid source support; reconciliation defaults to a report and requires
+explicit approval to apply. These APIs do not replace ingestion or Dream workflows.
+
+`MiniAWikiRetrievalV2.lookupMoveLinks(snapshot, path)` remains a low-level lookup
+for callers holding an acquired generation. Its `moveReverse` data is also used by
+managed moves. `/graph answer` remains a compatibility wrapper around graph
+retrieval: prefer `/graph retrieve` when requesting evidence; neither synthesizes
+an answer with an LLM.
+
+Context reuses valid page metadata for mount descriptions and skips page reads
+when a description is explicitly configured. Page counts still use current backend
+listings so newly added, unpublished pages are not hidden by an old search generation.
+S3 existence checks use metadata-only HEAD requests when the installed S3 client
+supports them, with GET compatibility for older clients. Direct page reads still
+fetch the current body before slicing; the scan cache described above does not
+change that freshness contract.

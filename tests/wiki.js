@@ -50,6 +50,120 @@
 
   // ── Parsefrontmatter ────────────────────────────────────────────────────────
 
+  exports.testConsoleWikiOperations = function() {
+    var source = io.readFileString("mini-a-con.js"), output = [], calls = []
+    var hits = [{path:"guide.md",title:"Guide"}]
+    hits.outcome = "partial"; hits.stopReasons = ["deadline"]; hits.sources = [{wiki:"docs",status:"partial"}]
+    var manager = {
+      list: function(path, opts) { calls.push({path:path,options:opts}); return opts.withMeta ? [{path:"guide.md",title:"Guide",description:"Metadata visible"}] : ["guide.md"] },
+      search: function() { return hits },
+      context: function(opts) { calls.push(opts); return {access:"ro",retrieval:{mode:"legacy",fallbackReason:"v2-build-required",nextAction:"Ask the publisher"}} }
+    }
+    var harness = new Function("manager", "output", "__miniAWikiRequireSearchHits",
+      'var getConsoleWikiManager=function(){return manager}, print=function(x){output.push(String(x))}, printErr=print, printTree=function(x){return stringify(x)}, colorifyText=function(x){return x}, ansiColor=function(a,b){return b}, accentColor="", promptColor="", hintColor="", errorColor="";\n' +
+      source.substring(source.indexOf("  function parseConsolePathArgs("),source.indexOf("  function quoteConsolePath(")) +
+      source.substring(source.indexOf("  function printWiki("),source.indexOf("  function printGraph(")) + '\nreturn printWiki;')
+    var run = harness(manager, output, __miniAWikiRequireSearchHits)
+    run('list "guides with spaces/" --meta')
+    ow.test.assert(calls[0].path,"guides with spaces/","quoted prefix round trips")
+    ow.test.assert(calls[0].options.withMeta,true,"metadata branch is reachable")
+    ow.test.assert(output.join("\n").indexOf("Metadata visible")>=0,true,"metadata is rendered")
+    output.length=0; run('context wiki=docs')
+    ow.test.assert(calls[1].wiki,"docs","console forwards selected wiki")
+    ow.test.assert(output.join("\n").indexOf("v2-build-required")>=0,true,"retrieval status is visible")
+    ow.test.assert(output.join("\n").indexOf('"ro"')>=0,true,"access is visible")
+    run('context path=@docs/'); ow.test.assert(calls[2].path,"@docs/","mounted path is forwarded")
+    output.length=0; run('context wiki=docs path=@other/')
+    ow.test.assert(calls.length,3,"conflicting scopes never reach manager")
+    output.length=0; run('search expiry')
+    ow.test.assert(output.join("\n").indexOf("coverage is incomplete")>=0,true,"partial hit warning remains visible")
+    ow.test.assert(output.join("\n").indexOf("deadline")>=0,true,"stop reason is displayed")
+    hits=[]; hits.truncated=true; output.length=0; run('search absent')
+    ow.test.assert(output.join("\n").indexOf("No matches in the searched portion")>=0,true,"partial zero is not global absence")
+    hits=[]; output.length=0; run('search absent')
+    ow.test.assert(output.join("\n").indexOf("coverage is incomplete"),-1,"complete zero has no partial warning")
+  }
+
+  exports.testWikiConfigSharedMapping = function() {
+    var args = {wikibackend:"https",wikiurl:"https://example.invalid/wiki",wikiaccess:"rw",wikisourceurl:"https://example.invalid/{{path}}",wikigraphcross:false,wikiretrievalv2:false}
+    var cfg = __miniAWikiConfigFromArgs(args)
+    ow.test.assert(cfg.backend,"http","HTTPS alias normalized")
+    ow.test.assert(cfg.wikisourceurl,args.wikisourceurl,"citation options forwarded")
+    ow.test.assert(cfg.wikigraphcross,false,"explicit false retained")
+    ow.test.assert(cfg.wikiretrievalv2,false,"legacy override retained")
+    ow.test.assert(__miniAMcpWikiBuildConfig(args,{readonly:true,access:"rw"}).access,"ro","MCP forced read-only survives shared mapping")
+    ow.test.assert(__miniAMcpWikiBuildConfig(args,{access:"rw"}).access,"rw","ops explicit writable policy survives")
+    cfg = __miniAWikiConfigFromArgs({wikibackend:"s3fs",wikiroot:"/tmp/cache",wikibucket:"bucket",wikiregion:"region"})
+    ow.test.assert(cfg.root,"/tmp/cache","S3 filesystem root forwarded")
+    ow.test.assert(cfg.bucket,"bucket","S3 filesystem bucket forwarded")
+    cfg = __miniAWikiConfigFromArgs({wikibackend:"es",wikiurl:"http://example.invalid",wikiprefix:"pages",wikiaccesskey:"user",wikisecret:"test-value"})
+    ow.test.assert(cfg.esindex,"pages","ES index forwarded")
+    ow.test.assert(cfg.esuser,"user","ES credentials mapped")
+  }
+
+  exports.testContextAvoidsRedundantReads = function() {
+    var root=createTestDir(), child=createTestDir(), writer, reader
+    try {
+      writePage(child,"index.md","---\ntitle: Docs\ndescription: Published description\n---\n# Docs")
+      writer=new MiniAWikiManager({backend:"fs",root:child,access:"rw",wikiretrievalv2:true})
+      ow.test.assert(writer.reindex().ok,true,"published metadata fixture")
+      writer.close(); writer=__
+      reader=new MiniAWikiManager({backend:"fs",root:root,access:"ro",wikiretrievalv2:true})
+      reader.attach("docs",{backend:"fs",root:child,description:"Configured description"})
+      var mount=reader._mounts[0], reads=0, original=mount.manager._backend.read, primaryReads=0
+      mount.manager._backend.read=function(path){reads++;return original.call(mount.manager._backend,path)}
+      var primaryRead=reader._backend.read
+      reader._backend.read=function(path){primaryReads++;return primaryRead.call(reader._backend,path)}
+      ow.test.assert(reader.context().mounts[0].description,"Configured description","configured description preserved")
+      ow.test.assert(reads,0,"configured description needs no mounted page fetch")
+      ow.test.assert(primaryReads,0,"missing log needs no backend fetch")
+      mount.manager._metaFor("index.md"); reads=0
+      mount.description=""
+      ow.test.assert(reader.context().mounts[0].description,"Published description","published metadata supplies description")
+      ow.test.assert(reads,0,"unchanged metadata cache needs no repeated source body")
+      ow.test.assert(reader.context().retrieval.nextAction.indexOf("publisher")>=0,true,"read-only fallback explains next action")
+    } finally { if(writer)writer.close();if(reader)reader.close();cleanupTestDir(root);cleanupTestDir(child) }
+  }
+
+  exports.testS3ExistsUsesMetadata = function() {
+    var gets=0, heads=0, closed=0, events=[], missing=false
+    var client={statObject:function(){heads++;if(missing)throw new Error("missing");return {etag:"v1"}},getObjectStream:function(){gets++;return {close:function(){closed++}}}}
+    var factory=new Function("S3","loadLib","return ("+MiniAWikiManager.prototype._makeS3Backend.toString()+")")(function(){return client},function(){})
+    var backend=factory.call({_auditRetrieval:function(type,id,path,ok,bytes,details){events.push(details)}},{bucket:"fixture"})
+    ow.test.assert(backend.exists("page.md"),true,"metadata detects existing object")
+    ow.test.assert(heads,1,"one HEAD")
+    ow.test.assert(gets,0,"no GET for existence")
+    ow.test.assert(events[0].method,"HEAD","audit describes actual method")
+    missing=true; ow.test.assert(backend.exists("missing.md"),false,"missing object remains absent")
+    ow.test.assert(gets,0,"metadata failure does not fall back to body GET")
+    delete client.statObject
+    ow.test.assert(backend.exists("legacy.md"),true,"older client retains compatibility")
+    ow.test.assert(gets,1,"older client uses GET")
+    ow.test.assert(closed,1,"legacy existence stream closed")
+  }
+
+  exports.testWikiRunnerCoverage = function() {
+    var jobs=[], todo=[], seen={}
+    var visit=function(path){
+      if(seen[path])return;seen[path]=true
+      var doc=io.readFileYAML(path)
+      jobs=jobs.concat(doc.jobs || []);todo=todo.concat(doc.todo || [])
+      ;(doc.include || []).forEach(function(p){if(String(p).indexOf("tests/")===0)visit(String(p))})
+    }
+    visit("tests/wiki.yaml")
+    ;["wiki","wikiRetrievalV2"].forEach(function(name){
+      var source=io.readFileString("tests/"+name+".js"), pattern=/exports\.(test\w+)\s*=/g, match
+      while((match=pattern.exec(source))!==null){
+        var symbol=match[1]
+        var registered=jobs.some(function(job){
+          var reference=isString(job.exec) ? job.exec.match(/require\(["']tests\/([^"']+)\.js["']\)\.(test\w+)/) : null
+          return reference && reference[1]===name && reference[2]===symbol && todo.indexOf(job.name)>=0
+        })
+        ow.test.assert(registered,true,"exported test must have a scheduled job: "+name+"."+symbol)
+      }
+    })
+  }
+
   exports.testConsoleSearchPreservesV2Status = function() {
     var dir = createTestDir(), wm
     try {
@@ -1266,7 +1380,6 @@
       ow.test.assert(isUnDef(read.path), true, "restricted read must not disclose page paths")
       var replay = __miniAMcpWikiRestrictedRead({ path: result.results[0].reference })
       ow.test.assert(replay.error, "invalid-or-expired-reference", "restricted references must be single-use")
-      ow.test.assert(__miniAMcpWikiDenyRestricted("tree").error, "restricted-operation", "hidden operations must be denied at dispatch")
     } finally {
       cleanupTestDir(dir)
     }

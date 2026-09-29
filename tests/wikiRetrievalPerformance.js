@@ -23,7 +23,7 @@ try {
   root=make(dir+"/root","rw");mounted=make(dir+"/mount","rw")
   var build=millis(function(){return root.reindex()});if(!build.value.ok)throw new Error(stringify(build.value));if(!mounted.reindex().ok)throw new Error("mount build failed")
   report.initialBuild={ms:build.ms,fixtureDiskBytes:walkBytes(dir+"/root")}
-  var operations={compactSearch:function(m){return m.agenticSearch("queryparameter")},zeroSearch:function(m){return m.agenticSearch(zeroQuery)},retrieve:function(m){return m.retrieve("queryparameter",{chunks:2,maxInspected:2})},assembleContext:function(m){return m.assembleContext("queryparameter",{chunks:2})},open:function(m){return m.open("page-0.md")},navigate:function(m){return m.navigate("page-0.md",{section:"Specific"})},backlinks:function(m){return m.backlinks("page-0.md")},federation:function(m){return m.retrieve("lastmountparameter expiry",{wiki:"*",chunks:1})}}
+  var operations={context:function(m){return m.context()},compactSearch:function(m){return m.agenticSearch("queryparameter")},zeroSearch:function(m){return m.agenticSearch(zeroQuery)},retrieve:function(m){return m.retrieve("queryparameter",{chunks:2,maxInspected:2})},assembleContext:function(m){return m.assembleContext("queryparameter",{chunks:2})},open:function(m){return m.open("page-0.md")},navigate:function(m){return m.navigate("page-0.md",{section:"Specific"})},backlinks:function(m){return m.backlinks("page-0.md")},federation:function(m){return m.retrieve("lastmountparameter expiry",{wiki:"*",chunks:1})}}
   Object.keys(operations).forEach(function(name){
     var constructed=millis(function(){return make(dir+"/root","ro")}),client=constructed.value,attached=millis(function(){return client.attach("last",{backend:"fs",root:dir+"/mount"})})
     var reads=0,bytes=0

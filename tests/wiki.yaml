@@ -3,6 +3,70 @@ include:
 - tests/wikiRetrievalV2.yaml
 
 jobs:
+- name: MiniA Wiki Tests::ConsoleWikiOperations
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testConsoleWikiOperations
+
+- name: MiniA Wiki Tests::WikiConfigSharedMapping
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testWikiConfigSharedMapping
+
+- name: MiniA Wiki Tests::ContextAvoidsRedundantReads
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testContextAvoidsRedundantReads
+
+- name: MiniA Wiki Tests::S3ExistsUsesMetadata
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testS3ExistsUsesMetadata
+
+- name: MiniA Wiki Tests::WikiRunnerCoverage
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testWikiRunnerCoverage
+
+- name: MiniA Wiki Tests::ListSupportsOffsetAndLimitWithoutMeta
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testListSupportsOffsetAndLimitWithoutMeta
+
+- name: MiniA Wiki Tests::WriteIncrementallyUpdatesGraph
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testWriteIncrementallyUpdatesGraph
+
+- name: MiniA Wiki Tests::DeleteIncrementallyUpdatesGraph
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testDeleteIncrementallyUpdatesGraph
+
+- name: MiniA Wiki Tests::FsBackendRejectsTraversalDelete
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testFsBackendRejectsTraversalDelete
+
+- name: MiniA Wiki Tests::FsBackendRejectsAbsoluteWrite
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testFsBackendRejectsAbsoluteWrite
+
+- name: MiniA Wiki Tests::FsBackendRejectsNonMarkdownWrite
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testFsBackendRejectsNonMarkdownWrite
+
+- name: MiniA Wiki Tests::FsBackendRejectsNonMarkdownDelete
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testFsBackendRejectsNonMarkdownDelete
+
+- name: MiniA Wiki Tests::FsBackendSearchSkipsWikiInternalFiles
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testFsBackendSearchSkipsWikiInternalFiles
+
+- name: MiniA Wiki Tests::LuceneCompatibilityErrorDetection
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testLuceneCompatibilityErrorDetection
+
+- name: MiniA Wiki Tests::LuceneIncrementalCompatibilityFailureTriggersResetRebuild
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testLuceneIncrementalCompatibilityFailureTriggersResetRebuild
+
+- name: MiniA Wiki Tests::LuceneIncrementalGenericFailureDoesNotReset
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testLuceneIncrementalGenericFailureDoesNotReset
+
 - name: MiniA Wiki Federation Parity::FederatedSynonyms
   to: oJob Test
   exec: args.func = require("tests/wikiFederationParity.js").testFederatedSynonyms
@@ -709,6 +773,23 @@ jobs:
   exec: args.func = require("tests/wiki.js").testS3ArtifactsHydrateLocalSearchAndGraphCache
 
 todo:
+- MiniA Wiki Tests::ConsoleSearchPreservesV2Status
+- MiniA Wiki Tests::ConsoleWikiOperations
+- MiniA Wiki Tests::WikiConfigSharedMapping
+- MiniA Wiki Tests::ContextAvoidsRedundantReads
+- MiniA Wiki Tests::S3ExistsUsesMetadata
+- MiniA Wiki Tests::WikiRunnerCoverage
+- MiniA Wiki Tests::ListSupportsOffsetAndLimitWithoutMeta
+- MiniA Wiki Tests::WriteIncrementallyUpdatesGraph
+- MiniA Wiki Tests::DeleteIncrementallyUpdatesGraph
+- MiniA Wiki Tests::FsBackendRejectsTraversalDelete
+- MiniA Wiki Tests::FsBackendRejectsAbsoluteWrite
+- MiniA Wiki Tests::FsBackendRejectsNonMarkdownWrite
+- MiniA Wiki Tests::FsBackendRejectsNonMarkdownDelete
+- MiniA Wiki Tests::FsBackendSearchSkipsWikiInternalFiles
+- MiniA Wiki Tests::LuceneCompatibilityErrorDetection
+- MiniA Wiki Tests::LuceneIncrementalCompatibilityFailureTriggersResetRebuild
+- MiniA Wiki Tests::LuceneIncrementalGenericFailureDoesNotReset
 - MiniA Wiki Federation Parity::FederatedSynonyms
 - MiniA Wiki Federation Parity::LateMount
 - MiniA Wiki Federation Parity::SearchOptions

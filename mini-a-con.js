@@ -1479,57 +1479,7 @@ try {
     if (toBoolean(sessionOptions.usewiki) !== true) return __
 
     try {
-      var wikiCfg = {
-        access : sessionOptions.wikiaccess,
-        backend: sessionOptions.wikibackend,
-        indexdir: sessionOptions.wikiindexdir,
-        s3artifactprefix: sessionOptions.wikis3artifactprefix,
-        s3artifactbundle: sessionOptions.s3artifactbundle,
-        wikihttpindexurl: sessionOptions.wikihttpindexurl,
-        wikihttptimeout: sessionOptions.wikihttptimeout,
-        wikiartifactrefreshsecs: sessionOptions.wikiartifactrefreshsecs,
-        wikilexical: sessionOptions.wikilexical,
-        wikiretrievalv2: sessionOptions.wikiretrievalv2,
-        wikitelemetry: sessionOptions.wikitelemetry,
-        wikiretrievalconfig: sessionOptions.wikiretrievalconfig,
-        usegraph: toBoolean(sessionOptions.usewikigraph) === true,
-        wikigraphsemantic: toBoolean(sessionOptions.wikigraphsemantic) === true,
-        wikigraphcommunity: sessionOptions.wikigraphcommunity,
-        wikigraphsearchhints: sessionOptions.wikigraphsearchhints,
-        wikigraphhintcap: sessionOptions.wikigraphhintcap,
-        wikigraphmounts: sessionOptions.wikigraphmounts,
-        wikimountgraphttlms: sessionOptions.wikimountgraphttlms,
-        wikigraphcross: sessionOptions.wikigraphcross,
-        wikigraphcrossjoin: sessionOptions.wikigraphcrossjoin,
-        wikigraphcrosscap: sessionOptions.wikigraphcrosscap,
-        wikigraphcrossdepth: sessionOptions.wikigraphcrossdepth,
-        wikigraphcrossmaxdf: sessionOptions.wikigraphcrossmaxdf,
-        wikigraphcrossminkeylen: sessionOptions.wikigraphcrossminkeylen,
-        wikigraphfalkor: {
-          host: sessionOptions.wikigraphfalkorhost,
-          port: sessionOptions.wikigraphfalkorport,
-          graph: sessionOptions.wikigraphfalkorgraph,
-          user: sessionOptions.wikigraphfalkoruser,
-          pass: sessionOptions.wikigraphfalkorpass
-        }
-      }
-      if (sessionOptions.wikibackend === "s3") {
-        wikiCfg.bucket          = sessionOptions.wikibucket
-        wikiCfg.prefix          = sessionOptions.wikiprefix
-        wikiCfg.url             = sessionOptions.wikiurl
-        wikiCfg.accessKey       = sessionOptions.wikiaccesskey
-        wikiCfg.secret          = sessionOptions.wikisecret
-        wikiCfg.region          = sessionOptions.wikiregion
-        wikiCfg.useVersion1     = sessionOptions.wikiuseversion1
-        wikiCfg.ignoreCertCheck = sessionOptions.wikiignorecertcheck
-      } else if (sessionOptions.wikibackend === "http" || sessionOptions.wikibackend === "https") {
-        wikiCfg.backend = "http"
-        wikiCfg.url = sessionOptions.wikiurl
-        wikiCfg.accessKey = sessionOptions.wikiaccesskey
-        wikiCfg.secret = sessionOptions.wikisecret
-      } else {
-        wikiCfg.root = isString(sessionOptions.wikiroot) && sessionOptions.wikiroot.trim().length > 0 ? sessionOptions.wikiroot.trim() : "."
-      }
+      var wikiCfg = __miniAWikiConfigFromArgs(sessionOptions)
       var mountsRaw = isDef(sessionOptions.wikimounts) ? sessionOptions.wikimounts : (isObject(extraCLIArgs) ? extraCLIArgs.wikimounts : __)
       wikiCfg = __miniAWikiPrimaryConfig(wikiCfg, sessionOptions.wikiroot, mountsRaw)
       var wm = __miniAWikiCreatePrimary(wikiCfg, function(level, message) { if (level === "warn") logWarn(message) })
@@ -6146,7 +6096,7 @@ try {
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
       { command: "/edit [last]", description: "Compose and submit one goal in the configured external editor (last pre-fills the previous goal; /editor also works)" },
       { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, compact, mounts, attach, detach" },
-      { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, report, query, retrieve, answer, neighbors, path, communities, surprise, export, stats, falkor, cross (requires usewikigraph=true)" },
+      { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, report, query, retrieve, answer (retrieval alias; no synthesis), neighbors, path, communities, surprise, export, stats, falkor, cross (requires usewikigraph=true)" },
       { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: plan, apply (default), reorg, repair, reindex, graph, indexes, dryrun" },
       { command: "/absorb plan|show|apply|status|resume|delete|cancel [spec|id]", description: "Plan, review and apply local wiki absorption (see ABSORB.md)." },
       { command: "/ingest <source> [section]", description: "Ingest docs into the wiki; flags: dryrun, force, independent. No source: recovery choices." }
@@ -6334,12 +6284,17 @@ try {
 
     try {
       if (sub === "list" || sub === "") {
-        var pages = wm.list(consolePathValue(rest))
+        var listArgs = parseConsolePathArgs(rest).argv
+        var withMeta = listArgs.indexOf("--meta") >= 0
+        listArgs = listArgs.filter(function(arg) { return arg !== "--meta" })
+        if (listArgs.length > 1) throw new Error("Usage: /wiki list [prefix] [--meta]; quote paths containing spaces.")
+        var pages = wm.list(listArgs[0] || "", { withMeta: withMeta })
         if (pages.length === 0) {
           print(colorifyText("Wiki is empty.", hintColor))
         } else {
           print(colorifyText("Wiki pages (" + pages.length + "):", accentColor))
-          pages.forEach(function(p) { print("  " + colorifyText(p, promptColor)) })
+          if (withMeta) print(printTree(pages))
+          else pages.forEach(function(p) { print("  " + colorifyText(p, promptColor)) })
         }
       } else if (sub === "tree") {
         var tree = wm.tree(consolePathValue(rest), 3)
@@ -6366,8 +6321,13 @@ try {
       } else if (sub === "search") {
         if (rest.length === 0) { print(colorifyText("Usage: /wiki search <query>", errorColor)); return }
         var hits = __miniAWikiRequireSearchHits(wm.search(rest))
+        var incomplete = hits.outcome === "partial" || hits.truncated === true
+        if (incomplete) {
+          print(colorifyText("Search coverage is incomplete; absence is not established.", hintColor))
+          print(printTree({ sources: hits.sources || [], stopReasons: hits.stopReasons || [], budget: hits.budget }))
+        }
         if (hits.length === 0) {
-          print(colorifyText("No results for: " + rest, hintColor))
+          print(colorifyText((incomplete ? "No matches in the searched portion for: " : "No results for: ") + rest, hintColor))
         } else {
           print(colorifyText("Results (" + hits.length + "):", accentColor))
           hits.forEach(function(h) {
@@ -6486,17 +6446,17 @@ try {
           print(colorifyText("Wiki reindex failed: " + (isObject(reindexResult) ? reindexResult.error : "unknown error"), errorColor))
         }
       } else if (sub === "context") {
-        var ctx = wm.context()
-        print(colorifyText("Wiki context: " + ctx.pages + " pages, " + ctx.sections.length + " sections", accentColor))
-        if (ctx.sections.length > 0) print("  sections: " + ctx.sections.join(", "))
-        if (ctx.mounts.length > 0) {
-          print("  mounts:")
-          ctx.mounts.forEach(function(m) { print("    @" + m.name + " — " + (m.description || "") + " (" + m.pages + " pages)") })
-        }
-        if (ctx.recent.length > 0) {
-          print("  recent:")
-          ctx.recent.forEach(function(e) { print("    " + colorifyText(e, hintColor)) })
-        }
+        var contextArgs = parseConsolePathArgs(rest).argv, contextOptions = {}
+        contextArgs.forEach(function(arg) {
+          if (arg.indexOf("wiki=") === 0) contextOptions.wiki = arg.substring(5)
+          else if (arg.indexOf("path=") === 0) contextOptions.path = arg.substring(5)
+          else if (arg.charAt(0) === "@") contextOptions.path = arg
+          else if (contextArgs.length === 1 && arg.indexOf("=") < 0) contextOptions.wiki = arg
+          else throw new Error("Usage: /wiki context [wiki=<name>|path=@<name>/]")
+        })
+        if (contextOptions.wiki === "" || contextOptions.path === "") throw new Error("A wiki name or mounted path is required.")
+        if (isDef(contextOptions.wiki) && isDef(contextOptions.path)) throw new Error("Choose wiki= or path=, not both.")
+        print(printTree(wm.context(contextOptions)))
       } else if (sub === "mounts") {
         var mountList = wm.mounts()
         if (mountList.length === 0) {
@@ -6529,13 +6489,6 @@ try {
         } else {
           print(colorifyText("Detach failed: " + (isObject(detachResult) ? detachResult.error : "unknown error"), errorColor))
         }
-      } else if (sub === "list" && rest.indexOf("--meta") >= 0) {
-        var metaPath = rest.replace("--meta", "").trim()
-        var metaPages = wm.list(metaPath, { withMeta: true })
-        print(colorifyText("Wiki pages with metadata (" + metaPages.length + "):", accentColor))
-        metaPages.forEach(function(p) {
-          print("  " + colorifyText(p.path, promptColor) + (p.title ? " — " + p.title : "") + (p.description ? "\n    " + colorifyText(p.description, hintColor) : ""))
-        })
       } else {
         print(colorifyText("Usage: /wiki [context|list|tree|browse|read|search|backlinks|delete|lint|write|move|init|reindex|compact|mounts|attach|detach] [args]", errorColor))
         print(colorifyText("  list --meta   show pages with title+description", hintColor))

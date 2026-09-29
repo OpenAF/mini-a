@@ -394,7 +394,7 @@ Choose one action: {{{actionFieldValues}}}. Include only fields needed for that 
 • "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if useMemoryWrite}}
 • "memory_write" - Record durable knowledge that should survive across runs (params: {"kind":"preference|environment|procedure|pitfall|reference","value":"...","key":"optional stable key","tags":["optional"],"ttlDays":N}); use "preference" for what the user/team wants, "environment" for how this machine/repo/service is set up, "procedure" for a validated how-to, "pitfall" for something that failed and why, "reference" for a pointer to a doc/URL. Only write things worth remembering next time, not step-by-step narration.{{/if}}{{#if useWiki}}
 • "wiki" - Interact with the wiki knowledge base (params: {"op":"retrieve|search|open|navigate|read|grep|related|context|list|tree|browse|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md or wiki:ref","query":"...","pattern":"...","section":"Heading Name","startLine":N,"endLine":N,"maxChars":N,"limit":N,"contextLines":N}); Search without a wiki selector searches all mounted wikis automatically. Use path="@name/" for navigation or wiki="name" only to narrow scope. Partial coverage cannot establish absence; retain specific query terms when retrying. Read bounded evidence before making detailed factual claims. Retrieval strategy: SEARCH compact candidates, OPEN promising pages, NAVIGATE headings, then READ one section/range. Use GREP for exact identifiers/errors in a known page. Do not read every search result or whole long pages; use RELATED only when lexical evidence is insufficient.{{#if wikiRw}} Before write/move/delete read AGENTS.md for rules.{{/if}}{{#if wikiSourceUrl}} Results also carry a {{wikiSourceField}} URL, that page's canonical citation source; cite it when you use the page's content.{{/if}}{{/if}}{{#if useWikiGraph}}
-• "graph" - Query the wiki knowledge graph (params: {"op":"stats|query|neighbors|path|communities|surprise|retrieve|answer|export|build|cross", ...}); use for relationship/graph-shaped questions, not as a substitute for wiki search. "cross" (params: {"path":"page.md"} or {"query":"..."}) joins into mounted wikis' graphs via explicit @-links and shared tags/aliases/concepts.{{/if}}{{#if actionsList}}
+• "graph" - Query the wiki knowledge graph (params: {"op":"stats|query|neighbors|path|communities|surprise|retrieve|answer|export|build|cross", ...}); use for relationship/graph-shaped questions, not as a substitute for wiki search. "answer" is a compatibility alias for retrieval and performs no LLM synthesis. "cross" (params: {"path":"page.md"} or {"query":"..."}) joins into mounted wikis' graphs via explicit @-links and shared tags/aliases/concepts.{{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 {{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
 • "final" - Provide your complete "answer" when goal is achieved
@@ -8189,69 +8189,7 @@ MiniA.prototype._initWiki = function(args) {
   if (toBoolean(args.usewiki) !== true) return
   try {
     var wikiGraphEnabled = toBoolean(args.usewikigraph) === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0)
-    var cfg = {
-      access : args.wikiaccess,
-      backend: args.wikibackend,
-      usegraph: wikiGraphEnabled,
-      indexdir: args.wikiindexdir,
-      s3artifactprefix: args.wikis3artifactprefix,
-      s3artifactbundle: args.s3artifactbundle,
-      wikihttpindexurl: args.wikihttpindexurl,
-      wikihttptimeout: args.wikihttptimeout,
-      wikiartifactrefreshsecs: args.wikiartifactrefreshsecs,
-      wikilexical: args.wikilexical,
-      wikiretrievalv2: args.wikiretrievalv2,
-      wikitelemetry: args.wikitelemetry,
-      wikiretrievalconfig: args.wikiretrievalconfig,
-      wikisourceurl: args.wikisourceurl,
-      wikisourcefield: args.wikisourcefield,
-      wikisourceinline: args.wikisourceinline,
-      wikimetacache: args.wikimetacache,
-      wikigraphsemantic: toBoolean(args.wikigraphsemantic) === true,
-      wikigraphcommunity: args.wikigraphcommunity,
-      wikigraphhintcap: args.wikigraphhintcap,
-      wikigraphsearchhints: args.wikigraphsearchhints,
-      wikigraphmounts: args.wikigraphmounts,
-      wikimountgraphttlms: args.wikimountgraphttlms,
-      wikigraphcross: args.wikigraphcross,
-      wikigraphcrossjoin: args.wikigraphcrossjoin,
-      wikigraphcrosscap: args.wikigraphcrosscap,
-      wikigraphcrossdepth: args.wikigraphcrossdepth,
-      wikigraphcrossmaxdf: args.wikigraphcrossmaxdf,
-      wikigraphcrossminkeylen: args.wikigraphcrossminkeylen,
-      wikigraphautosave: args.wikigraphautosave,
-      wikigraphsavedebouncems: args.wikigraphsavedebouncems,
-      wikilintstreamthreshold: args.wikilintstreamthreshold,
-      wikilintmaxpairs: args.wikilintmaxpairs,
-      wikigraphfalkor: {
-        host: args.wikigraphfalkorhost,
-        port: args.wikigraphfalkorport,
-        graph: args.wikigraphfalkorgraph,
-        user: args.wikigraphfalkoruser,
-        pass: args.wikigraphfalkorpass
-      }
-    }
-    if (args.wikibackend === "s3" || args.wikibackend === "s3fs") {
-      cfg.bucket          = args.wikibucket
-      cfg.prefix          = args.wikiprefix
-      cfg.url             = args.wikiurl
-      cfg.accessKey       = args.wikiaccesskey
-      cfg.secret          = args.wikisecret
-      cfg.region          = args.wikiregion
-      cfg.useVersion1     = args.wikiuseversion1
-      cfg.ignoreCertCheck = args.wikiignorecertcheck
-    } else if (args.wikibackend === "es") {
-      cfg.esurl = args.wikiurl
-      cfg.esindex = isString(args.wikiprefix) && args.wikiprefix.trim().length > 0 ? args.wikiprefix.trim() : "mini_a_wiki"
-      cfg.esuser = args.wikiaccesskey
-      cfg.espass = args.wikisecret
-    } else if (args.wikibackend === "http") {
-      cfg.url = args.wikiurl
-      cfg.accessKey = args.wikiaccesskey
-      cfg.secret = args.wikisecret
-    } else {
-      cfg.root = isString(args.wikiroot) && args.wikiroot.trim().length > 0 ? args.wikiroot.trim() : "."
-    }
+    var cfg = __miniAWikiConfigFromArgs(args)
     // F10: set llmExtractFn before constructing the manager so configure() wires it in one pass
     if (wikiGraphEnabled) {
       cfg.llmExtractFn = function(payload) {

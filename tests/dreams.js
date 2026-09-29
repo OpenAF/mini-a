@@ -831,29 +831,32 @@
   }
 
   exports.testDreamWikiReindexModeRebuildsSearchIndex = function() {
-    var dir = seedWiki(makeWikiDir())
-    try {
-      load("mini-a-wiki.js")
-      // Write a page directly through the backend, bypassing wm.write() (which updates the
-      // live index incrementally) — so it's absent from the index and proves reindex mode
-      // actually re-scans rather than being a no-op.
-      io.mkdir(dir + "/offindex")
-      io.writeFileString(dir + "/offindex/page.md",
-        "---\ntitle: Offindex\ndescription: Offindex page\ncreated: 2026-01-01T00:00:00.000Z\nupdated: 2026-01-01T00:00:00.000Z\n---\n\n# Offindex\n\nzyxwvutmarker content")
-
-      var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "reindex", wikilexical: "(language: english, ngrams: true)" }, function() {}).dreamWiki()
-      ow.test.assert(res.ok, true, "reindex mode should succeed")
-      ow.test.assert(res.mode, "reindex", "mode should be reindex")
-      var inspector = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" }, function() {})
-      var manifest
-      try { manifest = af.fromJson(io.readFileString(inspector._getLuceneIndexPath() + "/mini-a-lexical.json")) } finally { inspector.close() }
-      ow.test.assert(manifest.lexical.ngrams, true, "reindex mode should preserve the requested lexical configuration")
-
-      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" }, function() {})
-      var hits = wm.search("zyxwvutmarker", { limit: 5 })
-      wm.close()
-      ow.test.assert(hits.length > 0, true, "reindex should have picked up the directly-written page")
-    } finally { try { io.rm(dir) } catch(e) {} }
+    ;[true, false].forEach(function(v2) {
+      var dir = seedWiki(makeWikiDir()), inspector, snapshot
+      try {
+        load("mini-a-wiki.js")
+        // Bypass managed writes to prove reindex discovers unpublished content.
+        io.mkdir(dir + "/offindex")
+        io.writeFileString(dir + "/offindex/page.md",
+          "---\ntitle: Offindex\ndescription: Offindex page\n---\n# Offindex\nzyxwvutmarker content")
+        var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "reindex", wikiretrievalv2: v2, wikilexical: "(language: english, ngrams: true)" }, function() {}).dreamWiki()
+        ow.test.assert(res.ok, true, "reindex mode should succeed")
+        ow.test.assert(res.mode, "reindex", "mode should be reindex")
+        inspector = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro", wikiretrievalv2: v2 }, function() {})
+        var manifest
+        if (v2) {
+          snapshot = inspector._retrievalV2.acquire()
+          manifest = snapshot.manifest
+        } else manifest = af.fromJson(io.readFileString(inspector._getLuceneIndexPath() + "/mini-a-lexical.json"))
+        ow.test.assert(manifest.lexical.ngrams, true, "active engine should preserve requested lexical configuration")
+        var hits = inspector.search("zyxwvutmarker", { limit: 5 })
+        ow.test.assert(hits.length > 0, true, "reindex should find directly-written content in both engines")
+      } finally {
+        if (snapshot && inspector) inspector._retrievalV2.release(snapshot)
+        if (inspector) inspector.close()
+        try { io.rm(dir) } catch(e) {}
+      }
+    })
   }
 
   exports.testDreamWikiGraphModeRebuildsGraph = function() {

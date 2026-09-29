@@ -384,12 +384,6 @@ MiniAMcpWikiRestriction.prototype.consume = function(ref) {
   return Number(grant.expires) > Date.now() ? grant : __
 }
 
-function __miniAMcpWikiDenyRestricted(operation) {
-  var r = global.__miniAMcpWiki && global.__miniAMcpWiki.restriction
-  if (r && r.enabled) return __miniAMcpWikiRestrictedError("restricted-operation")
-  return __
-}
-
 function __miniAMcpWikiObserveRestricted(operation, implementation, args) {
   var manager = global.__wikiManager, state = global.__miniAMcpWiki && global.__miniAMcpWiki.restriction
   if (!state || !state.enabled || !manager || !manager._retrievalV2 || toBoolean(manager._config && manager._config.wikitelemetry) !== true) return implementation(args)
@@ -597,30 +591,7 @@ function __miniAMcpWikiBuildConfig(args, options) {
     }
   }
 
-  if (backend === "s3" || backend === "s3fs") {
-    cfg.bucket          = args.wikibucket
-    cfg.prefix          = args.wikiprefix
-    cfg.url             = args.wikiurl
-    cfg.accessKey       = args.wikiaccesskey
-    cfg.secret          = args.wikisecret
-    cfg.region          = args.wikiregion
-    cfg.useVersion1     = args.wikiuseversion1
-    cfg.ignoreCertCheck = args.wikiignorecertcheck
-    if (backend === "s3fs") cfg.root = isString(args.wikiroot) && args.wikiroot.trim().length > 0 ? args.wikiroot.trim() : "."
-  } else if (backend === "es") {
-    cfg.esurl   = args.wikiurl
-    cfg.esindex = isString(args.wikiprefix) && args.wikiprefix.trim().length > 0 ? args.wikiprefix.trim() : "mini_a_wiki"
-    cfg.esuser  = args.wikiaccesskey
-    cfg.espass  = args.wikisecret
-  } else if (backend === "http") {
-    cfg.url       = args.wikiurl
-    cfg.accessKey = args.wikiaccesskey
-    cfg.secret    = args.wikisecret
-  } else {
-    cfg.root = isString(args.wikiroot) && args.wikiroot.trim().length > 0 ? args.wikiroot.trim() : "."
-  }
-
-  return cfg
+  return __miniAWikiConfigFromArgs(merge(args, { wikibackend: backend }), cfg)
 }
 
 function __miniAMcpWikiDefaultLabel(args, cfg) {

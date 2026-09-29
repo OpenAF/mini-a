@@ -2,6 +2,39 @@
 // License: Apache 2.0
 // Description: Wiki manager for Mini-A. Supports filesystem, S3, Elasticsearch and static HTTP(S) backends.
 
+// Shared argument mapping. Entry points retain explicit access and model policies.
+function __miniAWikiConfigFromArgs(args, overrides) {
+  args = isMap(args) ? args : {}
+  var backend = isString(args.wikibackend) ? args.wikibackend.trim().toLowerCase() : "fs"
+  if (backend === "https") backend = "http"
+  if (["fs", "s3", "s3fs", "es", "http"].indexOf(backend) < 0) backend = "fs"
+  var cfg = { access: args.wikiaccess, backend: backend, indexdir: args.wikiindexdir,
+    s3artifactprefix: args.wikis3artifactprefix, s3artifactbundle: args.s3artifactbundle,
+    usegraph: toBoolean(args.usewikigraph) === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0),
+    wikigraphsemantic: toBoolean(args.wikigraphsemantic) === true }
+  ;["wikihttpindexurl", "wikihttptimeout", "wikiartifactrefreshsecs", "wikilexical", "wikiretrievalv2", "wikitelemetry", "wikiretrievalconfig",
+    "wikisourceurl", "wikisourcefield", "wikisourceinline", "wikimetacache", "wikigraphcommunity", "wikigraphhintcap", "wikigraphsearchhints",
+    "wikigraphmounts", "wikimountgraphttlms", "wikigraphcross", "wikigraphcrossjoin", "wikigraphcrosscap", "wikigraphcrossdepth",
+    "wikigraphcrossmaxdf", "wikigraphcrossminkeylen", "wikigraphautosave", "wikigraphsavedebouncems", "wikilintstreamthreshold", "wikilintmaxpairs"
+  ].forEach(function(key) { cfg[key] = args[key] })
+  cfg.wikigraphfalkor = { host: args.wikigraphfalkorhost, port: args.wikigraphfalkorport, graph: args.wikigraphfalkorgraph, user: args.wikigraphfalkoruser, pass: args.wikigraphfalkorpass }
+  if (backend === "s3" || backend === "s3fs") {
+    cfg.bucket = args.wikibucket; cfg.prefix = args.wikiprefix; cfg.url = args.wikiurl
+    cfg.accessKey = args.wikiaccesskey; cfg.secret = args.wikisecret; cfg.region = args.wikiregion
+    cfg.useVersion1 = args.wikiuseversion1; cfg.ignoreCertCheck = args.wikiignorecertcheck
+  } else if (backend === "es") {
+    cfg.esurl = args.wikiurl
+    cfg.esindex = isString(args.wikiprefix) && args.wikiprefix.trim().length > 0 ? args.wikiprefix.trim() : "mini_a_wiki"
+    cfg.esuser = args.wikiaccesskey; cfg.espass = args.wikisecret
+  } else if (backend === "http") {
+    cfg.url = args.wikiurl; cfg.accessKey = args.wikiaccesskey; cfg.secret = args.wikisecret
+  }
+  if (backend === "fs" || backend === "s3fs") cfg.root = isString(args.wikiroot) && args.wikiroot.trim().length > 0 ? args.wikiroot.trim() : "."
+  Object.keys(overrides || {}).forEach(function(key) { cfg[key] = overrides[key] })
+  return cfg
+}
+
+
 loadLib("mini-a-wiki-retrieval.js")
 
 // ── Template version & helpers ────────────────────────────────────────────────
@@ -2621,7 +2654,7 @@ MiniAWikiManager.prototype.regenerateIndexes = function(options) {
     var attached = []
     if (isRoot) {
       try {
-        var logRaw = this._backend.read("log.md")
+        var logRaw = pages.indexOf("log.md") >= 0 ? this._backend.read("log.md") : __
         if (isString(logRaw)) {
           logRaw.split("\n").forEach(function(line) { if (/^## \[/.test(line)) recent.push(line.replace(/^## /, "").trim()) })
           recent = recent.reverse().slice(0, isNumber(opts.maxRecent) ? opts.maxRecent : 10)
@@ -3069,13 +3102,18 @@ MiniAWikiManager.prototype._makeS3Backend = function(cfg) {
     },
     exists: function(path) {
       var identifier = "s3://" + bucket + "/" + prefix + path, started = Number(java.lang.System.nanoTime())
+      var method = isFunction(s3client.statObject) ? "HEAD" : "GET"
       try {
-        var stream = s3client.getObjectStream(bucket, prefix + path)
-        var exists = isDef(stream)
-        if (exists) try { stream.close() } catch(ig) {}
-        parent._auditRetrieval("s3", identifier, path, exists, 0, { operation: "exists", protocol: "s3", method: "GET", totalMillis: __miniAWikiAuditMillis(started) })
+        var exists
+        if (method === "HEAD") exists = isDef(s3client.statObject(bucket, prefix + path))
+        else {
+          var stream = s3client.getObjectStream(bucket, prefix + path)
+          exists = isDef(stream)
+          if (exists) try { stream.close() } catch(ig) {}
+        }
+        parent._auditRetrieval("s3", identifier, path, exists, 0, { operation: "exists", protocol: "s3", method: method, totalMillis: __miniAWikiAuditMillis(started) })
         return exists
-      } catch(e) { parent._auditRetrieval("s3", identifier, path, false, 0, { operation: "exists", protocol: "s3", method: "GET", totalMillis: __miniAWikiAuditMillis(started) }); return false }
+      } catch(e) { parent._auditRetrieval("s3", identifier, path, false, 0, { operation: "exists", protocol: "s3", method: method, totalMillis: __miniAWikiAuditMillis(started) }); return false }
     },
     delete: function(path) {
       s3client.removeObject(bucket, prefix + path)
@@ -3682,11 +3720,12 @@ MiniAWikiManager.prototype.open = function(pathOrRef, options) {
   var opts = isObject(options) ? options : {}
   var maxHeadings = isNumber(opts.maxHeadings) && opts.maxHeadings > 0 ? Math.min(Math.floor(opts.maxHeadings), 100) : 40
   var rawLines = String(page.raw || "").split("\n")
+  var bodyLineCount = String(page.body || "").split("\n").length
   var headings = this._markdownHeadings(page.body).map(function(h, i, all) {
-    var next = String(page.body || "").split("\n").length
+    var next = bodyLineCount
     for (var j = i + 1; j < all.length; j++) if (all[j].level <= h.level) { next = all[j].line; break }
     // body headings are offset by any front matter in raw content.
-    var bodyOffset = rawLines.length - String(page.body || "").split("\n").length
+    var bodyOffset = rawLines.length - bodyLineCount
     return { id: this._headingAnchor(h.text), title: h.text, level: h.level, lineStart: h.line + bodyOffset + 1, lineEnd: next + bodyOffset }
   }.bind(this))
   var links = isArray(page.links) ? page.links.slice(0, 40) : []
@@ -5343,7 +5382,7 @@ MiniAWikiManager.prototype.context = function(options) {
   // Last N log entries (most recent first)
   var recent = []
   try {
-    var logRaw = this._backend.read("log.md")
+    var logRaw = pages.indexOf("log.md") >= 0 ? this._backend.read("log.md") : __
     if (isString(logRaw)) {
       logRaw.split("\n").forEach(function(line) {
         if (/^## \[/.test(line)) recent.push(line.replace(/^## /, "").trim())
@@ -5354,13 +5393,16 @@ MiniAWikiManager.prototype.context = function(options) {
 
   var mounts = isArray(this._mounts) ? this._mounts : []
   var mountList = mounts.map(function(m) {
-    var count = 0; try { count = m.manager._safeListPages("").length } catch(e) {}
-    var desc = ""
-    try {
-      var idx = m.manager.read("index.md")
-      if (isObject(idx) && isObject(idx.meta) && isString(idx.meta.description)) desc = idx.meta.description
-    } catch(e) {}
-    return { name: m.name, pages: count, label: isString(m.label) ? m.label : m.name, description: isString(m.description) && m.description.length > 0 ? m.description : desc }
+    var mountPages = []; try { mountPages = m.manager._safeListPages("") } catch(e) {}
+    var count = mountPages.length
+    var desc = isString(m.description) ? m.description : ""
+    if (desc.length === 0 && mountPages.indexOf("index.md") >= 0) {
+      try {
+        var idx = m.manager._metaFor("index.md")
+        if (isObject(idx) && isString(idx.description)) desc = idx.description
+      } catch(e) {}
+    }
+    return { name: m.name, pages: count, label: isString(m.label) ? m.label : m.name, description: desc }
   })
   var catalog = [{ name: "primary", label: isString(this._config.label) ? this._config.label : "wiki", primary: true, readOnly: this._access !== "rw", pageCount: pages.length, description: isString(this._config.description) ? this._config.description : "" }]
   if (this._catalog) { catalog[0].generated = true; catalog[0].label = "Wiki Mount Catalog"; catalog[0].description = "Generated read-only primary; configure wikiroot for persistent storage." }
@@ -5396,6 +5438,7 @@ MiniAWikiManager.prototype.context = function(options) {
 
   return {
     wiki     : "primary",
+    backend  : this._backendType,
     pages    : pages.length,
     sections : sections,
     mounts   : mountList.slice(0,10),
@@ -5410,6 +5453,8 @@ MiniAWikiManager.prototype.context = function(options) {
       mode   : this._retrievalV2 ? "v2" : "legacy",
       federation: mounts.length ? { mode: this._retrievalEngineFor() ? "passage-v2" : "mixed-or-legacy", sources: mounts.map(function(m){return {wiki:m.name,mode:m.manager._retrievalV2?"v2":"legacy"}}) } : __,
       fallbackReason: this._legacyRetrievalV2 ? "v2-build-required" : __,
+      nextAction: this._legacyRetrievalV2 ? (this._access === "rw" ? "Run /wiki reindex to publish Retrieval V2." : "Ask the wiki publisher to run a writable reindex; this reader remains in legacy mode.") :
+        (searchStatus !== "passage-v2" && this._retrievalV2 ? "Inspect the retrieval error and ask the publisher to validate or rebuild the artifacts." : __),
       lexical: lexicalCapabilities,
       analysis: analysisStatus,
       graph  : graphStatus,
