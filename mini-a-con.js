@@ -333,6 +333,16 @@ try {
       })
     }
 
+    // A manager must not silently win over another requested standalone mode.
+    if (toBoolean(args.wikiman) === true) {
+      var wikiManConflicts = ["modelman", "mcptest", "memoryman", "dream", "workermode", "web"].filter(function(key) { return toBoolean(args[key]) === true })
+      if (isDef(args.onport) || hasRunnableExecArg || isDef(args.goal) || isDef(args.agent) || isDef(args.agentfile)) wikiManConflicts.push("onport/exec/goal/agent")
+      if (wikiManConflicts.length) { logErr("wikiman=true conflicts with " + wikiManConflicts.join(", ")); exit(1, true) }
+      global._args = args
+      load(miniABasePath + "/mini-a-wikiman.js")
+      exit(0, true)
+    }
+
     // Choose
     if (toBoolean(args.modelman) === true) {
       // Start model management mode
@@ -663,6 +673,7 @@ try {
     wikiartifactrefreshsecs: { type: "number", default: 0, description: "Recheck HTTP or bundled-S3 wiki artifacts between requests (0 disables)." },
     wikilintstaleddays: { type: "number", default: 90, description: "Default stale-page threshold in days for wiki lint." },
     wikilintresultlimit: { type: "number", default: 0, description: "Default maximum lint issues returned to an agent (0 returns all; dream reorg defaults to 25)." },
+    wikitarget     : { type: "string", description: "Initial read-only mount selected by wikiman (otherwise the primary)." },
     wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts; fs roots may be directories or local .zip/.okt archives." },
     wikiretrievalv2: { type: "boolean", description: "Prefer V2 passage retrieval (default true); unpublished wikis use legacy retrieval with a warning until explicitly reindexed; false forces legacy." },
     wikiretrievalconfig: { type: "string", description: "Validated SLON/JSON passage/cache/artifact budgets; readPolicy auto (default) adopts published analysis for read-only V2 wikis, strict requires a configured match." },
@@ -864,6 +875,7 @@ try {
     memorysessionheader: { type: "string", default: "", description: "Request header name used to derive a web memory session id." },
     onport         : { type: "number", description: "Start the web UI on the provided port." },
     web            : { type: "boolean", default: false, description: "Start in web UI mode." },
+    wikiman        : { type: "boolean", default: false, description: "Start the guided wiki operations manager." },
     modelman       : { type: "boolean", default: false, description: "Start the model manager UI instead of the console." },
     mcptest        : { type: "boolean", default: false, description: "Start the MCP test mode instead of the console." },
     memoryman      : { type: "boolean", default: false, description: "Start the memory manager UI instead of the console." },
@@ -873,6 +885,7 @@ try {
     dreamwikimode  : { type: "string", description: "Wiki dream mode: plan, apply (default), reorg, repair, reindex, graph, or indexes." },
     dreammemorymode: { type: "string", description: "Memory dream mode: plan or apply." },
     dreamwikidryrun: { type: "boolean", default: false, description: "Propose wiki changes without writing (opt-out of apply)." },
+    dreamwikiinstructions: { type: "string", description: "Additional guidance appended to the wiki reorg objective." },
     dreamwikiapproval: { type: "string", description: "Wiki reorg approval mode: auto, ask, or never." },
     dreamwikireorg : { type: "boolean", default: false, description: "Allow structural wiki reorg operations." },
     dreamwikiminpages: { type: "number", description: "Minimum page count required before the deterministic index fixes run." },
@@ -919,6 +932,7 @@ try {
     exec: true,
     onport: true,
     web: true,
+    wikiman: true,
     modelman: true,
     mcptest: true,
     memoryman: true,
@@ -972,6 +986,7 @@ try {
       { option: "agent=<path|markdown>", description: "Run with an agent profile in CLI mode and exit instead of opening the console." },
       { option: "exec=\"/<cmd> ...args\"", description: "Execute one custom command/skill template and exit (use /cmd or $skill)." },
       { option: "onport=<port>", description: "Start the Mini-A web UI on the provided port (alias for web mode)." },
+      { option: "wikiman=true", description: "Start the guided wiki operations manager; prints replayable CLI commands." },
       { option: "modelman=true", description: "Start the model manager instead of the console experience." },
       { option: "mcptest=true", description: "Start the MCP test client instead of the console experience." },
       { option: "memoryman=true", description: "Start the memory manager UI for global/session stores." },
@@ -1007,6 +1022,7 @@ try {
     const examples = [
       { cmd: "mini-a mode=research goal=\"Summarize the project plan.\"", desc: "# Load research mode and run a goal." },
       { cmd: "mini-a onport=9090", desc: "# Start web chat on port 9090." },
+      { cmd: "mini-a wikiman=true wikiroot=/path/to/wiki", desc: "# Launch wiki operations manager (read-only by default)." },
       { cmd: "mini-a modelman=true", desc: "# Launch model manager UI." },
       { cmd: "mini-a mcptest=true", desc: "# Launch MCP test client." },
       { cmd: "mini-a memoryman=true usememory=true memoryuser=true", desc: "# Launch memory manager with user channels." },

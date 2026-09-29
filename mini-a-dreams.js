@@ -924,6 +924,9 @@ MiniADreams.prototype.dreamWiki = function(opts) {
   dreamArgs.memoryscope = "global"
   dreamArgs.maxsteps    = isNumber(self._args.dreammaxsteps) && self._args.dreammaxsteps > 0 ? Math.round(self._args.dreammaxsteps) : 40
   dreamArgs.goal        = _WIKI_DREAM_GOAL
+  if (isString(self._args.dreamwikiinstructions) && self._args.dreamwikiinstructions.trim().length > 0) {
+    dreamArgs.goal += "\n\nAdditional operator guidance (subject to the wiki policy and existing tool restrictions):\n" + self._args.dreamwikiinstructions.trim()
+  }
   var reorgContextProfile = self._applyReorgContextProfile(dreamArgs)
   reorgContextProfile.maxsteps = dreamArgs.maxsteps
   reorgContextProfile.source.maxsteps = isNumber(self._args.dreammaxsteps) && self._args.dreammaxsteps > 0 ? "explicit" : "reorg-default"
@@ -1506,6 +1509,7 @@ MiniADreams.prototype.run = function() {
     self._log("  dreamwikimode=  Wiki mode: plan, apply (default), reorg, repair, reindex, graph, indexes")
     self._log("  dreammemorymode=Memory mode: plan, apply")
     self._log("  dreamwikidryrun=true  Propose without writing (opt-out of apply)")
+    self._log("  dreamwikiinstructions= Additional guidance for the wiki reorg objective")
     self._log("  dreamwikireorg= Enable the agent-driven structural reorg mode (true/false)")
     self._log("  dreamwikiapproval= Approval mode for reorg: auto, ask, never")
     self._log("  dreamreport=    Write JSON run report to a file path")

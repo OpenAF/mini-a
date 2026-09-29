@@ -1,0 +1,41 @@
+help:
+  text: |
+    Run the same wiki operations as mini-a wikiman=true without interactive menus.
+    ojob utils/wikiOps.yaml operation=wiki.lint wikiroot=/path/to/wiki
+    ojob utils/wikiOps.yaml operation=wiki.reindex wikiroot=/path/to/wiki wikiaccess=rw confirm=true
+    Parameters use JSON/SLON. Mutations require confirm=true. Reorg also requires
+    backupconfirmed=true dreamwikireorg=true dreamwikiapproval=auto.
+    Secrets may be supplied using existing configuration or shell environment expansion.
+  expects:
+  - name: operation
+    desc: Namespaced operation (wiki.lint, graph.stats, dream.reorg, ingest.run, absorb.status, etc.)
+    mandatory: true
+  - name: params
+    desc: JSON/SLON operation parameters
+  - name: wikiroot
+    desc: Explicit wiki directory (or configure another backend / mounts)
+  - name: wikitarget
+    desc: Optional read-only mount name
+  - name: confirm
+    desc: Explicitly authorize mutation (default false)
+  - name: backupconfirmed
+    desc: Acknowledge an external reorg recovery point (default false)
+ojob:
+  logToConsole: false
+  catch: |
+    printErr(typeof MiniAWikiOps === "undefined" ? "Unable to load wiki operations runner" : MiniAWikiOps.sanitize(String(exception), args))
+    exit(1)
+todo:
+- Run wiki operation
+jobs:
+- name: Run wiki operation
+  exec: |
+    loadLib("mini-a-wikiops.js")
+    var runner = new MiniAWikiOps(args, function(msg) { print(MiniAWikiOps.sanitize(msg, args)) })
+    var spec = runner.spec(args.operation, args.params)
+    var gates = { confirm: toBoolean(args.confirm) === true, backupconfirmed: toBoolean(args.backupconfirmed) === true }
+    var result = runner.execute(spec, gates)
+    print(printTree(MiniAWikiOps.sanitize(result, runner.args), __, { tableArrays: false, wordWrap: false }))
+    var replay = runner.command(spec, gates)
+    print(MiniAWikiOps.formatReplay(replay))
+    if (isMap(result) && result.ok === false) exit(1)

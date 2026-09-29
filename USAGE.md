@@ -975,6 +975,8 @@ The `start()` method accepts various configuration options:
 - **`wikiretrievalconfig`** (SLON/JSON, optional): V2 passage, cache, artifact and query budgets. `readPolicy` defaults to `"auto"`: read-only V2 readers adopt the published generation's language/analyzer, accent folding, shingles and character n-gram settings, including sizes. This overrides differing startup index settings independently for each wiki mount. Synonyms, query expansion, relevance feedback and resource budgets remain reader-controlled. Use `wikiretrievalconfig='(readPolicy: strict)'` to require the published index to match configured analysis. Writable wikis always use configured build settings and still require explicit reindexing to change their contract. Mounts inherit the parent's retrieval configuration unless a mount supplies its own `wikiretrievalconfig` object.
   Supported existing manifests need no migration. Readers validate integrity, parser/format versions, Lucene compatibility and analyzer capabilities before adopting settings; unsupported generations still require a compatible runtime or publisher reindex. Published shingle/n-gram sizes must be integers within 2–1024 / 1–1024 respectively. Generation switches and predecessor recovery retain the analyzer settings belonging to each pinned snapshot. Unpublished and explicitly legacy wikis keep their existing behavior.
   `wiki op="context"` (optionally `wiki="mount-name"`) exposes `retrieval.analysis`, and V2 search/retrieve source diagnostics include `analysis`: `policy`, `generation`, `source` (`generation` or `configured`), `effective` index settings, and `differingFields`. A strict mismatch retains `incompatible-generation` and includes field details. Under small response budgets, per-source `analysisOmitted: "output-budget"` replaces the detailed settings to preserve evidence; full settings remain available through context.
+  A `manifest-merkle-failure` means the serving manifest failed its content-hash check; the accompanying `source-unavailable` is a search status, not proof that Markdown is missing. New publications use `merkleFormat: canonical-json-v1`, which sorts object keys recursively and preserves array order so JSON map ordering cannot change the hash after restart. Unmarked manifests retain their original hash contract. Upgrade all readers and writers before rebuilding with this format; older Mini-A readers do not support it. To recover an affected local wiki, keep its Markdown, start the updated version with `wikiaccess=rw` and the intended lexical settings, then run `/wiki reindex`. Do not edit stored checksums or delete the wiki.
+
 - **`OAF_MINI_A_WIKI_LEXICAL`** (environment variable, optional): Environment equivalent of `wikilexical`; an explicit runtime `wikilexical` value takes precedence.
 - **`wikisourceurl`** (Handlebars string, optional): Renders a page's canonical citation URL (a published docs site, a GitHub blob URL, etc.) onto `search`/`read`/`open`/`grep`/`related` results, e.g. `wikisourceurl="https://docs.example.com/{{$encodePath pathNoExt}}"`. Available variables: `path`, `pathNoExt`, `encodedPath`, `backend`, `root`, `bucket`, `prefix`, `url`, `mount`, `section`, `anchor`, `title`. mini-a registers `ow.template.addOpenAFHelpers()` and `ow.template.addConditionalHelpers()` for this template, plus `$encodeURI`/`$encodeURIComponent`/`$encodePath` URL-encoding helpers — prefer `{{$encodePath ...}}` over triple-brace escaping, since Handlebars HTML-escapes `{{x}}` by default and neither form percent-encodes on its own. A `wikimounts` entry may set its own `wikisourceurl`, so a mounted page cites its own wiki rather than the parent's URL space; a mount without one carries no citation URL for its pages. Off by default; never applied when `mcp-wiki-safe.yaml` restriction is active (it would leak the real page path that server exists to hide), and `mcp-wiki-safe.yaml` does not accept this argument at all. See `docs/WIKI.md`'s "Citation URLs" section.
 - **`wikisourcefield`** (string, default: `sourceUrl`): Result field name the rendered citation URL is written to.
@@ -3262,6 +3264,33 @@ Each record's `md` value is YAML front matter (every non-default field: `kind`, 
 
 ---
 
+## Wiki operations manager
+
+Run `mini-a wikiman=true` (or `opack exec mini-a wikiman=true`) to select a wiki and use guided maintenance menus. To supply a target at launch:
+
+```sh
+mini-a wikiman=true wikiroot="/path/My Wiki" wikiaccess=rw usewikigraph=true
+```
+
+Inspection works without a model. Access defaults to `ro`; the manager requires an explicit root or configured backend and never silently selects the current directory. Configured mounts remain read-only. To maintain a mounted wiki, explicitly configure its root/backend as the primary with `wikiaccess=rw`.
+
+Menus cover inspection and bounded reads/lint, managed page editing/moves/deletion, search and directory indexes, compaction, graph exploration/builds/exports, wiki Dream modes, ingestion and absorption/recovery. With only a primary wiki configured, the manager opens the operations menu directly. **Graph statistics (/graph stats)** uses the console statistics operation; stored graph file diagnostics are listed separately. Session settings and mount attachments are temporary. Unavailable actions explain their backend/access requirements. Within each category, toggle **Advanced options** for operation options or **Session → Adjust session settings** for connection and graph settings. Enter `/back` at text prompts to cancel; menus include Back/Exit.
+
+Menu options use emoji labels and the standard Mini-A green/pink branding. Categories stay open after an operation, with the last operation first for quick repeats. Advanced options are off by default and can be toggled within the category. Unavailable actions show their reason when selected. Running/completed/failed headings and elapsed time accompany compact result previews; **Show last result details** and session history retain full output. Compaction retains its complete preview before approval. Terminal-width dashed separators distinguish results, replay commands, and the current-wiki summary; the summary uses compact SLON with yellow double side lines, a pale cream background, and black text. Before execution begins, each operation prints a dark-gray, italic command without side lines or surrounding parentheses, with shell continuations between arguments for easy copying. History/export retains the plain command. The command uses the same dispatcher. The printed command changes to the package directory with `cd`, so it can be pasted from another working directory. From the checkout/package directory, the equivalent direct invocations are:
+
+```sh
+ojob utils/wikiOps.yaml operation=wiki.lint wikiroot="/path/My Wiki"
+ojob utils/wikiOps.yaml operation=wiki.reindex wikiroot="/path/My Wiki" wikiaccess=rw confirm=true
+```
+
+Writes require review and `confirm=true` in noninteractive runs. Reorg asks two default-No questions: confirm the target/objective/limits, then acknowledge an external recovery point and authorize live edits. The runner also requires `backupconfirmed=true dreamwikireorg=true dreamwikiapproval=auto`. Optional `dreamwikiinstructions` appends guidance to the existing reorg goal; tool restrictions remain in effect. Replaying a command reproduces configuration, not necessarily the same LLM edits.
+
+Compaction previews first and requires confirmation that other readers/writers have stopped (`params='{"dryRun":false,"offline":true}'`). A failed or interrupted mutation may leave partial changes. Ingestion recovery discard and absorption plan delete/cancel do **not** undo written pages. Use their existing recovery actions; reorg has no general rollback.
+
+Page editing imports a content file or opens `editor=` / `$EDITOR` (default `vi`) without invoking a shell. The reviewed content is snapshotted in a temporary file. **Session → Run history / export** saves a sanitized JSON run record; page-write exports also preserve the content next to the record. Unexported editor snapshots are removed on exit. No connection profiles or history are saved automatically.
+
+Commands refer to sensitive argument values through `MINIA_WIKIOPS_<ARGUMENT>` environment variables, listing the required variables without printing their values. Existing `OAF_MODEL` configuration and saved model aliases remain usable. Launch modes such as `modelman`, `mcptest`, Dream, web, worker, and goal/exec cannot be combined with `wikiman=true`.
+
 ## Wiki Ingestion
 
 `mini-a-ingest.js` turns an existing body of documentation into wiki pages. Discovery, filtering, chunking, the re-ingest ledger, writing and finalization are deterministic; distillation and image descriptions call the LLM.
@@ -3408,6 +3437,7 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 | `dreammemorymode` | string | `apply` | Memory dream mode: `plan` or `apply` |
 | `dreamwikidryrun` | boolean | `false` | Propose wiki changes without writing (opt-out of `apply`) |
 | `dreamwikiapproval` | string | `ask` | Reorg approval mode: `auto`, `ask`, `never` |
+| `dreamwikiinstructions` | string | _(none)_ | Additional operator guidance appended to the wiki reorg objective |
 | `dreamwikireorg` | boolean | `false` | Allow structural reorg operations |
 | `dreammaxsteps` | number | `40` for `reorg` | Maximum structural-reorg agent steps; other wiki dream modes are deterministic or proposal-only |
 | `dreamreport` | string | - | Optional file path to write JSON run report |

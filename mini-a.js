@@ -15658,7 +15658,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "memorysessionheader", "goal", "mcp", "validationgoal", "valgoal", "deepresearch", "maxcycles",
     "validationthreshold", "persistlearnings", "valtools", "outerloop", "outerloopinstructions", "outerloopsessionid", "outerloopmaxcycles", "outerloopmaxtime", "outerloopstoponrepeat", "outerloopmaxnochange",
     "durable", "runid", "resumerun", "runstatus", "runroot", "showseparator", "goalprefix", "shellprefix", "resume", "mode",
-    "onport", "web", "modelman", "mcptest", "memoryman", "workermode", "path", "usehistory", "useattach", "historypath",
+    "onport", "web", "modelman", "mcptest", "memoryman", "wikiman", "wikitarget", "workermode", "path", "usehistory", "useattach", "historypath",
     "historykeep", "historykeepperiod", "historykeepcount", "historyretention", "ssequeuetimeout",
     "logpromptheaders", "historys3bucket", "historys3prefix", "historys3url", "historys3accesskey",
     "historys3secret", "historys3region", "historys3useversion1", "historys3ignorecertcheck", "extracommands",
@@ -15670,7 +15670,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix", "wikiindexdir", "wikis3artifactprefix", "s3artifactbundle", "wikihttpindexurl", "wikihttptimeout", "wikiartifactrefreshsecs",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
     "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "wikiretrievalv2", "wikiretrievalconfig", "wikisourceurl", "wikisourcefield", "wikisourceinline", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphmounts", "wikimountgraphttlms", "wikigraphcross", "wikigraphcrossjoin", "wikigraphcrosscap", "wikigraphcrossdepth", "wikigraphcrossmaxdf", "wikigraphcrossminkeylen", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
-    "dreamwikimode", "dreammemorymode", "dreamwikidryrun", "dreamwikiapproval", "dreamwikireorg",
+    "dreamwikimode", "dreammemorymode", "dreamwikidryrun", "dreamwikiapproval", "dreamwikireorg", "dreamwikiinstructions",
     "dreamwikiminpages", "dreamwikimaxdepth", "dreamwikilintresultlimit", "dreamwikisurgical", "wikilintresultlimit", "dreamreport",
     "useskillswiki", "skillwikibackend", "skillwikiroot", "skillwikimounts", "skillsautosearch", "skillsautolimit", "skillsmaxloaded", "skillsmaxchars"
   ].forEach(function(name) {
@@ -15939,6 +15939,7 @@ MiniA.shouldWarnUnknownArgs = function(args) {
     isDef(args.exec) ||
     toBoolean(args.web) === true ||
     toBoolean(args.onport) === true ||
+    toBoolean(args.wikiman) === true ||
     toBoolean(args.modelman) === true ||
     toBoolean(args.mcptest) === true ||
     toBoolean(args.memoryman) === true ||

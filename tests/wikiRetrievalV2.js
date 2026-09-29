@@ -2,6 +2,59 @@
   load("mini-a-common.js"); load("mini-a-wiki.js")
   var temporary = function() { var p = java.io.File.createTempFile("wiki-v2-test-", "").getCanonicalPath(); io.rm(p); io.mkdir(p); return p }
   var make = function(root, extra) { return new MiniAWikiManager(merge({ backend: "fs", root: root, access: "rw", wikiretrievalv2: true, wikiretrievalconfig: { passageChars: 256 } }, extra || {}), function() {}) }
+  exports.testCanonicalManifestRestart = function() {
+    var dir=temporary(), writer, reader
+    var reverseObjects=function(value) {
+      if(isArray(value))return value.map(reverseObjects)
+      if(!isMap(value))return value
+      var out={};Object.keys(value).reverse().forEach(function(key){out[key]=reverseObjects(value[key])});return out
+    }
+    try {
+      writer=make(dir,{wikilexical:{language:"english",ngrams:true,shingles:true,queryExpansion:true,pseudoRelevanceFeedback:true}})
+      io.writeFileString(dir+"/rca.md","# RCA\nrcarestartneedle root cause analysis.")
+      ow.test.assert(writer.reindex().ok,true,"canonical fixture publishes")
+      var engine=writer._retrievalV2, root=engine.root, pointer=io.readFileJSON(root+"/current.json")
+      var path=root+"/"+pointer.generation+"/manifest.json", manifest=io.readFileJSON(path)
+      ow.test.assert(manifest.merkleFormat,"canonical-json-v1","new publications declare hash format")
+      var reordered=reverseObjects(manifest)
+      ow.test.assert(MiniAWikiRetrievalV2.manifestMerkle(reordered),manifest.merkle,"nested order does not change the hash")
+      var legacy={schema:3,nested:{z:1,a:2}}, legacyOrdered={nested:legacy.nested,schema:3}
+      ow.test.assert(MiniAWikiRetrievalV2.manifestMerkle(legacy),MiniAWikiRetrievalV2.digestText(stringify(legacyOrdered,__,"")),"unmarked manifests preserve the legacy contract")
+      ow.test.assert(MiniAWikiRetrievalV2.manifestMerkle(reverseObjects(legacy))!==MiniAWikiRetrievalV2.manifestMerkle(legacy),true,"legacy hashing reproduces nested-order failure")
+      var altered=clone(manifest);altered.catalogue.stats.pageCount++
+      ow.test.assert(MiniAWikiRetrievalV2.manifestMerkle(altered)!==manifest.merkle,true,"nested changes remain detected")
+      altered=clone(manifest);altered.files.reverse()
+      ow.test.assert(MiniAWikiRetrievalV2.manifestMerkle(altered)!==manifest.merkle,true,"array order remains bound")
+      altered=clone(manifest);altered.merkleFormat="unknown"
+      var error="";try{MiniAWikiRetrievalV2.manifestMerkle(altered)}catch(e){error=String(e.message||e)}
+      ow.test.assert(error,"unsupported-manifest-merkle-format","unknown formats never fall back")
+      writer.close();writer=__
+      // Simulate a runtime changing nested map order, while preserving exact
+      // pointer/file integrity. The manifest's semantic hash is not rewritten.
+      io.writeFileString(path,JSON.stringify(reordered));pointer.checksum=MiniAWikiRetrievalV2.digest(path)
+      io.writeFileString(root+"/current.json",JSON.stringify(pointer))
+      var script=dir+"/restart.js", log=dir+"/restart.log"
+      io.writeFileString(script,'load("mini-a-common.js");load("mini-a-wiki.js");var m=new MiniAWikiManager('+JSON.stringify({backend:"fs",root:String(dir),access:"ro",wikiretrievalv2:true})+',function(){});try{var r=m.retrieve("rcarestartneedle");if(!r.ok||!r.evidence.length)throw new Error(stringify(r));}catch(e){printErr(e);java.lang.System.exit(1)}finally{m.close()}java.lang.System.exit(0)')
+      var command=new java.util.ArrayList();command.add(String(getOpenAFPath())+"/oaf");command.add("-f");command.add(script)
+      var builder=new java.lang.ProcessBuilder(command)
+      builder.directory(new java.io.File(String(java.lang.System.getProperty("user.dir"))))
+      builder.redirectErrorStream(true);builder.redirectOutput(new java.io.File(log))
+      var child=builder.start()
+      if(!child.waitFor(20,java.util.concurrent.TimeUnit.SECONDS)){child.destroyForcibly();throw new Error("manifest restart timeout")}
+      ow.test.assert(Number(child.exitValue()),0,"fresh process searches reordered manifest: "+io.readFileString(log))
+      // Hash-valid file bytes still cannot hide a changed semantic manifest.
+      reordered.catalogue.stats.pageCount++;io.writeFileString(path,JSON.stringify(reordered))
+      pointer.checksum=MiniAWikiRetrievalV2.digest(path);io.writeFileString(root+"/current.json",JSON.stringify(pointer))
+      reader=make(dir,{access:"ro"})
+      ow.test.assert(reader.retrieve("rcarestartneedle").sources[0].reason,"manifest-merkle-failure","reader rejects nested tampering")
+      reader.close();reader=__
+      writer=make(dir,{wikilexical:{language:"english",ngrams:true,shingles:true}})
+      ow.test.assert(writer.reindex().ok,true,"explicit rebuild recovers a rejected manifest from Markdown")
+      writer.close();writer=__
+      reader=make(dir,{access:"ro"})
+      ow.test.assert(reader.retrieve("rcarestartneedle").evidence.length,1,"rebuilt wiki searches after reopening")
+    } finally {if(reader)reader.close();if(writer)writer.close();io.rm(dir)}
+  }
   exports.testReadOnlyAnalysisAdoption = function() {
     var dir = temporary(), writer, reader, strict, matching
     var snapshotFiles = function(root) {
@@ -1594,6 +1647,23 @@
       try {engine._validate(pin.dir,pin.manifest)}finally{global.MiniAWikiRetrievalV2.digest=digestFunction;engine._readVerifiedBlock=combinedFunction}
       ow.test.assert(combinedBlockCalls,1,"fresh validation materializes the evidence block in one checksum-bound read")
       ow.test.assert(digestBlockCalls,0,"fresh validation does not open evidence blocks separately for hashing")
+      var reordered=clone(pin.catalog), reorderedMeta={}
+      Object.keys(reordered.pages["bound.md"].metadata).reverse().forEach(function(key) {
+        reorderedMeta[key]=reordered.pages["bound.md"].metadata[key]
+      })
+      reordered.pages["bound.md"].metadata=reorderedMeta
+      var reorderedPatch=patchCatalogue(engine,pin,reordered)
+      try {
+        engine._validate(pin.dir,reorderedPatch.manifest)
+        engine._validatePublication(pin.dir,reorderedPatch.manifest,{catalog:reordered,changedPaths:{"bound.md":true}})
+        engine._validatePageMetadata({dir:pin.dir,manifest:reorderedPatch.manifest},reordered.pages["bound.md"])
+      } finally {reorderedPatch.restore()}
+      var sameMetadata=global.MiniAWikiRetrievalV2.sameMetadata
+      ow.test.assert(sameMetadata({nested:{a:1,b:2},items:[{x:1,y:2},null]}, {items:[{y:2,x:1},null],nested:{b:2,a:1}}),true,"nested object order is immaterial")
+      ow.test.assert(sameMetadata({items:[1,2]}, {items:[2,1]}),false,"array order remains bound")
+      ow.test.assert(sameMetadata({value:1}, {value:"1"}),false,"scalar types remain bound")
+      ow.test.assert(sameMetadata({value:null}, {}),false,"missing and null fields differ")
+      ow.test.assert(sameMetadata({nested:{a:1}}, {nested:{a:2}}),false,"nested values remain bound")
       var cases=[
         {name:"text hash",error:"passage-revision-binding-failure",change:function(c){c.passages[id].textHash=sha1("forged evidence")}},
         {name:"character offset",error:"passage-revision-binding-failure",change:function(c){c.passages[id].charStart++}},

@@ -1,0 +1,100 @@
+include:
+- oJobTest.yaml
+
+jobs:
+- name: MiniA Wiki Manager Tests::MutationGates
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testMutationGates
+
+- name: MiniA Wiki Manager Tests::ConfigurationAndMounts
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testConfigurationAndMounts
+
+- name: MiniA Wiki Manager Tests::ParameterValidation
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testParameterValidation
+
+- name: MiniA Wiki Manager Tests::FileOperations
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testFileOperations
+
+- name: MiniA Wiki Manager Tests::GraphAndIndexes
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testGraphAndIndexes
+
+- name: MiniA Wiki Manager Tests::ShellReplay
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testShellReplay
+
+- name: MiniA Wiki Manager Tests::SecretRedaction
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testSecretRedaction
+
+- name: MiniA Wiki Manager Tests::ReorgConfirmations
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testReorgConfirmations
+
+- name: MiniA Wiki Manager Tests::CompactionConfirmations
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testCompactionConfirmations
+
+- name: MiniA Wiki Manager Tests::RecordExport
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testRecordExport
+
+- name: MiniA Wiki Manager Tests::LaunchAndGuidance
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testLaunchAndGuidance
+
+- name: MiniA Wiki Manager Tests::DreamAndIngestion
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testDreamAndIngestion
+
+- name: MiniA Wiki Manager Tests::V2Compaction
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testV2Compaction
+
+- name: MiniA Wiki Manager Tests::MountedReadTarget
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testMountedReadTarget
+
+- name: MiniA Wiki Manager Tests::EditorArgumentsAndFailure
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testEditorArgumentsAndFailure
+
+- name: MiniA Wiki Manager Tests::GraphStatsConsoleParity
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testGraphStatsConsoleParity
+
+- name: MiniA Wiki Manager Tests::SinglePrimarySkipsTargetPicker
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testSinglePrimarySkipsTargetPicker
+
+- name: MiniA Wiki Manager Tests::CategoryUX
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testCategoryUX
+
+- name: MiniA Wiki Manager Tests::ReplayPresentation
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testReplayPresentation
+
+todo:
+- MiniA Wiki Manager Tests::MutationGates
+- MiniA Wiki Manager Tests::ConfigurationAndMounts
+- MiniA Wiki Manager Tests::ParameterValidation
+- MiniA Wiki Manager Tests::FileOperations
+- MiniA Wiki Manager Tests::GraphAndIndexes
+- MiniA Wiki Manager Tests::ShellReplay
+- MiniA Wiki Manager Tests::SecretRedaction
+- MiniA Wiki Manager Tests::ReorgConfirmations
+- MiniA Wiki Manager Tests::CompactionConfirmations
+- MiniA Wiki Manager Tests::RecordExport
+- MiniA Wiki Manager Tests::LaunchAndGuidance
+- MiniA Wiki Manager Tests::DreamAndIngestion
+- MiniA Wiki Manager Tests::V2Compaction
+- MiniA Wiki Manager Tests::MountedReadTarget
+- MiniA Wiki Manager Tests::EditorArgumentsAndFailure
+- MiniA Wiki Manager Tests::GraphStatsConsoleParity
+- MiniA Wiki Manager Tests::SinglePrimarySkipsTargetPicker
+- MiniA Wiki Manager Tests::CategoryUX
+- MiniA Wiki Manager Tests::ReplayPresentation
