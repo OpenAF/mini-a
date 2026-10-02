@@ -6659,6 +6659,9 @@ function MiniAInteractiveSession(args, adapter) {
           print(colorifyText("Wiki reindex completed.", successColor))
         } else {
           print(colorifyText("Wiki reindex failed: " + (isObject(reindexResult) ? reindexResult.error : "unknown error"), errorColor))
+          if (isObject(reindexResult) && isMap(reindexResult.bindingFailure)) {
+            print(colorifyText("Page: " + reindexResult.bindingFailure.page + "; mismatched fields: " + reindexResult.bindingFailure.fields.join(", "), errorColor))
+          }
         }
       } else if (sub === "context") {
         var contextArgs = parseConsolePathArgs(rest).argv, contextOptions = {}

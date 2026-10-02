@@ -2565,21 +2565,66 @@ MiniA.prototype.getCurrentConversationStatus = function() {
 
 // Refresh at each call, including retries and final/auxiliary calls. Cache only
 // the last input per consumer so our own prepared prompts are never nested.
-MiniA.prototype._prepareContextInvocation = function(llm, prompt, consumer) {
+MiniA.prototype._prepareContextInvocation = function(llm, prompt, consumer, recovery) {
   var key = consumer || "executor"
   if (!isMap(this._contextInvocationInputs)) this._contextInvocationInputs = {}
   var previous = this._contextInvocationInputs[key]
   if (isMap(previous) && prompt === previous.prepared) prompt = previous.original
+  if (!isMap(recovery)) recovery = {}
   var original = prompt
   var prefix = "\n\nCURRENT CONVERSATION STATUS (runtime-owned snapshot for this call):\n"
   var suffix = "\nUse this snapshot for the current agent/conversation. Child diagnostics and retrieved or historical status describe their own scope, not this conversation. Tool availability does not establish local feature status.\n"
   var status = stringify(this.getCurrentConversationStatus(), __, "")
   prompt += prefix + status + suffix
-  var prepared = this._projectContextInvocation(llm, prompt, consumer)
-  // Capturing/projecting context can itself degrade the VM. Never send the
-  // pre-failure status as authoritative; re-account the refreshed fixed input.
-  var refreshed = stringify(this.getCurrentConversationStatus(), __, "")
-  if (refreshed !== status) prepared = this._projectContextInvocation(llm, original + prefix + refreshed + suffix, consumer)
+  var prepared
+  var providerBefore, providerGPT, viewBefore
+  if (isObject(this._historyVm) && this._historyVm.contextVirtualization && !this._historyVm.contextVirtualizationShadow && isObject(llm) && isFunction(llm.getGPT)) {
+    providerGPT = llm.getGPT()
+    if (isObject(providerGPT) && isFunction(providerGPT.getConversation)) providerBefore = providerGPT.getConversation()
+    viewBefore = this._historyVm._providerView
+  }
+  try {
+    prepared = this._projectContextInvocation(llm, prompt, consumer, recovery)
+    // Re-account status changes before dispatch, within the same recovery cycle.
+    var refreshed = stringify(this.getCurrentConversationStatus(), __, "")
+    if (refreshed !== status) prepared = this._projectContextInvocation(llm, original + prefix + refreshed + suffix, consumer, recovery)
+  } catch (error) {
+    // A status refresh can reject a previously fitting provisional view.
+    // Restore that view before recovery or terminal failure; journal appends stay exact.
+    if (isArray(providerBefore) && isObject(providerGPT) && isFunction(providerGPT.setConversation)) {
+      providerGPT.setConversation(providerBefore)
+      this._historyVm._providerView = viewBefore
+    }
+    if (isObject(error) && error.code === "MINIA_CONTEXT_BUDGET" && isMap(recovery) && isFunction(recovery.rebuild) &&
+        (recovery.attempted === true || (this._contextSummaryRecoveries || 0) >= 3)) {
+      throw this._contextBudgetError(key, error.budget, error.estimatedTotal, error.components, "exhausted")
+    }
+    if (!isObject(error) || error.code !== "MINIA_CONTEXT_BUDGET" || !isMap(recovery) || recovery.attempted === true ||
+        !isFunction(recovery.rebuild) || (this._contextSummaryRecoveries || 0) >= 3 || error.components.current_prompt <= 0 || error.recovery === "canonical backing unavailable" ||
+        error.estimatedTotal - error.components.current_prompt - error.components.selected_context > error.budget) throw error
+    recovery.attempted = true
+    this._contextSummaryRecoveries = (this._contextSummaryRecoveries || 0) + 1
+    // Only the executor can request note recovery; auxiliary calls never recurse.
+    if (key !== "executor") throw error
+    var rebuilt
+    try { rebuilt = recovery.rebuild(error) } catch(rebuildError) {
+      if (isFunction(recovery.rollback)) recovery.rollback()
+      throw this._contextBudgetError(key, error.budget, error.estimatedTotal, error.components, "summary-failed")
+    }
+    if (!isString(rebuilt) || rebuilt === original) {
+      if (isFunction(recovery.rollback)) recovery.rollback()
+      throw this._contextBudgetError(key, error.budget, error.estimatedTotal, error.components, "no-progress")
+    }
+    try {
+      prepared = this._prepareContextInvocation(llm, rebuilt, consumer, recovery)
+    } catch (retryError) {
+      if (isFunction(recovery.rollback)) recovery.rollback()
+      if (isObject(retryError) && retryError.code === "MINIA_CONTEXT_BUDGET") throw this._contextBudgetError(key, retryError.budget, retryError.estimatedTotal, retryError.components, "exhausted")
+      throw retryError
+    }
+    this.fnI("recover", "Context budget recovery rebuilt working notes (estimated prompt tokens " + error.components.current_prompt + " -> " + this._historyVm.estimateTokens(prepared) + ").")
+    return prepared
+  }
   this._contextInvocationInputs[key] = { original: original, prepared: prepared }
   return prepared
 }
@@ -2610,34 +2655,66 @@ MiniA.prototype._captureContextToolResult = function(name, params, result) {
 
 // The next exposed invocation is the paging boundary. Provider-internal rounds
 // remain intact. Counts here are application estimates, not billed usage.
-MiniA.prototype._projectContextInvocation = function(llm, prompt, consumer) {
+MiniA.prototype._contextBudgetError = function(consumer, budget, total, components, outcome) {
+  var largest = Object.keys(components).sort(function(a, b) { return components[b] - components[a] })
+  var error = new Error("Context budget exceeded for " + consumer + " (estimated " + total + " > " + budget +
+    " tokens; component estimates, largest first: " + largest.map(function(key) { return key + "=" + components[key] }).join(", ") +
+    "; recovery " + outcome + "). Narrow protected input/tool schemas or increase maxcontext.")
+  error.code = "MINIA_CONTEXT_BUDGET"
+  error.consumer = consumer
+  error.budget = budget
+  error.estimatedTotal = total
+  error.components = components
+  error.recovery = outcome
+  error.estimates = true
+  error.miniAStop = true
+  return error
+}
+
+MiniA.prototype._projectContextInvocation = function(llm, prompt, consumer, recovery) {
   var vm = this._historyVm
-  if (!isObject(vm) || !vm.contextVirtualization || vm.degraded || !isObject(llm) || !isFunction(llm.getGPT)) return prompt
+  if (!isObject(vm) || !vm.contextVirtualization || !isObject(llm) || !isFunction(llm.getGPT)) return prompt
   var gpt = llm.getGPT()
   if (!isObject(gpt) || !isFunction(gpt.getConversation) || !isFunction(gpt.setConversation)) return prompt
   var conversation = gpt.getConversation()
   if (!isArray(conversation)) return prompt
   this._syncContextSources()
   if (!consumer || consumer === "executor") vm.captureProviderConversation(conversation)
-  if (vm.degraded) return prompt
   var configured = this._getEffectiveContextBudget(__, 0)
   var args = isMap(this._sessionArgs) ? this._sessionArgs : {}
-  var model = llm === this.lc_llm ? this._oaf_lc_model : (llm === this.val_llm ? this._oaf_val_model : this._oaf_model)
+  var model = isMap(recovery) && isMap(recovery.model) ? recovery.model : llm === this.lc_llm ? this._oaf_lc_model : (llm === this.val_llm ? this._oaf_val_model : this._oaf_model)
   var output = isMap(model) && isNumber(model.max_tokens) ? model.max_tokens : Math.min(4096, Math.floor((configured || 32000) * 0.15))
-  var fixed = { prompt: vm.estimateTokens(prompt), tools: vm.estimateTokens(stringify(this.mcpTools || [], __, "")), safety: 256 }
-  fixed.instructions = isString(this._systemInst) && !conversation.some(function(entry) { return isMap(entry) && (entry.role === "system" || entry.role === "developer") && entry.content === this._systemInst }, this) ? vm.estimateTokens(this._systemInst) : 0
+  var schemas = this.mcpTools || []
+  if (isObject(gpt.model) && (isMap(gpt.model.tools) || isArray(gpt.model.tools))) {
+    schemas = Object.keys(gpt.model.tools).map(function(key) {
+      var tool = gpt.model.tools[key]
+      return isMap(tool) && isMap(tool.function) ? { type: tool.type || "function", function: tool.function } : tool
+    })
+  }
+  var fixed = { prompt: vm.estimateTokens(prompt), tools: consumer === "summarizer" ? 0 : vm.estimateTokens(stringify(schemas, __, "")), safety: 256 }
+  fixed.instructions = (!consumer || consumer === "executor") && isString(this._systemInst) && !conversation.some(function(entry) { return isMap(entry) && (entry.role === "system" || entry.role === "developer") && entry.content === this._systemInst }, this) ? vm.estimateTokens(this._systemInst) : 0
   var total = configured > 0 ? configured : vm.estimateTokens(stringify(vm.materializeConversation(conversation), __, "")) + fixed.prompt + fixed.tools + fixed.instructions + fixed.safety + output
+  if (vm.degraded) {
+    var degradedTokens = vm.estimateTokens(stringify(conversation, __, ""))
+    var degradedTotal = degradedTokens + fixed.prompt + fixed.tools + fixed.instructions + fixed.safety + output
+    if (!vm.contextVirtualizationShadow && configured > 0 && degradedTotal > configured) throw this._contextBudgetError(consumer || "executor", configured, degradedTotal, {
+      protected_conversation: degradedTokens, current_prompt: fixed.prompt, tool_schemas: fixed.tools,
+      separate_instructions: fixed.instructions, safety_allowance: fixed.safety, output_reserve: output, selected_context: 0
+    }, "canonical backing unavailable")
+    return prompt
+  }
   var options = { consumer: consumer || "executor", goal: isString(args.goal) ? args.goal : String(prompt), budget: total,
-    outputReserve: output, fixedTokens: fixed, freezeUnselected: true, includeRecent: true }
+    outputReserve: output, fixedTokens: fixed, freezeUnselected: true, includeRecent: true, emergency: isMap(recovery) && recovery.emergencyMode === true }
   if (consumer && consumer !== "executor") {
     // Auxiliary models own independent provider histories. Add a task-specific
     // source view without rebinding their message indexes to executor history.
     var occupied = vm.estimateTokens(stringify(conversation, __, "")) + fixed.prompt + fixed.tools + fixed.instructions + fixed.safety + output
     if (!vm.contextVirtualizationShadow && configured > 0 && occupied > total) {
-      var auxiliaryError = new Error("Context budget cannot fit protected " + consumer + " input and output reserve (estimated " + occupied + " > " + total + ").")
-      auxiliaryError.miniAStop = true
-      throw auxiliaryError
+      throw this._contextBudgetError(consumer, total, occupied, { protected_conversation: vm.estimateTokens(stringify(conversation, __, "")),
+        current_prompt: fixed.prompt, tool_schemas: fixed.tools, separate_instructions: fixed.instructions,
+        safety_allowance: fixed.safety, output_reserve: output, selected_context: 0 }, "impossible (independent auxiliary history)")
     }
+    if (consumer === "summarizer") return prompt
     var available = Math.max(0, total - occupied)
     var auxiliary = vm.assembleContext({ consumer: consumer, goal: String(prompt), budget: Math.max(1, available - 100), outputReserve: 0, includeRecent: false })
     var extra = vm.serializeContext(auxiliary).text
@@ -2650,10 +2727,18 @@ MiniA.prototype._projectContextInvocation = function(llm, prompt, consumer) {
     return prompt
   }
   var projected = vm.projectActiveContext(conversation, options)
+  var beforeRecovery = projected.requestTokens
+  if (projected.overflow && options.emergency !== true && configured > 0 && vm.enabled && !vm.degraded && io.fileExists(vm.journalPath)) {
+    if (isMap(recovery)) recovery.emergencyMode = true
+    projected = vm.projectActiveContext(conversation, merge(options, { emergency: true }, true))
+    if (!projected.overflow) this.fnI("recover", "Context budget recovery compacted recent work (estimated " + beforeRecovery + " -> " + projected.requestTokens + " tokens; budget " + configured + ").")
+  }
   if (projected.overflow && configured > 0) {
-    var error = new Error("Context budget cannot fit protected instructions, current prompt, tools and output reserve (estimated " + projected.requestTokens + " > " + configured + "). Narrow the task or increase maxcontext.")
-    error.miniAStop = true
-    throw error
+    throw this._contextBudgetError(consumer || "executor", configured, projected.requestTokens, {
+      protected_conversation: projected.protectedTokens, current_prompt: fixed.prompt, tool_schemas: fixed.tools,
+      separate_instructions: fixed.instructions, safety_allowance: fixed.safety, output_reserve: output,
+      selected_context: projected.selectedContextTokens
+    }, projected.requestTokens < beforeRecovery ? "exhausted" : "impossible or no-progress")
   }
   if (projected.active && isArray(projected.conversation)) gpt.setConversation(projected.conversation)
   return prompt
@@ -3836,7 +3921,7 @@ MiniA.prototype._promptIsolatedSummary = function(text, instructions, useLowCost
   var summarizer = this._createBareLlmInstance(config)
   if (!isObject(summarizer)) throw new Error("Unable to create isolated summarizer")
   summarizer.withInstructions(instructions)
-  var prompt = this._prepareContextInvocation(summarizer, text, "summarizer")
+  var prompt = this._prepareContextInvocation(summarizer, text, "summarizer", { model: config })
   // Summaries are prose, not agent action JSON.
   return summarizer.promptWithStats(prompt)
 }
@@ -18240,7 +18325,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     //if (args.__format == "md") args.knowledge = "give final answer in markdown without mentioning it\n\n" + args.knowledge
 
     // Summarize context if too long
-    var summarize = ctx => {
+    var summarize = (ctx, strict) => {
       var summarizeLLM = (this._use_lc && isObject(this.lc_llm)) ? this.lc_llm : this.llm
       var llmType = (this._use_lc && isObject(this.lc_llm)) ? "low-cost" : "main"
       var instructionText = "You are condensing an agent's working notes.\n1) KEEP (verbatim or lightly normalized): current goal, constraints, explicit decisions, and facts directly advancing the goal.\n2) COMPRESS tangents, detours, and dead-ends into terse bullets.\n3) RECORD open questions and next actions."
@@ -18265,6 +18350,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           if (isObject(runtime)) {
             self._updateErrorHistory(runtime, { category: summaryError.type, message: `summarize: ${summaryError.reason}`, context: { operation: "summarize" } })
           }
+          if (strict === true) throw e
           // Never return full original payload on failure; keep a compact fallback.
           return "[SUMMARY FALLBACK] " + text.substring(0, 1200)
         }
@@ -18288,7 +18374,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           : ""
         // Bound verbose/non-compressing responses so merge passes also shrink.
         var summaryCharLimit = Math.max(1200, Math.min(12000, Math.floor(text.length / 2)))
-        if (responseText.length > summaryCharLimit) responseText = responseText.substring(0, summaryCharLimit) + "\n[Summary truncated]"
+        if (strict === true && (responseText.trim().length === 0 || self._estimateTokens(responseText) >= originalTokens)) throw new Error("Summary made no progress")
+        if (strict !== true && responseText.length > summaryCharLimit) responseText = responseText.substring(0, summaryCharLimit) + "\n[Summary truncated]"
         var finalTokens = self._estimateTokens(responseText)
         global.__mini_a_metrics.summaries_final_tokens.getAdd(finalTokens)
         global.__mini_a_metrics.summaries_tokens_reduced.getAdd(Math.max(0, originalTokens - finalTokens))
@@ -18349,7 +18436,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (summarizeLLM === this.lc_llm && lcBudget > 0) effectiveBudget = effectiveBudget > 0 ? Math.min(effectiveBudget, lcBudget) : lcBudget
       var chunkThreshold = effectiveBudget > 0 ? Math.max(800, Math.min(12000, Math.floor(effectiveBudget * 0.45))) : 12000
       var chunkBudget = Math.max(800, Math.floor(chunkThreshold * 0.45))
-      var maxChunks = 128
+      var maxChunks = strict === true ? Math.max(128, Math.ceil(ctx.length / Math.max(400, chunkBudget * 4)) + ctx.split("\n").length) : 128
 
       if (inputTokens <= chunkThreshold) return summarizeSingle(ctx, instructionText)
 
@@ -18369,13 +18456,46 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (chunkSummaries.length === 0) return "[SUMMARY FALLBACK] Unable to summarize context chunks."
 
       var merged = chunkSummaries.join("\n")
-      if (this._estimateTokens(merged) > chunkThreshold && merged.length < ctx.length) return summarize(merged)
+      if (this._estimateTokens(merged) > chunkThreshold && merged.length < ctx.length) return summarize(merged, strict)
       var mergedInstruction = instructionText + "\n4) Merge chunk summaries into a single concise result with no redundancy."
       var mergedSummary = summarizeSingle(merged, mergedInstruction)
       if (!isString(mergedSummary) || mergedSummary.trim().length === 0) {
         return "[SUMMARY FALLBACK] " + merged.substring(0, 3000)
       }
       return mergedSummary
+    }
+
+    this._contextSummaryRecoveries = 0
+    var makeBudgetRecovery = (build) => {
+      var previousContext
+      return { attempted: false, rebuild: (error) => {
+        previousContext = runtime.context.slice()
+        // Fresh inbox is passed separately by the prompt builder.
+        var notes = previousContext.filter(function(entry) { return entry !== commsObservation })
+        if (notes.length === 0) return __
+        runtime.context = commsObservation ? [commsObservation] : []
+        markContextDirty()
+        runtime.stateSnapshotDirty = true
+        var protectedPrompt
+        try { protectedPrompt = build() } finally { runtime.context = previousContext; markContextDirty() }
+        var protectedTotal = this._historyVm.estimateTokens(protectedPrompt) + error.estimatedTotal - error.components.current_prompt - error.components.selected_context
+        if (protectedTotal + 256 >= error.budget) return __
+        var summary
+        try { summary = summarize(notes.join("\n"), true) } catch(ignoreSummaryRecovery) { return __ }
+        if (!isString(summary) || this._estimateTokens(summary) >= this._estimateTokens(notes.join("\n"))) return __
+        var backed = this._historyVm.registerContextObject("recovery", "runtime_notes", notes, { provenance: { source: "budget-recovery", coverage: "exact-working-notes" } })
+        if (!isDef(backed) || this._historyVm.degraded) return __
+        var handle = this._historyVm.objects[this._historyVm.objects.length - 1].handle
+        runtime.context = ["[SUMMARY] Working notes (exact backing " + handle + "): " + summary]
+        if (commsObservation) runtime.context.push(commsObservation)
+        markContextDirty()
+        runtime.stateSnapshotDirty = true
+        return build()
+      }, rollback: () => {
+        if (isArray(previousContext)) runtime.context = previousContext
+        markContextDirty()
+        runtime.stateSnapshotDirty = true
+      } }
     }
 
     // Helper function to check and summarize context during execution
@@ -19603,10 +19723,21 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       // memory snapshot in "full" inject mode on every step).
       var contextMaxTokens = (getEffectiveContextBudget() || 4000) - (this._memoryPromptTokens || 0)
       var fixedRequestTokens = Math.max(this._estimateTokens(stateSnapshot) + 500, 1000)
+      var commsObservation = ""
+      var stepRecovery = makeBudgetRecovery(() => {
+        var rebuilt = $t(this._STEP_PROMPT_TEMPLATE.trim(), {
+          goalBlock: cachedGoalBlock, hookContextBlock: cachedHookContextBlock,
+          progress: selectPromptContext(promptContextBudget).filter(function(entry) { return entry !== commsObservation }).join("\n"), state: getStateSnapshot()
+        })
+        if (commsObservation) rebuilt += "\n" + commsObservation
+        rebuilt = this._maybeInjectPlanReminder(rebuilt, runtime.currentStepNumber, maxSteps)
+        rebuilt = this._injectSimplePlanStepContext(rebuilt)
+        return this._maybeInjectRepeatedActionWarning(rebuilt, runtime)
+      })
       if (isObject(this._historyVm) && !this._historyVm.degraded && (this._historyVm.enabled || this._historyVm.shadow)) {
         this._prepareHistoryVmProjection(runtime.currentStepNumber)
         if (this._historyVm.contextVirtualization && !this._historyVm.contextVirtualizationShadow) {
-          this._prepareContextInvocation(this.llm, cachedGoalBlock + cachedHookContextBlock + stateSnapshot, "executor")
+          this._prepareContextInvocation(this.llm, cachedGoalBlock + cachedHookContextBlock + stateSnapshot, "executor", stepRecovery)
         }
         try { fixedRequestTokens += this._estimateTokens(stringify(this.llm.getGPT().getConversation(), __, "")) } catch(ignoreHistoryVmConversationSize) {}
         fixedRequestTokens += this._estimateTokens((this._systemInst || "") + cachedGoalBlock + cachedHookContextBlock)
@@ -19623,7 +19754,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       // content every step. Track consecutive overflow steps and force a stop
       // (with an IN_PROGRESS summary, same pattern as the other hard ceilings
       // above) once retrying clearly cannot recover.
-      if (isObject(this._historyVm) && this._historyVm.enabled === true && remainingContextTokens < 0) {
+      if (isObject(this._historyVm) && this._historyVm.enabled === true && remainingContextTokens < 0 &&
+          (!this._historyVm.contextVirtualization || this._historyVm.contextVirtualizationShadow)) {
         runtime.historyVmBudgetOverflowStreak = (runtime.historyVmBudgetOverflowStreak || 0) + 1
         if (runtime.historyVmBudgetWarned !== true) {
           runtime.historyVmBudgetWarned = true
@@ -19654,7 +19786,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       })
       // Deliver after history selection so a fresh inbox cannot be filtered out or
       // summarized away before the receiving model has seen it once.
-      var commsObservation = this._drainCommsObservation()
+      commsObservation = this._drainCommsObservation()
       if (commsObservation) {
         prompt += "\n" + commsObservation
         runtime.context.push(commsObservation)
@@ -19921,7 +20053,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       try {
         responseWithStats = this._withExponentialBackoff(() => {
           addCall()
-          prompt = this._prepareContextInvocation(currentLLM, prompt, "executor")
+          prompt = this._prepareContextInvocation(currentLLM, prompt, "executor", stepRecovery)
           var jsonFlag = !noJsonPromptFlag && !isOllamaToolJsonConflict
           if (args.showthinking) {
             // Streaming not compatible with showthinking - use regular prompts
@@ -19960,6 +20092,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           }
         }))
       } catch (e) {
+        if (isObject(e) && e.code === "MINIA_CONTEXT_BUDGET") throw e
         if (this.state == "stop" || (isObject(e) && e.miniAStop === true)) {
           break
         }
@@ -20179,6 +20312,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                 return this._promptJsonRecovery(currentLLM, lcRetryPrompt, args, currentModelConfig, noJsonPromptFlag)
               }, this._llmRetryOptions("Low-cost JSON-retry model", { llmType: "low-cost", step: step + 1, reason: "json-retry" }, { maxDelay: 6000 }))
             } catch (lcRetryErr) {
+              if (isObject(lcRetryErr) && lcRetryErr.code === "MINIA_CONTEXT_BUDGET") throw lcRetryErr
               if (this.state == "stop" || (isObject(lcRetryErr) && lcRetryErr.miniAStop === true)) {
                 lcRetryStopRequested = true
                 break
@@ -20260,6 +20394,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               return this._promptJsonRecovery(this.llm, fallbackPrompt, args, this._oaf_model, runtime.forceNoJson === true || this._noJsonPrompt)
             }, this._llmRetryOptions("Main fallback model", { llmType: "main", reason: "fallback" }, { maxDelay: 6000 }))
           } catch (fallbackErr) {
+            if (isObject(fallbackErr) && fallbackErr.code === "MINIA_CONTEXT_BUDGET") throw fallbackErr
             if (this.state == "stop" || (isObject(fallbackErr) && fallbackErr.miniAStop === true)) {
               break
             }
@@ -21646,13 +21781,17 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
     }
 
+    var finalRecovery = makeBudgetRecovery(() => $t(this._FINAL_PROMPT.trim(), {
+      goalBlock: cachedGoalBlock, hookContextBlock: cachedHookContextBlock,
+      context: runtime.context.join("\n"), state: getStateSnapshot()
+    }))
     var finalResponseWithStats
     try {
       this.fnI("input", "Interacting with main model (final answer)...")
       this._trace("llm_prompt", { label: "FINAL_PROMPT", model: "main", content: finalPrompt })
       finalResponseWithStats = this._withExponentialBackoff(() => {
         addCall()
-        finalPrompt = this._prepareContextInvocation(finalLLM, finalPrompt, "executor")
+        finalPrompt = this._prepareContextInvocation(finalLLM, finalPrompt, "executor", finalRecovery)
         var jsonFlag = runtime.forceNoJson !== true && !this._noJsonPrompt
         if (args.showthinking) {
           if (jsonFlag && isDef(finalLLM.promptJSONWithStatsRaw)) {
@@ -21667,6 +21806,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         return finalLLM.promptWithStats(finalPrompt)
       }, this._llmRetryOptions("Final answer", { operation: "final" }, { maxDelay: 6000 }))
     } catch (finalErr) {
+      if (isObject(finalErr) && finalErr.code === "MINIA_CONTEXT_BUDGET") throw finalErr
       var finalErrorInfo = this._categorizeError(finalErr, { source: "llm", operation: "final" })
       runtime.context.push(`[OBS FINAL] (error) final answer request failed: ${finalErrorInfo.reason}`)
       this._registerRuntimeError(runtime, {

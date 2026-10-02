@@ -315,6 +315,98 @@
     return agent._buildSystemPromptWithBudget("chatbot-test", payload, agent._CHATBOT_SYSTEM_PROMPT, { args: args || {}, mode: "chatbot" })
   }
 
+  exports.testBudgetFailureStopsExecutorAndFinalDispatch = function() {
+    [1, 2].forEach(function(failAt) {
+      var agent = createAgent(), prepares = 0, dispatches = 0, errors = []
+      agent.fnI = function(type, text) { if (type === "error") errors.push(String(text)) }
+      var args = { goal: "Inspect fixture", raw: true, maxsteps: 1, usememory: false, usetools: false }
+      try {
+        agent.init(args)
+        agent._use_lc = false
+        agent._prepareContextInvocation = function(llm, prompt) {
+          prepares++
+          if (prepares >= failAt) throw agent._contextBudgetError("executor", 200000, 394426, {
+            protected_conversation: 390000, current_prompt: 72, tool_schemas: 2,
+            separate_instructions: 0, safety_allowance: 256, output_reserve: 4096, selected_context: 0
+          }, "impossible")
+          return prompt
+        }
+        agent.llm.promptWithStats = agent.llm.promptJSONWithStats = function() {
+          dispatches++
+          return { response: { action: "think", thought: "Inspecting fixture" }, stats: {} }
+        }
+        agent.start(merge({}, args))
+        ow.test.assert(agent.state === "stop" && errors.some(function(text) { return text.indexOf("Context budget exceeded") >= 0 }), true, "Executor and final-answer budget errors remain actionable terminal errors")
+        ow.test.assert(prepares, failAt, "Terminal executor errors must not attempt final-answer preparation")
+        ow.test.assert(dispatches, failAt - 1, "A terminal overflow cannot dispatch or start a final-answer retry")
+      } finally { agent._stopAgentResources() }
+    })
+  }
+
+  exports.testAutomaticNoteBudgetRecovery = function() {
+    load("mini-a-history-vm.js")
+    var agent = createAgent(), source = io.readFileString("mini-a.js")
+    var root = String(java.nio.file.Files.createTempDirectory("mini-a-budget-test-").toAbsolutePath())
+    var vm = new MiniAHistoryVM({ enabled: true, contextVirtualization: true, conversationPath: root + "/conversation.json" })
+    try {
+      agent._historyVm = vm
+      agent._sessionArgs = { goal: "EXACT GOAL AND CONSTRAINTS" }
+      agent.fnI = function() {}
+      agent._getEffectiveContextBudget = function() { return 200000 }
+      agent._withExponentialBackoff = function(fn) { return fn() }
+      var chunks = [], dispatched = [], provider = []
+      var adapter = { getGPT: function() { return { getConversation: function() { return provider }, setConversation: function(value) { provider = value } } },
+        promptWithStats: function(prompt) { dispatched.push(prompt); return { response: "done" } } }
+      agent.llm = adapter; agent.lc_llm = adapter; agent._use_lc = true
+      agent._promptIsolatedSummary = function(text, instructions, lc) { chunks.push(text); return { response: "Completed inspection; next validate result.", stats: {} } }
+      var runtime = { context: [new Array(157501).join("completed ")] }
+      var inbox = "EXACT NEW INBOX"
+      runtime.context.push(inbox)
+      var begin = source.indexOf("    var summarize = (ctx, strict) => {")
+      var end = source.indexOf("    // Helper function to check and summarize context", begin)
+      var factory = new Function("args", "runtime", "commsObservation", "markContextDirty",
+        "var addCall = function() {}, registerCallUsage = function() {};\n" + source.substring(begin, end) + "\nreturn makeBudgetRecovery;")
+      var makeRecovery = factory.call(agent, { maxcontext: 200000 }, runtime, inbox, function() { runtime.contextTextDirty = true })
+      var builds = 0
+      var build = function() { builds++; return "EXACT GOAL AND CONSTRAINTS\nEXACT HOOK\n" + runtime.context.join("\n") + "\nEXACT STATE" }
+      var recovery = makeRecovery(build)
+      var prepared = agent._prepareContextInvocation(adapter, build(), "executor", recovery)
+      adapter.promptWithStats(prepared)
+      ow.test.assert(chunks.length > 2, true, "Overflow uses chunked note summaries")
+      ow.test.assert(chunks.every(function(text) { return text.indexOf(inbox) < 0 && text.indexOf("EXACT GOAL") < 0 && text.indexOf("EXACT HOOK") < 0 }), true, "Summary input excludes protected task and fresh inbox")
+      ow.test.assert(builds >= 3 && runtime.stateSnapshotDirty === true && runtime.contextTextDirty === true, true, "Recovery regenerates selection and state instead of resending the old prompt")
+      ow.test.assert(prepared.indexOf(inbox) >= 0 && prepared.indexOf("EXACT HOOK") >= 0, true, "Rebuilt dispatch preserves exact protected content")
+      ow.test.assert(vm.estimateTokens(prepared) < 200000 && dispatched.length === 1, true, "Only the fitting request dispatches")
+      var original = new Array(85001).join("old note: ")
+      ;["", original, null].forEach(function(summary) {
+        runtime.context = [original, inbox]
+        agent._contextSummaryRecoveries = 0
+        agent._promptIsolatedSummary = function() { if (summary === null) throw new Error("summary failed"); return { response: summary, stats: {} } }
+        var failure
+        try { agent._prepareContextInvocation(adapter, build(), "executor", makeRecovery(build)) } catch(e) { failure = e }
+        ow.test.assert(failure.code, "MINIA_CONTEXT_BUDGET", "Failed summary terminates with budget diagnostics")
+        ow.test.assert(runtime.context[0], original, "Empty, failing, or expanding summary preserves original notes")
+        ow.test.assert(dispatched.length, 1, "Failed recovery never dispatches oversized input")
+      })
+      agent._promptIsolatedSummary = function() { return { response: "short notes", stats: {} } }
+      agent._contextSummaryRecoveries = 0
+      for (var cycle = 0; cycle < 4; cycle++) {
+        runtime.context = [original, inbox]
+        var stopped = false
+        try { agent._prepareContextInvocation(adapter, build(), "executor", makeRecovery(build)) } catch(e) { stopped = e.miniAStop === true }
+        ow.test.assert(stopped, cycle === 3, "At most three summary recovery cycles per run")
+      }
+      var auxiliaryFailure
+      provider = [{ role: "user", content: original }]
+      try { agent._prepareContextInvocation(adapter, "Validate", "validator") } catch(e) { auxiliaryFailure = e }
+      ow.test.assert(auxiliaryFailure.consumer, "validator", "Auxiliary overflow reports independent consumer")
+      ow.test.assert(provider[0].content, original, "Auxiliary overflow leaves its independent history exact")
+    } finally {
+      vm.deleteOwnedStore()
+      new java.io.File(root).delete()
+    }
+  }
+
   exports.testLargeSummaryChunksAndMergeStayBounded = function() {
     var agent = createAgent(), source = io.readFileString("mini-a.js"), inputs = []
     agent.fnI = function() {}
@@ -326,8 +418,8 @@
       // Force a verbose response so merge reduction is also exercised.
       return { response: text, stats: {} }
     }
-    var begin = source.indexOf("    var summarize = ctx => {")
-    var end = source.indexOf("    // Helper function to check and summarize context", begin)
+    var begin = source.indexOf("    var summarize = (ctx, strict) => {")
+    var end = source.indexOf("    this._contextSummaryRecoveries = 0", begin)
     var factory = new Function("args", "var runtime = {}, addCall = function() {}, registerCallUsage = function() {};\n" + source.substring(begin, end) + "\nreturn summarize;")
     var summarize = factory.call(agent, { maxcontext: 200000, lccontextlimit: 16000 })
     var original = new Array(667417).join("x")

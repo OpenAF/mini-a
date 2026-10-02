@@ -2,6 +2,47 @@
   load("mini-a-common.js"); load("mini-a-wiki.js")
   var temporary = function() { var p = java.io.File.createTempFile("wiki-v2-test-", "").getCanonicalPath(); io.rm(p); io.mkdir(p); return p }
   var make = function(root, extra) { return new MiniAWikiManager(merge({ backend: "fs", root: root, access: "rw", wikiretrievalv2: true, wikiretrievalconfig: { passageChars: 256 } }, extra || {}), function() {}) }
+  exports.testControlPageReads = function() {
+    var dir=temporary(), writer, reader, mounted
+    var raw="# Rules\ncontrolpageneedle\n## Contributions\nRead rules before writing knowledge.\n"
+    try {
+      io.mkdir(dir+"/guides")
+      ;["AGENTS.md","index.md","log.md","guides/index.md"].forEach(function(path) { io.writeFileString(dir+"/"+path,raw) })
+      io.writeFileString(dir+"/knowledge.md","# Knowledge\nordinaryknowledge\n")
+      writer=make(dir)
+      ow.test.assert(writer.reindex().ok,true,"control-page fixture publishes")
+      reader=make(dir,{access:"ro"})
+      ;["AGENTS.md","index.md","log.md","guides/index.md"].forEach(function(path) {
+        var opened=reader.open(path), read=reader.agenticRead(path,{maxChars:12}), body=read.body, cursor=read.next
+        ow.test.assert(opened.error,__,"control pages can be opened outside search")
+        ow.test.assert(opened.headings.length,2,"control-page navigation exposes headings")
+        ow.test.assert(read.chars<=12,true,"control-page reads remain bounded")
+        while(cursor) {read=reader.agenticRead(cursor.path,cursor);body+=read.body;cursor=read.next}
+        ow.test.assert(body,raw,"control-page cursors preserve full source content")
+        ow.test.assert(reader.agenticRead(path,{section:"Contributions"}).body.indexOf("Read rules")>=0,true,"control-page section reads work")
+        ow.test.assert(reader.navigate(path,{section:"Contributions"}).error,__,"control-page navigation works")
+      })
+      ow.test.assert(reader.agenticSearch("controlpageneedle").results.length,0,"control pages remain excluded from search")
+      io.mkdir(dir+"/host")
+      mounted=make(dir+"/host")
+      ow.test.assert(mounted.attach("docs",{backend:"fs",root:dir}).ok,true,"control-page wiki mounts")
+      var mountedRead=mounted.agenticRead("@docs/AGENTS.md",{maxChars:12})
+      ow.test.assert(mountedRead.path,"@docs/AGENTS.md","mounted control-page reads preserve namespace")
+      ow.test.assert(mountedRead.next.path,"wiki:@docs/AGENTS.md","mounted continuations preserve namespace")
+      ow.test.assert(mounted.agenticRead(mountedRead.next.path,mountedRead.next).body.length>0,true,"mounted continuation reads work")
+      ow.test.assert(mounted.open("@docs/AGENTS.md").path,"@docs/AGENTS.md","mounted control pages can be opened")
+      ow.test.assert(reader.grep("AGENTS.md","controlpageneedle").matches.length,1,"explicit control-page grep uses source reads")
+      var first=reader.agenticRead("AGENTS.md",{maxChars:12})
+      io.writeFileString(dir+"/AGENTS.md",raw+"Changed rules.\n")
+      ow.test.assert(reader.agenticRead(first.next.path,first.next).error,"stale-reference","changed rules invalidate read continuations")
+      io.rm(dir+"/log.md")
+      ow.test.assert(reader.agenticRead("log.md"),__,"missing control pages remain missing")
+      io.writeFileString(dir+"/unindexed.md","# New\nUnpublished knowledge.\n")
+      ow.test.assert(reader.agenticRead("unindexed.md").error,"page-not-found","ordinary pages still require a serving binding")
+      ow.test.assert(reader._isControlPage(".mini-a-wiki-serving/AGENTS.md"),false,"private serving files are not control pages")
+      ow.test.assert(reader._isControlPage("../AGENTS.md"),false,"control-page access does not permit escaping the wiki root")
+    } finally {if(mounted)mounted.close();if(reader)reader.close();if(writer)writer.close();io.rm(dir)}
+  }
   exports.testCanonicalManifestRestart = function() {
     var dir=temporary(), writer, reader
     var reverseObjects=function(value) {
@@ -1679,6 +1720,11 @@
         reorderedMeta[key]=reordered.pages["bound.md"].metadata[key]
       })
       reordered.pages["bound.md"].metadata=reorderedMeta
+      reordered.pages["bound.md"].outline=reordered.pages["bound.md"].outline.map(function(heading) {
+        var reversed={}
+        Object.keys(heading).reverse().forEach(function(key) { reversed[key]=heading[key] })
+        return reversed
+      })
       var reorderedPatch=patchCatalogue(engine,pin,reordered)
       try {
         engine._validate(pin.dir,reorderedPatch.manifest)
@@ -1698,18 +1744,35 @@
         {name:"byte offset",error:"passage-revision-binding-failure",change:function(c){c.passages[id].byteEnd++}},
         {name:"outline",error:"page-metadata-binding-failure",change:function(c){c.pages["bound.md"].outline[0].title="Forged heading"}},
         {name:"applicability metadata",error:"page-metadata-binding-failure",change:function(c){c.pages["bound.md"].metadata.version="99"}},
+        {name:"title",error:"page-metadata-binding-failure",change:function(c){c.pages["bound.md"].title="Forged title"}},
+        {name:"description",error:"page-metadata-binding-failure",change:function(c){c.pages["bound.md"].description="Forged description"}},
         {name:"locator",error:"invalid-page-record",change:function(c){c.pages["bound.md"].locator="blocks/0000000000000000000000000000000000000000.md"}},
         {name:"raw length",error:"page-revision-binding-failure",change:function(c){c.pages["bound.md"].charLength++}},
         {name:"page identity",error:"invalid-passage-ownership",change:function(c){c.passages[id].pageId="another-page"}},
         {name:"unreferenced passage",error:"catalogue-count-mismatch",change:function(c){c.passages.extra=clone(c.passages[id])}}
       ]
       cases.forEach(function(test){
-        var altered=clone(pin.catalog), error="", patched
+        var altered=clone(pin.catalog), error="", patched, bindingFailure
         test.change(altered);patched=patchCatalogue(engine,pin,altered)
-        try {engine._validate(pin.dir,patched.manifest)}catch(e){error=String(e.message||e)}
+        try {engine._validate(pin.dir,patched.manifest)}catch(e){error=String(e.message||e);bindingFailure=e.bindingFailure}
         finally {patched.restore()}
         ow.test.assert(error,test.error,"valid file checksums do not permit forged "+test.name+" binding")
+        if (test.error === "page-metadata-binding-failure") {
+          ow.test.assert(bindingFailure.page,"bound.md","binding failure identifies the page")
+          ow.test.assert(bindingFailure.fields,[test.name === "applicability metadata" ? "metadata" : test.name],"binding failure identifies mismatched fields without values")
+        }
       })
+      var validateMetadata=global.MiniAWikiRetrievalV2.validatePageMetadata
+      try {
+        global.MiniAWikiRetrievalV2.validatePageMetadata=function(path,parsed,metadata,page) {
+          var changed=clone(page);changed.title="Forged title"
+          return validateMetadata(path,parsed,metadata,changed)
+        }
+        var failedBuild=wm.reindex()
+        ow.test.assert(failedBuild.error,"page-metadata-binding-failure","reindex retains the stable binding error")
+        ow.test.assert(failedBuild.bindingFailure,{page:"bound.md",fields:["title"]},"reindex exposes the failing page and fields")
+        ow.test.assert(failedBuild.activationSucceeded,false,"binding failure prevents publication")
+      } finally {global.MiniAWikiRetrievalV2.validatePageMetadata=validateMetadata}
       var blockPath=pin.dir+"/"+pin.catalog.pages["bound.md"].locator, rawError=""
       try {
         io.writeFileString(blockPath,raw.replace("quotedparameter","xuotedparameter"))

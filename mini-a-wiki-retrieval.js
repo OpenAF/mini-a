@@ -43,6 +43,19 @@ MiniAWikiRetrievalV2.sameMetadata = function(left, right) {
     return Object.prototype.hasOwnProperty.call(right, key) && MiniAWikiRetrievalV2.sameMetadata(left[key], right[key])
   })
 }
+MiniAWikiRetrievalV2.validatePageMetadata = function(path, parsed, metadata, page) {
+  var fields = []
+  if (!MiniAWikiRetrievalV2.sameMetadata(parsed.outline, page.outline)) fields.push("outline")
+  if (!MiniAWikiRetrievalV2.sameMetadata(metadata, page.metadata)) fields.push("metadata")
+  if (page.title !== (metadata.title || path)) fields.push("title")
+  if (page.description !== (metadata.description || "")) fields.push("description")
+  if (fields.length) {
+    var error = new Error("page-metadata-binding-failure")
+    // Keep the stable error code; report identifiers without disclosing body or metadata values.
+    error.bindingFailure = { page: path, fields: fields }
+    throw error
+  }
+}
 // Request coordinator only: no mutable reader resources or synthetic publication.
 MiniAWikiRetrievalV2.coordinator = function(manager) {
   var coordinator = Object.create(MiniAWikiRetrievalV2.prototype)
@@ -770,7 +783,7 @@ MiniAWikiRetrievalV2.prototype._validate = function(dir, manifest, validatedPare
     self.metrics.validationBlockReads++; self.metrics.validationBlockBytes+=MiniAWikiRetrievalV2.bytes(raw)
     if(sha1(raw)!==page.revision || raw.length!==page.charLength || lines.length!==page.linesTotal)throw new Error("page-revision-binding-failure")
     var parsed=MiniAWikiRetrievalV2.parse(path,raw,manifest.passageChars,true,positions), metadata=af.fromJson(stringify(self.manager.parseFrontmatter(raw).meta,__,""))
-    if(stringify(parsed.outline,__,"")!==stringify(page.outline,__,"") || !MiniAWikiRetrievalV2.sameMetadata(metadata,page.metadata) || page.title!==(metadata.title||path) || page.description!==(metadata.description||""))throw new Error("page-metadata-binding-failure")
+    MiniAWikiRetrievalV2.validatePageMetadata(path, parsed, metadata, page)
     var lineFor=positions.lineFor
     var ids = {}
     page.passageIds.forEach(function(id) { var passage = catalog.passages[id]; if (ids[id] || !passage || passage.path !== path || passage.revision !== page.revision || !isFinite(passage.charStart) || !isFinite(passage.charEnd) || passage.charStart < 0 || passage.charEnd <= passage.charStart || passage.charEnd > page.charLength || passage.startLine < 1 || passage.endLine > page.linesTotal) throw new Error("invalid-passage-record"); ids[id] = true })
@@ -883,7 +896,7 @@ MiniAWikiRetrievalV2.prototype._validatePublication = function(dir, manifest, pr
     self.metrics.validationBlockReads++; self.metrics.validationBlockBytes += MiniAWikiRetrievalV2.bytes(raw)
     if (sha1(raw) !== page.revision || raw.length !== page.charLength || positions.lines.length !== page.linesTotal) throw new Error("page-revision-binding-failure")
     var parsed = MiniAWikiRetrievalV2.parse(path, raw, manifest.passageChars, true, positions), metadata = af.fromJson(stringify(self.manager.parseFrontmatter(raw).meta, __, ""))
-    if (stringify(parsed.outline, __, "") !== stringify(page.outline, __, "") || !MiniAWikiRetrievalV2.sameMetadata(metadata, page.metadata) || page.title !== (metadata.title || path) || page.description !== (metadata.description || "")) throw new Error("page-metadata-binding-failure")
+    MiniAWikiRetrievalV2.validatePageMetadata(path, parsed, metadata, page)
     page.passageIds.forEach(function(id) {
       if (seen[id]) throw new Error("invalid-passage-record")
       seen[id] = true
@@ -1703,7 +1716,7 @@ MiniAWikiRetrievalV2.prototype.build = function(changes, options) {
     var exported = this.config.bundlePath ? (pendingExport ? { ok: false, deferred: true, error: "ingest-pending" } : this.exportBundle(this.config.bundlePath)) : __
     finishStage("readerRetentionExport")
     return { ok: !exported || exported.ok || exported.deferred === true, activationSucceeded: true, localPublished: true, bundle: exported, generation: generation, pages: Number(manifest.catalogue.stats.pageCount), passages: Number(manifest.catalogue.stats.passageCount), updatedPages: paths.length, updateWork: work }
-  } catch(e) { activated = activated || e._pointerActivated === true; return { ok: false, error: __miniAErrMsg(e), previousGenerationPreserved: true, activationSucceeded: activated, localPublished: activated, generation: activated ? generation : __, updateWork: work } }
+  } catch(e) { activated = activated || e._pointerActivated === true; return { ok: false, error: __miniAErrMsg(e), bindingFailure: e.bindingFailure, previousGenerationPreserved: true, activationSucceeded: activated, localPublished: activated, generation: activated ? generation : __, updateWork: work } }
   finally {
     try { if (snapshot) this._closeSnapshot(snapshot) } catch(ignoreS) {}
     try { if (writer) writer.rollback() } catch(ignoreW) {}
@@ -2496,7 +2509,7 @@ MiniAWikiRetrievalV2.prototype._validatePageMetadata = function(snapshot, page) 
   if (sha1(raw) !== page.revision || raw.length !== page.charLength || positions.lines.length !== page.linesTotal) throw new Error("page-revision-binding-failure")
   var parsed = MiniAWikiRetrievalV2.parse(page.path,raw,snapshot.manifest.passageChars,true,positions)
   var metadata = af.fromJson(stringify(self.manager.parseFrontmatter(raw).meta,__,""))
-  if (stringify(parsed.outline,__,"") !== stringify(page.outline,__,"") || !MiniAWikiRetrievalV2.sameMetadata(metadata,page.metadata) || page.title !== (metadata.title || page.path) || page.description !== (metadata.description || "")) throw new Error("page-metadata-binding-failure")
+  MiniAWikiRetrievalV2.validatePageMetadata(page.path, parsed, metadata, page)
   this._guard(function() { self._cachePut(key,{page:page},MiniAWikiRetrievalV2.bytes(key + stringify(page,__,""))) })
 }
 MiniAWikiRetrievalV2.prototype.open = function(path, options) {
@@ -2510,7 +2523,7 @@ MiniAWikiRetrievalV2.prototype.open = function(path, options) {
     if (!this._active(page, this._pending(), __, __, __, __, snapshot)) return { path: path, error: "stale-evidence", restart: true }
     var limit = Math.min(100, Math.max(1, Number(options && options.maxHeadings) || 40))
     return { path: path, ref: this.manager._agenticRef(path), title: page.title, description: page.description, revision: page.revision, generation: snapshot.generation, frontmatter: clone(page.metadata), headings: clone(page.outline.slice(0, limit)), headingsTruncated: page.outline.length > limit, links: page.links.map(function(l) { return l.resolved }), size: page.stamp.size }
-  } catch(e) { return { path: path, error: __miniAErrMsg(e) } }
+  } catch(e) { return { path: path, error: __miniAErrMsg(e), bindingFailure: e.bindingFailure } }
   finally { if (snapshot) this.release(snapshot) }
 }
 MiniAWikiRetrievalV2.prototype.backlinks = function(path) {

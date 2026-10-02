@@ -521,6 +521,13 @@ MiniAWikiManager.prototype._isSearchExcludedPath = function(path) {
   return p.split("/").some(function(part) { return part.length > 0 && part.charAt(0) === "." })
 }
 
+// Control pages are source-backed navigation/rules, never passage-search evidence.
+MiniAWikiManager.prototype._isControlPage = function(path) {
+  try { path = this._normalizeRetrievalPath(path) } catch(e) { return false }
+  if (this._isHiddenPath(path) || path.split("/").some(function(part) { return part.charAt(0) === "." })) return false
+  return ["AGENTS.md", "index.md", "log.md"].indexOf(path.split("/").pop()) >= 0
+}
+
 MiniAWikiManager.prototype._safeListPages = function(prefix) {
   this._maybeRefreshArtifactBundle()
   var self = this
@@ -3727,7 +3734,7 @@ MiniAWikiManager.prototype.open = function(pathOrRef, options) {
     if (opened && !opened.error) { opened.path = path; opened.ref = this._agenticRef(path); this._decorateEntry(opened) }
     return opened
   }
-  if (this._retrievalV2) {
+  if (this._retrievalV2 && !this._isControlPage(path)) {
     return this._decorateEntry(this._retrievalV2.open(path, options))
   }
   var page = this.read(path)
@@ -3787,7 +3794,7 @@ MiniAWikiManager.prototype.agenticRead = function(pathOrRef, options) {
     return qualified
   }
   var pinnedDescriptor
-  if (this._retrievalV2) {
+  if (this._retrievalV2 && !this._isControlPage(path)) {
     pinnedDescriptor = this.open(path)
     if (!pinnedDescriptor || pinnedDescriptor.error) return pinnedDescriptor
   }
