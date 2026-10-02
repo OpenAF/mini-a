@@ -210,3 +210,66 @@ body.advanced-resizing[data-advanced-dock=top],body.advanced-resizing[data-advan
 .advanced-stat-map .njsmap_tablecell,.advanced-stat-map .njsmap_tablehead {padding:.4rem;border:1px solid var(--advanced-line);vertical-align:top}
 .advanced-stat-map span,.advanced-stat-map a {color:var(--advanced-text)!important}
 .advanced-stat-map .njsmap_valueNumber,.advanced-stat-map .njsmap_valueBool {color:var(--advanced-value)!important}
+
+/* Editable nJSMap-style key/value tables, shared by Advanced field popups. */
+.advanced-data-editor {display:block;min-width:0;font:12px/1.4 system-ui}
+.advanced-data-editor label {display:flex;flex-direction:column;gap:4px;min-width:0}
+.advanced-data-editor :is(input,select,textarea) {box-sizing:border-box;max-width:100%;min-width:0;min-height:28px;color:var(--advanced-text);background:var(--advanced-field);border:1px solid var(--advanced-control-border);border-radius:4px;padding:4px 6px;font:inherit;line-height:18px}
+.advanced-data-editor textarea,.advanced-data-popup .advanced-data-editor textarea {min-width:0;min-height:28px;width:100%;resize:vertical}
+.data-editor-row,.data-editor-actions,.data-editor-row-actions {display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.advanced-data-editor .data-editor-row {min-height:28px}
+.advanced-data-editor .data-editor-row .data-editor-value {flex:1 1 8rem;width:0}
+.advanced-data-editor .data-editor-row input[type=checkbox] {flex:0 0 auto;width:16px;min-height:16px;margin:6px}
+.advanced-data-editor .data-editor-row select {flex:0 0 auto;width:auto}
+.advanced-data-editor button,.advanced-data-popup .data-editor-actions button {box-sizing:border-box;font:inherit;min-height:24px;margin:0;padding:2px 6px;border-radius:4px}
+.advanced-data-editor button.data-editor-icon {display:inline-flex;align-items:center;justify-content:center;flex:0 0 24px;width:24px;height:24px;min-height:24px;padding:0}
+.data-editor-icon svg {display:block;width:14px;height:14px;pointer-events:none}
+.data-editor-row-actions {flex:0 0 auto;flex-wrap:nowrap;margin-left:auto;gap:2px}
+.data-editor-count {color:var(--advanced-muted);white-space:nowrap}
+.data-editor-disclosure[aria-expanded=true] svg {transform:rotate(90deg)}
+.advanced-data-editor [aria-invalid=true] {border-color:var(--advanced-error);outline:1px solid var(--advanced-error)}
+.advanced-data-popup :focus-visible,.advanced-data-editor :focus-visible {outline:2px solid var(--advanced-check);outline-offset:2px}
+.advanced-data-popup button:disabled,.advanced-data-editor button:disabled {opacity:.5;cursor:default}
+.advanced-data-popup [role=status] {overflow-wrap:anywhere;margin:6px 0}
+.advanced-data-popup [role=status]:empty,.advanced-data-editor [role=status]:empty {display:none}
+.data-editor-toolbar {margin-bottom:6px}
+.data-editor-toolbar button[aria-expanded=true] {background:var(--advanced-hover);border-color:var(--advanced-hover-border)}
+.data-editor-panel {padding:8px;margin-bottom:6px;background:var(--advanced-card);border:1px solid var(--advanced-border);border-radius:5px}
+.data-editor-panel > p {margin:0}
+.data-editor-panel > button {margin-top:4px}
+.advanced-data-editor [hidden] {display:none!important}
+.advanced-data-editor .data-editor-table {width:100%;min-width:220px;table-layout:fixed;border-collapse:collapse;margin:2px 0;background:var(--advanced-field)}
+.advanced-data-editor .data-editor-table :is(th,td) {border:1px solid var(--advanced-control-border);padding:1px 3px;vertical-align:top;text-align:left;overflow-wrap:anywhere}
+.advanced-data-editor .data-editor-table th {width:20%;background:var(--advanced-card);font-weight:normal}
+.advanced-data-editor .data-editor-key {font-weight:600;background:transparent;border-color:transparent;width:100%}
+.advanced-data-editor .data-editor-value {background:transparent;border-color:transparent}
+.advanced-data-editor .data-editor-value:hover,.advanced-data-editor .data-editor-key:hover {border-color:var(--advanced-control-border)}
+.advanced-data-editor .data-editor-number {color:var(--advanced-value)}
+.data-editor-children {overflow-x:auto;padding:2px}
+.data-editor-children > p {margin:4px;color:var(--advanced-muted)}
+.advanced-data-field {position:relative;display:block;width:100%;min-width:0}
+:is(.advanced-shell,.advanced-dialog) .advanced-data-field > :is(input,textarea) {display:block;margin:0;padding-right:2.6rem}
+:is(.advanced-shell,.advanced-dialog) .advanced-data-field > .advanced-data-trigger {position:absolute;right:.35rem;top:50%;transform:translateY(-50%);display:flex;align-items:center;justify-content:center;width:26px;height:26px;margin:0;padding:0;border:0;border-radius:4px;background:transparent;color:var(--advanced-muted);cursor:pointer}
+:is(.advanced-shell,.advanced-dialog) .advanced-data-field > .advanced-data-trigger:hover {background:var(--advanced-hover);color:var(--advanced-text)}
+:is(.advanced-shell,.advanced-dialog) .advanced-data-multiline > .advanced-data-trigger {top:.35rem;transform:none}
+.advanced-data-trigger svg {display:block;pointer-events:none}
+.advanced-data-field > :is(:disabled,[readonly]) + .advanced-data-trigger {display:none!important}
+.advanced-data-popup {box-sizing:border-box;width:min(1000px,96vw);max-width:96vw;max-height:90vh;overflow:auto;padding:12px;font:12px/1.4 system-ui}
+.advanced-data-popup::backdrop {background:#0008}
+.advanced-data-popup h3 {margin:0 0 8px;font-size:15px}
+.data-editor-footer {position:sticky;bottom:-12px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px;padding:8px 0;background:var(--advanced-bg);border-top:1px solid var(--advanced-border);margin-top:6px}
+.data-editor-footer p {margin:0;color:var(--advanced-muted);flex:1 1 16rem}
+@media(max-width:600px) {
+  .advanced-data-popup {padding:8px}
+  .data-editor-footer {bottom:-8px}
+  .advanced-data-editor .data-editor-table th {width:24%}
+  .advanced-data-editor .data-editor-table .data-editor-table th {width:20%}
+  .advanced-data-editor .data-editor-row .data-editor-value {flex-basis:100%;width:100%}
+  .advanced-data-editor .data-editor-row input[type=checkbox] {flex-basis:auto;width:16px}
+  .advanced-data-editor .data-editor-children {margin-left:-1px}
+}
+@media(pointer:coarse) {
+  .advanced-data-editor button,.advanced-data-popup .data-editor-actions button,.advanced-data-editor :is(input,select,textarea),.advanced-data-popup .advanced-data-editor textarea {min-height:32px}
+  .advanced-data-editor button.data-editor-icon {width:32px;height:32px;min-height:32px;flex-basis:32px}
+  .data-editor-row-actions {gap:4px}
+}

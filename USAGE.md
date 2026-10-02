@@ -4047,6 +4047,33 @@ The handle supports touch and mouse dragging, or arrow keys when focused. On nar
 screens the panes initially stack and the divider moves vertically. The
 position button in the pane header opens a menu to dock Advanced on the right, bottom, top, or left;
 an explicit position is remembered across reloads.
+Text fields in Advanced Settings, Models, command forms, and console interaction
+dialogs have a small **Edit data** icon inside the right edge of the field. It
+opens a modal with editable, nested
+key/value tables inspired by nJSMap. Edit keys and values directly in place, choose
+value types, build nested maps/arrays, add/remove entries, and reorder array items.
+Undo/Redo restores removals, type changes, and imports. Empty fields start as maps
+(or arrays for array settings). Existing JSON or SLON is loaded automatically;
+invalid source remains available for correction under **Import JSON/SLON**.
+
+Choose **JSON** or **SLON**, then **Use value** to put the serialized string back
+into the originating field. Its normal **Apply**, **Run**, or **Continue** action
+still controls submission. **Cancel** or Escape discards popup edits and restores
+focus without stopping an agent operation. Read-only settings cannot be edited.
+Invalid numbers or duplicate keys block export. If the original field changes or
+is removed while the popup is open, write-back is refused. Editing stays local.
+The component supports keyboard controls, light/dark themes, and narrow layouts.
+Input is limited to 200,000 characters, 2,000 values, and 30 nesting levels; SLON
+datetime literals must be quoted as strings for this JSON-data editor.
+
+`public/data-editor.js` registers `<mini-a-data-editor>` and exposes
+`MiniADataEditor.bind(field, {label, root})` to attach a popup trigger to any text
+input or textarea (`root` may be `map` or `array`). `MiniADataEditor.open(field,
+options)` opens one directly. The element exposes `.value`, `.format`, `.valid`,
+and `.serialize('json'|'slon')`, plus bubbling `change` events with
+`event.detail.value`. Serialization throws while fields are invalid. Setting
+`.value` resets undo history. Load `public/advanced.css` for its themed styles.
+
 Wiki, graph, ingestion, absorption, dreams, skills, context/history, statistics,
 debugging, and subtasks have dedicated operation panels. Panel controls submit the
 same commands as the composer, except **Statistics**, which displays inline Chart.js

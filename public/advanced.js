@@ -323,13 +323,13 @@ window.MiniAAdvancedUI = function(bridge) {
     dialogId = pending.id; dialog.replaceChildren(el('h3', pending.label));
     const reply = async answer => { await api({action:'reply',id:pending.id,answer}); dialog.close(); };
     if (pending.type === 'choice') pending.choices.forEach((choice,index) => dialog.append(button(asText(choice), () => reply(index))));
-    else { const field = el('textarea'); field.value = pending.value || ''; dialog.append(field,button('Continue', () => reply(field.value))); }
+    else { const field = el('textarea'); field.value = pending.value || ''; dialog.append(field,button('Continue', () => reply(field.value))); window.MiniADataEditor.bind(field, {label: pending.label}); }
     dialog.append(button('Cancel operation', async () => { await api({action:'stop'}); dialog.close(); }));
     if (!dialog.open) dialog.showModal();
   }
   function commandForm(label, build, fields) {
     const form = el('form', undefined, 'advanced-form'); form.append(el('h4',label));
-    const nodes = fields.map(name => { const field = name === 'Content' ? el('textarea') : input(name); field.setAttribute('aria-label', name); const lab=el('label',name); lab.append(field); form.append(lab); return field; });
+    const nodes = fields.map(name => { const field = name === 'Content' ? el('textarea') : input(name); field.setAttribute('aria-label', name); const lab=el('label',name); lab.append(field); form.append(lab); window.MiniADataEditor.bind(field, {label: name}); return field; });
     const go = el('button','Run'); go.type='submit'; form.append(go);
     form.onsubmit = e => { e.preventDefault(); command(build(...nodes.map(n=>n.value))).catch(showError); };
     screen.append(form);
@@ -481,6 +481,7 @@ window.MiniAAdvancedUI = function(bridge) {
           const field=input('',s.value === undefined ? '' : asText(s.value)); field.disabled=s.readOnly; field.setAttribute('aria-label',s.name);
           if (s.type==='boolean') {field.type='checkbox';field.checked=s.value===true;}
           label.append(field); row.append(label,description);
+          if (!s.readOnly && s.type !== 'boolean' && s.type !== 'number') window.MiniADataEditor.bind(field, {label: s.name, root: /array/i.test(s.description || '') ? 'array' : 'map'});
           if (!s.readOnly) row.append(button('Apply',async()=>{await mutate({action:'settings',values:{[s.name]:s.type==='boolean'?field.checked:field.value}}); snapshot=await api({action:'snapshot',after});}));
           list.append(row);
         });

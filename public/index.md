@@ -4910,6 +4910,7 @@
                 if (!loaded) await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = resolveAppUrl('js/' + name); script.onload = resolve; script.onerror = reject; document.head.append(script); });
             }
         } catch (_) { /* Structured statistics retain a plain-text fallback. */ }
+        await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = resolveAppUrl('data-editor.js?raw=true'); script.onload = resolve; script.onerror = reject; document.head.append(script); });
         await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = resolveAppUrl('advanced.js?raw=true'); script.onload = resolve; script.onerror = reject; document.head.append(script); });
         advancedUI = window.MiniAAdvancedUI({
             url: resolveAppUrl,
