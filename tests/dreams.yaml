@@ -3,6 +3,70 @@ include:
 
 jobs:
 
+- name: MiniA Dreams Tests::AutoBoundedSearchCoverage
+  to  : oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoBoundedSearchCoverage
+
+- name: MiniA Dreams Tests::AutoMalformedMetadataIsPreserved
+  to  : oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoMalformedMetadataIsPreserved
+
+- name: MiniA Dreams Tests::AutoConsoleParity
+  to  : oJob Test
+  exec: args.func = function() { load("tests/webDreamAuto.js") }
+
+- name: MiniA Dreams Tests::AutoJustifiedMerge
+  to  : oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoJustifiedMerge
+
+- name: MiniA Dreams Tests::AutoMetadataBindingRecovery
+  to  : oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoMetadataBindingRecovery
+
+- name: MiniA Dreams Tests::AutoResumesJournalWithoutSource
+  to  : oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoResumesJournalWithoutSource
+
+- name: MiniA Dreams Tests::AutoAuthorityAndDryRun
+  to  : oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoAuthorityAndDryRun
+
+- name: MiniA Dreams Tests::AutoManifestRecoveryAndIdempotence
+  to  : oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoManifestRecoveryAndIdempotence
+
+- name: MiniA Dreams Tests::AutoDeterministicSourceAndGraph
+  to  : oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoDeterministicSourceAndGraph
+
+- name: MiniA Dreams Tests::AutoModelRepairAndBudget
+  to  : oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoModelRepairAndBudget
+
+- name: MiniA Dreams Tests::AutoModelRejectsUnrelatedEdits
+  to  : oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoModelRejectsUnrelatedEdits
+
+- name: MiniA Dreams Tests::AutoModelNoProgressAndUnavailable
+  to  : oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoModelNoProgressAndUnavailable
+
+- name: MiniA Dreams Tests::AutoBackupsCancellationAndReconciliation
+  to  : oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoBackupsCancellationAndReconciliation
+
+- name: MiniA Dreams Tests::AutoExternalChangesConflict
+  to  : oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoExternalChangesConflict
+
+- name: MiniA Dreams Tests::AutoRecoveryBlockersAndOwnership
+  to  : oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoRecoveryBlockersAndOwnership
+
+- name: MiniA Dreams Tests::AutoSharedWriterLock
+  to  : oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoSharedWriterLock
+
 - name: MiniA Dreams Tests::WikiApplyFrontmatterHeadingsLinksAndFixpoint
   to  : oJob Test
   exec: args.func = require("tests/dreams.js").testDreamWikiApplyFrontmatterHeadingsLinksAndFixpoint
@@ -192,6 +256,22 @@ jobs:
   exec: args.func = require("tests/dreams.js").testDreamWikiPlanPreviewsGraphWithoutPersisting
 
 todo:
+- MiniA Dreams Tests::AutoBoundedSearchCoverage
+- MiniA Dreams Tests::AutoMalformedMetadataIsPreserved
+- MiniA Dreams Tests::AutoConsoleParity
+- MiniA Dreams Tests::AutoJustifiedMerge
+- MiniA Dreams Tests::AutoMetadataBindingRecovery
+- MiniA Dreams Tests::AutoResumesJournalWithoutSource
+- MiniA Dreams Tests::AutoAuthorityAndDryRun
+- MiniA Dreams Tests::AutoManifestRecoveryAndIdempotence
+- MiniA Dreams Tests::AutoDeterministicSourceAndGraph
+- MiniA Dreams Tests::AutoModelRepairAndBudget
+- MiniA Dreams Tests::AutoModelRejectsUnrelatedEdits
+- MiniA Dreams Tests::AutoModelNoProgressAndUnavailable
+- MiniA Dreams Tests::AutoBackupsCancellationAndReconciliation
+- MiniA Dreams Tests::AutoExternalChangesConflict
+- MiniA Dreams Tests::AutoRecoveryBlockersAndOwnership
+- MiniA Dreams Tests::AutoSharedWriterLock
 - MiniA Dreams Tests::WikiApplyFrontmatterHeadingsLinksAndFixpoint
 - MiniA Dreams Tests::DreamMemoryMergesDuplicates
 - MiniA Dreams Tests::DreamMemoryMarksStale

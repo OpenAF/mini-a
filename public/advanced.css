@@ -304,3 +304,24 @@ body.advanced-resizing[data-advanced-dock=top],body.advanced-resizing[data-advan
   .advanced-data-editor button.data-editor-icon {width:32px;height:32px;min-height:32px;flex-basis:32px}
   .data-editor-row-actions {gap:4px}
 }
+
+/* Command readers use the pane palette and remain usable in narrow docks. */
+.advanced-result-panel { border-block: 1px solid var(--advanced-border); margin: 1rem 0; padding: .75rem 0; min-width: 0; }
+.advanced-result-panel > select { width: 100%; max-width: 100%; margin-bottom: .5rem; }
+.advanced-reader-container, .advanced-result-block, .advanced-help-entry { min-width: 0; margin-block: .75rem; }
+.advanced-reader { color: inherit; background: transparent; overflow-wrap: anywhere; font-size: .95rem; }
+.advanced-reader pre, .advanced-result-block pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
+.advanced-reader table, .advanced-result-block table { display: block; overflow-x: auto; max-width: 100%; }
+.advanced-reader iframe { width: 100%; min-height: 240px; border: 0; background: white; }
+.advanced-help-entry { border-bottom: 1px solid var(--advanced-border); padding-bottom: .8rem; }
+.advanced-help-entry input { max-width: 100%; }
+.advanced-goal-editor, .advanced-dialog textarea { width: 100%; min-height: 18rem; resize: vertical; box-sizing: border-box; }
+.advanced-result-list { padding-left: 1.2rem; }
+.advanced-result-list li { margin-block: .5rem; overflow-wrap: anywhere; }
+.advanced-result-block nav { display: flex; gap: .3rem; flex-wrap: wrap; }
+.advanced-warning { border-left: 3px solid var(--advanced-accent); padding-left: .6rem; }
+.advanced-result-panel summary { cursor: pointer; }
+@media (max-width: 600px) {
+  .advanced-dialog { width: calc(100vw - 2rem); max-width: calc(100vw - 2rem); }
+  .advanced-goal-editor, .advanced-dialog textarea { min-height: 12rem; }
+}

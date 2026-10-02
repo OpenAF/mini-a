@@ -429,7 +429,8 @@ MiniAAbsorb.prototype._sourceCheck = function(plan) {
   })
 }
 MiniAAbsorb.prototype._finalize = function() {
-  var args = merge({}, this._args), wm = this._args.wikimanager, own = !wm, previousSemantic
+  var args = {}, wm = this._args.wikimanager, own = !wm, previousSemantic
+  Object.keys(this._args).forEach(function(k) { if (k !== "wikimanager") args[k] = this._args[k] }.bind(this))
   args.usewiki = true
   args.wikigraphsemantic = false
   var ingest = new MiniAIngest(args, this._log), cfg
@@ -468,7 +469,7 @@ MiniAAbsorb.prototype._apply = function(id, resume) {
   if (self._canonical(lockPath) !== lockPath) throw new Error("Symlink writer lock")
   new java.io.File(lockPath).getParentFile().mkdirs()
   try {
-    file = new java.io.RandomAccessFile(lockPath, "rw"); channel = file.getChannel(); lock = channel.tryLock()
+    lock = __miniAWikiWriterLock(String(new java.io.File(lockPath).getParentFile().getParent()))
     if (!lock) throw new Error("Wiki writer busy")
     var descriptor = Object.create(MiniAWikiManager.prototype)
     descriptor._backendType = "fs"; descriptor._backend = { root: self._root }; descriptor._config = {}
@@ -558,7 +559,7 @@ MiniAAbsorb.prototype._deletePlan = function(id) {
   if (this._canonical(lockPath) !== lockPath) throw new Error("Symlink writer lock")
   new java.io.File(lockPath).getParentFile().mkdirs()
   try {
-    file = new java.io.RandomAccessFile(lockPath, "rw"); channel = file.getChannel(); lock = channel.tryLock()
+    lock = __miniAWikiWriterLock(String(new java.io.File(lockPath).getParentFile().getParent()))
     if (!lock) throw new Error("Wiki writer busy")
     var journal = this._json(this._state + "/journal.json")
     if (journal && (!journal.id || journal.id === id)) throw new Error("Plan required for recovery; resume " + id + " before deleting")

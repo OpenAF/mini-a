@@ -3,6 +3,9 @@ window.MiniAAdvancedUI = function(bridge) {
   const storeKey = 'mini-a-advanced-session';
   let enabled = false, after = 0, snapshot = null, polling = false, dialogId = null, busy = false;
   let history = [], historyIndex = 0, activeScreen = 'activity';
+  let viewParams = {}, resultGeneration = 0, resultRefresh = null, submittedView = null, liveFloor = 0, liveClearRun = null;
+  const previousSelections = {};
+  let subtaskRefresh = null, subtaskTick = 0;
   const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
   const button = (text, action) => { const n = el('button', text); n.type = 'button'; n.addEventListener('click', () => Promise.resolve().then(action).catch(showError)); return n; };
   const input = (placeholder, value = '') => { const n = el('input'); n.placeholder = placeholder; n.value = value; return n; };
@@ -107,7 +110,7 @@ window.MiniAAdvancedUI = function(bridge) {
   function updateSplitOrientation() { finishDrag(); applySplit(); }
   if (stacked.addEventListener) stacked.addEventListener('change', updateSplitOrientation);
   else stacked.addListener(updateSplitOrientation);
-  const screen = el('section', undefined, 'advanced-screen');
+  const screen = el('section', undefined, 'advanced-screen'); screen.tabIndex = -1;
   const activity = el('section', undefined, 'advanced-activity');
   const filter = input('Filter live activity'); filter.setAttribute('aria-label', 'Filter activity');
   const events = el('div', undefined, 'advanced-events'); events.setAttribute('role', 'log');
@@ -129,6 +132,9 @@ window.MiniAAdvancedUI = function(bridge) {
   const dialog = el('dialog', undefined, 'advanced-dialog'); dialog.setAttribute('aria-label', 'Console interaction'); document.body.append(dialog);
   dialog.addEventListener('cancel', e => { e.preventDefault(); api({action:'stop'}).catch(showError); dialog.close(); });
   const screens = [
+    ['help', 'Help', 'Search command syntax, prerequisites, aliases and custom commands. Insert a command to edit it before running.'],
+    ['answer', 'Answer', 'Read the previous answer, copy it or download it to your browser.'],
+    ['editor', 'Goal editor', 'Compose a multiline goal and explicitly submit it.'],
     ['activity', 'Live activity', 'Follow agent actions, tool calls, progress, and results in real time.'],
     ['settings', 'Settings', 'Adjust parameters for this session and manage saved presets.'],
     ['models', 'Models', 'Choose and configure the main, low-cost, and validation models.'],
@@ -146,6 +152,9 @@ window.MiniAAdvancedUI = function(bridge) {
   ];
   // Match Simple view's small, rounded, currentColor SVG line icons.
   const tabIcons = {
+    help: 'M9 8a3 3 0 1 1 5 2c-2 1-2 2-2 4M12 18v1M3 3h18v18H3Z',
+    answer: 'M5 3h14v18H5ZM8 7h8m-8 4h8m-8 4h6',
+    editor: 'm4 16 12-12 4 4-12 12H4ZM13 7l4 4',
     chevronDown: 'm8 10 4 4 4-4',
     dockright: 'M3 4h18v16H3ZM15 4v16',
     dockbottom: 'M3 4h18v16H3ZM3 14h18',
@@ -194,7 +203,7 @@ window.MiniAAdvancedUI = function(bridge) {
   screenTrigger.className = 'advanced-dock-toggle';
   screenTrigger.setAttribute('aria-expanded', 'false'); screenTrigger.setAttribute('aria-controls', screenOptions.id);
   const screenButtons = screens.map(([name, label, description]) => {
-    const option = button(label, () => { closeScreenOptions(true); activeScreen = name; renderScreen(); });
+    const option = button(label, () => { closeScreenOptions(true); activeScreen = name; viewParams = {}; renderScreen(); });
     option.prepend(tabIcon(name)); option.title = description;
     option.setAttribute('aria-description', description); option.dataset.screen = name;
     screenOptions.append(option); return option;
@@ -245,7 +254,7 @@ window.MiniAAdvancedUI = function(bridge) {
   }
   controls.append(sessionAction('Stop', '<rect x="5" y="5" width="14" height="14" rx="2"></rect>', () => api({action:'stop'})), sessionAction('New conversation', '<path d="M19 13H13v6h-2v-6H5v-2h6V5h2v6h6v2z" />', async () => {
     if (busy) throw new Error('Stop or finish the current operation before starting a new conversation.');
-    await bridge.newConversation(); after = 0; events.replaceChildren(); dialogId = null;
+    await bridge.newConversation(); resetSessionView();
     activeScreen = 'activity'; renderScreen();
     sessionStorage.removeItem(storeKey); await poll();
   }));
@@ -258,13 +267,25 @@ window.MiniAAdvancedUI = function(bridge) {
     const result = await response.json(); if (result.error) throw new Error(result.error); return result;
   }
   function showError(error) { status.textContent = String(error.message || error); paneStatus.textContent = 'Error'; paneStatus.dataset.state = 'error'; }
+  function resetSessionView() {
+    after = 0; snapshot = null; dialogId = null; liveFloor = 0; liveClearRun = null; submittedView = null; viewParams = {};
+    Object.keys(previousSelections).forEach(key => delete previousSelections[key]);
+    resultGeneration++; resultRefresh = subtaskRefresh = null; events.replaceChildren();
+  }
   async function mutate(data) {
-    const result = await api({...data,requestId:bridge.newRequestId()});
+    const uuid = bridge.uuid(), requestId = bridge.newRequestId();
+    const result = await api({...data,requestId});
+    if (uuid !== bridge.uuid()) return;
     if (result.busy) throw new Error('This conversation is busy. Stop or finish the current operation first.');
     if (data.action === 'command') {
-      activeScreen = 'activity';
-      filter.value = ''; filter.oninput();
-      renderScreen();
+      const destination = result.view || {name:'activity',params:{}};
+      activeScreen = destination.name; viewParams = destination.params || {};
+      submittedView = {requestId, name: activeScreen};
+      delete previousSelections[activeScreen];
+      if (viewParams.command === 'cls') { liveFloor = after; events.replaceChildren(); }
+      if (activeScreen === 'stats') statsMode = viewParams.mode || 'summary';
+      filter.value = ''; filter.oninput(); renderScreen();
+      if (activeScreen !== 'activity') screen.focus({preventScroll:true});
     }
     busy = true; await poll();
   }
@@ -280,10 +301,12 @@ window.MiniAAdvancedUI = function(bridge) {
   }
   function appendEvent(record, navigate = true) {
     if (record.type === 'view') {
-      if (record.value === 'clear') { events.replaceChildren(); return; }
-      else if (navigate) { activeScreen = record.value; renderScreen(); }
+      // Navigation happens once, from the submission receipt. Replays never move focus.
+      if (record.value === 'clear') { liveFloor = record.sequence; liveClearRun = record.runId; events.replaceChildren(); }
+      return;
     }
-    const details = el('details'); details.dataset.sequence = record.sequence;
+    if (record.sequence <= liveFloor || (liveClearRun && record.runId === liveClearRun)) return;
+    const details = el('details'); details.dataset.sequence = record.sequence; details.dataset.runId = record.runId || '';
     const summary = el('summary');
     summary.append(el('time', record.timestamp.slice(11,19), 'advanced-event-time'), el('span', record.type, 'advanced-event-type'), el('span', activityText(record.value)?.replace(/\s+/g,' ').slice(0,150) || '', 'advanced-event-text'));
     details.dataset.type = record.type;
@@ -306,16 +329,19 @@ window.MiniAAdvancedUI = function(bridge) {
     polling = true;
     try {
       const current = bridge.uuid();
-      if (snapshot && current !== snapshot.uuid) { after = 0; snapshot = null; events.replaceChildren(); }
+      if (snapshot && current !== snapshot.uuid) resetSessionView();
       const data = await api({action:'snapshot',after});
       if (current !== bridge.uuid()) return;
       const first = !snapshot; snapshot = data; busy = data.busy; bridge.trackRun(data);
+      if (data.busy && data.operationView) submittedView = {requestId:data.operation,name:data.operationView.name};
       paneStatus.dataset.state = data.closed ? 'closed' : busy ? 'working' : 'ready';
       status.textContent = paneStatus.textContent = data.closed ? 'Session ended' : busy ? 'Working' : 'Ready';
       for (const record of data.events) { if (record.sequence > after) { appendEvent(record, !first); after = record.sequence; } }
       if (data.events.length) followActivity();
-      if (first || data.events.some(e => e.type === 'complete' && (['settings','preset'].includes(e.value?.action) || e.value?.settingsChanged))) renderScreen();
-      if (first || data.events.some(e => e.type === 'history-clear')) bridge.refresh();
+      if (first || (['settings','models'].includes(activeScreen) && !screen.contains(document.activeElement) && data.events.some(e => e.type === 'complete' && (['settings','preset'].includes(e.value?.action) || e.value?.settingsChanged)))) renderScreen();
+      if (first || data.events.some(e => ['history-clear','history-replace'].includes(e.type))) bridge.refresh();
+      if (resultRefresh && data.events.some(e => ['command-result','complete','result-part','output','error','interaction'].includes(e.type))) resultRefresh();
+      if (activeScreen === 'subtasks' && subtaskRefresh && Date.now() - subtaskTick > 3000) { subtaskTick = Date.now(); subtaskRefresh(); }
       if (data.pending && data.pending.id !== dialogId) showDialog(data.pending);
       if (!data.pending && dialog.open) dialog.close();
       if (busy || data.events.some(e => e.type === 'answer')) bridge.refresh();
@@ -325,17 +351,26 @@ window.MiniAAdvancedUI = function(bridge) {
     dialogId = pending.id; dialog.replaceChildren(el('h3', pending.label));
     const reply = async answer => { await api({action:'reply',id:pending.id,answer}); dialog.close(); };
     if (pending.type === 'choice') pending.choices.forEach((choice,index) => dialog.append(button(asText(choice), () => reply(index))));
-    else { const field = el('textarea'); field.value = pending.value || ''; dialog.append(field,button('Continue', () => reply(field.value))); window.MiniADataEditor.bind(field, {label: pending.label}); }
+    else {
+      const field = el('textarea'); field.value = pending.value || ''; field.setAttribute('aria-label', pending.label);
+      const preview = el('div');
+      dialog.append(field, button(pending.type === 'editor' ? 'Submit goal' : pending.type === 'wiki-editor' ? 'Write page' : 'Continue', () => reply(field.value)));
+      if (pending.type === 'wiki-editor') dialog.append(button('Preview', () => { preview.replaceChildren(markdown(field.value)); }), preview);
+      if (!['editor','wiki-editor'].includes(pending.type)) window.MiniADataEditor.bind(field, {label: pending.label});
+    }
     dialog.append(button('Cancel operation', async () => { await api({action:'stop'}); dialog.close(); }));
     if (!dialog.open) dialog.showModal();
+    dialog.querySelector('textarea,button')?.focus();
   }
   function commandForm(label, build, fields) {
     const form = el('form', undefined, 'advanced-form'); form.append(el('h4',label));
     const nodes = fields.map(spec => {
       const name = typeof spec === 'string' ? spec : spec.name;
-      const field = name === 'Content' ? el('textarea') : input(name);
+      const field = spec.options ? el('select') : name === 'Content' || name === 'Goal' ? el('textarea') : input(name);
+      if (spec.options) spec.options.forEach(value => {const option=el('option',value || '(default)');option.value=value;field.append(option);});
       field.setAttribute('aria-label', name);
       const lab=el('label',name); lab.append(field); form.append(lab);
+      if (name === 'Content') { const preview=el('div');form.append(button('Preview',()=>preview.replaceChildren(markdown(field.value))),preview); }
       if (spec.dataEditor) window.MiniADataEditor.bind(field, {label: name, root: spec.dataEditor});
       return field;
     });
@@ -371,6 +406,202 @@ window.MiniAAdvancedUI = function(bridge) {
       view.innerHTML = window.nJSMap(prepare(value), undefined, document.body.classList.contains('markdown-body-dark'));
     } catch (_) { view.append(el('pre', JSON.stringify(value, null, 2))); }
     return view;
+  }
+  function insertCommand(value) {
+    const composer = document.querySelector('#promptInput'); composer.value = value; composer.focus();
+    composer.dispatchEvent(new Event('input', {bubbles:true}));
+  }
+  function download(text, name = 'result.md') {
+    const url = URL.createObjectURL(new Blob([text], {type:'text/plain;charset=utf-8'}));
+    const link = el('a'); link.href = url; link.download = name.split(/[\\/]/).pop(); link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function markdown(text) {
+    const node = el('div', undefined, 'advanced-reader markdown-body');
+    // Reuse the application's Markdown conversion, then allow only passive markup.
+    // Sanitization is also applied to custom commands, wiki bodies and model reports.
+    if (!bridge.renderMarkdown) { node.append(el('pre', text)); return node; }
+    const template = document.createElement('template'); template.innerHTML = bridge.renderMarkdown(String(text || ''));
+    const tags = new Set('P BR HR H1 H2 H3 H4 H5 H6 UL OL LI BLOCKQUOTE PRE CODE EM STRONG DEL S TABLE THEAD TBODY TR TH TD A DETAILS SUMMARY SPAN DIV'.split(' '));
+    for (const child of [...template.content.querySelectorAll('*')]) {
+      if (!tags.has(child.tagName)) { child.replaceWith(document.createTextNode(child.textContent)); continue; }
+      for (const attribute of [...child.attributes]) {
+        const safeLink = child.tagName === 'A' && attribute.name === 'href' && /^(https?:\/\/|mailto:|#)/i.test(attribute.value);
+        const safeClass = child.tagName === 'CODE' && attribute.name === 'class' && /^language-[\w-]+$/.test(attribute.value);
+        if (!safeLink && !safeClass) child.removeAttribute(attribute.name);
+      }
+      if (child.tagName === 'A') child.setAttribute('rel','noopener noreferrer');
+    }
+    node.append(template.content);
+    for (const code of node.querySelectorAll('code.language-mermaid')) {
+      if (!window.mermaid) continue;
+      const source = code.textContent;
+      Promise.resolve().then(async () => {
+        window.mermaid.initialize({startOnLoad:false,securityLevel:'strict',theme:document.body.classList.contains('markdown-body-dark')?'dark':'default'});
+        const rendered = await window.mermaid.render('advanced-diagram-' + bridge.newRequestId(), source);
+        if (!node.isConnected) return;
+        const frame = el('iframe'); frame.title = 'Mermaid preview'; frame.setAttribute('sandbox','');
+        frame.srcdoc = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'">' + rendered.svg;
+        code.parentElement.after(frame);
+      }).catch(() => { /* Keep the original diagram source readable. */ });
+    }
+    return node;
+  }
+  function reader(text, raw = false, name = 'result.md') {
+    const container = el('section', undefined, 'advanced-reader-container'), content = el('div');
+    const controls = el('div', undefined, 'advanced-actions');
+    const draw = () => content.replaceChildren(raw ? el('pre', text) : markdown(text));
+    controls.append(button('Rendered / Raw', () => { raw = !raw; draw(); }), button('Copy', () => navigator.clipboard.writeText(text)), button('Download', () => download(text, name)));
+    container.append(controls, content); draw(); return container;
+  }
+  function helpScreen(skillsOnly = false) {
+    const search = input(skillsOnly ? 'Search local skills' : 'Search Help', skillsOnly && !/^(search|remote|recommend|open|read|related|context)( |$)/.test(viewParams.args || '') ? viewParams.args || '' : ''); search.setAttribute('aria-label', search.placeholder);
+    const list = el('div'); screen.append(search, list);
+    function draw() {
+      list.replaceChildren();
+      for (const item of snapshot.commandMetadata || []) {
+        if (skillsOnly && item.kind !== 'skill') continue;
+        if (!JSON.stringify(item).toLowerCase().includes(search.value.toLowerCase())) continue;
+        const card = el('section',undefined,'advanced-help-entry');
+        card.append(el('h4',item.syntax), el('p',item.description));
+        if (item.aliases?.length) card.append(el('p','Aliases: '+item.aliases.join(', ')));
+        if (item.subcommands?.length) card.append(el('p','Subcommands / options: '+item.subcommands.join(', ')));
+        if (item.prerequisite) card.append(el('p',item.prerequisite));
+        if (item.source) card.append(el('small',item.source));
+        if (item.examples?.length) card.append(el('pre', item.examples.join('\n')));
+        const args = input(item.arguments || 'Arguments'); args.setAttribute('aria-label', item.command + ' arguments');
+        card.append(args,button('Insert command',()=>insertCommand(item.command + (args.value ? ' '+args.value : ' ')))); list.append(card);
+      }
+      if (!list.childElementCount) list.append(el('p','No matching commands or skills.'));
+    }
+    search.oninput = draw; draw();
+  }
+  function goalEditor(value = '') {
+    const field = el('textarea'); field.value = value; field.className = 'advanced-goal-editor'; field.setAttribute('aria-label','Goal editor');
+    screen.append(field,button('Submit goal',async()=>{ if (!field.value.trim()) return; await command(field.value); }),button('Cancel',()=>{activeScreen='activity';renderScreen();}));
+  }
+  function pageList(items, operation = 'read', family = 'wiki') {
+    const list = el('ul',undefined,'advanced-result-list');
+    for (const item of items || []) {
+      const path = typeof item === 'string' ? item : item.path || item.ref || item.page || item.id;
+      const row = el('li');
+      if (path) row.append(button(path,()=>command(`/${family} ${operation} ${quote(path)}`)));
+      if (typeof item === 'object') { if (item.title) row.append(el('strong',item.title)); if (item.snippet || item.summary || item.description) row.append(el('p',item.snippet || item.summary || item.description)); }
+      list.append(row);
+    }
+    if (!list.childElementCount) list.append(el('li','No entries.'));
+    return list;
+  }
+  function renderBlock(block) {
+    const value = block.value, meta = block.meta || {}, container = el('section',undefined,'advanced-result-block');
+    if (block.type === 'markdown') { if (meta.ref) container.append(el('h4',meta.ref)); if (meta.path) container.append(el('h4',meta.path),breadcrumbs(meta.path)); if (meta.page) container.append(structuredMap(meta.page)); container.append(reader(String(value || ''))); }
+    else if (block.type === 'answer') { container.append(el('h4','Previous goal'),el('pre',value.goal || ''),reader(String(value.answer || ''),meta.raw === true)); }
+    else if (block.type === 'saved') { container.append(el('p','Saved on server: '+value.destination),reader(String(value.content || ''),true,value.destination)); }
+    else if (block.type === 'export') { const raw = typeof value === 'string' ? value : asText(value); container.append(reader(raw,true,'graph.'+(meta.format || 'txt'))); if (meta.format === 'mermaid') container.append(markdown('```mermaid\n'+raw+'\n```')); }
+    else if (block.type === 'history') {
+      if (value.picker) container.append(el('p','Choose a saved conversation below, or Cancel to keep this conversation.'),button('Cancel',()=>{activeScreen='activity';renderScreen();}));
+      for (const goal of value.goals || []) { const row = el('section'); row.append(el('pre',goal),button('Insert',()=>insertCommand(goal)),button('Edit',()=>{activeScreen='editor';viewParams={text:goal};renderScreen();})); container.append(row); }
+    } else if (block.type === 'pages') container.append(pageList(value));
+    else if (block.type === 'wiki-search') { if (value.partial) container.append(el('p','Partial search coverage: absence is not established.','advanced-warning')); container.append(pageList(value.hits),structuredMap({sources:value.sources,stopReasons:value.stopReasons,budget:value.budget})); }
+    else if (block.type === 'wiki-tree' || block.type === 'wiki-browse') { container.append(breadcrumbs(value.path || ''),pageList(value.sections || value.child_sections,'browse'),pageList(value.pages || value.direct_pages),structuredMap(value)); }
+    else if (block.type === 'wiki-backlinks') container.append(pageList(value.backlinks));
+    else if (block.type === 'skill-results') container.append(pageList(value,'open','skills'));
+    else if (block.type === 'skill-detail') {
+      container.append(structuredMap(value)); const ref=value.ref || meta.ref;
+      if(ref) { container.append(button('Read skill',()=>command('/skills read '+quote(ref))),button('Related skills',()=>command('/skills related '+quote(ref))));for(const heading of value.headings || [])container.append(button(heading,()=>command('/skills read '+quote(ref)+' '+quote(heading)))); }
+    } else if (block.type === 'skill-related') container.append(pageList([...(value.backlinks || []),...(value.graph || []),...(value.cross || [])],'open','skills'),structuredMap(value));
+    else if (block.type === 'lint') {
+      container.append(structuredMap(value.summary)); const filter = el('select'), issues = el('div');
+      for (const level of ['all','error','warning','info']) { const option = el('option',level); option.value=level;filter.append(option); }
+      filter.setAttribute('aria-label','Lint severity');
+      const draw = () => { issues.replaceChildren(); const table = el('table'); for (const issue of value.issues || []) { if(filter.value !== 'all' && issue.severity !== filter.value)continue; const row = el('tr'), page = el('td'); page.append(button(issue.page || '(page)',()=>command('/wiki read '+quote(issue.page))));row.append(el('td',issue.severity),page,el('td',issue.type),el('td',issue.detail || issue.target || ''));table.append(row); } issues.append(table); };
+      filter.onchange=draw;container.append(filter,issues);draw();
+    } else if (block.type === 'help') container.append(el('p','Use the searchable command list below.'));
+    else {
+      if (meta.retrievalAlias) container.append(el('p','answer is a retrieval alias; no answer synthesis is performed.'));
+      if (block.type === 'graph') {
+        const paths = new Set(), nodes = new Set();
+        const visit = item => { if(Array.isArray(item))item.forEach(visit); else if(item && typeof item === 'object')Object.entries(item).forEach(([key,v])=>{if(typeof v==='string'){if(['path','page','ref'].includes(key))paths.add(v);if(['id','from','to'].includes(key)){nodes.add(v);if(v.startsWith('doc:'))paths.add(v.slice(4));}}else if(typeof v==='object')visit(v);}); };
+        visit(value);container.append(pageList([...paths]));for(const id of nodes)container.append(button('Neighbors: '+id,()=>command('/graph neighbors '+quote(id))));
+      }
+      container.append(structuredOutput(value));
+      const raw = typeof value === 'string' ? value : asText(value);
+      if (raw !== undefined) container.append(button('Copy data',()=>navigator.clipboard.writeText(raw)),button('Download data',()=>download(raw,typeof value === 'string'?'result.txt':'result.json')));
+      if (block.type === 'subtask' && value.id) container.append(button('Details',()=>command('/subtask '+value.id)),button('Result',()=>command('/subtask result '+value.id)),button('Cancel task',()=>command('/subtask cancel '+value.id)));
+      if (block.type === 'subtask' && typeof value.answer === 'string') container.append(reader(value.answer));
+      if (block.type === 'recoveries') for (const entry of value.recoveries || []) container.append(el('h4',entry.id),button('Resume',()=>command('/ingest recovery resume '+quote(entry.id))),button('Discard',()=>command('/ingest recovery discard '+quote(entry.id))));
+      if (block.type === 'absorb') {
+        const plans = value.plans || (value.id || value.planId ? [value] : []);
+        for (const plan of plans) { const id = typeof plan === 'string' ? plan : plan.id || plan.planId; if(!id)continue;container.append(el('h4',id)); for(const op of ['show','apply','resume','delete','cancel'])container.append(button(op,()=>command('/absorb '+op+' '+quote(id)))); }
+      }
+    }
+    return container;
+  }
+  function breadcrumbs(path) {
+    const nav = el('nav'); nav.setAttribute('aria-label','Wiki path'); nav.append(button('/',()=>command('/wiki browse')));
+    const parts = path.split('/').filter(Boolean); parts.forEach((part,index)=>nav.append(button(part,()=>command('/wiki browse '+quote(parts.slice(0,index+1).join('/'))))));return nav;
+  }
+  function resultPanel() {
+    const generation = resultGeneration, uuid = bridge.uuid(), view = activeScreen;
+    const panel = el('section',undefined,'advanced-result-panel'); panel.setAttribute('aria-label','Command results');
+    const select = el('select'); select.setAttribute('aria-label','Previous results');
+    const notice = el('p','Loading results…'); notice.setAttribute('role','status');
+    const content = el('div'), progress = el('details'); progress.append(el('summary','Operation progress'));
+    const progressContent = el('div'); progress.append(progressContent);
+    let cursor = 0, loading = false, refreshAgain = false, selected = null, selectionRequest = 0;
+    const current = () => generation === resultGeneration && uuid === bridge.uuid() && view === activeScreen;
+    const more = button('Older results',()=>load(false)); more.hidden=true;
+    panel.append(notice,select,more,content,progress);screen.append(panel);
+    async function choose(sequence) {
+      const request = ++selectionRequest;
+      const record = await api({action:'result',sequence});
+      if(!current() || request !== selectionRequest)return;
+      selected=sequence; const result=record.value || {}; content.replaceChildren();
+      notice.textContent=(result.status || 'previous')+' · '+(result.command || '')+' · '+record.timestamp+' · Previous result';
+      for(const block of result.blocks || [])content.append(renderBlock(block));
+      if(result.messages?.length) {
+        const messages = el('details'); messages.open = !result.blocks?.length || result.status !== 'completed'; messages.append(el('summary', result.legacy ? 'Legacy command output' : 'Messages'));
+        for(const message of result.messages)messages.append(structuredOutput(message.value));content.append(messages);
+      }
+    }
+    async function load(reset = true) {
+      if(!current())return;
+      if(loading){refreshAgain=true;return;}loading=true;
+      try {
+        const page=await api({action:'results',view,before:reset?0:cursor}); if(!current())return;
+        if(reset){select.replaceChildren();cursor=0;}
+        for(const result of page.results || []){const option=el('option',result.timestamp+' · '+result.command+' · '+result.status);option.value=String(result.sequence);select.append(option);}
+        cursor=page.before;more.hidden=!page.hasMore;
+        const preferred=previousSelections[view];
+        if(preferred && [...select.children].some(n=>Number(n.value)===preferred))select.value=String(preferred);
+        else if(preferred) {const option=el('option','Selected previous result #'+preferred);option.value=String(preferred);select.append(option);select.value=String(preferred);}
+        const next=Number(select.value);
+        if(next && next!==selected)await choose(next);
+        if(!next)notice.textContent='No previous results. Run a command using the controls below.';
+        progress.hidden=!(snapshot?.busy && submittedView?.name===view);
+        if(!progress.hidden) {
+          progress.open=true;progressContent.replaceChildren();
+          const records=[...events.children].filter(n=>n.dataset.runId===submittedView.requestId).slice(-30);
+          records.forEach(n=>progressContent.append(el('pre',n.textContent)));
+        }
+      } catch(error){if(current())notice.textContent=error.message || String(error);}
+      finally{loading=false;if(refreshAgain && current()){refreshAgain=false;load();}}
+    }
+    select.onchange=()=>{previousSelections[view]=Number(select.value);choose(Number(select.value)).catch(showError);};
+    resultRefresh=()=>load();load();
+  }
+  function subtaskScreen() {
+    const generation=resultGeneration, uuid=bridge.uuid(), list=el('div');screen.append(list);
+    let loading=false, previousTasks='';
+    subtaskRefresh=async()=>{
+      if(loading)return;loading=true;
+      try { const result=await api({action:'subtasks'});if(generation!==resultGeneration||uuid!==bridge.uuid())return;
+        const serialized=JSON.stringify(result.tasks || []);
+        if(serialized===previousTasks || list.contains(document.activeElement))return;previousTasks=serialized;
+        list.replaceChildren(); for(const task of result.tasks || []) {const row=el('section');row.append(el('strong',task.status+' · '+task.goal),button(task.id,()=>command('/subtask '+task.id)),button('Result',()=>command('/subtask result '+task.id)),button('Cancel task',()=>command('/subtask cancel '+task.id)));list.append(row);}
+        if(!list.childElementCount)list.append(el('p','No subtasks. Enable delegation before submitting a child goal.'));
+      } catch(error){list.textContent=error.message || String(error);}finally{loading=false;}
+    }; subtaskRefresh();
   }
   function renderStats(container) {
     destroyStatsCharts(); container.replaceChildren();
@@ -443,6 +674,8 @@ window.MiniAAdvancedUI = function(bridge) {
     const controls = el('div', undefined, 'advanced-actions advanced-debug-controls');
     const category = el('select'); category.setAttribute('aria-label', 'Debug category');
     const initial = el('option', 'All events'); initial.value = 'all'; category.append(initial);
+    const requestedFilter = typeof viewParams !== 'undefined' ? viewParams.filter : null;
+    if (requestedFilter && requestedFilter !== 'all') { const option = el('option', requestedFilter); option.value = requestedFilter; category.append(option); category.value = requestedFilter; }
     const refresh = button('Refresh', () => load(true));
     const more = button('Load more', () => load(false)); more.hidden = true;
     const notice = el('p', '', 'advanced-screen-description'); notice.setAttribute('role', 'status');
@@ -565,6 +798,7 @@ window.MiniAAdvancedUI = function(bridge) {
   }).observe(document.body, {attributes: true, attributeFilter: ['class']});
   function renderScreen() {
     debugGeneration++;
+    resultGeneration++; resultRefresh = subtaskRefresh = null;
     statsGeneration++; destroyStatsCharts();
     const selected = screens.find(([name]) => name === activeScreen) || screens[0];
     activeScreen = selected[0];
@@ -576,57 +810,72 @@ window.MiniAAdvancedUI = function(bridge) {
     if (activeScreen === 'activity') { followActivity(); return; }
     screen.replaceChildren(el('h3', selected[1]), el('p', selected[2], 'advanced-screen-description'));
     if (!snapshot) return;
-    if (activeScreen === 'settings' || activeScreen === 'models') {
-      const search=input('Search settings'); screen.append(search);
+    resultPanel();
+    if (activeScreen === 'help') { helpScreen(); }
+    else if (activeScreen === 'answer') { actions([['Previous answer','/last'],['Raw answer','/last md']]); commandForm('Save on server', file => file ? `/save ${quote(file)}` : '/save', ['Server path (default response.md)']); }
+    else if (activeScreen === 'editor') { if (['edit','editor'].includes(viewParams.command)) screen.append(el('p','Use the goal editor dialog to submit or cancel.')); else goalEditor(viewParams.text || ''); }
+    else if (activeScreen === 'settings' || activeScreen === 'models') {
+      const search=input('Search settings', viewParams.filter || ''); screen.append(search);
       const list=el('div',undefined,'advanced-settings'); screen.append(list);
+      let commandFilter = viewParams.command;
       const render=()=>{
         list.replaceChildren();
-        snapshot.settings.filter(s=>(activeScreen!=='models'||['model','modellc','modelval'].includes(s.name)) && `${s.name} ${s.description}`.toLowerCase().includes(search.value.toLowerCase())).forEach(s=>{
-          const row=el('div'); const label=el('label', s.name); const description=el('small',`${s.description || ''} · ${s.source === 'session' ? 'Session override' : 'Server default'} · Default: ${asText(s.defaultValue) ?? '(unset)'}${s.readOnly?' · Server-controlled':''}`);
+        snapshot.settings.filter(s=>(activeScreen!=='models'||(viewParams.slot ? s.name === viewParams.slot : ['model','modellc','modelval'].includes(s.name))) && (commandFilter === 'show' ? s.name.startsWith(search.value.toLowerCase()) : ['set','toggle','unset'].includes(commandFilter) ? s.name === search.value.toLowerCase() : `${s.name} ${s.description}`.toLowerCase().includes(search.value.toLowerCase()))).forEach(s=>{
+          const row=el('div'); const label=el('label', s.name); const description=el('small',`${s.description || ''} · ${s.source === 'session' ? 'Session override' : s.source === 'server' ? 'Server default' : s.source} · Default: ${asText(s.defaultValue) ?? '(unset)'}${s.readOnly?' · Server-controlled':''}`);
           const field=input('',s.value === undefined ? '' : asText(s.value)); field.disabled=s.readOnly; field.setAttribute('aria-label',s.name);
           if (s.type==='boolean') {field.type='checkbox';field.checked=s.value===true;label.className='advanced-boolean-setting';}
           label.append(field); row.append(label,description);
           if (!s.readOnly && ['map', 'array'].includes(s.dataEditor)) window.MiniADataEditor.bind(field, {label: s.name, root: s.dataEditor});
-          if (!s.readOnly) row.append(button('Apply',async()=>{await mutate({action:'settings',values:{[s.name]:s.type==='boolean'?field.checked:field.value}}); snapshot=await api({action:'snapshot',after});}));
+          if (!s.readOnly) row.append(button('Apply',async()=>{await mutate({action:'settings',values:{[s.name]:s.type==='boolean'?field.checked:field.value}});}));
           list.append(row);
         });
-      }; search.oninput=render; render();
+      }; search.oninput=()=>{commandFilter=null;render();}; render();
       const presets=el('div',undefined,'advanced-actions'); const name=input('Preset name'); const names=el('select'); snapshot.presets.forEach(p=>{const o=el('option',p);o.value=p;names.append(o);});
       presets.append(name,button('Save preset',()=>mutate({action:'preset',op:'save',name:name.value})),names);
       ['apply','default','delete'].forEach(op=>presets.append(button(op,()=>mutate({action:'preset',op,name:names.value})))); screen.append(presets);
     } else if (activeScreen==='debug') {
       debugScreen();
     } else if(activeScreen==='wiki') {
-      actions([['List','/wiki list --meta'],['Tree','/wiki tree'],['Lint','/wiki lint'],['Statistics','/stats wiki']]);
+      commandForm('Attach wiki', (name,backend,root) => `/wiki attach ${quote(name)} backend=${backend || 'fs'} root=${quote(root || '.')}`, ['Name','Backend','Root']);
+      commandForm('Detach wiki', name => `/wiki detach ${name}`, ['Name']);
+      actions([['Context','/wiki context'],['Mounts','/wiki mounts'],['List','/wiki list --meta'],['Tree','/wiki tree'],['Lint','/wiki lint'],['Statistics','/stats wiki']]);
       commandForm('Browse / read', (op,path)=>`/wiki ${op||'browse'} ${quote(path)}`,['Operation','Path']);
       commandForm('Search',q=>`/wiki search ${q}`,['Query']);
       commandForm('Write page',(path,content)=>`/wiki write ${quote(path)} ${content}`,['Path','Content']);
       commandForm('Move page',(from,to)=>`/wiki move ${quote(from)} ${quote(to)}`,['From','To']);
-      commandForm('Maintenance',args=>`/wiki ${args}`,['Subcommand and arguments']);
+      commandForm('Maintenance',(op,path,mode)=>`/wiki ${op} ${path ? quote(path) : ''} ${mode}`,[{name:'Operation',options:['delete','init','reindex','compact']},'Path (delete / init)',{name:'Compaction mode',options:['','dryrun','offline=true']}]);
+      commandForm('Wiki command',args=>`/wiki ${args}`,['Subcommand and arguments']);
     } else if(activeScreen==='graph') {
       actions([['Statistics','/graph stats'],['Build','/graph build']]);
-      commandForm('Inspect graph',(op,path)=>`/graph ${op||'neighbors'} ${quote(path)}`,['Operation','Path']);
+      commandForm('Inspect graph',(op,path)=>`/graph ${op||'neighbors'} ${quote(path)}`,[{name:'Operation',options:['neighbors','cross']},'Path or node ID']);
+      commandForm('Retrieve', (op,query)=>`/graph ${op} ${query}`,[{name:'Operation',options:['query','retrieve','answer']},'Query']);
+      commandForm('Export', format=>`/graph export ${format}`,[{name:'Format',options:['mermaid','graphml','neo4j','html','svg']}]);
+      actions([['Report','/graph report'],['Communities','/graph communities'],['Surprise links','/graph surprise']]);
       commandForm('Find path',(from,to)=>`/graph path ${quote(from)} ${quote(to)}`,['From','To']);
       commandForm('Graph operation',args=>`/graph ${args}`,['Subcommand and arguments']);
     } else if(activeScreen==='ingest') {
-      commandForm('Ingest source',(source,section,flags)=>`/ingest ${quote(source)} ${quote(section)} ${flags}`,['Source','Section','Options (dryrun / force)']);
+      commandForm('Ingest source',(source,section,flags)=>`/ingest ${quote(source)}${section ? ' ' + quote(section) : ''} ${flags}`,['Source','Section','Options (dryrun / force / prune / allowemptyprune / sourceid= / independent)']);
       actions([['Recovery','/ingest recovery']]);commandForm('Recover',args=>`/ingest recovery ${args}`,['resume / discard and ID']);
     } else if(activeScreen==='absorb') {
       actions([['Status','/absorb status']]);commandForm('Create plan',spec=>`/absorb plan ${quote(spec)}`,[{name:'Spec file or inline JSON/SLON',dataEditor:'map'}]);
       commandForm('Manage plan',(op,id)=>`/absorb ${op} ${quote(id)}`,['show / apply / resume / delete / cancel','Plan ID']);
     } else if(activeScreen==='dream') {
-      commandForm('Dream operation',op=>`/dream ${op}`,['memory / wiki / plan / apply / reorg / repair / reindex / graph / indexes']);
+      commandForm('Dream operation',(op,mode,flags)=>`/dream ${op} ${mode} ${flags}`,[{name:'Target',options:['','memory','wiki']},{name:'Mode',options:['','auto','plan','apply','reorg','repair','reindex','graph','indexes']},{name:'Dry run',options:['','dryrun']}]);
     } else if(activeScreen==='subtasks') {
+      subtaskScreen();
       actions([['List subtasks','/subtasks']]); commandForm('Delegate',goal=>`/delegate ${goal}`,['Goal']);commandForm('Inspect / cancel',args=>`/subtask ${args}`,['ID / result ID / cancel ID']);
     } else if(activeScreen==='skills') {
+      helpScreen(true);
       actions([['List skills','/skills'],['Help','/help']]); commandForm('Inspect skills',args=>`/skills ${args}`,['Filter or subcommand']);commandForm('Run skill or custom command',cmd=>cmd,['$skill or /command with arguments']);
     } else if(activeScreen==='history') {
       const notice=el('p','Loading saved conversations…','advanced-screen-description');
       notice.setAttribute('role','status');
+      const historyGeneration=resultGeneration, historyUuid=bridge.uuid();
       const saved=el('ul',undefined,'advanced-history-list');
       saved.setAttribute('aria-label','Saved conversations');
       screen.append(button('Refresh list',()=>renderScreen()),notice,saved);
       api({action:'sessions'}).then(data=>{
+        if(historyGeneration!==resultGeneration || historyUuid!==bridge.uuid())return;
         const sessions=data.sessions||[];
         notice.textContent=sessions.length ? 'Select a conversation to open it.' : 'No saved conversations yet.';
         sessions.forEach(session=>{
@@ -634,7 +883,7 @@ window.MiniAAdvancedUI = function(bridge) {
           const row=el('li');
           const open=button('',async()=>{
             if(busy)throw new Error('Finish the current operation first.');
-            bridge.resume(session.uuid);snapshot=null;after=0;dialogId=null;events.replaceChildren();
+            bridge.resume(session.uuid);resetSessionView();
             filter.value='';filter.oninput();
             activeScreen='activity';renderScreen();
             bridge.refresh();await poll();
@@ -648,19 +897,21 @@ window.MiniAAdvancedUI = function(bridge) {
           row.append(open);saved.append(row);
         });
       }).catch(error=>{notice.textContent='Could not load saved conversations. Use Refresh list to try again.';showError(error);});
-      actions([['History','/history'],['Previous answer','/last'],['Restore','/restore'],['Clear','/clear']]);commandForm('Rewind',count=>`/rewind ${count}`,['Exchanges']);commandForm('Save answer',file=>`/save ${quote(file)}`,['Server path']);
+      actions([['History','/history'],['Previous answer','/last'],['Restore','/restore'],['Clear','/clear']]);commandForm('Rewind',count=>`/rewind ${count}`,['Exchanges']);commandForm('Save answer',file=>file ? `/save ${quote(file)}` : '/save',['Server path']);
     } else if(activeScreen==='context') {
-      actions([['Summary','/context'],['Analyze','/context analyze'],['Virtual memory','/context vm']]);commandForm('Compact / summarize',(op,keep)=>`/${op} ${keep}`,['compact / summarize','Messages to keep']);
+      actions([['Summary','/context'],['Analyze','/context analyze'],['Virtual memory','/context vm']]);commandForm('Compact / summarize',(op,keep)=>`/${op} ${keep}`,[{name:'Operation',options:['compact','summarize']},'Messages to keep']);
     } else if(activeScreen==='stats') { statisticsScreen(); return; }
-    screen.append(el('p','Command output appears in Live activity.'));
+
   }
   renderScreen();
   const composer=document.querySelector('#promptInput');
   composer.addEventListener('input',()=>{
     suggestions.replaceChildren(); const value=composer.value; const head=/^\/(\w+)\s+(\S*)$/.exec(value);
-    const pool = head && snapshot ? (snapshot.completions?.[head[1]] || []).map(c=>head[1]+' '+c) : (snapshot?.commands || []);
-    const matches=enabled && snapshot && /^\/[\w -]*$/.test(value) ? pool.filter(c=>c.startsWith(value.slice(1))).slice(0,12):[];
-    suggestions.hidden=!matches.length; matches.forEach(c=>suggestions.append(button('/'+c,()=>{composer.value='/'+c+' ';suggestions.hidden=true;composer.focus();})));
+    const metadata=snapshot?.commandMetadata || [];
+    const commandMeta=head && metadata.find(item=>item.name===head[1]);
+    const pool = head && snapshot ? [...new Set([...(snapshot.completions?.[head[1]] || []),...(commandMeta?.subcommands || [])])].map(c=>'/'+head[1]+' '+c) : metadata.length ? metadata.map(item=>item.command) : (snapshot?.commands || []).map(c=>'/'+c);
+    const matches=enabled && snapshot && /^[/$][\w -]*$/.test(value) ? pool.filter(c=>c.startsWith(value)).slice(0,12):[];
+    suggestions.hidden=!matches.length; matches.forEach(c=>suggestions.append(button(c,()=>{composer.value=c+' ';suggestions.hidden=true;composer.focus();})));
   });
   composer.addEventListener('keydown',e=>{
     if(!enabled)return;
@@ -672,10 +923,7 @@ window.MiniAAdvancedUI = function(bridge) {
   setInterval(()=>poll().catch(showError),1000);
   if(sessionStorage.getItem(storeKey))setEnabled(true);
   return { enabled:()=>enabled, stop:()=>api({action:'stop'}), submit:async value=>{
-    const requestId=bridge.newRequestId();
-    history.push(value);historyIndex=history.length;
-    const result=await api({action:'command',command:value,requestId});
-    if(result.busy){throw new Error('Conversation is busy');}
-    composer.value=''; suggestions.hidden=true; await poll();
+    await command(value);
+    composer.value=''; suggestions.hidden=true;
   }};
 };

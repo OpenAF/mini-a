@@ -21,7 +21,7 @@ const ctx = vm.createContext({
   isString: x => typeof x === 'string', isObject: x => x !== null && typeof x === 'object',
   isMap: x => x !== null && typeof x === 'object', isArray: Array.isArray,
   isUnDef: x => x === undefined, isFunction: x => typeof x === 'function', isDef: x => x !== undefined,
-  __: undefined, global: {}, sessionOptions: { usewiki: true, wikiaccess: 'rw' },
+  __: undefined, adapter: undefined, browserResult: () => {}, global: {}, sessionOptions: { usewiki: true, wikiaccess: 'rw' },
   activeAgent: { _wikiManager: wm }, getConsoleWikiManager: () => wm,
   colorifyText: x => x, ansiColor: () => '', print: x => output.push(x), printErr: x => output.push(x),
   printTree: x => x, errorColor: '', hintColor: '', successColor: '', accentColor: '', promptColor: '',

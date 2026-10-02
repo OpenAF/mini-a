@@ -13,6 +13,7 @@ const node = (tag, text, className) => ({tag, text, className, children: [], att
 });
 const bindings = [];
 const context = vm.createContext({
+  resultGeneration: 0, resultPanel() {}, viewParams: {}, bridge: {uuid: () => 'fixture'},
   statsGeneration: 0, debugGeneration: 0, destroyStatsCharts() {}, activeScreen: 'settings',
   screens: ['settings', 'wiki', 'graph', 'history', 'ingest', 'absorb'].map(name => [name, name, '']),
   screenTrigger: node('button'), screenButtons: [], activity: node('div'), screen: node('div'),

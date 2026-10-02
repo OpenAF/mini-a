@@ -50,6 +50,10 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/wikiManager.js").testDreamAndIngestion
 
+- name: MiniA Wiki Manager Tests::AutoDream
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testAutoDream
+
 - name: MiniA Wiki Manager Tests::V2Compaction
   to: oJob Test
   exec: args.func = require("tests/wikiManager.js").testV2Compaction
@@ -91,6 +95,7 @@ todo:
 - MiniA Wiki Manager Tests::RecordExport
 - MiniA Wiki Manager Tests::LaunchAndGuidance
 - MiniA Wiki Manager Tests::DreamAndIngestion
+- MiniA Wiki Manager Tests::AutoDream
 - MiniA Wiki Manager Tests::V2Compaction
 - MiniA Wiki Manager Tests::MountedReadTarget
 - MiniA Wiki Manager Tests::EditorArgumentsAndFailure

@@ -3429,17 +3429,18 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 | `auditch` | string | - | SLON/JSON audit channel — recent events are included as context to help surface insights |
 | `maxauditrecords` | number | `200` | Maximum audit log entries included in the memory consolidation prompt |
 | `usewiki` | boolean | `false` | Enable the wiki dream (requires `wikiroot`, `wikibucket`, or equivalent) |
-| `wikiaccess` | string | `rw` | Always overridden to `rw` inside the dream pass |
+| `wikiaccess` | string | mode-dependent | `auto` execution requires explicitly configured `rw`; other dream modes retain their existing writable configuration |
 | `wikiroot` / `wikibucket` / `wikibackend` | string | - | Same wiki backend settings as the regular agent |
 | `model` | string | - | SLON/JSON model config used for the memory consolidation LLM call |
 | `dryrun` | boolean | `false` | Preview what would change without writing anything back |
-| `dreamwikimode` | string | `apply` | Wiki dream mode: `plan`, `apply`, `reorg`, `repair`, `reindex`, `graph`, `indexes` |
+| `dreamwikimode` | string | `apply` | Wiki dream mode: `auto`, `plan`, `apply`, `reorg`, `repair`, `reindex`, `graph`, `indexes` |
 | `dreammemorymode` | string | `apply` | Memory dream mode: `plan` or `apply` |
 | `dreamwikidryrun` | boolean | `false` | Propose wiki changes without writing (opt-out of `apply`) |
 | `dreamwikiapproval` | string | `ask` | Reorg approval mode: `auto`, `ask`, `never` |
 | `dreamwikiinstructions` | string | _(none)_ | Additional operator guidance appended to the wiki reorg objective |
 | `dreamwikireorg` | boolean | `false` | Allow structural reorg operations |
-| `dreammaxsteps` | number | `40` for `reorg` | Maximum structural-reorg agent steps; other wiki dream modes are deterministic or proposal-only |
+| `dreammaxsteps` | number | `40` | Total model-step budget for `auto` or agent-step budget for `reorg` |
+| `dreamwikillm` | boolean | `true` | Allow model proposals for unresolved issues in `auto`; `false` runs deterministic repairs only |
 | `dreamreport` | string | - | Optional file path to write JSON run report |
 | `libs` | string | - | Extra comma-separated libraries to load |
 
@@ -3459,9 +3460,37 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 7. Unless `dryrun=true`, the pre-dream state is backed up — to a sibling namespace (`<ns>::predream-<ISO-timestamp>`) for ordinary channel records, or below `.predream-<ISO-timestamp>/` for Markdown channel records — then the consolidated snapshot is written back.
 8. A summary is printed: entries before/after, dropped count, stale-marked count.
 
+### Wiki dream auto mode
+
+`/dream wiki auto` diagnoses a local wiki, resumes valid existing ingestion journals, repairs deterministic lint/navigation issues, explicitly rebuilds damaged retrieval artifacts, and asks the configured main model about remaining issues. The same coordinator runs in the terminal, Wiki Manager (`wikiman=true`, Dream → auto), Advanced web console (`webadvanced=true`, Dream → Wiki → Auto), and CLI:
+
+```sh
+mini-a dream=true dreammode=wiki dreamwikimode=auto \
+  usewiki=true wikiroot=/path/to/wiki wikiaccess=rw \
+  dreamwikillm=false dreamreport=/tmp/wiki-auto.json
+```
+
+Wiki Manager previews by default and offers to apply automatic repairs; its advanced model/limits overrides accept `dreamwikillm=false`. Use `/dream wiki auto dryrun` or `dryrun=true` to inspect issues and repair candidates. Dry-run does not call a model, resume journals, back up files, publish indexes, or repair pages. Execution requires an explicitly configured `wikiaccess=rw`; invoking auto authorizes its supported repairs without further per-action prompts. Other dream modes keep their existing approval behavior.
+
+Auto performs at most three repair/verification cycles and stops when no progress occurs. `dreammaxsteps` defaults to 40 total model requests; the three-cycle bound can stop it sooner. Each proposal receives at most 25 issues and 12 complete pages, with a 64,000-character page budget. The model has no tools: its proposed wiki writes, moves, duplicate merges and deletions are validated and applied by the coordinator. Missing models leave semantic issues unresolved after deterministic repairs. Healthy pages receive no speculative reorganisation.
+
+Authoritative Markdown is inspected independently of retrieval. Corrupt metadata bindings and manifests trigger an explicit rebuild from those pages, without repairing hashes or using an older retrieval contract. Verification opens a new strict reader, opens content pages, probes search, reruns lint, and checks the enabled structural graph. Graph maintenance in auto does not make semantic extraction calls. Unsupported schemas/runtime capabilities, malformed frontmatter whose ownership cannot be established, unavailable pages, and persistent failures remain unresolved.
+
+Auto preserves provenance and ingestion ownership by protecting owned pages from generic edits and structural changes. Ingestion recovery uses the journal's existing signature and manifest conflict checks; it does not rediscover or reprocess original sources. Corrupt/conflicting journals stay in place. Pending absorption blocks auto and reports the existing `/absorb status` and `/absorb resume <plan-id>` recovery flow.
+
+Local writes share a reentrant `.mini-a-wiki-ingest/writer.lock` across manager mutations, ingestion, absorption, dreams and publication. Competing writers report busy. Before repairs, auto persists `backup.json` (original page/state contents and hashes) and `journal.json` under `.mini-a-wiki-maintenance/<run-id>/`, excluded from navigation and retrieval. Backup failure blocks repairs. Every page mutation records its expected before/after hashes and intended content, including link rewrites and originals involved in moves, merges and deletions. Derived serving artifacts are rebuilt from the backed-up authoritative data.
+
+Stop in Advanced mode, or Escape at terminal operation/stream boundaries, requests cancellation. An in-flight non-streaming model request may finish before cancellation takes effect; its response is checked before writes. Interrupted/cancelled runs retain a pending marker and their backups. The next auto pass reconciles known journal boundaries before proceeding. External edits that disagree with the recorded hashes are preserved and reported as conflicts requiring manual review; auto does not overwrite them to force recovery.
+
+The structured report includes `run_id`, `status`, `diagnosed_issues`, `attempted_actions`, `verified_fixes`, `unresolved_issues`, `backup_location`, and `verification` coverage. Search probes record `found` for ranked results. When bounded results omit a page, V2 verification checks its actual Lucene passage count and records `indexed` and `indexed_passages`; repeated titles alone do not trigger a rebuild. Status can be `noop`, `complete`, `partial`, `planned`, `blocked`, `cancelled`, or `interrupted`. `dreamreport` saves the report for CLI and console auto runs. A successful rebuild or model response alone does not count as a verified fix.
+
+Auto is on-demand and local-directory-only. It does not mutate mounted/remote wikis or remote graphs, export artifact bundles, schedule work, or start automatically after ordinary operation failures.
+
 ### Wiki dream internals
 
-1. `usewiki=true` is required; `wikiaccess` is forced to `rw`.
+The following describes the pre-existing modes; auto follows the workflow above.
+
+1. `usewiki=true` is required; these modes configure `wikiaccess=rw`.
 2. `dreamwikimode=plan`, `dryrun=true` and `dreamwikidryrun=true` all run the same no-write proposal path.
 3. Use `dreamwikimode=plan` for explicit mode selection; use `dryrun=true` when you want the generic safety flag (it also affects memory dreams).
 4. Proposal output includes `new_tree`, `move_table`, `indexes_to_create`, `indexes_to_update`, and lint before/after summaries.
@@ -4039,9 +4068,9 @@ Advanced mode uses the console's shared command dispatcher and parameter metadat
 It includes slash and argument completion, command history (Up/Down), Tab completion,
 a searchable Live activity pane with auto-follow, and settings/model screens.
 The console-colored Advanced pane follows the same light/dark theme as Simple view
-and opens on the **Live activity** tab. Hover over
-a tab for a description; the same description appears when the tab is selected.
-Activity appears only in Live activity. Disable **Auto-follow** to inspect older
+and opens in **Live activity**. Use the compact icon-and-text view selector to
+choose a pane. Hover over an option for its description. Progress remains available
+in Live activity and in the command’s destination pane. Disable **Auto-follow** to inspect older
 entries. Drag the centered divider handle to resize the Advanced pane; its size is remembered.
 The handle supports touch and mouse dragging, or arrow keys when focused. On narrow
 screens the panes initially stack and the divider moves vertically. The
@@ -4076,12 +4105,12 @@ and `.serialize('json'|'slon')`, plus bubbling `change` events with
 
 Wiki, graph, ingestion, absorption, dreams, skills, context/history, statistics,
 debugging, and subtasks have dedicated operation panels. Panel controls submit the
-same commands as the composer, except **Statistics**, which displays inline Chart.js
+same commands as the composer. **Statistics** also displays inline Chart.js
 charts for Summary, Detailed, Tools, Memory, and Wiki. Charts use the Advanced
 palette in both themes, include expandable nJSMap values tables and structured
 map/array details, and update with **Refresh**. Maps, arrays, and table/tree output
-from any slash command also use nJSMap in Live activity, with plain-text fallback
-if the shared OpenAF library cannot load.
+from slash commands use nJSMap in their destination pane and in Live activity, with
+plain-text fallback if the shared OpenAF library cannot load.
 These are the same metrics as `/stats`; some counters are shared across server sessions.
 `/model` opens model settings, `/debug` opens the
 trace inspector, `/edit` opens a browser editor, `/cls` clears the visible activity,
@@ -4101,13 +4130,50 @@ The shared dispatcher covers these command families:
 
 | Commands | Browser behavior |
 | --- | --- |
-| `/help`, `/show`, `/set`, `/unset`, `/toggle`, `/reset` | Shared parameter handling, with matching settings controls |
-| `/history`, `/restore`, `/clear`, `/rewind`, `/last`, `/save` | Shared conversation operations; browser dialogs replace terminal prompts |
-| `/context`, `/compact`, `/summarize`, `/stats` | Shared context and diagnostics, displayed in activity |
-| `/wiki`, `/graph`, `/ingest`, `/absorb`, `/dream` | Dedicated panels submit the existing subsystem commands |
-| `/skills`, custom commands and skill invocations | Existing discovery and expansion |
-| `/delegate`, `/subtasks`, `/subtask` | Existing delegation manager and status commands |
-| `/model`, `/debug`, `/edit`, `/cls`, `/exit` | Browser settings, trace inspector, editor, activity clearing, and session closing |
+| `/help` | Searchable Help with syntax, examples, aliases, prerequisites, discovered commands and skills; **Insert command** fills the composer without executing |
+| `/show [prefix]`, `/set`, `/unset`, `/toggle`, `/reset` | Settings filtered to the supplied prefix or affected parameter; existing validation, secret masking and server restrictions apply |
+| `/model [main\|lc\|val]`, `/models` | Models with the requested slot selected, or all slots; invalid slots report an error |
+| `/last [md]`, `/save [file]` | Answer reader with previous goal, Markdown/raw mode, Copy and browser Download; `/save` still writes on the server (default `response.md`) |
+| `/history [n]`, `/restore`, `/clear`, `/rewind [n]` | History with recent goals and Insert/Edit actions; saved-conversation Open picker; shared clear and rewind operations update the transcript |
+| `/context [llm\|analyze\|vm]`, `/compact [n]`, `/summarize [n]` | Context measurements, virtual-memory details and readable generated summaries |
+| `/stats [modes] [out=file.json]`, `/debug [filter]` | Statistics and Debug preserve requested modes, export arguments and category filters; export results show server destinations |
+| `/wiki`, `/graph` | Page and section links, breadcrumbs, Markdown/raw page reader, lint severity filtering, mount and maintenance controls, graph data and exports |
+| `/skills`, custom `/commands`, `$skill` | Local discovery and library search/read/related/context results; custom invocations keep shared expansion and goal execution |
+| `/ingest`, `/absorb`, `/dream` | Operation results and progress, ingestion recovery, plan review/actions, mode and dry-run controls; existing approval gates remain in force |
+| `/delegate`, `/subtasks`, `/subtask` | Delegation results, task details/results/cancellation, and status polling while Subtasks is visible |
+| `/edit [last]`, `/editor [last]` | Multiline editor with **Submit goal** and Cancel; `last` prefills the previous goal |
+| `/cls`, `/exit`, `/quit` | Clear visible activity only, or end the session while retaining history; **New conversation** starts another session |
+
+Each destination displays the latest command result and a **Previous results**
+selector. **Older results** pages backwards through the session journal; selecting
+an entry fetches its full content without executing the command. Previous results
+are timestamped snapshots, including answers, context and statistics from before a
+clear or rewind. Older journals remain readable as grouped legacy command output.
+Commands navigate once when accepted. Progress, completion, reconnect and journal
+replay do not move the selected pane. Results, errors, progress and completion carry
+the command request ID. Reloading never repeats a write, export or model request.
+
+Browser `/restore` opens History’s saved-conversation picker. Opening an entry uses
+the same saved-session Open flow; cancelling leaves the current conversation alone.
+Terminal `/restore` retains its existing behavior. `/clear` clears current answer
+state and metrics, while `/rewind` refreshes the previous answer and transcript and
+retains existing subtask cancellation. `/cls` retains stored events and pane results;
+polling and replay respect the clear boundary.
+
+Wiki writes without content open a multiline editor with Preview and **Write page**.
+Supplied content is passed through unchanged, including trailing newlines. Writes
+and maintenance retain backend access restrictions. Search results retain source
+coverage and partial-result warnings. Graph `answer` remains a retrieval alias;
+it does not synthesize an answer. Exports offer raw Copy/Download and a Mermaid
+preview when the existing Mermaid library is available; there is no graph canvas.
+Markdown readers use the existing converter with passive-markup sanitization.
+
+Ingest accepts `dryrun`, `force`, `prune`, `allowemptyprune`, `sourceid=...` and
+`independent`. Recovery Resume/Discard actions use the existing dispatcher and its
+confirmation requirements. Absorb shows plan IDs and explicit review/apply/resume/
+delete/cancel actions. Dream results distinguish partial, blocked, failed and
+completed outcomes; controls never enable automatic approval. Stop uses existing
+backend cancellation behavior and does not promise rollback of completed work.
 
 Settings affect the current conversation. Apply them while it is idle; server
 transport settings are shown as read-only. Changing runtime settings disposes the
@@ -4163,5 +4229,30 @@ node --test tests/webAdvanced*.cjs
 node tests/webStreamCompletion.cjs
 oaf -f tests/modePresets.js
 oaf -f tests/webAdvanced.js
+oaf -f tests/webAdvancedSlash.js
 ojob tests/wiki.yaml
 ```
+
+
+Advanced slash-command browser smoke checklist (separate from fixture tests):
+
+1. In a disposable session, submit `/help`, insert a custom command without running
+   it, then verify `/show wiki`, `/model lc`, `/debug calls` and `/stats tools` select
+   their requested panes and filters. Check invalid slot/filter feedback.
+2. Run a goal, inspect `/last` and `/last md`, compare Copy/Download content, and
+   verify `/save` and `/stats out=...` report server destinations. Open `/editor last`,
+   cancel, then explicitly submit a goal. Check `/history 1`, `/rewind 1` and `/clear`.
+3. With a disposable writable wiki, read/write a page with blank lines, preview it,
+   follow section/mounted links, filter lint issues, and inspect a Mermaid export.
+   Repeat a write in read-only mode and inspect disabled-library/partial-search states.
+4. Review ingestion recovery and absorb plan actions without bypassing confirmations.
+   Inspect dream dry-run/approval-required results and delegated task progress.
+5. Reload during an operation, switch panes, select older results and load another
+   page. Confirm no repeated navigation or execution, no cross-session results, and
+   that `/cls` remains clear. End the session and start a New conversation.
+6. Repeat reader/editor/navigation checks using keyboard only, a narrow viewport,
+   light/dark themes, and hostile HTML/link content in a disposable wiki page.
+
+Node tests exercise presentation fixtures and OpenAF tests exercise the shared
+runtime/journal with fixture subsystems. They do not establish live browser layout,
+provider, remote backend or deployed-server behavior.

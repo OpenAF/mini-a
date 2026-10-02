@@ -6,10 +6,10 @@ const start = source.indexOf('  async function mutate(data) {');
 const end = source.indexOf('  function setEnabled(value)', start);
 async function run(action, response) {
   const context = vm.createContext({
-    activeScreen: 'stats', busy: false, history: [], historyIndex: 0,
-    bridge: {newRequestId: () => 'request'},
+    activeScreen: 'stats', busy: false, history: [], historyIndex: 0, previousSelections: {}, screen: {focus(){}}, statsMode: 'summary', after: 0, events: {replaceChildren(){}},
+    bridge: {newRequestId: () => 'request', uuid: () => 'session'},
     filter: {value: 'old search', oninput() { this.applied = this.value; }},
-    api: async () => response,
+    api: async data => ({...response,view:{name:'stats',params:{mode:data.command?.split(' ')[1] || 'summary'}}}),
     renderScreen() { context.rendered = context.activeScreen; },
     poll: async () => { context.screenAtPoll = context.activeScreen; }
   });
@@ -22,8 +22,8 @@ async function run(action, response) {
     for (const cmd of ['/stats', '/stats detailed', '/stats tools', '/stats memory', '/stats wiki']) {
       context.activeScreen = 'stats';
       await context.command(cmd);
-      assert.equal(context.rendered, 'activity', cmd);
-      assert.equal(context.screenAtPoll, 'activity', 'show output before polling');
+      assert.equal(context.rendered, 'stats', cmd);
+      assert.equal(context.screenAtPoll, 'stats', 'navigate to requested pane before polling');
       assert.equal(context.filter.applied, '', 'stale filters cannot hide command results');
     }
   } else {

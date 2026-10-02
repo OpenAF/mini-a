@@ -8,7 +8,10 @@
 // cross-page dedup and reorganisation are deliberately left to the wiki dream pass.
 
 var MiniAIngest = function(ingestArgs, logFn) {
-  this._args  = isMap(ingestArgs) ? merge({}, ingestArgs) : {}
+  // Live managers contain reader back-references and must never be deep-cloned.
+  var options = {}
+  if (isMap(ingestArgs)) Object.keys(ingestArgs).forEach(function(k) { if (k !== "wikimanager") options[k] = ingestArgs[k] })
+  this._args = merge({}, options)
   if (isObject(ingestArgs) && isObject(ingestArgs.wikimanager)) this._args.wikimanager = ingestArgs.wikimanager
   this._logFn = isFunction(logFn) ? logFn : log
   this._llm   = __   // injectable for tests
@@ -519,7 +522,7 @@ MiniAIngest.prototype.manageRecovery = function(action, id, confirmed) {
       if (toBoolean(a.ingestdryrun) === true || toBoolean(a.dryrun) === true) throw new Error("recovery mutations are unavailable in dry-run")
       var lockPath = wm._getIndexRoot() + "/.mini-a-wiki-ingest/writer.lock"
       if (!io.fileExists(new java.io.File(lockPath).getParent())) throw new Error("no pending recovery")
-      file = new java.io.RandomAccessFile(lockPath, "rw"); channel = file.getChannel(); lock = channel.tryLock()
+      lock = __miniAWikiWriterLock(String(new java.io.File(lockPath).getParentFile().getParent()))
       if (!lock) throw new Error("ingestion writer busy")
       if (io.fileExists(wm._getIndexRoot() + "/.mini-a-wiki-absorb/journal.json")) throw new Error("unfinished absorption journal; use /absorb resume")
     }
@@ -684,7 +687,7 @@ MiniAIngest.prototype.run = function() {
   var acquireWriter = function(indexRoot) {
     var lockPath = indexRoot + "/.mini-a-wiki-ingest/writer.lock", parent = new java.io.File(lockPath).getParentFile()
     if (!parent.exists() && !parent.mkdirs()) throw new Error("cannot create ingestion lock directory")
-    file = new java.io.RandomAccessFile(lockPath, "rw"); channel = file.getChannel(); lock = channel.tryLock()
+    lock = __miniAWikiWriterLock(String(new java.io.File(lockPath).getParentFile().getParent()))
     if (!lock) throw new Error("ingestion writer busy")
     if (io.fileExists(indexRoot + "/.mini-a-wiki-absorb/journal.json")) throw new Error("unfinished absorption journal; use /absorb resume")
   }

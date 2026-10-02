@@ -4,8 +4,39 @@
 
 function MiniAInteractiveSession(args, adapter) {
   var host = MiniAInteractiveSession.host
-  var print = adapter ? adapter.print : host.print
-  var printErr = adapter ? adapter.error : host.printErr
+  var commandResult
+  function captureOutput(value, error) {
+    if (commandResult && isDef(value)) {
+      if (isMap(value) && isString(value.type)) {
+        commandResult.blocks.push(value)
+        if (isMap(value.value) && (value.value.partial === true || value.value.status === "partial")) commandResult.status = "partial"
+        else if (isMap(value.value) && value.value.ok === false) commandResult.status = value.value.reason === "approval-required" || value.value.status === "blocked" ? "blocked" : "failed"
+      }
+      else commandResult.messages.push({ type: error ? "error" : "text", value: value })
+      if (error) commandResult.status = "failed"
+    }
+    return error ? adapter.error(value) : adapter.print(value)
+  }
+  function contextMeasurements(stats) {
+    var result = {}
+    if (isObject(stats)) Object.keys(stats).forEach(function(key) { if (key !== "entries") result[key] = stats[key] })
+    return result
+  }
+  function browserResult(value, type, meta) {
+    if (!adapter) return
+    if (type === "context") value = contextMeasurements(value)
+    var block = { type: type || "data", value: value, meta: meta || {} }
+    if (commandResult) {
+      var previousBlock = commandResult.blocks.length ? commandResult.blocks[commandResult.blocks.length - 1] : __
+      if (type === "markdown" && isMap(meta) && ["stream", "planner_stream"].indexOf(meta.stream) >= 0 && isMap(previousBlock) && previousBlock.type === type && previousBlock.meta.stream === meta.stream) previousBlock.value += value
+      else commandResult.blocks.push(block)
+      if (isMap(value) && (value.partial === true || value.status === "partial")) commandResult.status = "partial"
+      else if (isMap(value) && (value.ok === false || isString(value.error) && value.error.length > 0)) commandResult.status = value.reason === "approval-required" || value.status === "blocked" ? "blocked" : "failed"
+    }
+    if (isFunction(adapter.result)) adapter.result(block)
+  }
+  var print = adapter ? function(value) { return captureOutput(value, false) } : host.print
+  var printErr = adapter ? function(value) { return captureOutput(value, true) } : host.printErr
   var printnl = adapter ? adapter.print : host.printnl
   var printTree = adapter ? function(value) { return { type: "tree", value: value } } : host.printTree
   var printTable = adapter ? function(value) { return { type: "table", value: value } } : host.printTable
@@ -496,6 +527,7 @@ function MiniAInteractiveSession(args, adapter) {
   // -----------------
 
   function colorifyText(text, color) {
+    if (adapter && commandResult && color === errorColor) commandResult.status = "failed"
     if (!colorSupport || isUnDef(color)) return text
     return ansiColor(color, text)
   }
@@ -895,8 +927,10 @@ function MiniAInteractiveSession(args, adapter) {
     dream          : { type: "boolean", default: false, description: "Run a dream (sleep) pass — LLM-powered memory and/or wiki consolidation — instead of the console." },
     dreammode      : { type: "string", description: "Dream mode selector for dream=true: memory, wiki, or both (default auto: memory when memory is configured, otherwise wiki)." },
     dreamwiki      : { type: "boolean", default: false, description: "Force wiki dream when dream=true and memory is also configured." },
-    dreamwikimode  : { type: "string", description: "Wiki dream mode: plan, apply (default), reorg, repair, reindex, graph, or indexes." },
+    dreamwikimode  : { type: "string", description: "Wiki dream mode: auto, plan, apply (default), reorg, repair, reindex, graph, or indexes." },
     dreammemorymode: { type: "string", description: "Memory dream mode: plan or apply." },
+    dreamwikillm   : { type: "boolean", default: true, description: "Allow bounded model proposals for wiki auto repairs." },
+    dreammaxsteps  : { type: "number", default: 40, description: "Total model step budget for wiki auto/reorg." },
     dreamwikidryrun: { type: "boolean", default: false, description: "Propose wiki changes without writing (opt-out of apply)." },
     dreamwikiinstructions: { type: "string", description: "Additional guidance appended to the wiki reorg objective." },
     dreamwikiapproval: { type: "string", description: "Wiki reorg approval mode: auto, ask, or never." },
@@ -2450,8 +2484,8 @@ function MiniAInteractiveSession(args, adapter) {
 
           // Handle /dream command completions
           if (lookupName === "dream") {
-            var dreamSubcmds = ["memory", "wiki", "dryrun", "plan", "apply", "reorg", "repair", "reindex", "graph", "indexes"]
-            var dreamWikiModes = ["plan", "apply", "reorg", "repair", "reindex", "graph", "indexes", "dryrun"]
+            var dreamSubcmds = ["memory", "wiki", "dryrun", "auto", "plan", "apply", "reorg", "repair", "reindex", "graph", "indexes"]
+            var dreamWikiModes = ["auto", "plan", "apply", "reorg", "repair", "reindex", "graph", "indexes", "dryrun"]
             var remainder = uptoCursor.substring(firstSpace + 1)
             var trimmedRemainder = remainder.replace(/^\s*/, "")
             var insertionPoint = cursor - trimmedRemainder.length
@@ -3105,6 +3139,8 @@ function MiniAInteractiveSession(args, adapter) {
       }
     }
 
+    if (adapter) { browserResult(stats, "context", { analysis: llmAnalysis }); return }
+
     // Define colors and patterns for each section type
     var sectionStyles = {
       "System"    : { color: "FG(117)", pattern: "█", label: "System" },
@@ -3156,6 +3192,7 @@ function MiniAInteractiveSession(args, adapter) {
       return
     }
     var vm = agentInstance.getHistoryVmDiagnostics()
+    if (adapter) { browserResult(vm, "context"); return }
 
     print(colorifyText("History virtual memory", accentColor))
     print(colorifyText("  Active: ", hintColor) + colorifyText(String(vm.active === true), vm.active === true ? successColor : errorColor) + colorifyText(" | Shadow: " + String(vm.shadow === true) + " | Mode: " + String(vm.mode || "safe"), hintColor))
@@ -3417,7 +3454,7 @@ function MiniAInteractiveSession(args, adapter) {
       var role = isString(entry.role) ? entry.role.toLowerCase() : ""
       if (role !== "user") continue
       var goalText = extractGoalFromPlannerPrompt(flattenConversationContent(entry.content))
-      goalText = isString(goalText) ? goalText.replace(/\s+/g, " ").trim() : ""
+      goalText = isString(goalText) ? (adapter ? goalText : goalText.replace(/\s+/g, " ").trim()) : ""
       if (goalText.length === 0) continue
       goals.push(goalText)
     }
@@ -3428,6 +3465,7 @@ function MiniAInteractiveSession(args, adapter) {
     }
 
     var start = Math.max(0, goals.length - rowsToShow)
+    if (adapter) { browserResult({ goals: goals.slice(start), total: goals.length, count: rowsToShow }, "history"); return }
     print(colorifyText("Recent user goals (last " + rowsToShow + ")", accentColor))
     for (var gi = start; gi < goals.length; gi++) {
       print(colorifyText(String(gi - start + 1) + ". ", hintColor) + goals[gi])
@@ -3482,6 +3520,7 @@ function MiniAInteractiveSession(args, adapter) {
         sessionOptions.conversation = buildHistoryConversationPath()
         historyFileKeptRecorded = false
       }
+      if (adapter) { lastResult = __; lastOrigResult = __; lastGoalPrompt = __ }
       resetMetrics()
       if (adapter) adapter.event("history-clear", "Conversation cleared")
       print(colorifyText("Conversation and metrics cleared. Future goals will start fresh.", successColor))
@@ -3580,6 +3619,13 @@ function MiniAInteractiveSession(args, adapter) {
 
       var updatedStats = refreshConversationStats(activeAgent)
       var afterTokens = isObject(updatedStats) ? updatedStats.totalTokens : 0
+      if (adapter) {
+        var pair = extractLastGoalAndAnswer(newConversation)
+        lastGoalPrompt = pair.goal; lastResult = pair.answer; lastOrigResult = pair.answerOriginal || pair.answer
+        persistConversationSnapshot(activeAgent)
+        adapter.event("history-replace", newConversation.filter(function(e) { return e.role === "user" || e.role === "assistant" }).map(function(e) { return { event: e.role === "user" ? "👤" : "final", message: e.role === "user" ? extractGoalFromPlannerPrompt(flattenConversationContent(e.content)) : flattenConversationContent(e.content) } }))
+        browserResult({ exchanges: actualCount, removed: removedCount, cancelled: cancelledIds, context: contextMeasurements(updatedStats), previous: pair }, "rewind")
+      }
 
       print(
         colorifyText("Rewound ", successColor) +
@@ -3677,6 +3723,8 @@ function MiniAInteractiveSession(args, adapter) {
       var updatedStats = refreshConversationStats(activeAgent)
       var afterTokens = isObject(updatedStats) ? updatedStats.totalTokens : 0
       var reduction = previousTokens > 0 ? Math.max(0, previousTokens - afterTokens) : 0
+      browserResult(summaryText, "markdown")
+      browserResult(updatedStats, "context")
       print(
         colorifyText("Conversation compacted. Preserved ", successColor) +
         colorifyText(String(keepTail.length), numericColor) +
@@ -3788,6 +3836,8 @@ function MiniAInteractiveSession(args, adapter) {
         var updatedStats = refreshConversationStats(activeAgent)
         var afterTokens = isObject(updatedStats) ? updatedStats.totalTokens : 0
         var reduction = previousTokens > 0 ? Math.max(0, previousTokens - afterTokens) : 0
+        browserResult(summaryText, "markdown")
+        browserResult(updatedStats, "context")
         print(
           colorifyText("Conversation summarized and replaced. Preserved ", successColor) +
           colorifyText(String(keepTail.length), numericColor) +
@@ -3851,6 +3901,7 @@ function MiniAInteractiveSession(args, adapter) {
   var lastResult = __, lastOrigResult = __, lastGoalPrompt = __
   var lastDebugTrace = __
   var internalParameters = { goalprefix: true, usehistory: true, historykeep: true, historykeepperiod: true, historykeepcount: true, useeditor: true, editor: true }
+  var activeDream = __
   var activeAgent = __
   var shutdownHandled = false
   var subtaskLogsByShortId = {}
@@ -5070,7 +5121,8 @@ function MiniAInteractiveSession(args, adapter) {
         }
         payload.u = nowDate
         payload.updated_at = nowDate
-        if (isObject(existingPayload) && isObject(existingPayload.last)) payload.last = clone(existingPayload.last)
+        if (adapter) delete payload.last
+        else if (isObject(existingPayload) && isObject(existingPayload.last)) payload.last = clone(existingPayload.last)
         if (isString(lastGoalPrompt) && lastGoalPrompt.trim().length > 0) {
           payload.last = payload.last || {}
           payload.last.goal = lastGoalPrompt
@@ -6009,6 +6061,7 @@ function MiniAInteractiveSession(args, adapter) {
       }
       try {
         io.writeFileJSON(statsOptions.outputPath, payload, "")
+        browserResult({ destination: statsOptions.outputPath, ok: true }, "operation")
         print()
         print(colorifyText("Statistics written to " + statsOptions.outputPath, successColor))
       } catch (statsSaveErr) {
@@ -6017,7 +6070,126 @@ function MiniAInteractiveSession(args, adapter) {
     }
   }
 
+  function commandHelpRows() {
+    var helpCommands = [
+      { command: "/help", description: "Show this help message" },
+      { command: "/set <key> <value>", description: "Update a Mini-A parameter (use '\"\"\"' for multi-line values)" },
+      { command: "/toggle <key>", description: "Toggle boolean parameter" },
+      { command: "/unset <key>", description: "Clear a parameter" },
+      { command: "/show [prefix]", description: "Display configured parameters (filtered by prefix)" },
+      { command: "/reset", description: "Restore default parameters" },
+      { command: "/restore", description: "Restore a saved conversation like resume=true" },
+      { command: "/last [md]", description: "Print the previous final answer (md: raw markdown)" },
+      { command: "/save [file.md]", description: "Save the last response to a file (default: response.md)" },
+      { command: "/clear", description: "Reset the ongoing conversation and accumulated metrics" },
+      { command: "/rewind [n]", description: "Undo the last n exchanges (default: 1); cancels any active subtasks" },
+      { command: "/cls", description: "Clear the console screen" },
+      { command: "/context", description: "Visualize conversation/context size" },
+      { command: "/compact [n]", description: "Summarize old context, keep last n messages" },
+      { command: "/summarize [n]", description: "Compact and display an LLM-generated conversation summary" },
+      { command: "/history [n]", description: "Show the last n user goals (one per line)" },
+      { command: "/model [main|lc|val]", description: "Choose a model definition for a slot (no arg = interactive slot picker)" },
+      { command: "/models", description: "List current main, low and validation models" },
+      { command: "/stats [mode] [out=file.json]", description: "Show session statistics (modes: detailed, tools, memory, wiki)" },
+      { command: "/debug [filter]", description: "Inspect previous-goal events; filters: all, calls, answers, memory, system, prompts, responses, thinking, problems" },
+      { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
+      { command: "/edit [last]", description: "Compose and submit one goal in the configured external editor (last pre-fills the previous goal; /editor also works)" },
+      { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, compact, mounts, attach, detach" },
+      { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, report, query, retrieve, answer (retrieval alias; no synthesis), neighbors, path, communities, surprise, export, stats, falkor, cross (requires usewikigraph=true)" },
+      { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: auto, plan, apply (default), reorg, repair, reindex, graph, indexes, dryrun" },
+      { command: "/absorb plan|show|apply|status|resume|delete|cancel [spec|id]", description: "Plan, review and apply local wiki absorption (see ABSORB.md)." },
+      { command: "/ingest <source> [section]", description: "Ingest docs into the wiki; flags: dryrun, force, independent. No source: recovery choices." }
+    ]
+    helpCommands.push(
+      { command: "/delegate <goal>", description: "Delegate a sub-goal to a child agent (requires usedelegation=true)" },
+      { command: "/subtasks", description: "List all subtasks and their status" },
+      { command: "/subtask <id>", description: "Show details for a subtask" },
+      { command: "/exit", description: "Leave the console" }
+    )
+    return helpCommands
+  }
+
+  function commandMetadata() {
+    var destinations = {
+      help: "help", set: "settings", toggle: "settings", unset: "settings", show: "settings", reset: "settings",
+      restore: "history", last: "answer", save: "answer", clear: "history", rewind: "history", history: "history",
+      cls: "activity", context: "context", compact: "context", summarize: "context", model: "models", models: "models",
+      stats: "stats", debug: "debug", skills: "skills", edit: "editor", editor: "editor", wiki: "wiki", graph: "graph",
+      dream: "dream", ingest: "ingest", absorb: "absorb", delegate: "subtasks", subtasks: "subtasks", subtask: "subtasks",
+      exit: "history", quit: "history"
+    }
+    var aliases = { editor: "edit", quit: "exit" }
+    var rows = commandHelpRows()
+    var descriptions = {
+      help: "Search commands. Insert command fills the composer without running it.",
+      set: "Update a session parameter. Server-controlled settings cannot be changed here.",
+      restore: "Open the saved-conversation picker. Cancel leaves this conversation untouched.",
+      cls: "Clear visible Live activity; retain stored events and conversation.",
+      model: "Select main, lc or val; omit the slot to show all models.",
+      edit: "Open the multiline goal editor. Submit goal runs it; Cancel closes it.",
+      exit: "End this session and retain saved history. Use New conversation to continue."
+    }
+    var result = slashCommands.map(function(name) {
+      var canonical = aliases[name] || name
+      var row = rows.filter(function(r) { return r.command.split(/[ \[]/)[0] === "/" + canonical })[0] || {}
+      var syntax = row.command || "/" + name
+      if (name !== canonical) syntax = syntax.replace("/" + canonical, "/" + name)
+      return { name: name, command: "/" + name, syntax: syntax, arguments: syntax.indexOf(" ") < 0 ? "" : syntax.substring(syntax.indexOf(" ") + 1),
+        description: descriptions[canonical] || row.description || "", destination: destinations[name],
+        subcommands: ({ context: ["llm", "analyze", "vm"], model: ["main", "lc", "val"], last: ["md"], edit: ["last"], editor: ["last"], stats: ["detailed", "tools", "memory", "wiki", "out="], debug: debugTraceFilters.map(function(f) { return f.key }),
+          wiki: ["context", "list", "tree", "browse", "read", "search", "backlinks", "lint", "write", "move", "mv", "delete", "remove", "rm", "init", "reindex", "compact", "mounts", "attach", "detach"],
+          graph: ["query", "retrieve", "answer", "neighbors", "path", "cross", "communities", "surprise", "stats", "report", "build", "falkor", "export"],
+          skills: ["search", "remote", "recommend", "open", "read", "related", "context"], absorb: ["plan", "show", "apply", "status", "resume", "delete", "cancel"], ingest: ["recovery", "dryrun", "force", "prune", "allowemptyprune", "sourceid=", "independent"],
+          dream: ["memory", "wiki", "plan", "apply", "reorg", "repair", "reindex", "graph", "indexes", "dryrun"], subtask: ["result", "cancel"] })[name] || [],
+        aliases: canonical === "edit" ? ["editor"] : canonical === "exit" ? ["quit"] : [],
+        examples: ({ set: ["/set debug true"], show: ["/show wiki"], model: ["/model lc"], last: ["/last", "/last md"], history: ["/history 10"], stats: ["/stats detailed tools", "/stats out=metrics.json"], wiki: ['/wiki read "Team Docs/index.md"', '/wiki write "notes.md"'], graph: ["/graph export mermaid", "/graph retrieve installation"], skills: ["/skills search testing", "/skills read reference"], ingest: ['/ingest "./docs" "Docs" dryrun prune sourceid=docs'], absorb: ["/absorb status", "/absorb show plan-id"], dream: ["/dream wiki plan dryrun"], subtask: ["/subtask result task-id", "/subtask cancel task-id"] })[name] || ["/" + name], prerequisite: ["wiki", "graph", "ingest", "absorb"].indexOf(name) >= 0 ? "Wiki enabled; write operations require wikiaccess=rw." : name === "delegate" ? "usedelegation=true" : "" }
+    })
+    ;[customSlashCommands, customSkillSlashCommands].forEach(function(entries, index) {
+      Object.keys(entries).sort().forEach(function(name) {
+        var entry = entries[name], prefix = index ? "$" : "/"
+        result.push({ name: name, command: prefix + name, syntax: prefix + name + " [args...]", arguments: "[args...]",
+          description: entry.description || "No description", destination: "activity", source: entry.file,
+          kind: index ? "skill" : "custom", aliases: index ? ["/" + name] : [], examples: [prefix + name] })
+      })
+    })
+    return result
+  }
+
+  function commandView(input) {
+    var match = String(input).match(/^([/$])([^\s]*)(?:\s+([\s\S]*))?$/)
+    if (!match) return { name: "activity", params: {} }
+    var name = (match[2] || "help").toLowerCase(), raw = match[3] || ""
+    var metadata = commandMetadata().filter(function(m) { return m.command === match[1] + name || (isArray(m.aliases) && m.aliases.indexOf(match[1] + name) >= 0) })[0]
+    // Navigation never needs a setting value (which may be a credential).
+    var params = { command: name, args: name === "set" ? "" : raw }
+    if (["set", "toggle", "unset", "show"].indexOf(name) >= 0) params.filter = name === "show" ? raw.trim() : raw.split(/[=\s]/)[0]
+    if (name === "model") params.slot = { main: "model", model: "model", lc: "modellc", modellc: "modellc", val: "modelval", modelval: "modelval" }[raw.trim().toLowerCase()] || ""
+    if (name === "debug") params.filter = raw.trim().toLowerCase() || "all"
+    if (name === "stats") params.mode = raw.trim().split(/\s+/).filter(function(v) { return ["detailed", "tools", "memory", "wiki"].indexOf(v) >= 0 })[0] || "summary"
+    if (name === "last") params.raw = raw.trim().toLowerCase() === "md"
+    return { name: metadata ? metadata.destination : "help", params: params }
+  }
+
+  function executeBrowserCommand(input, action) {
+    var view = commandView(input)
+    commandResult = { version: 1, command: input, view: view.name, params: view.params, status: "completed", blocks: [], messages: [] }
+    try {
+      var accepted = isFunction(action) ? action() : dispatchInput(input)
+      if (view.name === "settings" && ["set", "toggle", "unset", "reset"].indexOf(view.params.command) >= 0) {
+        var parameter = String(view.params.filter || "").toLowerCase()
+        browserResult(parameter ? { parameter: parameter, value: sessionOptions[parameter], source: sessionExplicitOptions[parameter] ? "session" : "default" } : { reset: true }, "setting")
+      }
+      return accepted
+    }
+    catch(e) { commandResult.status = "failed"; commandResult.messages.push({ type: "error", value: String(e) }); throw e }
+    finally {
+      if (isFunction(adapter.commandResult)) adapter.commandResult(commandResult)
+      commandResult = __
+    }
+  }
+
   function printHelp() {
+    if (adapter) { browserResult(commandMetadata(), "help"); return }
     function wrapHelpText(text, maxWidth) {
       var normalized = isString(text) ? text : String(text)
       normalized = normalized.replace(/\s+/g, " ").trim()
@@ -6130,41 +6302,7 @@ function MiniAInteractiveSession(args, adapter) {
       "",
       "Commands (prefix with '/'):"
     ]
-    var helpCommands = [
-      { command: "/help", description: "Show this help message" },
-      { command: "/set <key> <value>", description: "Update a Mini-A parameter (use '\"\"\"' for multi-line values)" },
-      { command: "/toggle <key>", description: "Toggle boolean parameter" },
-      { command: "/unset <key>", description: "Clear a parameter" },
-      { command: "/show [prefix]", description: "Display configured parameters (filtered by prefix)" },
-      { command: "/reset", description: "Restore default parameters" },
-      { command: "/restore", description: "Restore a saved conversation like resume=true" },
-      { command: "/last [md]", description: "Print the previous final answer (md: raw markdown)" },
-      { command: "/save [file.md]", description: "Save the last response to a file (default: response.md)" },
-      { command: "/clear", description: "Reset the ongoing conversation and accumulated metrics" },
-      { command: "/rewind [n]", description: "Undo the last n exchanges (default: 1); cancels any active subtasks" },
-      { command: "/cls", description: "Clear the console screen" },
-      { command: "/context", description: "Visualize conversation/context size" },
-      { command: "/compact [n]", description: "Summarize old context, keep last n messages" },
-      { command: "/summarize [n]", description: "Compact and display an LLM-generated conversation summary" },
-      { command: "/history [n]", description: "Show the last n user goals (one per line)" },
-      { command: "/model [main|lc|val]", description: "Choose a model definition for a slot (no arg = interactive slot picker)" },
-      { command: "/models", description: "List current main, low and validation models" },
-      { command: "/stats [mode] [out=file.json]", description: "Show session statistics (modes: detailed, tools, memory, wiki)" },
-      { command: "/debug [filter]", description: "Inspect previous-goal events; filters: all, calls, answers, memory, system, prompts, responses, thinking, problems" },
-      { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
-      { command: "/edit [last]", description: "Compose and submit one goal in the configured external editor (last pre-fills the previous goal; /editor also works)" },
-      { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, compact, mounts, attach, detach" },
-      { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, report, query, retrieve, answer (retrieval alias; no synthesis), neighbors, path, communities, surprise, export, stats, falkor, cross (requires usewikigraph=true)" },
-      { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: plan, apply (default), reorg, repair, reindex, graph, indexes, dryrun" },
-      { command: "/absorb plan|show|apply|status|resume|delete|cancel [spec|id]", description: "Plan, review and apply local wiki absorption (see ABSORB.md)." },
-      { command: "/ingest <source> [section]", description: "Ingest docs into the wiki; flags: dryrun, force, independent. No source: recovery choices." }
-    ]
-    helpCommands.push(
-      { command: "/delegate <goal>", description: "Delegate a sub-goal to a child agent (requires usedelegation=true)" },
-      { command: "/subtasks", description: "List all subtasks and their status" },
-      { command: "/subtask <id>", description: "Show details for a subtask" },
-      { command: "/exit", description: "Leave the console" }
-    )
+    var helpCommands = commandHelpRows()
     appendAlignedHelpRows(lines, helpCommands)
     var commandNames = Object.keys(customSlashCommands).sort()
     if (commandNames.length > 0) {
@@ -6243,6 +6381,7 @@ function MiniAInteractiveSession(args, adapter) {
       } else if (sub === "search") {
         if (rest.length === 0) { print(colorifyText("Usage: /skills search <query>", errorColor)); return }
         var hits = __miniASkillSearch(swm, { query: rest })
+        if (adapter) { browserResult(hits, "skill-results"); return }
         if (hits.length === 0) {
           print(colorifyText("No skills found for: " + rest, hintColor))
         } else {
@@ -6255,6 +6394,7 @@ function MiniAInteractiveSession(args, adapter) {
       } else if (sub === "recommend") {
         if (rest.length === 0) { print(colorifyText("Usage: /skills recommend <task description>", errorColor)); return }
         var recs = __miniASkillRecommend(swm, { task: rest })
+        if (adapter) { browserResult(recs, "skill-results"); return }
         if (recs.length === 0) {
           print(colorifyText("No skills recommended for: " + rest, hintColor))
         } else {
@@ -6265,18 +6405,23 @@ function MiniAInteractiveSession(args, adapter) {
         }
       } else if (sub === "open") {
         if (rest.length === 0) { print(colorifyText("Usage: /skills open <ref>", errorColor)); return }
-        print(printTree(__miniASkillOpen(swm, consolePathValue(rest), {})))
+        var openedSkill = __miniASkillOpen(swm, consolePathValue(rest), {})
+        if (adapter) { browserResult(openedSkill, "skill-detail", { ref: consolePathValue(rest) }); return }
+        print(printTree(openedSkill))
       } else if (sub === "read") {
         var readParts = parseConsolePathArgs(rest).argv
         var readRef = readParts.shift()
         if (!isString(readRef) || readRef.length === 0) { print(colorifyText("Usage: /skills read <ref> [section...]", errorColor)); return }
         var section = readParts.join(" ").trim()
         var out = __miniASkillRead(swm, readRef, section.length > 0 ? { section: section } : {})
+        if (adapter) { browserResult(out.body || out, isString(out.body) ? "markdown" : "data", { ref: readRef }); return }
         if (isString(out.body)) print(out.body)
         else print(printTree(out))
       } else if (sub === "related") {
         if (rest.length === 0) { print(colorifyText("Usage: /skills related <ref>", errorColor)); return }
-        print(printTree(__miniASkillRelated(swm, consolePathValue(rest), {})))
+        var relatedSkills = __miniASkillRelated(swm, consolePathValue(rest), {})
+        if (adapter) { browserResult(relatedSkills, "skill-related"); return }
+        print(printTree(relatedSkills))
       } else {
         print(colorifyText("Usage: /skills search|recommend|open|read|related|context ...", errorColor))
       }
@@ -6291,7 +6436,7 @@ function MiniAInteractiveSession(args, adapter) {
     // skill listing unchanged, so "/skills <name>" keeps working exactly as
     // before for any local skill whose name happens to match one of these words.
     var firstWord = isString(prefix) ? prefix.trim().split(/\s+/)[0].toLowerCase() : ""
-    if (__skillWikiSubcommands[firstWord] === true && isObject(getConsoleSkillWikiManager())) return printRemoteSkills(prefix)
+    if (__skillWikiSubcommands[firstWord] === true && (adapter || isObject(getConsoleSkillWikiManager()))) return printRemoteSkills(prefix)
 
     var normalizedPrefix = isString(prefix) ? prefix.trim().toLowerCase() : ""
     var skillNames = Object.keys(customSkillSlashCommands).sort().filter(function(name) {
@@ -6338,7 +6483,7 @@ function MiniAInteractiveSession(args, adapter) {
     }
     var parts = isString(subcmdRaw) ? subcmdRaw.trim().split(/\s+/) : []
     var sub   = parts.length > 0 ? parts[0].toLowerCase() : "list"
-    var rest  = String(subcmdRaw || "").trim().replace(/^\S+\s*/, "")
+    var rest  = (adapter ? String(subcmdRaw || "").replace(/^\s*/, "") : String(subcmdRaw || "").trim()).replace(/^\S+\s*/, "")
 
     try {
       if (sub === "list" || sub === "") {
@@ -6347,6 +6492,7 @@ function MiniAInteractiveSession(args, adapter) {
         listArgs = listArgs.filter(function(arg) { return arg !== "--meta" })
         if (listArgs.length > 1) throw new Error("Usage: /wiki list [prefix] [--meta]; quote paths containing spaces.")
         var pages = wm.list(listArgs[0] || "", { withMeta: withMeta })
+        if (adapter) { browserResult(pages, "pages"); return }
         if (pages.length === 0) {
           print(colorifyText("Wiki is empty.", hintColor))
         } else {
@@ -6356,6 +6502,7 @@ function MiniAInteractiveSession(args, adapter) {
         }
       } else if (sub === "tree") {
         var tree = wm.tree(consolePathValue(rest), 3)
+        if (adapter) { browserResult(tree, "wiki-tree"); return }
         print(colorifyText("Wiki tree: " + (tree.path || "/") + " (" + tree.page_count + " pages)", accentColor))
         if (isObject(tree.index)) print("  index: " + colorifyText(tree.index.path + (tree.index.exists ? "" : " (missing)"), tree.index.exists ? promptColor : errorColor))
         tree.sections.forEach(function(s) {
@@ -6364,6 +6511,7 @@ function MiniAInteractiveSession(args, adapter) {
         tree.pages.forEach(function(p) { print("  page: " + colorifyText(p.path, promptColor) + (p.title ? " — " + p.title : "")) })
       } else if (sub === "browse") {
         var browse = wm.browse(consolePathValue(rest))
+        if (adapter) { browserResult(browse, "wiki-browse"); return }
         print(colorifyText("Wiki browse: " + (browse.path || "/"), accentColor))
         print("  index: " + colorifyText(browse.nearest_index.path + (browse.nearest_index.exists ? "" : " (missing)"), browse.nearest_index.exists ? promptColor : errorColor))
         browse.child_sections.forEach(function(s) { print("  section: " + colorifyText(s.path, promptColor) + " pages=" + s.page_count) })
@@ -6373,6 +6521,7 @@ function MiniAInteractiveSession(args, adapter) {
         if (rest.length === 0) { print(colorifyText("Usage: /wiki read <path>", errorColor)); return }
         var page = wm.read(consolePathValue(rest))
         if (!isObject(page)) { print(colorifyText("Page not found: " + rest, errorColor)); return }
+        if (adapter) { browserResult(page.body, "markdown", { path: consolePathValue(rest), page: page.meta }); return }
         print(colorifyText("── " + rest + " ──", accentColor))
         if (isObject(page.meta) && isString(page.meta.title)) print(colorifyText(page.meta.title, "BOLD"))
         print(page.body)
@@ -6380,6 +6529,7 @@ function MiniAInteractiveSession(args, adapter) {
         if (rest.length === 0) { print(colorifyText("Usage: /wiki search <query>", errorColor)); return }
         var hits = __miniAWikiRequireSearchHits(wm.search(rest))
         var incomplete = hits.outcome === "partial" || hits.truncated === true
+        if (adapter) { browserResult({ hits: hits.slice(), partial: incomplete, sources: hits.sources, stopReasons: hits.stopReasons, budget: hits.budget }, "wiki-search"); return }
         if (incomplete) {
           print(colorifyText("Search coverage is incomplete; absence is not established.", hintColor))
           print(printTree({ sources: hits.sources || [], stopReasons: hits.stopReasons || [], budget: hits.budget }))
@@ -6396,10 +6546,12 @@ function MiniAInteractiveSession(args, adapter) {
       } else if (sub === "backlinks") {
         if (rest.length === 0) { print(colorifyText("Usage: /wiki backlinks <path>", errorColor)); return }
         var refs = wm.backlinks(consolePathValue(rest))
+        if (adapter) { browserResult(refs, "wiki-backlinks"); return }
         print(colorifyText("Backlinks to " + refs.target + " (" + refs.count + "):", accentColor))
         refs.backlinks.forEach(function(b) { print("  " + colorifyText(b.path, promptColor) + (b.title ? " — " + b.title : "")) })
       } else if (sub === "lint") {
         var lintResult = wm.lint(isObject(activeAgent) ? activeAgent._memoryManager : __)
+        if (adapter) { browserResult(lintResult, "lint"); return }
         var s = lintResult.summary
         print(colorifyText("Wiki lint: " + s.pages + " pages, " + s.errors + " errors, " + s.warnings + " warnings, " + s.info + " info", accentColor))
         if (lintResult.issues.length === 0) {
@@ -6426,12 +6578,13 @@ function MiniAInteractiveSession(args, adapter) {
         var writePath = writeArgs.argv[0] || ""
         var writeContent = rest.substring(writeArgs.ends[0] || 0).replace(/^\s/, "")
         if (writePath.length === 0) { print(colorifyText("Usage: /wiki write <path> [content]", errorColor)); return }
-        if (writeContent.trim().length === 0) {
+        if (adapter ? writeContent.length === 0 : writeContent.trim().length === 0) {
           print(colorifyText("Enter wiki page content. Finish with a line containing only \"\"\".", hintColor))
-          writeContent = collectMultiline("")
+          writeContent = adapter ? adapter.ask("wiki-editor", "Write " + writePath, [], "") : collectMultiline("")
           if (isUnDef(writeContent)) return
         }
         var writeResult = wm.write(writePath, writeContent)
+        browserResult(writeResult, "operation")
         if (isObject(writeResult) && writeResult.ok === true) {
           print(colorifyText("Wrote " + writePath, successColor))
         } else {
@@ -6445,6 +6598,7 @@ function MiniAInteractiveSession(args, adapter) {
         var moveParts = parseConsolePathArgs(rest).argv
         if (moveParts.length !== 2) { print(colorifyText("Usage: /wiki move <from.md> <to.md>", errorColor)); return }
         var moveResult = wm.move(moveParts[0], moveParts[1])
+        browserResult(moveResult, "operation")
         if (isObject(moveResult) && moveResult.ok === true) {
           print(colorifyText("Moved " + moveResult.from + " -> " + moveResult.to + " (changed " + moveResult.pages_changed + " pages)", successColor))
         } else {
@@ -6458,6 +6612,7 @@ function MiniAInteractiveSession(args, adapter) {
         if (rest.length === 0) { print(colorifyText("Usage: /wiki delete <path>", errorColor)); return }
         var deletePath = consolePathValue(rest)
         var deleteResult = wm.delete(deletePath)
+        browserResult(deleteResult, "operation")
         if (isObject(deleteResult) && deleteResult.ok === true) {
           print(colorifyText("Deleted " + deletePath, successColor))
         } else {
@@ -6469,6 +6624,7 @@ function MiniAInteractiveSession(args, adapter) {
           return
         }
         var initResult = wm.init(consolePathValue(rest))
+        browserResult(initResult, "operation")
         if (isObject(initResult) && initResult.ok === true) {
           if (initResult.created.length > 0) print(colorifyText("Created: " + initResult.created.join(", "), successColor))
           if (initResult.skipped.length > 0) print(colorifyText("Already exists (skipped): " + initResult.skipped.join(", "), hintColor))
@@ -6498,6 +6654,7 @@ function MiniAInteractiveSession(args, adapter) {
             reindexResult = { ok: false, error: __miniAErrMsg(reindexErr) }
           }
         }
+        browserResult(reindexResult, "operation")
         if (isObject(reindexResult) && reindexResult.ok === true) {
           print(colorifyText("Wiki reindex completed.", successColor))
         } else {
@@ -6517,6 +6674,7 @@ function MiniAInteractiveSession(args, adapter) {
         print(printTree(wm.context(contextOptions)))
       } else if (sub === "mounts") {
         var mountList = wm.mounts()
+        if (adapter) { browserResult(mountList, "mounts"); return }
         if (mountList.length === 0) {
           print(colorifyText("No mounts attached.", hintColor))
         } else {
@@ -6534,6 +6692,8 @@ function MiniAInteractiveSession(args, adapter) {
           attachCfg[kv.substring(0, eq)] = kv.substring(eq + 1)
         })
         var attachResult = wm.attach(attachName, attachCfg)
+        browserResult(attachResult, "operation")
+        if (adapter) browserResult(wm.mounts(), "mounts")
         if (isObject(attachResult) && attachResult.ok) {
           print(colorifyText("Attached @" + attachName + " (" + attachResult.pages + " pages)", successColor))
         } else {
@@ -6542,6 +6702,8 @@ function MiniAInteractiveSession(args, adapter) {
       } else if (sub === "detach") {
         if (rest.trim().length === 0) { print(colorifyText("Usage: /wiki detach <name>", errorColor)); return }
         var detachResult = wm.detach(rest.trim())
+        browserResult(detachResult, "operation")
+        if (adapter) browserResult(wm.mounts(), "mounts")
         if (isObject(detachResult) && detachResult.ok) {
           print(colorifyText("Detached @" + detachResult.name, successColor))
         } else {
@@ -6582,6 +6744,11 @@ function MiniAInteractiveSession(args, adapter) {
       if (sub === "falkor" && rest.length > 0) params.query = rest
       if (sub === "cross") params.path = consolePathValue(rest)
       var out = wm.graph(sub, params)
+      if (adapter) {
+        browserResult(out, sub === "export" ? "export" : "graph", { format: params.format, operation: sub, retrievalAlias: sub === "answer" })
+        if (sub === "report" && isMap(out) && out.ok === true && isString(out.path) && io.fileExists(out.path)) browserResult(io.readFileString(out.path), "markdown")
+        return
+      }
       if (isString(out)) print(out)
       else print(printTree(out))
     } catch(e) {
@@ -6595,6 +6762,7 @@ function MiniAInteractiveSession(args, adapter) {
     var listing = runner.manageRecovery("list")
     if (!listing.ok) { print(printTree(listing)); return }
     var entries = listing.recoveries || []
+    if (adapter) { browserResult(listing, "recoveries"); if (!commandParts.length) return }
     entries.forEach(function(entry, index) {
       print(colorifyText("Recovery " + (index + 1) + ": " + entry.id + " (" + entry.phase + ")", accentColor))
       print("  Scope: " + (entry.scopeId || "unknown"))
@@ -6655,7 +6823,9 @@ function MiniAInteractiveSession(args, adapter) {
       if (op === "plan") opts.absorbspec = parts[1]
       else opts.absorbplan = parts[1]
       if (isObject(activeAgent) && isObject(activeAgent._wikiManager)) opts.wikimanager = activeAgent._wikiManager
+      else if (adapter && isObject(webWikiManager)) opts.wikimanager = webWikiManager
       var result = new MiniAAbsorb(opts, function(msg) { print(colorifyText(msg, hintColor)) }).run()
+      if (adapter) { browserResult(result, "absorb"); if (op === "show" && isString(result.report)) browserResult(result.report, "markdown"); return }
       print(isString(result.report) && op === "show" ? format.withMD(result.report) : printTree(result))
     } catch(e) { print(colorifyText("Absorb error: " + e.message, errorColor)) }
   }
@@ -6706,7 +6876,7 @@ function MiniAInteractiveSession(args, adapter) {
     var ingestArgs = merge({}, sessionOptions)
     // Reuse the active agent's wiki manager. It can keep the Lucene writer
     // open for interactive search, so a second manager would contend for it.
-    var ingestWikiManager = isObject(activeAgent) && isObject(activeAgent._wikiManager) ? activeAgent._wikiManager : __
+    var ingestWikiManager = isObject(activeAgent) && isObject(activeAgent._wikiManager) ? activeAgent._wikiManager : (adapter ? webWikiManager : __)
     if (isObject(ingestWikiManager)) ingestArgs.wikimanager = ingestWikiManager
     if (operands.length) ingestArgs.ingestsource = operands[0]
     if (operands.length > 1) ingestArgs.ingestsection = operands[1]
@@ -6746,9 +6916,9 @@ function MiniAInteractiveSession(args, adapter) {
     try { __miniAApplyMemoryUserDefaults(dreamSessionOptions) } catch(ignoreDreamMemoryUserDefaults) {}
 
     var hasMemory = isString(dreamSessionOptions.memorych) && dreamSessionOptions.memorych.trim().length > 0
-    var hasWiki   = toBoolean(dreamSessionOptions.usewiki) === true && isObject(getConsoleWikiManager())
+    var hasWiki   = toBoolean(dreamSessionOptions.usewiki) === true
 
-    var isWikiMode = ["wiki", "plan", "apply", "reorg", "repair", "reindex", "graph", "indexes"].indexOf(mode) >= 0
+    var isWikiMode = ["wiki", "auto", "plan", "apply", "reorg", "repair", "reindex", "graph", "indexes"].indexOf(mode) >= 0
     if (mode === "memory" && !hasMemory) {
       print(colorifyText("No memory channel configured. Start with memorych=...", errorColor)); return
     }
@@ -6776,8 +6946,9 @@ function MiniAInteractiveSession(args, adapter) {
     if (sessionExplicitOptions.wikigraphsemantic !== true) delete dreamArgs.wikigraphsemantic
 
     try {
-      if (parts.indexOf("plan") >= 0 || parts.indexOf("apply") >= 0 || parts.indexOf("reorg") >= 0 || parts.indexOf("repair") >= 0 ||
+      if (parts.indexOf("auto") >= 0 || parts.indexOf("plan") >= 0 || parts.indexOf("apply") >= 0 || parts.indexOf("reorg") >= 0 || parts.indexOf("repair") >= 0 ||
           parts.indexOf("reindex") >= 0 || parts.indexOf("graph") >= 0 || parts.indexOf("indexes") >= 0) {
+        if (parts.indexOf("auto") >= 0) dreamArgs.dreamwikimode = "auto"
         if (parts.indexOf("plan") >= 0) dreamArgs.dreamwikimode = "plan"
         if (parts.indexOf("apply") >= 0) dreamArgs.dreamwikimode = "apply"
         if (parts.indexOf("repair") >= 0) dreamArgs.dreamwikimode = "repair"
@@ -6797,6 +6968,7 @@ function MiniAInteractiveSession(args, adapter) {
         if (isMap(msg) && msg.type === "dream-model-output") {
           var modelText = isString(msg.text) ? msg.text : String(msg.text || "")
           if (modelText.length === 0) return
+          if (adapter) { browserResult(modelText, "markdown", { stream: msg.event }); return }
           if (msg.event === "stream" || msg.event === "planner_stream") {
             _renderStreamChunk(modelText, msg.event)
           } else {
@@ -6808,12 +6980,24 @@ function MiniAInteractiveSession(args, adapter) {
         print(colorifyText(msg, hintColor))
       }
       dreamLogFn.markdownModelOutput = true
+      dreamArgs.isCancelled = function() {
+        if (adapter) return isFunction(adapter.isCancelled) && adapter.isCancelled()
+        var code = con.readCharNB()
+        return isDef(code) && Number(code) === 27
+      }
       var runner = new MiniADreams(dreamArgs, dreamLogFn)
+      activeDream = runner
 
       // Render the result maps: a dream that declines to run (gate closed, approval required,
       // nothing configured) reports it through the return value, not the log.
       var reportDream = function(label, res) {
         if (!isMap(res)) return
+        if (res.mode === "auto" && isString(dreamArgs.dreamreport) && dreamArgs.dreamreport.trim().length) {
+          try { io.writeFileString(dreamArgs.dreamreport.trim(), JSON.stringify({ ok: res.ok, wiki: res })) }
+          catch(reportError) { res.report_error = __miniAErrMsg(reportError); res.ok = false }
+        }
+        if (adapter) { browserResult(res, "dream", { mode: label }); return }
+        if (res.mode === "auto") { print(printTree(res)); return }
         if (res.partial === true) {
           print(colorifyText("Dream " + label + " completed partially: " + (res.reason || "verification incomplete"), errorColor))
           print(printTree(res))
@@ -6830,11 +7014,11 @@ function MiniAInteractiveSession(args, adapter) {
       }
 
       if ((mode === "" || mode === "memory") && hasMemory) reportDream("memory", runner.dreamMemory())
-      if ((mode === "" || mode === "wiki" || mode === "plan" || mode === "apply" || mode === "reorg" || mode === "repair" ||
+      if ((mode === "" || mode === "wiki" || mode === "auto" || mode === "plan" || mode === "apply" || mode === "reorg" || mode === "repair" ||
            mode === "reindex" || mode === "graph" || mode === "indexes") && hasWiki) reportDream("wiki", runner.dreamWiki())
     } catch(dreamErr) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Dream error: " + dreamErr, errorColor))
-    }
+    } finally { activeDream = __ }
   }
 
   function dispatchInput(input) {
@@ -6884,7 +7068,8 @@ function MiniAInteractiveSession(args, adapter) {
       }
     }
     if (trimmed.charAt(0) === '/') {
-      var command = trimmed.substring(1).trim()
+      var command = trimmed.substring(1).replace(/^\s+/, "")
+      if (!adapter || !/^wiki\s+write\s/i.test(command)) command = command.trim()
       var commandLower = command.toLowerCase()
       var parsedSlashCommand = parseSlashCommandInput(command)
       if (command.length === 0) {
@@ -6925,7 +7110,14 @@ function MiniAInteractiveSession(args, adapter) {
         continue
       }
       if (commandLower === "reset") {
+        var previousSessionOptions = sessionOptions
         sessionOptions = resetOptions()
+        if (adapter) {
+          sessionOptions.conversation = previousSessionOptions.conversation
+          Object.keys(previousSessionOptions).forEach(function(key) {
+            if (isFunction(adapter.optionReadOnly) && adapter.optionReadOnly(key)) sessionOptions[key] = previousSessionOptions[key]
+          })
+        }
         sessionExplicitOptions = resetExplicitOptions()
         lastConversationStats = __
         historyFileKeptRecorded = false
@@ -6934,6 +7126,7 @@ function MiniAInteractiveSession(args, adapter) {
         continue
       }
       if (commandLower === "restore") {
+        if (adapter) { browserResult({ picker: true }, "history"); continue }
         restoreConversationSelection()
         continue
       }
@@ -6943,6 +7136,10 @@ function MiniAInteractiveSession(args, adapter) {
           continue
         }
 
+        if (adapter) {
+          browserResult({ goal: lastGoalPrompt, answer: extractAnswerText(isDef(lastOrigResult) ? lastOrigResult : lastResult, false) }, "answer", { raw: parsedSlashCommand.argsRaw.trim().toLowerCase() === "md" })
+          continue
+        }
         // Check for "md" option
         var printMarkdown = false
         if (command.indexOf("last ") === 0) {
@@ -6995,6 +7192,7 @@ function MiniAInteractiveSession(args, adapter) {
           }
 
           io.writeFileString(fileName, content)
+          browserResult({ destination: fileName, content: content, characters: content.length, ok: true }, "saved")
           print(colorifyText("Response saved to " + fileName + " (" + content.length + " bytes)", successColor))
         } catch (saveError) {
           printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to save file: " + saveError, errorColor))
@@ -7080,7 +7278,12 @@ function MiniAInteractiveSession(args, adapter) {
         }
         continue
       }
-      if (adapter && parsedSlashCommand.name === "debug") { adapter.view("debug"); continue }
+      if (adapter && parsedSlashCommand.name === "debug") {
+        var debugFilter = parsedSlashCommand.argsRaw.trim().toLowerCase() || "all"
+        if (!debugTraceFilters.some(function(f) { return f.key === debugFilter })) printErr("Invalid debug filter: " + debugFilter)
+        else browserResult({ filter: debugFilter }, "debug")
+        continue
+      }
       if (commandLower === "debug") {
         inspectDebugTrace()
         continue
@@ -7090,7 +7293,12 @@ function MiniAInteractiveSession(args, adapter) {
         continue
       }
       if (commandLower === "model" || commandLower.indexOf("model ") === 0) {
-        if (adapter) { adapter.view("models"); continue }
+        if (adapter) {
+          var requestedSlot = parsedSlashCommand.argsRaw.trim().toLowerCase()
+          if (requestedSlot && ["main", "model", "lc", "modellc", "val", "modelval"].indexOf(requestedSlot) < 0) printErr("Invalid target. Use 'main', 'lc' or 'val'.")
+          else printCurrentModels()
+          continue
+        }
         var target = "model" // default to model
         if (commandLower === "model") {
           // Interactive slot picker: show the current model name for each slot,
@@ -7248,6 +7456,7 @@ function MiniAInteractiveSession(args, adapter) {
         }
         try {
           var subtaskId = activeAgent._subtaskManager.submitAndRun(goal, {}, {})
+          if (adapter) browserResult(activeAgent._subtaskManager.status(subtaskId), "subtask")
           print(colorifyText("Subtask submitted: " + subtaskId, successColor))
           print(colorifyText("Use /subtask " + subtaskId + " to check status", hintColor))
         } catch (delegateErr) {
@@ -7259,6 +7468,7 @@ function MiniAInteractiveSession(args, adapter) {
         if (!ensureDelegationAgent()) continue
         try {
           var subtasks = activeAgent._subtaskManager.list()
+          if (adapter) { browserResult(subtasks, "subtasks"); continue }
           if (subtasks.length === 0) {
             print(colorifyText("No subtasks.", hintColor))
           } else {
@@ -7283,6 +7493,7 @@ function MiniAInteractiveSession(args, adapter) {
         }
         try {
           var cancelled = activeAgent._subtaskManager.cancel(subtaskId)
+          browserResult({ id: subtaskId, cancelled: cancelled }, "subtask")
           if (cancelled) {
             print(colorifyText("Subtask " + subtaskId.substring(0, 8) + " cancelled.", successColor))
           } else {
@@ -7302,6 +7513,7 @@ function MiniAInteractiveSession(args, adapter) {
         }
         try {
           var result = activeAgent._subtaskManager.result(subtaskId)
+          if (adapter) { browserResult(result, "subtask"); continue }
           print(colorifyText("Result for subtask " + subtaskId.substring(0, 8) + ":", accentColor))
           if (isDef(result.error)) {
             print(colorifyText("Error: " + result.error, errorColor))
@@ -7324,6 +7536,7 @@ function MiniAInteractiveSession(args, adapter) {
         }
         try {
           var status = activeAgent._subtaskManager.status(subtaskId)
+          if (adapter) { browserResult(status, "subtask"); continue }
           print(colorifyText("Subtask " + status.id.substring(0, 8) + ":", accentColor))
           print("  Status: " + colorifyText(status.status, status.status === "completed" ? successColor : (status.status === "failed" ? errorColor : hintColor)))
           print("  Goal: " + colorifyText(status.goal, hintColor))
@@ -7412,11 +7625,15 @@ function MiniAInteractiveSession(args, adapter) {
 
   if (adapter) {
     return {
-      execute: dispatchInput,
+      execute: executeBrowserCommand,
+      commandMetadata: commandMetadata,
+      commandView: commandView,
+      subtasks: function() { return isObject(activeAgent) && isObject(activeAgent._subtaskManager) ? activeAgent._subtaskManager.list() : [] },
       definitions: parameterDefinitions,
       commands: function() { return getAllSlashCommandNames() },
       completions: function() { return { wiki: getWikiSubcommandCompletions(), set: sessionParameterNames, show: sessionParameterNames, toggle: sessionParameterNames.filter(function(k) { return parameterDefinitions[k].type === "boolean" }), unset: sessionParameterNames } },
       agent: function() { return activeAgent },
+      stopDream: function() { if (activeDream) activeDream.requestStop() },
       attach: function(agent) { activeAgent = agent; agent.setHookFn(function(event, vars) { return runHooks(event, vars) }); agent.setConfirmFn(function(label, choices) { return adapter.ask("choice", label, choices) }) },
       saveConversation: function() { persistConversationSnapshot(activeAgent) },
       pruneHistory: pruneConversationHistory,
@@ -7427,11 +7644,17 @@ function MiniAInteractiveSession(args, adapter) {
         if (isDef(goal)) lastGoalPrompt = goal
         if (isDef(result)) { lastResult = result; lastOrigResult = result }
       },
-      setOptions: function(values) {
-        Object.keys(values).forEach(function(key) { setOption(key, values[key]) })
+      setOptions: function(values, report) {
+        var apply = function() { Object.keys(values).forEach(function(key) { setOption(key, values[key]) }) }
+        if (report === true) {
+          var key = Object.keys(values)[0] || ""
+          return executeBrowserCommand("/set " + key + " " + (isString(values[key]) ? values[key] : stringify(values[key])), apply)
+        }
+        return apply()
       },
       beginTrace: function(goal) { return toBoolean(sessionOptions.debugtrace) === true ? createDebugTrace(goal) : function() {} },
       tracePage: function(after, limit, category, sequence) {
+        if (category && !debugTraceFilters.some(function(f) { return f.key === category })) throw new Error("Invalid debug filter: " + category)
         var filters = debugTraceFilters.map(function(filter) { return { category: filter.key, label: filter.label } })
         if (!lastDebugTrace) return isDef(sequence) ? {} : { events: [], total: 0, hasMore: false, filters: filters }
         var index = readDebugTraceIndex(lastDebugTrace.path, true)

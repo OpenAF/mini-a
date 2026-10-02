@@ -2,6 +2,8 @@
 // License: Apache 2.0
 // Description: Wiki manager for Mini-A. Supports filesystem, S3, Elasticsearch and static HTTP(S) backends.
 
+loadLib("mini-a-wiki-maintenance.js")
+
 // Shared argument mapping. Entry points retain explicit access and model policies.
 function __miniAWikiConfigFromArgs(args, overrides) {
   args = isMap(args) ? args : {}
@@ -506,7 +508,7 @@ MiniAWikiManager.prototype._isHiddenPath = function(path) {
   if (p.length === 0) return false
   var bn = p.split("/").pop()
   var meta = this._indexMeta()
-  return p.split("/").some(function(part) { return /^\.mini-a-wiki-(serving|bundles|legacy|state|ingest|absorb|meta|lucene|graph)(?:$|\.)/.test(part) }) || meta.hiddenNames.indexOf(p) >= 0 || meta.hiddenNames.indexOf(bn) >= 0
+  return p.split("/").some(function(part) { return /^\.mini-a-wiki-(serving|bundles|legacy|state|ingest|absorb|maintenance|meta|lucene|graph)(?:$|\.)/.test(part) }) || meta.hiddenNames.indexOf(p) >= 0 || meta.hiddenNames.indexOf(bn) >= 0
 }
 
 MiniAWikiManager.prototype._isSearchExcludedPath = function(path) {
@@ -695,6 +697,10 @@ MiniAWikiManager.prototype._metaReadFastInfo = function(path) {
 }
 
 MiniAWikiManager.prototype._metaFor = function(path, rawOpt, parsedOpt) {
+  if (this._config.maintenanceSourceOnly === true) {
+    var raw = this._backend.read(path)
+    return isString(raw) ? this.parseFrontmatter(raw).meta : __
+  }
   this._ensureIndexRuntime()
   if (this._catalog || this._config.wikimetacache === false) {
     var rawDirect = isString(rawOpt) ? rawOpt : this._backend.read(path)
@@ -1699,6 +1705,7 @@ MiniAWikiManager.prototype._graphRemovePage = function(path) {
 }
 
 MiniAWikiManager.prototype._updatePageIndexes = function(path, raw, parsed) {
+  if (this._config.maintenanceSourceOnly === true) return
   var meta = this._metaUpdate(path, raw, parsed)
   this._ensureSearchIndex().set(path, raw, isMap(meta) && isString(meta.title) ? meta.title : path)
   this._graphUpdatePage(path, raw, parsed)
@@ -1710,6 +1717,7 @@ MiniAWikiManager.prototype._updatePageIndexes = function(path, raw, parsed) {
 }
 
 MiniAWikiManager.prototype._removePageIndexes = function(path) {
+  if (this._config.maintenanceSourceOnly === true) return
   this._metaRemove(path)
   this._ensureSearchIndex().unset(path)
   this._graphRemovePage(path)
@@ -1737,9 +1745,9 @@ MiniAWikiManager.prototype.compact = function(options) {
   return { ok: cleanup.ok, generation: built.generation, cleanup: cleanup, fallbackPreserved: true }
 }
 
-MiniAWikiManager.prototype.reindex = function() {
+MiniAWikiManager.prototype.reindex = function(options) {
   if (this._legacyRetrievalV2) {
-    var initial = this._legacyRetrievalV2.build()
+    var initial = this._legacyRetrievalV2.build(__, options)
     // A failed first build leaves legacy retrieval active unless publication
     // actually completed. Read-only attempts never change the effective mode.
     this._refreshRetrievalMode()
@@ -1747,7 +1755,7 @@ MiniAWikiManager.prototype.reindex = function() {
   }
   if (this._retrievalV2) {
     var changes = isMap(this._servingBatchChanges) && io.fileExists(this._retrievalV2.root + "/current.json") ? Object.keys(this._servingBatchChanges) : __
-    var built = this._retrievalV2.build(changes)
+    var built = this._retrievalV2.build(options && options.authoritative === true ? __ : changes, options)
     // Finalization batches normally reuse the prior generation. A changed
     // serving contract needs the same full rebuild as an explicit reindex.
     if (isArray(changes) && built.ok === false && built.activationSucceeded === false &&
@@ -2187,7 +2195,7 @@ MiniAWikiManager.prototype.configure = function(config) {
   // Keep launcher defaults unset so an explicit option or environment override wins.
   if (isUnDef(cfg.wikiretrievalv2)) cfg.wikiretrievalv2 = true
   if (isUnDef(cfg.wikiretrievalconfig) && isString(getEnv("OAF_MINI_A_WIKI_RETRIEVAL_CONFIG"))) cfg.wikiretrievalconfig = getEnv("OAF_MINI_A_WIKI_RETRIEVAL_CONFIG")
-  var validatedRetrievalConfig = toBoolean(cfg.wikiretrievalv2) === true ? global.MiniAWikiRetrievalV2.config(cfg.wikiretrievalconfig) : __
+  var validatedRetrievalConfig = cfg.maintenanceSourceOnly !== true && toBoolean(cfg.wikiretrievalv2) === true ? global.MiniAWikiRetrievalV2.config(cfg.wikiretrievalconfig) : __
   // The explicit runtime value wins. The environment form is intentionally
   // read here too so direct manager/MCP construction has the same behaviour as
   // the Mini-A launcher.
@@ -2245,6 +2253,7 @@ MiniAWikiManager.prototype.configure = function(config) {
   // this, the second instance's cache setup would silently reuse the first instance's
   // loader closure/backend reference.
   this._instanceNonce = sha1(this._getBackendIdentity() + "|" + String(new Date().getTime()) + "|" + String(Math.random())).substring(0, 12)
+  if (cfg.maintenanceSourceOnly === true) return // authoritative Markdown only; never a retrieval fallback
   if (this._archiveRoot && toBoolean(cfg.wikiretrievalv2) === true && isString(cfg.indexdir) && cfg.indexdir.trim().length) {
     var archive = String(this._backend.root)
     this._hydrateArtifactBundle(function() { var f = new java.io.File(archive); return { etag: String(java.nio.file.Files.getLastModifiedTime(f.toPath())) + ":" + Number(f.length()) } }, function() { return new java.io.FileInputStream(archive) }, "archive", archive)
@@ -2263,7 +2272,11 @@ MiniAWikiManager.prototype.configure = function(config) {
       this._legacyRetrievalV2 = this._retrievalV2
       this._retrievalV2 = __
       var wikiName = isString(cfg.wikiMountName) ? "@" + cfg.wikiMountName : "primary"
-      this._logFn("warn", "[wiki " + wikiName + "] wikiretrievalv2=true requested, but no V2 serving generation exists (v2-build-required); using legacy retrieval. Run an explicit writable V2 reindex or publish compatible artifacts to enable V2.")
+      if (this._bootstrappedEmptyWiki) {
+        this._logFn("info", "[wiki " + wikiName + "] Initialized a new wiki with Markdown starter files. /wiki init creates the wiki structure; run /wiki reindex to build and enable V2 retrieval. Using legacy retrieval until then.")
+      } else {
+        this._logFn("warn", "[wiki " + wikiName + "] wikiretrievalv2=true requested, but no V2 serving generation exists (v2-build-required); using legacy retrieval. Run an explicit writable V2 reindex or publish compatible artifacts to enable V2.")
+      }
     }
   }
 }
@@ -2362,6 +2375,7 @@ MiniAWikiManager.prototype._isArchiveRoot = function(root) {
 
 MiniAWikiManager.prototype._bootstrapWiki = function() {
   this._bootstrappedFiles = []
+  this._bootstrappedEmptyWiki = false
   try {
     var pages = this.list("")
     var hasAgents = this._backend.exists("AGENTS.md")
@@ -2375,6 +2389,7 @@ MiniAWikiManager.prototype._bootstrapWiki = function() {
     if (!hasAgents) { this._backend.write("AGENTS.md", __miniAWikiAgentsTemplate(now)); this._bootstrappedFiles.push("AGENTS.md") }
     if (!hasIndex)  { this._backend.write("index.md",  __miniAWikiIndexRootTemplate(now)); this._bootstrappedFiles.push("index.md") }
     if (!this._backend.exists("log.md")) { this._backend.write("log.md", __miniAWikiLogTemplate(now)); this._bootstrappedFiles.push("log.md") }
+    this._bootstrappedEmptyWiki = pages.length === 0
   } catch(e) {}
 }
 
@@ -2794,13 +2809,13 @@ var __miniAWikiFsListSerial = function(dir, normalizedPrefix, sep, work) {
     counters.directoryListings = (Number(counters.directoryListings) || 0) + 1
     for (var i = 0; children && i < children.length; i++) {
       var child = children[i], name = String(child.getName())
-      if (/^\.mini-a-wiki-(serving|bundles|legacy|state|ingest|absorb|meta|lucene|graph)(?:$|\.)/.test(name)) {
+      if (/^\.mini-a-wiki-(serving|bundles|legacy|state|ingest|absorb|maintenance|meta|lucene|graph)(?:$|\.)/.test(name)) {
         counters.derivedEntriesSkipped = (Number(counters.derivedEntriesSkipped) || 0) + 1; continue
       }
       var target = String(child.getCanonicalPath())
       if (target.indexOf(boundary) !== 0) continue
       if (target.substring(boundary.length).replace(/\\/g, "/").split("/").some(function(part) {
-        return /^\.mini-a-wiki-(serving|bundles|legacy|state|ingest|absorb|meta|lucene|graph)(?:$|\.)/.test(part)
+        return /^\.mini-a-wiki-(serving|bundles|legacy|state|ingest|absorb|maintenance|meta|lucene|graph)(?:$|\.)/.test(part)
       })) {
         counters.derivedEntriesSkipped = (Number(counters.derivedEntriesSkipped) || 0) + 1; continue
       }
@@ -5477,3 +5492,25 @@ MiniAWikiManager.prototype.assembleContext = function(query, options) {
 // Explicit identity allows another module scope to install the extension without
 // guessing from function source or overwriting a caller's custom implementation.
 MiniAWikiManager.prototype._assembleContextPlaceholder = MiniAWikiManager.prototype.assembleContext
+
+// Hold one shared lock across complete operations, including link rewrites and
+// publication. Nested manager operations and journal recovery are reentrant.
+;["configure", "write", "delete", "move", "init", "regenerateIndexes", "reindex", "compact", "appendLog", "upgradeAgents", "_bootstrapWiki", "graph"].forEach(function(name) {
+  var original = MiniAWikiManager.prototype[name]
+  if (!isFunction(original)) return
+  MiniAWikiManager.prototype[name] = function() {
+    var cfg = name === "configure" ? arguments[0] || {} : this._config || {}
+    var local = name === "configure" ? String(cfg.backend || "fs") === "fs" : this._backendType === "fs"
+    var writable = name === "configure" ? cfg.access === "rw" : this._access === "rw"
+    var graphWrite = name !== "graph" || ["build", "report", "falkor"].indexOf(String(arguments[0])) >= 0
+    var root = name === "configure" ? cfg.root || "." : this._backend.root
+    if (!local || !writable || !graphWrite || cfg.__catalog === true || new java.io.File(String(root)).isFile()) return original.apply(this, arguments)
+    var lock
+    try { lock = __miniAWikiWriterLock(root) }
+    catch(e) {
+      if (name === "configure") throw e
+      return { ok: false, error: __miniAErrMsg(e) }
+    }
+    try { return original.apply(this, arguments) } finally { lock.release() }
+  }
+})

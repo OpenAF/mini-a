@@ -39,22 +39,29 @@ MiniAAdvanced.prototype.isServerOption = function(key) {
   return /^(web|onport|historypath|historys3|historyretention|ssequeuetimeout|memorysessionheader|logpromptheaders|homedir|conversation|useeditor|editor|maxpromptchars|path$|useattach$)/.test(key)
 }
 
-MiniAAdvanced.prototype.safe = function(value, key) {
+MiniAAdvanced.prototype.safe = function(value, key, preserveText) {
   var self = this
   if (isUnDef(value)) return value
   if (/^key$|^token$|api.?key|access.?key|secret|pass(?:word)?$|authorization|credential|webtoken|workerregtoken/i.test(key || "")) return "[redacted]"
-  if (isArray(value)) return value.map(function(v) { return self.safe(v) })
+  if (isArray(value)) return value.map(function(v) { return self.safe(v, __, preserveText) })
   if (isMap(value)) {
     var out = {}
-    Object.keys(value).forEach(function(k) { out[k] = self.safe(value[k], k === "value" && isString(value.parameter) ? value.parameter : k) })
+    Object.keys(value).forEach(function(k) { out[k] = self.safe(value[k], k === "value" && isString(value.parameter) ? value.parameter : k, preserveText) })
     return out
   }
   if (isString(value)) {
     // Model settings are commonly SLON strings, rather than objects.
     if (/^\s*[({]/.test(value)) {
-      try { var parsed = af.fromJSSLON(value); if (isMap(parsed) || isArray(parsed)) return self.safe(parsed) } catch(ignore) {}
+      try {
+        var parsed = af.fromJSSLON(value)
+        if (isMap(parsed) || isArray(parsed)) {
+          var clean = self.safe(parsed, __, preserveText)
+          if (preserveText) return stringify(clean, __, "") === stringify(parsed, __, "") ? value : stringify(clean, __, "  ")
+          return clean
+        }
+      } catch(ignore) {}
     }
-    value = value.replace(/(\/set\s+(?:\w*(?:secret|password|accesskey|apikey|webtoken|workerregtoken|secpass|falkorpass))\s*(?:=|\s)\s*)[^\n]+/ig, "$1[redacted]")
+    value = value.replace(/(\/set\s+(?:\w*(?:secret|password|accesskey|apikey|webtoken|workerregtoken|secpass|falkorpass))\s*(?:=|\s)\s*)[\s\S]+/ig, "$1[redacted]")
     return value.replace(/((?:key|api[_-]?key|token|password|secret|authorization|secpass|falkorpass)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,)}]+)/ig, "$1[redacted]")
   }
   return value
@@ -83,13 +90,19 @@ MiniAAdvanced.prototype._get = function(uuid) {
   if (this.sessions[uuid]) return this.sessions[uuid]
   var self = this, file = this.root + "/" + uuid + ".json"
   var saved = io.fileExists(file) ? io.readFileJSON(file) : {}
-  var state = { uuid: uuid, file: file, journal: this.root + "/" + uuid + ".ndjson", sequence: 0, offsets: [], pending: null, operation: null, receipts: isMap(saved.receipts) ? saved.receipts : {}, closed: saved.closed === true }
+  var state = { uuid: uuid, file: file, journal: this.root + "/" + uuid + ".ndjson", sequence: 0, offsets: [], nativeResults: {}, pending: null, operation: null, receipts: isMap(saved.receipts) ? saved.receipts : {}, closed: saved.closed === true }
   state.lock = new java.util.concurrent.locks.ReentrantLock()
   state.askLock = new java.util.concurrent.locks.ReentrantLock()
   // Recover the journal index, never materialize all diagnostic payloads in memory.
   if (io.fileExists(state.journal)) {
     var raf = new java.io.RandomAccessFile(state.journal, "r")
-    try { while (raf.getFilePointer() < raf.length()) { state.offsets.push(raf.getFilePointer()); raf.readLine() } } finally { raf.close() }
+    try {
+      while (raf.getFilePointer() < raf.length()) {
+        state.offsets.push(raf.getFilePointer())
+        var line = String(new java.lang.String(new java.lang.String(raf.readLine()).getBytes("ISO-8859-1"), "UTF-8"))
+        try { var record = jsonParse(line); if (record.type === "command-result" && record.runId) state.nativeResults[record.runId] = true } catch(ignoreLegacyLine) {}
+      }
+    } finally { raf.close() }
     state.sequence = state.offsets.length
   }
   var options = merge({}, this.args)
@@ -133,11 +146,22 @@ MiniAAdvanced.prototype._get = function(uuid) {
       var id = String(new java.io.File(path).getName()).replace(/^c-/, "").replace(/\.json$/, "")
       if (self.sessions[id] || io.fileExists(self.root + "/" + id + ".json")) self.removeSession(id)
     },
+    isCancelled: function() { return state.cancelled === true },
     print: function(value) { emit("output", value) },
     error: function(value) { emit("error", value) },
-    event: function(type, value) { if (type === "history-clear") global.__res[uuid] = []; emit(type, value) },
+    event: function(type, value) {
+      if (type === "history-clear") global.__res[uuid] = []
+      if (type === "history-replace") global.__res[uuid] = value
+      emit(type, value)
+    },
+    result: function(value) { emit("result-part", value) },
+    commandResult: function(value) {
+      if (state.cancelled) value.status = "cancelled"
+      emit("command-result", value)
+    },
     view: function(name) { emit("view", name) },
     goal: function(goal, skillUsage, displayPrompt) { state.goal = { prompt: goal, skillUsage: skillUsage, displayPrompt: displayPrompt }; return true },
+    optionReadOnly: function(key) { return self.isServerOption(key) },
     validateOption: function(key) {
       if (self.isServerOption(key)) throw new Error(key + " is controlled by the server/session and requires server configuration")
     },
@@ -160,6 +184,7 @@ MiniAAdvanced.prototype._get = function(uuid) {
     for (var offset = 0; offset < state.sequence; offset += 100) {
       this.events(state, offset, 100, true).forEach(function(event) {
         if (event.type === "history-clear") global.__res[uuid] = []
+        if (event.type === "history-replace") global.__res[uuid] = event.value
         if (event.type === "user") global.__res[uuid].push({ event: "👤", message: String(event.value) })
         if (event.type === "answer") global.__res[uuid].push({ event: "final", message: String(event.value) })
       })
@@ -175,10 +200,11 @@ MiniAAdvanced.prototype._get = function(uuid) {
 MiniAAdvanced.prototype.emit = function(state, type, value) {
   state.lock.lock()
   try {
-    var record = { sequence: state.sequence + 1, timestamp: new Date().toISOString(), runId: state.operation, type: type, value: this.safe(value) }
+    var record = { sequence: state.sequence + 1, timestamp: new Date().toISOString(), runId: state.operation, type: type, value: this.safe(value, __, type === "command-result" || type === "result-part") }
     var offset = io.fileExists(state.journal) ? Number(new java.io.File(state.journal).length()) : 0
     io.writeFileString(state.journal, stringify(record, __, "") + "\n", __, true)
     state.offsets.push(offset)
+    if (type === "command-result" && state.operation) state.nativeResults[state.operation] = true
     state.sequence++
     global.__lastActivity[state.uuid] = Date.now()
   } finally { state.lock.unlock() }
@@ -206,6 +232,54 @@ MiniAAdvanced.prototype.events = function(state, after, limit, full) {
     }
   } finally { if (raf) raf.close(); state.lock.unlock() }
   return out
+}
+
+// Read previous results backwards, with a stable exclusive sequence cursor. Payloads
+// are fetched separately so a selector never materializes large reports or exports.
+MiniAAdvanced.prototype.results = function(state, view, before, limit) {
+  var cursor = before || state.sequence + 1, rows = [], scanned = 0
+  state.lock.lock()
+  try {
+    var upper = Math.min(state.sequence, cursor - 1)
+    while (upper > 0 && rows.length < limit && scanned < 2000) {
+      var pageStart = Math.max(0, upper - 100)
+      var page = this.events(state, pageStart, upper - pageStart)
+      for (var i = page.length - 1; i >= 0; i--) {
+        var record = page[i]
+        cursor = record.sequence; scanned++
+        if (record.type === "command-result") {
+          var full = record.truncated ? this.events(state, record.sequence - 1, 1, true)[0] : record
+          if (!view || full.value.view === view) rows.push({ sequence: record.sequence, runId: record.runId, timestamp: record.timestamp, command: full.value.command, status: full.value.status, view: full.value.view })
+        } else if (record.type === "command") {
+          // Legacy journals have no command-result; group that request's output.
+          var found = !!state.nativeResults[record.runId]
+          var destination = state.runtime.commandView(record.value).name
+          if (!found && (!view || destination === view)) rows.push({ sequence: record.sequence, runId: record.runId, timestamp: record.timestamp, command: record.value, view: destination, status: state.operation === record.runId ? "running" : "previous", legacy: true })
+        }
+        if (rows.length >= limit || scanned >= 2000) break
+      }
+      upper = cursor - 1
+    }
+    return { results: rows, before: cursor, hasMore: cursor > 1 }
+  } finally { state.lock.unlock() }
+}
+
+MiniAAdvanced.prototype.result = function(state, sequence) {
+  var record = this.events(state, sequence - 1, 1, true)[0]
+  if (!record) return {}
+  if (record.type === "command-result") return record
+  if (record.type !== "command") throw new Error("Not a command result")
+  var value = { command: record.value, view: state.runtime.commandView(record.value).name, status: "previous", blocks: [], messages: [], legacy: true }
+  if (state.operation && state.operation === record.runId) { value.status = "running"; record.value = value; return record }
+  for (var cursor = sequence; cursor < state.sequence; cursor += 100) {
+    var page = this.events(state, cursor, 100, true)
+    for (var i = 0; i < page.length; i++) {
+      if (page[i].type === "command" || page[i].type === "complete") { record.value = value; return record }
+      if (["output", "error", "warn", "result-part"].indexOf(page[i].type) >= 0) value.messages.push({ type: page[i].type, value: page[i].value })
+    }
+  }
+  record.value = value
+  return record
 }
 
 MiniAAdvanced.prototype.persist = function(state, full) {
@@ -236,14 +310,14 @@ MiniAAdvanced.prototype.snapshot = function(state, after) {
   var definitions = state.runtime.definitions, options = state.runtime.options(), self = this
   return {
     uuid: state.uuid, sequence: state.sequence, busy: !!global.__busy[state.uuid], closed: state.closed,
-    operation: state.operation, kind: state.kind, pending: state.pending ? this.safe(state.pending) : null,
-    commands: state.runtime.commands(), completions: state.runtime.completions(), events: this.events(state, after, 100),
+    operation: state.operation, operationView: state.operationView, kind: state.kind, pending: state.pending ? this.safe(state.pending) : null,
+    commandMetadata: state.runtime.commandMetadata(), commands: state.runtime.commands(), completions: state.runtime.completions(), events: this.events(state, after, 100),
     settings: Object.keys(definitions).sort().map(function(key) {
       var def = definitions[key]
       var value = options[key]
       var modelEnv = { model: "OAF_MODEL", modellc: "OAF_LC_MODEL", modelval: "OAF_VAL_MODEL" }
       if (isUnDef(value) && modelEnv[key]) value = getEnv(modelEnv[key])
-      return { name: key, type: def.type, dataEditor: def.dataEditor, description: def.description, value: self.safe(value, key), defaultValue: self.safe(def.default, key), source: Object.prototype.hasOwnProperty.call(state.overrides, key) ? "session" : "server",
+      return { name: key, type: def.type, dataEditor: def.dataEditor, description: def.description, value: self.safe(value, key), defaultValue: self.safe(def.default, key), source: Object.prototype.hasOwnProperty.call(state.overrides, key) ? "session" : isUnDef(options[key]) && modelEnv[key] && isDef(value) ? modelEnv[key] : "server",
         readOnly: self.isServerOption(key) }
     }), presets: Object.keys(this.presets.presets), defaultPreset: this.presets.defaultPreset
   }
@@ -259,6 +333,16 @@ MiniAAdvanced.prototype.request = function(data) {
     }).map(function(file) { return { uuid: file.filename.replace(/\.json$/, ""), updated: file.lastModified } }).sort(function(a,b) { return b.updated - a.updated }).slice(0,100) }
   }
   if (data.action === "snapshot") return this.snapshot(state, after)
+  if (data.action === "subtasks") return { tasks: this.safe(state.runtime.subtasks()) }
+  if (data.action === "results") {
+    var before = Number(data.before || 0), limit = Number(data.limit || 20)
+    if (!isFinite(before) || before < 0 || before % 1 || !isFinite(limit) || limit < 1 || limit > 100 || limit % 1) throw new Error("Invalid results cursor or limit")
+    return this.results(state, data.view, before, limit)
+  }
+  if (data.action === "result") {
+    if (!isNumber(data.sequence) || data.sequence < 1 || data.sequence % 1) throw new Error("Invalid result sequence")
+    return this.result(state, data.sequence)
+  }
   if (data.action === "stats") {
     var agent = state.runtime.agent()
     // Export numeric statistics only; traces and prompt metadata are not chart data.
@@ -293,6 +377,7 @@ MiniAAdvanced.prototype.request = function(data) {
   }
   if (data.action === "stop") {
     state.cancelled = true
+    if (state.runtime && isFunction(state.runtime.stopDream)) state.runtime.stopDream()
     state.pending = null
     var agent = global.__conversations[state.uuid]
     if (agent && isFunction(agent.requestStop)) agent.requestStop("Stopped from Advanced mode", { quiet: true })
@@ -303,12 +388,13 @@ MiniAAdvanced.prototype.request = function(data) {
   if (state.receipts[data.requestId]) return state.receipts[data.requestId]
   var token = global._mini_a_web_reserve(state.uuid)
   if (isUnDef(token)) return { busy: true }
-  var receipt = { accepted: true, requestId: data.requestId }
+  var receipt = { accepted: true, requestId: data.requestId, view: data.action === "command" ? this.safe(state.runtime.commandView(data.command), __, true) : { name: "settings", params: {} } }
   state.receipts[data.requestId] = receipt
   var receiptKeys = Object.keys(state.receipts)
   while (receiptKeys.length > 128) delete state.receipts[receiptKeys.shift()]
   state.operation = data.requestId
   state.kind = "command"
+  state.operationView = receipt.view
   state.cancelled = false
   try { this.persist(state) } catch(e) { state.operation = null; global._mini_a_web_release(state.uuid, token); throw e }
   try { this.schedule(function() {
@@ -342,7 +428,7 @@ MiniAAdvanced.prototype.request = function(data) {
             values[key] = stringify(retainMasked(af.fromJSSLON(values[key]), previous), __, "")
           }
         })
-        state.runtime.setOptions(values)
+        state.runtime.setOptions(values, true)
       } else if (data.action === "preset") {
         if (!isString(data.name) || !/^[a-zA-Z0-9 _-]{1,80}$/.test(data.name)) throw new Error("Invalid preset name")
         if (data.op === "save") {
@@ -370,20 +456,26 @@ MiniAAdvanced.prototype.request = function(data) {
         global._mini_a_web_dispose(state.uuid)
         state.runtime.sync(__)
       } else if (state.runtime.agent()) global.__conversations[state.uuid] = state.runtime.agent()
-    } catch(e) { self.emit(state, "error", __miniAErrMsg(e)) }
+    } catch(e) {
+      self.emit(state, "error", __miniAErrMsg(e))
+      if (!state.nativeResults[data.requestId]) self.emit(state, "command-result", {
+        version: 1, command: isString(data.command) ? data.command : data.action, view: receipt.view.name, params: receipt.view.params,
+        status: state.cancelled ? "cancelled" : "failed", blocks: [], messages: [{ type: "error", value: __miniAErrMsg(e) }]
+      })
+    }
     finally {
       var afterOptions = state.runtime.options()
       Object.keys(afterOptions).forEach(function(key) {
         if (isDef(beforeOptions) && stringify(beforeOptions[key]) !== stringify(afterOptions[key])) state.overrides[key] = afterOptions[key]
       })
       if (isDef(beforeOptions)) Object.keys(beforeOptions).forEach(function(key) { if (isUnDef(afterOptions[key])) delete state.overrides[key] })
+      self.emit(state, "complete", { requestId: data.requestId, action: data.action, settingsChanged: isDef(previousOptions) && previousOptions !== stringify(afterOptions, __, "") })
       state.operation = null
       try { self.persist(state) } finally { global._mini_a_web_release(state.uuid, token) }
-      self.emit(state, "complete", { requestId: data.requestId, action: data.action, settingsChanged: isDef(previousOptions) && previousOptions !== stringify(afterOptions, __, "") })
       if (state.goal && !state.cancelled && !state.closed) {
         var goal = state.goal
         state.goal = null
-        self.submitPrompt({ header: { "x-mini-a-token": global.__webtoken }, files: { postData: stringify({ uuid: state.uuid, prompt: goal.prompt, skillUsage: goal.skillUsage, displayPrompt: goal.displayPrompt }, __, "") } })
+        self.submitPrompt({ header: { "x-mini-a-token": global.__webtoken }, files: { postData: stringify({ uuid: state.uuid, prompt: goal.prompt, skillUsage: goal.skillUsage, displayPrompt: goal.displayPrompt, advancedRequestId: data.requestId }, __, "") } })
       }
     }
   }).catch(function(e) { state.operation = null; global._mini_a_web_release(state.uuid, token); self.emit(state, "error", String(e)) })

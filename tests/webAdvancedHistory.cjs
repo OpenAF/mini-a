@@ -12,7 +12,8 @@ async function render(sessions, error) {
   let uuid = 'current-session';
   const context = vm.createContext({
     el: node, screen: node('section'), busy: false, snapshot: {}, after: 42, dialogId: 'old',
-    events: node('div'), activeScreen: 'history',
+    events: node('div'), activeScreen: 'history', resultGeneration: 0, previousSelections: {}, viewParams: {},
+    resetSessionView() { context.snapshot=null;context.after=0;context.dialogId=null;context.events.replaceChildren(); },
     filter: {value: 'old search', oninput() { this.applied = this.value; }},
     button: (text, onclick) => Object.assign(node('button', text), {onclick}),
     api: async () => { if (error) throw error; return {sessions}; },

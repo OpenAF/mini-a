@@ -118,6 +118,8 @@ Then open `http://localhost:8888`.
 For the console-oriented **Advanced** mode, add `webadvanced=true webtoken=<secret>`
 and open `http://localhost:8888/#token=<secret>`. It adds shared console slash commands,
 settings/presets, detailed activity and debug traces, and subsystem operation screens.
+Slash commands open dedicated panes with readable results, searchable Help,
+answer/wiki readers, and paginated previous results. Progress remains in Live activity.
 See [Advanced web console](USAGE.md#advanced-web-console).
 
 For history/attachments and S3-backed history examples, see [USAGE.md](USAGE.md#web-ui-quick-start).
@@ -377,7 +379,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 - **ASCII Sketch Guidance** - Encourage text-based sketch outputs in responses (`useascii=true`)
 - **Interactive Maps** - Ask the agent to return Leaflet map snippets for geographic prompts, rendered directly in the console transcript and web UI (`usemaps=true`)
 - **Math Formula Rendering** - Encourage LaTeX formulas rendered with KaTeX in the web UI (`usemath=true`)
-- **Dreams (Sleep Pass)** - Off-line consolidation with explicit modes: memory `plan|apply`, wiki `plan|apply|reorg|repair|reindex|graph|indexes`, proposal-first dry runs, and optional JSON reports — run via `/dream` or `mini-a dream=true`
+- **Dreams (Sleep Pass)** - Off-line consolidation with explicit modes: memory `plan|apply`, wiki `auto|plan|apply|reorg|repair|reindex|graph|indexes`, proposal-first dry runs, and optional JSON reports — run via `/dream` or `mini-a dream=true`
 
 ## Documentation
 
@@ -413,6 +415,7 @@ Mini-A ships with complementary components:
 - **`mini-a-memoryman.js`** - Interactive working-memory manager for inspecting and maintaining persisted global/session memories — launched via `mini-a memoryman=true`
 - **`mini-a-wikiman.js`** - Guided wiki, graph, Dream and ingestion maintenance menus with replayable CLI commands; run `mini-a wikiman=true wikiroot=/path/to/wiki wikiaccess=rw` (see [usage](USAGE.md#wiki-operations-manager))
 - **`mini-a-modelman.js`** - Interactive model/config manager, also reachable from the console via `/model` — launched via `mini-a modelman=true`
+- **`mini-a-wiki-maintenance.js`** - Shared local writer lock and durable maintenance journal persistence.
 - **`mini-a-dreams.js`** - Dream engine for memory/wiki consolidation with mode routing, reorg gates, and structured output/reporting — launched via `mini-a dream=true` or `/dream`
 - **`mini-a.sh`** - Shell wrapper script for running directly from a cloned repository
 - **`mini-a.js`** - Reusable library for embedding in other OpenAF jobs

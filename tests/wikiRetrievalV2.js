@@ -225,6 +225,33 @@
       } finally {engine.release(pin)}
     } finally {if(reader)reader.close();if(writer)writer.close();io.rm(dir)}
   }
+  exports.testRetrievalV2FirstInitializationMessage = function() {
+    var dir = temporary(), writer, reader, messages = []
+    var logger = function(level, message) { messages.push({ level: level, message: message }) }
+    try {
+      writer = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikiretrievalv2: true }, logger)
+      var setup = messages.filter(function(entry) { return entry.message.indexOf("Initialized a new wiki") >= 0 })
+      ow.test.assert(setup.length, 1, "empty writable wiki explains first-time setup once")
+      ow.test.assert(setup[0].level, "info", "first-time setup is informational")
+      ow.test.assert(setup[0].message.indexOf("/wiki reindex") >= 0, true, "setup explains how to enable V2")
+      ow.test.assert(messages.some(function(entry) { return entry.level === "warn" && entry.message.indexOf("v2-build-required") >= 0 }), false, "empty wiki has no missing-generation warning")
+      ow.test.assert(writer.init().ok, true, "explicit init succeeds after bootstrap")
+      ow.test.assert(writer.context().retrieval.mode, "legacy", "init retains explicit build semantics")
+      ow.test.assert(io.fileExists(dir + "/.mini-a-wiki-serving/current.json"), false, "init does not automatically publish V2")
+      writer.close(); writer = __
+      messages = []
+      reader = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikiretrievalv2: true }, logger)
+      ow.test.assert(messages.some(function(entry) { return entry.level === "warn" && entry.message.indexOf("v2-build-required") >= 0 }), true, "existing unpublished wiki retains the warning")
+      ow.test.assert(reader.reindex().ok, true, "explicit reindex publishes V2")
+      ow.test.assert(reader.context().retrieval.mode, "v2", "reindex activates V2")
+    } finally { if (reader) reader.close(); if (writer) writer.close(); io.rm(dir) }
+    dir = temporary(); messages = []
+    try {
+      reader = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro", wikiretrievalv2: true }, logger)
+      ow.test.assert(messages.some(function(entry) { return entry.level === "warn" && entry.message.indexOf("v2-build-required") >= 0 }), true, "empty read-only wiki retains publisher guidance")
+      ow.test.assert(io.fileExists(dir + "/index.md"), false, "read-only setup creates no starter files")
+    } finally { if (reader) reader.close(); io.rm(dir) }
+  }
   exports.testRetrievalV2DefaultCompatibility = function() {
     var dir = temporary(), writer, reader, legacy, warnings = []
     var snapshot = function(root) {

@@ -20,6 +20,9 @@ jobs:
 - name: MiniA Wiki V2::ReadOnlyAnalysisValidation
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testReadOnlyAnalysisValidation
+- name: MiniA Wiki V2::RetrievalV2FirstInitializationMessage
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testRetrievalV2FirstInitializationMessage
 - name: MiniA Wiki V2::RetrievalV2DefaultCompatibility
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testRetrievalV2DefaultCompatibility
@@ -209,6 +212,7 @@ todo:
 - MiniA Wiki V2::ReadOnlyAnalysisAdoption
 - MiniA Wiki V2::ReadOnlyAnalysisMountsAndGenerations
 - MiniA Wiki V2::ReadOnlyAnalysisValidation
+- MiniA Wiki V2::RetrievalV2FirstInitializationMessage
 - MiniA Wiki V2::RetrievalV2DefaultCompatibility
 - MiniA Wiki V2::RetrievalV2DefaultPrecedence
 - MiniA Wiki V2::AutomaticLegacyFallback

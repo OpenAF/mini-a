@@ -215,7 +215,7 @@ MiniAWikiMan.prototype.record = function(runner, spec, gates) {
   this.ui.print(ansiColor(result && result.ok === false ? "FG(196),BOLD" : "FG(41),BOLD",
     (result && result.ok === false ? "❌ Failed: " : "✅ Completed: ") + spec.operation))
   this.ui.print(ansiColor("FG(249),ITALIC", "⏱ " + record.elapsed_ms + " ms"))
-  this.show(spec.operation === "wiki.compact" ? record.result : MiniAWikiMan.summary(record.result))
+  this.show((spec.operation === "wiki.compact" || spec.operation === "dream.auto") ? record.result : MiniAWikiMan.summary(record.result))
   this.ui.print(ansiColor("FG(249)", "Full output: Show last result details, or Session → Run history / export."))
   return result
 }
@@ -227,14 +227,15 @@ MiniAWikiMan.prototype.runOperation = function(id, advanced) {
     params[field[0]] = field[3] === "boolean" ? self.yes(field[1] + "?") : self.input(field[1], field[2])
   })
   if (id === "wiki.write") this.editPage(params)
+  if (id === "dream.auto") params.dryrun = !this.yes("Run automatic repairs instead of previewing?")
   if (id === "ingest.run") params.dryrun = !this.yes("Apply ingestion instead of previewing?")
   if (advanced === true) {
     this.show({ parameters: params })
     params = merge(params, MiniAWikiOps.parse(this.input("Parameter overrides as JSON/SLON", "{}")))
     if (id.indexOf("dream.") === 0 || id.indexOf("ingest.") === 0 || id.indexOf("absorb.") === 0 || id === "graph.build") {
-      var tuning = MiniAWikiOps.parse(this.input("Model / limits overrides (model, dreammaxsteps, maxcontext, contextguard, toolresultmaxinline, readresultmaxmatches, ingest..., absorb...)", "{}"))
+      var tuning = MiniAWikiOps.parse(this.input("Model / limits overrides (model, dreamwikillm, dreammaxsteps, maxcontext, contextguard, toolresultmaxinline, readresultmaxmatches, ingest..., absorb...)", "{}"))
       Object.keys(tuning).forEach(function(k) {
-        if (!["model", "dreammaxsteps", "maxcontext", "contextguard", "toolresultmaxinline", "readresultmaxmatches"].includes(k) && !/^(ingest|absorb)/.test(k)) throw new Error("Unsupported tuning argument: " + k)
+        if (!["model", "dreamwikillm", "dreammaxsteps", "maxcontext", "contextguard", "toolresultmaxinline", "readresultmaxmatches"].includes(k) && !/^(ingest|absorb)/.test(k)) throw new Error("Unsupported tuning argument: " + k)
       })
       runner = new MiniAWikiOps(merge(clone(this.args), tuning), runner.log)
     }

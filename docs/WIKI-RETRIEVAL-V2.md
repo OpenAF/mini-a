@@ -24,7 +24,10 @@ state and inactive source evidence are suppressed during retrieval.
 Readers prefer V2 by default. When neither `current.json` nor `previous.json`
 exists in the serving directory, the manager keeps legacy retrieval and logs one
 warning identifying the primary wiki or mount, the `v2-build-required` reason,
-and how to enable V2. This applies to writable and read-only managers. No automatic
+and how to enable V2. For an empty writable wiki, successful creation of the Markdown
+starter files instead logs an informational setup message explaining that `/wiki init`
+creates the structure and `/wiki reindex` enables V2. Existing unpublished wikis and
+read-only managers retain the warning. No automatic
 reindex or migration runs. Legacy retrieval retains its existing index/scan behavior.
 `context().retrieval.mode` reports `legacy` and `fallbackReason` reports
 `v2-build-required`; `retrieval.search` describes the actual legacy search capability.

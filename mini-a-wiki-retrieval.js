@@ -1405,7 +1405,8 @@ RoutedCatalogueTransaction.prototype.tombstone=function(map,key){
 }
 RoutedCatalogueTransaction.prototype.delta=function(){var self=this;this.maps.forEach(function(name){self.operations[name].tombstones.sort()});return{schema:1,maps:this.operations}}
 RoutedCatalogueTransaction.prototype.stats=function(){return{pageCount:Number(this.parent.manifest.catalogue.stats.pageCount)+this.pageDelta,passageCount:Number(this.parent.manifest.catalogue.stats.passageCount)+this.passageDelta}}
-MiniAWikiRetrievalV2.prototype.build = function(changes) {
+MiniAWikiRetrievalV2.prototype.build = function(changes, options) {
+  if (options && options.authoritative === true) changes = __
   var m = this.manager, self = this
   if (this.capabilityError) return {ok:false,error:this.capabilityError}
   if (m._access !== "rw") return { ok: false, error: "wiki is read-only" }
@@ -1436,7 +1437,7 @@ MiniAWikiRetrievalV2.prototype.build = function(changes) {
     // Stable logical identities are derived from the prior compatible catalogue.
     // An explicit full rebuild can repair missing/incompatible artifacts without
     // reading them as a serving generation.
-    if (!old && io.fileExists(this.root + "/current.json")) {
+    if (!old && !(options && options.authoritative === true) && io.fileExists(this.root + "/current.json")) {
       try { old = this.acquire() } catch(identityUnavailable) {}
     }
     analyzer = this._analyzer()
@@ -2731,5 +2732,18 @@ MiniAWikiRetrievalV2.prototype.exportBundle = function(destination) {
   } catch(e) { return { ok: false, error: __miniAErrMsg(e) } }
   finally { try { if (zip) zip.close(); else if (output) output.close() } catch(ignoreZip) {}; try { java.nio.file.Files.deleteIfExists(new java.io.File(temporary).toPath()) } catch(ignoreFile) {}; if (snapshot) this.release(snapshot) }
 }
+
+// Direct publishers participate in the same writer coordination as manager APIs.
+;["build", "exportBundle"].forEach(function(name) {
+  var original = MiniAWikiRetrievalV2.prototype[name]
+  MiniAWikiRetrievalV2.prototype[name] = function() {
+    var m = this.manager, lock
+    try {
+      if (m._backendType === "fs" && m._access === "rw" && !m._archiveRoot) lock = __miniAWikiWriterLock(m._backend.root)
+      return original.apply(this, arguments)
+    } catch(e) { return { ok: false, error: __miniAErrMsg(e) } }
+    finally { if (lock) lock.release() }
+  }
+})
 
 global.MiniAWikiRetrievalV2 = MiniAWikiRetrievalV2

@@ -71,7 +71,7 @@ function MiniAWebPrompt(request) {
       var advancedState = isDef(global.__advanced) ? global.__advanced.sessions[uuid] : __
       var effectiveArgs = isDef(advancedState) ? merge(global.maArgs, advancedState.runtime.options()) : global.maArgs
       if (isDef(advancedState)) {
-        advancedState.operation = runToken
+        advancedState.operation = isString(postData.advancedRequestId) && /^[a-zA-Z0-9-]{1,80}$/.test(postData.advancedRequestId) ? postData.advancedRequestId : runToken
         advancedState.kind = "prompt"
         advancedState.displayPrompt = postData.displayPrompt
         global.__advanced.persist(advancedState)
@@ -401,7 +401,7 @@ function MiniAWebPrompt(request) {
           global._mini_a_web_dispose(uuid)
         }
       } finally {
-        try { if (isDef(advancedState)) { advancedState.operation = null; delete advancedState.displayPrompt; global.__advanced.persist(advancedState) } }
+        try { if (isDef(advancedState)) { global.__advanced.emit(advancedState, "complete", { requestId: advancedState.operation, action: "goal" }); advancedState.operation = null; delete advancedState.displayPrompt; global.__advanced.persist(advancedState) } }
         finally { global._mini_a_web_release(uuid, runToken) }
       }
     }).catch((eee) => {

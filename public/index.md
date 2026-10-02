@@ -4913,6 +4913,7 @@
         await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = resolveAppUrl('data-editor.js?raw=true'); script.onload = resolve; script.onerror = reject; document.head.append(script); });
         await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = resolveAppUrl('advanced.js?raw=true'); script.onload = resolve; script.onerror = reject; document.head.append(script); });
         advancedUI = window.MiniAAdvancedUI({
+            renderMarkdown: renderConversationMarkdown,
             url: resolveAppUrl,
             newRequestId: generateNewSessionUuid,
             uuid: () => { if (!currentSessionUuid) currentSessionUuid = getOrCreateSessionUuid(); return currentSessionUuid; },
