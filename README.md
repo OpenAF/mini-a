@@ -115,8 +115,10 @@ Start the browser UI:
 
 Then open `http://localhost:8888`.
 
-For the console-oriented **Advanced** mode, add `webadvanced=true webtoken=<secret>`
-and open `http://localhost:8888/#token=<secret>`. It adds shared console slash commands,
+For the console-oriented **Advanced** mode, add `webadvanced=true`. When `webtoken`
+is omitted, Mini-A generates a fresh token, prints the access URL, and tries to open
+the operating system browser on the configured port. To supply your own token, add
+`webtoken=<secret>` and open `http://localhost:8888/#token=<secret>`. It adds shared console slash commands,
 settings/presets, detailed activity and debug traces, and subsystem operation screens.
 Slash commands open dedicated panes with readable results, searchable Help,
 answer/wiki readers, and paginated previous results. Progress remains in Live activity.

@@ -643,7 +643,7 @@ function MiniAInteractiveSession(args, adapter) {
 
   // dataEditor opts into inline structured editing and selects the initial map/array root.
   var parameterDefinitions = {
-    webadvanced: { type: "boolean", default: false, description: "Enable trusted Advanced web console APIs (requires webtoken)." },
+    webadvanced: { type: "boolean", default: false, description: "Enable trusted Advanced web console APIs (generates a token and opens the browser when webtoken is omitted)." },
     webadvancedpath: { type: "string", description: "Local Advanced session journal and preset directory." },
     verbose        : { type: "boolean", default: false, description: "Print detailed interaction events" },
     debug          : { type: "boolean", default: false, description: "Enable debug logging" },

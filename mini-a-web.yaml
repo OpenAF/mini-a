@@ -98,7 +98,7 @@ help:
     example  : "120"
     mandatory: false
   - name     : webadvanced
-    desc     : Enable trusted Advanced console APIs (requires webtoken)
+    desc     : Enable trusted Advanced console APIs (generates a token and opens the browser when webtoken is omitted)
     example  : "true"
     mandatory: false
   - name     : webadvancedpath
@@ -106,7 +106,7 @@ help:
     example  : "/var/lib/mini-a/web"
     mandatory: false
   - name     : webtoken
-    desc     : "Shared secret required (as an x-mini-a-token header, or ?token= for the SSE stream) on state-mutating routes. Unset (default) leaves the server open to anyone who can reach the port — with useshell=true that is remote code execution, so set this or restrict network access when exposing the server beyond localhost."
+    desc     : "Shared secret required as an x-mini-a-token header, or ?token= for the SSE stream. Advanced mode generates a fresh token when omitted; Simple mode without a token leaves the server open to anyone who can reach the port."
     example  : "a-long-random-secret"
     mandatory: false
   - name     : useattach
@@ -1514,6 +1514,8 @@ todo:
       if (isDef(mutationToken)) global._mini_a_web_release(postData.uuid, mutationToken)
     }
 
+- Open Advanced browser
+
 ojob:
   opacks      :
   - openaf: 20250915
@@ -1538,10 +1540,42 @@ jobs:
 # ---------------------
 - name : CheckEnv
   exec : | #js
-    if (toBoolean(args.webadvanced) === true && (!isString(args.webtoken) || !args.webtoken.trim())) throw "webadvanced=true requires webtoken"
     var hasModelOverride = isDef(args) && isDef(args.model) && ((isString(args.model) && args.model.trim().length > 0) || isMap(args.model))
     if (isUnDef(getEnv("OAF_MODEL")) && !hasModelOverride) {
       throw "OAF_MODEL environment variable not set. Please export OAF_MODEL or provide model= with your model configuration before starting the Mini-A web server."
+    }
+    global.__webTokenGenerated = false
+    if (toBoolean(args.webadvanced) === true && (!isString(args.webtoken) || !args.webtoken.trim())) {
+      // 256 bits from the JVM CSPRNG; retain leading zeroes in the hex encoding.
+      args.webtoken = String(new java.math.BigInteger(256, new java.security.SecureRandom()).toString(16))
+      while (args.webtoken.length < 64) args.webtoken = "0" + args.webtoken
+      global.__webTokenGenerated = true
+    }
+
+# ---------------------
+- name : Open Advanced browser
+  exec : | #js
+    if (global.__webTokenGenerated !== true || !isDef(global.__advanced)) return
+    var url = "http://localhost:" + (isDef(args.onport) ? args.onport : 8888) + "/#token=" + encodeURIComponent(global.__webtoken)
+    print("Mini-A Advanced access URL: " + url)
+    try {
+      if (java.awt.Desktop.isDesktopSupported()) {
+        java.awt.Desktop.getDesktop().browse(new java.net.URI(url))
+        return
+      }
+    } catch(ignoreDesktop) {}
+    try {
+      // Pass the URL as one argument, without invoking a shell.
+      var os = String(java.lang.System.getProperty("os.name")).toLowerCase()
+      var command = os.indexOf("mac") >= 0 ? ["open", url] :
+        (os.indexOf("windows") >= 0 ? ["rundll32", "url.dll,FileProtocolHandler", url] : ["xdg-open", url])
+      var browser = new java.lang.ProcessBuilder(command).redirectErrorStream(true)
+        .redirectOutput(java.lang.ProcessBuilder.Redirect.DISCARD).start()
+      if (browser.waitFor(3, java.util.concurrent.TimeUnit.SECONDS) && browser.exitValue() !== 0) {
+        logWarn("Could not open the browser automatically. Open the Advanced access URL printed above.")
+      }
+    } catch(ignoreBrowser) {
+      logWarn("Could not open the browser automatically. Open the Advanced access URL printed above.")
     }
 
 # ---------------------

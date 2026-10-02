@@ -4060,13 +4060,20 @@ profiles, tenant options and token mode.
 Start the existing web server with Advanced mode enabled:
 
 ```sh
-./mini-a-web.sh onport=8888 webadvanced=true webtoken="YOUR_RANDOM_TOKEN"
+./mini-a-web.sh onport=8888 webadvanced=true
 ```
 
-Open `http://localhost:8888/#token=YOUR_RANDOM_TOKEN` and select **Advanced**.
+Without `webtoken`, Mini-A generates a secure random token for this server run,
+prints `http://localhost:8888/#token=<generated-token>` (using your `onport`), and
+tries to open the operating system browser once the routes are ready. If browser
+opening is unavailable (for example, on a headless server), open the printed URL
+manually. The generated token changes on restart and is not saved to disk.
+
+To use a fixed token, add `webtoken="YOUR_RANDOM_TOKEN"` and open
+`http://localhost:8888/#token=YOUR_RANDOM_TOKEN` manually. Select **Advanced**.
 The fragment token is kept in the browser tab's session storage and sent in the
 existing authentication header. Use a URL-encoded token when it contains special
-characters. Advanced mode refuses to start without `webtoken`. Its token grants
+characters. Advanced mode always requires authentication. Its token grants
 trusted console authority, including enabling shell and filesystem/wiki writes.
 Simple mode remains available on the same conversation.
 
