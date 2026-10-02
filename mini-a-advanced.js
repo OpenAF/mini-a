@@ -137,7 +137,7 @@ MiniAAdvanced.prototype._get = function(uuid) {
     error: function(value) { emit("error", value) },
     event: function(type, value) { if (type === "history-clear") global.__res[uuid] = []; emit(type, value) },
     view: function(name) { emit("view", name) },
-    goal: function(goal, skillUsage) { state.goal = { prompt: goal, skillUsage: skillUsage }; return true },
+    goal: function(goal, skillUsage, displayPrompt) { state.goal = { prompt: goal, skillUsage: skillUsage, displayPrompt: displayPrompt }; return true },
     validateOption: function(key) {
       if (self.isServerOption(key)) throw new Error(key + " is controlled by the server/session and requires server configuration")
     },
@@ -383,7 +383,7 @@ MiniAAdvanced.prototype.request = function(data) {
       if (state.goal && !state.cancelled && !state.closed) {
         var goal = state.goal
         state.goal = null
-        self.submitPrompt({ header: { "x-mini-a-token": global.__webtoken }, files: { postData: stringify({ uuid: state.uuid, prompt: goal.prompt, skillUsage: goal.skillUsage }, __, "") } })
+        self.submitPrompt({ header: { "x-mini-a-token": global.__webtoken }, files: { postData: stringify({ uuid: state.uuid, prompt: goal.prompt, skillUsage: goal.skillUsage, displayPrompt: goal.displayPrompt }, __, "") } })
       }
     }
   }).catch(function(e) { state.operation = null; global._mini_a_web_release(state.uuid, token); self.emit(state, "error", String(e)) })

@@ -5089,7 +5089,7 @@ function MiniAInteractiveSession(args, adapter) {
     } catch(ignorePersistError) { }
   }
 
-  function runGoal(goalText, skillUsage) {
+  function runGoal(goalText, skillUsage, displayPrompt) {
     _streamOutputStats.totalChars = 0
     _streamOutputStats.contentChars = 0
     _lastRenderedPlanSignature = ""
@@ -5109,7 +5109,7 @@ function MiniAInteractiveSession(args, adapter) {
     }
 
     lastGoalPrompt = isString(goalText) ? goalText : (isDef(goalText) ? String(goalText) : "")
-    if (adapter) return adapter.goal(processFileAttachments(effectiveGoal), skillUsage)
+    if (adapter) return adapter.goal(processFileAttachments(effectiveGoal), skillUsage, displayPrompt)
     var _args = buildArgs(effectiveGoal)
     clearDebugTrace()
     if (!ensureModel(_args)) return false
@@ -7384,7 +7384,7 @@ function MiniAInteractiveSession(args, adapter) {
           var template = isString(_loadedTemplateDoc.bodyTemplate) ? _loadedTemplateDoc.bodyTemplate : ""
           var goalFromTemplate = renderCustomSlashTemplate(template, parsedArgs)
           goalFromTemplate = preprocessSkillTemplateReferences(goalFromTemplate, _matchedDef)
-          runGoal(goalFromTemplate, buildSkillUsage(_matchedDef, getLastSkillReferenceFiles()))
+          runGoal(goalFromTemplate, buildSkillUsage(_matchedDef, getLastSkillReferenceFiles()), "/" + parsedSlashCommand.name)
         } catch (templateExecError) {
           printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to execute '/" + parsedSlashCommand.name + "': " + templateExecError, errorColor))
         }

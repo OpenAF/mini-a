@@ -17,6 +17,9 @@ global._mini_a_web_dispose = function(id) { delete global.__conversations[id] }
 var submitted=[]
 var MiniAWebPrompt = function(req) { submitted.push(jsonParse(req.files.postData)) }
 try {
+  var commandsDir = testRoot + '/.openaf-mini-a/commands'
+  io.mkdir(commandsDir)
+  io.writeFileString(commandsDir + '/git-impact.md', '---\nname: git-impact\ndescription: Fixture command\n---\nReview the complete changes for {{arg1}}.')
   var advanced = new MiniAAdvanced({homedir:testRoot, webadvancedpath: testRoot, usehistory: false, model: '(type: openai, model: fixture, key: TOP-SECRET)' })
   advanced.schedule = function(fn) { jobs.push(fn); return { catch: function() {} } }
   advanced.submitPrompt = function(req) { submitted.push(jsonParse(req.files.postData)) }
@@ -54,6 +57,11 @@ try {
   check(io.readFileString(advanced.presetPath).indexOf('TOP-SECRET')<0,'presets omit secrets')
   advanced.request({uuid:'first',action:'command',command:'Hello',requestId:'goal-1'});jobs.shift()()
   check(submitted.length===1 && submitted[0].prompt==='Hello','goals use shared prompt route')
+  advanced.request({uuid:'first',action:'command',command:'/git-impact main',requestId:'custom-goal'});jobs.shift()()
+  check(submitted[1].prompt.trim() === 'Review the complete changes for main.', 'custom command still submits its expanded prompt and arguments')
+  check(submitted[1].displayPrompt === '/git-impact', 'custom command submits only its name for display')
+  advanced.request({uuid:'first',action:'command',command:'Follow up',requestId:'plain-goal'});jobs.shift()()
+  check(submitted[2].prompt === 'Follow up' && isUnDef(submitted[2].displayPrompt), 'ordinary prompts do not inherit command labels')
   var recovered=new MiniAAdvanced({homedir:testRoot,webadvancedpath:testRoot,usehistory:false}).get('first')
   check(recovered.runtime.options().useshell===true,'settings recovered')
   check(recovered.sequence===first.sequence,'journal recovered')

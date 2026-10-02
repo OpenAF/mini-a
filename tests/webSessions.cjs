@@ -112,6 +112,39 @@ assert.equal(call('advanced', {uuid:'a',command:'x'.repeat(150001)}).error, 'Inv
 assert.equal(advancedCalls, 1);
 console.log('Advanced opt-in, authentication and request-size checks passed.');
 
+// Custom command labels reach the transcript and journal while the agent receives
+// the full prompt, including on a reused agent and after returning to plain input.
+const commandEvents = [];
+g._mini_a_web_extractSubtaskId = message => /^\[subtask:([^\]]+)\]/.exec(message)?.[1];
+const commandState = { runtime: {
+  options: () => ({}), attach() {}, sync() {}, beginTrace: () => () => {},
+  saveConversation() {}, afterGoal() {}
+} };
+g.__advanced = { sessions: { commands: commandState }, persist() {}, safe: x => x,
+  emit(state, type, value) { commandEvents.push({type, value}); } };
+Agent.prototype.setTraceFn = function() {};
+const originalStart = Agent.prototype.start;
+Agent.prototype.start = function(args) {
+  this.fn('user', args.goal);
+  return originalStart.call(this, args);
+};
+finalResult = 'Command answer';
+for (const [prompt, displayPrompt] of [
+  ['Expanded impact instructions', '/git-impact'],
+  ['Expanded commit instructions', '/git-commit'],
+  ['Plain follow-up', undefined]
+]) {
+  call('prompt', {uuid: 'commands', prompt, displayPrompt}); pending.shift()();
+  assert.equal(g.__conversations.commands.lastArgs.goal, 'Prefix: ' + prompt);
+  assert.equal(g.__res.commands.filter(e => e.event === '👤').at(-1).message, displayPrompt || 'Prefix: ' + prompt);
+  assert.equal(commandEvents.filter(e => e.type === 'user').at(-1).value, displayPrompt || 'Prefix: ' + prompt);
+  assert.equal(commandState.displayPrompt, undefined, 'display label cleared after the run');
+}
+call('prompt', {uuid: 'simple-label', prompt: 'Simple prompt', displayPrompt: '/ignored'}); pending.shift()();
+assert.equal(g.__res['simple-label'].find(e => e.event === '👤').message, 'Prefix: Simple prompt');
+Agent.prototype.start = originalStart;
+console.log('Advanced custom command display checks passed.');
+
 // Advanced new-conversation and expiry preserve console history and its VM store.
 let savedAdvanced = 0, persistedAdvanced = 0, disposedAdvanced = 0, deletedVm = 0, prunedAdvanced = 0;
 g.__advanced = {

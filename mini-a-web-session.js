@@ -19,6 +19,7 @@ function MiniAWebPrompt(request) {
     // Parse POST data
     var postData = jsonParse(request.files.postData)
     postData.prompt = __normalizePromptInput(postData.prompt)
+    if (isString(postData.displayPrompt)) postData.displayPrompt = __normalizePromptInput(postData.displayPrompt)
     // Validate UUID or generate a new one
     if (isDef(postData.uuid)) {
       if (!global._mini_a_web_isValidUuid(postData.uuid)) {
@@ -72,6 +73,7 @@ function MiniAWebPrompt(request) {
       if (isDef(advancedState)) {
         advancedState.operation = runToken
         advancedState.kind = "prompt"
+        advancedState.displayPrompt = postData.displayPrompt
         global.__advanced.persist(advancedState)
       }
       var startArgs = merge(effectiveArgs, {
@@ -127,6 +129,9 @@ function MiniAWebPrompt(request) {
         lma.setInteractionFn( (e, m) => {
           try {
             var advancedLive = isDef(global.__advanced) ? global.__advanced.sessions[uuid] : __
+            // The callback survives across goals; use the current display label.
+            // Keep the expanded prompt in startArgs and the model conversation.
+            if (e === "user" && isDef(advancedLive) && isString(advancedLive.displayPrompt) && advancedLive.displayPrompt.length > 0 && !isString(global._mini_a_web_extractSubtaskId(m))) m = advancedLive.displayPrompt
             if (isDef(advancedLive) && e !== "stream" && e !== "planner_stream") global.__advanced.emit(advancedLive, e, m)
             if (e == "stream") {
               // Local child agents inherit this callback and prefix every
@@ -396,7 +401,7 @@ function MiniAWebPrompt(request) {
           global._mini_a_web_dispose(uuid)
         }
       } finally {
-        try { if (isDef(advancedState)) { advancedState.operation = null; global.__advanced.persist(advancedState) } }
+        try { if (isDef(advancedState)) { advancedState.operation = null; delete advancedState.displayPrompt; global.__advanced.persist(advancedState) } }
         finally { global._mini_a_web_release(uuid, runToken) }
       }
     }).catch((eee) => {
