@@ -115,6 +115,14 @@ body.advanced-resizing,body.advanced-resizing * {user-select:none!important;-web
 .advanced-settings label,.advanced-form label {display:block;margin:.3rem 0}
 .advanced-settings small {display:block;opacity:.7;margin:.3rem 0}
 .advanced-actions {display:flex;flex-wrap:wrap;gap:.4rem;margin:.5rem 0}
+.advanced-history-list {display:flex;flex-direction:column;gap:.5rem;list-style:none;padding:0;margin:0 0 1rem}
+.advanced-history-list li {min-width:0}
+.advanced-history-list .advanced-history-open {display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .75rem;width:100%;margin:0;padding:.75rem;text-align:left}
+.advanced-history-title {flex:1 1 12rem;font-weight:600;overflow-wrap:anywhere}
+.advanced-history-date {color:var(--advanced-muted);font-size:12px}
+.advanced-history-current {color:var(--advanced-accent);font-size:12px}
+.advanced-history-open[aria-current=true] {border-color:var(--advanced-accent-border);background:var(--advanced-accent-bg)}
+.advanced-history-open:focus-visible {outline:2px solid var(--advanced-check);outline-offset:2px}
 .advanced-events details {border-bottom:1px solid #8884;padding:.35rem 0}
 .advanced-events summary {cursor:pointer;overflow-wrap:anywhere;font-family:monospace}
 :is(.advanced-shell,.advanced-dialog) pre {white-space:pre-wrap;overflow-wrap:anywhere;font:12px monospace;max-height:400px;overflow:auto}
@@ -159,6 +167,8 @@ body.advanced-resizing[data-advanced-dock=top],body.advanced-resizing[data-advan
 .advanced-settings>div,.advanced-form {background:var(--advanced-card);border:1px solid var(--advanced-line);border-radius:9px;padding:.85rem;margin:.65rem 0}
 .advanced-settings label {color:var(--advanced-value);font:12px ui-monospace,SFMono-Regular,Menlo,monospace}
 .advanced-settings label input {margin-top:.45rem}
+.advanced-settings label.advanced-boolean-setting {display:flex;align-items:center;gap:.65rem;overflow-wrap:anywhere}
+.advanced-settings label.advanced-boolean-setting input[type=checkbox] {flex:0 0 auto;margin:0}
 .advanced-settings small {color:var(--advanced-muted);opacity:1;line-height:1.5}
 .advanced-activity {border-top:0;gap:.8rem}
 .advanced-activity-header label {color:var(--advanced-muted);font-size:12px}
@@ -210,6 +220,27 @@ body.advanced-resizing[data-advanced-dock=top],body.advanced-resizing[data-advan
 .advanced-stat-map .njsmap_tablecell,.advanced-stat-map .njsmap_tablehead {padding:.4rem;border:1px solid var(--advanced-line);vertical-align:top}
 .advanced-stat-map span,.advanced-stat-map a {color:var(--advanced-text)!important}
 .advanced-stat-map .njsmap_valueNumber,.advanced-stat-map .njsmap_valueBool {color:var(--advanced-value)!important}
+
+/* Debug index and selected record share the Advanced theme. */
+.advanced-debug-controls {align-items:center}
+.advanced-debug-controls label {display:flex;align-items:center;gap:.5rem;min-width:0}
+.advanced-debug-controls select {max-width:100%;color:var(--advanced-text);background:var(--advanced-field);border:1px solid var(--advanced-control-border);border-radius:5px;padding:.35rem}
+.advanced-debug-table {max-height:45vh;overflow:auto;margin:.6rem 0}
+.advanced-debug-table th {position:sticky;top:0;background:var(--advanced-bg)}
+.advanced-debug-table td {vertical-align:top}
+.advanced-debug-table tbody tr {cursor:pointer}
+.advanced-debug-table tbody tr:hover {background:var(--advanced-hover)}
+.advanced-debug-table tr.is-selected {background:var(--advanced-accent-bg);box-shadow:inset 3px 0 var(--advanced-accent)}
+.advanced-debug-table button[aria-pressed=true] {color:var(--advanced-accent);border-color:var(--advanced-accent-border)}
+.advanced-debug-table button {white-space:nowrap}
+.advanced-debug-table .advanced-debug-secondary {color:var(--advanced-muted);font-size:11px}
+.advanced-debug-details {min-width:0;margin-top:1rem;padding:.8rem;border:1px solid var(--advanced-line);border-radius:9px;background:var(--advanced-card)}
+.advanced-debug-details h4 {margin:0}
+.advanced-debug-details [role=status] {color:var(--advanced-muted);overflow-wrap:anywhere}
+.advanced-debug-details pre {white-space:pre-wrap;overflow-wrap:anywhere}
+.advanced-debug-controls :focus-visible,.advanced-debug-table :focus-visible {outline:2px solid var(--advanced-check);outline-offset:2px}
+.advanced-debug-controls button:disabled {opacity:.5;cursor:default}
+@media(max-width:600px){.advanced-debug-table .advanced-debug-secondary{display:none}.advanced-debug-table th,.advanced-debug-table td{padding:.4rem .25rem}.advanced-debug-details{padding:.5rem}}
 
 /* Editable nJSMap-style key/value tables, shared by Advanced field popups. */
 .advanced-data-editor {display:block;min-width:0;font:12px/1.4 system-ui}

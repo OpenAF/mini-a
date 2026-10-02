@@ -4088,6 +4088,15 @@ trace inspector, `/edit` opens a browser editor, `/cls` clears the visible activ
 and `/exit` ends the session without stopping the web server. Paths refer to the
 server filesystem, including `@file` attachments and `/save` destinations.
 
+**Debug** uses the console's category labels and a chronological table of sequence,
+kind, and summary, with timestamp and category as secondary columns. Opening the
+panel or changing categories selects the first event. Click a row, or focus its
+sequence button and press Enter/Space, to replace the full record below the table.
+Records use escaped nJSMap rendering with a plain-text fallback. **Load more** keeps
+the selected record; **Refresh** reloads the category. Full records are fetched from
+the disk-backed trace only when selected, and inspection stays inside Debug without
+adding entries to Live activity. Existing credential redaction still applies.
+
 The shared dispatcher covers these command families:
 
 | Commands | Browser behavior |
@@ -4150,6 +4159,7 @@ node tests/consolePaths.cjs
 node tests/entryPointParity.cjs
 node tests/webSessions.cjs
 node tests/webActivity.cjs
+node --test tests/webAdvanced*.cjs
 node tests/webStreamCompletion.cjs
 oaf -f tests/modePresets.js
 oaf -f tests/webAdvanced.js

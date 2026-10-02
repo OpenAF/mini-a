@@ -26,6 +26,14 @@ for (const payload of [
 const escaped = context.structuredOutput({'<img src=x onerror=alert(1)>': 'http://example.com/" onclick="alert(1)', value:'\x1b[32m<script>x</script>\x1b[0m', empty:null});
 assert.doesNotMatch(escaped.innerHTML, /<img|<script|\x1b|href="[^"]*" onclick=/);
 assert.match(escaped.innerHTML, /&lt;script&gt;/);
+const longText = 'x'.repeat(16000) + '<img src=x onerror=alert(1)>';
+const fullRecord = context.structuredMap({sequence: 7, timestamp: '2026-10-02T10:00:00Z', kind: 'tool_result', payload: {nested: [{text: longText}]}});
+assert.match(fullRecord.innerHTML, /sequence/);
+assert.match(fullRecord.innerHTML, /2026-10-02 10:00:00/);
+assert.match(fullRecord.innerHTML, /tool_result/);
+assert.ok(fullRecord.innerHTML.includes('x'.repeat(16000)));
+assert.match(fullRecord.innerHTML, /&lt;img/);
+assert.doesNotMatch(fullRecord.innerHTML, /<img/);
 assert.equal(context.structuredOutput('ordinary text').tag, 'pre');
 context.nJSMap = undefined;
 assert.equal(context.structuredOutput({count:2}).children[0].tag, 'pre');

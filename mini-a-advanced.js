@@ -243,7 +243,7 @@ MiniAAdvanced.prototype.snapshot = function(state, after) {
       var value = options[key]
       var modelEnv = { model: "OAF_MODEL", modellc: "OAF_LC_MODEL", modelval: "OAF_VAL_MODEL" }
       if (isUnDef(value) && modelEnv[key]) value = getEnv(modelEnv[key])
-      return { name: key, type: def.type, description: def.description, value: self.safe(value, key), defaultValue: self.safe(def.default, key), source: Object.prototype.hasOwnProperty.call(state.overrides, key) ? "session" : "server",
+      return { name: key, type: def.type, dataEditor: def.dataEditor, description: def.description, value: self.safe(value, key), defaultValue: self.safe(def.default, key), source: Object.prototype.hasOwnProperty.call(state.overrides, key) ? "session" : "server",
         readOnly: self.isServerOption(key) }
     }), presets: Object.keys(this.presets.presets), defaultPreset: this.presets.defaultPreset
   }

@@ -609,6 +609,7 @@ function MiniAInteractiveSession(args, adapter) {
     return __miniAUnwrapAnswer(text)
   }
 
+  // dataEditor opts into inline structured editing and selects the initial map/array root.
   var parameterDefinitions = {
     webadvanced: { type: "boolean", default: false, description: "Enable trusted Advanced web console APIs (requires webtoken)." },
     webadvancedpath: { type: "string", description: "Local Advanced session journal and preset directory." },
@@ -640,7 +641,7 @@ function MiniAInteractiveSession(args, adapter) {
     usetools       : { type: "boolean", default: __, description: "Register MCP tools directly on the model" },
     capabilityselection: { type: "boolean", default: false, description: "Select a bounded relevant subset of normalized capabilities before registering MCP tools" },
     capabilitylimit: { type: "number", default: 8, description: "Maximum capabilities exposed when capabilityselection=true" },
-    policy         : { type: "string", description: "SLON/JSON policy definition for shell, tools, delegation, Wiki and network" },
+    policy         : { type: "string", dataEditor: "map", description: "SLON/JSON policy definition for shell, tools, delegation, Wiki and network" },
     policyfile     : { type: "string", description: "JSON file containing centralized policy definition" },
     usetoolslc     : { type: "boolean", default: __, description: "Register MCP tools directly only on the low-cost model" },
     useutils       : { type: "boolean", default: __, description: "Enable bundled Mini Utils Tool utilities" },
@@ -664,8 +665,8 @@ function MiniAInteractiveSession(args, adapter) {
     memoryusersession: { type: "boolean", default: false, description: "Enable usememory and auto-configure ~/.openaf-mini-a file-backed session memory only." },
     memoryscope    : { type: "string", default: "both", description: "Memory read scope: session, global, or both." },
     memorysessionid: { type: "string", description: "Session id namespace used by memorysessionch persistence." },
-    memorych       : { type: "string", description: "JSSLON channel definition or native file path for global memory persistence." },
-    memorysessionch: { type: "string", description: "JSSLON channel definition or native file path for session memory persistence." },
+    memorych       : { type: "string", dataEditor: "map", description: "JSSLON channel definition or native file path for global memory persistence." },
+    memorysessionch: { type: "string", dataEditor: "map", description: "JSSLON channel definition or native file path for session memory persistence." },
     usewiki        : { type: "boolean", default: false, description: "Enable the wiki knowledge base for shared markdown knowledge." },
     wikiaccess     : { type: "string", default: "ro", description: "Wiki access mode: ro or rw." },
     wikibackend    : { type: "string", default: "fs", description: "Wiki backend: fs, s3, s3fs, es, or http (https is an alias)." },
@@ -686,11 +687,11 @@ function MiniAInteractiveSession(args, adapter) {
     wikilintstaleddays: { type: "number", default: 90, description: "Default stale-page threshold in days for wiki lint." },
     wikilintresultlimit: { type: "number", default: 0, description: "Default maximum lint issues returned to an agent (0 returns all; dream reorg defaults to 25)." },
     wikitarget     : { type: "string", description: "Initial read-only mount selected by wikiman (otherwise the primary)." },
-    wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts; fs roots may be directories or local .zip/.okt archives." },
+    wikimounts     : { type: "string", dataEditor: "array", description: "SLON/JSON array of read-only wiki mounts; fs roots may be directories or local .zip/.okt archives." },
     wikiretrievalv2: { type: "boolean", description: "Prefer V2 passage retrieval (default true); unpublished wikis use legacy retrieval with a warning until explicitly reindexed; false forces legacy." },
-    wikiretrievalconfig: { type: "string", description: "Validated SLON/JSON passage/cache/artifact budgets; readPolicy auto (default) adopts published analysis for read-only V2 wikis, strict requires a configured match." },
+    wikiretrievalconfig: { type: "string", dataEditor: "map", description: "Validated SLON/JSON passage/cache/artifact budgets; readPolicy auto (default) adopts published analysis for read-only V2 wikis, strict requires a configured match." },
     wikitelemetry: { type: "boolean", description: "Record local aggregate wiki retrieval telemetry (off by default); writable managers persist it, read-only managers keep it in memory." },
-    wikilexical    : { type: "string", description: "SLON/JSON Lucene lexical configuration; defaults to {language:'english'} and supports optional synonymsFile." },
+    wikilexical    : { type: "string", dataEditor: "map", description: "SLON/JSON Lucene lexical configuration; defaults to {language:'english'} and supports optional synonymsFile." },
     usewikigraph   : { type: "boolean", default: false, description: "Enable the wiki knowledge graph for structural and semantic page relationships." },
     wikigraphsemantic: { type: "boolean", default: false, description: "Build semantic (embedding-based) edges in addition to structural links when running /graph build." },
     wikigraphcommunity: { type: "string", description: "Community detection algorithm for the wiki graph (louvain|leiden)." },
@@ -712,7 +713,7 @@ function MiniAInteractiveSession(args, adapter) {
     useskillswiki   : { type: "boolean", default: false, description: "Enable the virtual skill library (docs/VIRTUAL-SKILLS.md). Reuses usewiki's wiki when no skillwiki* config is given." },
     skillwikibackend: { type: "string", description: "Skill library backend: fs, s3, s3fs, es, or http. Defaults to fs. Only needed for a dedicated skill wiki separate from usewiki." },
     skillwikiroot  : { type: "string", description: "Root directory for a dedicated skill library (fs backend). Only needed when not reusing usewiki's wiki." },
-    skillwikimounts: { type: "string", description: "SLON/JSON array of read-only skill-library mounts, same shape as wikimounts. Only used with a dedicated skill wiki." },
+    skillwikimounts: { type: "string", dataEditor: "array", description: "SLON/JSON array of read-only skill-library mounts, same shape as wikimounts. Only used with a dedicated skill wiki." },
     skillsautosearch: { type: "boolean", default: false, description: "Allow mini-a to consult the skill library automatically during planning (opt-in, bounded by skillsautolimit/skillsmaxloaded/skillsmaxchars)." },
     skillsautolimit: { type: "number", default: 5, description: "Maximum results per automatic skill search." },
     skillsmaxloaded: { type: "number", default: 3, description: "Maximum distinct skills opened per agent run." },
@@ -772,8 +773,8 @@ function MiniAInteractiveSession(args, adapter) {
     shellprefix    : { type: "string", description: "Prefix applied to each shell command" },
     shellallow     : { type: "string", description: "Comma-separated shell allow list" },
     shellbanextra  : { type: "string", description: "Comma-separated extra banned commands" },
-    browsercontext : { type: "string", description: "Browser context configuration (JSSLON/JSON) or true to auto-enable when needed." },
-    mcp            : { type: "string", description: "MCP connection definition (SLON/JSON)" },
+    browsercontext : { type: "string", dataEditor: "map", description: "Browser context configuration (JSSLON/JSON) or true to auto-enable when needed." },
+    mcp            : { type: "string", dataEditor: "map", description: "MCP connection definition (SLON/JSON)" },
     agent          : { type: "string", description: "Markdown agent profile path or inline content with YAML metadata to prefill args" },
     agentfile      : { type: "string", description: "Legacy alias for agent" },
     mode           : { type: "string", description: "Apply comma-separated presets from mini-a-modes (later presets win)." },
@@ -811,25 +812,25 @@ function MiniAInteractiveSession(args, adapter) {
     planfile       : { type: "string", description: "Plan file to load or save before execution" },
     planformat     : { type: "string", description: "Plan format override (md|json)" },
     planstyle      : { type: "string", default: "simple", description: "Planning style: simple or legacy." },
-    plancontent    : { type: "string", description: "Inline plan content (JSON or Markdown) to preload" },
+    plancontent    : { type: "string", dataEditor: "map", description: "Inline plan content (JSON or Markdown) to preload" },
     updatefreq     : { type: "string", default: "auto", description: "Plan update frequency (auto|always|checkpoints|never)" },
     updateinterval : { type: "number", default: 3, description: "Steps between plan updates when updatefreq=auto" },
     forceupdates   : { type: "boolean", default: false, description: "Force plan updates even when actions fail" },
     planlog        : { type: "string", description: "Append plan updates to this log file" },
     saveplannotes  : { type: "boolean", default: false, description: "Append execution learnings to plan notes" },
-    rules          : { type: "string", description: "Custom agent rules (plain text, bullet list, or JSON/SLON array)" },
-    state          : { type: "string", description: "Initial agent state (JSON or SLON)" },
+    rules          : { type: "string", dataEditor: "array", description: "Custom agent rules (plain text, bullet list, or JSON/SLON array)" },
+    state          : { type: "string", dataEditor: "map", description: "Initial agent state (JSON or SLON)" },
     format         : { type: "string", description: "Final answer format (md|json|yaml|toon|slon)" },
     maxcontent     : { type: "number", description: "Alias for maxcontext." },
-    model          : { type: "string", description: "Override OAF_MODEL configuration" },
-    modellc        : { type: "string", description: "Override OAF_LC_MODEL configuration" },
-    modelval       : { type: "string", description: "Override OAF_VAL_MODEL configuration" },
-    auditch        : { type: "string", description: "Audit channel definition or native file path" },
-    toollog        : { type: "string", description: "Tool usage log channel definition or native file path" },
-    metricsch      : { type: "string", description: "Metrics channel definition or native file path" },
-    debugch        : { type: "string", description: "Debug channel definition or native file path for the main model." },
-    debuglcch      : { type: "string", description: "Debug channel definition or native file path for the low-cost model." },
-    debugvalch     : { type: "string", description: "Debug channel definition or native file path for the validation model." },
+    model          : { type: "string", dataEditor: "map", description: "Override OAF_MODEL configuration" },
+    modellc        : { type: "string", dataEditor: "map", description: "Override OAF_LC_MODEL configuration" },
+    modelval       : { type: "string", dataEditor: "map", description: "Override OAF_VAL_MODEL configuration" },
+    auditch        : { type: "string", dataEditor: "map", description: "Audit channel definition or native file path" },
+    toollog        : { type: "string", dataEditor: "map", description: "Tool usage log channel definition or native file path" },
+    metricsch      : { type: "string", dataEditor: "map", description: "Metrics channel definition or native file path" },
+    debugch        : { type: "string", dataEditor: "map", description: "Debug channel definition or native file path for the main model." },
+    debuglcch      : { type: "string", dataEditor: "map", description: "Debug channel definition or native file path for the low-cost model." },
+    debugvalch     : { type: "string", dataEditor: "map", description: "Debug channel definition or native file path for the validation model." },
     deepresearch   : { type: "boolean", default: false, description: "Enable deep research mode with iterative validation" },
     maxcycles      : { type: "number", default: 3, description: "Maximum research cycles in deep research mode" },
     validationgoal : { type: "string", description: "Validation criteria for deep research outcomes (string or file path; implies deepresearch=true, maxcycles=3)" },
@@ -849,7 +850,7 @@ function MiniAInteractiveSession(args, adapter) {
     workerregtoken : { type: "string", description: "Bearer token for worker registration endpoints" },
     workerevictionttl: { type: "number", default: 60000, description: "Heartbeat TTL in ms before dynamic worker eviction" },
     workerregurl   : { type: "string", description: "Comma-separated registration URL(s) used by workers in workermode" },
-    workerskills   : { type: "string", description: "JSON/SLON array of A2A-style worker skills exposed by workermode" },
+    workerskills   : { type: "string", dataEditor: "array", description: "JSON/SLON array of A2A-style worker skills exposed by workermode" },
     workertags     : { type: "string", description: "Comma-separated tags appended to the default workermode skill" },
     workerreginterval: { type: "number", default: 30000, description: "Worker heartbeat interval in ms for self-registration" },
     maxconcurrent  : { type: "number", default: 4, description: "Maximum concurrent child agents when delegation is enabled" },
@@ -862,7 +863,7 @@ function MiniAInteractiveSession(args, adapter) {
     autodelegationthreshold: { type: "number", default: 8192, description: "Token threshold that triggers auto-delegation when enabled." },
     autodelegationmaxperstep: { type: "number", default: 2, description: "Maximum number of auto-delegations per step." },
     noisytools     : { type: "string", description: "Comma-separated list of tool names that should be logged with full verbosity." },
-    subtasks       : { type: "string", description: "Inline subtasks definition (JSON/SLON) for startup delegation." },
+    subtasks       : { type: "string", dataEditor: "array", description: "Inline subtasks definition (JSON/SLON) for startup delegation." },
     subtasksfile   : { type: "string", description: "Path to a subtasks file for startup delegation." },
     subtaskssequential: { type: "boolean", default: false, description: "Run startup subtasks sequentially instead of in parallel." },
     forkstatemaxbytes: { type: "number", default: 65536, description: "Maximum serialized state size shared with delegated subtasks." },
@@ -4897,7 +4898,7 @@ function MiniAInteractiveSession(args, adapter) {
     }
   }
 
-  function traceEventSummary(record) {
+  function traceEventSummary(record, compact) {
     var payload = isMap(record.payload) ? record.payload : {}
     var text = ""
     if (isString(payload.label)) text = payload.label
@@ -4905,7 +4906,7 @@ function MiniAInteractiveSession(args, adapter) {
     else if (isString(payload.event)) text = payload.event + (isDef(payload.message) ? ": " + payload.message : "")
     else if (isString(payload.content)) text = payload.content
     else if (isDef(payload.message)) text = String(payload.message)
-    else text = stringify(payload, __, "")
+    else text = compact ? record.kind : stringify(payload, __, "")
     return truncateForConsoleWidth(String(text || "").replace(/\s+/g, " ").trim(), 90)
   }
 
@@ -4952,7 +4953,7 @@ function MiniAInteractiveSession(args, adapter) {
     return selected >= 0 && selected < debugTraceFilters.length ? debugTraceFilters[selected] : __
   }
 
-  function readDebugTraceIndex(tracePath) {
+  function readDebugTraceIndex(tracePath, compact) {
     var index = [], raf = __
     try {
       raf = new java.io.RandomAccessFile(tracePath, "r")
@@ -4963,7 +4964,7 @@ function MiniAInteractiveSession(args, adapter) {
         var line = String(new java.lang.String(new java.lang.String(rawLine).getBytes("ISO-8859-1"), "UTF-8"))
         var record = jsonParse(line, __, __, true)
         if (!isMap(record)) continue
-        index.push({ offset: offset, sequence: record.sequence, kind: record.kind, category: classifyDebugTraceRecord(record), timestamp: record.timestamp, summary: traceEventSummary(record) })
+        index.push({ offset: offset, sequence: record.sequence, kind: record.kind, category: classifyDebugTraceRecord(record), timestamp: record.timestamp, summary: traceEventSummary(record, compact) })
       }
     } finally {
       if (isDef(raf)) try { raf.close() } catch(ignoreTraceIndexCloseError) {}
@@ -7431,14 +7432,16 @@ function MiniAInteractiveSession(args, adapter) {
       },
       beginTrace: function(goal) { return toBoolean(sessionOptions.debugtrace) === true ? createDebugTrace(goal) : function() {} },
       tracePage: function(after, limit, category, sequence) {
-        if (!lastDebugTrace) return { events: [] }
-        var index = readDebugTraceIndex(lastDebugTrace.path)
+        var filters = debugTraceFilters.map(function(filter) { return { category: filter.key, label: filter.label } })
+        if (!lastDebugTrace) return isDef(sequence) ? {} : { events: [], total: 0, hasMore: false, filters: filters }
+        var index = readDebugTraceIndex(lastDebugTrace.path, true)
         if (isDef(sequence)) {
           var entry = index.filter(function(e) { return e.sequence === sequence })[0]
           return entry ? readDebugTraceRecord(lastDebugTrace.path, entry.offset) : {}
         }
-        var rows = index.filter(function(e) { return e.sequence > after && (!category || category === "all" || category === e.category) }).slice(0, limit)
-        return { events: rows.map(function(e) { var out = merge({}, e); delete out.offset; return out }), total: index.length }
+        var remaining = index.filter(function(e) { return e.sequence > after && (!category || category === "all" || category === e.category) })
+        var rows = remaining.slice(0, limit)
+        return { events: rows.map(function(e) { var out = merge({}, e); delete out.offset; return out }), total: index.length, hasMore: remaining.length > rows.length, filters: filters }
       },
       dispose: function() {
         clearDebugTrace()

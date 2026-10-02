@@ -33,6 +33,11 @@ try {
   first.runtime.agent = originalAgent
   var snap=advanced.snapshot(first,0)
   check(snap.commands.indexOf('absorb')>=0,'broad command registry')
+  var settingByName = {}
+  snap.settings.forEach(function(setting) { settingByName[setting.name] = setting })
+  check(settingByName.model.dataEditor === 'map', 'model editor metadata reaches browser')
+  check(settingByName.wikimounts.dataEditor === 'array', 'array editor metadata reaches browser')
+  check(isUnDef(settingByName.absorboutput.dataEditor) && isUnDef(settingByName.policyfile.dataEditor), 'path-only settings do not offer data editors')
   check(stringify(snap).indexOf('TOP-SECRET')<0,'model credentials redacted')
   jobs = []
   var change={uuid:'first',action:'command',command:'/set useshell true',requestId:'change-1'}
@@ -75,6 +80,26 @@ try {
   var traces=first.runtime.tracePage(0,100,'calls')
   check(traces.events.length===1,'shared trace classification')
   check(first.runtime.tracePage(0,100,'all',1).payload.name==='fixture','trace details')
+  var traceJournalSequence = first.sequence
+  var longTraceText = new Array(15002).join('x') + '<script>café 漢字</script>'
+  sink('tool_result',{nested:{items:[{text:longTraceText}]}})
+  sink('event',{event:'warn',message:'fixture warning'})
+  sink('llm_prompt',{label:'SYSTEM_INSTRUCTION',content:'system fixture'})
+  var tracePage = advanced.request({uuid:'first',action:'trace',after:0,category:'all'})
+  check(tracePage.filters[1].label === 'MCP and tool calls' && tracePage.filters[8].label === 'Warnings and errors', 'console debug labels reach browser')
+  check(tracePage.filters[1].category === 'calls', 'filter names survive API redaction')
+  check(tracePage.events.map(function(e) { return e.sequence }).join(',') === '1,2,3,4', 'trace index is chronological')
+  check(tracePage.events[1].summary === 'tool_result' && tracePage.events[2].summary === 'warn: fixture warning', 'compact fallback retains readable summaries')
+  check(isUnDef(tracePage.events[1].payload) && isUnDef(tracePage.events[1].offset), 'trace pages contain only public index metadata')
+  var traceDetail = advanced.request({uuid:'first',action:'trace',sequence:2})
+  check(traceDetail.payload.nested.items[0].text === longTraceText, 'selected record retains complete nested long UTF-8 strings')
+  check(first.runtime.tracePage(0,1,'all').hasMore && !first.runtime.tracePage(3,1,'all').hasMore, 'trace page continuation')
+  check(first.runtime.tracePage(1,1,'all').events[0].sequence === 2, 'trace cursor continuation')
+  check(first.runtime.tracePage(0,1,'problems').events[0].sequence === 3 && !first.runtime.tracePage(0,1,'problems').hasMore, 'filtered trace continuation')
+  check(first.runtime.tracePage(0,100,'thinking').events.length === 0, 'empty trace category')
+  check(Object.keys(advanced.request({uuid:'first',action:'trace',sequence:999})).length === 0, 'missing trace record')
+  check(advanced.request({uuid:'second',action:'trace'}).total === 0, 'empty trace metadata')
+  check(first.sequence === traceJournalSequence && jobs.length === 0, 'debug inspection emits no activity or commands')
   var confirmationAgent = new MiniA(), confirmationCount = 0
   confirmationAgent.setInteractionFn(function() {})
   confirmationAgent.setConfirmFn(function(label, choices) { confirmationCount++; check(choices[0] === 'No', 'confirmation defaults to refusal'); return 0 })

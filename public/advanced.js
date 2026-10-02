@@ -273,9 +273,10 @@ window.MiniAAdvancedUI = function(bridge) {
     await mutate({action:'command',command:value});
   }
   function setEnabled(value) {
+    debugGeneration++;
     enabled = value; shell.hidden = split.hidden = !value; if (!value) finishDrag(); document.body.classList.toggle('mini-a-advanced', value);
     toggle.textContent = value ? 'Simple' : 'Advanced';
-    if (value) { const uuid = sessionStorage.getItem(storeKey); if (uuid && !snapshot) bridge.resume(uuid); poll().catch(showError); }
+    if (value) { const uuid = sessionStorage.getItem(storeKey); if (uuid && !snapshot) bridge.resume(uuid); if (activeScreen === 'debug') renderScreen(); poll().catch(showError); }
   }
   function appendEvent(record, navigate = true) {
     if (record.type === 'view') {
@@ -307,6 +308,7 @@ window.MiniAAdvancedUI = function(bridge) {
       const current = bridge.uuid();
       if (snapshot && current !== snapshot.uuid) { after = 0; snapshot = null; events.replaceChildren(); }
       const data = await api({action:'snapshot',after});
+      if (current !== bridge.uuid()) return;
       const first = !snapshot; snapshot = data; busy = data.busy; bridge.trackRun(data);
       paneStatus.dataset.state = data.closed ? 'closed' : busy ? 'working' : 'ready';
       status.textContent = paneStatus.textContent = data.closed ? 'Session ended' : busy ? 'Working' : 'Ready';
@@ -329,7 +331,14 @@ window.MiniAAdvancedUI = function(bridge) {
   }
   function commandForm(label, build, fields) {
     const form = el('form', undefined, 'advanced-form'); form.append(el('h4',label));
-    const nodes = fields.map(name => { const field = name === 'Content' ? el('textarea') : input(name); field.setAttribute('aria-label', name); const lab=el('label',name); lab.append(field); form.append(lab); window.MiniADataEditor.bind(field, {label: name}); return field; });
+    const nodes = fields.map(spec => {
+      const name = typeof spec === 'string' ? spec : spec.name;
+      const field = name === 'Content' ? el('textarea') : input(name);
+      field.setAttribute('aria-label', name);
+      const lab=el('label',name); lab.append(field); form.append(lab);
+      if (spec.dataEditor) window.MiniADataEditor.bind(field, {label: name, root: spec.dataEditor});
+      return field;
+    });
     const go = el('button','Run'); go.type='submit'; form.append(go);
     form.onsubmit = e => { e.preventDefault(); command(build(...nodes.map(n=>n.value))).catch(showError); };
     screen.append(form);
@@ -426,6 +435,101 @@ window.MiniAAdvancedUI = function(bridge) {
     }
     if (!container.childElementCount) container.append(el('p', 'No ' + statsMode + ' statistics available yet.'));
   }
+  let debugGeneration = 0;
+  function debugScreen() {
+    const generation = debugGeneration, uuid = bridge.uuid();
+    let cursor = 0, pageRequest = 0, recordRequest = 0, selected = null, rows = [], filters = [];
+    const current = () => generation === debugGeneration && uuid === bridge.uuid() && activeScreen === 'debug' && enabled;
+    const controls = el('div', undefined, 'advanced-actions advanced-debug-controls');
+    const category = el('select'); category.setAttribute('aria-label', 'Debug category');
+    const initial = el('option', 'All events'); initial.value = 'all'; category.append(initial);
+    const refresh = button('Refresh', () => load(true));
+    const more = button('Load more', () => load(false)); more.hidden = true;
+    const notice = el('p', '', 'advanced-screen-description'); notice.setAttribute('role', 'status');
+    const frame = el('div', undefined, 'advanced-debug-table');
+    const table = el('table'); table.setAttribute('aria-label', 'Chronological debug events');
+    const head = el('thead'), headings = el('tr'), body = el('tbody');
+    ['Sequence', 'Kind', 'Summary', 'Timestamp', 'Category'].forEach((label, index) => {
+      const cell = el('th', label, index > 2 ? 'advanced-debug-secondary' : undefined);
+      cell.setAttribute('scope', 'col'); headings.append(cell);
+    });
+    head.append(headings); table.append(head, body); frame.append(table);
+    const details = el('section', undefined, 'advanced-debug-details');
+    details.setAttribute('aria-label', 'Selected debug record');
+    const detailStatus = el('p', 'Select an event to inspect.'); detailStatus.setAttribute('role', 'status');
+    const content = el('div'); details.append(el('h4', 'Record details'), detailStatus, content);
+    controls.append(el('label', 'Category ')); controls.lastChild.append(category);
+    controls.append(refresh);
+    screen.append(controls, notice, frame, more, details);
+    function markSelection() {
+      rows.forEach(row => {
+        const chosen = row.item.sequence === selected;
+        row.node.classList.toggle('is-selected', chosen);
+        row.control.setAttribute('aria-pressed', String(chosen));
+      });
+    }
+    async function select(item) {
+      if (!current()) return;
+      selected = item.sequence; const request = ++recordRequest;
+      markSelection(); content.replaceChildren();
+      detailStatus.textContent = `Loading record #${selected}…`;
+      details.setAttribute('aria-busy', 'true');
+      try {
+        const record = await api({action: 'trace', sequence: selected});
+        if (!current() || request !== recordRequest) return;
+        if (!record || record.sequence !== item.sequence || !Object.prototype.hasOwnProperty.call(record, 'payload')) {
+          detailStatus.textContent = 'This record is no longer available. Refresh the trace.';
+          return;
+        }
+        detailStatus.textContent = `#${record.sequence} ${record.kind}`;
+        content.replaceChildren(structuredMap(record));
+      } catch (error) {
+        if (current() && request === recordRequest) detailStatus.textContent = 'Unable to load record: ' + (error.message || String(error)) + '. Select it again to retry.';
+      } finally {
+        if (current() && request === recordRequest) details.setAttribute('aria-busy', 'false');
+      }
+    }
+    async function load(reset) {
+      if (!current()) return;
+      const request = ++pageRequest, key = category.value;
+      if (reset) {
+        cursor = 0; selected = null; rows = []; recordRequest++;
+        body.replaceChildren(); content.replaceChildren(); more.hidden = true;
+        details.setAttribute('aria-busy', 'false'); detailStatus.textContent = 'Select an event to inspect.';
+      }
+      refresh.disabled = more.disabled = true; notice.textContent = 'Loading debug events…';
+      table.setAttribute('aria-busy', 'true');
+      try {
+        const result = await api({action: 'trace', after: cursor, category: key});
+        if (!current() || request !== pageRequest) return;
+        if (result.filters) {
+          filters = result.filters;
+          category.replaceChildren(...filters.map(filter => { const option = el('option', filter.label); option.value = filter.category; return option; }));
+          category.value = key;
+        }
+        for (const item of result.events || []) {
+          const row = el('tr'), control = button('#' + item.sequence, () => select(item));
+          control.setAttribute('aria-label', `Inspect #${item.sequence} ${item.kind} — ${activityText(item.summary) || item.kind}`);
+          const sequence = el('td'); sequence.append(control);
+          row.append(sequence, el('td', item.kind), el('td', activityText(item.summary) || item.kind),
+            el('td', item.timestamp, 'advanced-debug-secondary'), el('td', filters.find(filter => filter.category === item.category)?.label || item.category, 'advanced-debug-secondary'));
+          row.addEventListener('click', event => { if (!control.contains(event.target)) select(item); });
+          rows.push({item, node: row, control}); body.append(row); cursor = item.sequence;
+        }
+        more.hidden = !result.hasMore;
+        notice.textContent = rows.length ? `${rows.length} events loaded in chronological order.` : result.total ? 'No events in this category.' : 'No debug trace events are available. Run a goal with debugtrace=true to collect a trace.';
+        if (selected === null && rows.length) select(rows[0].item);
+        else markSelection();
+        if (!rows.length) detailStatus.textContent = 'No record selected.';
+      } catch (error) {
+        if (current() && request === pageRequest) notice.textContent = 'Unable to load debug events: ' + (error.message || String(error)) + '. ' + (reset ? 'Use Refresh to retry.' : 'Use Load more to retry.');
+      } finally {
+        if (current() && request === pageRequest) { refresh.disabled = more.disabled = false; table.setAttribute('aria-busy', 'false'); }
+      }
+    }
+    category.onchange = () => load(true);
+    load(true);
+  }
   function statisticsScreen() {
     const generation = statsGeneration, uuid = bridge.uuid();
     statsMetrics = null; statsDetails = null;
@@ -460,6 +564,7 @@ window.MiniAAdvancedUI = function(bridge) {
     }
   }).observe(document.body, {attributes: true, attributeFilter: ['class']});
   function renderScreen() {
+    debugGeneration++;
     statsGeneration++; destroyStatsCharts();
     const selected = screens.find(([name]) => name === activeScreen) || screens[0];
     activeScreen = selected[0];
@@ -479,9 +584,9 @@ window.MiniAAdvancedUI = function(bridge) {
         snapshot.settings.filter(s=>(activeScreen!=='models'||['model','modellc','modelval'].includes(s.name)) && `${s.name} ${s.description}`.toLowerCase().includes(search.value.toLowerCase())).forEach(s=>{
           const row=el('div'); const label=el('label', s.name); const description=el('small',`${s.description || ''} · ${s.source === 'session' ? 'Session override' : 'Server default'} · Default: ${asText(s.defaultValue) ?? '(unset)'}${s.readOnly?' · Server-controlled':''}`);
           const field=input('',s.value === undefined ? '' : asText(s.value)); field.disabled=s.readOnly; field.setAttribute('aria-label',s.name);
-          if (s.type==='boolean') {field.type='checkbox';field.checked=s.value===true;}
+          if (s.type==='boolean') {field.type='checkbox';field.checked=s.value===true;label.className='advanced-boolean-setting';}
           label.append(field); row.append(label,description);
-          if (!s.readOnly && s.type !== 'boolean' && s.type !== 'number') window.MiniADataEditor.bind(field, {label: s.name, root: /array/i.test(s.description || '') ? 'array' : 'map'});
+          if (!s.readOnly && ['map', 'array'].includes(s.dataEditor)) window.MiniADataEditor.bind(field, {label: s.name, root: s.dataEditor});
           if (!s.readOnly) row.append(button('Apply',async()=>{await mutate({action:'settings',values:{[s.name]:s.type==='boolean'?field.checked:field.value}}); snapshot=await api({action:'snapshot',after});}));
           list.append(row);
         });
@@ -490,10 +595,7 @@ window.MiniAAdvancedUI = function(bridge) {
       presets.append(name,button('Save preset',()=>mutate({action:'preset',op:'save',name:name.value})),names);
       ['apply','default','delete'].forEach(op=>presets.append(button(op,()=>mutate({action:'preset',op,name:names.value})))); screen.append(presets);
     } else if (activeScreen==='debug') {
-      const category=el('select'); ['all','calls','answers','memory','system','prompts','responses','thinking','problems'].forEach(v=>{const o=el('option',v);o.value=v;category.append(o);});
-      let cursor=0; const list=el('div');
-      const load=async()=>{const result=await api({action:'trace',after:cursor,category:category.value});for(const item of result.events||[]){cursor=item.sequence;list.append(button(`${item.sequence} ${item.category} ${activityText(item.summary)}`,async()=>{const record=await api({action:'trace',sequence:item.sequence});list.append(structuredOutput(record));}));}};
-      category.onchange=()=>{cursor=0;list.replaceChildren();load().catch(showError);};screen.append(category,button('Load more',load),list);load().catch(showError);
+      debugScreen();
     } else if(activeScreen==='wiki') {
       actions([['List','/wiki list --meta'],['Tree','/wiki tree'],['Lint','/wiki lint'],['Statistics','/stats wiki']]);
       commandForm('Browse / read', (op,path)=>`/wiki ${op||'browse'} ${quote(path)}`,['Operation','Path']);
@@ -510,7 +612,7 @@ window.MiniAAdvancedUI = function(bridge) {
       commandForm('Ingest source',(source,section,flags)=>`/ingest ${quote(source)} ${quote(section)} ${flags}`,['Source','Section','Options (dryrun / force)']);
       actions([['Recovery','/ingest recovery']]);commandForm('Recover',args=>`/ingest recovery ${args}`,['resume / discard and ID']);
     } else if(activeScreen==='absorb') {
-      actions([['Status','/absorb status']]);commandForm('Create plan',spec=>`/absorb plan ${quote(spec)}`,['Spec file or inline JSON/SLON']);
+      actions([['Status','/absorb status']]);commandForm('Create plan',spec=>`/absorb plan ${quote(spec)}`,[{name:'Spec file or inline JSON/SLON',dataEditor:'map'}]);
       commandForm('Manage plan',(op,id)=>`/absorb ${op} ${quote(id)}`,['show / apply / resume / delete / cancel','Plan ID']);
     } else if(activeScreen==='dream') {
       commandForm('Dream operation',op=>`/dream ${op}`,['memory / wiki / plan / apply / reorg / repair / reindex / graph / indexes']);
@@ -519,11 +621,33 @@ window.MiniAAdvancedUI = function(bridge) {
     } else if(activeScreen==='skills') {
       actions([['List skills','/skills'],['Help','/help']]); commandForm('Inspect skills',args=>`/skills ${args}`,['Filter or subcommand']);commandForm('Run skill or custom command',cmd=>cmd,['$skill or /command with arguments']);
     } else if(activeScreen==='history') {
-      const saved=el('div');screen.append(saved);
-      api({action:'sessions'}).then(data=>(data.sessions||[]).forEach(session=>saved.append(button(`${new Date(session.updated).toLocaleString()} · ${session.uuid.slice(0,8)}`,()=>{
-        if(busy)throw new Error('Finish the current operation first.');
-        bridge.resume(session.uuid);snapshot=null;after=0;events.replaceChildren();poll();
-      })))).catch(showError);
+      const notice=el('p','Loading saved conversations…','advanced-screen-description');
+      notice.setAttribute('role','status');
+      const saved=el('ul',undefined,'advanced-history-list');
+      saved.setAttribute('aria-label','Saved conversations');
+      screen.append(button('Refresh list',()=>renderScreen()),notice,saved);
+      api({action:'sessions'}).then(data=>{
+        const sessions=data.sessions||[];
+        notice.textContent=sessions.length ? 'Select a conversation to open it.' : 'No saved conversations yet.';
+        sessions.forEach(session=>{
+          const current=session.uuid===bridge.uuid();
+          const row=el('li');
+          const open=button('',async()=>{
+            if(busy)throw new Error('Finish the current operation first.');
+            bridge.resume(session.uuid);snapshot=null;after=0;dialogId=null;events.replaceChildren();
+            filter.value='';filter.oninput();
+            activeScreen='activity';renderScreen();
+            bridge.refresh();await poll();
+          });
+          open.className='advanced-history-open';
+          open.title='Open conversation '+session.uuid;
+          if(current)open.setAttribute('aria-current','true');
+          open.append(el('span','Conversation '+session.uuid.slice(0,8),'advanced-history-title'),
+            el('time',new Date(session.updated).toLocaleString(),'advanced-history-date'));
+          if(current)open.append(el('span','Current','advanced-history-current'));
+          row.append(open);saved.append(row);
+        });
+      }).catch(error=>{notice.textContent='Could not load saved conversations. Use Refresh list to try again.';showError(error);});
       actions([['History','/history'],['Previous answer','/last'],['Restore','/restore'],['Clear','/clear']]);commandForm('Rewind',count=>`/rewind ${count}`,['Exchanges']);commandForm('Save answer',file=>`/save ${quote(file)}`,['Server path']);
     } else if(activeScreen==='context') {
       actions([['Summary','/context'],['Analyze','/context analyze'],['Virtual memory','/context vm']]);commandForm('Compact / summarize',(op,keep)=>`/${op} ${keep}`,['compact / summarize','Messages to keep']);
