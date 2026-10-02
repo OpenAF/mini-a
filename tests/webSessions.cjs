@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const yaml = fs.readFileSync('mini-a-web.yaml', 'utf8');
+const yaml = require('./webSource.cjs');
 const route = name => yaml.split('((uri          )): /' + name + '\n')[1].split('((execURI      )): | #js\n')[1].split(/\n(?=[^ \n])/)[0].replace(/^    /gm, '');
 let serial = 0, starts = 0, closes = 0, fail = false, scheduleFail = false;
 let finalResult = { answer: 'fixture answer' };
@@ -98,3 +98,38 @@ assert.equal(g.__res.shape.at(-1).event, '❗');
 assert.match(g.__res.shape.at(-1).message, /no final answer/);
 assert.equal(g.__busy.shape, undefined); assert.equal(g.__conversations.shape, undefined);
 console.log('Web final-result shape checks passed.');
+
+// Advanced transport cannot instantiate or mutate sessions before opt-in and authentication.
+assert.equal(call('advanced', {uuid:'a',action:'snapshot'}).error, 'Advanced mode is disabled');
+let advancedCalls = 0;
+g.__advanced = { request(data) { advancedCalls++; return {uuid:data.uuid,ok:true}; } };
+g._mini_a_web_checkToken = () => false;
+assert.equal(call('advanced', {uuid:'a',action:'snapshot'}).error, 'unauthorized');
+assert.equal(advancedCalls, 0);
+g._mini_a_web_checkToken = () => true;
+assert.equal(call('advanced', {uuid:'a',action:'snapshot'}).ok, true);
+assert.equal(call('advanced', {uuid:'a',command:'x'.repeat(150001)}).error, 'Invalid advanced request');
+assert.equal(advancedCalls, 1);
+console.log('Advanced opt-in, authentication and request-size checks passed.');
+
+// Advanced new-conversation and expiry preserve console history and its VM store.
+let savedAdvanced = 0, persistedAdvanced = 0, disposedAdvanced = 0, deletedVm = 0, prunedAdvanced = 0;
+g.__advanced = {
+  sessions: { advanced: {runtime: {
+    saveConversation() { savedAdvanced++; }, dispose() { disposedAdvanced++; }
+  }} },
+  persist() { persistedAdvanced++; }, pruneHistory() { prunedAdvanced++; }
+};
+g.__usehistory = false; g.__historykeep = false;
+g.__conversations.advanced = new Agent();
+g.__conversations.advanced._historyVm = {deleteOwnedStore() { deletedVm++; }};
+g.__res.advanced = [{event:'final',message:'kept'}];
+assert.equal(call('clear', {uuid:'advanced'}).status, 'cleared');
+assert.equal(savedAdvanced, 1); assert.equal(persistedAdvanced, 1);
+assert.equal(deletedVm, 0); assert.equal(g.__res.advanced.length, 1);
+g.__lastActivity.advanced = 0;
+c.args = {historyretention:1, ssequeuetimeout:1};
+vm.runInContext(cleanup, c);
+assert.equal(prunedAdvanced, 1); assert.equal(disposedAdvanced, 1);
+assert.equal(deletedVm, 0); assert.equal(g.__advanced.sessions.advanced, undefined);
+console.log('Advanced history lifecycle checks passed.');

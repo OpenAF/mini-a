@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync('mini-a-con.js', 'utf8');
+const source = fs.readFileSync('mini-a-session.js', 'utf8');
 function extract(name) {
   const start = source.indexOf('  function ' + name + '(');
   assert.ok(start >= 0, name);

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const common = fs.readFileSync('mini-a-common.js', 'utf8');
 const job = fs.readFileSync('mini-a.yaml', 'utf8');
-const con = fs.readFileSync('mini-a-con.js', 'utf8');
+const con = fs.readFileSync('mini-a-session.js', 'utf8');
 const output = [], warnings = [], executed = [];
 const c = vm.createContext({
   __: undefined, isString: x => typeof x === 'string', isDef: x => x != null,

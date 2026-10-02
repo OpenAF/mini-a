@@ -115,6 +115,11 @@ Start the browser UI:
 
 Then open `http://localhost:8888`.
 
+For the console-oriented **Advanced** mode, add `webadvanced=true webtoken=<secret>`
+and open `http://localhost:8888/#token=<secret>`. It adds shared console slash commands,
+settings/presets, detailed activity and debug traces, and subsystem operation screens.
+See [Advanced web console](USAGE.md#advanced-web-console).
+
 For history/attachments and S3-backed history examples, see [USAGE.md](USAGE.md#web-ui-quick-start).
 
 **Security note**: by default the web UI has no authentication — anyone who can reach the port can submit goals, and with `useshell=true` that is equivalent to remote code execution. Set `webtoken=<secret>` to require an `x-mini-a-token` header (or a `?token=` query param, used automatically by the bundled UI) on every request, and prefer binding the port to localhost or placing it behind a reverse proxy/VPN rather than exposing it directly. Optional math rendering (KaTeX) is loaded from a public CDN, so it degrades gracefully but is unavailable in fully offline deployments.

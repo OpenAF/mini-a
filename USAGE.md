@@ -4019,3 +4019,112 @@ Use `ojob mcps/mcp-workiq.yaml op=login` to sign in, then connect with
 SBuckets; write tools require `readwrite=true` on the connector. See
 [WorkIQ setup and verification](docs/WORKIQ.md) for the required OpenAF features,
 profiles, tenant options and token mode.
+
+## Advanced web console
+
+Start the existing web server with Advanced mode enabled:
+
+```sh
+./mini-a-web.sh onport=8888 webadvanced=true webtoken="YOUR_RANDOM_TOKEN"
+```
+
+Open `http://localhost:8888/#token=YOUR_RANDOM_TOKEN` and select **Advanced**.
+The fragment token is kept in the browser tab's session storage and sent in the
+existing authentication header. Use a URL-encoded token when it contains special
+characters. Advanced mode refuses to start without `webtoken`. Its token grants
+trusted console authority, including enabling shell and filesystem/wiki writes.
+Simple mode remains available on the same conversation.
+
+Advanced mode uses the console's shared command dispatcher and parameter metadata.
+It includes slash and argument completion, command history (Up/Down), Tab completion,
+a searchable Live activity pane with auto-follow, and settings/model screens.
+The console-colored Advanced pane follows the same light/dark theme as Simple view
+and opens on the **Live activity** tab. Hover over
+a tab for a description; the same description appears when the tab is selected.
+Activity appears only in Live activity. Disable **Auto-follow** to inspect older
+entries. Drag the centered divider handle to resize the Advanced pane; its size is remembered.
+The handle supports touch and mouse dragging, or arrow keys when focused. On narrow
+screens the panes initially stack and the divider moves vertically. The
+position button in the pane header opens a menu to dock Advanced on the right, bottom, top, or left;
+an explicit position is remembered across reloads.
+Wiki, graph, ingestion, absorption, dreams, skills, context/history, statistics,
+debugging, and subtasks have dedicated operation panels. Panel controls submit the
+same commands as the composer, except **Statistics**, which displays inline Chart.js
+charts for Summary, Detailed, Tools, Memory, and Wiki. Charts use the Advanced
+palette in both themes, include expandable nJSMap values tables and structured
+map/array details, and update with **Refresh**. Maps, arrays, and table/tree output
+from any slash command also use nJSMap in Live activity, with plain-text fallback
+if the shared OpenAF library cannot load.
+These are the same metrics as `/stats`; some counters are shared across server sessions.
+`/model` opens model settings, `/debug` opens the
+trace inspector, `/edit` opens a browser editor, `/cls` clears the visible activity,
+and `/exit` ends the session without stopping the web server. Paths refer to the
+server filesystem, including `@file` attachments and `/save` destinations.
+
+The shared dispatcher covers these command families:
+
+| Commands | Browser behavior |
+| --- | --- |
+| `/help`, `/show`, `/set`, `/unset`, `/toggle`, `/reset` | Shared parameter handling, with matching settings controls |
+| `/history`, `/restore`, `/clear`, `/rewind`, `/last`, `/save` | Shared conversation operations; browser dialogs replace terminal prompts |
+| `/context`, `/compact`, `/summarize`, `/stats` | Shared context and diagnostics, displayed in activity |
+| `/wiki`, `/graph`, `/ingest`, `/absorb`, `/dream` | Dedicated panels submit the existing subsystem commands |
+| `/skills`, custom commands and skill invocations | Existing discovery and expansion |
+| `/delegate`, `/subtasks`, `/subtask` | Existing delegation manager and status commands |
+| `/model`, `/debug`, `/edit`, `/cls`, `/exit` | Browser settings, trace inspector, editor, activity clearing, and session closing |
+
+Settings affect the current conversation. Apply them while it is idle; server
+transport settings are shown as read-only. Changing runtime settings disposes the
+previous agent's resources before the next goal, preserving conversation history.
+Save a named preset explicitly; selecting it as the default affects new conversations.
+Credentials are masked, unchanged masked values are preserved during edits, and
+credentials are omitted from saved presets/session settings. Saved model selections
+reuse current server credentials only when provider type and URL match. Other
+credential-bearing compound settings must be supplied again after a restart.
+
+Advanced conversations use the console's `~/.openaf-mini-a/history` directory
+(`homedir` relocates the `.openaf-mini-a` directory). They are kept when starting
+a new conversation or when an idle web session expires. `historykeepperiod`
+(minutes) and `historykeepcount` use the shared console housekeeping routine,
+on opening an Advanced session and during periodic cleanup while sessions are loaded.
+Retention applies to the shared history folder; active web conversations and
+running subtasks are protected. Removed conversations also lose their History VM
+sidecars and matching Advanced session settings/event journals. Existing Advanced
+conversation files under `webadvancedpath` remain readable in place and participate
+in the same retention rules. Advanced history follows local console storage;
+Simple view's `historypath` and S3 history behavior remain separate.
+
+The server stores session settings and event journals under
+`~/.openaf-mini-a/web` (or `webadvancedpath=<directory>`). Browser reloads reconnect
+to the current session; the History screen also lists saved Advanced sessions.
+Running work and pending dialogs survive browser disconnects. Stop/Escape cancels
+active work; closing a browser does not. Server restarts recover saved history and
+settings, but interrupted jobs are reported rather than automatically resumed.
+Idle sessions follow the existing `historyretention` cleanup. Journals and saved
+settings remain available for restoration until conversation retention removes them; the previous-goal temporary debug trace
+is removed when the session expires or its next goal starts.
+
+The activity pane retains a bounded visible window. Terminal ANSI formatting is
+removed from displayed activity and debug payloads; stored events remain unchanged. Large entries load their full
+payload only when expanded; `/debug` pages the existing disk-backed trace and loads
+selected records on demand. Activity and traces are authenticated and use the same
+session token as the rest of the interface.
+
+Implementation: `mini-a-session.js` contains the shared console session;
+`mini-a-con.js` is the terminal entry point. `mini-a-web-session.js` holds the existing
+prompt route shared by Simple chat and Advanced commands. `mini-a-advanced.js`
+provides authenticated session operations and event storage; `public/advanced.js`
+and `public/advanced.css` add browser presentation without a frontend framework.
+
+Validation commands:
+
+```sh
+node tests/consolePaths.cjs
+node tests/entryPointParity.cjs
+node tests/webSessions.cjs
+node tests/webActivity.cjs
+node tests/webStreamCompletion.cjs
+oaf -f tests/modePresets.js
+oaf -f tests/webAdvanced.js
+ojob tests/wiki.yaml
+```

@@ -51,7 +51,7 @@
   // ── Parsefrontmatter ────────────────────────────────────────────────────────
 
   exports.testConsoleWikiOperations = function() {
-    var source = io.readFileString("mini-a-con.js"), output = [], calls = []
+    var source = io.readFileString("mini-a-session.js"), output = [], calls = []
     var hits = [{path:"guide.md",title:"Guide"}]
     hits.outcome = "partial"; hits.stopReasons = ["deadline"]; hits.sources = [{wiki:"docs",status:"partial"}]
     var manager = {

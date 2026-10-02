@@ -1,6 +1,6 @@
 // Run with: openaf -f tests/modePresets.js
 // Exercise the production launcher resolver with OpenAF's actual merge semantics.
-var source = io.readFileString("mini-a-con.js")
+var source = io.readFileString("mini-a-session.js")
 var start = source.indexOf("    (function(args, explicitKeys) {")
 var endMarker = "    })(args, explicitCLIArgKeys)"
 var end = source.indexOf(endMarker, start)

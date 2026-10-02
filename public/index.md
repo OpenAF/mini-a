@@ -178,7 +178,9 @@
                 const isHistoryElement = div.id === 'historyPanel' || div.id === 'historyOverlay' || (typeof div.closest === 'function' && div.closest('#historyPanel'));
                 const isAttachmentModal = div.id === 'attachmentModal';
 
-                if (!isChatContainer && !isHistoryElement && !isAttachmentModal) {
+                // Advanced components own their theme through CSS variables.
+                const isAdvancedElement = typeof div.closest === 'function' && div.closest('.advanced-shell, .advanced-toolbar, .advanced-completions, .advanced-divider, .advanced-dialog');
+                if (!isChatContainer && !isHistoryElement && !isAttachmentModal && !isAdvancedElement) {
                     div.style.backgroundColor = '#0f1115';
                     div.style.color = '#e6e6e6';
                     if (div.style.borderColor || getComputedStyle(div).borderColor !== 'rgba(0, 0, 0, 0)') {
@@ -252,7 +254,9 @@
                 const isChatContainer = div.classList.contains('chat-container');
                 const isHistoryElement = div.id === 'historyPanel' || div.id === 'historyOverlay' || (typeof div.closest === 'function' && div.closest('#historyPanel'));
                 const isAttachmentModal = div.id === 'attachmentModal';
-                if (!isChatContainer && !isHistoryElement && !isAttachmentModal) {
+                // Advanced components own their theme through CSS variables.
+                const isAdvancedElement = typeof div.closest === 'function' && div.closest('.advanced-shell, .advanced-toolbar, .advanced-completions, .advanced-divider, .advanced-dialog');
+                if (!isChatContainer && !isHistoryElement && !isAttachmentModal && !isAdvancedElement) {
                     div.style.backgroundColor = '#f8f9fa';
                     div.style.color = '#000000';
                     if (div.style.borderColor || getComputedStyle(div).borderColor !== 'rgba(0, 0, 0, 0)') {
@@ -2169,7 +2173,7 @@
             if (typeof window === 'undefined') return null;
             if (window.__miniAWebToken !== undefined) return window.__miniAWebToken;
             const params = new URLSearchParams(window.location.search);
-            let token = params.get('token');
+            let token = params.get('token') || new URLSearchParams(window.location.hash.slice(1)).get('token');
             if (!token && typeof sessionStorage !== 'undefined') token = sessionStorage.getItem('mini_a_web_token');
             if (token && typeof sessionStorage !== 'undefined') sessionStorage.setItem('mini_a_web_token', token);
             window.__miniAWebToken = token || null;
@@ -2183,7 +2187,8 @@
         const originalFetch = window.fetch.bind(window);
         window.fetch = function(input, init) {
             const token = getWebToken();
-            if (token) {
+            const targetUrl = new URL(typeof input === 'string' ? input : input.url, window.location.href);
+            if (token && targetUrl.origin === window.location.origin) {
                 init = init || {};
                 init.headers = Object.assign({}, init.headers, { 'X-Mini-A-Token': token });
             }
@@ -2246,24 +2251,12 @@
 
             if (uuid) return uuid;
 
-            // Prefer crypto.randomUUID if available
-            if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-                uuid = crypto.randomUUID();
-            } else {
-                // Fallback to RFC4122 v4-like generator
-                uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-                    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-                    return v.toString(16);
-                });
-            }
+            uuid = generateNewSessionUuid();
 
             if (typeof window !== 'undefined') window.mini_a_session_uuid = uuid;
             return uuid;
         } catch (e) {
-            // Last resort: return non-persistent uuid
-            if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') 
-                return crypto.randomUUID();
-            return 'tmp-' + Date.now() + '-' + Math.floor(Math.random() * 1000000);
+            return generateNewSessionUuid();
         }
     }
 
@@ -2505,8 +2498,18 @@
             if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
                 return crypto.randomUUID();
             }
-        } catch (_) { /* ignore */ }
-        return 'branched-' + Date.now() + '-' + Math.floor(Math.random() * 1000000);
+        } catch (_) { /* Try the compatible generator below. */ }
+        const bytes = new Uint8Array(16);
+        try {
+            crypto.getRandomValues(bytes);
+        } catch (_) {
+            // Identifiers only: these values are not authentication tokens.
+            for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+        }
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        const hex = Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
+        return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
     }
 
     function copyToClipboard(text) {
@@ -4897,6 +4900,40 @@
         }
     }
 
+    let advancedUI = null;
+    async function enableAdvancedUI() {
+        if (advancedUI) return;
+        const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = resolveAppUrl('advanced.css?raw=true'); document.head.append(css);
+        // OpenAF serves these shared libraries through mapLibs.
+        try {
+            for (const [name, loaded] of [['openafsigil.js', typeof $$ === 'function'], ['njsmap.js', typeof window.nJSMap === 'function']]) {
+                if (!loaded) await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = resolveAppUrl('js/' + name); script.onload = resolve; script.onerror = reject; document.head.append(script); });
+            }
+        } catch (_) { /* Structured statistics retain a plain-text fallback. */ }
+        await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = resolveAppUrl('advanced.js?raw=true'); script.onload = resolve; script.onerror = reject; document.head.append(script); });
+        advancedUI = window.MiniAAdvancedUI({
+            url: resolveAppUrl,
+            newRequestId: generateNewSessionUuid,
+            uuid: () => { if (!currentSessionUuid) currentSessionUuid = getOrCreateSessionUuid(); return currentSessionUuid; },
+            resume: uuid => { currentSessionUuid = uuid; window.mini_a_session_uuid = uuid; },
+            refresh: () => { pollOnce(); },
+            trackRun: data => {
+                if (data.busy && data.kind === 'prompt' && !isProcessing) {
+                    lastSubmittedPrompt = '';
+                    activeSubmissionStartedAt = Date.now();
+                    sawNonFinishedForActiveSubmission = false;
+                    startProcessing();
+                    if (streamEnabled) startStream(currentSessionUuid);
+                    startPolling();
+                } else if (!data.busy && isProcessing) {
+                    stopProcessing(false);
+                    pollOnce();
+                }
+            },
+            newConversation: handleClearClick
+        });
+    }
+
     async function configureFeatureAvailability() {
         let shouldEnableHistory = true;
         let shouldEnableAttachments = false;
@@ -4913,6 +4950,7 @@
             }
 
             const data = await response.json();
+            if (data.webadvanced === true) await enableAdvancedUI();
             if (typeof data.usehistory === 'boolean') {
                 shouldEnableHistory = data.usehistory;
             }
@@ -5350,6 +5388,8 @@
     }
 
     function addPreview() {
+        // Idle transcript refreshes (including a new Advanced session) are not LLM runs.
+        if (!isProcessing) return;
         if (document.getElementById(PREVIEW_ID)) return;
         const el = document.createElement('div');
         el.id = PREVIEW_ID;
@@ -5779,12 +5819,19 @@
     }
 
     async function handleSubmit() {
+        if (advancedUI && advancedUI.enabled() && isProcessing) { await advancedUI.stop(); return; }
         if (isProcessing) {
             await stopProcessing(true);
             return;
         }
 
         const rawPrompt = promptInput.value || '';
+        if (advancedUI && advancedUI.enabled()) {
+            if (!rawPrompt.trim()) return;
+            try { await advancedUI.submit(buildPromptWithAttachments(rawPrompt, attachmentsEnabled ? attachments : [])); }
+            catch (error) { console.error(error); alert(error.message); }
+            return;
+        }
         const finalPrompt = buildPromptWithAttachments(rawPrompt, attachmentsEnabled ? attachments : []);
         if (!finalPrompt.trim()) return;
 

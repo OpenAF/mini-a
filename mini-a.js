@@ -1633,6 +1633,11 @@ MiniA.prototype._runRawOutputGuarded = function(innerFn) {
   return innerFn()
 }
 
+// Optional UI adapter for the existing shell approval choices (No / Yes / Always).
+MiniA.prototype.setConfirmFn = function(fn) {
+  this._confirmFn = isFunction(fn) ? fn : __
+}
+
 /**
  * Set an optional trace sink. Console callers use this to persist complete
  * per-goal diagnostics without retaining them in the agent process.
@@ -14615,7 +14620,7 @@ MiniA.prototype._runCommand = function(args) {
       var _r
       if (!this._shellBatch) {
         var _ac = this._useAnsiLogging ? ansiColor : function(_, t) { return t }
-        _r = askChoose("Can I execute '" + _ac("italic,red,bold", args.command) + "'? " + (note.length > 0 ? _ac("faint","(" + note + " )") : ""), ["No", "Yes", "Always"])
+        _r = (isFunction(this._confirmFn) ? this._confirmFn : askChoose)("Can I execute '" + _ac("italic,red,bold", args.command) + "'? " + (note.length > 0 ? _ac("faint","(" + note + " )") : ""), ["No", "Yes", "Always"])
       } else {
         _r = 0 // No prompt in batch mode; default to "No"
       }
@@ -15658,7 +15663,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "memorysessionheader", "goal", "mcp", "validationgoal", "valgoal", "deepresearch", "maxcycles",
     "validationthreshold", "persistlearnings", "valtools", "outerloop", "outerloopinstructions", "outerloopsessionid", "outerloopmaxcycles", "outerloopmaxtime", "outerloopstoponrepeat", "outerloopmaxnochange",
     "durable", "runid", "resumerun", "runstatus", "runroot", "showseparator", "goalprefix", "shellprefix", "resume", "mode",
-    "onport", "web", "modelman", "mcptest", "memoryman", "wikiman", "wikitarget", "workermode", "path", "usehistory", "useattach", "historypath",
+    "onport", "web", "webadvanced", "webadvancedpath", "modelman", "mcptest", "memoryman", "wikiman", "wikitarget", "workermode", "path", "usehistory", "useattach", "historypath",
     "historykeep", "historykeepperiod", "historykeepcount", "historyretention", "ssequeuetimeout",
     "logpromptheaders", "historys3bucket", "historys3prefix", "historys3url", "historys3accesskey",
     "historys3secret", "historys3region", "historys3useversion1", "historys3ignorecertcheck", "extracommands",
