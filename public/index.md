@@ -1,3 +1,5 @@
+<link rel="icon" href="favicon.ico?raw=true" type="image/x-icon">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png?raw=true">
 <script src="showdown.min.js?raw=true"></script>
 <!-- Chart.js + adapters/plugins: deterministic, version-aware loader -->
 <script>
