@@ -1817,7 +1817,7 @@
     <br>
     <div id="inputSection" class="input-section">
         <button id="attachBtn" title="Attach files" aria-label="Attach files" type="button"></button>
-        <input type="file" id="fileInput" accept="text/*,.md,.markdown,.txt,.json,.yaml,.yml,.csv,.tsv,.xml,.html,.css,.scss,.less,.js,.ts,.jsx,.tsx,.py,.rb,.go,.java,.kt,.c,.cpp,.cs,.rs,.php,.sh,.bash,.zsh,.fish,.sql,.toml,.ini,.env" multiple style="display:none" />
+        <input type="file" id="fileInput" accept="image/png,image/jpeg,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,text/*,.md,.markdown,.txt,.json,.yaml,.yml,.csv,.tsv,.xml,.html,.css,.scss,.less,.js,.ts,.jsx,.tsx,.py,.rb,.go,.java,.kt,.c,.cpp,.cs,.rs,.php,.sh,.bash,.zsh,.fish,.sql,.toml,.ini,.env" multiple style="display:none" />
         <div class="prompt-wrapper">
             <div id="attachmentsContainer" class="attachments-container" aria-live="polite"></div>
             <textarea id="promptInput" placeholder="Enter your prompt..." rows="1" disabled></textarea>
@@ -2358,6 +2358,7 @@
             if (typeof ev.message !== 'undefined' && ev.message !== null) {
                 sanitized.message = typeof ev.message === 'string' ? ev.message : JSON.stringify(ev.message);
             }
+            if (typeof ev.displayMessage === 'string') sanitized.displayMessage = ev.displayMessage;
             return sanitized;
         }).filter(Boolean);
     }
@@ -2387,7 +2388,7 @@
             const ev = events[i];
             const key = ev && typeof ev.event === 'string' ? ev.event : '';
             if (key === '👤' || key === 'user') {
-                return typeof ev.message === 'string' ? ev.message : '';
+                return typeof ev.displayMessage === 'string' ? ev.displayMessage : (typeof ev.message === 'string' ? ev.message : '');
             }
         }
         return '';
@@ -2473,7 +2474,7 @@
             const ev = events[i];
             const key = ev && typeof ev.event === 'string' ? ev.event : '';
             if (key === '👤' || key === 'user') {
-                return typeof ev.message === 'string' ? ev.message : '';
+                return typeof ev.displayMessage === 'string' ? ev.displayMessage : (typeof ev.message === 'string' ? ev.message : '');
             }
         }
         return '';
@@ -3045,7 +3046,7 @@
             } else if (ev.event === '👤' || ev.event === 'user') {
                 flush(false);
                 id = index;
-                result += buildOptimisticUserPromptBlock(ev.message);
+                result += buildOptimisticUserPromptBlock(typeof ev.displayMessage === 'string' ? ev.displayMessage : ev.message);
             } else {
                 if (!['🧩', '💡', '💭', '🌀', '🛑', '⏳'].includes(ev.event) &&
                     !(showExecsEnabled && ['⚙️', '🖥️'].includes(ev.event))) return;
@@ -3334,6 +3335,12 @@
 
             const label = document.createElement('span');
             label.textContent = item.name;
+            if (item.binary && /\.(png|jpg|jpeg)$/i.test(item.name)) {
+                const thumbnail = document.createElement('img');
+                thumbnail.src = 'data:' + (/\.png$/i.test(item.name) ? 'image/png' : 'image/jpeg') + ';base64,' + item.base64;
+                thumbnail.alt = ''; thumbnail.style.cssText = 'width:32px;height:32px;object-fit:contain;';
+                chip.appendChild(thumbnail);
+            }
             chip.appendChild(label);
 
             const removeBtn = document.createElement('button');
@@ -3367,8 +3374,27 @@
         if (files.length === 0) return;
 
         for (const file of files) {
+            const binary = /\.(png|jpg|jpeg|doc|docx|xls|xlsx|ppt|pptx|pdf)$/i.test(file.name || '');
+            if (binary) {
+                const image = /\.(png|jpg|jpeg)$/i.test(file.name);
+                const existing = attachments.filter(item => item.binary);
+                if (existing.length >= 4 || file.size > (image ? 10 : 20) * 1024 * 1024 || existing.reduce((sum, item) => sum + item.size, 0) + file.size > 20 * 1024 * 1024) {
+                    notifyAttachmentWarning('Binary attachments allow four files, 10 MiB per image, and 20 MiB combined. Skipping "' + file.name + '".');
+                    continue;
+                }
+                try {
+                    const dataUrl = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve(reader.result);
+                        reader.onerror = () => reject(new Error('Cannot read ' + file.name));
+                        reader.readAsDataURL(file);
+                    });
+                    attachments.push({ id: 'att-' + Date.now() + '-' + Math.random().toString(16).slice(2), name: sanitizeAttachmentName(file.name), binary: true, size: file.size, mediaType: file.type, base64: dataUrl.slice(dataUrl.indexOf(',') + 1) });
+                } catch (error) { notifyAttachmentWarning(error.message); }
+                continue;
+            }
             if (!isAllowedTextFile(file)) {
-                notifyAttachmentWarning('Only text-based files can be attached. Skipping "' + (file.name || 'file') + '".');
+                notifyAttachmentWarning('Supported attachments are text, PNG/JPEG, Office documents and PDFs. Skipping "' + (file.name || 'file') + '".');
                 continue;
             }
             if (file.size > MAX_ATTACHMENT_SIZE) {
@@ -3423,13 +3449,18 @@
             output = '';
         }
 
-        const blocks = items.map(item => {
+        const blocks = items.filter(item => !item.binary).map(item => {
             const safeName = sanitizeAttachmentName(item.name).replace(/```/g, '`');
             const cleanContent = (item.content || '').replace(/\r\n/g, '\n');
             return '```attachment ' + safeName + '\n' + cleanContent + '\n```';
         });
 
         return output + blocks.join('\n\n');
+    }
+
+    function buildAttachmentDisplayPrompt(prompt, items) {
+        if (!items || !items.length) return prompt;
+        return prompt + '\n\n📎 ' + items.map(item => sanitizeAttachmentName(item.name)).join(', ');
     }
 
     function stripAttachmentBlocks(text) {
@@ -5101,6 +5132,7 @@
                 if (typeof ev.message !== 'undefined' && ev.message !== null) {
                     sanitized.message = typeof ev.message === 'string' ? ev.message : JSON.stringify(ev.message);
                 }
+                if (typeof ev.displayMessage === 'string') sanitized.displayMessage = ev.displayMessage;
                 return sanitized;
             })
             .filter(Boolean);
@@ -5152,6 +5184,7 @@
                 if (typeof ev.message !== 'undefined' && ev.message !== null) {
                     sanitized.message = typeof ev.message === 'string' ? ev.message : JSON.stringify(ev.message);
                 }
+                if (typeof ev.displayMessage === 'string') sanitized.displayMessage = ev.displayMessage;
                 return sanitized;
             }) : []
         };
@@ -5830,17 +5863,20 @@
         }
 
         const rawPrompt = promptInput.value || '';
+        const binaryAttachments = attachmentsEnabled ? attachments.filter(item => item.binary).map(({name, mediaType, base64}) => ({name, mediaType, base64})) : [];
+        if (binaryAttachments.length && !rawPrompt.trim()) { notifyAttachmentWarning('Enter a question or instruction for the attached files.'); return; }
         if (advancedUI && advancedUI.enabled()) {
             if (!rawPrompt.trim()) return;
-            try { await advancedUI.submit(buildPromptWithAttachments(rawPrompt, attachmentsEnabled ? attachments : [])); }
+            try { await advancedUI.submit(buildPromptWithAttachments(rawPrompt, attachmentsEnabled ? attachments : []), binaryAttachments); clearAttachments(); }
             catch (error) { console.error(error); alert(error.message); }
             return;
         }
         const finalPrompt = buildPromptWithAttachments(rawPrompt, attachmentsEnabled ? attachments : []);
         if (!finalPrompt.trim()) return;
 
-        lastSubmittedPrompt = finalPrompt;
-        lastFinishedPrompt = finalPrompt;
+        const displayPrompt = buildAttachmentDisplayPrompt(finalPrompt, binaryAttachments);
+        lastSubmittedPrompt = displayPrompt;
+        lastFinishedPrompt = displayPrompt;
         activeHistoryId = null;
 
         try {
@@ -5849,19 +5885,20 @@
             const browserContext = shouldSendBrowserContext ? collectBrowserContext() : null;
 
             // Add user prompt to display immediately
-            const userPromptDiv = buildOptimisticUserPromptBlock(finalPrompt);
+            const userPromptDiv = buildOptimisticUserPromptBlock(displayPrompt);
             lastRawContent += userPromptDiv;
             await renderRawContent(lastRawContent);
 
             const response = await fetch(resolveAppUrl('prompt'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
-                body: JSON.stringify({ prompt: finalPrompt, uuid: currentSessionUuid, browserContext })
+                body: JSON.stringify({ prompt: finalPrompt, uuid: currentSessionUuid, browserContext, attachments: binaryAttachments })
             });
 
             if (!response.ok) throw new Error('Failed to submit prompt');
 
             const data = await response.json();
+            if (data && data.error) throw new Error(data.error);
             if (data && data.busy) {
                 lastRawContent = lastRawContent.replace(userPromptDiv, '');
                 await renderRawContent(lastRawContent + '<p style="opacity: 0.7;">This session is still processing the previous request. Please wait for it to finish.</p>');
@@ -5877,7 +5914,7 @@
 
         } catch (error) {
             console.error('Error submitting prompt:', error);
-            await updateResultsContent('<p style="color: red;">Error submitting prompt. Please try again.</p>');
+            await updateResultsContent('<p style="color: red;">' + escapeHtml(error.message || 'Error submitting prompt. Please try again.') + '</p>');
             forceRenderChartBlocks();
         }
     }

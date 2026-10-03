@@ -10049,6 +10049,22 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
   }
 }
 
+MiniA.prototype._buildReadresultGuardKey = function(params, toolName) {
+  var aliasOps = { "result_stat":"stat", "result_read":"read", "result_head":"head", "result_tail":"tail", "result_slice":"slice", "result_grep":"grep" }
+  if (!isMap(params) || !isString(params.resultFile) || params.resultFile.trim().length === 0) return ""
+  var aliasOp = isString(toolName) ? (aliasOps[toolName] || "") : ""
+  if (!aliasOp && params.action !== "readresult") return ""
+  var op = aliasOp || (isString(params.op) ? params.op.trim().toLowerCase() : "stat")
+  var key = [params.resultFile.trim(), op]
+  if (op === "grep") key.push(isString(params.pattern) ? params.pattern : "", isNumber(params.context) ? String(params.context) : "0")
+  if (op === "slice") key.push(isNumber(params.fromLine) ? String(params.fromLine) : isNumber(params.start) ? String(params.start) : "1", isNumber(params.toLine) ? String(params.toLine) : isNumber(params.end) ? String(params.end) : "")
+  if (op === "grep") key.push(isNumber(params.startChar) ? String(params.startChar) : "1")
+  if (op === "slice") key.push(isNumber(params.fromChar) ? String(params.fromChar) : "", isNumber(params.toChar) ? String(params.toChar) : "")
+  if (op === "head" || op === "tail") key.push(isNumber(params.lines) ? String(params.lines) : "50")
+  if (op === "read") key.push(isNumber(params.maxBytes) ? String(params.maxBytes) : "0")
+  return key.join("|")
+}
+
 MiniA.prototype._normalizeToolResult = function(original) {
     var processed = original
     if (isDef(processed) && isArray(processed.content) && isDef(processed.content[0]) && isDef(processed.content[0].text)) {
@@ -12353,22 +12369,48 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         // (readresult response itself gets spilled → model tries to readresult again → infinite loop).
         var _autoCapThreshold = parent._getToolResultInlineLimit(args, 16000)
 
+        // Positions refer to the original string, in 1-based inclusive UTF-16 units.
+        var lineOffsets = [], offset = 0
+        for (var li = 0; li < ropLines.length; li++) {
+          lineOffsets.push(offset)
+          offset += ropLines[li].length + 1
+        }
+        var budgetError = function() { return { error: "Extraction budget too small for content and locator." } }
+        var nextNotice = function(next, limited) {
+          return "\n[" + (limited ? "LIMITED" : "TRUNCATED") + "; next arguments (same file/pattern): " + JSON.stringify(next) + "]"
+        }
         if (rop === "slice") {
+          var charMode = isDef(params.fromChar) || isDef(params.toChar)
+          if (charMode && (isDef(params.fromLine) || isDef(params.toLine) || isDef(params.start) || isDef(params.end))) {
+            return { error: "Do not mix character and line ranges." }
+          }
           var sliceFrom = isNumber(params.fromLine) && params.fromLine > 0 ? Math.floor(params.fromLine)
-                        : isNumber(params.start)   && params.start    > 0 ? Math.floor(params.start) : 1
-          var sliceTo   = isNumber(params.toLine)   && params.toLine   > 0 ? Math.floor(params.toLine)
-                        : isNumber(params.end)     && params.end      > 0 ? Math.floor(params.end) : ropTotalLines
-          if (sliceTo > ropTotalLines) sliceTo = ropTotalLines
-          var sliceText = ropLines.slice(sliceFrom - 1, sliceTo).join("\n")
+                        : isNumber(params.start) && params.start > 0 ? Math.floor(params.start) : 1
+          var sliceTo = isNumber(params.toLine) && params.toLine > 0 ? Math.floor(params.toLine)
+                      : isNumber(params.end) && params.end > 0 ? Math.floor(params.end) : ropTotalLines
+          sliceTo = Math.min(sliceTo, ropTotalLines)
+          var charFrom = charMode ? (isDef(params.fromChar) ? params.fromChar : 1) : (lineOffsets[sliceFrom - 1] === undefined ? spilledRaw.length : lineOffsets[sliceFrom - 1]) + 1
+          var charTo = charMode ? (isDef(params.toChar) ? params.toChar : spilledRaw.length) : lineOffsets[sliceTo - 1] + ropLines[sliceTo - 1].length
+          if (!isNumber(charFrom) || !isNumber(charTo) || charFrom < 1 || charTo < 0 || Math.floor(charFrom) !== charFrom || Math.floor(charTo) !== charTo) return { error: "Character positions must be positive integers (UTF-16 units)." }
+          charTo = Math.min(charTo, spilledRaw.length)
+          var sliceText = spilledRaw.substring(charFrom - 1, Math.max(charFrom - 1, charTo))
           var sliceTruncated = sliceText.length > _autoCapThreshold
-          if (sliceTruncated) sliceText = sliceText.substring(0, _autoCapThreshold)
+          var sliceNext, sliceSuffix = ""
+          if (sliceTruncated) {
+            var sliceRoom = _autoCapThreshold - nextNotice({ fromChar: spilledRaw.length + 1, toChar: charTo }, false).length
+            if (sliceRoom < 1) return budgetError()
+            sliceText = sliceText.substring(0, sliceRoom)
+            sliceNext = { fromChar: charFrom + sliceText.length, toChar: charTo }
+            sliceSuffix = nextNotice(sliceNext, false)
+          }
           var sliceResp = {
             action: "readresult", op: "slice", resultFile: resultFilePath,
-            fromLine: sliceFrom, toLine: sliceTo, totalLines: ropTotalLines,
-            content: [{ type: "text", text: sliceText + (sliceTruncated ? "\n[TRUNCATED at " + _autoCapThreshold + " bytes. Use a smaller line range with fromLine/toLine.]" : "") }],
-            estimatedTokens: Math.ceil(sliceText.length / 4)
+            fromChar: charFrom, toChar: charFrom + sliceText.length - 1, totalLines: ropTotalLines,
+            content: [{ type: "text", text: sliceText + sliceSuffix }],
+            estimatedTokens: Math.ceil((sliceText.length + sliceSuffix.length) / 4)
           }
-          if (sliceTruncated) sliceResp.truncated = true
+          if (!charMode) { sliceResp.fromLine = sliceFrom; sliceResp.toLine = sliceTo }
+          if (sliceTruncated) { sliceResp.truncated = true; sliceResp.limited = true; sliceResp.next = sliceNext }
           return sliceResp
         }
 
@@ -12412,51 +12454,100 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           } catch(rxErr) {
             grepRx = new RegExp(grepPat.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
           }
-          var grepInclude = {}
-          var grepMatchCount = 0
-          var grepReturnedMatches = 0
-          var grepMaxMatches = parent._getReadresultMaxMatches(args, 0)
+          var grepStart = isNumber(params.startChar) && params.startChar > 0 ? Math.floor(params.startChar) - 1 : 0
+          var grepMatchCount = 0, grepMaxMatches = parent._getReadresultMaxMatches(args, 0)
+          var regions = [], matchingLines = {}
+          grepRx = new RegExp(grepRx.source, "gi")
           for (var gi = 0; gi < ropLines.length; gi++) {
-            if (grepRx.test(ropLines[gi])) {
-              grepMatchCount++
-              if (grepMaxMatches > 0 && grepReturnedMatches >= grepMaxMatches) continue
-              grepReturnedMatches++
-              for (var gc = Math.max(0, gi - grepCtx); gc <= Math.min(ropLines.length - 1, gi + grepCtx); gc++) {
-                grepInclude[gc] = true
+            grepRx.lastIndex = 0
+            var gm, lineMatched = false
+            while ((gm = grepRx.exec(ropLines[gi])) !== null) {
+              lineMatched = true
+              var ms = lineOffsets[gi] + gm.index
+              var me = ms + gm[0].length
+              if (me > grepStart || (gm[0].length === 0 && ms >= grepStart)) {
+                // Merge overlapping context windows without losing later matches.
+                var rs = Math.max(lineOffsets[gi], ms - 200, grepStart)
+                var re = Math.min(lineOffsets[gi] + ropLines[gi].length, me + 200)
+                var prev = regions.length ? regions[regions.length - 1] : null
+                if (prev && prev.line === gi && rs <= prev.end) {
+                  prev.end = Math.max(prev.end, re)
+                  prev.matches.push({ start: ms, end: me })
+                } else regions.push({ line: gi, start: rs, end: re, matches: [{ start: ms, end: me }] })
               }
+              if (gm[0].length === 0) grepRx.lastIndex = gm.index + 1
+            }
+            if (lineMatched) { grepMatchCount++; matchingLines[gi] = true }
+          }
+          var grepParts = [], grepRanges = [], grepUsed = 0, grepNext, grepExcerpted = false, grepIncomplete = false
+          var grepReturned = {}, grepReturnedMatches = 0, grepLast = -1
+          var reserve = nextNotice({ startChar: spilledRaw.length + 2 }, true).length
+          for (var ri = 0; ri < regions.length; ri++) {
+            var region = regions[ri], gl = region.line
+            var firstMatch = region.matches[0]
+            if (grepMaxMatches > 0 && !grepReturned[gl] && grepReturnedMatches >= grepMaxMatches) { grepNext = { startChar: Math.max(grepStart, firstMatch.start) + 1 }; break }
+            var room = _autoCapThreshold - grepUsed - (grepParts.length ? 1 : 0)
+            var fullFrom = Math.max(0, gl - grepCtx), fullTo = Math.min(ropLines.length - 1, gl + grepCtx)
+            var fullParts = [], fullLines = []
+            for (var fc = Math.max(fullFrom, grepLast + 1); fc <= fullTo; fc++) {
+              if (matchingLines[fc] && lineOffsets[fc] < grepStart) continue
+              fullParts.push((fc + 1) + ": " + ropLines[fc]); fullLines.push(fc)
+            }
+            var fullText = (grepLast >= 0 && fullLines.length && fullLines[0] > grepLast + 1 ? "---\n" : "") + fullParts.join("\n")
+            var lastRegion = ri
+            while (lastRegion + 1 < regions.length && regions[lastRegion + 1].line <= fullTo) lastRegion++
+            var fullCount = 0
+            fullLines.forEach(function(l) { if (matchingLines[l] && !grepReturned[l]) fullCount++ })
+            if (!grepReturned[gl] && grepStart <= lineOffsets[gl] && fullText.length > 0 && fullText.length + (lastRegion + 1 < regions.length ? reserve : 0) <= room && (grepMaxMatches <= 0 || grepReturnedMatches + fullCount <= grepMaxMatches)) {
+              grepParts.push(fullText); grepUsed += fullText.length + (grepParts.length > 1 ? 1 : 0)
+              fullLines.forEach(function(l) { if (matchingLines[l] && !grepReturned[l]) { grepReturned[l] = true; grepReturnedMatches++ } })
+              grepLast = fullTo; ri = lastRegion
+              continue
+            }
+            var start = region.start, end = region.end
+            if (firstMatch.start === firstMatch.end && start === end) start = Math.max(lineOffsets[gl], end - 200)
+            var label = function(a, b) { return (gl + 1) + ": [chars " + (a + 1) + "-" + b + "] ..." }
+            var matchEnd = region.matches[region.matches.length - 1].end
+            var locatorSize = label(start, end).length + 3
+            var needsContinuation = ri + 1 < regions.length || matchEnd - Math.max(firstMatch.start, grepStart) > room - locatorSize
+            var available = room - (needsContinuation ? reserve : 0) - locatorSize
+            if (available < 1) {
+              if (!grepParts.length) return budgetError()
+              grepNext = { startChar: Math.max(grepStart, firstMatch.start) + 1 }; break
+            }
+            if (end - start > available) {
+              // Spend space on the match before spending it on surrounding context.
+              var anchor = Math.max(firstMatch.start, grepStart)
+              var matchSize = Math.min(available, (needsContinuation ? firstMatch.end : matchEnd) - anchor)
+              start = Math.max(start, anchor - Math.floor((available - matchSize) / 2))
+              end = Math.min(region.end, start + available)
+            }
+            var piece = label(start, end) + spilledRaw.substring(start, end) + "..."
+            grepParts.push(piece); grepUsed += piece.length + (grepParts.length > 1 ? 1 : 0)
+            grepRanges.push({ line: gl + 1, fromChar: start + 1, toChar: end })
+            grepExcerpted = true
+            grepLast = gl
+            if (!grepReturned[gl]) { grepReturned[gl] = true; grepReturnedMatches++ }
+            var remaining = region.matches.filter(function(m) { return m.end > end || (m.start === m.end && m.start > end) })
+            if (remaining.length) {
+              grepNext = { startChar: Math.max(end, remaining[0].start) + 1 }
+              grepIncomplete = remaining[0].start < end
+              break
             }
           }
-          var grepParts = []
-          var grepLast = -1
-          for (var gi2 = 0; gi2 < ropLines.length; gi2++) {
-            if (grepInclude[gi2]) {
-              if (grepLast >= 0 && gi2 > grepLast + 1) grepParts.push("---")
-              grepParts.push((gi2 + 1) + ": " + ropLines[gi2])
-              grepLast = gi2
-            }
-          }
-          var grepText = grepMatchCount > 0 ? grepParts.join("\n") : "(no matches)"
-          var grepTruncated = grepText.length > _autoCapThreshold
-          if (grepTruncated) grepText = grepText.substring(0, _autoCapThreshold)
-          var grepLimited = grepMaxMatches > 0 && grepMatchCount > grepReturnedMatches
-          var grepSuffix = ""
-          if (grepLimited) {
-            grepSuffix += "\n[LIMITED to first " + grepReturnedMatches + " matching regions out of " + grepMatchCount + ". Refine the pattern or use slice/head for narrower extraction.]"
-          }
-          if (grepTruncated) {
-            grepSuffix += "\n[TRUNCATED at " + _autoCapThreshold + " bytes. Use a more specific pattern."
-            if (grepLimited) grepSuffix += " A match limit is also active."
-            grepSuffix += "]"
-          }
+          var grepText = grepParts.length ? grepParts.join("\n") : "(no matches)"
+          if (grepNext) grepText += nextNotice(grepNext, true)
+          if (grepText.length > _autoCapThreshold) return budgetError()
           var grepResp = {
             action: "readresult", op: "grep", resultFile: resultFilePath,
             pattern: grepPat, matchCount: grepMatchCount, totalLines: ropTotalLines,
-            returnedMatches: grepReturnedMatches,
-            content: [{ type: "text", text: grepText + grepSuffix }],
-            estimatedTokens: Math.ceil(grepText.length / 4)
+            returnedMatches: grepReturnedMatches, ranges: grepRanges,
+            content: [{ type: "text", text: grepText }], estimatedTokens: Math.ceil(grepText.length / 4)
           }
-          if (grepTruncated) grepResp.truncated = true
-          if (grepLimited) grepResp.limited = true
+          if (grepExcerpted) grepResp.excerpted = true
+          if (grepIncomplete) grepResp.truncated = true
+          if (grepNext) { grepResp.limited = true; grepResp.next = grepNext }
+
           return grepResp
         }
 
@@ -12922,8 +13013,8 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
                 spillReason + resultFile + " (auto-deleted at shutdown).",
                 "Size: " + resultByteSize + " bytes (~" + estTokens + " tokens).",
                 (toBoolean(args.usestdutils) === true
-                  ? "IMPORTANT: Call result_stat with resultFile='" + resultFile + "' first (size check). Then use result_read (full), result_head/result_tail (first/last N lines), result_slice (line range), or result_grep (regex search)."
-                  : "IMPORTANT: To access this data call proxy-dispatch with action='readresult' and resultFile='" + resultFile + "'. Start with op='stat', then use op='read', op='head', op='grep', or op='slice' as needed.")
+                  ? "IMPORTANT: Call result_stat with resultFile='" + resultFile + "' first (size check). Then use result_read (full), result_head/result_tail (first/last N lines), result_grep (regex search), then result_slice (fromChar/toChar) or returned next arguments with the same file/pattern."
+                  : "IMPORTANT: To access this data call proxy-dispatch with action='readresult' and resultFile='" + resultFile + "'. Start with op='stat', then use op='read', op='head', op='grep', or op='slice' with fromChar/toChar; follow next arguments with the same file/pattern. Refetch only if the saved source is unsuitable.")
               ]
               previewLines.push("Format: " + resultFormat.toUpperCase() + ".")
               if (isMap(resultPayload)) {
@@ -13078,11 +13169,14 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
       }
       _proxyDispatchProps.op = {
         type       : "string",
-        description: "Sub-operation for action='readresult'. 'stat' (default, always use first): size/line count only. 'read': full content (after stat confirms size). 'head'/'tail': first/last N lines. 'slice': lines fromLine..toLine. 'grep': pattern match with context.",
+        description: "Sub-operation for action='readresult'. 'stat' (default, always use first): size/line count only. 'read': full content (after stat confirms size). 'head'/'tail': first/last N lines. 'slice': line or UTF-16 character range (do not mix). 'grep': matching lines or labeled excerpts; follow returned next arguments with the same file/pattern.",
         enum       : [ "stat", "read", "head", "tail", "slice", "grep" ]
       }
       _proxyDispatchProps.fromLine = { type: "integer", description: "For op='slice': 1-based start line.", minimum: 1 }
       _proxyDispatchProps.toLine = { type: "integer", description: "For op='slice': 1-based end line.", minimum: 1 }
+      _proxyDispatchProps.fromChar = { type: "integer", minimum: 1, description: "For slice: inclusive 1-based UTF-16 start; do not mix with line ranges." }
+      _proxyDispatchProps.toChar = { type: "integer", minimum: 1, description: "For slice: inclusive 1-based UTF-16 end." }
+      _proxyDispatchProps.startChar = { type: "integer", minimum: 1, description: "For grep: resume at this 1-based UTF-16 position using returned next arguments." }
       _proxyDispatchProps.lines = { type: "integer", description: "For op='head'/'tail': number of lines (default 50).", minimum: 1 }
       _proxyDispatchProps.pattern = { type: "string", description: "For op='grep': regex (case-insensitive), falls back to literal match." }
       _proxyDispatchProps.context = { type: "integer", description: "For op='grep': context lines around each match (default 0).", minimum: 0 }
@@ -13174,15 +13268,17 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
 
       fns["result_slice"] = function(params) {
         var p = isMap(params) ? params : {}
-        return _doReadResult({ op: "slice", resultFile: p.resultFile, fromLine: p.fromLine, toLine: p.toLine })
+        return _doReadResult({ op: "slice", resultFile: p.resultFile, fromLine: p.fromLine, toLine: p.toLine, fromChar: p.fromChar, toChar: p.toChar })
       }
       fnsMeta["result_slice"] = {
         name       : "result_slice",
-        description: "Read a specific line range from a spilled result file (1-based, inclusive).",
+        description: "Read a line or character range from the original saved file. Ranges are 1-based inclusive; characters are UTF-16 units. Do not mix ranges. Follow next arguments for remaining content.",
         inputSchema: {
           type      : "object",
           properties: {
             resultFile: { type: "string", description: "Path to the spilled result file." },
+            fromChar  : { type: "integer", minimum: 1, description: "Start UTF-16 position (default 1); exclusive of line ranges." },
+            toChar    : { type: "integer", minimum: 1, description: "End UTF-16 position (default end of file)." },
             fromLine  : { type: "integer", minimum: 1, description: "1-based start line (default 1)." },
             toLine    : { type: "integer", minimum: 1, description: "1-based end line (default last line)." }
           },
@@ -13192,15 +13288,16 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
 
       fns["result_grep"] = function(params) {
         var p = isMap(params) ? params : {}
-        return _doReadResult({ op: "grep", resultFile: p.resultFile, pattern: p.pattern, context: p.context })
+        return _doReadResult({ op: "grep", resultFile: p.resultFile, pattern: p.pattern, context: p.context, startChar: p.startChar })
       }
       fnsMeta["result_grep"] = {
         name       : "result_grep",
-        description: "Search a spilled result file for lines matching a regex pattern (case-insensitive, falls back to literal match). Returns matched lines with optional surrounding context.",
+        description: "Search a spilled result file for lines matching a regex pattern (case-insensitive, falls back to literal match). Returns matching lines or match-centered excerpts with source character ranges. Follow next arguments with the same file/pattern for remaining matches.",
         inputSchema: {
           type      : "object",
           properties: {
             resultFile: { type: "string", description: "Path to the spilled result file." },
+            startChar : { type: "integer", minimum: 1, description: "Resume grep at a 1-based UTF-16 position returned in next." },
             pattern   : { type: "string", description: "Regular expression to search for (case-insensitive)." },
             context   : { type: "integer", minimum: 0, description: "Lines of context before and after each match (default 0)." }
           },
@@ -17339,6 +17436,7 @@ MiniA.prototype._refreshRunPrompt = function(args) {
         "For large MCP payloads: pass 'argumentsFile' to load arguments from disk, 'resultToFile=true' or 'resultSizeThreshold' to spill results to a temp file. " +
         spillNote + " ~4 chars = 1 token. " +
         "To read a spilled 'resultFile', use " + spillReadTool + " — never filesystem read/grep tools (that re-triggers spill and loops). " +
+        "Search the saved result, then follow excerpt fromChar/toChar ranges or next arguments with the same file/pattern. Character positions are 1-based inclusive UTF-16 units. Refetch only if the saved source is unsuitable. get-url style=\"text\" provides readable web content. " +
         "Chain a 'resultFile' path directly as the next call's 'argumentsFile'. Prefer file handoff for payloads >10KB; use the inline 'estimatedTokens' field to decide."
       )
     }
@@ -19000,19 +19098,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     var getEffectiveContextBudget = () => this._getEffectiveContextBudget(args, 0)
 
-    var _GUARD_ALIAS_OPS = { "result_stat":"stat", "result_read":"read", "result_head":"head", "result_tail":"tail", "result_slice":"slice", "result_grep":"grep" }
-    var buildReadresultGuardKey = (params, toolName) => {
-      if (!isMap(params) || !isString(params.resultFile) || params.resultFile.trim().length === 0) return ""
-      var aliasOp = isString(toolName) ? (_GUARD_ALIAS_OPS[toolName] || "") : ""
-      if (!aliasOp && params.action !== "readresult") return ""
-      var op = aliasOp || (isString(params.op) ? params.op.trim().toLowerCase() : "stat")
-      var key = [params.resultFile.trim(), op]
-      if (op === "grep") key.push(isString(params.pattern) ? params.pattern : "", isNumber(params.context) ? String(params.context) : "0")
-      if (op === "slice") key.push(isNumber(params.fromLine) ? String(params.fromLine) : isNumber(params.start) ? String(params.start) : "1", isNumber(params.toLine) ? String(params.toLine) : isNumber(params.end) ? String(params.end) : "")
-      if (op === "head" || op === "tail") key.push(isNumber(params.lines) ? String(params.lines) : "50")
-      if (op === "read") key.push(isNumber(params.maxBytes) ? String(params.maxBytes) : "0")
-      return key.join("|")
-    }
+    var buildReadresultGuardKey = (params, toolName) => this._buildReadresultGuardKey(params, toolName)
 
     var isPromptContextAnchor = function(entry) {
       if (!isString(entry)) return false
@@ -19098,9 +19184,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               // Try to convert TOON-encoded content to JSON so that op=grep works on
               // human-readable key names. TOON encoding (used by mcpproxytoon) makes
               // JSON keys opaque to text search, breaking the readresult grep workflow.
-              // Pretty-print the JSON (not minified) so that line-based ops (grep/slice)
-              // work correctly on minified sources like opacks/index.json which arrive
-              // as a single long line and make every line-based readresult op useless.
+              // Retain the existing JSON spill representation for file handoff. Retrieval
+              // uses this saved string unchanged, including its line/character positions.
               var _spillContent = obsContent
               var _spillExt = ".toon"
               try {
@@ -19119,8 +19204,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                 " File: " + retroTempPath +
                 " | Size: " + obsContent.length + " bytes (~" + estTokens + " tokens)." +
                 (toBoolean(args.usestdutils) === true
-                  ? " | IMPORTANT: Call result_stat resultFile='" + retroTempPath + "' first (size check). Then use result_read, result_head, result_tail, result_slice, or result_grep as needed.]"
-                  : " | IMPORTANT: Use proxy-dispatch action='readresult' resultFile='" + retroTempPath + "' to access. Start with op='stat', then op='read', op='head', op='grep', or op='slice' as needed.]")
+                  ? " | IMPORTANT: Call result_stat resultFile='" + retroTempPath + "' first (size check). Then search with result_grep; use result_slice fromChar/toChar or follow next arguments (same file/pattern). Refetch only if the saved source is unsuitable.]"
+                  : " | IMPORTANT: Use proxy-dispatch action='readresult' resultFile='" + retroTempPath + "' to access. Start with op='stat', then op='read', op='head', op='grep', or op='slice' with fromChar/toChar; follow next arguments with the same file/pattern. Refetch only if the saved source is unsuitable.]")
               // Patch the live context entry so future selectPromptContext calls see
               // the notice directly and do not retro-spill the same data again.
               if (i >= 0 && i < runtime.context.length && runtime.context[i] === entry) {
@@ -19407,8 +19492,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               " File: " + obsTempPath +
               " | Size: " + observation.length + " bytes (~" + obsTokens + " tokens)." +
               (toBoolean(args.usestdutils) === true
-                ? " | IMPORTANT: Call result_stat resultFile='" + obsTempPath + "' first (size check). Then use result_read, result_head, result_tail, result_slice, or result_grep as needed.]"
-                : " | IMPORTANT: Use proxy-dispatch action='readresult' resultFile='" + obsTempPath + "' to inspect it. Start with op='stat', then use op='head', op='grep', or op='slice' as needed.]")
+                ? " | IMPORTANT: Call result_stat resultFile='" + obsTempPath + "' first (size check). Then search with result_grep; use result_slice fromChar/toChar or follow next arguments (same file/pattern). Refetch only if the saved source is unsuitable.]"
+                : " | IMPORTANT: Use proxy-dispatch action='readresult' resultFile='" + obsTempPath + "' to inspect it. Start with op='stat', then use op='head', op='grep', or op='slice' with fromChar/toChar; follow next arguments with the same file/pattern. Refetch only if the saved source is unsuitable.]")
             rawResult = {
               autoSpilled: true,
               resultFile : obsTempPath,

@@ -873,7 +873,13 @@ Adapt the examples above by changing the `OAF_MODEL` tuple to match your provide
 - Click the paperclip button to the left of the prompt to choose one or more text-based files (Markdown, source code, CSV, JSON, etc.). Each file can be up to **512 KB**.
 - Every attachment appears above the prompt as a rounded chip showing the file name; remove any file before sending by selecting the **✕** icon.
 - When you submit the prompt, Mini-A automatically appends the file name and contents as Markdown code blocks. In the conversation stream the files show up as collapsible buttons—click one to open a preview modal with syntax highlighting.
-- Non-text files or oversized attachments are skipped with a warning so you always know what was sent.
+- Both Simple and Advanced modes also accept PNG/JPEG images, Word (`.doc`, `.docx`), Excel (`.xls`, `.xlsx`), PowerPoint (`.ppt`, `.pptx`) and PDF files. Enter a question or instruction before submitting binary files; Advanced slash and skill commands do not accept them.
+- Binary attachments allow **four files**, **10 MiB per image**, **20 MiB per document**, and **20 MiB combined**. Unsupported or oversized files are skipped with a warning. Images retain the existing 25-megapixel limit.
+- `useattach=true` enables isolated, read-only processing without requiring `useutils=true`, `useshell=true` or `readwrite=true`. Office/PDF files use the existing Tika `readDocument` reader (30,000 extracted characters per document); images use `inspectImage` with your question and the active main model. A vision-capable provider/model is required for images. See [Reading documents and images](#reading-documents-and-images) for Tika installation and runtime requirements; preinstall Tika for offline use.
+- The answer pane shows your original query and the attached file names. Extracted document text and image analysis remain in model context for follow-up questions.
+- Processing progress and errors identify the file. If any file fails, no agent goal runs from partial results. Truncated extraction is marked; the combined expanded prompt must fit `maxpromptchars`.
+- Temporary originals are deleted after processing. Only extracted text/image analysis enters normal conversation history, so follow-ups use those results and cannot reprocess the original file. Scanned PDFs need OCR, which is not enabled; embedded document images, layout rendering and spreadsheet formula evaluation are not included.
+- Binary data travels as base64 in the JSON request. Reverse proxies must permit requests up to 29 MiB for the largest allowed submissions.
 
 ## Basic Usage
 
@@ -1115,6 +1121,19 @@ Default behavior note:
 - **`mcpprogcallbatchmax`** (number, default: `10`): Maximum calls accepted in one `/call-tools-batch` request.
 - **`toolcachettl`** (number, optional): Override the default cache duration (milliseconds) for deterministic tool results when no per-tool metadata is provided
 
+For a large saved result, fetch once, inspect it with `result_stat`, then search and read supporting passages:
+
+```javascript
+result_stat({ resultFile: "/tmp/saved-result.json" })
+result_grep({ resultFile: "/tmp/saved-result.json", pattern: "relevant phrase" })
+// Use the returned character range, for example:
+result_slice({ resultFile: "/tmp/saved-result.json", fromChar: 24001, toChar: 24400 })
+// If grep returns next: {startChar: 25001}, repeat the same file/pattern with:
+result_grep({ resultFile: "/tmp/saved-result.json", pattern: "relevant phrase", startChar: 25001 })
+```
+
+Without the named tools, use `proxy-dispatch` with `action="readresult"` and `op="stat"`, `"grep"`, or `"slice"`. Character ranges are 1-based inclusive JavaScript UTF-16 positions in the unchanged saved file; do not mix character and line ranges. Long matching lines return labeled excerpts with up to 200 characters of surrounding context. `matchCount` counts matching lines; `returnedMatches` counts distinct matching lines represented in that response. `excerpted` indicates omitted surrounding text; `limited` and `next` indicate more matching excerpts remain. `truncated` indicates incomplete requested content. Follow `next` arguments using the same file, operation, pattern, and context (slice continuations replace line ranges with character ranges). Continuation arguments also appear in the response text. For readable web content, use `get-url style="text"`; its default is unchanged. Refetch only when the saved source is unsuitable.
+
 ```javascript
 // Single MCP connection
 mcp: "(cmd: 'docker run --rm -i mcp/dockerhub')"
@@ -1319,7 +1338,7 @@ Extend or override these presets by editing the YAML file—Mini-A reloads it on
 - **`contextguard`** (boolean, default: false): When `maxcontext=0`, enable a conservative small-window safety policy that proactively compresses oversized tool output and bounds proxy `readresult` extraction to avoid overflowing smaller model context windows.
 - **`contextguardbudget`** (number, default: 32000): Assumed smallest context window, in tokens, used by `contextguard` when `maxcontext=0`.
 - **`toolresultmaxinline`** (number, default: `4096` when `contextguard=true`): Maximum inline bytes kept from large tool or `readresult` outputs before Mini-A spills or truncates the content under `contextguard`.
-- **`readresultmaxmatches`** (number, default: `20` when `contextguard=true`): Maximum matching regions returned by `proxy-dispatch` `readresult` with `op='grep'` when `contextguard` is active.
+- **`readresultmaxmatches`** (number, default: `20` when `contextguard=true`): Maximum distinct matching lines returned by `proxy-dispatch` `readresult` with `op='grep'` when `contextguard` is active.
 
 #### Rate Limiting
 - **`rpm`** (number): Rate limit in calls per minute

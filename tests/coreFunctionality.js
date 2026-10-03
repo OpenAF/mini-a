@@ -2186,12 +2186,119 @@
 
       ow.test.assert(isMap(result), true, "readresult should return a result map")
       ow.test.assert(result.matchCount, 30, "grep should still report the full match count")
-      ow.test.assert(result.returnedMatches, 5, "grep should cap returned matches under context guard")
+      ow.test.assert(result.returnedMatches > 0 && result.returnedMatches <= 5, true, "grep should honor both match and text budgets")
       ow.test.assert(result.limited, true, "grep should mark limited responses")
-      ow.test.assert(String(result.content[0].text).indexOf("LIMITED to first 5") >= 0, true, "grep response should explain the applied match cap")
+      ow.test.assert(String(result.content[0].text).indexOf("LIMITED") >= 0, true, "grep response should explain the applied match cap")
     } finally {
       try { io.rm(tempPath) } catch(ignoreCleanupErr) {}
     }
+  }
+
+  exports.testResultExcerptRecovery = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    var file = String(java.nio.file.Files.createTempFile("mini-a-excerpts-", ".json").toAbsolutePath())
+    var cfg = agent._createMcpProxyConfig([agent._createUtilsMcpConfig({ useutils: true })], { usestdutils: true, toolresultmaxinline: 600 })
+    var fns = cfg.options.fns
+    var pad = new Array(3001).join("x")
+    var original = JSON.stringify({ html: "<p>😀" + pad + "NEEDLE_A" + pad + "NEEDLE_B" + pad + "NEEDLE_C</p>\nquoted \"text\"" })
+    try {
+      io.writeFileString(file, original)
+      var cursor = 1, seen = [], turns = 0
+      do {
+        var params = { resultFile: file, pattern: "NEEDLE_[ABC]", startChar: cursor }
+        var result = fns.result_grep(params)
+        var proxy = fns["proxy-dispatch"](merge(params, { action: "readresult", op: "grep" }))
+        ow.test.assert(proxy, result, "Named and proxy retrieval must agree")
+        ow.test.assert(result.matchCount, 1, "Count matching lines, not regex occurrences")
+        ow.test.assert(result.returnedMatches, 1, "Represent one distinct matching line")
+        ow.test.assert(result.excerpted, true, "Long line is deliberately excerpted")
+        ow.test.assert(result.content[0].text.length <= 600, true, "Include labels and next notice in budget")
+        var found = result.content[0].text.match(/NEEDLE_[ABC]/g) || []
+        seen = seen.concat(found)
+        result.ranges.forEach(function(range) {
+          var slice = fns.result_slice({ resultFile: file, fromChar: range.fromChar, toChar: range.toChar })
+          ow.test.assert(slice.content[0].text, original.substring(range.fromChar - 1, range.toChar), "Ranges address exact original UTF-16 content")
+        })
+        if (result.next) {
+          ow.test.assert(result.next.startChar > cursor, true, "Continuation advances")
+          ow.test.assert(agent._normalizeToolResult(result).display.indexOf(JSON.stringify(result.next)) >= 0, true, "Continuation survives normalization")
+          cursor = result.next.startChar
+        }
+        turns++
+      } while (result.next && turns < 10)
+      ow.test.assert(seen, ["NEEDLE_A", "NEEDLE_B", "NEEDLE_C"], "Recover distant matches once each")
+      ow.test.assert(io.readFileString(file), original, "Retrieval must not rewrite compact JSON")
+      var base = { resultFile: file, pattern: "NEEDLE", startChar: 1 }
+      ow.test.assert(agent._buildReadresultGuardKey(base, "result_grep") !== agent._buildReadresultGuardKey(merge(base, { startChar: 200 }), "result_grep"), true, "Grep progress gets a distinct repetition key")
+      ow.test.assert(agent._buildReadresultGuardKey({ resultFile: file, fromChar: 1, toChar: 50 }, "result_slice") !== agent._buildReadresultGuardKey({ resultFile: file, fromChar: 51, toChar: 100 }, "result_slice"), true, "Slice progress gets a distinct repetition key")
+      ow.test.assert(agent._buildReadresultGuardKey(base, "result_grep"), agent._buildReadresultGuardKey(merge(base, { action: "readresult", op: "grep" }), "proxy-dispatch"), "Both dispatch paths share repetition keys")
+      var slices = "", from = 1
+      do {
+        var part = fns.result_slice({ resultFile: file, fromChar: from, toChar: original.length })
+        slices += original.substring(part.fromChar - 1, part.toChar)
+        ow.test.assert(part.content[0].text.length <= 600, true, "Slice continuation fits budget")
+        if (part.next) from = part.next.fromChar
+      } while (part.next)
+      ow.test.assert(slices, original, "Character continuation covers the original string exactly")
+      ow.test.assert(isString(fns.result_slice({ resultFile: file, fromLine: 1, fromChar: 1 }).error), true, "Reject mixed ranges")
+      ow.test.assert(fns.result_grep({ resultFile: file, pattern: "absent" }).matchCount, 0, "No-match behavior")
+      ow.test.assert(isString(fns.result_grep({ resultFile: file + ".missing", pattern: "x" }).error), true, "Missing-file behavior")
+      io.writeFileString(file, "before\nhit [\nafter\nother\nhit again")
+      var ordinary = fns.result_grep({ resultFile: file, pattern: "hit", context: 1 })
+      ow.test.assert(ordinary.content[0].text, "1: before\n2: hit [\n3: after\n4: other\n5: hit again", "Preserve ordinary multiline context")
+      ow.test.assert(fns.result_grep({ resultFile: file, pattern: "[" }).matchCount, 1, "Invalid regex falls back to literal")
+      ow.test.assert(fns.result_slice({ resultFile: file, fromLine: 2, toLine: 3 }).content[0].text, "hit [\nafter", "Line slicing remains unchanged")
+      io.writeFileString(file, "😀é\n" + pad + "NEEDLE_A NEEDLE_B" + pad)
+      var merged = fns.result_grep({ resultFile: file, pattern: "NEEDLE_[AB]" })
+      ow.test.assert(merged.ranges.length, 1, "Merge overlapping match windows")
+      ow.test.assert(merged.ranges[0].line, 2, "Excerpt locator retains the source line")
+      ow.test.assert(merged.content[0].text.indexOf("NEEDLE_A NEEDLE_B") >= 0, true, "Merged excerpt contains both matches")
+      ow.test.assert(fns.result_slice({ resultFile: file, fromChar: 1, toChar: 3 }).content[0].text, "😀é", "Character positions count UTF-16 units")
+      var small = agent._createMcpProxyConfig([agent._createUtilsMcpConfig({ useutils: true })], { usestdutils: true, toolresultmaxinline: 60 }).options.fns
+      ow.test.assert(small.result_grep({ resultFile: file, pattern: "NEEDLE_A" }).content[0].text.indexOf("NEEDLE_A") >= 0, true, "Reduce context when a small budget can still fit the match and locator")
+      var lineSlice = fns.result_slice({ resultFile: file, fromLine: 2, toLine: 2 })
+      ow.test.assert(lineSlice.next.fromChar > 5, true, "Oversized line slice continues in original character positions")
+      ow.test.assert(lineSlice.truncated && lineSlice.limited, true, "Incomplete requested slice is marked explicitly")
+      io.writeFileString(file, pad)
+      ;["(?:)", "$", "x+"].forEach(function(pattern) {
+        var start = 1, count = 0, r
+        do {
+          r = fns.result_grep({ resultFile: file, pattern: pattern, startChar: start })
+          ow.test.assert(isUnDef(r.error), true, "Edge regex produces bounded content")
+          if (r.next) { ow.test.assert(r.next.startChar > start, true, "Edge regex advances"); start = r.next.startChar }
+          count++
+        } while (r.next && count < 30)
+        ow.test.assert(isUnDef(r.next), true, "Zero-length and oversized matches terminate")
+      })
+      var tiny = agent._createMcpProxyConfig([agent._createUtilsMcpConfig({ useutils: true })], { usestdutils: true, toolresultmaxinline: 8 }).options.fns
+      ow.test.assert(isString(tiny.result_grep({ resultFile: file, pattern: "x" }).error), true, "Tiny budget gives explicit error")
+    } finally { io.rm(file) }
+  }
+
+  exports.testResultWebSpillRecovery = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    var calls = 0
+    var payload = { content: [{ type: "text", text: "<html>" + new Array(10001).join("a") + "supporting passage</html>" }] }
+    var mock = { id: "mock-web", type: "dummy", options: {
+      fns: { "get-url": function() { calls++; return payload } },
+      fnsMeta: { "get-url": { name: "get-url", description: "Mock web response", inputSchema: { type: "object", properties: {} } } }
+    } }
+    var cfg = agent._createMcpProxyConfig([mock], { usestdutils: true, mcpproxythreshold: 100, toolresultmaxinline: 512 })
+    var fns = cfg.options.fns
+    var fetched = fns["proxy-dispatch"]({ action: "call", tool: "get-url", arguments: {} })
+    ow.test.assert(isString(fetched.resultFile), true, "Mock web response spills")
+    try {
+      var saved = io.readFileString(fetched.resultFile)
+      var grep = fns.result_grep({ resultFile: fetched.resultFile, pattern: "supporting passage" })
+      ow.test.assert(grep.content[0].text.indexOf("supporting passage") >= 0, true, "Recover phrase near end of web result")
+      ow.test.assert(grep.content[0].text.length <= 512, true, "Keep configured extraction limit")
+      var range = grep.ranges[0]
+      var slice = fns.result_slice({ resultFile: fetched.resultFile, fromChar: range.fromChar, toChar: range.toChar })
+      ow.test.assert(slice.content[0].text, saved.substring(range.fromChar - 1, range.toChar), "Slice original saved response")
+      ow.test.assert(calls, 1, "Recovery needs only one fetch")
+    } finally { io.rm(fetched.resultFile) }
   }
 
   exports.testResultAliasToolsExposedWithStdutils = function() {

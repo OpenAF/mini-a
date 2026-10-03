@@ -110,7 +110,7 @@ help:
     example  : "a-long-random-secret"
     mandatory: false
   - name     : useattach
-    desc     : "Boolean to enable/disable file attachments (default: false)"
+    desc     : "Enable text, PNG/JPEG, Office and PDF attachments (default: false)"
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
@@ -1085,8 +1085,10 @@ todo:
       if (isUnDef(global.__advanced)) return ow.server.httpd.reply({ error: "Advanced mode is disabled" })
       if (!global._mini_a_web_checkToken(request)) return ow.server.httpd.reply({ error: "unauthorized" })
       var raw = request.files.postData
-      if (!isString(raw) || raw.length > 150000) throw "Invalid advanced request"
-      return ow.server.httpd.reply(global.__advanced.request(jsonParse(raw)))
+      if (!isString(raw) || raw.length > MiniAWebAttachments.maxRequestChars) throw "Invalid advanced request"
+      var data = jsonParse(raw)
+      if (raw.length > 150000 && (!isArray(data.attachments) || !data.attachments.length)) throw "Invalid advanced request"
+      return ow.server.httpd.reply(global.__advanced.request(data))
     } catch(e) { return ow.server.httpd.reply({ error: String(e) }) }
 
 # Clear a session
@@ -1182,6 +1184,8 @@ todo:
       }
 
       if (isDef(postData.request) && postData.request == "stop") {
+        global.__attachmentStops = global.__attachmentStops || {}
+        if (isDef(global.__runTokens[postData.uuid])) global.__attachmentStops[postData.uuid] = global.__runTokens[postData.uuid]
         var _stopConv = global.__conversations[ postData.uuid ]
         if (isDef(_stopConv)) {
           if (isFunction(_stopConv.requestStop)) {
@@ -1281,6 +1285,7 @@ todo:
           if (isDef(r.event)) {
             var _h = { event: r.event }
             if (isDef(r.message)) _h.message = r.message
+            if (isString(r.displayMessage)) _h.displayMessage = r.displayMessage
             _history.push(_h)
           }
           if (r.event == "final") {
@@ -1297,7 +1302,7 @@ todo:
             if (r.event == "👤" || r.event == "user") {
               flushActivity(false)
               activityId = i
-              _res.content += "<div style=\"text-align: right;\"><i><div style=\"display: inline-block; text-align: left;\">" + __formatUserMessage(r.message) + "</div> " + r.event + "</i>\n<br><br></div>"
+              _res.content += "<div style=\"text-align: right;\"><i><div style=\"display: inline-block; text-align: left;\">" + __formatUserMessage(isString(r.displayMessage) ? r.displayMessage : r.message) + "</div> " + r.event + "</i>\n<br><br></div>"
             } else if (isDef(r.event)) {
               // Group only the messages that were visible before activity disclosures.
               if (!(r.event == "🧩" || r.event == "💡" || r.event == "💭" || r.event == "🌀" || r.event == "🛑" || r.event == "⏳" || ((r.event == "⚙️" || r.event == "🖥️") && global.__showexecs))) continue
@@ -1488,6 +1493,7 @@ todo:
         if (isUnDef(item) || isUnDef(item.event)) continue
         var entry = { event: item.event }
         if (isDef(item.message)) entry.message = item.message
+        if (isString(item.displayMessage)) entry.displayMessage = item.displayMessage
         sanitized.push(entry)
       }
 
@@ -1528,6 +1534,7 @@ ojob:
   argsFromEnvs: true
   loadLibs    :
   - mini-a.js
+  - mini-a-web-attachments.js
   - mini-a-web-session.js
   - s3.js
   channels    :
@@ -1877,6 +1884,7 @@ jobs:
     global.__logpromptheaders = args.logpromptheaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
     global.__memorysessionheader = isString(args.memorysessionheader) ? args.memorysessionheader.trim().toLowerCase() : ""
     global.__useattach = args.useattach
+    MiniAWebAttachments.cleanup()
     global.__usesvg = args.usesvg
     global.__usevectors = args.usevectors
     global.__usemath = args.usemath

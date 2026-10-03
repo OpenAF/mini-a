@@ -377,6 +377,8 @@ MiniAAdvanced.prototype.request = function(data) {
   }
   if (data.action === "stop") {
     state.cancelled = true
+    global.__attachmentStops = global.__attachmentStops || {}
+    if (isDef(global.__runTokens[state.uuid])) global.__attachmentStops[state.uuid] = global.__runTokens[state.uuid]
     if (state.runtime && isFunction(state.runtime.stopDream)) state.runtime.stopDream()
     state.pending = null
     var agent = global.__conversations[state.uuid]
@@ -386,6 +388,8 @@ MiniAAdvanced.prototype.request = function(data) {
   if (state.closed) throw new Error("Session ended. Start a new conversation.")
   if (!isString(data.requestId) || !/^[a-zA-Z0-9-]{1,80}$/.test(data.requestId)) throw new Error("A requestId is required")
   if (state.receipts[data.requestId]) return state.receipts[data.requestId]
+  var binaryAttachments = isDef(data.attachments) ? MiniAWebAttachments.validate(data.attachments, data.command) : []
+  if (binaryAttachments.length && (data.action !== "command" || /^\s*[/$]/.test(data.command))) throw new Error("Binary attachments require an ordinary goal, not a slash or skill command")
   var token = global._mini_a_web_reserve(state.uuid)
   if (isUnDef(token)) return { busy: true }
   var receipt = { accepted: true, requestId: data.requestId, view: data.action === "command" ? this.safe(state.runtime.commandView(data.command), __, true) : { name: "settings", params: {} } }
@@ -475,7 +479,7 @@ MiniAAdvanced.prototype.request = function(data) {
       if (state.goal && !state.cancelled && !state.closed) {
         var goal = state.goal
         state.goal = null
-        self.submitPrompt({ header: { "x-mini-a-token": global.__webtoken }, files: { postData: stringify({ uuid: state.uuid, prompt: goal.prompt, skillUsage: goal.skillUsage, displayPrompt: goal.displayPrompt, advancedRequestId: data.requestId }, __, "") } })
+        self.submitPrompt({ header: { "x-mini-a-token": global.__webtoken }, files: { postData: stringify({ uuid: state.uuid, prompt: goal.prompt, skillUsage: goal.skillUsage, displayPrompt: goal.displayPrompt, advancedRequestId: data.requestId, attachments: data.attachments }, __, "") } })
       }
     }
   }).catch(function(e) { state.operation = null; global._mini_a_web_release(state.uuid, token); self.emit(state, "error", String(e)) })

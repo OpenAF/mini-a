@@ -33,6 +33,7 @@ const c = { global: g, MiniA: Agent, __: undefined, genUUID: () => 'token-' + ++
   $doV(fn) { if (scheduleFail) throw Error('schedule failed'); pending.push(fn); return { catch() {} }; } };
 vm.createContext(c);
 vm.runInContext(fs.readFileSync('mini-a-common.js', 'utf8'), c);
+vm.runInContext(fs.readFileSync('mini-a-web-attachments.js', 'utf8'), c);
 const helpers = yaml.slice(yaml.indexOf('    global._mini_a_web_reserve ='), yaml.indexOf('    global.__webtoken =')).replace(/^    /gm,'');
 vm.runInContext(helpers,c);
 function call(name, data) { c.request = { files: { postData: JSON.stringify(data) }, header: { 'x-session': ' selected ' } }; return vm.runInContext('(function(){'+route(name)+'})()',c); }
@@ -166,3 +167,78 @@ vm.runInContext(cleanup, c);
 assert.equal(prunedAdvanced, 1); assert.equal(disposedAdvanced, 1);
 assert.equal(deletedVm, 0); assert.equal(g.__advanced.sessions.advanced, undefined);
 console.log('Advanced history lifecycle checks passed.');
+
+Agent.prototype.start = function(args) {
+  this.fn('user', args.goal);
+  return originalStart.call(this, args);
+};
+// Binary data is processed only inside the accepted, reserved prompt run.
+delete g.__advanced;
+g.__useattach = true;
+const attachment = {name:'report.pdf',base64:Buffer.from('%PDF-fixture').toString('base64')};
+let processed = 0;
+c.MiniAWebAttachments.process = (items, prompt, agent, alive, progress) => {
+  processed++; assert.equal(alive(),true); assert.equal(items[0].name,'report.pdf');
+  progress('Processing attachment: report.pdf'); return prompt + '\nDocument evidence';
+};
+assert.equal(call('prompt',{uuid:'binary',prompt:'Read',attachments:[attachment]}).error,undefined,'accepted submission has no error');
+assert.equal(processed,0,'extraction is asynchronous');
+assert.equal(call('prompt',{uuid:'binary',prompt:'Overlap',attachments:[attachment]}).busy,true);
+pending.shift()();
+assert.equal(processed,1);
+assert.match(g.__conversations.binary.lastArgs.goal,/Document evidence/);
+const binaryUser = g.__res.binary.find(e => e.event === '👤');
+assert.match(binaryUser.message,/Document evidence/,'model history retains extracted content');
+assert.equal(binaryUser.displayMessage,'Read\n\n📎 report.pdf');
+assert.equal(g.__conversations.binary._webAttachmentDisplayPrompt,undefined,'display label expires after the run');
+const binaryResult = call('result',{uuid:'binary'});
+assert.match(binaryResult.content,/Read/);assert.match(binaryResult.content,/report.pdf/);
+assert.doesNotMatch(binaryResult.content,/Document evidence/,'answer view hides Tika source text');
+assert.equal(binaryResult.history.find(e => e.event === '👤').displayMessage,binaryUser.displayMessage);
+assert.equal(JSON.stringify(g.__res.binary).includes(attachment.base64),false,'binary payload is absent from transcript');
+assert.match(call('prompt',{uuid:'invalid',prompt:'Read',attachments:[{...attachment,name:'x.exe'}]}).error,/unsupported/);
+assert.equal(g.__busy.invalid,undefined);
+const priorStarts = starts;
+c.MiniAWebAttachments.process = () => { throw Error('report.pdf: parser failed'); };
+call('prompt',{uuid:'binary-failure',prompt:'Read',attachments:[attachment]});pending.shift()();
+assert.equal(starts,priorStarts,'failed extraction never starts the agent');
+assert.match(g.__res['binary-failure'].at(-1).message,/parser failed/);
+call('prompt',{uuid:'binary-stop',prompt:'Read',attachments:[attachment]});
+g.__attachmentStops['binary-stop']=g.__runTokens['binary-stop'];
+c.MiniAWebAttachments.process = (items,prompt,agent,alive) => { assert.equal(alive(),false);throw Error('cancelled'); };
+pending.shift()();assert.equal(starts,priorStarts);
+assert.equal(g.__busy['binary-stop'],undefined);
+console.log('Web binary processing, failure and cancellation checks passed.');
+const beforeExpandedLimit = starts;
+c.MiniAWebAttachments.process = () => 'x'.repeat(120001);
+call('prompt',{uuid:'binary-limit',prompt:'Read',attachments:[attachment]});pending.shift()();
+assert.equal(starts,beforeExpandedLimit);
+assert.match(g.__res['binary-limit'].at(-1).message,/prompt exceeds/);
+c.MiniAWebAttachments.process = (items,prompt,agent,alive) => {assert.equal(alive(),true);return prompt+'\nSaved evidence';};
+call('prompt',{uuid:'binary-stop',prompt:'Try again',attachments:[attachment]});pending.shift()();
+assert.equal(starts,beforeExpandedLimit+1,'a new run after Stop can process files');
+console.log('Expanded prompt limit and post-cancellation retry checks passed.');
+
+// Reused callbacks must read the new label and never apply it to later plain goals.
+c.MiniAWebAttachments.process = (items,prompt) => prompt+'\nImage evidence';
+call('prompt',{uuid:'binary',prompt:'Inspect',attachments:[{name:'image.png',base64:'iVBORw0KGgo='}]});pending.shift()();
+assert.equal(g.__res.binary.filter(e => e.event === '👤').at(-1).displayMessage,'Inspect\n\n📎 image.png');
+call('prompt',{uuid:'binary',prompt:'Follow up'});pending.shift()();
+assert.equal(g.__res.binary.filter(e => e.event === '👤').at(-1).displayMessage,undefined);
+assert.equal(g.__res.binary.filter(e => e.event === '👤').at(-1).message,'Prefix: Follow up');
+// Advanced user journal and answer pane use the label; the model still sees evidence.
+g.__advanced = {sessions:{'binary-advanced':commandState},persist(){},safe:x=>x,emit(state,type,value){commandEvents.push({type,value});}};
+call('prompt',{uuid:'binary-advanced',prompt:'Explain',attachments:[attachment]});pending.shift()();
+assert.equal(commandEvents.filter(e => e.type === 'user').at(-1).value,'Explain\n\n📎 report.pdf');
+assert.match(g.__conversations['binary-advanced'].lastArgs.goal,/Image evidence/);
+assert.doesNotMatch(call('result',{uuid:'binary-advanced'}).content,/Image evidence/);
+assert.equal(g.__conversations['binary-advanced']._webAttachmentDisplayPrompt,undefined);
+Agent.prototype.start = originalStart;
+console.log('Simple and Advanced attachment transcript display checks passed.');
+
+assert.equal(call('load-history',{uuid:'restored-binary',history:binaryResult.history}).status,'loaded');
+const restoredUser = g.__res['restored-binary'].find(e => e.event === '👤');
+assert.equal(restoredUser.displayMessage,binaryUser.displayMessage);
+assert.match(restoredUser.message,/Document evidence/);
+assert.doesNotMatch(call('result',{uuid:'restored-binary'}).content,/Document evidence/);
+console.log('Restored attachment history preserves presentation and model content.');

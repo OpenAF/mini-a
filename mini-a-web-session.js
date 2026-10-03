@@ -1,6 +1,6 @@
 // Shared prompt route used by Simple chat and Advanced console commands.
 function MiniAWebPrompt(request) {
-  var _res = { error: "check server logs" }
+  var _res = {}
   try {
     if (!global._mini_a_web_checkToken(request)) {
       return ow.server.httpd.reply({ error: "unauthorized" })
@@ -17,9 +17,14 @@ function MiniAWebPrompt(request) {
     }
     
     // Parse POST data
-    var postData = jsonParse(request.files.postData)
+    var rawPost = request.files.postData
+    if (!isString(rawPost) || rawPost.length > MiniAWebAttachments.maxRequestChars) throw new Error("Request exceeds attachment payload limit")
+    var postData = jsonParse(rawPost)
     postData.prompt = __normalizePromptInput(postData.prompt)
     if (isString(postData.displayPrompt)) postData.displayPrompt = __normalizePromptInput(postData.displayPrompt)
+    var binaryAttachments = MiniAWebAttachments.validate(postData.attachments, postData.prompt)
+    var attachmentDisplayPrompt = binaryAttachments.length ? MiniAWebAttachments.displayPrompt(postData.prompt, binaryAttachments) : __
+    delete postData.attachments
     // Validate UUID or generate a new one
     if (isDef(postData.uuid)) {
       if (!global._mini_a_web_isValidUuid(postData.uuid)) {
@@ -35,6 +40,9 @@ function MiniAWebPrompt(request) {
       return ow.server.httpd.reply({ error: "session busy", uuid: _res.uuid, busy: true })
     }
 
+    global.__attachmentStops = global.__attachmentStops || {}
+    delete global.__attachmentStops[_res.uuid]
+    if (isDef(global.__advanced) && isDef(global.__advanced.sessions[_res.uuid])) global.__advanced.sessions[_res.uuid].cancelled = false
     // Initialize response storage
     if (isUnDef(global.__res[_res.uuid])) {
       global.__res[ _res.uuid ] = [ ]
@@ -129,10 +137,15 @@ function MiniAWebPrompt(request) {
         lma.setInteractionFn( (e, m) => {
           try {
             var advancedLive = isDef(global.__advanced) ? global.__advanced.sessions[uuid] : __
-            // The callback survives across goals; use the current display label.
-            // Keep the expanded prompt in startArgs and the model conversation.
-            if (e === "user" && isDef(advancedLive) && isString(advancedLive.displayPrompt) && advancedLive.displayPrompt.length > 0 && !isString(global._mini_a_web_extractSubtaskId(m))) m = advancedLive.displayPrompt
-            if (isDef(advancedLive) && e !== "stream" && e !== "planner_stream") global.__advanced.emit(advancedLive, e, m)
+            // The callback survives across goals. Attachment display labels belong
+            // to the current run; extracted source data stays in the model history.
+            var displayMessage
+            if (e === "user" && !isString(global._mini_a_web_extractSubtaskId(m))) {
+              var attachmentDisplay = lma._webAttachmentDisplayPrompt
+              if (isDef(attachmentDisplay) && global._mini_a_web_owns(uuid, attachmentDisplay.token)) displayMessage = attachmentDisplay.text
+              else if (isDef(advancedLive) && isString(advancedLive.displayPrompt) && advancedLive.displayPrompt.length > 0) m = advancedLive.displayPrompt
+            }
+            if (isDef(advancedLive) && e !== "stream" && e !== "planner_stream") global.__advanced.emit(advancedLive, e, isString(displayMessage) ? displayMessage : m)
             if (e == "stream") {
               // Local child agents inherit this callback and prefix every
               // interaction message with [subtask:id]. Do not mix their answer
@@ -323,7 +336,9 @@ function MiniAWebPrompt(request) {
                 pendingProxyThought = __
               }
             }
-            global.__res[uuid].push({ event: _e, message: m })
+            var transcriptEntry = { event: _e, message: m }
+            if (isString(displayMessage)) transcriptEntry.displayMessage = displayMessage
+            global.__res[uuid].push(transcriptEntry)
             if (global.__usestream && isFunction(global._mini_a_web_ssePush) && _e != "🗺️") {
               global._mini_a_web_ssePush(uuid, "interaction", { event: _e })
             }
@@ -361,6 +376,17 @@ function MiniAWebPrompt(request) {
         var traceSink = advancedState.runtime.beginTrace(postData.prompt)
         lma.setTraceFn(function(kind, payload) { traceSink(kind, global.__advanced.safe(payload)) })
       }
+      if (binaryAttachments.length) {
+        postData.prompt = __normalizePromptInput(MiniAWebAttachments.process(binaryAttachments, postData.prompt, lma,
+          function() { return global._mini_a_web_owns(uuid, runToken) && global.__attachmentStops[uuid] !== runToken && (!advancedState || !advancedState.cancelled) },
+          function(message) {
+            global.__res[uuid].push({ event: "info", message: message })
+            if (advancedState) global.__advanced.emit(advancedState, "info", message)
+          }))
+        startArgs.goal = __miniAPrefixGoal(postData.prompt, effectiveArgs.goalprefix)
+      }
+      if (global.__attachmentStops[uuid] === runToken || (advancedState && advancedState.cancelled) || !global._mini_a_web_owns(uuid, runToken)) return
+      if (isString(attachmentDisplayPrompt)) lma._webAttachmentDisplayPrompt = { token: runToken, text: attachmentDisplayPrompt }
       var _rma = lma.start(startArgs)
 
       if (!global._mini_a_web_owns(uuid, runToken)) return
@@ -372,9 +398,9 @@ function MiniAWebPrompt(request) {
       if (isObject(finalMessage)) finalMessage = af.toSLON(finalMessage)
       global.__res[uuid].push( { event: "final", message: finalMessage } )
       if (isDef(advancedState)) {
-        advancedState.runtime.sync(lma, postData.prompt, finalMessage)
+        advancedState.runtime.sync(lma, isString(attachmentDisplayPrompt) ? attachmentDisplayPrompt : postData.prompt, finalMessage)
         advancedState.runtime.saveConversation()
-        advancedState.runtime.afterGoal(postData.prompt, finalMessage)
+        advancedState.runtime.afterGoal(isString(attachmentDisplayPrompt) ? attachmentDisplayPrompt : postData.prompt, finalMessage)
         global.__advanced.emit(advancedState, "answer", finalMessage)
       }
       if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
@@ -401,6 +427,9 @@ function MiniAWebPrompt(request) {
           global._mini_a_web_dispose(uuid)
         }
       } finally {
+        if (isDef(lma) && isDef(lma._webAttachmentDisplayPrompt) && lma._webAttachmentDisplayPrompt.token === runToken) delete lma._webAttachmentDisplayPrompt
+        binaryAttachments = null
+        if (global.__attachmentStops[uuid] === runToken) delete global.__attachmentStops[uuid]
         try { if (isDef(advancedState)) { global.__advanced.emit(advancedState, "complete", { requestId: advancedState.operation, action: "goal" }); advancedState.operation = null; delete advancedState.displayPrompt; global.__advanced.persist(advancedState) } }
         finally { global._mini_a_web_release(uuid, runToken) }
       }
@@ -409,6 +438,7 @@ function MiniAWebPrompt(request) {
       global._mini_a_web_release(_res.uuid, runToken)
     })
   } catch(ee) {
+    _res.error = String(ee)
     logErr(ee)
     if (isDef(runToken)) global._mini_a_web_release(_res.uuid, runToken)
   }

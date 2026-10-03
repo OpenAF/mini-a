@@ -1,6 +1,7 @@
 // OpenAF integration checks for the real shared runtime, disk journal and async adapter.
 // Run: oaf -f tests/webAdvanced.js (no model requests).
 load('mini-a-session.js')
+load('mini-a-web-attachments.js')
 load('mini-a-advanced.js')
 var testRoot = String(io.createTempFile('mini-a-advanced-tests-', '.dir'))
 io.rm(testRoot); io.mkdir(testRoot)
@@ -62,6 +63,19 @@ try {
   check(submitted[1].displayPrompt === '/git-impact', 'custom command submits only its name for display')
   advanced.request({uuid:'first',action:'command',command:'Follow up',requestId:'plain-goal'});jobs.shift()()
   check(submitted[2].prompt === 'Follow up' && isUnDef(submitted[2].displayPrompt), 'ordinary prompts do not inherit command labels')
+  global.__useattach = true
+  var binary = [{name: 'report.pdf', base64: 'JVBERi0='}]
+  advanced.request({uuid:'first',action:'command',command:'Read the report',attachments:binary,requestId:'binary-goal'});jobs.shift()()
+  check(submitted[3].attachments[0].base64 === binary[0].base64, 'Advanced forwards separate attachments')
+  check(stringify(advanced.events(first,0,1000)).indexOf(binary[0].base64) < 0, 'Advanced journal omits binary data')
+  advanced.request({uuid:'first',action:'command',command:'Read the report',attachments:binary,requestId:'binary-goal'})
+  check(jobs.length === 0, 'Accepted request retry does not process attachments twice')
+  var rejected = false
+  try { advanced.request({uuid:'first',action:'command',command:'/stats',attachments:binary,requestId:'binary-slash'}) } catch(e) { rejected = /ordinary goal/.test(String(e)) }
+  check(rejected && jobs.length === 0 && !global.__busy.first, 'Slash attachment rejected before scheduling')
+  rejected = false
+  try { advanced.request({uuid:'first',action:'command',command:'$missing',attachments:binary,requestId:'binary-skill'}) } catch(e) { rejected = /ordinary goal/.test(String(e)) }
+  check(rejected && jobs.length === 0, 'Skill command attachment rejected before scheduling')
   var recovered=new MiniAAdvanced({homedir:testRoot,webadvancedpath:testRoot,usehistory:false}).get('first')
   check(recovered.runtime.options().useshell===true,'settings recovered')
   check(recovered.sequence===first.sequence,'journal recovered')

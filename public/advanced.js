@@ -262,7 +262,7 @@ window.MiniAAdvancedUI = function(bridge) {
   async function api(data) {
     const uuid = bridge.uuid();
     if (enabled) sessionStorage.setItem(storeKey, uuid);
-    const response = await fetch(bridge.url('advanced'), {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uuid,...data})});
+    const response = await fetch(bridge.url('advanced'), {method:'POST',headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify({uuid,...data})});
     if (!response.ok) throw new Error(`Advanced request failed (${response.status})`);
     const result = await response.json(); if (result.error) throw new Error(result.error); return result;
   }
@@ -289,9 +289,9 @@ window.MiniAAdvancedUI = function(bridge) {
     }
     busy = true; await poll();
   }
-  async function command(value) {
+  async function command(value, attachments) {
     history.push(value); historyIndex = history.length;
-    await mutate({action:'command',command:value});
+    await mutate({action:'command',command:value,attachments});
   }
   function setEnabled(value) {
     debugGeneration++;
@@ -922,8 +922,8 @@ window.MiniAAdvancedUI = function(bridge) {
   });
   setInterval(()=>poll().catch(showError),1000);
   if(sessionStorage.getItem(storeKey))setEnabled(true);
-  return { enabled:()=>enabled, stop:()=>api({action:'stop'}), submit:async value=>{
-    await command(value);
+  return { enabled:()=>enabled, stop:()=>api({action:'stop'}), submit:async (value, attachments)=>{
+    await command(value, attachments);
     composer.value=''; suggestions.hidden=true;
   }};
 };
