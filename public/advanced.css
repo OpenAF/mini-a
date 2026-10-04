@@ -1,4 +1,15 @@
 /* Advanced follows the same body theme class as Simple view. */
+.advanced-subtask-list { display:grid; gap:10px; }
+.advanced-subtask-card { min-width:0; padding:12px; border:1px solid var(--advanced-border); border-radius:8px; background:var(--advanced-card); overflow-wrap:anywhere; }
+.advanced-subtask-heading { display:flex; align-items:baseline; flex-wrap:wrap; gap:8px; }
+.advanced-subtask-badge { padding:2px 8px; border-radius:12px; background:var(--advanced-button); color:var(--advanced-muted); font-size:12px; text-transform:capitalize; }
+.advanced-subtask-badge[data-state="running"] { background:var(--advanced-working-bg); color:var(--advanced-accent); }
+.advanced-subtask-badge[data-state="completed"] { background:var(--advanced-success-bg); color:var(--advanced-success); }
+.advanced-subtask-badge[data-state="failed"], .advanced-subtask-badge[data-state="timeout"] { color:var(--advanced-error); }
+.advanced-subtask-card > details { margin:8px 0; }
+.advanced-subtask-card button:disabled { opacity:.5; cursor:default; }
+.advanced-subtask-card summary, .advanced-subtask-history > summary { cursor:pointer; }
+.advanced-subtask-history { margin-top:18px; border-top:1px solid var(--advanced-border); padding-top:12px; }
 body {
   --advanced-scheme:light;
   --advanced-bg:#fafbfa;

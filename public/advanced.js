@@ -541,7 +541,7 @@ window.MiniAAdvancedUI = function(bridge) {
     const nav = el('nav'); nav.setAttribute('aria-label','Wiki path'); nav.append(button('/',()=>command('/wiki browse')));
     const parts = path.split('/').filter(Boolean); parts.forEach((part,index)=>nav.append(button(part,()=>command('/wiki browse '+quote(parts.slice(0,index+1).join('/'))))));return nav;
   }
-  function resultPanel() {
+  function resultPanel(host = screen) {
     const generation = resultGeneration, uuid = bridge.uuid(), view = activeScreen;
     const panel = el('section',undefined,'advanced-result-panel'); panel.setAttribute('aria-label','Command results');
     const select = el('select'); select.setAttribute('aria-label','Previous results');
@@ -551,7 +551,7 @@ window.MiniAAdvancedUI = function(bridge) {
     let cursor = 0, loading = false, refreshAgain = false, selected = null, selectionRequest = 0;
     const current = () => generation === resultGeneration && uuid === bridge.uuid() && view === activeScreen;
     const more = button('Older results',()=>load(false)); more.hidden=true;
-    panel.append(notice,select,more,content,progress);screen.append(panel);
+    panel.append(notice,select,more,content,progress);host.append(panel);
     async function choose(sequence) {
       const request = ++selectionRequest;
       const record = await api({action:'result',sequence});
@@ -591,17 +591,85 @@ window.MiniAAdvancedUI = function(bridge) {
     resultRefresh=()=>load();load();
   }
   function subtaskScreen() {
-    const generation=resultGeneration, uuid=bridge.uuid(), list=el('div');screen.append(list);
-    let loading=false, previousTasks='';
-    subtaskRefresh=async()=>{
-      if(loading)return;loading=true;
-      try { const result=await api({action:'subtasks'});if(generation!==resultGeneration||uuid!==bridge.uuid())return;
-        const serialized=JSON.stringify(result.tasks || []);
-        if(serialized===previousTasks || list.contains(document.activeElement))return;previousTasks=serialized;
-        list.replaceChildren(); for(const task of result.tasks || []) {const row=el('section');row.append(el('strong',task.status+' · '+task.goal),button(task.id,()=>command('/subtask '+task.id)),button('Result',()=>command('/subtask result '+task.id)),button('Cancel task',()=>command('/subtask cancel '+task.id)));list.append(row);}
-        if(!list.childElementCount)list.append(el('p','No subtasks. Enable delegation before submitting a child goal.'));
-      } catch(error){list.textContent=error.message || String(error);}finally{loading=false;}
-    }; subtaskRefresh();
+    const generation = resultGeneration, uuid = bridge.uuid(), cards = new Map();
+    const current = () => generation === resultGeneration && uuid === bridge.uuid();
+    const summary = el('p', 'Loading subtasks…', 'advanced-subtask-summary');
+    summary.setAttribute('role', 'status');
+    const notice = el('p', '', 'advanced-screen-description');
+    const filter = el('select'); filter.setAttribute('aria-label', 'Filter subtasks');
+    for (const [value, label] of [['all','All tasks'],['active','Running / queued'],['completed','Completed'],['issues','Failed / cancelled']]) {
+      const option = el('option', label); option.value = value; filter.append(option);
+    }
+    const list = el('div', undefined, 'advanced-subtask-list');
+    const empty = el('p');
+    let loading = false, tasks = [];
+    const isActive = task => ['running', 'pending'].includes(task.status);
+    const refresh = button('Refresh', () => subtaskRefresh());
+    const controls = el('div', undefined, 'advanced-actions'); controls.append(filter, refresh);
+    screen.append(summary, controls, notice, empty, list);
+    function draw() {
+      const counts = {};
+      tasks.forEach(task => { counts[task.status] = (counts[task.status] || 0) + 1; });
+      summary.textContent = tasks.length + ' tasks · ' + (counts.running || 0) + ' running · ' + (counts.pending || 0) + ' queued · ' + (counts.completed || 0) + ' completed · ' + (tasks.length - (counts.running || 0) - (counts.pending || 0) - (counts.completed || 0)) + ' failed / cancelled';
+      const ids = new Set(tasks.map(task => task.id));
+      for (const [id, card] of cards) if (!ids.has(id)) { card.root.remove(); cards.delete(id); }
+      let visible = 0;
+      for (const task of tasks) {
+        let card = cards.get(task.id);
+        if (!card) {
+          const root = el('section', undefined, 'advanced-subtask-card');
+          const heading = el('div', undefined, 'advanced-subtask-heading');
+          const badge = el('span', '', 'advanced-subtask-badge'), goal = el('strong');
+          heading.append(badge, goal);
+          const meta = el('p', '', 'advanced-screen-description');
+          const details = el('details'), detail = el('div'); details.append(el('summary', 'Details'), detail);
+          const output = el('details'), answer = el('div'); output.append(el('summary', 'Result'), answer);
+          const cancel = button('Cancel task', () => command('/subtask cancel ' + task.id));
+          root.append(heading, meta, details, output, cancel); list.append(root);
+          card = {root, badge, goal, meta, details, detail, output, answer, cancel}; cards.set(task.id, card);
+        }
+        card.root.hidden = !(filter.value === 'all' || (filter.value === 'active' ? isActive(task) : filter.value === 'issues' ? !isActive(task) && task.status !== 'completed' : task.status === filter.value));
+        if (!card.root.hidden) visible++;
+        card.badge.textContent = task.status === 'pending' ? 'Queued' : task.status;
+        card.badge.dataset.state = task.status;
+        card.goal.textContent = task.goal || task.id;
+        const elapsed = task.startedAt ? Math.max(0, Math.round(((task.completedAt || Date.now()) - task.startedAt) / 1000)) + 's' : 'Not started';
+        card.meta.textContent = task.id + ' · ' + elapsed + (task.attempt !== undefined ? ' · Attempt ' + task.attempt + (task.maxAttempts ? '/' + task.maxAttempts : '') : '');
+        card.cancel.hidden = !isActive(task);
+        card.cancel.disabled = !!snapshot?.busy;
+        card.cancel.title = snapshot?.busy ? 'Cancel is available when the parent operation finishes. Stop in the pane header stops the current operation.' : 'Cancel this task';
+        // Preserve the card, focus, and open sections across status refreshes.
+        const detailData = JSON.stringify({status:task.status, goal:task.goal, startedAt:task.startedAt, completedAt:task.completedAt, lastActivityReason:task.lastActivityReason, error:task.error});
+        if (detailData !== card.detailData) {
+          card.detailData = detailData;
+          card.detail.replaceChildren(structuredMap(JSON.parse(detailData)));
+        }
+        const answer = task.result?.answer;
+        const resultData = JSON.stringify([task.status, answer, task.error]);
+        if (resultData !== card.resultData) {
+          card.resultData = resultData;
+          card.answer.replaceChildren();
+          if (task.error) card.answer.append(el('p', String(task.error), 'advanced-warning'));
+          if (typeof answer === 'string') card.answer.append(reader(answer));
+          else card.answer.append(el('p', isActive(task) ? 'Result will appear here when the task finishes.' : 'No answer was returned.'));
+        }
+      }
+      empty.hidden = visible > 0;
+      empty.textContent = tasks.length ? 'No tasks match this filter.' : 'No subtasks in this conversation. Enable usedelegation=true and submit a child goal below.';
+    }
+    filter.onchange = draw;
+    subtaskRefresh = async () => {
+      if (loading || !current()) return;
+      loading = true; refresh.disabled = true;
+      try {
+        const result = await api({action:'subtasks'}); if (!current()) return;
+        tasks = result.tasks || []; draw();
+        notice.textContent = 'Live · Updated ' + new Date().toLocaleTimeString() + ' · Refreshes every 3 seconds while this view is open.' + (snapshot?.busy ? ' Inspection remains available while the parent is working; delegate and cancel commands are available after it finishes.' : '');
+      } catch (error) {
+        if (current()) { summary.textContent = 'Subtask refresh failed'; notice.textContent = 'Showing the last received state. ' + (error.message || String(error)); }
+      } finally { loading = false; refresh.disabled = false; }
+    };
+    subtaskRefresh();
   }
   function renderStats(container) {
     destroyStatsCharts(); container.replaceChildren();
@@ -810,7 +878,7 @@ window.MiniAAdvancedUI = function(bridge) {
     if (activeScreen === 'activity') { followActivity(); return; }
     screen.replaceChildren(el('h3', selected[1]), el('p', selected[2], 'advanced-screen-description'));
     if (!snapshot) return;
-    resultPanel();
+    if (activeScreen !== 'subtasks') resultPanel();
     if (activeScreen === 'help') { helpScreen(); }
     else if (activeScreen === 'answer') { actions([['Previous answer','/last'],['Raw answer','/last md']]); commandForm('Save on server', file => file ? `/save ${quote(file)}` : '/save', ['Server path (default response.md)']); }
     else if (activeScreen === 'editor') { if (['edit','editor'].includes(viewParams.command)) screen.append(el('p','Use the goal editor dialog to submit or cancel.')); else goalEditor(viewParams.text || ''); }
@@ -863,7 +931,11 @@ window.MiniAAdvancedUI = function(bridge) {
       commandForm('Dream operation',(op,mode,flags)=>`/dream ${op} ${mode} ${flags}`,[{name:'Target',options:['','memory','wiki']},{name:'Mode',options:['','auto','plan','apply','reorg','repair','reindex','graph','indexes']},{name:'Dry run',options:['','dryrun']}]);
     } else if(activeScreen==='subtasks') {
       subtaskScreen();
-      actions([['List subtasks','/subtasks']]); commandForm('Delegate',goal=>`/delegate ${goal}`,['Goal']);commandForm('Inspect / cancel',args=>`/subtask ${args}`,['ID / result ID / cancel ID']);
+      commandForm('Delegate',goal=>`/delegate ${goal}`,['Goal']);
+      const history = el('details', undefined, 'advanced-subtask-history');
+      history.append(el('summary', 'Command history (saved snapshots)')); screen.append(history);
+      history.open = submittedView?.name === 'subtasks';
+      resultPanel(history);
     } else if(activeScreen==='skills') {
       helpScreen(true);
       actions([['List skills','/skills'],['Help','/help']]); commandForm('Inspect skills',args=>`/skills ${args}`,['Filter or subcommand']);commandForm('Run skill or custom command',cmd=>cmd,['$skill or /command with arguments']);

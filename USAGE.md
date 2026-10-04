@@ -4144,6 +4144,11 @@ map/array details, and update with **Refresh**. Maps, arrays, and table/tree out
 from slash commands use nJSMap in their destination pane and in Live activity, with
 plain-text fallback if the shared OpenAF library cannot load.
 These are the same metrics as `/stats`; some counters are shared across server sessions.
+**Subtasks** shows live task cards with status counts, filters, duration, and
+expandable details/results. Inspection works while the parent is busy; open
+sections stay open during refreshes. Delegate and cancel commands require the
+parent operation to finish. Previous command output is kept separately under
+**Command history (saved snapshots)** and is not the live task status.
 `/model` opens model settings, `/debug` opens the
 trace inspector, `/edit` opens a browser editor, `/cls` clears the visible activity,
 and `/exit` ends the session without stopping the web server. Paths refer to the
@@ -4279,6 +4284,9 @@ Advanced slash-command browser smoke checklist (separate from fixture tests):
    Repeat a write in read-only mode and inspect disabled-library/partial-search states.
 4. Review ingestion recovery and absorb plan actions without bypassing confirmations.
    Inspect dream dry-run/approval-required results and delegated task progress.
+   While a parent is busy, open Subtasks, expand Details and Result, and verify
+   status updates preserve those sections. Check task filters, completed results,
+   disabled cancellation while busy, and the separate saved command history.
 5. Reload during an operation, switch panes, select older results and load another
    page. Confirm no repeated navigation or execution, no cross-session results, and
    that `/cls` remains clear. End the session and start a New conversation.
