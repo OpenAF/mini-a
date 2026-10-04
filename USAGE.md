@@ -1236,6 +1236,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 #### Libraries and Extensions
 - **`libs`** (string): Comma-separated list of additional OpenAF libraries to load
 - **`useutils`** (boolean, default: false): Auto-register the Mini File Tool utilities as a dummy MCP server for quick file operations
+  - Includes `mathematics` for calculations, statistics, unit conversion, and seeded random generation; see [Mathematics utility](#mathematics-utility)
   - Also exposes `readDocument` (document text via lazy Tika installation) and `inspectImage` (PNG/JPEG vision via `promptImage`); see [Reading documents and images](#reading-documents-and-images)
   - Exposes `init` (configure the working root and permissions), `filesystemQuery` (read/list/search/info via the `operation` field), `filesystemModify` (write/append/delete with `operation` plus required `content` or `confirm` flags), and `markdownFiles` (list, search, or read `*.md` files within the root)
   - When running through `mini-a-con.js`, also exposes `userInput`, an interactive helper backed by OpenAF `ask*` functions (`ask`, `askEncrypt`, `ask1`, `askChoose`, `askChooseMultiple`, `askStruct`) so the model can request clarification directly from the console user
@@ -2211,6 +2212,38 @@ mini-a \
   ]" \
   usetools=true
 ```
+
+### Mathematics utility
+
+With `useutils=true`, the `mathematics` tool accepts an `operation` and the
+parameters below. It is also available directly from OpenAF:
+
+```javascript
+load("mini-a-utils.js")
+var tool = new MiniUtilsTool()
+tool.mathematics({ operation: "statistics", values: [-1, 0, 1], metrics: ["sum", "mean", "median"] })
+// { sum: 0, mean: 0, median: 0 }
+tool.mathematics({ operation: "convert-unit", value: 2, fromUnit: "km", toUnit: "m" })
+// result: 2000
+tool.mathematics({ operation: "random", type: "integer", min: 0, max: 0 })
+// value: 0
+```
+
+- `statistics` returns `count`, `sum`, `mean`, `median`, `min`, and `max`.
+  An optional `metrics` array selects those fields, including zero-valued
+  results; unknown metric names are ignored.
+- `convert-unit` (alias `convert`) accepts case-insensitive units within one
+  dimension: length (`m`, `km`, `cm`, `mm`, `mi`, `ft`, `in`), mass (`kg`, `g`,
+  `lb`, `oz`), or volume (`l`, `ml`, `gal`, with US liquid gallons).
+  Unknown units and cross-dimension requests such as `m` to `kg` return an
+  `[ERROR]` string. Optional `precision` rounds the converted result.
+- Random `integer` uses inclusive `min`/`max` bounds, defaulting to `0`/`100`.
+  Random `sequence` shuffles the inclusive `start`/`end` interval, defaulting
+  to `0`/`10`; optional `count` limits the returned sequence.
+  Explicit `max: 0` and `end: 0` are valid bounds.
+- Random `boolean` uses `probabilityTrue` between `0` and `1`, defaulting to
+  `0.5`. Zero always produces `false`; one always produces `true`.
+  Supply `seed` to reproduce random results for the same parameters.
 
 ### Built-in MCP Servers
 
@@ -4108,6 +4141,14 @@ The handle supports touch and mouse dragging, or arrow keys when focused. On nar
 screens the panes initially stack and the divider moves vertically. The
 position button in the pane header opens a menu to dock Advanced on the right, bottom, top, or left;
 an explicit position is remembered across reloads.
+The expand icon at the top right of the prompt opens a full-screen composer in
+both Simple and Advanced views, including on mobile. The draft and attachments
+stay in place. Enter adds a newline; **Ctrl/Cmd+Enter** or **Send** submits.
+The collapse icon or Escape returns to the usual input without discarding text.
+Successful submission collapses the composer; failed submissions keep it open.
+Advanced history **Edit** uses this composer in place of the separate Goal editor
+screen. `/edit` and `/editor` retain their server-managed Submit goal/Cancel dialog.
+
 Text fields in Advanced Settings, Models, command forms, and console interaction
 dialogs have a small **Edit data** icon inside the right edge of the field. It
 opens a modal with editable, nested

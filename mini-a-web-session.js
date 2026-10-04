@@ -118,7 +118,7 @@ function MiniAWebPrompt(request) {
             var r = global.__res[ uuid ][i]
             if (r.event == "👤") {
               _data.push( { role: "user", content: r.message } )
-            } else if (r.event == "🤖" || r.event == "⬅️") {
+            } else if (r.event == "final" || r.event == "🤖" || r.event == "⬅️") {
               _data.push( { role: "assistant", content: r.message } )
             } else if (r.event == "⚙️" || r.event == "🖥️") {
               _data.push( { role: "assistant", content: "[TOOL_OUTPUT] " + r.message } )

@@ -665,6 +665,27 @@
         box-shadow: 0 2px 6px rgba(0,123,255,0.15);
     }
 
+    .prompt-wrapper { position: relative; min-width: 0; }
+    #promptInput { padding-right: 44px; }
+    #expandPromptBtn { position: absolute; top: 0; right: 0; width: 44px; height: 44px; padding: 10px; border: 0; border-radius: 8px; background: transparent; color: #888; cursor: pointer; }
+    #expandPromptBtn svg { width: 20px; height: 20px; }
+    #expandPromptBtn:focus-visible { outline: 2px solid #27824b; }
+    .prompt-wrapper:has(.advanced-toolbar) { padding-top: 44px; }
+    .prompt-wrapper:has(.advanced-toolbar) #expandPromptBtn { top: 0; }
+    #composerDialog { box-sizing: border-box; position: fixed; inset: auto; margin: 0; left: var(--composer-left,0px); top: var(--composer-top,0px); width: var(--composer-width,100vw); height: var(--composer-height,100dvh); max-width: none; max-height: none; border: 0; padding: max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left)); background: white; color: inherit; }
+    body.markdown-body-dark #composerDialog { background: #1a1d23; color: #e6e6e6; }
+    body.markdown-body-dark #composerDialog #inputSection { background: #1a1d23; }
+    #composerDialog[open] { display: flex; flex-direction: column; gap: 8px; }
+    #composerHint { margin: 0; font-size: .8rem; }
+    #composerDialog #inputSection { flex: 1; min-height: 0; margin: 0; display: grid; grid-template-columns: auto 1fr auto; grid-template-rows: minmax(0,1fr) auto; }
+    #composerDialog .prompt-wrapper { grid-column: 1 / -1; grid-row: 1; display: flex; flex-direction: column; height: 100%; min-height: 0; padding-top: 0; }
+    #composerDialog #promptInput { flex: 1; min-height: 0; max-height: none; height: 100% !important; overflow-y: auto !important; font-size: 16px; }
+    #composerDialog #expandPromptBtn { top: 0; bottom: auto; }
+    #composerDialog #attachmentsContainer { padding-right: 44px; flex-shrink: 0; }
+    #composerDialog #attachBtn { grid-column: 1; grid-row: 2; }
+    #composerDialog #submitBtn { grid-column: 3; grid-row: 2; }
+    #composerDialog :is(#clearBtn,#historyBtn,.advanced-toolbar,.advanced-completions) { display: none; }
+
     /* ========== BUTTONS ========== */
 
     #attachBtn,
@@ -1820,6 +1841,7 @@
         <input type="file" id="fileInput" accept="image/png,image/jpeg,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,text/*,.md,.markdown,.txt,.json,.yaml,.yml,.csv,.tsv,.xml,.html,.css,.scss,.less,.js,.ts,.jsx,.tsx,.py,.rb,.go,.java,.kt,.c,.cpp,.cs,.rs,.php,.sh,.bash,.zsh,.fish,.sql,.toml,.ini,.env" multiple style="display:none" />
         <div class="prompt-wrapper">
             <div id="attachmentsContainer" class="attachments-container" aria-live="polite"></div>
+            <button id="expandPromptBtn" type="button" title="Expand input" aria-label="Expand input" aria-expanded="false" aria-controls="promptInput"></button>
             <textarea id="promptInput" placeholder="Enter your prompt..." rows="1" disabled></textarea>
         </div>
         <button id="submitBtn" title="Send" aria-label="Send" type="button"></button>
@@ -1827,6 +1849,8 @@
         <button id="historyBtn" title="History" aria-label="History" type="button"></button>
     </div>
 </div>
+
+<dialog id="composerDialog" aria-label="Expanded prompt input"><p id="composerHint">Enter for a new line · Ctrl/Cmd+Enter to send · Escape to collapse</p><p id="composerNotice" role="alert" hidden></p></dialog>
 
 <div id="attachmentModal" class="attachment-modal" aria-hidden="true">
     <div class="attachment-modal-content" role="dialog" aria-modal="true" aria-labelledby="attachmentModalTitle">
@@ -4946,6 +4970,8 @@
         await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = resolveAppUrl('data-editor.js?raw=true'); script.onload = resolve; script.onerror = reject; document.head.append(script); });
         await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = resolveAppUrl('advanced.js?raw=true'); script.onload = resolve; script.onerror = reject; document.head.append(script); });
         advancedUI = window.MiniAAdvancedUI({
+            openComposer,
+            composerExpanded,
             renderMarkdown: renderConversationMarkdown,
             url: resolveAppUrl,
             newRequestId: generateNewSessionUuid,
@@ -5400,8 +5426,85 @@
             </svg>`;
     }
 
+    // Shared composer: move the original controls so drafts and attachments stay intact.
+    const composerDialog = document.getElementById('composerDialog');
+    const expandPromptBtn = document.getElementById('expandPromptBtn');
+    let composerAnchor = null;
+    let composerBodyOverflow = '';
+    function composerExpanded() { return composerDialog.open; }
+    function updateComposerViewport() {
+        const viewport = window.visualViewport;
+        const values = {left: viewport ? viewport.offsetLeft : 0, top: viewport ? viewport.offsetTop : 0,
+            width: viewport ? viewport.width : window.innerWidth, height: viewport ? viewport.height : window.innerHeight};
+        Object.entries(values).forEach(([key, value]) => composerDialog.style.setProperty('--composer-' + key, value + 'px'));
+    }
+    function updateComposerIcon() {
+        const expanded = composerExpanded();
+        const label = expanded ? 'Collapse input' : 'Expand input';
+        expandPromptBtn.title = label;
+        expandPromptBtn.setAttribute('aria-label', label);
+        expandPromptBtn.setAttribute('aria-expanded', String(expanded));
+        expandPromptBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' +
+            (expanded ? 'M20 9h-5V4M4 15h5v5' : 'M15 4h5v5M9 20H4v-5') + '"/></svg>';
+    }
+    function setComposerExpanded(expanded) {
+        if (expanded === composerExpanded()) return;
+        const selection = [promptInput.selectionStart, promptInput.selectionEnd, promptInput.selectionDirection];
+        const scroll = promptInput.scrollTop;
+        const section = document.getElementById('inputSection');
+        if (expanded) {
+            composerAnchor = document.createComment('composer position');
+            section.before(composerAnchor);
+            composerDialog.append(section);
+            composerBodyOverflow = document.body.style.overflow;
+            document.body.style.overflow = 'hidden';
+            updateComposerViewport();
+            composerDialog.showModal();
+        } else {
+            composerDialog.close();
+            composerAnchor.replaceWith(section);
+            composerAnchor = null;
+            document.body.style.overflow = composerBodyOverflow;
+            autoResizeTextarea();
+        }
+        updateComposerIcon();
+        if (!promptInput.disabled) {
+            promptInput.focus({preventScroll: true});
+            promptInput.setSelectionRange(...selection);
+            promptInput.scrollTop = scroll;
+        } else expandPromptBtn.focus({preventScroll: true});
+    }
+    function composerNotice(message) {
+        const notice = document.getElementById('composerNotice');
+        notice.textContent = message || '';
+        notice.hidden = !message;
+    }
+    function openComposer(value) {
+        if (promptInput.disabled) return false;
+        if (typeof value === 'string' && value !== promptInput.value) {
+            if (promptInput.value.trim() && !window.confirm('Replace the current draft with this goal?')) return false;
+            promptInput.value = value;
+            promptInput.dispatchEvent(new Event('input', {bubbles: true}));
+        }
+        setComposerExpanded(true);
+        return true;
+    }
+    expandPromptBtn.addEventListener('click', () => setComposerExpanded(!composerExpanded()));
+    composerDialog.addEventListener('cancel', event => { event.preventDefault(); setComposerExpanded(false); });
+    composerDialog.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && !event.isComposing) {
+            event.preventDefault(); event.stopPropagation(); setComposerExpanded(false);
+        }
+    }, true);
+    window.addEventListener('resize', updateComposerViewport);
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', updateComposerViewport);
+        window.visualViewport.addEventListener('scroll', updateComposerViewport);
+    }
+    updateComposerIcon();
+
     function autoResizeTextarea() {
-        if (!promptInput) return;
+        if (!promptInput || composerExpanded()) return;
         
         // Reset height to get accurate scrollHeight
         promptInput.style.height = '1px';
@@ -5862,12 +5965,13 @@
             return;
         }
 
+        composerNotice('');
         const rawPrompt = promptInput.value || '';
         const binaryAttachments = attachmentsEnabled ? attachments.filter(item => item.binary).map(({name, mediaType, base64}) => ({name, mediaType, base64})) : [];
-        if (binaryAttachments.length && !rawPrompt.trim()) { notifyAttachmentWarning('Enter a question or instruction for the attached files.'); return; }
+        if (binaryAttachments.length && !rawPrompt.trim()) { notifyAttachmentWarning('Enter a question or instruction for the attached files.'); composerNotice('Enter a question or instruction for the attached files.'); return; }
         if (advancedUI && advancedUI.enabled()) {
             if (!rawPrompt.trim()) return;
-            try { await advancedUI.submit(buildPromptWithAttachments(rawPrompt, attachmentsEnabled ? attachments : []), binaryAttachments); clearAttachments(); }
+            try { await advancedUI.submit(buildPromptWithAttachments(rawPrompt, attachmentsEnabled ? attachments : []), binaryAttachments); clearAttachments(); setComposerExpanded(false); autoResizeTextarea(); }
             catch (error) { console.error(error); alert(error.message); }
             return;
         }
@@ -5900,6 +6004,7 @@
             const data = await response.json();
             if (data && data.error) throw new Error(data.error);
             if (data && data.busy) {
+                composerNotice('This conversation is busy. Wait for it to finish before sending.');
                 lastRawContent = lastRawContent.replace(userPromptDiv, '');
                 await renderRawContent(lastRawContent + '<p style="opacity: 0.7;">This session is still processing the previous request. Please wait for it to finish.</p>');
                 forceRenderChartBlocks();
@@ -5908,11 +6013,13 @@
             lastRenderedRaw = '';
             activeSubmissionStartedAt = Date.now();
             sawNonFinishedForActiveSubmission = false;
+            setComposerExpanded(false);
             startProcessing();
             if (streamEnabled) startStream(currentSessionUuid);
             startPolling();
 
         } catch (error) {
+            composerNotice(error.message || 'Error submitting prompt. Please try again.');
             console.error('Error submitting prompt:', error);
             await updateResultsContent('<p style="color: red;">' + escapeHtml(error.message || 'Error submitting prompt. Please try again.') + '</p>');
             forceRenderChartBlocks();
@@ -6419,8 +6526,9 @@
         // Add event listeners
         promptInput.addEventListener('input', autoResizeTextarea);
         promptInput.addEventListener('paste', () => setTimeout(autoResizeTextarea, 0));
-        promptInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !promptInput.disabled) {
+        promptInput.addEventListener('keydown', (e) => {
+            if (e.isComposing || e.keyCode === 229 || promptInput.disabled) return;
+            if (e.key === 'Enter' && (composerExpanded() ? (e.ctrlKey || e.metaKey) : !e.shiftKey)) {
                 e.preventDefault();
                 handleSubmit();
             }

@@ -1375,11 +1375,17 @@ todo:
         global.__sseQueues[uuid] = { events: [], closed: false, updated: Date.now() }
       }
       var idx = 0
+      var readerQueue = __
       var lastPing = Date.now()
       writer.write("ready", { status: "ok", uuid: uuid })
       while (true) {
         var queue = global.__sseQueues[uuid]
         if (isUnDef(queue)) break
+        // A new run replaces the queue; its events start at index zero.
+        if (queue !== readerQueue) {
+          readerQueue = queue
+          idx = 0
+        }
         while (idx < queue.events.length) {
           var entry = queue.events[idx]
           writer.write(entry.event, entry.data)
@@ -1394,28 +1400,15 @@ todo:
         sleep(100)
       }
     } catch(e) {
-      // Mark queue as closed on error (e.g., client disconnect)
-      if (isDef(uuid) && isDef(global.__sseQueues[uuid])) {
-        if (isUnDef(global.__advanced) || isUnDef(global.__advanced.sessions[uuid])) global.__sseQueues[uuid].closed = true
-        global.__sseQueues[uuid].updated = Date.now()
-      }
+      // A disconnected reader does not own the producer's shared queue.
       try { 
         writer.write("error", { message: String(e) }) 
       } catch(writeErr) {
         // Log both the original error and the write failure for complete context
         log("SSE error" + (isDef(uuid) ? " for " + uuid : "") + ": " + e + " | Failed to write error response: " + writeErr)
       }
-    } finally {
-      // Clean up on exit (normal or error); periodic job handles edge cases
-      if (isDef(uuid) && isDef(global.__sseQueues[uuid])) {
-        // Queue.closed is true in two cases:
-        // 1. Normal completion: _mini_a_web_sseClose() sets closed=true, loop exits
-        // 2. Error/disconnect: catch block sets closed=true
-        if (global.__sseQueues[uuid].closed) {
-          delete global.__sseQueues[uuid]
-        }
-      }
     }
+    // Periodic cleanup owns queue removal so other readers can drain it.
 
 # Convert markdown to static HTML
 - (httpdService   ): "${onport:-8888}"
@@ -2224,6 +2217,7 @@ jobs:
             break
           case "🤖":
           case "⬅️":
+          case "final":
           case "🏁":
           case "✅":
           case "❌":

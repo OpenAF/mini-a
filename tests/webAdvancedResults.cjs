@@ -18,7 +18,7 @@ const context=vm.createContext({
   input:(label,value='')=>Object.assign(node('input'),{value,placeholder:label}), quote:JSON.stringify,
   asText:JSON.stringify, structuredOutput:value=>node('pre',JSON.stringify(value)), structuredMap:value=>node('pre',JSON.stringify(value)),
   command:async value=>commands.push(value), screen:node('section'), viewParams:{}, snapshot:{commandMetadata:[]},
-  bridge:{uuid:()=>context.uuid,newRequestId:()=>String(Math.random())}, uuid:'first',
+  bridge:{openComposer:value=>{context.editedGoal=value},uuid:()=>context.uuid,newRequestId:()=>String(Math.random())}, uuid:'first',
   navigator:{clipboard:{writeText:text=>inserted.push(text)}},
   window:{}, document:{querySelector:()=>context.composer,body:{classList:{contains:()=>false}}},
   Event:class {}, URL:{createObjectURL:()=>'',revokeObjectURL(){}}, Blob:class {}, setTimeout(){},
@@ -43,7 +43,7 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
   find(answer,'Rendered / Raw').onclick();assert.ok(all(answer).some(n=>n.tag==='markdown'),'rendered reader');
   const history=context.renderBlock({type:'history',value:{goals:['multi\nline']}});
   find(history,'Insert').onclick();assert.equal(context.composer.value,'multi\nline');
-  find(history,'Edit').onclick();assert.equal(context.activeScreen,'editor');assert.equal(context.viewParams.text,'multi\nline');assert.equal(commands.length,0);
+  find(history,'Edit').onclick();assert.equal(context.editedGoal,'multi\nline');assert.equal(context.activeScreen,'wiki');assert.equal(commands.length,0);
   const pages=context.renderBlock({type:'wiki-search',value:{partial:true,hits:[{path:'@team/a file.md',snippet:'Match'}],sources:[{id:'team'}]}});
   assert.ok(all(pages).some(n=>n.textContent.includes('Partial search coverage')));
   await find(pages,'@team/a file.md').onclick();assert.equal(commands.pop(),'/wiki read "@team/a file.md"');

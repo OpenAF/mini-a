@@ -1084,6 +1084,45 @@
     }
   }
 
+  exports.testMathOpsZeroStatistics = function() {
+    var tool = new MiniUtilsTool()
+    var result = tool.mathematics({ operation: "statistics", values: [0, 0], metrics: ["sum", "mean", "median", "min", "max", "count", "unknown", "toString"] })
+    ;["sum", "mean", "median", "min", "max"].forEach(function(metric) {
+      ow.test.assert(result[metric], 0, "Selected zero-valued " + metric + " must be retained")
+    })
+    ow.test.assert(result.count, 2, "Count is retained")
+    ow.test.assert(Object.keys(result).length, 6, "Only supported metrics are returned")
+  }
+
+  exports.testMathOpsUnitDimensions = function() {
+    var tool = new MiniUtilsTool()
+    ;[["m", "kg"], ["kg", "l"], ["ml", "cm"]].forEach(function(units) {
+      var result = tool.mathematics({ operation: "convert-unit", value: 1, fromUnit: units[0], toUnit: units[1] })
+      ow.test.assert(isString(result) && result.indexOf("[ERROR]") === 0, true, "Incompatible dimensions must fail")
+    })
+    ow.test.assert(tool.mathematics({ operation: "convert", value: 0, fromUnit: "KG", toUnit: "g" }).result, 0, "Zero and case normalization remain supported")
+    ow.test.assert(tool.mathematics({ operation: "convert-unit", value: 2, fromUnit: "gal", toUnit: "l" }).result, 7.57082, "Volume conversion remains supported")
+    ow.test.assert(tool.mathematics({ operation: "convert-unit", value: 1, fromUnit: "toString", toUnit: "m" }), "[ERROR] Unknown unit", "Inherited properties are not units")
+  }
+
+  exports.testMathOpsRandomZeroParameters = function() {
+    var tool = new MiniUtilsTool()
+    var integer = tool.mathematics({ operation: "random", type: "integer", min: 0, max: 0, seed: 1 })
+    ow.test.assert(integer.max, 0, "Explicit zero maximum must not default to 100")
+    ow.test.assert(integer.value, 0, "Singleton zero range returns zero")
+    var sequence = tool.mathematics({ operation: "random", type: "sequence", start: -2, end: 0, seed: 1 })
+    ow.test.assert(sequence.end, 0, "Explicit zero end must not default to 10")
+    ow.test.assert(sequence.sequence.sort(function(a,b) { return a-b }), [-2, -1, 0], "Sequence stays inside the requested interval")
+    ;[0, 1].forEach(function(probability) {
+      var result = tool.mathematics({ operation: "random", type: "boolean", count: 20, probabilityTrue: probability, seed: 1 })
+      ow.test.assert(result.probabilityTrue, probability, "Explicit probability is retained")
+      ow.test.assert(result.values.every(function(value) { return value === (probability === 1) }), true, "Boundary probabilities are deterministic")
+    })
+    ow.test.assert(tool.mathematics({ operation: "random", type: "integer", seed: 1 }).max, 100, "Omitted maximum still defaults")
+    ow.test.assert(tool.mathematics({ operation: "random", type: "sequence", seed: 1 }).end, 10, "Omitted end still defaults")
+    ow.test.assert(tool.mathematics({ operation: "random", type: "boolean", seed: 1 }).probabilityTrue, 0.5, "Omitted probability still defaults")
+  }
+
   exports.testMathOpsCalculate = function() {
     var tool = new MiniUtilsTool()
 

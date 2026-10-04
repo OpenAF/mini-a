@@ -242,3 +242,22 @@ assert.equal(restoredUser.displayMessage,binaryUser.displayMessage);
 assert.match(restoredUser.message,/Document evidence/);
 assert.doesNotMatch(call('result',{uuid:'restored-binary'}).content,/Document evidence/);
 console.log('Restored attachment history preserves presentation and model content.');
+
+// Both recovery paths must retain the answer, not just completion notifications.
+delete g.__advanced;
+g.__usehistory = true;
+g.__res.recovery = [{event:'👤',message:'Question'}, {event:'final',message:'Important answer'}];
+g._mini_a_web_historyExists = () => false;
+let rebuilt;
+g._mini_a_web_saveFile = (_path, value) => { rebuilt = value; };
+call('prompt', {uuid:'recovery',prompt:'Follow up'}); pending.shift()();
+assert.equal(rebuilt.c.at(-1).role, 'assistant');
+assert.equal(rebuilt.c.at(-1).content, 'Important answer');
+const payloadHelper = yaml.slice(yaml.indexOf('    global._mini_a_web_buildHistoryPayload ='), yaml.indexOf('    global._mini_a_web_storeHistory =')).replace(/^    /gm, '');
+c.io = {fileExists: () => false};
+vm.runInContext(payloadHelper, c);
+g.__res.recovery = [{event:'👤',message:'Question'}, {event:'final',message:'Important answer'}];
+const recovered = JSON.parse(g._mini_a_web_buildHistoryPayload('recovery'));
+assert.equal(recovered.c.at(-1).role, 'assistant');
+assert.equal(recovered.c.at(-1).content, 'Important answer');
+console.log('Final answers survive local recovery and remote history payload rebuilding.');

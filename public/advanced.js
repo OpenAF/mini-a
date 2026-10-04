@@ -134,7 +134,6 @@ window.MiniAAdvancedUI = function(bridge) {
   const screens = [
     ['help', 'Help', 'Search command syntax, prerequisites, aliases and custom commands. Insert a command to edit it before running.'],
     ['answer', 'Answer', 'Read the previous answer, copy it or download it to your browser.'],
-    ['editor', 'Goal editor', 'Compose a multiline goal and explicitly submit it.'],
     ['activity', 'Live activity', 'Follow agent actions, tool calls, progress, and results in real time.'],
     ['settings', 'Settings', 'Adjust parameters for this session and manage saved presets.'],
     ['models', 'Models', 'Choose and configure the main, low-cost, and validation models.'],
@@ -279,7 +278,7 @@ window.MiniAAdvancedUI = function(bridge) {
     if (result.busy) throw new Error('This conversation is busy. Stop or finish the current operation first.');
     if (data.action === 'command') {
       const destination = result.view || {name:'activity',params:{}};
-      activeScreen = destination.name; viewParams = destination.params || {};
+      activeScreen = destination.name === 'editor' ? 'activity' : destination.name; viewParams = destination.params || {};
       submittedView = {requestId, name: activeScreen};
       delete previousSelections[activeScreen];
       if (viewParams.command === 'cls') { liveFloor = after; events.replaceChildren(); }
@@ -476,10 +475,6 @@ window.MiniAAdvancedUI = function(bridge) {
     }
     search.oninput = draw; draw();
   }
-  function goalEditor(value = '') {
-    const field = el('textarea'); field.value = value; field.className = 'advanced-goal-editor'; field.setAttribute('aria-label','Goal editor');
-    screen.append(field,button('Submit goal',async()=>{ if (!field.value.trim()) return; await command(field.value); }),button('Cancel',()=>{activeScreen='activity';renderScreen();}));
-  }
   function pageList(items, operation = 'read', family = 'wiki') {
     const list = el('ul',undefined,'advanced-result-list');
     for (const item of items || []) {
@@ -500,7 +495,7 @@ window.MiniAAdvancedUI = function(bridge) {
     else if (block.type === 'export') { const raw = typeof value === 'string' ? value : asText(value); container.append(reader(raw,true,'graph.'+(meta.format || 'txt'))); if (meta.format === 'mermaid') container.append(markdown('```mermaid\n'+raw+'\n```')); }
     else if (block.type === 'history') {
       if (value.picker) container.append(el('p','Choose a saved conversation below, or Cancel to keep this conversation.'),button('Cancel',()=>{activeScreen='activity';renderScreen();}));
-      for (const goal of value.goals || []) { const row = el('section'); row.append(el('pre',goal),button('Insert',()=>insertCommand(goal)),button('Edit',()=>{activeScreen='editor';viewParams={text:goal};renderScreen();})); container.append(row); }
+      for (const goal of value.goals || []) { const row = el('section'); row.append(el('pre',goal),button('Insert',()=>insertCommand(goal)),button('Edit',()=>bridge.openComposer(goal))); container.append(row); }
     } else if (block.type === 'pages') container.append(pageList(value));
     else if (block.type === 'wiki-search') { if (value.partial) container.append(el('p','Partial search coverage: absence is not established.','advanced-warning')); container.append(pageList(value.hits),structuredMap({sources:value.sources,stopReasons:value.stopReasons,budget:value.budget})); }
     else if (block.type === 'wiki-tree' || block.type === 'wiki-browse') { container.append(breadcrumbs(value.path || ''),pageList(value.sections || value.child_sections,'browse'),pageList(value.pages || value.direct_pages),structuredMap(value)); }
@@ -881,7 +876,6 @@ window.MiniAAdvancedUI = function(bridge) {
     if (activeScreen !== 'subtasks') resultPanel();
     if (activeScreen === 'help') { helpScreen(); }
     else if (activeScreen === 'answer') { actions([['Previous answer','/last'],['Raw answer','/last md']]); commandForm('Save on server', file => file ? `/save ${quote(file)}` : '/save', ['Server path (default response.md)']); }
-    else if (activeScreen === 'editor') { if (['edit','editor'].includes(viewParams.command)) screen.append(el('p','Use the goal editor dialog to submit or cancel.')); else goalEditor(viewParams.text || ''); }
     else if (activeScreen === 'settings' || activeScreen === 'models') {
       const search=input('Search settings', viewParams.filter || ''); screen.append(search);
       const list=el('div',undefined,'advanced-settings'); screen.append(list);
@@ -986,7 +980,7 @@ window.MiniAAdvancedUI = function(bridge) {
     suggestions.hidden=!matches.length; matches.forEach(c=>suggestions.append(button(c,()=>{composer.value=c+' ';suggestions.hidden=true;composer.focus();})));
   });
   composer.addEventListener('keydown',e=>{
-    if(!enabled)return;
+    if(!enabled || e.isComposing || bridge.composerExpanded())return;
     if(e.key==='Tab'&&!suggestions.hidden&&suggestions.firstChild){e.preventDefault();suggestions.firstChild.click();}
     if(e.key==='ArrowUp'&&!composer.value.includes('\n')&&history.length){e.preventDefault();composer.value=history[Math.max(0,--historyIndex)]||'';}
     if(e.key==='ArrowDown'&&!composer.value.includes('\n')&&history.length){e.preventDefault();composer.value=history[Math.min(history.length,++historyIndex)]||'';}
