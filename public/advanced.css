@@ -92,8 +92,9 @@ body.markdown-body-dark {
   --advanced-code:#111713;
   --advanced-code-text:#c5e5cd;
 }
-.advanced-toolbar {display:flex;gap:.6rem;align-items:center;font:13px system-ui;padding:.4rem}
+.advanced-toolbar {display:flex;gap:.6rem;align-items:center;font:13px system-ui;padding:.1rem .4rem}
 .advanced-toolbar button,:is(.advanced-shell,.advanced-dialog) button,.advanced-completions button {cursor:pointer;padding:.35rem .6rem;border:1px solid #8886;border-radius:5px;color:inherit;background:transparent}
+.advanced-toolbar button {padding:.15rem .5rem;font-size:12px;line-height:1.3}
 .advanced-shell {position:fixed;right:0;top:0;bottom:0;width:calc(var(--advanced-size,45) * 1vw);z-index:30;background:var(--advanced-bg);color:var(--advanced-text);border-left:1px solid var(--advanced-border);display:grid;grid-template-rows:auto auto minmax(0,1fr);font:13px system-ui;overflow:hidden}
 .advanced-screen[hidden],.advanced-activity[hidden],.advanced-divider[hidden],.advanced-shell[hidden],.advanced-completions[hidden]{display:none}
 body.mini-a-advanced .answer-activity {display:none}

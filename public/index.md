@@ -344,7 +344,11 @@
     .chat-container {
         display: flex;
         flex-direction: column;
-        height: 100%;
+        /* Fixed to the viewport like the advanced layout, so the host page's body padding adds no extra top/side space. */
+        position: fixed;
+        inset: 1rem;
+        min-width: 0;
+        min-height: 0;
         /* background: var(--bg); */
         color: var(--text);
     }
@@ -666,12 +670,11 @@
     }
 
     .prompt-wrapper { position: relative; min-width: 0; }
-    #promptInput { padding-right: 44px; }
-    #expandPromptBtn { position: absolute; top: 0; right: 0; width: 44px; height: 44px; padding: 10px; border: 0; border-radius: 8px; background: transparent; color: #888; cursor: pointer; }
-    #expandPromptBtn svg { width: 20px; height: 20px; }
+    #expandPromptBtn { display: none; position: absolute; top: 2px; right: 4px; z-index: 1; width: 24px; height: 24px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--text); box-shadow: none; cursor: pointer; align-items: center; justify-content: center; opacity: 0.6; transition: all 0.2s ease; box-sizing: border-box; }
+    #expandPromptBtn:hover { background: var(--panel-bg); opacity: 1; }
+    #expandPromptBtn svg { width: 14px; height: 14px; pointer-events: none; }
     #expandPromptBtn:focus-visible { outline: 2px solid #27824b; }
-    .prompt-wrapper:has(.advanced-toolbar) { padding-top: 44px; }
-    .prompt-wrapper:has(.advanced-toolbar) #expandPromptBtn { top: 0; }
+    .prompt-wrapper:has(.advanced-toolbar) #expandPromptBtn { display: flex; }
     #composerDialog { box-sizing: border-box; position: fixed; inset: auto; margin: 0; left: var(--composer-left,0px); top: var(--composer-top,0px); width: var(--composer-width,100vw); height: var(--composer-height,100dvh); max-width: none; max-height: none; border: 0; padding: max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left)); background: white; color: inherit; }
     body.markdown-body-dark #composerDialog { background: #1a1d23; color: #e6e6e6; }
     body.markdown-body-dark #composerDialog #inputSection { background: #1a1d23; }
@@ -680,8 +683,9 @@
     #composerDialog #inputSection { flex: 1; min-height: 0; margin: 0; display: grid; grid-template-columns: auto 1fr auto; grid-template-rows: minmax(0,1fr) auto; }
     #composerDialog .prompt-wrapper { grid-column: 1 / -1; grid-row: 1; display: flex; flex-direction: column; height: 100%; min-height: 0; padding-top: 0; }
     #composerDialog #promptInput { flex: 1; min-height: 0; max-height: none; height: 100% !important; overflow-y: auto !important; font-size: 16px; }
-    #composerDialog #expandPromptBtn { top: 0; bottom: auto; }
-    #composerDialog #attachmentsContainer { padding-right: 44px; flex-shrink: 0; }
+    #composerDialog #expandPromptBtn { top: 0; right: 0; bottom: auto; }
+    #composerDialog #promptInput { padding-right: 32px; }
+    #composerDialog #attachmentsContainer { flex-shrink: 0; }
     #composerDialog #attachBtn { grid-column: 1; grid-row: 2; }
     #composerDialog #submitBtn { grid-column: 3; grid-row: 2; }
     #composerDialog :is(#clearBtn,#historyBtn,.advanced-toolbar,.advanced-completions) { display: none; }
@@ -2143,6 +2147,7 @@
 
     /* ========== DOM ELEMENT REFERENCES ========== */
     const promptInput = document.getElementById('promptInput');
+    const composerDialog = document.getElementById('composerDialog');
     const attachBtn = document.getElementById('attachBtn');
     const fileInput = document.getElementById('fileInput');
     const submitBtn = document.getElementById('submitBtn');
@@ -5427,7 +5432,6 @@
     }
 
     // Shared composer: move the original controls so drafts and attachments stay intact.
-    const composerDialog = document.getElementById('composerDialog');
     const expandPromptBtn = document.getElementById('expandPromptBtn');
     let composerAnchor = null;
     let composerBodyOverflow = '';
