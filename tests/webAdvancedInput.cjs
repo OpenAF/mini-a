@@ -2,6 +2,8 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const showdown = require('../public/showdown.min.js');
+const converter = new showdown.Converter({tables:true});
 const source = fs.readFileSync('public/advanced.js', 'utf8');
 function all(node) { return [node, ...node.children.flatMap(all)]; }
 function el(tag, text, className) {
@@ -14,15 +16,17 @@ function el(tag, text, className) {
   };
 }
 let current='session-a', requests=[], fail=false;
+const rendered=[];
 const ctx=vm.createContext({el, button:(text, onclick)=>Object.assign(el('button',text),{onclick}),
+  markdown:text=>{const node=el('div');node.html=converter.makeHtml(text);rendered.push({text,node});return node;},
   asText:String, bridge:{uuid:()=>current}, dialog:el('dialog'), dialogId:null,
   api:async data=>{requests.push(data);if(fail)throw Error('Retry this reply');return {};},
   window:{MiniADataEditor:{bind(){throw Error('Input fields must not open data editor');}}}
 });
 vm.runInContext(source.slice(source.indexOf('  function showDialog('),source.indexOf('  function commandForm(')),ctx);
 const fields=[
-  {type:'text',label:'Text',choices:[]}, {type:'password',label:'Secret',choices:[]},
-  {type:'choose',label:'Choose',choices:['<script>','B'],descriptions:['First','Second'],max:1},
+  {type:'text',label:'**Your answer**\n\n- First item\n- Second item\n\n```js\nvar value = 1\n```',help:'Read the [guide](https://example.invalid/guide).',choices:[]}, {type:'password',label:'Secret',choices:[]},
+  {type:'choose',label:'Choose',choices:['<script>','B'],descriptions:['First','*Second*'],max:1},
   {type:'multiple',label:'Many',choices:['A','B']}, {type:'char',label:'Char',choices:['y','n']}
 ];
 (async()=>{
@@ -32,7 +36,14 @@ const fields=[
   assert.equal(controls[0].focused,true);assert.equal(controls[1].type,'password');
   assert.equal(controls[1].autocomplete,'off');
   assert.ok(all(form).some(n=>n.textContent==='<script>'),'Option text stays text');
-  assert.ok(all(form).some(n=>n.tag==='small' && n.textContent==='Second'));
+  const prompt=all(form).find(n=>n.className==='advanced-input-prompt');
+  assert.match(prompt.children[0].html, /<strong>Your answer<\/strong>/);
+  assert.match(prompt.children[0].html, /<ul>/);
+  assert.match(prompt.children[0].html, /<code class="js language-js">/);
+  assert.equal(controls[0]['aria-labelledby'],prompt.id,'Input is labelled by rendered question');
+  assert.ok(rendered.some(r=>r.node.html.includes('<a href="https://example.invalid/guide">guide</a>')));
+  assert.ok(rendered.some(r=>r.node.html.includes('<em>Second</em>')));
+  assert.ok(!rendered.some(r=>r.text==='<script>'),'Choice values are never parsed as Markdown');
   await form.requestSubmit();assert.equal(requests.length,0,'Unselected required choice stays open');
   controls[0].value='multi\nline';controls[1].value='private';controls[3].checked=true;
   controls[4].checked=true;controls[5].checked=true;controls[7].checked=true;

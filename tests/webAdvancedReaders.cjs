@@ -38,6 +38,15 @@ assert.deepEqual(badLink.attributes,[{name:'rel',value:'noopener noreferrer'}]);
 assert.deepEqual(goodLink.attributes,[{name:'href',value:'https://example.invalid/path'},{name:'rel',value:'noopener noreferrer'}]);
 assert.deepEqual(code.attributes,[{name:'class',value:'language-mermaid'}]);assert.equal(codeInjection.attributes.length,0);
 vm.runInContext(source.slice(source.indexOf('  function showDialog('),source.indexOf('  function commandForm(')),ctx);
+// Question dialogs use the same passive renderer, including for untrusted HTML.
+ctx.showDialog({id:'unsafe-question',type:'input',label:'Input requested',choices:[{type:'text',label:'<script>attack()</script><a href="javascript:attack()">link</a>',choices:[]}]});
+const questionForm=ctx.dialog.children[1];
+const questionGroup=questionForm.children[0];
+const questionPrompt=questionGroup.children[0];
+assert.equal(questionGroup.attributes.find(a=>a.name==='aria-labelledby').value,questionPrompt.id);
+assert.equal(questionPrompt.children[0].children[0],template.content,'Question uses the sanitized Markdown fragment');
+assert.equal(script.replacement.tag,'text');
+assert.ok(!badLink.attributes.some(a=>a.name==='href'),'Unsafe question links lose their destination');
 (async()=>{
   ctx.showDialog({id:'edit',type:'editor',label:'Edit goal',value:'old\ngoal'});
   const field=ctx.dialog.children.find(n=>n.tag==='textarea');assert.equal(field.value,'old\ngoal');assert.ok(field.focused);assert.ok(ctx.dialog.open);

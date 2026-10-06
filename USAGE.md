@@ -4139,7 +4139,10 @@ returns your answers to the tool and the agent continues the same goal.
 Dialogs support multiline text, masked input, allowed-character choices,
 single-choice lists, multiple-choice lists, and named forms. Standard `question`
 requests group their questions into one dialog, show option descriptions, and use
-free text when no options are supplied. `output=index` retains index responses;
+free text when no options are supplied. Question prompts, help text, and option
+descriptions render Markdown (including lists, links, and code blocks) through
+the safe browser renderer. Choice values and user-entered answers stay literal.
+`output=index` retains index responses;
 `max` controls list display size, rather than limiting the number selected.
 
 **Cancel operation**, Escape, or **Stop** cancels the active operation and releases

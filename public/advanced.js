@@ -368,8 +368,12 @@ window.MiniAAdvancedUI = function(bridge) {
     if (pending.type === 'input') {
       const form = el('form', undefined, 'advanced-input-form');
       const readers = pending.choices.map((field, fieldIndex) => {
-        const group = el('fieldset'); group.append(el('legend', field.label));
-        if (field.help) group.append(el('p', field.help));
+        const group = el('fieldset');
+        const prompt = el('div', undefined, 'advanced-input-prompt');
+        prompt.id = 'advanced-input-prompt-' + fieldIndex;
+        prompt.append(markdown(field.label)); group.append(prompt);
+        group.setAttribute('aria-labelledby', prompt.id);
+        if (field.help) group.append(markdown(field.help));
         let read;
         if (['choose','char','multiple'].includes(field.type)) {
           const choices = el('div', undefined, 'advanced-input-choices');
@@ -378,8 +382,11 @@ window.MiniAAdvancedUI = function(bridge) {
             const row = el('label');
             const control = el('input'); control.type = field.type === 'multiple' ? 'checkbox' : 'radio';
             control.name = 'input-' + fieldIndex; control.value = String(index);
-            const text = el('span', asText(choice));
-            if (field.descriptions?.[index]) text.append(el('small', field.descriptions[index]));
+            const text = el('div', asText(choice));
+            if (field.descriptions?.[index]) {
+              const description = el('div', undefined, 'advanced-input-description');
+              description.append(markdown(field.descriptions[index])); text.append(description);
+            }
             row.append(control, text); choices.append(row); return control;
           });
           group.append(choices);
@@ -391,7 +398,7 @@ window.MiniAAdvancedUI = function(bridge) {
         } else {
           const control = el(field.type === 'password' ? 'input' : 'textarea');
           if (field.type === 'password') { control.type = 'password'; control.autocomplete = 'off'; }
-          control.setAttribute('aria-label', field.label); group.append(control);
+          control.setAttribute('aria-labelledby', prompt.id); group.append(control);
           read = () => control.value || '';
         }
         form.append(group); return read;
