@@ -98,6 +98,31 @@ modes:
         options:
           job: mcps/mcp-web.yaml 
 
+  web-poweruser:
+    include    : poweruser
+    description: "Web power user mode"
+    params     :
+      useascii         : false
+      usetools         : true
+      usediagrams      : true
+      usecharts        : true
+      usemaps          : true
+      usevectors       : true
+      usemath          : true
+      useattach        : true
+      historyvm        : true
+      contextvirtualization: true
+      contextguard     : true
+      orchestration    : auto
+      mcpproxy         : true
+      mcpproxythreshold: 51200
+      mcpproxytoon     : true
+      usestream        : true
+      usedelegation    : true
+      autodelegation   : true
+      usestdutils      : true
+      webadvanced      : true
+
   chatbot:
     description: "Chatbot mode"
     params     :

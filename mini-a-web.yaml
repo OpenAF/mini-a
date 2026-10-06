@@ -1545,6 +1545,17 @@ jobs:
       throw "OAF_MODEL environment variable not set. Please export OAF_MODEL or provide model= with your model configuration before starting the Mini-A web server."
     }
     global.__webTokenGenerated = false
+    if (toBoolean(args.webadvanced) === true && (isUnDef(args.onport) || String(args.onport).trim() === "")) {
+      // webadvanced implies the web view: pick a free port (prefer 8888) when none was requested.
+      var _ss = null
+      try {
+        try { _ss = new java.net.ServerSocket(8888) } catch(e8888) { _ss = new java.net.ServerSocket(0) }
+        args.onport = Number(_ss.getLocalPort())
+      } finally {
+        if (_ss != null) _ss.close()
+      }
+      log("webadvanced=true without onport; using available port " + args.onport)
+    }
     if (toBoolean(args.webadvanced) === true && (!isString(args.webtoken) || !args.webtoken.trim())) {
       // 256 bits from the JVM CSPRNG; retain leading zeroes in the hex encoding.
       args.webtoken = String(new java.math.BigInteger(256, new java.security.SecureRandom()).toString(16))
