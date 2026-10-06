@@ -7637,7 +7637,12 @@ function MiniAInteractiveSession(args, adapter) {
       completions: function() { return { wiki: getWikiSubcommandCompletions(), set: sessionParameterNames, show: sessionParameterNames, toggle: sessionParameterNames.filter(function(k) { return parameterDefinitions[k].type === "boolean" }), unset: sessionParameterNames } },
       agent: function() { return activeAgent },
       stopDream: function() { if (activeDream) activeDream.requestStop() },
-      attach: function(agent) { activeAgent = agent; agent.setHookFn(function(event, vars) { return runHooks(event, vars) }); agent.setConfirmFn(function(label, choices) { return adapter.ask("choice", label, choices) }) },
+      attach: function(agent) {
+        activeAgent = agent
+        if (isFunction(agent.setUserInputFn)) agent.setUserInputFn(function(request) { return adapter.ask("input", "Input requested", request.fields) })
+        agent.setHookFn(function(event, vars) { return runHooks(event, vars) })
+        agent.setConfirmFn(function(label, choices) { return adapter.ask("choice", label, choices) })
+      },
       saveConversation: function() { persistConversationSnapshot(activeAgent) },
       pruneHistory: pruneConversationHistory,
       afterGoal: function(goal, result) { runHooks("after_goal", { MINI_A_GOAL: goal, MINI_A_RESULT: String(result || "").substring(0, 2000) }) },

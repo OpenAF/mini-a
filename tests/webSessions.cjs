@@ -30,6 +30,8 @@ const c = { global: g, MiniA: Agent, __: undefined, genUUID: () => 'token-' + ++
   toBoolean: x => x === true, merge: (a,b) => ({...a,...b}), jsonParse: JSON.parse, stringify: JSON.stringify,
   af: { fromJSSLON: JSON.parse, toSLON: JSON.stringify }, ow: { server: { httpd: { reply: x => x } } },
   log() {}, logErr() {}, logWarn() {}, printErr(e) { throw e; }, $err() {}, __miniAErrMsg: String,
+  sleep() {},
+  $tb(fn) { return { stopWhen(check) { this.check = check; return this; }, exec() { fn(); this.check(true); } }; },
   $doV(fn) { if (scheduleFail) throw Error('schedule failed'); pending.push(fn); return { catch() {} }; } };
 vm.createContext(c);
 vm.runInContext(fs.readFileSync('mini-a-common.js', 'utf8'), c);
@@ -235,6 +237,22 @@ assert.doesNotMatch(call('result',{uuid:'binary-advanced'}).content,/Image evide
 assert.equal(g.__conversations['binary-advanced']._webAttachmentDisplayPrompt,undefined);
 Agent.prototype.start = originalStart;
 console.log('Simple and Advanced attachment transcript display checks passed.');
+
+// Stop while start() is blocked must interrupt the worker and discard its answer.
+const normalBox = c.$tb;
+c.$tb = () => ({stopWhen(check) { this.check = check; return this; }, exec() {
+  assert.equal(this.check(false), false, 'active goal keeps running');
+  commandState.cancelled = true;
+  assert.equal(this.check(false), true, 'Stop interrupts a blocked goal');
+}});
+call('prompt',{uuid:'binary-advanced',prompt:'Blocked goal'});pending.shift()();
+assert.equal(g.__busy['binary-advanced'],undefined,'Stop releases reservation');
+assert.equal(g.__conversations['binary-advanced'],undefined,'stopped agent is disposed');
+assert.equal(g.__res['binary-advanced'].at(-1).event,'stop','Stop is not a failed or final answer');
+c.$tb = normalBox;
+call('prompt',{uuid:'binary-advanced',prompt:'Retry'});pending.shift()();
+assert.equal(g.__res['binary-advanced'].at(-1).event,'final','new goal works after Stop');
+console.log('Advanced blocked worker cancellation and retry checks passed.');
 
 assert.equal(call('load-history',{uuid:'restored-binary',history:binaryResult.history}).status,'loaded');
 const restoredUser = g.__res['restored-binary'].find(e => e.event === '👤');

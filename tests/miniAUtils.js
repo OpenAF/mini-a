@@ -630,6 +630,41 @@
     ow.test.assert(readResult.count === 3, true, "Should read todo items")
   }
 
+  exports.testBrowserUserInput = function() {
+    var requests = [], replies = []
+    var tool = new MiniUtilsTool({ inputFn: function(request) { requests.push(request); return replies.shift() } })
+    replies.push(["line one\nline two"])
+    ow.test.assert(tool.userInput({ prompt: "Name?" }).answer, "line one\nline two", "Browser text preserves newlines")
+    replies.push(["masked"])
+    ow.test.assert(tool.userInput({ prompt: "Masked?", mask: "*" }).answer, "masked", "Masked ask keeps plaintext return")
+    ow.test.assert(requests[1].fields[0].type, "password", "Masked ask uses password control")
+    replies.push(["fixture-secret"])
+    var secret = tool.userInput({ operation: "secret", prompt: "Secret?" })
+    ow.test.assert(af.decrypt(secret.answer), "fixture-secret", "Secret is encrypted on the server")
+    replies.push([""])
+    ow.test.assert(isUnDef(tool.userInput({ operation: "secret", prompt: "Empty?" }).answer), true, "Empty secret matches askEncrypt")
+    replies.push([1])
+    ow.test.assert(tool.userInput({ operation: "char", prompt: "Continue?", options: ["y", "n"] }).answer, "n", "Char resolves allowed value")
+    replies.push([1])
+    var choice = tool.userInput({ operation: "choose", prompt: "Pick", options: ["same", "same"], output: "index" })
+    ow.test.assert(choice.selectedIndex, 1, "Duplicate labels preserve selected index")
+    replies.push([[0, 2]])
+    ow.test.assert(tool.userInput({ operation: "multiple", prompt: "Pick", options: ["a", "b", "c"], output: "index" }).answer.join(","), "0,2", "Multiple index output")
+    replies.push(["value", 1, [0, 1]])
+    var form = tool.userInput({ operation: "form", questions: [{name:"text"}, {name:"choice",type:"choose",options:["a","b"],output:"index"}, {name:"many",type:"multiple",options:["a","b"]}] })
+    ow.test.assert(form.answers[0].name, "text", "Form retains named array")
+    ow.test.assert(form.answers[1].answer, 1, "Form index output")
+    ow.test.assert(form.answers[2].answer.join(","), "a,b", "Form choice values")
+    replies.push([1, "free text", [0, 1]])
+    var grouped = tool.question({questions:[{header:"one",question:"Choose",options:[{label:"a",description:"First"},{label:"b",description:"Second"}]},{header:"two",question:"Explain"},{header:"three",question:"Many",multiple:true,options:["a","b"]}]})
+    ow.test.assert(grouped.answers.one, "b", "Question alias retains keyed answers")
+    ow.test.assert(grouped.answers.two, "free text", "Question without options accepts text")
+    ow.test.assert(requests[requests.length - 1].fields[0].descriptions[1], "Second", "Option descriptions reach browser")
+    ow.test.assert(requests[requests.length - 1].fields.length, 3, "Grouped questions use one request")
+    tool._inputFn = function() { throw new Error("Command cancelled") }
+    ow.test.assert(tool.userInput({prompt:"Cancelled"}).indexOf("[ERROR]"), 0, "Cancellation returns tool error")
+  }
+
   exports.testUserInput = function() {
     var tool = new MiniUtilsTool()
     var originals = {

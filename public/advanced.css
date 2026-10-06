@@ -337,3 +337,14 @@ body.advanced-resizing[data-advanced-dock=top],body.advanced-resizing[data-advan
   .advanced-dialog { width: calc(100vw - 2rem); max-width: calc(100vw - 2rem); }
   .advanced-goal-editor, .advanced-dialog textarea { min-height: 12rem; }
 }
+
+.advanced-input-form { display: grid; gap: .75rem; }
+.advanced-input-form fieldset { min-width: 0; border: 1px solid var(--advanced-control-border, #8886); border-radius: .5rem; padding: .75rem; }
+.advanced-input-form legend { padding: 0 .25rem; }
+.advanced-input-form textarea, .advanced-input-form input[type="password"] { box-sizing: border-box; width: 100%; }
+.advanced-input-choices { display: grid; gap: .5rem; overflow-y: auto; }
+.advanced-input-choices label { display: flex; align-items: flex-start; gap: .5rem; cursor: pointer; }
+.advanced-input-choices small { display: block; opacity: .75; }
+.advanced-input-error { color: #c44; margin: .25rem 0; }
+.advanced-dialog .advanced-input-choices input[type="radio"], .advanced-dialog .advanced-input-choices input[type="checkbox"] { flex: 0 0 auto; width: auto; padding: 0; margin: .2rem 0 0; accent-color: var(--advanced-check); }
+.advanced-dialog .advanced-input-form textarea { min-width: 0; min-height: 6rem; }

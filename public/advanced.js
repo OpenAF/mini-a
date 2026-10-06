@@ -267,6 +267,7 @@ window.MiniAAdvancedUI = function(bridge) {
   }
   function showError(error) { status.textContent = String(error.message || error); paneStatus.textContent = 'Error'; paneStatus.dataset.state = 'error'; }
   function resetSessionView() {
+    if (dialog.open) dialog.close();
     after = 0; snapshot = null; dialogId = null; liveFloor = 0; liveClearRun = null; submittedView = null; viewParams = {};
     Object.keys(previousSelections).forEach(key => delete previousSelections[key]);
     resultGeneration++; resultRefresh = subtaskRefresh = null; events.replaceChildren();
@@ -324,7 +325,8 @@ window.MiniAAdvancedUI = function(bridge) {
     while (events.childElementCount > 1000) events.firstChild.remove();
   }
   async function poll() {
-    if (!enabled || polling) return;
+    // Sessions already attached to Advanced can still ask after switching panes.
+    if ((!enabled && !snapshot) || polling) return;
     polling = true;
     try {
       const current = bridge.uuid();
@@ -334,7 +336,7 @@ window.MiniAAdvancedUI = function(bridge) {
       const first = !snapshot; snapshot = data; busy = data.busy; bridge.trackRun(data);
       if (data.busy && data.operationView) submittedView = {requestId:data.operation,name:data.operationView.name};
       paneStatus.dataset.state = data.closed ? 'closed' : busy ? 'working' : 'ready';
-      status.textContent = paneStatus.textContent = data.closed ? 'Session ended' : busy ? 'Working' : 'Ready';
+      status.textContent = paneStatus.textContent = data.closed ? 'Session ended' : data.pending ? 'Waiting for your input' : busy ? 'Working' : 'Ready';
       for (const record of data.events) { if (record.sequence > after) { appendEvent(record, !first); after = record.sequence; } }
       if (data.events.length) followActivity();
       if (first || (['settings','models'].includes(activeScreen) && !screen.contains(document.activeElement) && data.events.some(e => e.type === 'complete' && (['settings','preset'].includes(e.value?.action) || e.value?.settingsChanged)))) renderScreen();
@@ -348,8 +350,62 @@ window.MiniAAdvancedUI = function(bridge) {
   }
   function showDialog(pending) {
     dialogId = pending.id; dialog.replaceChildren(el('h3', pending.label));
-    const reply = async answer => { await api({action:'reply',id:pending.id,answer}); dialog.close(); };
-    if (pending.type === 'choice') pending.choices.forEach((choice,index) => dialog.append(button(asText(choice), () => reply(index))));
+    const dialogSession = bridge.uuid();
+    const reply = async answer => {
+      const session = dialogSession;
+      if (session !== bridge.uuid() || dialogId !== pending.id) return;
+      try {
+        await api({action:'reply',id:pending.id,answer});
+        if (session === bridge.uuid() && dialogId === pending.id) dialog.close();
+      } catch (error) {
+        if (session === bridge.uuid() && dialogId === pending.id) {
+          let message = dialog.querySelector('.advanced-input-error');
+          if (!message) { message = el('p', undefined, 'advanced-input-error'); message.setAttribute('role', 'alert'); dialog.append(message); }
+          message.textContent = error.message || String(error);
+        }
+      }
+    };
+    if (pending.type === 'input') {
+      const form = el('form', undefined, 'advanced-input-form');
+      const readers = pending.choices.map((field, fieldIndex) => {
+        const group = el('fieldset'); group.append(el('legend', field.label));
+        if (field.help) group.append(el('p', field.help));
+        let read;
+        if (['choose','char','multiple'].includes(field.type)) {
+          const choices = el('div', undefined, 'advanced-input-choices');
+          if (Number.isFinite(field.max) && field.max > 0) choices.style.maxHeight = Math.min(field.max, 12) * 3.5 + 'em';
+          const controls = field.choices.map((choice, index) => {
+            const row = el('label');
+            const control = el('input'); control.type = field.type === 'multiple' ? 'checkbox' : 'radio';
+            control.name = 'input-' + fieldIndex; control.value = String(index);
+            const text = el('span', asText(choice));
+            if (field.descriptions?.[index]) text.append(el('small', field.descriptions[index]));
+            row.append(control, text); choices.append(row); return control;
+          });
+          group.append(choices);
+          read = () => {
+            const indexes = controls.flatMap((control, index) => control.checked ? [index] : []);
+            if (field.type !== 'multiple' && !indexes.length) throw Error('Choose an option for ' + field.label);
+            return field.type === 'multiple' ? indexes : indexes[0];
+          };
+        } else {
+          const control = el(field.type === 'password' ? 'input' : 'textarea');
+          if (field.type === 'password') { control.type = 'password'; control.autocomplete = 'off'; }
+          control.setAttribute('aria-label', field.label); group.append(control);
+          read = () => control.value || '';
+        }
+        form.append(group); return read;
+      });
+      const error = el('p', undefined, 'advanced-input-error'); error.setAttribute('role', 'alert');
+      const submit = button('Continue', () => form.requestSubmit()); submit.type = 'button';
+      form.onsubmit = async event => {
+        event.preventDefault();
+        try { const answers = readers.map(read => read()); error.textContent = ''; submit.disabled = true; await reply(answers); }
+        catch (failure) { error.textContent = failure.message || String(failure); }
+        finally { submit.disabled = false; }
+      };
+      form.append(error, submit); dialog.append(form);
+    } else if (pending.type === 'choice') pending.choices.forEach((choice,index) => dialog.append(button(asText(choice), () => reply(index))));
     else {
       const field = el('textarea'); field.value = pending.value || ''; field.setAttribute('aria-label', pending.label);
       const preview = el('div');
@@ -357,9 +413,9 @@ window.MiniAAdvancedUI = function(bridge) {
       if (pending.type === 'wiki-editor') dialog.append(button('Preview', () => { preview.replaceChildren(markdown(field.value)); }), preview);
       if (!['editor','wiki-editor'].includes(pending.type)) window.MiniADataEditor.bind(field, {label: pending.label});
     }
-    dialog.append(button('Cancel operation', async () => { await api({action:'stop'}); dialog.close(); }));
+    dialog.append(button('Cancel operation', async () => { if (dialogSession !== bridge.uuid() || dialogId !== pending.id) return; try { await api({action:'stop'}); dialog.close(); } catch(error) { showError(error); } }));
     if (!dialog.open) dialog.showModal();
-    dialog.querySelector('textarea,button')?.focus();
+    dialog.querySelector('textarea,input,button')?.focus();
   }
   function commandForm(label, build, fields) {
     const form = el('form', undefined, 'advanced-form'); form.append(el('h4',label));

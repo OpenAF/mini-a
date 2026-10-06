@@ -19,6 +19,7 @@ var MiniUtilsTool = function(options) {
   this._chartRenderer = __
   // Mini-A supplies this to route display-only output to its console. Without
   // it, direct MiniUtilsTool users retain the historical print() behavior.
+  this._inputFn = __
   this._displayEventFn = __
   this._separator = String(java.io.File.separator)
   this._listNestedKeys = ["files", "dirs", "children", "items", "list", "entries", "content"]
@@ -67,6 +68,7 @@ MiniUtilsTool.prototype.init = function(options) {
     this._readWrite = options.readwrite === true
     this._visualizationsEnabled = options.useasciiviz === true
     this._chartRenderer = isFunction(options.chartRenderer) ? options.chartRenderer : __
+    if (isFunction(options.inputFn)) this._inputFn = options.inputFn
     this._displayEventFn = isFunction(options.displayEventFn) ? options.displayEventFn : __
     this._skillsRoots = this._resolveSkillsRoots(options)
     var sep = String(java.io.File.separator)
@@ -3499,28 +3501,59 @@ MiniUtilsTool.prototype.todoList = function(params) {
   }
 }
 
+// The browser sends indexes; values and encryption are resolved here on the server.
+MiniUtilsTool.prototype._browserInput = function(questions) {
+  var fields = questions.map(function(q) {
+    if (!isMap(q) || !isString(q.name) || !q.name.length) throw new Error("Question name is required")
+    var type = q.type || "question"
+    if (["?", "question", "ask", "secret", "char", "choose", "multiple"].indexOf(type) < 0) throw new Error("Invalid question type")
+    if (["char", "choose", "multiple"].indexOf(type) >= 0 && (!isArray(q.options) || !q.options.length)) throw new Error("options array is required")
+    if (type === "char" && q.options.some(function(v) { return !isString(v) || v.length !== 1 })) throw new Error("char options must be single characters")
+    return { label: isString(q.prompt) && q.prompt.length ? q.prompt : q.name + ":", type: type === "secret" || isString(q.mask) && q.mask.length ? "password" : ["?", "question", "ask"].indexOf(type) >= 0 ? "text" : type,
+      choices: isArray(q.options) ? q.options.map(function(v) { return isString(v) ? v : stringify(v, __, "") }) : [],
+      help: q.help || "", max: q.max, descriptions: q.descriptions || [] }
+  })
+  var answers = this._inputFn({ fields: fields })
+  if (!isArray(answers) || answers.length !== questions.length) throw new Error("Invalid input response")
+  return questions.map(function(q, i) {
+    var answer = answers[i], type = q.type || "question"
+    if (["choose", "char"].indexOf(type) >= 0) answer = q.options[answer]
+    if (type === "multiple") answer = answer.map(function(index) { return q.options[index] })
+    if (type === "secret") answer = answer === "" ? __ : af.encrypt(answer)
+    if (q.output === "index" && ["choose", "multiple"].indexOf(type) >= 0) answer = answers[i]
+    else if (q.output === "index") answer = isArray(answer) ? answer.map(function(v) { return q.options.indexOf(v) }) : q.options.indexOf(answer)
+    return { name: q.name, answer: answer }
+  })
+}
+
 MiniUtilsTool.prototype._ask = function(prompt, mask) {
+  if (isFunction(this._inputFn)) return this._browserInput([{ name: "answer", prompt: prompt, mask: mask }])[0].answer
   return ask(prompt, mask)
 }
 
 MiniUtilsTool.prototype._askEncrypt = function(prompt) {
+  if (isFunction(this._inputFn)) return this._browserInput([{ name: "answer", prompt: prompt, type: "secret" }])[0].answer
   return askEncrypt(prompt)
 }
 
 MiniUtilsTool.prototype._ask1 = function(prompt, options) {
+  if (isFunction(this._inputFn)) return this._browserInput([{ name: "answer", prompt: prompt, type: "char", options: options }])[0].answer
   return ask1(prompt, options)
 }
 
 MiniUtilsTool.prototype._askChoose = function(prompt, options, max, help) {
+  if (isFunction(this._inputFn)) return this._browserInput([{ name: "answer", prompt: prompt, type: "choose", options: options, max: max, help: help, output: "index" }])[0].answer
   return askChoose(prompt, options, max, help)
 }
 
 MiniUtilsTool.prototype._askChooseMultiple = function(prompt, options, max, help) {
+  if (isFunction(this._inputFn)) return this._browserInput([{ name: "answer", prompt: prompt, type: "multiple", options: options, max: max, help: help }])[0].answer
   var result = askChooseMultiple(prompt, options, max, help)
   return isArray(result) ? result : []
 }
 
 MiniUtilsTool.prototype._askStruct = function(questions) {
+  if (isFunction(this._inputFn)) return this._browserInput(questions)
   return askStruct(questions)
 }
 
@@ -3960,6 +3993,23 @@ MiniUtilsTool.prototype.webfetch = function(params) {
 MiniUtilsTool.prototype.question = function(params) {
   var p = isMap(params) ? params : {}
   if (!isArray(p.questions) || p.questions.length === 0) return "[ERROR] questions array is required"
+  if (isFunction(this._inputFn)) {
+    try {
+      var fields = p.questions.map(function(q, i) {
+        if (!isMap(q)) throw new Error("Invalid question")
+        var options = isArray(q.options) ? q.options : []
+        return { name: isString(q.header) && q.header.trim().length ? q.header.trim() : "q" + (i + 1), prompt: q.question,
+          type: options.length ? q.multiple === true ? "multiple" : "choose" : "question",
+          options: options.map(function(v) { return isMap(v) ? v.label : v }),
+          descriptions: options.map(function(v) { return isMap(v) && isString(v.description) ? v.description : "" }) }
+      })
+      var result = this.userInput({ operation: "struct", questions: fields })
+      if (isString(result)) return result
+      var grouped = {}
+      result.answers.forEach(function(entry) { Object.defineProperty(grouped, entry.name, { value: entry.answer, enumerable: true, configurable: true }) })
+      return { answers: grouped }
+    } catch(e) { return "[ERROR] " + __miniAErrMsg(e) }
+  }
   var answers = {}
   for (var i = 0; i < p.questions.length; i++) {
     var q = p.questions[i]

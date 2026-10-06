@@ -40,6 +40,7 @@ var _MINI_A_DURABLE_MEMORY_KINDS = {
  * </odoc>
  */
 var MiniA = function() {
+  this._userInputFn = __
   this._isInitialized = false
   this._isInitializing = false
   this._id = sha384(nowNano()).substr(0, 8)
@@ -10887,6 +10888,9 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
 
     var toolOptions = {}
     if (args.readwrite === true) toolOptions.readwrite = true
+    if (args.__interaction_source === "mini-a-web" && this._supportsUserInput(args) && isFunction(this._userInputFn)) {
+      toolOptions.inputFn = function(request) { return parent._userInputFn(request) }
+    }
     var supportsConsoleDisplay = this._supportsConsoleUserInput(args) === true
     if (toBoolean(args.useasciiviz) === true && supportsConsoleDisplay) toolOptions.useasciiviz = true
     if (supportsConsoleDisplay) {
@@ -10962,10 +10966,10 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         return (includeSkillsTool && name === "skills") || (toBoolean(args.useskillswiki) === true && name === "skillwiki")
       })
     }
-    if (this._supportsConsoleUserInput(args) !== true) {
-      methodNames = methodNames.filter(function(name) { return name !== "userInput" })
-      methodNames = methodNames.filter(function(name) { return name !== "showMessage" })
+    if (this._supportsUserInput(args) !== true) {
+      methodNames = methodNames.filter(function(name) { return name !== "userInput" && name !== "question" })
     }
+    if (supportsConsoleDisplay !== true) methodNames = methodNames.filter(function(name) { return name !== "showMessage" })
     if (toBoolean(args.usewiki) !== true || !isObject(this._wikiManager)) {
       methodNames = methodNames.filter(function(name) { return name !== "wiki" })
     }
@@ -13423,7 +13427,8 @@ MiniA.prototype._executeToolWithCache = function(connectionId, toolName, params,
   }
 
   var cacheConfig = this._toolCacheSettings[toolName]
-  var shouldCache = !MiniA._isCommsTool(toolName, params) && isObject(cacheConfig) && cacheConfig.enabled === true
+  var inputToolName = toolName === "proxy-dispatch" && isMap(params) && isString(params.tool) ? params.tool : toolName
+  var shouldCache = ["userInput", "question"].indexOf(inputToolName) < 0 && !MiniA._isCommsTool(toolName, params) && isObject(cacheConfig) && cacheConfig.enabled === true
   var cacheKey = shouldCache ? this._buildToolCacheKey(toolName, callParams) : ""
 
   if (shouldCache) {
@@ -17446,12 +17451,12 @@ MiniA.prototype._refreshRunPrompt = function(args) {
     if (this._useToolsActual === true && toBoolean(args.usejsontool) !== true) {
       baseRules.push("If you need to respond without calling a tool, return the JSON response directly in the assistant message. Do not wrap that payload in a tool call to 'json'.")
     }
-    if (this._supportsConsoleUserInput(args) === true) {
+    if (this._supportsUserInput(args) === true) {
       var _uiToolName = toBoolean(args.usestdutils) === true ? "question" : "userInput"
       baseRules.push(
         "When you need information, clarification, or a decision from the user — such as a missing value, a choice between options, sensitive input, or a confirmation — call the '" + _uiToolName + "' tool instead of asking in your final answer or pausing execution."
       )
-      baseRules.push(
+      if (this._supportsConsoleUserInput(args)) baseRules.push(
         "When you want to show the user a progress update, status notification, or important finding during execution (not as a final answer), call the 'showMessage' tool. This prints directly to the console in real time."
       )
     }
@@ -17694,8 +17699,8 @@ MiniA.prototype._shouldIncludeNoUserInteractionRemark = function(args) {
   if (!isMap(args)) return false
   if (!isString(args.__interaction_source)) return false
   var source = args.__interaction_source.trim().toLowerCase()
-  if (source === "mini-a-con") return this._supportsConsoleUserInput(args) !== true
-  return source === "mini-a-web"
+  if (source === "mini-a-con" || source === "mini-a-web") return this._supportsUserInput(args) !== true
+  return false
 }
 
 MiniA.prototype._shouldEncourageWebMarkdownImages = function(args) {
@@ -17706,6 +17711,14 @@ MiniA.prototype._shouldEncourageWebMarkdownImages = function(args) {
   if (toBoolean(args.workermode) === true) return false
   var port = isNumber(args.onport) || isString(args.onport) ? Number(args.onport) : NaN
   return isFinite(port) && Math.floor(port) === port && port > 0 && port <= 65535
+}
+
+MiniA.prototype._supportsUserInput = function(args) {
+  return this._supportsConsoleUserInput(args) || (isMap(args) && toBoolean(args.useutils) === true && args.__interaction_source === "mini-a-web" && isFunction(this._userInputFn))
+}
+
+MiniA.prototype.setUserInputFn = function(fn) {
+  this._userInputFn = isFunction(fn) ? fn : __
 }
 
 MiniA.prototype._supportsConsoleUserInput = function(args) {

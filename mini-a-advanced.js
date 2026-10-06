@@ -14,7 +14,7 @@ function MiniAAdvanced(args) {
 
 MiniAAdvanced.prototype.removeSession = function(uuid) {
   var state = this.sessions[uuid]
-  if (state) state.runtime.dispose()
+  if (state) { state.cancelled = true; state.closed = true; state.pending = null; state.runtime.dispose() }
   delete this.sessions[uuid]
   global._mini_a_web_dispose(uuid)
   delete global.__res[uuid]
@@ -166,16 +166,26 @@ MiniAAdvanced.prototype._get = function(uuid) {
       if (self.isServerOption(key)) throw new Error(key + " is controlled by the server/session and requires server configuration")
     },
     ask: function(type, label, choices, value) {
+      var runToken = global.__runTokens[uuid]
       state.askLock.lock()
       try {
-      if (state.cancelled) throw new Error("Command cancelled")
-      var pending = { id: genUUID(), type: type, label: label, choices: choices || [], value: value || "" }
-      state.pending = pending
-      emit("interaction", pending)
-      while (state.pending === pending && !state.cancelled) sleep(100)
-      if (state.cancelled) throw new Error("Command cancelled")
-      return pending.answer
-      } finally { state.askLock.unlock() }
+        if (state.cancelled || state.closed || isDef(runToken) && global.__runTokens[uuid] !== runToken) throw new Error("Command cancelled")
+        var pending = { id: genUUID(), type: type, label: label, choices: choices || [], value: value || "", runId: runToken }
+        function active() {
+          var agent = state.runtime.agent()
+          return !state.cancelled && !state.closed && (!isObject(agent) || agent._stopRequested !== true) &&
+            (isUnDef(runToken) || global.__runTokens[uuid] === runToken && (!global.__attachmentStops || global.__attachmentStops[uuid] !== runToken))
+        }
+        state.lock.lock()
+        try {
+          if (!active()) throw new Error("Command cancelled")
+          state.pending = pending
+          emit("interaction", pending)
+        } finally { state.lock.unlock() }
+        while (state.pending === pending && active()) sleep(100)
+        if (!active()) { if (state.pending === pending) state.pending = null; throw new Error("Command cancelled") }
+        return state._pendingAnswer
+      } finally { delete state._pendingAnswer; state.askLock.unlock() }
     }
   })
   if (isUnDef(global.__res)) global.__res = {}
@@ -306,6 +316,20 @@ MiniAAdvanced.prototype.persist = function(state, full) {
   return clean
 }
 
+// Only accept indexes/text matching the server-held field descriptors.
+MiniAAdvanced.prototype.validateInput = function(fields, answers) {
+  if (!isArray(answers) || answers.length !== fields.length) throw new Error("Invalid input response")
+  fields.forEach(function(field, i) {
+    var answer = answers[i]
+    function validIndex(v) { return isNumber(v) && v >= 0 && v < field.choices.length && v % 1 === 0 }
+    if (["choose", "char"].indexOf(field.type) >= 0) {
+      if (!validIndex(answer)) throw new Error("Invalid choice")
+    } else if (field.type === "multiple") {
+      if (!isArray(answer) || answer.some(function(v, n) { return !validIndex(v) || answer.indexOf(v) !== n })) throw new Error("Invalid choices")
+    } else if (!isString(answer)) throw new Error("Text answer required")
+  })
+}
+
 MiniAAdvanced.prototype.snapshot = function(state, after) {
   var definitions = state.runtime.definitions, options = state.runtime.options(), self = this
   return {
@@ -368,12 +392,18 @@ MiniAAdvanced.prototype.request = function(data) {
   }
   if (data.action === "trace") return this.safe(state.runtime.tracePage(after, 100, data.category, data.sequence))
   if (data.action === "reply") {
-    if (!state.pending || data.id !== state.pending.id) throw new Error("Interaction is no longer pending")
-    if (stringify(data.answer, __, "").length > 120000) throw new Error("Answer is too long")
-    if (state.pending.type === "choice" && (!isNumber(data.answer) || data.answer < 0 || data.answer >= state.pending.choices.length || data.answer % 1)) throw new Error("Invalid choice")
-    state.pending.answer = data.answer
-    state.pending = null
-    return { ok: true }
+    state.lock.lock()
+    try {
+      var pending = state.pending
+      if (!pending || data.id !== pending.id || state.cancelled || state.closed || isDef(pending.runId) && pending.runId !== global.__runTokens[state.uuid]) throw new Error("Interaction is no longer pending")
+      if (pending.type === "input") this.validateInput(pending.choices, data.answer)
+      if (stringify(data.answer, __, "").length > 120000) throw new Error("Answer is too long")
+      if (pending.type === "choice" && (!isNumber(data.answer) || data.answer < 0 || data.answer >= pending.choices.length || data.answer % 1)) throw new Error("Invalid choice")
+      // Keep replies separate from the publicly exposed request descriptor.
+      state._pendingAnswer = data.answer
+      state.pending = null
+      return { ok: true }
+    } finally { state.lock.unlock() }
   }
   if (data.action === "stop") {
     state.cancelled = true

@@ -362,6 +362,8 @@ function MiniAWebPrompt(request) {
           }
         })
         if (isString(startArgs.conversation) && isUnDef(advancedState)) startArgs.conversation = global._mini_a_web_loadFile(startArgs.conversation)
+        // Input capability must be attached before init builds the utility catalog.
+        if (isDef(advancedState)) advancedState.runtime.attach(lma)
         lma.init(startArgs)
       } else {
         lma = global.__conversations[ uuid ]
@@ -387,7 +389,30 @@ function MiniAWebPrompt(request) {
       }
       if (global.__attachmentStops[uuid] === runToken || (advancedState && advancedState.cancelled) || !global._mini_a_web_owns(uuid, runToken)) return
       if (isString(attachmentDisplayPrompt)) lma._webAttachmentDisplayPrompt = { token: runToken, text: attachmentDisplayPrompt }
-      var _rma = lma.start(startArgs)
+      var _rma
+      if (advancedState) {
+        // Match console Escape: interrupt the worker even while start() is
+        // blocked in a model/tool call, rather than only setting agent.state.
+        var stopped = function() {
+          return advancedState.cancelled || global.__attachmentStops[uuid] === runToken || !global._mini_a_web_owns(uuid, runToken)
+        }
+        $tb(function() { _rma = lma.start(startArgs) }).stopWhen(function(done) {
+          if (done === true || stopped()) return true
+          sleep(75)
+          return false
+        }).exec()
+        if (stopped()) {
+          if (global._mini_a_web_owns(uuid, runToken)) {
+            global.__res[uuid].push({ event: "stop", message: "Stopped from Advanced mode" })
+            if (global.__usestream && isFunction(global._mini_a_web_sseClose)) global._mini_a_web_sseClose(uuid, "stopped")
+            global._mini_a_web_dispose(uuid)
+            advancedState.runtime.sync(__)
+          }
+          return
+        }
+      } else {
+        _rma = lma.start(startArgs)
+      }
 
       if (!global._mini_a_web_owns(uuid, runToken)) return
       // start() can return a string, a structured result, or no result on failure.

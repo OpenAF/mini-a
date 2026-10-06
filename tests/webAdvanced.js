@@ -194,5 +194,62 @@ try {
   check(countSession.runtime.options().conversation === stablePath, 'clear retains the UUID history path for subsequent resume')
   countSession.runtime.dispose()
   retained.runtime.dispose(); legacy.runtime.dispose(); protectedSession.runtime.dispose()
+  var inputState = advanced.get('input-fixture'), inputFn, inputDone = false, inputResult
+  var inputAgent={ setUserInputFn:function(fn) { inputFn=fn }, setHookFn:function(){}, setConfirmFn:function(){} }
+  inputState.runtime.attach(inputAgent)
+  global.__runTokens['input-fixture'] = 'input-run'
+  function waitInput(test) { var until = Date.now() + 5000; while (!test() && Date.now() < until) sleep(20); check(test(), 'input fixture finished within timeout') }
+  $doV(function() { inputResult = inputFn({fields:[{type:'text',label:'Name',choices:[]},{type:'multiple',label:'Many',choices:['a','b']}]}); inputDone=true })
+  waitInput(function(){return !!inputState.pending})
+  var pendingId=inputState.pending.id
+  check(advanced.snapshot(inputState,0).pending.id===pendingId,'reload snapshot retains pending input')
+  var invalidReply=false
+  try { advanced.request({uuid:'input-fixture',action:'reply',id:pendingId,answer:['Name',[0,0]]}) } catch(e) { invalidReply=true }
+  check(invalidReply && inputState.pending.id===pendingId,'invalid reply retains dialog')
+  advanced.request({uuid:'input-fixture',action:'reply',id:pendingId,answer:['Name',[0,1]]})
+  waitInput(function(){return inputDone})
+  check(inputResult[0]==='Name' && inputResult[1].length===2,'reply resumes waiting input')
+  var duplicateRejected=false
+  try { advanced.request({uuid:'input-fixture',action:'reply',id:pendingId,answer:[]}) } catch(e) { duplicateRejected=true }
+  check(duplicateRejected,'duplicate reply rejected')
+  inputDone=false
+  $doV(function() { try { inputFn({fields:[{type:'password',label:'Secret',choices:[]}]}) } catch(e) { inputResult=String(e) }; inputDone=true })
+  waitInput(function(){return !!inputState.pending})
+  advanced.request({uuid:'input-fixture',action:'stop'})
+  waitInput(function(){return inputDone})
+  check(String(inputResult).indexOf('cancelled')>=0 && !inputState.pending,'Stop releases input wait')
+  inputState.cancelled=false; inputDone=false; global.__runTokens['input-fixture']='replacement-run'
+  $doV(function() { try { inputFn({fields:[{type:'text',label:'Run',choices:[]}]}) } catch(e) { inputResult=String(e) }; inputDone=true })
+  waitInput(function(){return !!inputState.pending})
+  global.__runTokens['input-fixture']='different-run'
+  waitInput(function(){return inputDone})
+  check(!inputState.pending,'run replacement releases stale input wait')
+  global.__runTokens['input-fixture']='queue-run'; inputDone=false
+  var queuedDone=false, queuedResult, firstQueuedId
+  $doV(function(){inputResult=inputFn({fields:[{type:'text',label:'First',choices:[]}]});inputDone=true})
+  waitInput(function(){return !!inputState.pending}); firstQueuedId=inputState.pending.id
+  $doV(function(){queuedResult=inputFn({fields:[{type:'text',label:'Second',choices:[]}]});queuedDone=true})
+  sleep(100)
+  check(inputState.pending.id===firstQueuedId,'queued input does not replace visible request')
+  advanced.request({uuid:'input-fixture',action:'reply',id:firstQueuedId,answer:['first']})
+  waitInput(function(){return inputDone && !!inputState.pending && inputState.pending.id!==firstQueuedId})
+  advanced.request({uuid:'input-fixture',action:'reply',id:inputState.pending.id,answer:['second']})
+  waitInput(function(){return queuedDone})
+  check(inputResult[0]==='first' && queuedResult[0]==='second','concurrent requests retain their own answers')
+  inputDone=false
+  $doV(function(){inputResult=inputFn({fields:[{type:'password',label:'Secret',choices:[]}]});inputDone=true})
+  waitInput(function(){return !!inputState.pending})
+  var secretDescriptor=inputState.pending
+  advanced.request({uuid:'input-fixture',action:'reply',id:secretDescriptor.id,answer:['transport-secret-fixture']})
+  waitInput(function(){return inputDone})
+  check(isUnDef(secretDescriptor.answer),'public request descriptor never holds plaintext replies')
+  check(io.readFileString(inputState.journal).indexOf('transport-secret-fixture')<0,'plaintext replies never enter interaction journal')
+  inputDone=false
+  $doV(function(){try { inputFn({fields:[{type:'text',label:'Stop from Simple',choices:[]}]}) } catch(e) {inputResult=String(e)};inputDone=true})
+  waitInput(function(){return !!inputState.pending})
+  inputAgent._stopRequested=true
+  waitInput(function(){return inputDone})
+  check(!inputState.pending && String(inputResult).indexOf('cancelled')>=0,'agent stop releases pending input independently of Advanced stop route')
+  inputState.runtime.dispose()
   print('Advanced OpenAF integration checks passed')
 } catch(e) { printErr(e); exit(1) } finally { __gHDir = originalHome; io.rm(testRoot) }

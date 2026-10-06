@@ -920,7 +920,7 @@ The `start()` method accepts various configuration options:
 - **`maxsteps`** (number, default: 15 via `mini-a.sh`/ojob, 50 when using the `MiniA` class programmatically): Maximum consecutive steps without a successful action before the agent forces a final answer
 - **`maxtotalsteps`** (number, default: 0/disabled): Hard ceiling on total steps regardless of progress. When reached, forces a final answer the same way `maxsteps` does — use this to bound goals that keep making "successful" progress but never call `final`.
 - **`earlystopthreshold`** (number, default: 3, auto-adjusts to 5 with low-cost models): Number of identical consecutive errors before the early stop guard activates. The system automatically increases this threshold when using low-cost models before escalation to give them more recovery opportunities. Set explicitly to override automatic behavior.
-- **`youare`** (string): Override the opening "You are ..." sentence in the agent prompt (inline text or an `@file` path); Mini-A always appends the default "Work step-by-step..." directive, and adds the "No user interaction..." remark for non-interactive surfaces (including `mini-a-web`, and `mini-a-con` unless the console-only `userInput` utils tool is available)
+- **`youare`** (string): Override the opening "You are ..." sentence in the agent prompt (inline text or an `@file` path); Mini-A always appends the default "Work step-by-step..." directive, and adds the "No user interaction..." remark for non-interactive surfaces (including Simple web sessions without an Advanced input adapter, and `mini-a-con` unless the `userInput` utils tool is available)
 - **`chatyouare`** (string): Override the opening chatbot persona sentence when `chatbotmode=true` (inline text or an `@file` path) without touching the rest of the conversational instructions
 - **`verbose`** (boolean, default: false): Enable verbose logging
 - **`debug`** (boolean, default: false): Enable debug mode with detailed logs
@@ -3088,7 +3088,7 @@ Mini-A records extensive counters that help track behaviour and costs:
 | `llm_calls` | `normal`, `low_cost`, `total`, `fallback_to_main` | Request volume per model tier and how often the session escalated back to the main model after low-cost failures. |
 | `goals` | `achieved`, `failed`, `stopped` | High-level result of the current run. |
 | `actions` | `thoughts_made`, `thinks_made`, `finals_made`, `mcp_actions_executed`, `mcp_actions_failed`, `shell_commands_executed`, `shell_commands_blocked`, `shell_commands_approved`, `shell_commands_denied`, `unknown_actions` | Operational footprint: mental steps, final responses, MCP usage, and shell gatekeeping outcomes. |
-| `user_interaction` | `requests`, `completed`, `failed` | Interactive console prompt metrics for the `userInput` Mini Utils tool. Only increments when `useutils=true` and the session is running through `mini-a-con`. |
+| `user_interaction` | `requests`, `completed`, `failed` | Interactive prompt metrics for the `userInput` Mini Utils tool, including the `question` adapter. Increments with `useutils=true` in the console or an attached Advanced browser session. |
 | `planning` | `disabled_simple_goal`, `plans_generated`, `plans_validated`, `plans_validation_failed`, `plans_replanned` | Visibility into the planning engine—when it was bypassed, generated plans, LLM critique validation passes/failures, and replans triggered by runtime feedback. The `plans_validated` counter tracks all LLM critiques run, while `plans_validation_failed` counts verdicts of `REVISE`. Dynamic replanning adjustments are logged separately in plan metadata. |
 | `performance` | `steps_taken`, `total_session_time_ms`, `avg_step_time_ms`, `max_context_tokens`, `llm_estimated_tokens`, `llm_actual_tokens`, `llm_normal_tokens`, `llm_lc_tokens` | Execution pacing and token consumption for cost analysis. `llm_actual_tokens` only counts provider-reported usage. `llm_normal_tokens` and `llm_lc_tokens` fall back to prompt-token estimates when the provider omits token metadata. |
 | `behavior_patterns` | `escalations`, `escalation_consecutive_errors`, `escalation_consecutive_thoughts`, `escalation_thought_loop`, `escalation_steps_without_action`, `escalation_similar_thoughts`, `escalation_context_window`, `retries`, `consecutive_errors`, `consecutive_thoughts`, `json_parse_failures`, `action_loops_detected`, `thinking_loops_detected`, `similar_thoughts_detected` | Signals that highlight unhealthy loops or parser problems. Per-reason escalation counters show which trigger fires most frequently. |
@@ -4128,6 +4128,32 @@ existing authentication header. Use a URL-encoded token when it contains special
 characters. Advanced mode always requires authentication. Its token grants
 trusted console authority, including enabling shell and filesystem/wiki writes.
 Simple mode remains available on the same conversation.
+
+With `useutils=true`, Advanced agent runs can request browser input using
+`userInput` (the default tool catalog), or `question` when `usestdutils=true`.
+For example, submit: "Ask me to choose between a short and detailed explanation,
+then write the explanation using my choice."
+The agent pauses at **Waiting for your input** and opens a dialog. **Continue**
+returns your answers to the tool and the agent continues the same goal.
+
+Dialogs support multiline text, masked input, allowed-character choices,
+single-choice lists, multiple-choice lists, and named forms. Standard `question`
+requests group their questions into one dialog, show option descriptions, and use
+free text when no options are supplied. `output=index` retains index responses;
+`max` controls list display size, rather than limiting the number selected.
+
+**Cancel operation**, Escape, or **Stop** cancels the active operation and releases
+pending input calls. Reloading the browser reconnects to a pending dialog while
+the server is running; unsent entries are not saved. A server restart interrupts
+the run rather than resuming it. Concurrent input requests are shown one at a time.
+Secret/password operations use password fields and encrypt their returns on the
+server, matching OpenAF `askEncrypt` (an empty secret returns no value). Plaintext
+secrets are not added to interaction journals or reconnect snapshots. A masked
+`ask` hides typing but still returns plaintext to the agent; masking is not encryption.
+After switching an existing Advanced conversation to Simple view, its pending
+input dialogs remain available. Fresh Simple conversations keep their existing
+noninteractive behavior. Input support is scoped to the main Advanced agent. Delegated agents do not inherit
+its browser adapter. `showMessage` remains a console display tool.
 
 Advanced mode uses the console's shared command dispatcher and parameter metadata.
 It includes slash and argument completion, command history (Up/Down), Tab completion,

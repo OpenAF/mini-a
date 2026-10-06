@@ -27,7 +27,7 @@ const template={content:{querySelectorAll:()=>elements}};
 const requests=[];
 const ctx=vm.createContext({
   el:node, button:(text,onclick)=>Object.assign(node('button',text),{onclick}),
-  bridge:{renderMarkdown:text=>text},window:{MiniADataEditor:{bind(){throw Error('Goal/wiki editor is not a data editor')}}},
+  bridge:{uuid:()=> 'reader-session',renderMarkdown:text=>text},window:{MiniADataEditor:{bind(){throw Error('Goal/wiki editor is not a data editor')}}},
   document:{createElement:()=>template,createTextNode:text=>({tag:'text',textContent:text}),body:{classList:{contains:()=>false}}},
   api:async data=>{requests.push(data);return {}},dialog:node('dialog'),dialogId:null,
 });
