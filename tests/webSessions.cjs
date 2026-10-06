@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const yaml = fs.readFileSync('mini-a-web.yaml', 'utf8');
+const yaml = require('./webSource.cjs');
 const route = name => yaml.split('((uri          )): /' + name + '\n')[1].split('((execURI      )): | #js\n')[1].split(/\n(?=[^ \n])/)[0].replace(/^    /gm, '');
 let serial = 0, starts = 0, closes = 0, fail = false, scheduleFail = false;
 let finalResult = { answer: 'fixture answer' };
@@ -33,6 +33,7 @@ const c = { global: g, MiniA: Agent, __: undefined, genUUID: () => 'token-' + ++
   $doV(fn) { if (scheduleFail) throw Error('schedule failed'); pending.push(fn); return { catch() {} }; } };
 vm.createContext(c);
 vm.runInContext(fs.readFileSync('mini-a-common.js', 'utf8'), c);
+vm.runInContext(fs.readFileSync('mini-a-web-attachments.js', 'utf8'), c);
 const helpers = yaml.slice(yaml.indexOf('    global._mini_a_web_reserve ='), yaml.indexOf('    global.__webtoken =')).replace(/^    /gm,'');
 vm.runInContext(helpers,c);
 function call(name, data) { c.request = { files: { postData: JSON.stringify(data) }, header: { 'x-session': ' selected ' } }; return vm.runInContext('(function(){'+route(name)+'})()',c); }
@@ -98,3 +99,165 @@ assert.equal(g.__res.shape.at(-1).event, '❗');
 assert.match(g.__res.shape.at(-1).message, /no final answer/);
 assert.equal(g.__busy.shape, undefined); assert.equal(g.__conversations.shape, undefined);
 console.log('Web final-result shape checks passed.');
+
+// Advanced transport cannot instantiate or mutate sessions before opt-in and authentication.
+assert.equal(call('advanced', {uuid:'a',action:'snapshot'}).error, 'Advanced mode is disabled');
+let advancedCalls = 0;
+g.__advanced = { request(data) { advancedCalls++; return {uuid:data.uuid,ok:true}; } };
+g._mini_a_web_checkToken = () => false;
+assert.equal(call('advanced', {uuid:'a',action:'snapshot'}).error, 'unauthorized');
+assert.equal(advancedCalls, 0);
+g._mini_a_web_checkToken = () => true;
+assert.equal(call('advanced', {uuid:'a',action:'snapshot'}).ok, true);
+assert.equal(call('advanced', {uuid:'a',command:'x'.repeat(150001)}).error, 'Invalid advanced request');
+assert.equal(advancedCalls, 1);
+console.log('Advanced opt-in, authentication and request-size checks passed.');
+
+// Custom command labels reach the transcript and journal while the agent receives
+// the full prompt, including on a reused agent and after returning to plain input.
+const commandEvents = [];
+g._mini_a_web_extractSubtaskId = message => /^\[subtask:([^\]]+)\]/.exec(message)?.[1];
+const commandState = { runtime: {
+  options: () => ({}), attach() {}, sync() {}, beginTrace: () => () => {},
+  saveConversation() {}, afterGoal() {}
+} };
+g.__advanced = { sessions: { commands: commandState }, persist() {}, safe: x => x,
+  emit(state, type, value) { commandEvents.push({type, value}); } };
+Agent.prototype.setTraceFn = function() {};
+const originalStart = Agent.prototype.start;
+Agent.prototype.start = function(args) {
+  this.fn('user', args.goal);
+  return originalStart.call(this, args);
+};
+finalResult = 'Command answer';
+for (const [prompt, displayPrompt] of [
+  ['Expanded impact instructions', '/git-impact'],
+  ['Expanded commit instructions', '/git-commit'],
+  ['Plain follow-up', undefined]
+]) {
+  call('prompt', {uuid: 'commands', prompt, displayPrompt}); pending.shift()();
+  assert.equal(g.__conversations.commands.lastArgs.goal, 'Prefix: ' + prompt);
+  assert.equal(g.__res.commands.filter(e => e.event === '👤').at(-1).message, displayPrompt || 'Prefix: ' + prompt);
+  assert.equal(commandEvents.filter(e => e.type === 'user').at(-1).value, displayPrompt || 'Prefix: ' + prompt);
+  assert.equal(commandState.displayPrompt, undefined, 'display label cleared after the run');
+}
+call('prompt', {uuid: 'simple-label', prompt: 'Simple prompt', displayPrompt: '/ignored'}); pending.shift()();
+assert.equal(g.__res['simple-label'].find(e => e.event === '👤').message, 'Prefix: Simple prompt');
+Agent.prototype.start = originalStart;
+console.log('Advanced custom command display checks passed.');
+
+// Advanced new-conversation and expiry preserve console history and its VM store.
+let savedAdvanced = 0, persistedAdvanced = 0, disposedAdvanced = 0, deletedVm = 0, prunedAdvanced = 0;
+g.__advanced = {
+  sessions: { advanced: {runtime: {
+    saveConversation() { savedAdvanced++; }, dispose() { disposedAdvanced++; }
+  }} },
+  persist() { persistedAdvanced++; }, pruneHistory() { prunedAdvanced++; }
+};
+g.__usehistory = false; g.__historykeep = false;
+g.__conversations.advanced = new Agent();
+g.__conversations.advanced._historyVm = {deleteOwnedStore() { deletedVm++; }};
+g.__res.advanced = [{event:'final',message:'kept'}];
+assert.equal(call('clear', {uuid:'advanced'}).status, 'cleared');
+assert.equal(savedAdvanced, 1); assert.equal(persistedAdvanced, 1);
+assert.equal(deletedVm, 0); assert.equal(g.__res.advanced.length, 1);
+g.__lastActivity.advanced = 0;
+c.args = {historyretention:1, ssequeuetimeout:1};
+vm.runInContext(cleanup, c);
+assert.equal(prunedAdvanced, 1); assert.equal(disposedAdvanced, 1);
+assert.equal(deletedVm, 0); assert.equal(g.__advanced.sessions.advanced, undefined);
+console.log('Advanced history lifecycle checks passed.');
+
+Agent.prototype.start = function(args) {
+  this.fn('user', args.goal);
+  return originalStart.call(this, args);
+};
+// Binary data is processed only inside the accepted, reserved prompt run.
+delete g.__advanced;
+g.__useattach = true;
+const attachment = {name:'report.pdf',base64:Buffer.from('%PDF-fixture').toString('base64')};
+let processed = 0;
+c.MiniAWebAttachments.process = (items, prompt, agent, alive, progress) => {
+  processed++; assert.equal(alive(),true); assert.equal(items[0].name,'report.pdf');
+  progress('Processing attachment: report.pdf'); return prompt + '\nDocument evidence';
+};
+assert.equal(call('prompt',{uuid:'binary',prompt:'Read',attachments:[attachment]}).error,undefined,'accepted submission has no error');
+assert.equal(processed,0,'extraction is asynchronous');
+assert.equal(call('prompt',{uuid:'binary',prompt:'Overlap',attachments:[attachment]}).busy,true);
+pending.shift()();
+assert.equal(processed,1);
+assert.match(g.__conversations.binary.lastArgs.goal,/Document evidence/);
+const binaryUser = g.__res.binary.find(e => e.event === '👤');
+assert.match(binaryUser.message,/Document evidence/,'model history retains extracted content');
+assert.equal(binaryUser.displayMessage,'Read\n\n📎 report.pdf');
+assert.equal(g.__conversations.binary._webAttachmentDisplayPrompt,undefined,'display label expires after the run');
+const binaryResult = call('result',{uuid:'binary'});
+assert.match(binaryResult.content,/Read/);assert.match(binaryResult.content,/report.pdf/);
+assert.doesNotMatch(binaryResult.content,/Document evidence/,'answer view hides Tika source text');
+assert.equal(binaryResult.history.find(e => e.event === '👤').displayMessage,binaryUser.displayMessage);
+assert.equal(JSON.stringify(g.__res.binary).includes(attachment.base64),false,'binary payload is absent from transcript');
+assert.match(call('prompt',{uuid:'invalid',prompt:'Read',attachments:[{...attachment,name:'x.exe'}]}).error,/unsupported/);
+assert.equal(g.__busy.invalid,undefined);
+const priorStarts = starts;
+c.MiniAWebAttachments.process = () => { throw Error('report.pdf: parser failed'); };
+call('prompt',{uuid:'binary-failure',prompt:'Read',attachments:[attachment]});pending.shift()();
+assert.equal(starts,priorStarts,'failed extraction never starts the agent');
+assert.match(g.__res['binary-failure'].at(-1).message,/parser failed/);
+call('prompt',{uuid:'binary-stop',prompt:'Read',attachments:[attachment]});
+g.__attachmentStops['binary-stop']=g.__runTokens['binary-stop'];
+c.MiniAWebAttachments.process = (items,prompt,agent,alive) => { assert.equal(alive(),false);throw Error('cancelled'); };
+pending.shift()();assert.equal(starts,priorStarts);
+assert.equal(g.__busy['binary-stop'],undefined);
+console.log('Web binary processing, failure and cancellation checks passed.');
+const beforeExpandedLimit = starts;
+c.MiniAWebAttachments.process = () => 'x'.repeat(120001);
+call('prompt',{uuid:'binary-limit',prompt:'Read',attachments:[attachment]});pending.shift()();
+assert.equal(starts,beforeExpandedLimit);
+assert.match(g.__res['binary-limit'].at(-1).message,/prompt exceeds/);
+c.MiniAWebAttachments.process = (items,prompt,agent,alive) => {assert.equal(alive(),true);return prompt+'\nSaved evidence';};
+call('prompt',{uuid:'binary-stop',prompt:'Try again',attachments:[attachment]});pending.shift()();
+assert.equal(starts,beforeExpandedLimit+1,'a new run after Stop can process files');
+console.log('Expanded prompt limit and post-cancellation retry checks passed.');
+
+// Reused callbacks must read the new label and never apply it to later plain goals.
+c.MiniAWebAttachments.process = (items,prompt) => prompt+'\nImage evidence';
+call('prompt',{uuid:'binary',prompt:'Inspect',attachments:[{name:'image.png',base64:'iVBORw0KGgo='}]});pending.shift()();
+assert.equal(g.__res.binary.filter(e => e.event === '👤').at(-1).displayMessage,'Inspect\n\n📎 image.png');
+call('prompt',{uuid:'binary',prompt:'Follow up'});pending.shift()();
+assert.equal(g.__res.binary.filter(e => e.event === '👤').at(-1).displayMessage,undefined);
+assert.equal(g.__res.binary.filter(e => e.event === '👤').at(-1).message,'Prefix: Follow up');
+// Advanced user journal and answer pane use the label; the model still sees evidence.
+g.__advanced = {sessions:{'binary-advanced':commandState},persist(){},safe:x=>x,emit(state,type,value){commandEvents.push({type,value});}};
+call('prompt',{uuid:'binary-advanced',prompt:'Explain',attachments:[attachment]});pending.shift()();
+assert.equal(commandEvents.filter(e => e.type === 'user').at(-1).value,'Explain\n\n📎 report.pdf');
+assert.match(g.__conversations['binary-advanced'].lastArgs.goal,/Image evidence/);
+assert.doesNotMatch(call('result',{uuid:'binary-advanced'}).content,/Image evidence/);
+assert.equal(g.__conversations['binary-advanced']._webAttachmentDisplayPrompt,undefined);
+Agent.prototype.start = originalStart;
+console.log('Simple and Advanced attachment transcript display checks passed.');
+
+assert.equal(call('load-history',{uuid:'restored-binary',history:binaryResult.history}).status,'loaded');
+const restoredUser = g.__res['restored-binary'].find(e => e.event === '👤');
+assert.equal(restoredUser.displayMessage,binaryUser.displayMessage);
+assert.match(restoredUser.message,/Document evidence/);
+assert.doesNotMatch(call('result',{uuid:'restored-binary'}).content,/Document evidence/);
+console.log('Restored attachment history preserves presentation and model content.');
+
+// Both recovery paths must retain the answer, not just completion notifications.
+delete g.__advanced;
+g.__usehistory = true;
+g.__res.recovery = [{event:'👤',message:'Question'}, {event:'final',message:'Important answer'}];
+g._mini_a_web_historyExists = () => false;
+let rebuilt;
+g._mini_a_web_saveFile = (_path, value) => { rebuilt = value; };
+call('prompt', {uuid:'recovery',prompt:'Follow up'}); pending.shift()();
+assert.equal(rebuilt.c.at(-1).role, 'assistant');
+assert.equal(rebuilt.c.at(-1).content, 'Important answer');
+const payloadHelper = yaml.slice(yaml.indexOf('    global._mini_a_web_buildHistoryPayload ='), yaml.indexOf('    global._mini_a_web_storeHistory =')).replace(/^    /gm, '');
+c.io = {fileExists: () => false};
+vm.runInContext(payloadHelper, c);
+g.__res.recovery = [{event:'👤',message:'Question'}, {event:'final',message:'Important answer'}];
+const recovered = JSON.parse(g._mini_a_web_buildHistoryPayload('recovery'));
+assert.equal(recovered.c.at(-1).role, 'assistant');
+assert.equal(recovered.c.at(-1).content, 'Important answer');
+console.log('Final answers survive local recovery and remote history payload rebuilding.');

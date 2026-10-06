@@ -51,7 +51,7 @@
   // ── Parsefrontmatter ────────────────────────────────────────────────────────
 
   exports.testConsoleWikiOperations = function() {
-    var source = io.readFileString("mini-a-con.js"), output = [], calls = []
+    var source = io.readFileString("mini-a-session.js"), output = [], calls = []
     var hits = [{path:"guide.md",title:"Guide"}]
     hits.outcome = "partial"; hits.stopReasons = ["deadline"]; hits.sources = [{wiki:"docs",status:"partial"}]
     var manager = {
@@ -60,7 +60,7 @@
       context: function(opts) { calls.push(opts); return {access:"ro",retrieval:{mode:"legacy",fallbackReason:"v2-build-required",nextAction:"Ask the publisher"}} }
     }
     var harness = new Function("manager", "output", "__miniAWikiRequireSearchHits",
-      'var getConsoleWikiManager=function(){return manager}, print=function(x){output.push(String(x))}, printErr=print, printTree=function(x){return stringify(x)}, colorifyText=function(x){return x}, ansiColor=function(a,b){return b}, accentColor="", promptColor="", hintColor="", errorColor="";\n' +
+      'var adapter, browserResult=function(){}, getConsoleWikiManager=function(){return manager}, print=function(x){output.push(String(x))}, printErr=print, printTree=function(x){return stringify(x)}, colorifyText=function(x){return x}, ansiColor=function(a,b){return b}, accentColor="", promptColor="", hintColor="", errorColor="";\n' +
       source.substring(source.indexOf("  function parseConsolePathArgs("),source.indexOf("  function quoteConsolePath(")) +
       source.substring(source.indexOf("  function printWiki("),source.indexOf("  function printGraph(")) + '\nreturn printWiki;')
     var run = harness(manager, output, __miniAWikiRequireSearchHits)

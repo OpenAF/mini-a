@@ -115,6 +115,7 @@ MiniAWikiOps.catalog = (function() {
   add("graph.report", "Graph", "Write graph report", true)
   add("graph.falkor", "Graph", "FalkorDB query / sync (advanced)", true, [["query", "Query (blank synchronizes)", ""]], {}, "Arbitrary queries are treated as writes; database permissions still apply.")
   add("graph.html", "Graph", "Export offline HTML constellation", true, [["output", "Output HTML file"], ["title", "Title", "Wiki constellation"]])
+  add("dream.auto", "Dream", "auto (preview by default)", true, [], { dryrun: true }, "Diagnose and repair identified issues, with recoverable backups and fresh-reader verification.")
   ;["plan", "apply", "repair", "reindex", "graph", "indexes", "reorg"].forEach(function(op) {
     add("dream." + op, "Dream", op, op !== "plan", op === "reorg" ? [["instructions", "Additional reorg guidance (optional)", ""]] : [], {}, op === "reorg" ? "Live agent changes; no automatic rollback. A rerun may produce different edits." : "")
   })
@@ -166,7 +167,7 @@ MiniAWikiOps.prototype.spec = function(id, params) {
 }
 MiniAWikiOps.mutates = function(spec) {
   if (spec.operation === "wiki.compact") return toBoolean(spec.params.dryRun) !== true
-  if (spec.operation === "ingest.run") return toBoolean(spec.params.dryrun) !== true
+  if (spec.operation === "ingest.run" || spec.operation === "dream.auto") return toBoolean(spec.params.dryrun) !== true
   return MiniAWikiOps.operation(spec.operation).writes
 }
 MiniAWikiOps.prototype.config = function() {
@@ -195,6 +196,7 @@ MiniAWikiOps.prototype.unavailable = function(spec) {
   var writable = cfg.access === "rw" && !cfg.__catalog && backend !== "http" && backend !== "https" && !archive
   if ((MiniAWikiOps.mutates(spec) || id === "wiki.compact") && id !== "graph.html" && !(id === "absorb.plan" && this.args.absorboutput) && !writable) return "Requires a writable primary wiki; mounts, archives and HTTP wikis are read-only"
   if ((id === "wiki.compact" || id === "wiki.indexstats" || id === "graph.filestats" || id === "graph.html" || id.indexOf("absorb.") === 0) && (backend !== "fs" || archive || cfg.__catalog)) return "Requires a local filesystem wiki"
+  if (id === "dream.auto" && (backend !== "fs" || archive || cfg.__catalog || this.args.wikitarget)) return "Auto requires a local primary filesystem wiki"
   if (id === "wiki.compact" && toBoolean(cfg.wikiretrievalv2) === false) return "Compaction requires Retrieval V2"
   if (id.indexOf("graph.") === 0 && id !== "graph.html" && id !== "graph.filestats" && toBoolean(cfg.usegraph) !== true) return "Enable usewikigraph=true in session settings"
   if (cfg.__catalog && (id.indexOf("dream.") === 0 || id.indexOf("ingest.") === 0 || id.indexOf("graph.") === 0 && id !== "graph.stats")) return "Select a concrete wiki target"
@@ -279,7 +281,7 @@ MiniAWikiOps.prototype._execute = function(spec, gates) {
         return merge(originalConfig.call(dream), { access: cfg.access })
       }
       dream._args.dreamwikimode = action; dream._args.dreammode = "wiki"
-      dream._args.dreamwikidryrun = action === "plan"
+      dream._args.dreamwikidryrun = action === "plan" || action === "auto" && p.dryrun === true
       if (action === "reorg") dream._args.dreamwikiinstructions = String(p.instructions || a.dreamwikiinstructions || "")
       return dream.dreamWiki()
     }

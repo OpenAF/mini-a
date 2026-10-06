@@ -43,6 +43,7 @@
     var root = String(java.nio.file.Files.createTempDirectory("mini-a-history-vm-test-").toAbsolutePath())
     var conversation = root + "/conversation.json"
     try {
+      load("mini-a-history-vm.js")
       var opts = merge({ enabled: true, conversationPath: conversation, conversationId: "test-conversation", sessionId: "test-session" }, isMap(options) ? options : {}, true)
       return fn(new MiniAHistoryVM(opts), conversation)
     } finally {
@@ -128,6 +129,80 @@
       ow.test.assert(vm.events[0].content !== "tampered", true, "Export is detached")
       MiniAHistoryVM.restorePayload(target, { c: [{ role: "user", content: "Legacy" }] })
       ow.test.assert(io.fileExists(target + ".historyvm"), false, "Legacy restore cannot inherit an unrelated sidecar")
+    }, { contextVirtualization: true })
+  }
+
+  exports.testEmergencyBudgetRecovery = function() {
+    load("mini-a.js")
+    withVm(function(vm, path) {
+      var huge = new Array(157501).join("completed ")
+      var history = [{ role: "user", content: "Keep my exact constraints" }, { role: "assistant", content: huge }]
+      var agent = new MiniA()
+      agent.fnI = function() {}
+      agent._historyVm = vm
+      agent._sessionArgs = { goal: "Continue" }
+      agent._getEffectiveContextBudget = function() { return 200000 }
+      var provider = history
+      var llm = { getGPT: function() { return { getConversation: function() { return provider }, setConversation: function(value) { provider = value } } } }
+      agent.llm = llm
+      var normal = (vm.captureProviderConversation(history), vm.projectActiveContext(history, { freezeUnselected: true, budget: 200000, projectionOnly: true }))
+      ow.test.assert(normal.overflow, true, "Synthetic ~394k request initially overflows 200k budget")
+      agent._prepareContextInvocation(llm, "Continue", "executor")
+      ow.test.assert(vm.estimateTokens(stringify(provider, __, "")) < 200000, true, "Recent assistant work automatically fits")
+      ow.test.assert(provider[0].content, history[0].content, "Real user input stays exact")
+      ow.test.assert(stringify(vm.materializeConversation(provider), __, ""), stringify(history, __, ""), "Emergency projection retains exact canonical history")
+      vm._writeCheckpoint()
+      var restored = new MiniAHistoryVM({ enabled: true, conversationPath: path, contextVirtualization: true })
+      ow.test.assert(restored.objects.some(function(object) { return isMap(object.content) && object.content.content === huge }), true, "Exact output survives reload")
+      restored.enabled = false
+      provider = [{ role: "user", content: huge }]
+      var failure
+      try { agent._prepareContextInvocation(llm, "Continue", "executor") } catch(e) { failure = e }
+      ow.test.assert(failure.code, "MINIA_CONTEXT_BUDGET", "Protected overflow has a structured error")
+      ow.test.assert(failure.components.protected_conversation > 390000, true, "Protected input accounts for irreducible request")
+      var sum = 0
+      Object.keys(failure.components).forEach(function(key) { sum += failure.components[key] })
+      ow.test.assert(sum, failure.estimatedTotal, "Component estimates are mutually exclusive and complete")
+      ow.test.assert(provider[0].content, huge, "Failed recovery leaves provider conversation unchanged")
+      provider = []
+      agent._systemInst = huge
+      var instructionFailure
+      try { agent._prepareContextInvocation(llm, "Continue", "executor") } catch(e) { instructionFailure = e }
+      ow.test.assert(instructionFailure.components.separate_instructions > 390000, true, "Separately charged oversized instructions cannot dispatch")
+      agent._systemInst = ""
+      agent.mcpTools = [{ name: "oversized", description: huge }]
+      var toolFailure
+      try { agent._prepareContextInvocation(llm, "Continue", "executor") } catch(e) { toolFailure = e }
+      ow.test.assert(toolFailure.components.tool_schemas > 390000, true, "Oversized tool schemas cannot dispatch")
+      agent.mcpTools = []
+      var lcProvider = history.slice()
+      agent.lc_llm = { getGPT: function() { return { getConversation: function() { return lcProvider }, setConversation: function(value) { lcProvider = value } } } }
+      agent._oaf_lc_model = { max_tokens: 8192 }
+      agent._prepareContextInvocation(agent.lc_llm, "Continue on low-cost", "executor")
+      ow.test.assert(vm.estimateTokens(stringify(lcProvider, __, "")) < 200000, true, "Adapter switching also recovers recent canonical work")
+      vm.degraded = true
+      provider = history
+      var backingFailure
+      try { agent._prepareContextInvocation(llm, "Continue", "executor") } catch(e) { backingFailure = e }
+      ow.test.assert(backingFailure.recovery, "canonical backing unavailable", "Unsafe backing cannot compact history")
+      vm.degraded = false
+
+    }, { contextVirtualization: true })
+  }
+
+  exports.testEmergencyToolProtocol = function() {
+    withVm(function(vm) {
+      var history = [{ role: "assistant", content: "", tool_calls: [{ id: "a", type: "function", function: { name: "lookup", arguments: "{}" } }] },
+        { role: "tool", tool_call_id: "a", content: new Array(40000).join("output ") },
+        { role: "assistant", content: [{ type: "image", url: "unknown" }] },
+        { role: "assistant", content: "incomplete", tool_calls: [{ id: "missing", type: "function", function: { name: "lookup", arguments: "{}" } }] }]
+      vm.captureProviderConversation(history)
+      var result = vm.projectActiveContext(history, { freezeUnselected: true, budget: 4000, emergency: true })
+      ow.test.assert(result.overflow, false, "Completed recent tools compact safely")
+      ow.test.assert(result.conversation[0].tool_calls[0].id, "a", "Call IDs survive")
+      ow.test.assert(result.conversation[1].tool_call_id, "a", "Tool reply stays paired")
+      ow.test.assert(stringify(result.conversation[2], __, ""), stringify(history[2], __, ""), "Unknown content stays exact")
+      ow.test.assert(stringify(result.conversation[3], __, ""), stringify(history[3], __, ""), "Incomplete exchange stays exact")
     }, { contextVirtualization: true })
   }
 
@@ -470,7 +545,7 @@
       } } }
       ow.test.assert(agent._prepareHistoryVmProjection(1) === true, true, "Runtime projection should complete")
       agent._prepareContextInvocation(agent.llm, "Continue", "executor")
-      ow.test.assert(isArray(sent) && sent.length < conversation.length, true, "Explicit active Phase 2 should freeze old messages at the final invocation boundary")
+      ow.test.assert(isArray(sent) && agent._estimateTokens(stringify(sent, __, "")) < agent._estimateTokens(stringify(conversation, __, "")), true, "Explicit active Phase 2 should compact or freeze old messages at the final invocation boundary")
       ow.test.assert(agent._historyVm.metrics.collapses === 0 && agent._historyVm.metrics.context_virtualization_active_assemblies === 1, true, "Active Phase 2 should not also run the Phase 1 collapse policy")
       agent._historyVm.deleteOwnedStore()
     } finally {

@@ -1,3 +1,5 @@
+<link rel="icon" href="favicon.ico?raw=true" type="image/x-icon">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png?raw=true">
 <script src="showdown.min.js?raw=true"></script>
 <!-- Chart.js + adapters/plugins: deterministic, version-aware loader -->
 <script>
@@ -178,7 +180,9 @@
                 const isHistoryElement = div.id === 'historyPanel' || div.id === 'historyOverlay' || (typeof div.closest === 'function' && div.closest('#historyPanel'));
                 const isAttachmentModal = div.id === 'attachmentModal';
 
-                if (!isChatContainer && !isHistoryElement && !isAttachmentModal) {
+                // Advanced components own their theme through CSS variables.
+                const isAdvancedElement = typeof div.closest === 'function' && div.closest('.advanced-shell, .advanced-toolbar, .advanced-completions, .advanced-divider, .advanced-dialog');
+                if (!isChatContainer && !isHistoryElement && !isAttachmentModal && !isAdvancedElement) {
                     div.style.backgroundColor = '#0f1115';
                     div.style.color = '#e6e6e6';
                     if (div.style.borderColor || getComputedStyle(div).borderColor !== 'rgba(0, 0, 0, 0)') {
@@ -252,7 +256,9 @@
                 const isChatContainer = div.classList.contains('chat-container');
                 const isHistoryElement = div.id === 'historyPanel' || div.id === 'historyOverlay' || (typeof div.closest === 'function' && div.closest('#historyPanel'));
                 const isAttachmentModal = div.id === 'attachmentModal';
-                if (!isChatContainer && !isHistoryElement && !isAttachmentModal) {
+                // Advanced components own their theme through CSS variables.
+                const isAdvancedElement = typeof div.closest === 'function' && div.closest('.advanced-shell, .advanced-toolbar, .advanced-completions, .advanced-divider, .advanced-dialog');
+                if (!isChatContainer && !isHistoryElement && !isAttachmentModal && !isAdvancedElement) {
                     div.style.backgroundColor = '#f8f9fa';
                     div.style.color = '#000000';
                     if (div.style.borderColor || getComputedStyle(div).borderColor !== 'rgba(0, 0, 0, 0)') {
@@ -338,7 +344,11 @@
     .chat-container {
         display: flex;
         flex-direction: column;
-        height: 100%;
+        /* Fixed to the viewport like the advanced layout, so the host page's body padding adds no extra top/side space. */
+        position: fixed;
+        inset: 1rem;
+        min-width: 0;
+        min-height: 0;
         /* background: var(--bg); */
         color: var(--text);
     }
@@ -658,6 +668,27 @@
         outline: none;
         box-shadow: 0 2px 6px rgba(0,123,255,0.15);
     }
+
+    .prompt-wrapper { position: relative; min-width: 0; }
+    #expandPromptBtn { display: none; position: absolute; top: 2px; right: 4px; z-index: 1; width: 24px; height: 24px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--text); box-shadow: none; cursor: pointer; align-items: center; justify-content: center; opacity: 0.6; transition: all 0.2s ease; box-sizing: border-box; }
+    #expandPromptBtn:hover { background: var(--panel-bg); opacity: 1; }
+    #expandPromptBtn svg { width: 14px; height: 14px; pointer-events: none; }
+    #expandPromptBtn:focus-visible { outline: 2px solid #27824b; }
+    .prompt-wrapper:has(.advanced-toolbar) #expandPromptBtn { display: flex; }
+    #composerDialog { box-sizing: border-box; position: fixed; inset: auto; margin: 0; left: var(--composer-left,0px); top: var(--composer-top,0px); width: var(--composer-width,100vw); height: var(--composer-height,100dvh); max-width: none; max-height: none; border: 0; padding: max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left)); background: white; color: inherit; }
+    body.markdown-body-dark #composerDialog { background: #1a1d23; color: #e6e6e6; }
+    body.markdown-body-dark #composerDialog #inputSection { background: #1a1d23; }
+    #composerDialog[open] { display: flex; flex-direction: column; gap: 8px; }
+    #composerHint { margin: 0; font-size: .8rem; }
+    #composerDialog #inputSection { flex: 1; min-height: 0; margin: 0; display: grid; grid-template-columns: auto 1fr auto; grid-template-rows: minmax(0,1fr) auto; }
+    #composerDialog .prompt-wrapper { grid-column: 1 / -1; grid-row: 1; display: flex; flex-direction: column; height: 100%; min-height: 0; padding-top: 0; }
+    #composerDialog #promptInput { flex: 1; min-height: 0; max-height: none; height: 100% !important; overflow-y: auto !important; font-size: 16px; }
+    #composerDialog #expandPromptBtn { top: 0; right: 0; bottom: auto; }
+    #composerDialog #promptInput { padding-right: 32px; }
+    #composerDialog #attachmentsContainer { flex-shrink: 0; }
+    #composerDialog #attachBtn { grid-column: 1; grid-row: 2; }
+    #composerDialog #submitBtn { grid-column: 3; grid-row: 2; }
+    #composerDialog :is(#clearBtn,#historyBtn,.advanced-toolbar,.advanced-completions) { display: none; }
 
     /* ========== BUTTONS ========== */
 
@@ -1811,9 +1842,10 @@
     <br>
     <div id="inputSection" class="input-section">
         <button id="attachBtn" title="Attach files" aria-label="Attach files" type="button"></button>
-        <input type="file" id="fileInput" accept="text/*,.md,.markdown,.txt,.json,.yaml,.yml,.csv,.tsv,.xml,.html,.css,.scss,.less,.js,.ts,.jsx,.tsx,.py,.rb,.go,.java,.kt,.c,.cpp,.cs,.rs,.php,.sh,.bash,.zsh,.fish,.sql,.toml,.ini,.env" multiple style="display:none" />
+        <input type="file" id="fileInput" accept="image/png,image/jpeg,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,text/*,.md,.markdown,.txt,.json,.yaml,.yml,.csv,.tsv,.xml,.html,.css,.scss,.less,.js,.ts,.jsx,.tsx,.py,.rb,.go,.java,.kt,.c,.cpp,.cs,.rs,.php,.sh,.bash,.zsh,.fish,.sql,.toml,.ini,.env" multiple style="display:none" />
         <div class="prompt-wrapper">
             <div id="attachmentsContainer" class="attachments-container" aria-live="polite"></div>
+            <button id="expandPromptBtn" type="button" title="Expand input" aria-label="Expand input" aria-expanded="false" aria-controls="promptInput"></button>
             <textarea id="promptInput" placeholder="Enter your prompt..." rows="1" disabled></textarea>
         </div>
         <button id="submitBtn" title="Send" aria-label="Send" type="button"></button>
@@ -1821,6 +1853,8 @@
         <button id="historyBtn" title="History" aria-label="History" type="button"></button>
     </div>
 </div>
+
+<dialog id="composerDialog" aria-label="Expanded prompt input"><p id="composerHint">Enter for a new line · Ctrl/Cmd+Enter to send · Escape to collapse</p><p id="composerNotice" role="alert" hidden></p></dialog>
 
 <div id="attachmentModal" class="attachment-modal" aria-hidden="true">
     <div class="attachment-modal-content" role="dialog" aria-modal="true" aria-labelledby="attachmentModalTitle">
@@ -2113,6 +2147,7 @@
 
     /* ========== DOM ELEMENT REFERENCES ========== */
     const promptInput = document.getElementById('promptInput');
+    const composerDialog = document.getElementById('composerDialog');
     const attachBtn = document.getElementById('attachBtn');
     const fileInput = document.getElementById('fileInput');
     const submitBtn = document.getElementById('submitBtn');
@@ -2169,7 +2204,7 @@
             if (typeof window === 'undefined') return null;
             if (window.__miniAWebToken !== undefined) return window.__miniAWebToken;
             const params = new URLSearchParams(window.location.search);
-            let token = params.get('token');
+            let token = params.get('token') || new URLSearchParams(window.location.hash.slice(1)).get('token');
             if (!token && typeof sessionStorage !== 'undefined') token = sessionStorage.getItem('mini_a_web_token');
             if (token && typeof sessionStorage !== 'undefined') sessionStorage.setItem('mini_a_web_token', token);
             window.__miniAWebToken = token || null;
@@ -2183,7 +2218,8 @@
         const originalFetch = window.fetch.bind(window);
         window.fetch = function(input, init) {
             const token = getWebToken();
-            if (token) {
+            const targetUrl = new URL(typeof input === 'string' ? input : input.url, window.location.href);
+            if (token && targetUrl.origin === window.location.origin) {
                 init = init || {};
                 init.headers = Object.assign({}, init.headers, { 'X-Mini-A-Token': token });
             }
@@ -2246,24 +2282,12 @@
 
             if (uuid) return uuid;
 
-            // Prefer crypto.randomUUID if available
-            if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-                uuid = crypto.randomUUID();
-            } else {
-                // Fallback to RFC4122 v4-like generator
-                uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-                    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-                    return v.toString(16);
-                });
-            }
+            uuid = generateNewSessionUuid();
 
             if (typeof window !== 'undefined') window.mini_a_session_uuid = uuid;
             return uuid;
         } catch (e) {
-            // Last resort: return non-persistent uuid
-            if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') 
-                return crypto.randomUUID();
-            return 'tmp-' + Date.now() + '-' + Math.floor(Math.random() * 1000000);
+            return generateNewSessionUuid();
         }
     }
 
@@ -2363,6 +2387,7 @@
             if (typeof ev.message !== 'undefined' && ev.message !== null) {
                 sanitized.message = typeof ev.message === 'string' ? ev.message : JSON.stringify(ev.message);
             }
+            if (typeof ev.displayMessage === 'string') sanitized.displayMessage = ev.displayMessage;
             return sanitized;
         }).filter(Boolean);
     }
@@ -2392,7 +2417,7 @@
             const ev = events[i];
             const key = ev && typeof ev.event === 'string' ? ev.event : '';
             if (key === '👤' || key === 'user') {
-                return typeof ev.message === 'string' ? ev.message : '';
+                return typeof ev.displayMessage === 'string' ? ev.displayMessage : (typeof ev.message === 'string' ? ev.message : '');
             }
         }
         return '';
@@ -2478,7 +2503,7 @@
             const ev = events[i];
             const key = ev && typeof ev.event === 'string' ? ev.event : '';
             if (key === '👤' || key === 'user') {
-                return typeof ev.message === 'string' ? ev.message : '';
+                return typeof ev.displayMessage === 'string' ? ev.displayMessage : (typeof ev.message === 'string' ? ev.message : '');
             }
         }
         return '';
@@ -2505,8 +2530,18 @@
             if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
                 return crypto.randomUUID();
             }
-        } catch (_) { /* ignore */ }
-        return 'branched-' + Date.now() + '-' + Math.floor(Math.random() * 1000000);
+        } catch (_) { /* Try the compatible generator below. */ }
+        const bytes = new Uint8Array(16);
+        try {
+            crypto.getRandomValues(bytes);
+        } catch (_) {
+            // Identifiers only: these values are not authentication tokens.
+            for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+        }
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        const hex = Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
+        return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
     }
 
     function copyToClipboard(text) {
@@ -3040,7 +3075,7 @@
             } else if (ev.event === '👤' || ev.event === 'user') {
                 flush(false);
                 id = index;
-                result += buildOptimisticUserPromptBlock(ev.message);
+                result += buildOptimisticUserPromptBlock(typeof ev.displayMessage === 'string' ? ev.displayMessage : ev.message);
             } else {
                 if (!['🧩', '💡', '💭', '🌀', '🛑', '⏳'].includes(ev.event) &&
                     !(showExecsEnabled && ['⚙️', '🖥️'].includes(ev.event))) return;
@@ -3329,6 +3364,12 @@
 
             const label = document.createElement('span');
             label.textContent = item.name;
+            if (item.binary && /\.(png|jpg|jpeg)$/i.test(item.name)) {
+                const thumbnail = document.createElement('img');
+                thumbnail.src = 'data:' + (/\.png$/i.test(item.name) ? 'image/png' : 'image/jpeg') + ';base64,' + item.base64;
+                thumbnail.alt = ''; thumbnail.style.cssText = 'width:32px;height:32px;object-fit:contain;';
+                chip.appendChild(thumbnail);
+            }
             chip.appendChild(label);
 
             const removeBtn = document.createElement('button');
@@ -3362,8 +3403,27 @@
         if (files.length === 0) return;
 
         for (const file of files) {
+            const binary = /\.(png|jpg|jpeg|doc|docx|xls|xlsx|ppt|pptx|pdf)$/i.test(file.name || '');
+            if (binary) {
+                const image = /\.(png|jpg|jpeg)$/i.test(file.name);
+                const existing = attachments.filter(item => item.binary);
+                if (existing.length >= 4 || file.size > (image ? 10 : 20) * 1024 * 1024 || existing.reduce((sum, item) => sum + item.size, 0) + file.size > 20 * 1024 * 1024) {
+                    notifyAttachmentWarning('Binary attachments allow four files, 10 MiB per image, and 20 MiB combined. Skipping "' + file.name + '".');
+                    continue;
+                }
+                try {
+                    const dataUrl = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve(reader.result);
+                        reader.onerror = () => reject(new Error('Cannot read ' + file.name));
+                        reader.readAsDataURL(file);
+                    });
+                    attachments.push({ id: 'att-' + Date.now() + '-' + Math.random().toString(16).slice(2), name: sanitizeAttachmentName(file.name), binary: true, size: file.size, mediaType: file.type, base64: dataUrl.slice(dataUrl.indexOf(',') + 1) });
+                } catch (error) { notifyAttachmentWarning(error.message); }
+                continue;
+            }
             if (!isAllowedTextFile(file)) {
-                notifyAttachmentWarning('Only text-based files can be attached. Skipping "' + (file.name || 'file') + '".');
+                notifyAttachmentWarning('Supported attachments are text, PNG/JPEG, Office documents and PDFs. Skipping "' + (file.name || 'file') + '".');
                 continue;
             }
             if (file.size > MAX_ATTACHMENT_SIZE) {
@@ -3418,13 +3478,18 @@
             output = '';
         }
 
-        const blocks = items.map(item => {
+        const blocks = items.filter(item => !item.binary).map(item => {
             const safeName = sanitizeAttachmentName(item.name).replace(/```/g, '`');
             const cleanContent = (item.content || '').replace(/\r\n/g, '\n');
             return '```attachment ' + safeName + '\n' + cleanContent + '\n```';
         });
 
         return output + blocks.join('\n\n');
+    }
+
+    function buildAttachmentDisplayPrompt(prompt, items) {
+        if (!items || !items.length) return prompt;
+        return prompt + '\n\n📎 ' + items.map(item => sanitizeAttachmentName(item.name)).join(', ');
     }
 
     function stripAttachmentBlocks(text) {
@@ -4897,6 +4962,44 @@
         }
     }
 
+    let advancedUI = null;
+    async function enableAdvancedUI() {
+        if (advancedUI) return;
+        const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = resolveAppUrl('advanced.css?raw=true'); document.head.append(css);
+        // OpenAF serves these shared libraries through mapLibs.
+        try {
+            for (const [name, loaded] of [['openafsigil.js', typeof $$ === 'function'], ['njsmap.js', typeof window.nJSMap === 'function']]) {
+                if (!loaded) await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = resolveAppUrl('js/' + name); script.onload = resolve; script.onerror = reject; document.head.append(script); });
+            }
+        } catch (_) { /* Structured statistics retain a plain-text fallback. */ }
+        await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = resolveAppUrl('data-editor.js?raw=true'); script.onload = resolve; script.onerror = reject; document.head.append(script); });
+        await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = resolveAppUrl('advanced.js?raw=true'); script.onload = resolve; script.onerror = reject; document.head.append(script); });
+        advancedUI = window.MiniAAdvancedUI({
+            openComposer,
+            composerExpanded,
+            renderMarkdown: renderConversationMarkdown,
+            url: resolveAppUrl,
+            newRequestId: generateNewSessionUuid,
+            uuid: () => { if (!currentSessionUuid) currentSessionUuid = getOrCreateSessionUuid(); return currentSessionUuid; },
+            resume: uuid => { currentSessionUuid = uuid; window.mini_a_session_uuid = uuid; },
+            refresh: () => { pollOnce(); },
+            trackRun: data => {
+                if (data.busy && data.kind === 'prompt' && !isProcessing) {
+                    lastSubmittedPrompt = '';
+                    activeSubmissionStartedAt = Date.now();
+                    sawNonFinishedForActiveSubmission = false;
+                    startProcessing();
+                    if (streamEnabled) startStream(currentSessionUuid);
+                    startPolling();
+                } else if (!data.busy && isProcessing) {
+                    stopProcessing(false);
+                    pollOnce();
+                }
+            },
+            newConversation: handleClearClick
+        });
+    }
+
     async function configureFeatureAvailability() {
         let shouldEnableHistory = true;
         let shouldEnableAttachments = false;
@@ -4913,6 +5016,7 @@
             }
 
             const data = await response.json();
+            if (data.webadvanced === true) await enableAdvancedUI();
             if (typeof data.usehistory === 'boolean') {
                 shouldEnableHistory = data.usehistory;
             }
@@ -5059,6 +5163,7 @@
                 if (typeof ev.message !== 'undefined' && ev.message !== null) {
                     sanitized.message = typeof ev.message === 'string' ? ev.message : JSON.stringify(ev.message);
                 }
+                if (typeof ev.displayMessage === 'string') sanitized.displayMessage = ev.displayMessage;
                 return sanitized;
             })
             .filter(Boolean);
@@ -5110,6 +5215,7 @@
                 if (typeof ev.message !== 'undefined' && ev.message !== null) {
                     sanitized.message = typeof ev.message === 'string' ? ev.message : JSON.stringify(ev.message);
                 }
+                if (typeof ev.displayMessage === 'string') sanitized.displayMessage = ev.displayMessage;
                 return sanitized;
             }) : []
         };
@@ -5325,8 +5431,84 @@
             </svg>`;
     }
 
+    // Shared composer: move the original controls so drafts and attachments stay intact.
+    const expandPromptBtn = document.getElementById('expandPromptBtn');
+    let composerAnchor = null;
+    let composerBodyOverflow = '';
+    function composerExpanded() { return composerDialog.open; }
+    function updateComposerViewport() {
+        const viewport = window.visualViewport;
+        const values = {left: viewport ? viewport.offsetLeft : 0, top: viewport ? viewport.offsetTop : 0,
+            width: viewport ? viewport.width : window.innerWidth, height: viewport ? viewport.height : window.innerHeight};
+        Object.entries(values).forEach(([key, value]) => composerDialog.style.setProperty('--composer-' + key, value + 'px'));
+    }
+    function updateComposerIcon() {
+        const expanded = composerExpanded();
+        const label = expanded ? 'Collapse input' : 'Expand input';
+        expandPromptBtn.title = label;
+        expandPromptBtn.setAttribute('aria-label', label);
+        expandPromptBtn.setAttribute('aria-expanded', String(expanded));
+        expandPromptBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' +
+            (expanded ? 'M20 9h-5V4M4 15h5v5' : 'M15 4h5v5M9 20H4v-5') + '"/></svg>';
+    }
+    function setComposerExpanded(expanded) {
+        if (expanded === composerExpanded()) return;
+        const selection = [promptInput.selectionStart, promptInput.selectionEnd, promptInput.selectionDirection];
+        const scroll = promptInput.scrollTop;
+        const section = document.getElementById('inputSection');
+        if (expanded) {
+            composerAnchor = document.createComment('composer position');
+            section.before(composerAnchor);
+            composerDialog.append(section);
+            composerBodyOverflow = document.body.style.overflow;
+            document.body.style.overflow = 'hidden';
+            updateComposerViewport();
+            composerDialog.showModal();
+        } else {
+            composerDialog.close();
+            composerAnchor.replaceWith(section);
+            composerAnchor = null;
+            document.body.style.overflow = composerBodyOverflow;
+            autoResizeTextarea();
+        }
+        updateComposerIcon();
+        if (!promptInput.disabled) {
+            promptInput.focus({preventScroll: true});
+            promptInput.setSelectionRange(...selection);
+            promptInput.scrollTop = scroll;
+        } else expandPromptBtn.focus({preventScroll: true});
+    }
+    function composerNotice(message) {
+        const notice = document.getElementById('composerNotice');
+        notice.textContent = message || '';
+        notice.hidden = !message;
+    }
+    function openComposer(value) {
+        if (promptInput.disabled) return false;
+        if (typeof value === 'string' && value !== promptInput.value) {
+            if (promptInput.value.trim() && !window.confirm('Replace the current draft with this goal?')) return false;
+            promptInput.value = value;
+            promptInput.dispatchEvent(new Event('input', {bubbles: true}));
+        }
+        setComposerExpanded(true);
+        return true;
+    }
+    expandPromptBtn.addEventListener('click', () => setComposerExpanded(!composerExpanded()));
+    composerDialog.addEventListener('cancel', event => { event.preventDefault(); setComposerExpanded(false); });
+    composerDialog.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && !event.isComposing) {
+            event.preventDefault(); event.stopPropagation(); setComposerExpanded(false);
+        }
+    }, true);
+    window.addEventListener('resize', updateComposerViewport);
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', updateComposerViewport);
+        window.visualViewport.addEventListener('scroll', updateComposerViewport);
+    }
+    updateComposerIcon();
+
     function autoResizeTextarea() {
-        if (!promptInput) return;
+        if (!promptInput || composerExpanded()) return;
         
         // Reset height to get accurate scrollHeight
         promptInput.style.height = '1px';
@@ -5350,6 +5532,8 @@
     }
 
     function addPreview() {
+        // Idle transcript refreshes (including a new Advanced session) are not LLM runs.
+        if (!isProcessing) return;
         if (document.getElementById(PREVIEW_ID)) return;
         const el = document.createElement('div');
         el.id = PREVIEW_ID;
@@ -5779,17 +5963,28 @@
     }
 
     async function handleSubmit() {
+        if (advancedUI && advancedUI.enabled() && isProcessing) { await advancedUI.stop(); return; }
         if (isProcessing) {
             await stopProcessing(true);
             return;
         }
 
+        composerNotice('');
         const rawPrompt = promptInput.value || '';
+        const binaryAttachments = attachmentsEnabled ? attachments.filter(item => item.binary).map(({name, mediaType, base64}) => ({name, mediaType, base64})) : [];
+        if (binaryAttachments.length && !rawPrompt.trim()) { notifyAttachmentWarning('Enter a question or instruction for the attached files.'); composerNotice('Enter a question or instruction for the attached files.'); return; }
+        if (advancedUI && advancedUI.enabled()) {
+            if (!rawPrompt.trim()) return;
+            try { await advancedUI.submit(buildPromptWithAttachments(rawPrompt, attachmentsEnabled ? attachments : []), binaryAttachments); clearAttachments(); setComposerExpanded(false); autoResizeTextarea(); }
+            catch (error) { console.error(error); alert(error.message); }
+            return;
+        }
         const finalPrompt = buildPromptWithAttachments(rawPrompt, attachmentsEnabled ? attachments : []);
         if (!finalPrompt.trim()) return;
 
-        lastSubmittedPrompt = finalPrompt;
-        lastFinishedPrompt = finalPrompt;
+        const displayPrompt = buildAttachmentDisplayPrompt(finalPrompt, binaryAttachments);
+        lastSubmittedPrompt = displayPrompt;
+        lastFinishedPrompt = displayPrompt;
         activeHistoryId = null;
 
         try {
@@ -5798,20 +5993,22 @@
             const browserContext = shouldSendBrowserContext ? collectBrowserContext() : null;
 
             // Add user prompt to display immediately
-            const userPromptDiv = buildOptimisticUserPromptBlock(finalPrompt);
+            const userPromptDiv = buildOptimisticUserPromptBlock(displayPrompt);
             lastRawContent += userPromptDiv;
             await renderRawContent(lastRawContent);
 
             const response = await fetch(resolveAppUrl('prompt'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
-                body: JSON.stringify({ prompt: finalPrompt, uuid: currentSessionUuid, browserContext })
+                body: JSON.stringify({ prompt: finalPrompt, uuid: currentSessionUuid, browserContext, attachments: binaryAttachments })
             });
 
             if (!response.ok) throw new Error('Failed to submit prompt');
 
             const data = await response.json();
+            if (data && data.error) throw new Error(data.error);
             if (data && data.busy) {
+                composerNotice('This conversation is busy. Wait for it to finish before sending.');
                 lastRawContent = lastRawContent.replace(userPromptDiv, '');
                 await renderRawContent(lastRawContent + '<p style="opacity: 0.7;">This session is still processing the previous request. Please wait for it to finish.</p>');
                 forceRenderChartBlocks();
@@ -5820,13 +6017,15 @@
             lastRenderedRaw = '';
             activeSubmissionStartedAt = Date.now();
             sawNonFinishedForActiveSubmission = false;
+            setComposerExpanded(false);
             startProcessing();
             if (streamEnabled) startStream(currentSessionUuid);
             startPolling();
 
         } catch (error) {
+            composerNotice(error.message || 'Error submitting prompt. Please try again.');
             console.error('Error submitting prompt:', error);
-            await updateResultsContent('<p style="color: red;">Error submitting prompt. Please try again.</p>');
+            await updateResultsContent('<p style="color: red;">' + escapeHtml(error.message || 'Error submitting prompt. Please try again.') + '</p>');
             forceRenderChartBlocks();
         }
     }
@@ -6331,8 +6530,9 @@
         // Add event listeners
         promptInput.addEventListener('input', autoResizeTextarea);
         promptInput.addEventListener('paste', () => setTimeout(autoResizeTextarea, 0));
-        promptInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !promptInput.disabled) {
+        promptInput.addEventListener('keydown', (e) => {
+            if (e.isComposing || e.keyCode === 229 || promptInput.disabled) return;
+            if (e.key === 'Enter' && (composerExpanded() ? (e.ctrlKey || e.metaKey) : !e.shiftKey)) {
                 e.preventDefault();
                 handleSubmit();
             }

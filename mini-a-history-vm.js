@@ -871,7 +871,7 @@ MiniAHistoryVM.prototype._indexContextObject = function(object, serialized, requ
   if (levels.indexOf("L2") >= 0) texts.L2 = this._buildRepresentation(object, "L2").text + " " + extra
   if (levels.indexOf("L3") >= 0 || levels.indexOf("L4") >= 0) {
     var exact = isString(serialized) ? serialized : (isString(object.content) ? object.content : stringify(object.content, __, ""))
-    if (levels.indexOf("L3") >= 0) texts.L3 = this._contentCodePoints(exact).slice(0, 1200).join("") + " " + extra
+    if (levels.indexOf("L3") >= 0) texts.L3 = this._contentCodePoints(exact, 1200).join("") + " " + extra
     if (levels.indexOf("L4") >= 0) texts.L4 = exact + " " + extra
   }
   var indexed = isMap(this.objectIndexTerms[object.handle]) ? this.objectIndexTerms[object.handle] : {}
@@ -1004,7 +1004,7 @@ MiniAHistoryVM.prototype._buildRepresentation = function(object, level) {
     var structuralDetail = this._structuralRepresentation(object, level, serialized)
     if (isMap(structuralDetail)) text = structuralDetail.text
     else {
-      var chars = this._contentCodePoints(serialized)
+      var chars = this._contentCodePoints(serialized, 1201)
       text = chars.slice(0, 1200).join("")
       if (chars.length > 1200) {
         text += "\n[" + object.handle + " detail truncated; expand L4 for exact content]"
@@ -1694,19 +1694,29 @@ MiniAHistoryVM.prototype._isSyntheticStepPrompt = function(entry) {
 MiniAHistoryVM.prototype.projectRequestContext = function(input, options) {
   var opts = isMap(options) ? options : {}
   var canonical = this.materializeConversation(input)
-  var recent = isNumber(opts.recentCount) ? Math.max(2, opts.recentCount) : 6
+  var recent = opts.emergency === true ? 0 : isNumber(opts.recentCount) ? Math.max(2, opts.recentCount) : 6
   var groups = {}, grouped = {}
+  var exactObject = function(index) {
+    var object = this._providerObjectForIndex(index)
+    return isMap(object) && object.branchId === this.branchId && stringify(object.content, __, "") === stringify(canonical[index], __, "")
+  }.bind(this)
+  var knownShape = function(entry) {
+    return isMap(entry) && Object.keys(entry).every(function(key) { return ["role", "content", "tool_calls", "tool_call_id", "name"].indexOf(key) >= 0 })
+  }
+
   for (var gi = 0; gi < canonical.length - recent; gi++) {
     var call = canonical[gi]
-    if (!isMap(call) || call.role !== "assistant" || !isArray(call.tool_calls) || call.tool_calls.length === 0) continue
-    var members = [gi], complete = true
+    if (!knownShape(call) || (isDef(call.content) && call.content !== null && !isString(call.content)) || call.role !== "assistant" || !isArray(call.tool_calls) || call.tool_calls.length === 0) continue
+    var members = [gi], complete = true, callIds = {}
     for (var gc = 0; gc < call.tool_calls.length; gc++) {
       var id = call.tool_calls[gc].id, found = -1
-      if (!isString(id)) { complete = false; break }
+      if (!isString(id) || callIds[id]) { complete = false; break }
+      callIds[id] = true
       for (var gr = gi + 1; gr < canonical.length - recent; gr++) {
+        if (!isMap(canonical[gr]) || canonical[gr].role !== "tool") break
         if (isMap(canonical[gr]) && canonical[gr].role === "tool" && canonical[gr].tool_call_id === id && isString(canonical[gr].content)) { found = gr; break }
       }
-      if (found < 0 || !isMap(this._providerObjectForIndex(found))) { complete = false; break }
+      if (found < 0 || !knownShape(canonical[found]) || !exactObject(gi) || !exactObject(found)) { complete = false; break }
       members.push(found)
     }
     if (complete) { groups[gi] = members; members.forEach(function(index) { grouped[index] = gi }) }
@@ -1714,27 +1724,42 @@ MiniAHistoryVM.prototype.projectRequestContext = function(input, options) {
   var protectedEntries = {}, eligible = {}, excluded = [], fixed = 0
   for (var i = 0; i < canonical.length; i++) {
     var entry = canonical[i], object = this._providerObjectForIndex(i)
-    var safe = isMap(entry) && isString(entry.content) && i < canonical.length - recent &&
+    var safe = knownShape(entry) && isString(entry.content) && i < canonical.length - recent &&
       !isDef(entry.tool_calls) && !isDef(entry.tool_call_id) && !isDef(entry.function_call) &&
       (entry.role === "assistant" || this._isSyntheticStepPrompt(entry)) && isMap(object) && stringify(object.content, __, "") === stringify(entry, __, "")
-    if (safe || isDef(grouped[i]) && isMap(object)) eligible[i] = object
+    if (safe || isDef(grouped[i]) && isMap(object)) {
+      eligible[i] = object
+      // Protocol fields remain exact even when the content body is pageable.
+      var protocol = merge({}, entry, true)
+      protocol.content = ""
+      fixed += this.estimateTokens(stringify(protocol, __, ""))
+    }
     else {
       protectedEntries[i] = entry
       fixed += this.estimateTokens(stringify(entry, __, ""))
       if (isMap(object)) excluded.push(object.handle)
     }
   }
-  var external = isMap(opts.fixedTokens) ? opts.fixedTokens : {}
+  var external = isMap(opts.fixedTokens) ? jsonParse(stringify(opts.fixedTokens, __, "")) : {}
+  delete external.provider_protected
   var overhead = 0
   Object.keys(external).forEach(function(key) { if (isNumber(external[key])) overhead += Math.max(0, external[key]) })
   var total = Math.max(1, opts.budget || 32000), reserve = Math.max(0, opts.outputReserve || 0)
-  var assembly = this.assembleContext(merge(opts, { deferDelta: true, excludeIds: excluded, fixedTokens: merge(external, { provider_protected: fixed }, true) }, true))
+  var assemblyOptions = merge({}, opts, true)
+  assemblyOptions.fixedTokens = merge(jsonParse(stringify(external, __, "")), { provider_protected: fixed }, true)
+  assemblyOptions.deferDelta = true
+  assemblyOptions.excludeIds = excluded
+  var assembly = this.assembleContext(assemblyOptions)
   var choices = {}, supplemental = []
   assembly.objects.forEach(function(item) {
     var object = this._resolveObject(item.handle)
     if (object.event.sourceKind === "provider_message") choices[object.event.metadata.providerIndex] = item
     else if (object.kind !== "history") supplemental.push(item)
   }, this)
+  // Emergency paging keeps a bounded handle for every eligible recent exchange.
+  if (opts.emergency === true) Object.keys(eligible).forEach(function(index) {
+    choices[index] = { handle: eligible[index].handle, level: "L1", category: "history", mandatory: true }
+  })
   var render = function() {
     var result = []
     for (var index = 0; index < canonical.length; index++) {
@@ -1743,7 +1768,7 @@ MiniAHistoryVM.prototype.projectRequestContext = function(input, options) {
       if (isDef(grouped[index])) {
         var members = groups[grouped[index]]
         if (!members.some(function(member) { return isMap(choices[member]) })) continue
-        if (index === grouped[index]) { result.push(canonical[index]); continue }
+        if (index === grouped[index] && opts.emergency !== true) { result.push(canonical[index]); continue }
         if (!isMap(selected)) selected = { handle: eligible[index].handle, level: "L0" }
       }
       if (!isMap(selected)) continue
@@ -1761,6 +1786,10 @@ MiniAHistoryVM.prototype.projectRequestContext = function(input, options) {
     return result
   }.bind(this)
   var output = render()
+  if (opts.emergency === true && this.estimateTokens(stringify(output, __, "")) + overhead + reserve > total) {
+    Object.keys(eligible).forEach(function(index) { choices[index].level = "L0" })
+    output = render()
+  }
   var requestTokens = function() { return this.estimateTokens(stringify(output, __, "")) + overhead + reserve }.bind(this)
   // Charge actual wrappers/serialization, then progressively demote and freeze
   // optional material. Hard constraints are never silently dropped.
@@ -1785,6 +1814,7 @@ MiniAHistoryVM.prototype.projectRequestContext = function(input, options) {
   finalItems.forEach(function(item) { item.tokenCost = this._contextRepresentationCost(this._resolveObject(item.handle), item.level) }, this)
   var materialized = outputTokens
   var result = { active: true, consumer: assembly.consumer, conversation: output, inputTokens: inputTokens, outputTokens: outputTokens,
+    protectedTokens: Math.min(fixed, outputTokens), selectedContextTokens: Math.max(0, outputTokens - fixed),
     requestTokens: requestTokens(), budget: total, overflow: requestTokens() > total, tokensSaved: inputTokens - outputTokens,
     references: finalItems.filter(function(item) { return item.level !== "L4" }).length, objectsSelected: finalItems.length,
     objectsConsidered: assembly.objectsConsidered, effectiveContextRatio: materialized > 0 ? (assembly.addressableTokens + fixed) / materialized : 0, assembly: assembly }
@@ -2066,10 +2096,11 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
   }
 }
 
-MiniAHistoryVM.prototype._contentCodePoints = function(value) {
+MiniAHistoryVM.prototype._contentCodePoints = function(value, limit) {
   var text = isString(value) ? value : stringify(value, __, "")
   var chars = []
-  for (var i = 0; i < text.length; i++) {
+  var cap = isNumber(limit) ? Math.max(0, Math.floor(limit)) : Infinity
+  for (var i = 0; i < text.length && chars.length < cap; i++) {
     var first = text.charCodeAt(i)
     if (first >= 0xD800 && first <= 0xDBFF && i + 1 < text.length) chars.push(text.substring(i, ++i + 1))
     else chars.push(text.charAt(i))

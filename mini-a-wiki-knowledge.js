@@ -481,6 +481,14 @@ MiniAWikiManager.prototype.knowledgeRepairStructure = function(options) {
 
 // OpenAF load()/require() callers may hold a constructor from another library scope.
 // Install the shared primitives on that instance without opening another manager.
+var __miniAKnowledgeSaveUnlocked = MiniAWikiManager.prototype.knowledgeSaveState
+MiniAWikiManager.prototype.knowledgeSaveState = function(state) {
+  var lock
+  try {
+    if (this._backendType === "fs" && this._access === "rw" && !this._archiveRoot) lock = __miniAWikiWriterLock(this._backend.root)
+    return __miniAKnowledgeSaveUnlocked.call(this, state)
+  } finally { if (lock) lock.release() }
+}
 global.__miniAWikiKnowledge = { versions: MINI_A_WIKI_KNOWLEDGE, Budget: MiniAWikiKnowledgeBudget, methods: {} }
 Object.keys(MiniAWikiManager.prototype).forEach(function(k) {
   if (/^(knowledge|_knowledge|assembleContext)/.test(k)) global.__miniAWikiKnowledge.methods[k] = MiniAWikiManager.prototype[k]

@@ -1,4 +1,19 @@
 jobs:
+- name: MiniA Utils Tests::MathOpsZeroStatistics
+  from: MiniA Utils Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testMathOpsZeroStatistics
+
+- name: MiniA Utils Tests::MathOpsUnitDimensions
+  from: MiniA Utils Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testMathOpsUnitDimensions
+
+- name: MiniA Utils Tests::MathOpsRandomZeroParameters
+  from: MiniA Utils Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testMathOpsRandomZeroParameters
+
 - name: MiniA Utils Tests::WikiMountedCompactContinuation
   to: oJob Test
   exec: args.func = require("tests/miniAUtils.js").testWikiMountedCompactContinuation
@@ -252,6 +267,9 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Utils Tests::MathOpsZeroStatistics
+- MiniA Utils Tests::MathOpsUnitDimensions
+- MiniA Utils Tests::MathOpsRandomZeroParameters
 - MiniA Utils Tests::WikiMountedCompactContinuation
 - MiniA Utils Tests::WikiSearchOptionForwarding
 - MiniA Utils Tests::SpacedSkillReferences

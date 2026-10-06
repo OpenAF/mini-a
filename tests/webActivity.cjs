@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 const root = path.join(__dirname, '..');
 const page = fs.readFileSync(path.join(root, 'public/index.md'), 'utf8');
-const yaml = fs.readFileSync(path.join(root, 'mini-a-web.yaml'), 'utf8');
+const yaml = require('./webSource.cjs');
 const agent = fs.readFileSync(path.join(root, 'mini-a.js'), 'utf8');
 const showdown = require(path.join(root, 'public/showdown.min.js'));
 const converter = new showdown.Converter({ tables: true });
@@ -24,7 +24,7 @@ function result(events, showexecs = true) {
     },
     ow: { server: { httpd: { reply: value => value } } },
     isDef: x => x !== undefined && x !== null, isUnDef: x => x === undefined || x === null,
-    isArray: Array.isArray, isFunction: x => typeof x === 'function',
+    isString: x => typeof x === 'string', isArray: Array.isArray, isFunction: x => typeof x === 'function',
     jsonParse: JSON.parse, printErr: error => { throw error; }, __: undefined
   };
   return vm.runInNewContext('(function() {' + route + '})()', context);
@@ -72,7 +72,7 @@ const proxyContext = vm.createContext({
   isString: value => typeof value === 'string',
   isDef: value => value !== undefined && value !== null, __: undefined
 });
-vm.runInContext('var pendingProxyThought;', proxyContext);
+vm.runInContext('var pendingProxyThought, displayMessage;', proxyContext);
 const normalizeInteraction = vm.runInContext('(function(_e, m) {' +
   yaml.slice(proxyStart, proxyEnd) + '})', proxyContext);
 for (const suffix of ['', ' #2', ' #3', ' #4']) {
@@ -272,3 +272,16 @@ if (process.argv.includes('--serve')) {
     response.end(fixture);
   }).listen(8899, '127.0.0.1', () => console.log('Browser fixture: http://127.0.0.1:8899'));
 }
+
+const attachmentEvents = [
+  {event:'👤',message:'Summarize\nTika extracted document text',displayMessage:'Summarize\n\n📎 report.pdf'},
+  {event:'final',message:'Answer'}
+];
+const attachmentResult = result(attachmentEvents);
+assert.match(attachmentResult.content,/Summarize/);assert.match(attachmentResult.content,/report.pdf/);
+assert.doesNotMatch(attachmentResult.content,/Tika extracted/);
+assert.equal(attachmentResult.history[0].displayMessage,attachmentEvents[0].displayMessage);
+assert.match(attachmentResult.history[0].message,/Tika extracted/);
+const rebuilt = context.upgradeActivityTranscript('',attachmentEvents);
+assert.match(rebuilt,/report.pdf/);assert.doesNotMatch(rebuilt,/Tika extracted/);
+console.log('Attachment live and rebuilt answer-view checks passed.');

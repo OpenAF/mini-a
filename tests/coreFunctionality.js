@@ -315,6 +315,98 @@
     return agent._buildSystemPromptWithBudget("chatbot-test", payload, agent._CHATBOT_SYSTEM_PROMPT, { args: args || {}, mode: "chatbot" })
   }
 
+  exports.testBudgetFailureStopsExecutorAndFinalDispatch = function() {
+    [1, 2].forEach(function(failAt) {
+      var agent = createAgent(), prepares = 0, dispatches = 0, errors = []
+      agent.fnI = function(type, text) { if (type === "error") errors.push(String(text)) }
+      var args = { goal: "Inspect fixture", raw: true, maxsteps: 1, usememory: false, usetools: false }
+      try {
+        agent.init(args)
+        agent._use_lc = false
+        agent._prepareContextInvocation = function(llm, prompt) {
+          prepares++
+          if (prepares >= failAt) throw agent._contextBudgetError("executor", 200000, 394426, {
+            protected_conversation: 390000, current_prompt: 72, tool_schemas: 2,
+            separate_instructions: 0, safety_allowance: 256, output_reserve: 4096, selected_context: 0
+          }, "impossible")
+          return prompt
+        }
+        agent.llm.promptWithStats = agent.llm.promptJSONWithStats = function() {
+          dispatches++
+          return { response: { action: "think", thought: "Inspecting fixture" }, stats: {} }
+        }
+        agent.start(merge({}, args))
+        ow.test.assert(agent.state === "stop" && errors.some(function(text) { return text.indexOf("Context budget exceeded") >= 0 }), true, "Executor and final-answer budget errors remain actionable terminal errors")
+        ow.test.assert(prepares, failAt, "Terminal executor errors must not attempt final-answer preparation")
+        ow.test.assert(dispatches, failAt - 1, "A terminal overflow cannot dispatch or start a final-answer retry")
+      } finally { agent._stopAgentResources() }
+    })
+  }
+
+  exports.testAutomaticNoteBudgetRecovery = function() {
+    load("mini-a-history-vm.js")
+    var agent = createAgent(), source = io.readFileString("mini-a.js")
+    var root = String(java.nio.file.Files.createTempDirectory("mini-a-budget-test-").toAbsolutePath())
+    var vm = new MiniAHistoryVM({ enabled: true, contextVirtualization: true, conversationPath: root + "/conversation.json" })
+    try {
+      agent._historyVm = vm
+      agent._sessionArgs = { goal: "EXACT GOAL AND CONSTRAINTS" }
+      agent.fnI = function() {}
+      agent._getEffectiveContextBudget = function() { return 200000 }
+      agent._withExponentialBackoff = function(fn) { return fn() }
+      var chunks = [], dispatched = [], provider = []
+      var adapter = { getGPT: function() { return { getConversation: function() { return provider }, setConversation: function(value) { provider = value } } },
+        promptWithStats: function(prompt) { dispatched.push(prompt); return { response: "done" } } }
+      agent.llm = adapter; agent.lc_llm = adapter; agent._use_lc = true
+      agent._promptIsolatedSummary = function(text, instructions, lc) { chunks.push(text); return { response: "Completed inspection; next validate result.", stats: {} } }
+      var runtime = { context: [new Array(157501).join("completed ")] }
+      var inbox = "EXACT NEW INBOX"
+      runtime.context.push(inbox)
+      var begin = source.indexOf("    var summarize = (ctx, strict) => {")
+      var end = source.indexOf("    // Helper function to check and summarize context", begin)
+      var factory = new Function("args", "runtime", "commsObservation", "markContextDirty",
+        "var addCall = function() {}, registerCallUsage = function() {};\n" + source.substring(begin, end) + "\nreturn makeBudgetRecovery;")
+      var makeRecovery = factory.call(agent, { maxcontext: 200000 }, runtime, inbox, function() { runtime.contextTextDirty = true })
+      var builds = 0
+      var build = function() { builds++; return "EXACT GOAL AND CONSTRAINTS\nEXACT HOOK\n" + runtime.context.join("\n") + "\nEXACT STATE" }
+      var recovery = makeRecovery(build)
+      var prepared = agent._prepareContextInvocation(adapter, build(), "executor", recovery)
+      adapter.promptWithStats(prepared)
+      ow.test.assert(chunks.length > 2, true, "Overflow uses chunked note summaries")
+      ow.test.assert(chunks.every(function(text) { return text.indexOf(inbox) < 0 && text.indexOf("EXACT GOAL") < 0 && text.indexOf("EXACT HOOK") < 0 }), true, "Summary input excludes protected task and fresh inbox")
+      ow.test.assert(builds >= 3 && runtime.stateSnapshotDirty === true && runtime.contextTextDirty === true, true, "Recovery regenerates selection and state instead of resending the old prompt")
+      ow.test.assert(prepared.indexOf(inbox) >= 0 && prepared.indexOf("EXACT HOOK") >= 0, true, "Rebuilt dispatch preserves exact protected content")
+      ow.test.assert(vm.estimateTokens(prepared) < 200000 && dispatched.length === 1, true, "Only the fitting request dispatches")
+      var original = new Array(85001).join("old note: ")
+      ;["", original, null].forEach(function(summary) {
+        runtime.context = [original, inbox]
+        agent._contextSummaryRecoveries = 0
+        agent._promptIsolatedSummary = function() { if (summary === null) throw new Error("summary failed"); return { response: summary, stats: {} } }
+        var failure
+        try { agent._prepareContextInvocation(adapter, build(), "executor", makeRecovery(build)) } catch(e) { failure = e }
+        ow.test.assert(failure.code, "MINIA_CONTEXT_BUDGET", "Failed summary terminates with budget diagnostics")
+        ow.test.assert(runtime.context[0], original, "Empty, failing, or expanding summary preserves original notes")
+        ow.test.assert(dispatched.length, 1, "Failed recovery never dispatches oversized input")
+      })
+      agent._promptIsolatedSummary = function() { return { response: "short notes", stats: {} } }
+      agent._contextSummaryRecoveries = 0
+      for (var cycle = 0; cycle < 4; cycle++) {
+        runtime.context = [original, inbox]
+        var stopped = false
+        try { agent._prepareContextInvocation(adapter, build(), "executor", makeRecovery(build)) } catch(e) { stopped = e.miniAStop === true }
+        ow.test.assert(stopped, cycle === 3, "At most three summary recovery cycles per run")
+      }
+      var auxiliaryFailure
+      provider = [{ role: "user", content: original }]
+      try { agent._prepareContextInvocation(adapter, "Validate", "validator") } catch(e) { auxiliaryFailure = e }
+      ow.test.assert(auxiliaryFailure.consumer, "validator", "Auxiliary overflow reports independent consumer")
+      ow.test.assert(provider[0].content, original, "Auxiliary overflow leaves its independent history exact")
+    } finally {
+      vm.deleteOwnedStore()
+      new java.io.File(root).delete()
+    }
+  }
+
   exports.testLargeSummaryChunksAndMergeStayBounded = function() {
     var agent = createAgent(), source = io.readFileString("mini-a.js"), inputs = []
     agent.fnI = function() {}
@@ -326,8 +418,8 @@
       // Force a verbose response so merge reduction is also exercised.
       return { response: text, stats: {} }
     }
-    var begin = source.indexOf("    var summarize = ctx => {")
-    var end = source.indexOf("    // Helper function to check and summarize context", begin)
+    var begin = source.indexOf("    var summarize = (ctx, strict) => {")
+    var end = source.indexOf("    this._contextSummaryRecoveries = 0", begin)
     var factory = new Function("args", "var runtime = {}, addCall = function() {}, registerCallUsage = function() {};\n" + source.substring(begin, end) + "\nreturn summarize;")
     var summarize = factory.call(agent, { maxcontext: 200000, lccontextlimit: 16000 })
     var original = new Array(667417).join("x")
@@ -2094,12 +2186,119 @@
 
       ow.test.assert(isMap(result), true, "readresult should return a result map")
       ow.test.assert(result.matchCount, 30, "grep should still report the full match count")
-      ow.test.assert(result.returnedMatches, 5, "grep should cap returned matches under context guard")
+      ow.test.assert(result.returnedMatches > 0 && result.returnedMatches <= 5, true, "grep should honor both match and text budgets")
       ow.test.assert(result.limited, true, "grep should mark limited responses")
-      ow.test.assert(String(result.content[0].text).indexOf("LIMITED to first 5") >= 0, true, "grep response should explain the applied match cap")
+      ow.test.assert(String(result.content[0].text).indexOf("LIMITED") >= 0, true, "grep response should explain the applied match cap")
     } finally {
       try { io.rm(tempPath) } catch(ignoreCleanupErr) {}
     }
+  }
+
+  exports.testResultExcerptRecovery = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    var file = String(java.nio.file.Files.createTempFile("mini-a-excerpts-", ".json").toAbsolutePath())
+    var cfg = agent._createMcpProxyConfig([agent._createUtilsMcpConfig({ useutils: true })], { usestdutils: true, toolresultmaxinline: 600 })
+    var fns = cfg.options.fns
+    var pad = new Array(3001).join("x")
+    var original = JSON.stringify({ html: "<p>😀" + pad + "NEEDLE_A" + pad + "NEEDLE_B" + pad + "NEEDLE_C</p>\nquoted \"text\"" })
+    try {
+      io.writeFileString(file, original)
+      var cursor = 1, seen = [], turns = 0
+      do {
+        var params = { resultFile: file, pattern: "NEEDLE_[ABC]", startChar: cursor }
+        var result = fns.result_grep(params)
+        var proxy = fns["proxy-dispatch"](merge(params, { action: "readresult", op: "grep" }))
+        ow.test.assert(proxy, result, "Named and proxy retrieval must agree")
+        ow.test.assert(result.matchCount, 1, "Count matching lines, not regex occurrences")
+        ow.test.assert(result.returnedMatches, 1, "Represent one distinct matching line")
+        ow.test.assert(result.excerpted, true, "Long line is deliberately excerpted")
+        ow.test.assert(result.content[0].text.length <= 600, true, "Include labels and next notice in budget")
+        var found = result.content[0].text.match(/NEEDLE_[ABC]/g) || []
+        seen = seen.concat(found)
+        result.ranges.forEach(function(range) {
+          var slice = fns.result_slice({ resultFile: file, fromChar: range.fromChar, toChar: range.toChar })
+          ow.test.assert(slice.content[0].text, original.substring(range.fromChar - 1, range.toChar), "Ranges address exact original UTF-16 content")
+        })
+        if (result.next) {
+          ow.test.assert(result.next.startChar > cursor, true, "Continuation advances")
+          ow.test.assert(agent._normalizeToolResult(result).display.indexOf(JSON.stringify(result.next)) >= 0, true, "Continuation survives normalization")
+          cursor = result.next.startChar
+        }
+        turns++
+      } while (result.next && turns < 10)
+      ow.test.assert(seen, ["NEEDLE_A", "NEEDLE_B", "NEEDLE_C"], "Recover distant matches once each")
+      ow.test.assert(io.readFileString(file), original, "Retrieval must not rewrite compact JSON")
+      var base = { resultFile: file, pattern: "NEEDLE", startChar: 1 }
+      ow.test.assert(agent._buildReadresultGuardKey(base, "result_grep") !== agent._buildReadresultGuardKey(merge(base, { startChar: 200 }), "result_grep"), true, "Grep progress gets a distinct repetition key")
+      ow.test.assert(agent._buildReadresultGuardKey({ resultFile: file, fromChar: 1, toChar: 50 }, "result_slice") !== agent._buildReadresultGuardKey({ resultFile: file, fromChar: 51, toChar: 100 }, "result_slice"), true, "Slice progress gets a distinct repetition key")
+      ow.test.assert(agent._buildReadresultGuardKey(base, "result_grep"), agent._buildReadresultGuardKey(merge(base, { action: "readresult", op: "grep" }), "proxy-dispatch"), "Both dispatch paths share repetition keys")
+      var slices = "", from = 1
+      do {
+        var part = fns.result_slice({ resultFile: file, fromChar: from, toChar: original.length })
+        slices += original.substring(part.fromChar - 1, part.toChar)
+        ow.test.assert(part.content[0].text.length <= 600, true, "Slice continuation fits budget")
+        if (part.next) from = part.next.fromChar
+      } while (part.next)
+      ow.test.assert(slices, original, "Character continuation covers the original string exactly")
+      ow.test.assert(isString(fns.result_slice({ resultFile: file, fromLine: 1, fromChar: 1 }).error), true, "Reject mixed ranges")
+      ow.test.assert(fns.result_grep({ resultFile: file, pattern: "absent" }).matchCount, 0, "No-match behavior")
+      ow.test.assert(isString(fns.result_grep({ resultFile: file + ".missing", pattern: "x" }).error), true, "Missing-file behavior")
+      io.writeFileString(file, "before\nhit [\nafter\nother\nhit again")
+      var ordinary = fns.result_grep({ resultFile: file, pattern: "hit", context: 1 })
+      ow.test.assert(ordinary.content[0].text, "1: before\n2: hit [\n3: after\n4: other\n5: hit again", "Preserve ordinary multiline context")
+      ow.test.assert(fns.result_grep({ resultFile: file, pattern: "[" }).matchCount, 1, "Invalid regex falls back to literal")
+      ow.test.assert(fns.result_slice({ resultFile: file, fromLine: 2, toLine: 3 }).content[0].text, "hit [\nafter", "Line slicing remains unchanged")
+      io.writeFileString(file, "😀é\n" + pad + "NEEDLE_A NEEDLE_B" + pad)
+      var merged = fns.result_grep({ resultFile: file, pattern: "NEEDLE_[AB]" })
+      ow.test.assert(merged.ranges.length, 1, "Merge overlapping match windows")
+      ow.test.assert(merged.ranges[0].line, 2, "Excerpt locator retains the source line")
+      ow.test.assert(merged.content[0].text.indexOf("NEEDLE_A NEEDLE_B") >= 0, true, "Merged excerpt contains both matches")
+      ow.test.assert(fns.result_slice({ resultFile: file, fromChar: 1, toChar: 3 }).content[0].text, "😀é", "Character positions count UTF-16 units")
+      var small = agent._createMcpProxyConfig([agent._createUtilsMcpConfig({ useutils: true })], { usestdutils: true, toolresultmaxinline: 60 }).options.fns
+      ow.test.assert(small.result_grep({ resultFile: file, pattern: "NEEDLE_A" }).content[0].text.indexOf("NEEDLE_A") >= 0, true, "Reduce context when a small budget can still fit the match and locator")
+      var lineSlice = fns.result_slice({ resultFile: file, fromLine: 2, toLine: 2 })
+      ow.test.assert(lineSlice.next.fromChar > 5, true, "Oversized line slice continues in original character positions")
+      ow.test.assert(lineSlice.truncated && lineSlice.limited, true, "Incomplete requested slice is marked explicitly")
+      io.writeFileString(file, pad)
+      ;["(?:)", "$", "x+"].forEach(function(pattern) {
+        var start = 1, count = 0, r
+        do {
+          r = fns.result_grep({ resultFile: file, pattern: pattern, startChar: start })
+          ow.test.assert(isUnDef(r.error), true, "Edge regex produces bounded content")
+          if (r.next) { ow.test.assert(r.next.startChar > start, true, "Edge regex advances"); start = r.next.startChar }
+          count++
+        } while (r.next && count < 30)
+        ow.test.assert(isUnDef(r.next), true, "Zero-length and oversized matches terminate")
+      })
+      var tiny = agent._createMcpProxyConfig([agent._createUtilsMcpConfig({ useutils: true })], { usestdutils: true, toolresultmaxinline: 8 }).options.fns
+      ow.test.assert(isString(tiny.result_grep({ resultFile: file, pattern: "x" }).error), true, "Tiny budget gives explicit error")
+    } finally { io.rm(file) }
+  }
+
+  exports.testResultWebSpillRecovery = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    var calls = 0
+    var payload = { content: [{ type: "text", text: "<html>" + new Array(10001).join("a") + "supporting passage</html>" }] }
+    var mock = { id: "mock-web", type: "dummy", options: {
+      fns: { "get-url": function() { calls++; return payload } },
+      fnsMeta: { "get-url": { name: "get-url", description: "Mock web response", inputSchema: { type: "object", properties: {} } } }
+    } }
+    var cfg = agent._createMcpProxyConfig([mock], { usestdutils: true, mcpproxythreshold: 100, toolresultmaxinline: 512 })
+    var fns = cfg.options.fns
+    var fetched = fns["proxy-dispatch"]({ action: "call", tool: "get-url", arguments: {} })
+    ow.test.assert(isString(fetched.resultFile), true, "Mock web response spills")
+    try {
+      var saved = io.readFileString(fetched.resultFile)
+      var grep = fns.result_grep({ resultFile: fetched.resultFile, pattern: "supporting passage" })
+      ow.test.assert(grep.content[0].text.indexOf("supporting passage") >= 0, true, "Recover phrase near end of web result")
+      ow.test.assert(grep.content[0].text.length <= 512, true, "Keep configured extraction limit")
+      var range = grep.ranges[0]
+      var slice = fns.result_slice({ resultFile: fetched.resultFile, fromChar: range.fromChar, toChar: range.toChar })
+      ow.test.assert(slice.content[0].text, saved.substring(range.fromChar - 1, range.toChar), "Slice original saved response")
+      ow.test.assert(calls, 1, "Recovery needs only one fetch")
+    } finally { io.rm(fetched.resultFile) }
   }
 
   exports.testResultAliasToolsExposedWithStdutils = function() {

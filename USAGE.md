@@ -873,7 +873,13 @@ Adapt the examples above by changing the `OAF_MODEL` tuple to match your provide
 - Click the paperclip button to the left of the prompt to choose one or more text-based files (Markdown, source code, CSV, JSON, etc.). Each file can be up to **512 KB**.
 - Every attachment appears above the prompt as a rounded chip showing the file name; remove any file before sending by selecting the **✕** icon.
 - When you submit the prompt, Mini-A automatically appends the file name and contents as Markdown code blocks. In the conversation stream the files show up as collapsible buttons—click one to open a preview modal with syntax highlighting.
-- Non-text files or oversized attachments are skipped with a warning so you always know what was sent.
+- Both Simple and Advanced modes also accept PNG/JPEG images, Word (`.doc`, `.docx`), Excel (`.xls`, `.xlsx`), PowerPoint (`.ppt`, `.pptx`) and PDF files. Enter a question or instruction before submitting binary files; Advanced slash and skill commands do not accept them.
+- Binary attachments allow **four files**, **10 MiB per image**, **20 MiB per document**, and **20 MiB combined**. Unsupported or oversized files are skipped with a warning. Images retain the existing 25-megapixel limit.
+- `useattach=true` enables isolated, read-only processing without requiring `useutils=true`, `useshell=true` or `readwrite=true`. Office/PDF files use the existing Tika `readDocument` reader (30,000 extracted characters per document); images use `inspectImage` with your question and the active main model. A vision-capable provider/model is required for images. See [Reading documents and images](#reading-documents-and-images) for Tika installation and runtime requirements; preinstall Tika for offline use.
+- The answer pane shows your original query and the attached file names. Extracted document text and image analysis remain in model context for follow-up questions.
+- Processing progress and errors identify the file. If any file fails, no agent goal runs from partial results. Truncated extraction is marked; the combined expanded prompt must fit `maxpromptchars`.
+- Temporary originals are deleted after processing. Only extracted text/image analysis enters normal conversation history, so follow-ups use those results and cannot reprocess the original file. Scanned PDFs need OCR, which is not enabled; embedded document images, layout rendering and spreadsheet formula evaluation are not included.
+- Binary data travels as base64 in the JSON request. Reverse proxies must permit requests up to 29 MiB for the largest allowed submissions.
 
 ## Basic Usage
 
@@ -974,6 +980,8 @@ The `start()` method accepts various configuration options:
 - **`wikilexical`** (SLON/JSON, optional): Lucene lexical configuration. It defaults to `{ language: "english" }`; choose another supported Lucene language and add explicit synonym rules (for example `{ language: "portuguese", synonyms: [["carro", "automovel"]] }`). To keep a larger dictionary outside command-line configuration, set `synonymsFile` (for example `{ synonymsFile: "synonyms.txt" }`); relative paths resolve from a filesystem wiki root, while other backends require an absolute path. The file may be a SLON/JSON array of rules or plain text with one comma-separated rule per line; blank lines and lines beginning with `#` are ignored. File rules are added to any inline `synonyms`. `shingles`, `ngrams`, `queryExpansion`, and `pseudoRelevanceFeedback` are disabled unless explicitly enabled. The matching configuration is recorded in `.mini-a-wiki-lucene/mini-a-lexical.json`; run writable `/wiki reindex` after changing it. Read-only or hydrated legacy indexes continue ordinary Lucene retrieval and log one publisher-reindex warning.
 - **`wikiretrievalconfig`** (SLON/JSON, optional): V2 passage, cache, artifact and query budgets. `readPolicy` defaults to `"auto"`: read-only V2 readers adopt the published generation's language/analyzer, accent folding, shingles and character n-gram settings, including sizes. This overrides differing startup index settings independently for each wiki mount. Synonyms, query expansion, relevance feedback and resource budgets remain reader-controlled. Use `wikiretrievalconfig='(readPolicy: strict)'` to require the published index to match configured analysis. Writable wikis always use configured build settings and still require explicit reindexing to change their contract. Mounts inherit the parent's retrieval configuration unless a mount supplies its own `wikiretrievalconfig` object.
   Supported existing manifests need no migration. Readers validate integrity, parser/format versions, Lucene compatibility and analyzer capabilities before adopting settings; unsupported generations still require a compatible runtime or publisher reindex. Published shingle/n-gram sizes must be integers within 2–1024 / 1–1024 respectively. Generation switches and predecessor recovery retain the analyzer settings belonging to each pinned snapshot. Unpublished and explicitly legacy wikis keep their existing behavior.
+  `page-metadata-binding-failure` means an indexed page's outline, frontmatter, title or description disagrees with its immutable Markdown block. Object-key ordering is ignored; array order and changed values remain checked. Reindex failures include `bindingFailure.page` and `bindingFailure.fields`, and `/wiki reindex` prints those details. Keep the source pages, restart with the updated Mini-A and the intended lexical settings, then reindex. Lint checks source structure independently and may pass even when serving metadata is invalid.
+  Wiki control pages (`AGENTS.md`, `index.md`, `log.md`, including section-local copies) stay excluded from passage search. Explicit `open`, `navigate`, `read` and `grep` use the source-reading path for these pages, so agents can read contribution rules before writing. Reads retain character limits, section/range selection, mount routing and revision-checked continuations. Ordinary content pages still require valid V2 serving bindings.
   `wiki op="context"` (optionally `wiki="mount-name"`) exposes `retrieval.analysis`, and V2 search/retrieve source diagnostics include `analysis`: `policy`, `generation`, `source` (`generation` or `configured`), `effective` index settings, and `differingFields`. A strict mismatch retains `incompatible-generation` and includes field details. Under small response budgets, per-source `analysisOmitted: "output-budget"` replaces the detailed settings to preserve evidence; full settings remain available through context.
   A `manifest-merkle-failure` means the serving manifest failed its content-hash check; the accompanying `source-unavailable` is a search status, not proof that Markdown is missing. New publications use `merkleFormat: canonical-json-v1`, which sorts object keys recursively and preserves array order so JSON map ordering cannot change the hash after restart. Unmarked manifests retain their original hash contract. Upgrade all readers and writers before rebuilding with this format; older Mini-A readers do not support it. To recover an affected local wiki, keep its Markdown, start the updated version with `wikiaccess=rw` and the intended lexical settings, then run `/wiki reindex`. Do not edit stored checksums or delete the wiki.
 
@@ -1113,6 +1121,19 @@ Default behavior note:
 - **`mcpprogcallbatchmax`** (number, default: `10`): Maximum calls accepted in one `/call-tools-batch` request.
 - **`toolcachettl`** (number, optional): Override the default cache duration (milliseconds) for deterministic tool results when no per-tool metadata is provided
 
+For a large saved result, fetch once, inspect it with `result_stat`, then search and read supporting passages:
+
+```javascript
+result_stat({ resultFile: "/tmp/saved-result.json" })
+result_grep({ resultFile: "/tmp/saved-result.json", pattern: "relevant phrase" })
+// Use the returned character range, for example:
+result_slice({ resultFile: "/tmp/saved-result.json", fromChar: 24001, toChar: 24400 })
+// If grep returns next: {startChar: 25001}, repeat the same file/pattern with:
+result_grep({ resultFile: "/tmp/saved-result.json", pattern: "relevant phrase", startChar: 25001 })
+```
+
+Without the named tools, use `proxy-dispatch` with `action="readresult"` and `op="stat"`, `"grep"`, or `"slice"`. Character ranges are 1-based inclusive JavaScript UTF-16 positions in the unchanged saved file; do not mix character and line ranges. Long matching lines return labeled excerpts with up to 200 characters of surrounding context. `matchCount` counts matching lines; `returnedMatches` counts distinct matching lines represented in that response. `excerpted` indicates omitted surrounding text; `limited` and `next` indicate more matching excerpts remain. `truncated` indicates incomplete requested content. Follow `next` arguments using the same file, operation, pattern, and context (slice continuations replace line ranges with character ranges). Continuation arguments also appear in the response text. For readable web content, use `get-url style="text"`; its default is unchanged. Refetch only when the saved source is unsuitable.
+
 ```javascript
 // Single MCP connection
 mcp: "(cmd: 'docker run --rm -i mcp/dockerhub')"
@@ -1215,6 +1236,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 #### Libraries and Extensions
 - **`libs`** (string): Comma-separated list of additional OpenAF libraries to load
 - **`useutils`** (boolean, default: false): Auto-register the Mini File Tool utilities as a dummy MCP server for quick file operations
+  - Includes `mathematics` for calculations, statistics, unit conversion, and seeded random generation; see [Mathematics utility](#mathematics-utility)
   - Also exposes `readDocument` (document text via lazy Tika installation) and `inspectImage` (PNG/JPEG vision via `promptImage`); see [Reading documents and images](#reading-documents-and-images)
   - Exposes `init` (configure the working root and permissions), `filesystemQuery` (read/list/search/info via the `operation` field), `filesystemModify` (write/append/delete with `operation` plus required `content` or `confirm` flags), and `markdownFiles` (list, search, or read `*.md` files within the root)
   - When running through `mini-a-con.js`, also exposes `userInput`, an interactive helper backed by OpenAF `ask*` functions (`ask`, `askEncrypt`, `ask1`, `askChoose`, `askChooseMultiple`, `askStruct`) so the model can request clarification directly from the console user
@@ -1317,7 +1339,7 @@ Extend or override these presets by editing the YAML file—Mini-A reloads it on
 - **`contextguard`** (boolean, default: false): When `maxcontext=0`, enable a conservative small-window safety policy that proactively compresses oversized tool output and bounds proxy `readresult` extraction to avoid overflowing smaller model context windows.
 - **`contextguardbudget`** (number, default: 32000): Assumed smallest context window, in tokens, used by `contextguard` when `maxcontext=0`.
 - **`toolresultmaxinline`** (number, default: `4096` when `contextguard=true`): Maximum inline bytes kept from large tool or `readresult` outputs before Mini-A spills or truncates the content under `contextguard`.
-- **`readresultmaxmatches`** (number, default: `20` when `contextguard=true`): Maximum matching regions returned by `proxy-dispatch` `readresult` with `op='grep'` when `contextguard` is active.
+- **`readresultmaxmatches`** (number, default: `20` when `contextguard=true`): Maximum distinct matching lines returned by `proxy-dispatch` `readresult` with `op='grep'` when `contextguard` is active.
 
 #### Rate Limiting
 - **`rpm`** (number): Rate limit in calls per minute
@@ -2191,6 +2213,38 @@ mini-a \
   usetools=true
 ```
 
+### Mathematics utility
+
+With `useutils=true`, the `mathematics` tool accepts an `operation` and the
+parameters below. It is also available directly from OpenAF:
+
+```javascript
+load("mini-a-utils.js")
+var tool = new MiniUtilsTool()
+tool.mathematics({ operation: "statistics", values: [-1, 0, 1], metrics: ["sum", "mean", "median"] })
+// { sum: 0, mean: 0, median: 0 }
+tool.mathematics({ operation: "convert-unit", value: 2, fromUnit: "km", toUnit: "m" })
+// result: 2000
+tool.mathematics({ operation: "random", type: "integer", min: 0, max: 0 })
+// value: 0
+```
+
+- `statistics` returns `count`, `sum`, `mean`, `median`, `min`, and `max`.
+  An optional `metrics` array selects those fields, including zero-valued
+  results; unknown metric names are ignored.
+- `convert-unit` (alias `convert`) accepts case-insensitive units within one
+  dimension: length (`m`, `km`, `cm`, `mm`, `mi`, `ft`, `in`), mass (`kg`, `g`,
+  `lb`, `oz`), or volume (`l`, `ml`, `gal`, with US liquid gallons).
+  Unknown units and cross-dimension requests such as `m` to `kg` return an
+  `[ERROR]` string. Optional `precision` rounds the converted result.
+- Random `integer` uses inclusive `min`/`max` bounds, defaulting to `0`/`100`.
+  Random `sequence` shuffles the inclusive `start`/`end` interval, defaulting
+  to `0`/`10`; optional `count` limits the returned sequence.
+  Explicit `max: 0` and `end: 0` are valid bounds.
+- Random `boolean` uses `probabilityTrue` between `0` and `1`, defaulting to
+  `0.5`. Zero always produces `false`; one always produces `true`.
+  Supply `seed` to reproduce random results for the same parameters.
+
 ### Built-in MCP Servers
 
 Mini-A includes several production-ready MCP servers in the `mcps/` directory:
@@ -2809,6 +2863,10 @@ Mini-A writes append-only canonical events and checkpoints under `chat-history.j
 Use `historyvmshadow=true` first to capture and estimate savings without changing provider requests or adding retrieval tool schemas. If both flags are supplied, enabled mode takes precedence. The VM is independent of `usememory`; enabling it creates retained conversation data even when history listing is disabled. `/clear` and explicit web conversation deletion remove the owned sidecar. Automatic web expiry preserves stored history when `historykeep=true`; it deletes the sidecar otherwise. `/rewind` records a new branch and default retrieval excludes the abandoned branch rather than deleting its canonical events.
 
 Phase 2 can be enabled explicitly with `historyvm=true contextvirtualization=true`. It extends the same canonical journal with stable typed handles, parent/child metadata, deterministic L0-L4 representations, structural compression, hierarchical summaries, coarse-to-fine retrieval, bounded line/section/JSON-path reads, adaptive utility-per-token assembly, typed provenance/supersession graphs, consumer-specific executor/planner/advisor/validator/delegate views, and per-consumer working-set deltas. At model-call boundaries the active projection preserves system/developer instructions, real user constraints, recent exchanges and unknown content. Older assistant messages and Mini-A's synthetic step scaffolding can be summarized or omitted; completed native tool-call groups are preserved or frozen together. Exact canonical content is restored before conversation persistence and remains retrievable with `context_search`, `context_get`, `context_expand`, `context_children`, and `context_related`.
+
+With active Phase 2 and a positive `maxcontext`, an oversized request automatically gets one emergency projection. Recent completed assistant work and complete tool exchanges may use bounded representations with recovery handles; exact originals remain in the canonical journal. Real user messages, instructions, incomplete tool exchanges, and unknown or multimodal content remain exact. The provider view changes only when the complete request fits. If executor working notes still prevent dispatch, Mini-A attempts isolated chunked summarization and rebuilds the prompt, preserving the supplied goal, explicit constraints, hook instructions, and newly delivered inbox messages. This allows one note-recovery attempt per logical request and at most three per run. Failed, empty, or nonshrinking summaries preserve the original notes and conversation. Recovery never resets provider history, increases the budget, or lowers the output reserve.
+
+Terminal budget errors report mutually exclusive token estimates for protected conversation, the current prompt, tool schemas, separately charged instructions, safety allowance, output reserve, and selected context, along with the recovery outcome. Oversized protected input or unavailable canonical backing cannot be recovered; narrow the input or schemas, or explicitly increase `maxcontext`. Auxiliary models retain independent histories and report budget errors without recursive recovery. Phase 1, shadow mode, legacy mode, and `maxcontext=0` retain their existing behavior.
 
 Use `historyvm=true contextvirtualization=true contextvirtualizationshadow=true` to dry-run the exact same projection while continuing to send the Phase 1 provider context. Diagnostics compare complete provider-context token estimates, object-set changes, and expected differences. Shadow values are projections, not provider-billed savings. Stable-prefix serialization and context deltas avoid local recomputation but do not imply provider prompt caching or delta-only transmission.
 
@@ -3429,17 +3487,18 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 | `auditch` | string | - | SLON/JSON audit channel — recent events are included as context to help surface insights |
 | `maxauditrecords` | number | `200` | Maximum audit log entries included in the memory consolidation prompt |
 | `usewiki` | boolean | `false` | Enable the wiki dream (requires `wikiroot`, `wikibucket`, or equivalent) |
-| `wikiaccess` | string | `rw` | Always overridden to `rw` inside the dream pass |
+| `wikiaccess` | string | mode-dependent | `auto` execution requires explicitly configured `rw`; other dream modes retain their existing writable configuration |
 | `wikiroot` / `wikibucket` / `wikibackend` | string | - | Same wiki backend settings as the regular agent |
 | `model` | string | - | SLON/JSON model config used for the memory consolidation LLM call |
 | `dryrun` | boolean | `false` | Preview what would change without writing anything back |
-| `dreamwikimode` | string | `apply` | Wiki dream mode: `plan`, `apply`, `reorg`, `repair`, `reindex`, `graph`, `indexes` |
+| `dreamwikimode` | string | `apply` | Wiki dream mode: `auto`, `plan`, `apply`, `reorg`, `repair`, `reindex`, `graph`, `indexes` |
 | `dreammemorymode` | string | `apply` | Memory dream mode: `plan` or `apply` |
 | `dreamwikidryrun` | boolean | `false` | Propose wiki changes without writing (opt-out of `apply`) |
 | `dreamwikiapproval` | string | `ask` | Reorg approval mode: `auto`, `ask`, `never` |
 | `dreamwikiinstructions` | string | _(none)_ | Additional operator guidance appended to the wiki reorg objective |
 | `dreamwikireorg` | boolean | `false` | Allow structural reorg operations |
-| `dreammaxsteps` | number | `40` for `reorg` | Maximum structural-reorg agent steps; other wiki dream modes are deterministic or proposal-only |
+| `dreammaxsteps` | number | `40` | Total model-step budget for `auto` or agent-step budget for `reorg` |
+| `dreamwikillm` | boolean | `true` | Allow model proposals for unresolved issues in `auto`; `false` runs deterministic repairs only |
 | `dreamreport` | string | - | Optional file path to write JSON run report |
 | `libs` | string | - | Extra comma-separated libraries to load |
 
@@ -3459,9 +3518,37 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 7. Unless `dryrun=true`, the pre-dream state is backed up — to a sibling namespace (`<ns>::predream-<ISO-timestamp>`) for ordinary channel records, or below `.predream-<ISO-timestamp>/` for Markdown channel records — then the consolidated snapshot is written back.
 8. A summary is printed: entries before/after, dropped count, stale-marked count.
 
+### Wiki dream auto mode
+
+`/dream wiki auto` diagnoses a local wiki, resumes valid existing ingestion journals, repairs deterministic lint/navigation issues, explicitly rebuilds damaged retrieval artifacts, and asks the configured main model about remaining issues. The same coordinator runs in the terminal, Wiki Manager (`wikiman=true`, Dream → auto), Advanced web console (`webadvanced=true`, Dream → Wiki → Auto), and CLI:
+
+```sh
+mini-a dream=true dreammode=wiki dreamwikimode=auto \
+  usewiki=true wikiroot=/path/to/wiki wikiaccess=rw \
+  dreamwikillm=false dreamreport=/tmp/wiki-auto.json
+```
+
+Wiki Manager previews by default and offers to apply automatic repairs; its advanced model/limits overrides accept `dreamwikillm=false`. Use `/dream wiki auto dryrun` or `dryrun=true` to inspect issues and repair candidates. Dry-run does not call a model, resume journals, back up files, publish indexes, or repair pages. Execution requires an explicitly configured `wikiaccess=rw`; invoking auto authorizes its supported repairs without further per-action prompts. Other dream modes keep their existing approval behavior.
+
+Auto performs at most three repair/verification cycles and stops when no progress occurs. `dreammaxsteps` defaults to 40 total model requests; the three-cycle bound can stop it sooner. Each proposal receives at most 25 issues and 12 complete pages, with a 64,000-character page budget. The model has no tools: its proposed wiki writes, moves, duplicate merges and deletions are validated and applied by the coordinator. Missing models leave semantic issues unresolved after deterministic repairs. Healthy pages receive no speculative reorganisation.
+
+Authoritative Markdown is inspected independently of retrieval. Corrupt metadata bindings and manifests trigger an explicit rebuild from those pages, without repairing hashes or using an older retrieval contract. Verification opens a new strict reader, opens content pages, probes search, reruns lint, and checks the enabled structural graph. Graph maintenance in auto does not make semantic extraction calls. Unsupported schemas/runtime capabilities, malformed frontmatter whose ownership cannot be established, unavailable pages, and persistent failures remain unresolved.
+
+Auto preserves provenance and ingestion ownership by protecting owned pages from generic edits and structural changes. Ingestion recovery uses the journal's existing signature and manifest conflict checks; it does not rediscover or reprocess original sources. Corrupt/conflicting journals stay in place. Pending absorption blocks auto and reports the existing `/absorb status` and `/absorb resume <plan-id>` recovery flow.
+
+Local writes share a reentrant `.mini-a-wiki-ingest/writer.lock` across manager mutations, ingestion, absorption, dreams and publication. Competing writers report busy. Before repairs, auto persists `backup.json` (original page/state contents and hashes) and `journal.json` under `.mini-a-wiki-maintenance/<run-id>/`, excluded from navigation and retrieval. Backup failure blocks repairs. Every page mutation records its expected before/after hashes and intended content, including link rewrites and originals involved in moves, merges and deletions. Derived serving artifacts are rebuilt from the backed-up authoritative data.
+
+Stop in Advanced mode, or Escape at terminal operation/stream boundaries, requests cancellation. An in-flight non-streaming model request may finish before cancellation takes effect; its response is checked before writes. Interrupted/cancelled runs retain a pending marker and their backups. The next auto pass reconciles known journal boundaries before proceeding. External edits that disagree with the recorded hashes are preserved and reported as conflicts requiring manual review; auto does not overwrite them to force recovery.
+
+The structured report includes `run_id`, `status`, `diagnosed_issues`, `attempted_actions`, `verified_fixes`, `unresolved_issues`, `backup_location`, and `verification` coverage. Search probes record `found` for ranked results. When bounded results omit a page, V2 verification checks its actual Lucene passage count and records `indexed` and `indexed_passages`; repeated titles alone do not trigger a rebuild. Status can be `noop`, `complete`, `partial`, `planned`, `blocked`, `cancelled`, or `interrupted`. `dreamreport` saves the report for CLI and console auto runs. A successful rebuild or model response alone does not count as a verified fix.
+
+Auto is on-demand and local-directory-only. It does not mutate mounted/remote wikis or remote graphs, export artifact bundles, schedule work, or start automatically after ordinary operation failures.
+
 ### Wiki dream internals
 
-1. `usewiki=true` is required; `wikiaccess` is forced to `rw`.
+The following describes the pre-existing modes; auto follows the workflow above.
+
+1. `usewiki=true` is required; these modes configure `wikiaccess=rw`.
 2. `dreamwikimode=plan`, `dryrun=true` and `dreamwikidryrun=true` all run the same no-write proposal path.
 3. Use `dreamwikimode=plan` for explicit mode selection; use `dryrun=true` when you want the generic safety flag (it also affects memory dreams).
 4. Proposal output includes `new_tree`, `move_table`, `indexes_to_create`, `indexes_to_update`, and lint before/after summaries.
@@ -4019,3 +4106,234 @@ Use `ojob mcps/mcp-workiq.yaml op=login` to sign in, then connect with
 SBuckets; write tools require `readwrite=true` on the connector. See
 [WorkIQ setup and verification](docs/WORKIQ.md) for the required OpenAF features,
 profiles, tenant options and token mode.
+
+## Advanced web console
+
+Start the existing web server with Advanced mode enabled:
+
+```sh
+./mini-a-web.sh onport=8888 webadvanced=true
+```
+
+Without `webtoken`, Mini-A generates a secure random token for this server run,
+prints `http://localhost:8888/#token=<generated-token>` (using your `onport`), and
+tries to open the operating system browser once the routes are ready. If browser
+opening is unavailable (for example, on a headless server), open the printed URL
+manually. The generated token changes on restart and is not saved to disk.
+
+To use a fixed token, add `webtoken="YOUR_RANDOM_TOKEN"` and open
+`http://localhost:8888/#token=YOUR_RANDOM_TOKEN` manually. Select **Advanced**.
+The fragment token is kept in the browser tab's session storage and sent in the
+existing authentication header. Use a URL-encoded token when it contains special
+characters. Advanced mode always requires authentication. Its token grants
+trusted console authority, including enabling shell and filesystem/wiki writes.
+Simple mode remains available on the same conversation.
+
+Advanced mode uses the console's shared command dispatcher and parameter metadata.
+It includes slash and argument completion, command history (Up/Down), Tab completion,
+a searchable Live activity pane with auto-follow, and settings/model screens.
+The console-colored Advanced pane follows the same light/dark theme as Simple view
+and opens in **Live activity**. Use the compact icon-and-text view selector to
+choose a pane. Hover over an option for its description. Progress remains available
+in Live activity and in the command’s destination pane. Disable **Auto-follow** to inspect older
+entries. Drag the centered divider handle to resize the Advanced pane; its size is remembered.
+The handle supports touch and mouse dragging, or arrow keys when focused. On narrow
+screens the panes initially stack and the divider moves vertically. The
+position button in the pane header opens a menu to dock Advanced on the right, bottom, top, or left;
+an explicit position is remembered across reloads.
+The expand icon at the top right of the prompt opens a full-screen composer in
+both Simple and Advanced views, including on mobile. The draft and attachments
+stay in place. Enter adds a newline; **Ctrl/Cmd+Enter** or **Send** submits.
+The collapse icon or Escape returns to the usual input without discarding text.
+Successful submission collapses the composer; failed submissions keep it open.
+Advanced history **Edit** uses this composer in place of the separate Goal editor
+screen. `/edit` and `/editor` retain their server-managed Submit goal/Cancel dialog.
+
+Text fields in Advanced Settings, Models, command forms, and console interaction
+dialogs have a small **Edit data** icon inside the right edge of the field. It
+opens a modal with editable, nested
+key/value tables inspired by nJSMap. Edit keys and values directly in place, choose
+value types, build nested maps/arrays, add/remove entries, and reorder array items.
+Undo/Redo restores removals, type changes, and imports. Empty fields start as maps
+(or arrays for array settings). Existing JSON or SLON is loaded automatically;
+invalid source remains available for correction under **Import JSON/SLON**.
+
+Choose **JSON** or **SLON**, then **Use value** to put the serialized string back
+into the originating field. Its normal **Apply**, **Run**, or **Continue** action
+still controls submission. **Cancel** or Escape discards popup edits and restores
+focus without stopping an agent operation. Read-only settings cannot be edited.
+Invalid numbers or duplicate keys block export. If the original field changes or
+is removed while the popup is open, write-back is refused. Editing stays local.
+The component supports keyboard controls, light/dark themes, and narrow layouts.
+Input is limited to 200,000 characters, 2,000 values, and 30 nesting levels; SLON
+datetime literals must be quoted as strings for this JSON-data editor.
+
+`public/data-editor.js` registers `<mini-a-data-editor>` and exposes
+`MiniADataEditor.bind(field, {label, root})` to attach a popup trigger to any text
+input or textarea (`root` may be `map` or `array`). `MiniADataEditor.open(field,
+options)` opens one directly. The element exposes `.value`, `.format`, `.valid`,
+and `.serialize('json'|'slon')`, plus bubbling `change` events with
+`event.detail.value`. Serialization throws while fields are invalid. Setting
+`.value` resets undo history. Load `public/advanced.css` for its themed styles.
+
+Wiki, graph, ingestion, absorption, dreams, skills, context/history, statistics,
+debugging, and subtasks have dedicated operation panels. Panel controls submit the
+same commands as the composer. **Statistics** also displays inline Chart.js
+charts for Summary, Detailed, Tools, Memory, and Wiki. Charts use the Advanced
+palette in both themes, include expandable nJSMap values tables and structured
+map/array details, and update with **Refresh**. Maps, arrays, and table/tree output
+from slash commands use nJSMap in their destination pane and in Live activity, with
+plain-text fallback if the shared OpenAF library cannot load.
+These are the same metrics as `/stats`; some counters are shared across server sessions.
+**Subtasks** shows live task cards with status counts, filters, duration, and
+expandable details/results. Inspection works while the parent is busy; open
+sections stay open during refreshes. Delegate and cancel commands require the
+parent operation to finish. Previous command output is kept separately under
+**Command history (saved snapshots)** and is not the live task status.
+`/model` opens model settings, `/debug` opens the
+trace inspector, `/edit` opens a browser editor, `/cls` clears the visible activity,
+and `/exit` ends the session without stopping the web server. Paths refer to the
+server filesystem, including `@file` attachments and `/save` destinations.
+
+**Debug** uses the console's category labels and a chronological table of sequence,
+kind, and summary, with timestamp and category as secondary columns. Opening the
+panel or changing categories selects the first event. Click a row, or focus its
+sequence button and press Enter/Space, to replace the full record below the table.
+Records use escaped nJSMap rendering with a plain-text fallback. **Load more** keeps
+the selected record; **Refresh** reloads the category. Full records are fetched from
+the disk-backed trace only when selected, and inspection stays inside Debug without
+adding entries to Live activity. Existing credential redaction still applies.
+
+The shared dispatcher covers these command families:
+
+| Commands | Browser behavior |
+| --- | --- |
+| `/help` | Searchable Help with syntax, examples, aliases, prerequisites, discovered commands and skills; **Insert command** fills the composer without executing |
+| `/show [prefix]`, `/set`, `/unset`, `/toggle`, `/reset` | Settings filtered to the supplied prefix or affected parameter; existing validation, secret masking and server restrictions apply |
+| `/model [main\|lc\|val]`, `/models` | Models with the requested slot selected, or all slots; invalid slots report an error |
+| `/last [md]`, `/save [file]` | Answer reader with previous goal, Markdown/raw mode, Copy and browser Download; `/save` still writes on the server (default `response.md`) |
+| `/history [n]`, `/restore`, `/clear`, `/rewind [n]` | History with recent goals and Insert/Edit actions; saved-conversation Open picker; shared clear and rewind operations update the transcript |
+| `/context [llm\|analyze\|vm]`, `/compact [n]`, `/summarize [n]` | Context measurements, virtual-memory details and readable generated summaries |
+| `/stats [modes] [out=file.json]`, `/debug [filter]` | Statistics and Debug preserve requested modes, export arguments and category filters; export results show server destinations |
+| `/wiki`, `/graph` | Page and section links, breadcrumbs, Markdown/raw page reader, lint severity filtering, mount and maintenance controls, graph data and exports |
+| `/skills`, custom `/commands`, `$skill` | Local discovery and library search/read/related/context results; custom invocations keep shared expansion and goal execution |
+| `/ingest`, `/absorb`, `/dream` | Operation results and progress, ingestion recovery, plan review/actions, mode and dry-run controls; existing approval gates remain in force |
+| `/delegate`, `/subtasks`, `/subtask` | Delegation results, task details/results/cancellation, and status polling while Subtasks is visible |
+| `/edit [last]`, `/editor [last]` | Multiline editor with **Submit goal** and Cancel; `last` prefills the previous goal |
+| `/cls`, `/exit`, `/quit` | Clear visible activity only, or end the session while retaining history; **New conversation** starts another session |
+
+Each destination displays the latest command result and a **Previous results**
+selector. **Older results** pages backwards through the session journal; selecting
+an entry fetches its full content without executing the command. Previous results
+are timestamped snapshots, including answers, context and statistics from before a
+clear or rewind. Older journals remain readable as grouped legacy command output.
+Commands navigate once when accepted. Progress, completion, reconnect and journal
+replay do not move the selected pane. Results, errors, progress and completion carry
+the command request ID. Reloading never repeats a write, export or model request.
+
+Browser `/restore` opens History’s saved-conversation picker. Opening an entry uses
+the same saved-session Open flow; cancelling leaves the current conversation alone.
+Terminal `/restore` retains its existing behavior. `/clear` clears current answer
+state and metrics, while `/rewind` refreshes the previous answer and transcript and
+retains existing subtask cancellation. `/cls` retains stored events and pane results;
+polling and replay respect the clear boundary.
+
+Wiki writes without content open a multiline editor with Preview and **Write page**.
+Supplied content is passed through unchanged, including trailing newlines. Writes
+and maintenance retain backend access restrictions. Search results retain source
+coverage and partial-result warnings. Graph `answer` remains a retrieval alias;
+it does not synthesize an answer. Exports offer raw Copy/Download and a Mermaid
+preview when the existing Mermaid library is available; there is no graph canvas.
+Markdown readers use the existing converter with passive-markup sanitization.
+
+Ingest accepts `dryrun`, `force`, `prune`, `allowemptyprune`, `sourceid=...` and
+`independent`. Recovery Resume/Discard actions use the existing dispatcher and its
+confirmation requirements. Absorb shows plan IDs and explicit review/apply/resume/
+delete/cancel actions. Dream results distinguish partial, blocked, failed and
+completed outcomes; controls never enable automatic approval. Stop uses existing
+backend cancellation behavior and does not promise rollback of completed work.
+
+Settings affect the current conversation. Apply them while it is idle; server
+transport settings are shown as read-only. Changing runtime settings disposes the
+previous agent's resources before the next goal, preserving conversation history.
+Save a named preset explicitly; selecting it as the default affects new conversations.
+Credentials are masked, unchanged masked values are preserved during edits, and
+credentials are omitted from saved presets/session settings. Saved model selections
+reuse current server credentials only when provider type and URL match. Other
+credential-bearing compound settings must be supplied again after a restart.
+
+Advanced conversations use the console's `~/.openaf-mini-a/history` directory
+(`homedir` relocates the `.openaf-mini-a` directory). They are kept when starting
+a new conversation or when an idle web session expires. `historykeepperiod`
+(minutes) and `historykeepcount` use the shared console housekeeping routine,
+on opening an Advanced session and during periodic cleanup while sessions are loaded.
+Retention applies to the shared history folder; active web conversations and
+running subtasks are protected. Removed conversations also lose their History VM
+sidecars and matching Advanced session settings/event journals. Existing Advanced
+conversation files under `webadvancedpath` remain readable in place and participate
+in the same retention rules. Advanced history follows local console storage;
+Simple view's `historypath` and S3 history behavior remain separate.
+
+The server stores session settings and event journals under
+`~/.openaf-mini-a/web` (or `webadvancedpath=<directory>`). Browser reloads reconnect
+to the current session; the History screen also lists saved Advanced sessions.
+Running work and pending dialogs survive browser disconnects. Stop/Escape cancels
+active work; closing a browser does not. Server restarts recover saved history and
+settings, but interrupted jobs are reported rather than automatically resumed.
+Idle sessions follow the existing `historyretention` cleanup. Journals and saved
+settings remain available for restoration until conversation retention removes them; the previous-goal temporary debug trace
+is removed when the session expires or its next goal starts.
+
+The activity pane retains a bounded visible window. Terminal ANSI formatting is
+removed from displayed activity and debug payloads; stored events remain unchanged. Large entries load their full
+payload only when expanded; `/debug` pages the existing disk-backed trace and loads
+selected records on demand. Activity and traces are authenticated and use the same
+session token as the rest of the interface.
+
+Implementation: `mini-a-session.js` contains the shared console session;
+`mini-a-con.js` is the terminal entry point. `mini-a-web-session.js` holds the existing
+prompt route shared by Simple chat and Advanced commands. `mini-a-advanced.js`
+provides authenticated session operations and event storage; `public/advanced.js`
+and `public/advanced.css` add browser presentation without a frontend framework.
+
+Validation commands:
+
+```sh
+node tests/consolePaths.cjs
+node tests/entryPointParity.cjs
+node tests/webSessions.cjs
+node tests/webActivity.cjs
+node --test tests/webAdvanced*.cjs
+node tests/webStreamCompletion.cjs
+oaf -f tests/modePresets.js
+oaf -f tests/webAdvanced.js
+oaf -f tests/webAdvancedSlash.js
+ojob tests/wiki.yaml
+```
+
+
+Advanced slash-command browser smoke checklist (separate from fixture tests):
+
+1. In a disposable session, submit `/help`, insert a custom command without running
+   it, then verify `/show wiki`, `/model lc`, `/debug calls` and `/stats tools` select
+   their requested panes and filters. Check invalid slot/filter feedback.
+2. Run a goal, inspect `/last` and `/last md`, compare Copy/Download content, and
+   verify `/save` and `/stats out=...` report server destinations. Open `/editor last`,
+   cancel, then explicitly submit a goal. Check `/history 1`, `/rewind 1` and `/clear`.
+3. With a disposable writable wiki, read/write a page with blank lines, preview it,
+   follow section/mounted links, filter lint issues, and inspect a Mermaid export.
+   Repeat a write in read-only mode and inspect disabled-library/partial-search states.
+4. Review ingestion recovery and absorb plan actions without bypassing confirmations.
+   Inspect dream dry-run/approval-required results and delegated task progress.
+   While a parent is busy, open Subtasks, expand Details and Result, and verify
+   status updates preserve those sections. Check task filters, completed results,
+   disabled cancellation while busy, and the separate saved command history.
+5. Reload during an operation, switch panes, select older results and load another
+   page. Confirm no repeated navigation or execution, no cross-session results, and
+   that `/cls` remains clear. End the session and start a New conversation.
+6. Repeat reader/editor/navigation checks using keyboard only, a narrow viewport,
+   light/dark themes, and hostile HTML/link content in a disposable wiki page.
+
+Node tests exercise presentation fixtures and OpenAF tests exercise the shared
+runtime/journal with fixture subsystems. They do not establish live browser layout,
+provider, remote backend or deployed-server behavior.

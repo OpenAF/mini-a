@@ -1154,6 +1154,9 @@ SubtaskManager.prototype._startLocalSubtask = function(subtask, prefix) {
 
       childAgent = new MiniA()
       subtask.childAgent = childAgent
+      if (isObject(parent.parentAgent) && isFunction(parent.parentAgent._confirmFn)) {
+        childAgent.setConfirmFn(function(label, choices) { return parent.parentAgent._confirmFn(prefix + " " + label, choices) })
+      }
       if (subtask.comms) childAgent._comms = subtask.comms
 
       var mergedArgs = parent._buildChildArgs(subtask)

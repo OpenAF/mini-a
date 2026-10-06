@@ -1633,6 +1633,11 @@ MiniA.prototype._runRawOutputGuarded = function(innerFn) {
   return innerFn()
 }
 
+// Optional UI adapter for the existing shell approval choices (No / Yes / Always).
+MiniA.prototype.setConfirmFn = function(fn) {
+  this._confirmFn = isFunction(fn) ? fn : __
+}
+
 /**
  * Set an optional trace sink. Console callers use this to persist complete
  * per-goal diagnostics without retaining them in the agent process.
@@ -2560,21 +2565,66 @@ MiniA.prototype.getCurrentConversationStatus = function() {
 
 // Refresh at each call, including retries and final/auxiliary calls. Cache only
 // the last input per consumer so our own prepared prompts are never nested.
-MiniA.prototype._prepareContextInvocation = function(llm, prompt, consumer) {
+MiniA.prototype._prepareContextInvocation = function(llm, prompt, consumer, recovery) {
   var key = consumer || "executor"
   if (!isMap(this._contextInvocationInputs)) this._contextInvocationInputs = {}
   var previous = this._contextInvocationInputs[key]
   if (isMap(previous) && prompt === previous.prepared) prompt = previous.original
+  if (!isMap(recovery)) recovery = {}
   var original = prompt
   var prefix = "\n\nCURRENT CONVERSATION STATUS (runtime-owned snapshot for this call):\n"
   var suffix = "\nUse this snapshot for the current agent/conversation. Child diagnostics and retrieved or historical status describe their own scope, not this conversation. Tool availability does not establish local feature status.\n"
   var status = stringify(this.getCurrentConversationStatus(), __, "")
   prompt += prefix + status + suffix
-  var prepared = this._projectContextInvocation(llm, prompt, consumer)
-  // Capturing/projecting context can itself degrade the VM. Never send the
-  // pre-failure status as authoritative; re-account the refreshed fixed input.
-  var refreshed = stringify(this.getCurrentConversationStatus(), __, "")
-  if (refreshed !== status) prepared = this._projectContextInvocation(llm, original + prefix + refreshed + suffix, consumer)
+  var prepared
+  var providerBefore, providerGPT, viewBefore
+  if (isObject(this._historyVm) && this._historyVm.contextVirtualization && !this._historyVm.contextVirtualizationShadow && isObject(llm) && isFunction(llm.getGPT)) {
+    providerGPT = llm.getGPT()
+    if (isObject(providerGPT) && isFunction(providerGPT.getConversation)) providerBefore = providerGPT.getConversation()
+    viewBefore = this._historyVm._providerView
+  }
+  try {
+    prepared = this._projectContextInvocation(llm, prompt, consumer, recovery)
+    // Re-account status changes before dispatch, within the same recovery cycle.
+    var refreshed = stringify(this.getCurrentConversationStatus(), __, "")
+    if (refreshed !== status) prepared = this._projectContextInvocation(llm, original + prefix + refreshed + suffix, consumer, recovery)
+  } catch (error) {
+    // A status refresh can reject a previously fitting provisional view.
+    // Restore that view before recovery or terminal failure; journal appends stay exact.
+    if (isArray(providerBefore) && isObject(providerGPT) && isFunction(providerGPT.setConversation)) {
+      providerGPT.setConversation(providerBefore)
+      this._historyVm._providerView = viewBefore
+    }
+    if (isObject(error) && error.code === "MINIA_CONTEXT_BUDGET" && isMap(recovery) && isFunction(recovery.rebuild) &&
+        (recovery.attempted === true || (this._contextSummaryRecoveries || 0) >= 3)) {
+      throw this._contextBudgetError(key, error.budget, error.estimatedTotal, error.components, "exhausted")
+    }
+    if (!isObject(error) || error.code !== "MINIA_CONTEXT_BUDGET" || !isMap(recovery) || recovery.attempted === true ||
+        !isFunction(recovery.rebuild) || (this._contextSummaryRecoveries || 0) >= 3 || error.components.current_prompt <= 0 || error.recovery === "canonical backing unavailable" ||
+        error.estimatedTotal - error.components.current_prompt - error.components.selected_context > error.budget) throw error
+    recovery.attempted = true
+    this._contextSummaryRecoveries = (this._contextSummaryRecoveries || 0) + 1
+    // Only the executor can request note recovery; auxiliary calls never recurse.
+    if (key !== "executor") throw error
+    var rebuilt
+    try { rebuilt = recovery.rebuild(error) } catch(rebuildError) {
+      if (isFunction(recovery.rollback)) recovery.rollback()
+      throw this._contextBudgetError(key, error.budget, error.estimatedTotal, error.components, "summary-failed")
+    }
+    if (!isString(rebuilt) || rebuilt === original) {
+      if (isFunction(recovery.rollback)) recovery.rollback()
+      throw this._contextBudgetError(key, error.budget, error.estimatedTotal, error.components, "no-progress")
+    }
+    try {
+      prepared = this._prepareContextInvocation(llm, rebuilt, consumer, recovery)
+    } catch (retryError) {
+      if (isFunction(recovery.rollback)) recovery.rollback()
+      if (isObject(retryError) && retryError.code === "MINIA_CONTEXT_BUDGET") throw this._contextBudgetError(key, retryError.budget, retryError.estimatedTotal, retryError.components, "exhausted")
+      throw retryError
+    }
+    this.fnI("recover", "Context budget recovery rebuilt working notes (estimated prompt tokens " + error.components.current_prompt + " -> " + this._historyVm.estimateTokens(prepared) + ").")
+    return prepared
+  }
   this._contextInvocationInputs[key] = { original: original, prepared: prepared }
   return prepared
 }
@@ -2605,34 +2655,66 @@ MiniA.prototype._captureContextToolResult = function(name, params, result) {
 
 // The next exposed invocation is the paging boundary. Provider-internal rounds
 // remain intact. Counts here are application estimates, not billed usage.
-MiniA.prototype._projectContextInvocation = function(llm, prompt, consumer) {
+MiniA.prototype._contextBudgetError = function(consumer, budget, total, components, outcome) {
+  var largest = Object.keys(components).sort(function(a, b) { return components[b] - components[a] })
+  var error = new Error("Context budget exceeded for " + consumer + " (estimated " + total + " > " + budget +
+    " tokens; component estimates, largest first: " + largest.map(function(key) { return key + "=" + components[key] }).join(", ") +
+    "; recovery " + outcome + "). Narrow protected input/tool schemas or increase maxcontext.")
+  error.code = "MINIA_CONTEXT_BUDGET"
+  error.consumer = consumer
+  error.budget = budget
+  error.estimatedTotal = total
+  error.components = components
+  error.recovery = outcome
+  error.estimates = true
+  error.miniAStop = true
+  return error
+}
+
+MiniA.prototype._projectContextInvocation = function(llm, prompt, consumer, recovery) {
   var vm = this._historyVm
-  if (!isObject(vm) || !vm.contextVirtualization || vm.degraded || !isObject(llm) || !isFunction(llm.getGPT)) return prompt
+  if (!isObject(vm) || !vm.contextVirtualization || !isObject(llm) || !isFunction(llm.getGPT)) return prompt
   var gpt = llm.getGPT()
   if (!isObject(gpt) || !isFunction(gpt.getConversation) || !isFunction(gpt.setConversation)) return prompt
   var conversation = gpt.getConversation()
   if (!isArray(conversation)) return prompt
   this._syncContextSources()
   if (!consumer || consumer === "executor") vm.captureProviderConversation(conversation)
-  if (vm.degraded) return prompt
   var configured = this._getEffectiveContextBudget(__, 0)
   var args = isMap(this._sessionArgs) ? this._sessionArgs : {}
-  var model = llm === this.lc_llm ? this._oaf_lc_model : (llm === this.val_llm ? this._oaf_val_model : this._oaf_model)
+  var model = isMap(recovery) && isMap(recovery.model) ? recovery.model : llm === this.lc_llm ? this._oaf_lc_model : (llm === this.val_llm ? this._oaf_val_model : this._oaf_model)
   var output = isMap(model) && isNumber(model.max_tokens) ? model.max_tokens : Math.min(4096, Math.floor((configured || 32000) * 0.15))
-  var fixed = { prompt: vm.estimateTokens(prompt), tools: vm.estimateTokens(stringify(this.mcpTools || [], __, "")), safety: 256 }
-  fixed.instructions = isString(this._systemInst) && !conversation.some(function(entry) { return isMap(entry) && (entry.role === "system" || entry.role === "developer") && entry.content === this._systemInst }, this) ? vm.estimateTokens(this._systemInst) : 0
+  var schemas = this.mcpTools || []
+  if (isObject(gpt.model) && (isMap(gpt.model.tools) || isArray(gpt.model.tools))) {
+    schemas = Object.keys(gpt.model.tools).map(function(key) {
+      var tool = gpt.model.tools[key]
+      return isMap(tool) && isMap(tool.function) ? { type: tool.type || "function", function: tool.function } : tool
+    })
+  }
+  var fixed = { prompt: vm.estimateTokens(prompt), tools: consumer === "summarizer" ? 0 : vm.estimateTokens(stringify(schemas, __, "")), safety: 256 }
+  fixed.instructions = (!consumer || consumer === "executor") && isString(this._systemInst) && !conversation.some(function(entry) { return isMap(entry) && (entry.role === "system" || entry.role === "developer") && entry.content === this._systemInst }, this) ? vm.estimateTokens(this._systemInst) : 0
   var total = configured > 0 ? configured : vm.estimateTokens(stringify(vm.materializeConversation(conversation), __, "")) + fixed.prompt + fixed.tools + fixed.instructions + fixed.safety + output
+  if (vm.degraded) {
+    var degradedTokens = vm.estimateTokens(stringify(conversation, __, ""))
+    var degradedTotal = degradedTokens + fixed.prompt + fixed.tools + fixed.instructions + fixed.safety + output
+    if (!vm.contextVirtualizationShadow && configured > 0 && degradedTotal > configured) throw this._contextBudgetError(consumer || "executor", configured, degradedTotal, {
+      protected_conversation: degradedTokens, current_prompt: fixed.prompt, tool_schemas: fixed.tools,
+      separate_instructions: fixed.instructions, safety_allowance: fixed.safety, output_reserve: output, selected_context: 0
+    }, "canonical backing unavailable")
+    return prompt
+  }
   var options = { consumer: consumer || "executor", goal: isString(args.goal) ? args.goal : String(prompt), budget: total,
-    outputReserve: output, fixedTokens: fixed, freezeUnselected: true, includeRecent: true }
+    outputReserve: output, fixedTokens: fixed, freezeUnselected: true, includeRecent: true, emergency: isMap(recovery) && recovery.emergencyMode === true }
   if (consumer && consumer !== "executor") {
     // Auxiliary models own independent provider histories. Add a task-specific
     // source view without rebinding their message indexes to executor history.
     var occupied = vm.estimateTokens(stringify(conversation, __, "")) + fixed.prompt + fixed.tools + fixed.instructions + fixed.safety + output
     if (!vm.contextVirtualizationShadow && configured > 0 && occupied > total) {
-      var auxiliaryError = new Error("Context budget cannot fit protected " + consumer + " input and output reserve (estimated " + occupied + " > " + total + ").")
-      auxiliaryError.miniAStop = true
-      throw auxiliaryError
+      throw this._contextBudgetError(consumer, total, occupied, { protected_conversation: vm.estimateTokens(stringify(conversation, __, "")),
+        current_prompt: fixed.prompt, tool_schemas: fixed.tools, separate_instructions: fixed.instructions,
+        safety_allowance: fixed.safety, output_reserve: output, selected_context: 0 }, "impossible (independent auxiliary history)")
     }
+    if (consumer === "summarizer") return prompt
     var available = Math.max(0, total - occupied)
     var auxiliary = vm.assembleContext({ consumer: consumer, goal: String(prompt), budget: Math.max(1, available - 100), outputReserve: 0, includeRecent: false })
     var extra = vm.serializeContext(auxiliary).text
@@ -2645,10 +2727,18 @@ MiniA.prototype._projectContextInvocation = function(llm, prompt, consumer) {
     return prompt
   }
   var projected = vm.projectActiveContext(conversation, options)
+  var beforeRecovery = projected.requestTokens
+  if (projected.overflow && options.emergency !== true && configured > 0 && vm.enabled && !vm.degraded && io.fileExists(vm.journalPath)) {
+    if (isMap(recovery)) recovery.emergencyMode = true
+    projected = vm.projectActiveContext(conversation, merge(options, { emergency: true }, true))
+    if (!projected.overflow) this.fnI("recover", "Context budget recovery compacted recent work (estimated " + beforeRecovery + " -> " + projected.requestTokens + " tokens; budget " + configured + ").")
+  }
   if (projected.overflow && configured > 0) {
-    var error = new Error("Context budget cannot fit protected instructions, current prompt, tools and output reserve (estimated " + projected.requestTokens + " > " + configured + "). Narrow the task or increase maxcontext.")
-    error.miniAStop = true
-    throw error
+    throw this._contextBudgetError(consumer || "executor", configured, projected.requestTokens, {
+      protected_conversation: projected.protectedTokens, current_prompt: fixed.prompt, tool_schemas: fixed.tools,
+      separate_instructions: fixed.instructions, safety_allowance: fixed.safety, output_reserve: output,
+      selected_context: projected.selectedContextTokens
+    }, projected.requestTokens < beforeRecovery ? "exhausted" : "impossible or no-progress")
   }
   if (projected.active && isArray(projected.conversation)) gpt.setConversation(projected.conversation)
   return prompt
@@ -3831,7 +3921,7 @@ MiniA.prototype._promptIsolatedSummary = function(text, instructions, useLowCost
   var summarizer = this._createBareLlmInstance(config)
   if (!isObject(summarizer)) throw new Error("Unable to create isolated summarizer")
   summarizer.withInstructions(instructions)
-  var prompt = this._prepareContextInvocation(summarizer, text, "summarizer")
+  var prompt = this._prepareContextInvocation(summarizer, text, "summarizer", { model: config })
   // Summaries are prose, not agent action JSON.
   return summarizer.promptWithStats(prompt)
 }
@@ -9959,6 +10049,22 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
   }
 }
 
+MiniA.prototype._buildReadresultGuardKey = function(params, toolName) {
+  var aliasOps = { "result_stat":"stat", "result_read":"read", "result_head":"head", "result_tail":"tail", "result_slice":"slice", "result_grep":"grep" }
+  if (!isMap(params) || !isString(params.resultFile) || params.resultFile.trim().length === 0) return ""
+  var aliasOp = isString(toolName) ? (aliasOps[toolName] || "") : ""
+  if (!aliasOp && params.action !== "readresult") return ""
+  var op = aliasOp || (isString(params.op) ? params.op.trim().toLowerCase() : "stat")
+  var key = [params.resultFile.trim(), op]
+  if (op === "grep") key.push(isString(params.pattern) ? params.pattern : "", isNumber(params.context) ? String(params.context) : "0")
+  if (op === "slice") key.push(isNumber(params.fromLine) ? String(params.fromLine) : isNumber(params.start) ? String(params.start) : "1", isNumber(params.toLine) ? String(params.toLine) : isNumber(params.end) ? String(params.end) : "")
+  if (op === "grep") key.push(isNumber(params.startChar) ? String(params.startChar) : "1")
+  if (op === "slice") key.push(isNumber(params.fromChar) ? String(params.fromChar) : "", isNumber(params.toChar) ? String(params.toChar) : "")
+  if (op === "head" || op === "tail") key.push(isNumber(params.lines) ? String(params.lines) : "50")
+  if (op === "read") key.push(isNumber(params.maxBytes) ? String(params.maxBytes) : "0")
+  return key.join("|")
+}
+
 MiniA.prototype._normalizeToolResult = function(original) {
     var processed = original
     if (isDef(processed) && isArray(processed.content) && isDef(processed.content[0]) && isDef(processed.content[0].text)) {
@@ -12263,22 +12369,48 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         // (readresult response itself gets spilled → model tries to readresult again → infinite loop).
         var _autoCapThreshold = parent._getToolResultInlineLimit(args, 16000)
 
+        // Positions refer to the original string, in 1-based inclusive UTF-16 units.
+        var lineOffsets = [], offset = 0
+        for (var li = 0; li < ropLines.length; li++) {
+          lineOffsets.push(offset)
+          offset += ropLines[li].length + 1
+        }
+        var budgetError = function() { return { error: "Extraction budget too small for content and locator." } }
+        var nextNotice = function(next, limited) {
+          return "\n[" + (limited ? "LIMITED" : "TRUNCATED") + "; next arguments (same file/pattern): " + JSON.stringify(next) + "]"
+        }
         if (rop === "slice") {
+          var charMode = isDef(params.fromChar) || isDef(params.toChar)
+          if (charMode && (isDef(params.fromLine) || isDef(params.toLine) || isDef(params.start) || isDef(params.end))) {
+            return { error: "Do not mix character and line ranges." }
+          }
           var sliceFrom = isNumber(params.fromLine) && params.fromLine > 0 ? Math.floor(params.fromLine)
-                        : isNumber(params.start)   && params.start    > 0 ? Math.floor(params.start) : 1
-          var sliceTo   = isNumber(params.toLine)   && params.toLine   > 0 ? Math.floor(params.toLine)
-                        : isNumber(params.end)     && params.end      > 0 ? Math.floor(params.end) : ropTotalLines
-          if (sliceTo > ropTotalLines) sliceTo = ropTotalLines
-          var sliceText = ropLines.slice(sliceFrom - 1, sliceTo).join("\n")
+                        : isNumber(params.start) && params.start > 0 ? Math.floor(params.start) : 1
+          var sliceTo = isNumber(params.toLine) && params.toLine > 0 ? Math.floor(params.toLine)
+                      : isNumber(params.end) && params.end > 0 ? Math.floor(params.end) : ropTotalLines
+          sliceTo = Math.min(sliceTo, ropTotalLines)
+          var charFrom = charMode ? (isDef(params.fromChar) ? params.fromChar : 1) : (lineOffsets[sliceFrom - 1] === undefined ? spilledRaw.length : lineOffsets[sliceFrom - 1]) + 1
+          var charTo = charMode ? (isDef(params.toChar) ? params.toChar : spilledRaw.length) : lineOffsets[sliceTo - 1] + ropLines[sliceTo - 1].length
+          if (!isNumber(charFrom) || !isNumber(charTo) || charFrom < 1 || charTo < 0 || Math.floor(charFrom) !== charFrom || Math.floor(charTo) !== charTo) return { error: "Character positions must be positive integers (UTF-16 units)." }
+          charTo = Math.min(charTo, spilledRaw.length)
+          var sliceText = spilledRaw.substring(charFrom - 1, Math.max(charFrom - 1, charTo))
           var sliceTruncated = sliceText.length > _autoCapThreshold
-          if (sliceTruncated) sliceText = sliceText.substring(0, _autoCapThreshold)
+          var sliceNext, sliceSuffix = ""
+          if (sliceTruncated) {
+            var sliceRoom = _autoCapThreshold - nextNotice({ fromChar: spilledRaw.length + 1, toChar: charTo }, false).length
+            if (sliceRoom < 1) return budgetError()
+            sliceText = sliceText.substring(0, sliceRoom)
+            sliceNext = { fromChar: charFrom + sliceText.length, toChar: charTo }
+            sliceSuffix = nextNotice(sliceNext, false)
+          }
           var sliceResp = {
             action: "readresult", op: "slice", resultFile: resultFilePath,
-            fromLine: sliceFrom, toLine: sliceTo, totalLines: ropTotalLines,
-            content: [{ type: "text", text: sliceText + (sliceTruncated ? "\n[TRUNCATED at " + _autoCapThreshold + " bytes. Use a smaller line range with fromLine/toLine.]" : "") }],
-            estimatedTokens: Math.ceil(sliceText.length / 4)
+            fromChar: charFrom, toChar: charFrom + sliceText.length - 1, totalLines: ropTotalLines,
+            content: [{ type: "text", text: sliceText + sliceSuffix }],
+            estimatedTokens: Math.ceil((sliceText.length + sliceSuffix.length) / 4)
           }
-          if (sliceTruncated) sliceResp.truncated = true
+          if (!charMode) { sliceResp.fromLine = sliceFrom; sliceResp.toLine = sliceTo }
+          if (sliceTruncated) { sliceResp.truncated = true; sliceResp.limited = true; sliceResp.next = sliceNext }
           return sliceResp
         }
 
@@ -12322,51 +12454,100 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           } catch(rxErr) {
             grepRx = new RegExp(grepPat.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
           }
-          var grepInclude = {}
-          var grepMatchCount = 0
-          var grepReturnedMatches = 0
-          var grepMaxMatches = parent._getReadresultMaxMatches(args, 0)
+          var grepStart = isNumber(params.startChar) && params.startChar > 0 ? Math.floor(params.startChar) - 1 : 0
+          var grepMatchCount = 0, grepMaxMatches = parent._getReadresultMaxMatches(args, 0)
+          var regions = [], matchingLines = {}
+          grepRx = new RegExp(grepRx.source, "gi")
           for (var gi = 0; gi < ropLines.length; gi++) {
-            if (grepRx.test(ropLines[gi])) {
-              grepMatchCount++
-              if (grepMaxMatches > 0 && grepReturnedMatches >= grepMaxMatches) continue
-              grepReturnedMatches++
-              for (var gc = Math.max(0, gi - grepCtx); gc <= Math.min(ropLines.length - 1, gi + grepCtx); gc++) {
-                grepInclude[gc] = true
+            grepRx.lastIndex = 0
+            var gm, lineMatched = false
+            while ((gm = grepRx.exec(ropLines[gi])) !== null) {
+              lineMatched = true
+              var ms = lineOffsets[gi] + gm.index
+              var me = ms + gm[0].length
+              if (me > grepStart || (gm[0].length === 0 && ms >= grepStart)) {
+                // Merge overlapping context windows without losing later matches.
+                var rs = Math.max(lineOffsets[gi], ms - 200, grepStart)
+                var re = Math.min(lineOffsets[gi] + ropLines[gi].length, me + 200)
+                var prev = regions.length ? regions[regions.length - 1] : null
+                if (prev && prev.line === gi && rs <= prev.end) {
+                  prev.end = Math.max(prev.end, re)
+                  prev.matches.push({ start: ms, end: me })
+                } else regions.push({ line: gi, start: rs, end: re, matches: [{ start: ms, end: me }] })
               }
+              if (gm[0].length === 0) grepRx.lastIndex = gm.index + 1
+            }
+            if (lineMatched) { grepMatchCount++; matchingLines[gi] = true }
+          }
+          var grepParts = [], grepRanges = [], grepUsed = 0, grepNext, grepExcerpted = false, grepIncomplete = false
+          var grepReturned = {}, grepReturnedMatches = 0, grepLast = -1
+          var reserve = nextNotice({ startChar: spilledRaw.length + 2 }, true).length
+          for (var ri = 0; ri < regions.length; ri++) {
+            var region = regions[ri], gl = region.line
+            var firstMatch = region.matches[0]
+            if (grepMaxMatches > 0 && !grepReturned[gl] && grepReturnedMatches >= grepMaxMatches) { grepNext = { startChar: Math.max(grepStart, firstMatch.start) + 1 }; break }
+            var room = _autoCapThreshold - grepUsed - (grepParts.length ? 1 : 0)
+            var fullFrom = Math.max(0, gl - grepCtx), fullTo = Math.min(ropLines.length - 1, gl + grepCtx)
+            var fullParts = [], fullLines = []
+            for (var fc = Math.max(fullFrom, grepLast + 1); fc <= fullTo; fc++) {
+              if (matchingLines[fc] && lineOffsets[fc] < grepStart) continue
+              fullParts.push((fc + 1) + ": " + ropLines[fc]); fullLines.push(fc)
+            }
+            var fullText = (grepLast >= 0 && fullLines.length && fullLines[0] > grepLast + 1 ? "---\n" : "") + fullParts.join("\n")
+            var lastRegion = ri
+            while (lastRegion + 1 < regions.length && regions[lastRegion + 1].line <= fullTo) lastRegion++
+            var fullCount = 0
+            fullLines.forEach(function(l) { if (matchingLines[l] && !grepReturned[l]) fullCount++ })
+            if (!grepReturned[gl] && grepStart <= lineOffsets[gl] && fullText.length > 0 && fullText.length + (lastRegion + 1 < regions.length ? reserve : 0) <= room && (grepMaxMatches <= 0 || grepReturnedMatches + fullCount <= grepMaxMatches)) {
+              grepParts.push(fullText); grepUsed += fullText.length + (grepParts.length > 1 ? 1 : 0)
+              fullLines.forEach(function(l) { if (matchingLines[l] && !grepReturned[l]) { grepReturned[l] = true; grepReturnedMatches++ } })
+              grepLast = fullTo; ri = lastRegion
+              continue
+            }
+            var start = region.start, end = region.end
+            if (firstMatch.start === firstMatch.end && start === end) start = Math.max(lineOffsets[gl], end - 200)
+            var label = function(a, b) { return (gl + 1) + ": [chars " + (a + 1) + "-" + b + "] ..." }
+            var matchEnd = region.matches[region.matches.length - 1].end
+            var locatorSize = label(start, end).length + 3
+            var needsContinuation = ri + 1 < regions.length || matchEnd - Math.max(firstMatch.start, grepStart) > room - locatorSize
+            var available = room - (needsContinuation ? reserve : 0) - locatorSize
+            if (available < 1) {
+              if (!grepParts.length) return budgetError()
+              grepNext = { startChar: Math.max(grepStart, firstMatch.start) + 1 }; break
+            }
+            if (end - start > available) {
+              // Spend space on the match before spending it on surrounding context.
+              var anchor = Math.max(firstMatch.start, grepStart)
+              var matchSize = Math.min(available, (needsContinuation ? firstMatch.end : matchEnd) - anchor)
+              start = Math.max(start, anchor - Math.floor((available - matchSize) / 2))
+              end = Math.min(region.end, start + available)
+            }
+            var piece = label(start, end) + spilledRaw.substring(start, end) + "..."
+            grepParts.push(piece); grepUsed += piece.length + (grepParts.length > 1 ? 1 : 0)
+            grepRanges.push({ line: gl + 1, fromChar: start + 1, toChar: end })
+            grepExcerpted = true
+            grepLast = gl
+            if (!grepReturned[gl]) { grepReturned[gl] = true; grepReturnedMatches++ }
+            var remaining = region.matches.filter(function(m) { return m.end > end || (m.start === m.end && m.start > end) })
+            if (remaining.length) {
+              grepNext = { startChar: Math.max(end, remaining[0].start) + 1 }
+              grepIncomplete = remaining[0].start < end
+              break
             }
           }
-          var grepParts = []
-          var grepLast = -1
-          for (var gi2 = 0; gi2 < ropLines.length; gi2++) {
-            if (grepInclude[gi2]) {
-              if (grepLast >= 0 && gi2 > grepLast + 1) grepParts.push("---")
-              grepParts.push((gi2 + 1) + ": " + ropLines[gi2])
-              grepLast = gi2
-            }
-          }
-          var grepText = grepMatchCount > 0 ? grepParts.join("\n") : "(no matches)"
-          var grepTruncated = grepText.length > _autoCapThreshold
-          if (grepTruncated) grepText = grepText.substring(0, _autoCapThreshold)
-          var grepLimited = grepMaxMatches > 0 && grepMatchCount > grepReturnedMatches
-          var grepSuffix = ""
-          if (grepLimited) {
-            grepSuffix += "\n[LIMITED to first " + grepReturnedMatches + " matching regions out of " + grepMatchCount + ". Refine the pattern or use slice/head for narrower extraction.]"
-          }
-          if (grepTruncated) {
-            grepSuffix += "\n[TRUNCATED at " + _autoCapThreshold + " bytes. Use a more specific pattern."
-            if (grepLimited) grepSuffix += " A match limit is also active."
-            grepSuffix += "]"
-          }
+          var grepText = grepParts.length ? grepParts.join("\n") : "(no matches)"
+          if (grepNext) grepText += nextNotice(grepNext, true)
+          if (grepText.length > _autoCapThreshold) return budgetError()
           var grepResp = {
             action: "readresult", op: "grep", resultFile: resultFilePath,
             pattern: grepPat, matchCount: grepMatchCount, totalLines: ropTotalLines,
-            returnedMatches: grepReturnedMatches,
-            content: [{ type: "text", text: grepText + grepSuffix }],
-            estimatedTokens: Math.ceil(grepText.length / 4)
+            returnedMatches: grepReturnedMatches, ranges: grepRanges,
+            content: [{ type: "text", text: grepText }], estimatedTokens: Math.ceil(grepText.length / 4)
           }
-          if (grepTruncated) grepResp.truncated = true
-          if (grepLimited) grepResp.limited = true
+          if (grepExcerpted) grepResp.excerpted = true
+          if (grepIncomplete) grepResp.truncated = true
+          if (grepNext) { grepResp.limited = true; grepResp.next = grepNext }
+
           return grepResp
         }
 
@@ -12832,8 +13013,8 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
                 spillReason + resultFile + " (auto-deleted at shutdown).",
                 "Size: " + resultByteSize + " bytes (~" + estTokens + " tokens).",
                 (toBoolean(args.usestdutils) === true
-                  ? "IMPORTANT: Call result_stat with resultFile='" + resultFile + "' first (size check). Then use result_read (full), result_head/result_tail (first/last N lines), result_slice (line range), or result_grep (regex search)."
-                  : "IMPORTANT: To access this data call proxy-dispatch with action='readresult' and resultFile='" + resultFile + "'. Start with op='stat', then use op='read', op='head', op='grep', or op='slice' as needed.")
+                  ? "IMPORTANT: Call result_stat with resultFile='" + resultFile + "' first (size check). Then use result_read (full), result_head/result_tail (first/last N lines), result_grep (regex search), then result_slice (fromChar/toChar) or returned next arguments with the same file/pattern."
+                  : "IMPORTANT: To access this data call proxy-dispatch with action='readresult' and resultFile='" + resultFile + "'. Start with op='stat', then use op='read', op='head', op='grep', or op='slice' with fromChar/toChar; follow next arguments with the same file/pattern. Refetch only if the saved source is unsuitable.")
               ]
               previewLines.push("Format: " + resultFormat.toUpperCase() + ".")
               if (isMap(resultPayload)) {
@@ -12988,11 +13169,14 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
       }
       _proxyDispatchProps.op = {
         type       : "string",
-        description: "Sub-operation for action='readresult'. 'stat' (default, always use first): size/line count only. 'read': full content (after stat confirms size). 'head'/'tail': first/last N lines. 'slice': lines fromLine..toLine. 'grep': pattern match with context.",
+        description: "Sub-operation for action='readresult'. 'stat' (default, always use first): size/line count only. 'read': full content (after stat confirms size). 'head'/'tail': first/last N lines. 'slice': line or UTF-16 character range (do not mix). 'grep': matching lines or labeled excerpts; follow returned next arguments with the same file/pattern.",
         enum       : [ "stat", "read", "head", "tail", "slice", "grep" ]
       }
       _proxyDispatchProps.fromLine = { type: "integer", description: "For op='slice': 1-based start line.", minimum: 1 }
       _proxyDispatchProps.toLine = { type: "integer", description: "For op='slice': 1-based end line.", minimum: 1 }
+      _proxyDispatchProps.fromChar = { type: "integer", minimum: 1, description: "For slice: inclusive 1-based UTF-16 start; do not mix with line ranges." }
+      _proxyDispatchProps.toChar = { type: "integer", minimum: 1, description: "For slice: inclusive 1-based UTF-16 end." }
+      _proxyDispatchProps.startChar = { type: "integer", minimum: 1, description: "For grep: resume at this 1-based UTF-16 position using returned next arguments." }
       _proxyDispatchProps.lines = { type: "integer", description: "For op='head'/'tail': number of lines (default 50).", minimum: 1 }
       _proxyDispatchProps.pattern = { type: "string", description: "For op='grep': regex (case-insensitive), falls back to literal match." }
       _proxyDispatchProps.context = { type: "integer", description: "For op='grep': context lines around each match (default 0).", minimum: 0 }
@@ -13084,15 +13268,17 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
 
       fns["result_slice"] = function(params) {
         var p = isMap(params) ? params : {}
-        return _doReadResult({ op: "slice", resultFile: p.resultFile, fromLine: p.fromLine, toLine: p.toLine })
+        return _doReadResult({ op: "slice", resultFile: p.resultFile, fromLine: p.fromLine, toLine: p.toLine, fromChar: p.fromChar, toChar: p.toChar })
       }
       fnsMeta["result_slice"] = {
         name       : "result_slice",
-        description: "Read a specific line range from a spilled result file (1-based, inclusive).",
+        description: "Read a line or character range from the original saved file. Ranges are 1-based inclusive; characters are UTF-16 units. Do not mix ranges. Follow next arguments for remaining content.",
         inputSchema: {
           type      : "object",
           properties: {
             resultFile: { type: "string", description: "Path to the spilled result file." },
+            fromChar  : { type: "integer", minimum: 1, description: "Start UTF-16 position (default 1); exclusive of line ranges." },
+            toChar    : { type: "integer", minimum: 1, description: "End UTF-16 position (default end of file)." },
             fromLine  : { type: "integer", minimum: 1, description: "1-based start line (default 1)." },
             toLine    : { type: "integer", minimum: 1, description: "1-based end line (default last line)." }
           },
@@ -13102,15 +13288,16 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
 
       fns["result_grep"] = function(params) {
         var p = isMap(params) ? params : {}
-        return _doReadResult({ op: "grep", resultFile: p.resultFile, pattern: p.pattern, context: p.context })
+        return _doReadResult({ op: "grep", resultFile: p.resultFile, pattern: p.pattern, context: p.context, startChar: p.startChar })
       }
       fnsMeta["result_grep"] = {
         name       : "result_grep",
-        description: "Search a spilled result file for lines matching a regex pattern (case-insensitive, falls back to literal match). Returns matched lines with optional surrounding context.",
+        description: "Search a spilled result file for lines matching a regex pattern (case-insensitive, falls back to literal match). Returns matching lines or match-centered excerpts with source character ranges. Follow next arguments with the same file/pattern for remaining matches.",
         inputSchema: {
           type      : "object",
           properties: {
             resultFile: { type: "string", description: "Path to the spilled result file." },
+            startChar : { type: "integer", minimum: 1, description: "Resume grep at a 1-based UTF-16 position returned in next." },
             pattern   : { type: "string", description: "Regular expression to search for (case-insensitive)." },
             context   : { type: "integer", minimum: 0, description: "Lines of context before and after each match (default 0)." }
           },
@@ -14615,7 +14802,7 @@ MiniA.prototype._runCommand = function(args) {
       var _r
       if (!this._shellBatch) {
         var _ac = this._useAnsiLogging ? ansiColor : function(_, t) { return t }
-        _r = askChoose("Can I execute '" + _ac("italic,red,bold", args.command) + "'? " + (note.length > 0 ? _ac("faint","(" + note + " )") : ""), ["No", "Yes", "Always"])
+        _r = (isFunction(this._confirmFn) ? this._confirmFn : askChoose)("Can I execute '" + _ac("italic,red,bold", args.command) + "'? " + (note.length > 0 ? _ac("faint","(" + note + " )") : ""), ["No", "Yes", "Always"])
       } else {
         _r = 0 // No prompt in batch mode; default to "No"
       }
@@ -15658,7 +15845,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "memorysessionheader", "goal", "mcp", "validationgoal", "valgoal", "deepresearch", "maxcycles",
     "validationthreshold", "persistlearnings", "valtools", "outerloop", "outerloopinstructions", "outerloopsessionid", "outerloopmaxcycles", "outerloopmaxtime", "outerloopstoponrepeat", "outerloopmaxnochange",
     "durable", "runid", "resumerun", "runstatus", "runroot", "showseparator", "goalprefix", "shellprefix", "resume", "mode",
-    "onport", "web", "modelman", "mcptest", "memoryman", "wikiman", "wikitarget", "workermode", "path", "usehistory", "useattach", "historypath",
+    "onport", "web", "webadvanced", "webadvancedpath", "modelman", "mcptest", "memoryman", "wikiman", "wikitarget", "workermode", "path", "usehistory", "useattach", "historypath",
     "historykeep", "historykeepperiod", "historykeepcount", "historyretention", "ssequeuetimeout",
     "logpromptheaders", "historys3bucket", "historys3prefix", "historys3url", "historys3accesskey",
     "historys3secret", "historys3region", "historys3useversion1", "historys3ignorecertcheck", "extracommands",
@@ -15670,7 +15857,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix", "wikiindexdir", "wikis3artifactprefix", "s3artifactbundle", "wikihttpindexurl", "wikihttptimeout", "wikiartifactrefreshsecs",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
     "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "wikiretrievalv2", "wikiretrievalconfig", "wikisourceurl", "wikisourcefield", "wikisourceinline", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphmounts", "wikimountgraphttlms", "wikigraphcross", "wikigraphcrossjoin", "wikigraphcrosscap", "wikigraphcrossdepth", "wikigraphcrossmaxdf", "wikigraphcrossminkeylen", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
-    "dreamwikimode", "dreammemorymode", "dreamwikidryrun", "dreamwikiapproval", "dreamwikireorg", "dreamwikiinstructions",
+    "dreamwikimode", "dreamwikillm", "dreammaxsteps", "dreammemorymode", "dreamwikidryrun", "dreamwikiapproval", "dreamwikireorg", "dreamwikiinstructions",
     "dreamwikiminpages", "dreamwikimaxdepth", "dreamwikilintresultlimit", "dreamwikisurgical", "wikilintresultlimit", "dreamreport",
     "useskillswiki", "skillwikibackend", "skillwikiroot", "skillwikimounts", "skillsautosearch", "skillsautolimit", "skillsmaxloaded", "skillsmaxchars"
   ].forEach(function(name) {
@@ -17249,6 +17436,7 @@ MiniA.prototype._refreshRunPrompt = function(args) {
         "For large MCP payloads: pass 'argumentsFile' to load arguments from disk, 'resultToFile=true' or 'resultSizeThreshold' to spill results to a temp file. " +
         spillNote + " ~4 chars = 1 token. " +
         "To read a spilled 'resultFile', use " + spillReadTool + " — never filesystem read/grep tools (that re-triggers spill and loops). " +
+        "Search the saved result, then follow excerpt fromChar/toChar ranges or next arguments with the same file/pattern. Character positions are 1-based inclusive UTF-16 units. Refetch only if the saved source is unsuitable. get-url style=\"text\" provides readable web content. " +
         "Chain a 'resultFile' path directly as the next call's 'argumentsFile'. Prefer file handoff for payloads >10KB; use the inline 'estimatedTokens' field to decide."
       )
     }
@@ -18235,7 +18423,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     //if (args.__format == "md") args.knowledge = "give final answer in markdown without mentioning it\n\n" + args.knowledge
 
     // Summarize context if too long
-    var summarize = ctx => {
+    var summarize = (ctx, strict) => {
       var summarizeLLM = (this._use_lc && isObject(this.lc_llm)) ? this.lc_llm : this.llm
       var llmType = (this._use_lc && isObject(this.lc_llm)) ? "low-cost" : "main"
       var instructionText = "You are condensing an agent's working notes.\n1) KEEP (verbatim or lightly normalized): current goal, constraints, explicit decisions, and facts directly advancing the goal.\n2) COMPRESS tangents, detours, and dead-ends into terse bullets.\n3) RECORD open questions and next actions."
@@ -18260,6 +18448,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           if (isObject(runtime)) {
             self._updateErrorHistory(runtime, { category: summaryError.type, message: `summarize: ${summaryError.reason}`, context: { operation: "summarize" } })
           }
+          if (strict === true) throw e
           // Never return full original payload on failure; keep a compact fallback.
           return "[SUMMARY FALLBACK] " + text.substring(0, 1200)
         }
@@ -18283,7 +18472,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           : ""
         // Bound verbose/non-compressing responses so merge passes also shrink.
         var summaryCharLimit = Math.max(1200, Math.min(12000, Math.floor(text.length / 2)))
-        if (responseText.length > summaryCharLimit) responseText = responseText.substring(0, summaryCharLimit) + "\n[Summary truncated]"
+        if (strict === true && (responseText.trim().length === 0 || self._estimateTokens(responseText) >= originalTokens)) throw new Error("Summary made no progress")
+        if (strict !== true && responseText.length > summaryCharLimit) responseText = responseText.substring(0, summaryCharLimit) + "\n[Summary truncated]"
         var finalTokens = self._estimateTokens(responseText)
         global.__mini_a_metrics.summaries_final_tokens.getAdd(finalTokens)
         global.__mini_a_metrics.summaries_tokens_reduced.getAdd(Math.max(0, originalTokens - finalTokens))
@@ -18344,7 +18534,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (summarizeLLM === this.lc_llm && lcBudget > 0) effectiveBudget = effectiveBudget > 0 ? Math.min(effectiveBudget, lcBudget) : lcBudget
       var chunkThreshold = effectiveBudget > 0 ? Math.max(800, Math.min(12000, Math.floor(effectiveBudget * 0.45))) : 12000
       var chunkBudget = Math.max(800, Math.floor(chunkThreshold * 0.45))
-      var maxChunks = 128
+      var maxChunks = strict === true ? Math.max(128, Math.ceil(ctx.length / Math.max(400, chunkBudget * 4)) + ctx.split("\n").length) : 128
 
       if (inputTokens <= chunkThreshold) return summarizeSingle(ctx, instructionText)
 
@@ -18364,13 +18554,46 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (chunkSummaries.length === 0) return "[SUMMARY FALLBACK] Unable to summarize context chunks."
 
       var merged = chunkSummaries.join("\n")
-      if (this._estimateTokens(merged) > chunkThreshold && merged.length < ctx.length) return summarize(merged)
+      if (this._estimateTokens(merged) > chunkThreshold && merged.length < ctx.length) return summarize(merged, strict)
       var mergedInstruction = instructionText + "\n4) Merge chunk summaries into a single concise result with no redundancy."
       var mergedSummary = summarizeSingle(merged, mergedInstruction)
       if (!isString(mergedSummary) || mergedSummary.trim().length === 0) {
         return "[SUMMARY FALLBACK] " + merged.substring(0, 3000)
       }
       return mergedSummary
+    }
+
+    this._contextSummaryRecoveries = 0
+    var makeBudgetRecovery = (build) => {
+      var previousContext
+      return { attempted: false, rebuild: (error) => {
+        previousContext = runtime.context.slice()
+        // Fresh inbox is passed separately by the prompt builder.
+        var notes = previousContext.filter(function(entry) { return entry !== commsObservation })
+        if (notes.length === 0) return __
+        runtime.context = commsObservation ? [commsObservation] : []
+        markContextDirty()
+        runtime.stateSnapshotDirty = true
+        var protectedPrompt
+        try { protectedPrompt = build() } finally { runtime.context = previousContext; markContextDirty() }
+        var protectedTotal = this._historyVm.estimateTokens(protectedPrompt) + error.estimatedTotal - error.components.current_prompt - error.components.selected_context
+        if (protectedTotal + 256 >= error.budget) return __
+        var summary
+        try { summary = summarize(notes.join("\n"), true) } catch(ignoreSummaryRecovery) { return __ }
+        if (!isString(summary) || this._estimateTokens(summary) >= this._estimateTokens(notes.join("\n"))) return __
+        var backed = this._historyVm.registerContextObject("recovery", "runtime_notes", notes, { provenance: { source: "budget-recovery", coverage: "exact-working-notes" } })
+        if (!isDef(backed) || this._historyVm.degraded) return __
+        var handle = this._historyVm.objects[this._historyVm.objects.length - 1].handle
+        runtime.context = ["[SUMMARY] Working notes (exact backing " + handle + "): " + summary]
+        if (commsObservation) runtime.context.push(commsObservation)
+        markContextDirty()
+        runtime.stateSnapshotDirty = true
+        return build()
+      }, rollback: () => {
+        if (isArray(previousContext)) runtime.context = previousContext
+        markContextDirty()
+        runtime.stateSnapshotDirty = true
+      } }
     }
 
     // Helper function to check and summarize context during execution
@@ -18875,19 +19098,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     var getEffectiveContextBudget = () => this._getEffectiveContextBudget(args, 0)
 
-    var _GUARD_ALIAS_OPS = { "result_stat":"stat", "result_read":"read", "result_head":"head", "result_tail":"tail", "result_slice":"slice", "result_grep":"grep" }
-    var buildReadresultGuardKey = (params, toolName) => {
-      if (!isMap(params) || !isString(params.resultFile) || params.resultFile.trim().length === 0) return ""
-      var aliasOp = isString(toolName) ? (_GUARD_ALIAS_OPS[toolName] || "") : ""
-      if (!aliasOp && params.action !== "readresult") return ""
-      var op = aliasOp || (isString(params.op) ? params.op.trim().toLowerCase() : "stat")
-      var key = [params.resultFile.trim(), op]
-      if (op === "grep") key.push(isString(params.pattern) ? params.pattern : "", isNumber(params.context) ? String(params.context) : "0")
-      if (op === "slice") key.push(isNumber(params.fromLine) ? String(params.fromLine) : isNumber(params.start) ? String(params.start) : "1", isNumber(params.toLine) ? String(params.toLine) : isNumber(params.end) ? String(params.end) : "")
-      if (op === "head" || op === "tail") key.push(isNumber(params.lines) ? String(params.lines) : "50")
-      if (op === "read") key.push(isNumber(params.maxBytes) ? String(params.maxBytes) : "0")
-      return key.join("|")
-    }
+    var buildReadresultGuardKey = (params, toolName) => this._buildReadresultGuardKey(params, toolName)
 
     var isPromptContextAnchor = function(entry) {
       if (!isString(entry)) return false
@@ -18973,9 +19184,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               // Try to convert TOON-encoded content to JSON so that op=grep works on
               // human-readable key names. TOON encoding (used by mcpproxytoon) makes
               // JSON keys opaque to text search, breaking the readresult grep workflow.
-              // Pretty-print the JSON (not minified) so that line-based ops (grep/slice)
-              // work correctly on minified sources like opacks/index.json which arrive
-              // as a single long line and make every line-based readresult op useless.
+              // Retain the existing JSON spill representation for file handoff. Retrieval
+              // uses this saved string unchanged, including its line/character positions.
               var _spillContent = obsContent
               var _spillExt = ".toon"
               try {
@@ -18994,8 +19204,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                 " File: " + retroTempPath +
                 " | Size: " + obsContent.length + " bytes (~" + estTokens + " tokens)." +
                 (toBoolean(args.usestdutils) === true
-                  ? " | IMPORTANT: Call result_stat resultFile='" + retroTempPath + "' first (size check). Then use result_read, result_head, result_tail, result_slice, or result_grep as needed.]"
-                  : " | IMPORTANT: Use proxy-dispatch action='readresult' resultFile='" + retroTempPath + "' to access. Start with op='stat', then op='read', op='head', op='grep', or op='slice' as needed.]")
+                  ? " | IMPORTANT: Call result_stat resultFile='" + retroTempPath + "' first (size check). Then search with result_grep; use result_slice fromChar/toChar or follow next arguments (same file/pattern). Refetch only if the saved source is unsuitable.]"
+                  : " | IMPORTANT: Use proxy-dispatch action='readresult' resultFile='" + retroTempPath + "' to access. Start with op='stat', then op='read', op='head', op='grep', or op='slice' with fromChar/toChar; follow next arguments with the same file/pattern. Refetch only if the saved source is unsuitable.]")
               // Patch the live context entry so future selectPromptContext calls see
               // the notice directly and do not retro-spill the same data again.
               if (i >= 0 && i < runtime.context.length && runtime.context[i] === entry) {
@@ -19282,8 +19492,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               " File: " + obsTempPath +
               " | Size: " + observation.length + " bytes (~" + obsTokens + " tokens)." +
               (toBoolean(args.usestdutils) === true
-                ? " | IMPORTANT: Call result_stat resultFile='" + obsTempPath + "' first (size check). Then use result_read, result_head, result_tail, result_slice, or result_grep as needed.]"
-                : " | IMPORTANT: Use proxy-dispatch action='readresult' resultFile='" + obsTempPath + "' to inspect it. Start with op='stat', then use op='head', op='grep', or op='slice' as needed.]")
+                ? " | IMPORTANT: Call result_stat resultFile='" + obsTempPath + "' first (size check). Then search with result_grep; use result_slice fromChar/toChar or follow next arguments (same file/pattern). Refetch only if the saved source is unsuitable.]"
+                : " | IMPORTANT: Use proxy-dispatch action='readresult' resultFile='" + obsTempPath + "' to inspect it. Start with op='stat', then use op='head', op='grep', or op='slice' with fromChar/toChar; follow next arguments with the same file/pattern. Refetch only if the saved source is unsuitable.]")
             rawResult = {
               autoSpilled: true,
               resultFile : obsTempPath,
@@ -19598,10 +19808,21 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       // memory snapshot in "full" inject mode on every step).
       var contextMaxTokens = (getEffectiveContextBudget() || 4000) - (this._memoryPromptTokens || 0)
       var fixedRequestTokens = Math.max(this._estimateTokens(stateSnapshot) + 500, 1000)
+      var commsObservation = ""
+      var stepRecovery = makeBudgetRecovery(() => {
+        var rebuilt = $t(this._STEP_PROMPT_TEMPLATE.trim(), {
+          goalBlock: cachedGoalBlock, hookContextBlock: cachedHookContextBlock,
+          progress: selectPromptContext(promptContextBudget).filter(function(entry) { return entry !== commsObservation }).join("\n"), state: getStateSnapshot()
+        })
+        if (commsObservation) rebuilt += "\n" + commsObservation
+        rebuilt = this._maybeInjectPlanReminder(rebuilt, runtime.currentStepNumber, maxSteps)
+        rebuilt = this._injectSimplePlanStepContext(rebuilt)
+        return this._maybeInjectRepeatedActionWarning(rebuilt, runtime)
+      })
       if (isObject(this._historyVm) && !this._historyVm.degraded && (this._historyVm.enabled || this._historyVm.shadow)) {
         this._prepareHistoryVmProjection(runtime.currentStepNumber)
         if (this._historyVm.contextVirtualization && !this._historyVm.contextVirtualizationShadow) {
-          this._prepareContextInvocation(this.llm, cachedGoalBlock + cachedHookContextBlock + stateSnapshot, "executor")
+          this._prepareContextInvocation(this.llm, cachedGoalBlock + cachedHookContextBlock + stateSnapshot, "executor", stepRecovery)
         }
         try { fixedRequestTokens += this._estimateTokens(stringify(this.llm.getGPT().getConversation(), __, "")) } catch(ignoreHistoryVmConversationSize) {}
         fixedRequestTokens += this._estimateTokens((this._systemInst || "") + cachedGoalBlock + cachedHookContextBlock)
@@ -19618,7 +19839,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       // content every step. Track consecutive overflow steps and force a stop
       // (with an IN_PROGRESS summary, same pattern as the other hard ceilings
       // above) once retrying clearly cannot recover.
-      if (isObject(this._historyVm) && this._historyVm.enabled === true && remainingContextTokens < 0) {
+      if (isObject(this._historyVm) && this._historyVm.enabled === true && remainingContextTokens < 0 &&
+          (!this._historyVm.contextVirtualization || this._historyVm.contextVirtualizationShadow)) {
         runtime.historyVmBudgetOverflowStreak = (runtime.historyVmBudgetOverflowStreak || 0) + 1
         if (runtime.historyVmBudgetWarned !== true) {
           runtime.historyVmBudgetWarned = true
@@ -19649,7 +19871,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       })
       // Deliver after history selection so a fresh inbox cannot be filtered out or
       // summarized away before the receiving model has seen it once.
-      var commsObservation = this._drainCommsObservation()
+      commsObservation = this._drainCommsObservation()
       if (commsObservation) {
         prompt += "\n" + commsObservation
         runtime.context.push(commsObservation)
@@ -19916,7 +20138,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       try {
         responseWithStats = this._withExponentialBackoff(() => {
           addCall()
-          prompt = this._prepareContextInvocation(currentLLM, prompt, "executor")
+          prompt = this._prepareContextInvocation(currentLLM, prompt, "executor", stepRecovery)
           var jsonFlag = !noJsonPromptFlag && !isOllamaToolJsonConflict
           if (args.showthinking) {
             // Streaming not compatible with showthinking - use regular prompts
@@ -19955,6 +20177,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           }
         }))
       } catch (e) {
+        if (isObject(e) && e.code === "MINIA_CONTEXT_BUDGET") throw e
         if (this.state == "stop" || (isObject(e) && e.miniAStop === true)) {
           break
         }
@@ -20174,6 +20397,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                 return this._promptJsonRecovery(currentLLM, lcRetryPrompt, args, currentModelConfig, noJsonPromptFlag)
               }, this._llmRetryOptions("Low-cost JSON-retry model", { llmType: "low-cost", step: step + 1, reason: "json-retry" }, { maxDelay: 6000 }))
             } catch (lcRetryErr) {
+              if (isObject(lcRetryErr) && lcRetryErr.code === "MINIA_CONTEXT_BUDGET") throw lcRetryErr
               if (this.state == "stop" || (isObject(lcRetryErr) && lcRetryErr.miniAStop === true)) {
                 lcRetryStopRequested = true
                 break
@@ -20255,6 +20479,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               return this._promptJsonRecovery(this.llm, fallbackPrompt, args, this._oaf_model, runtime.forceNoJson === true || this._noJsonPrompt)
             }, this._llmRetryOptions("Main fallback model", { llmType: "main", reason: "fallback" }, { maxDelay: 6000 }))
           } catch (fallbackErr) {
+            if (isObject(fallbackErr) && fallbackErr.code === "MINIA_CONTEXT_BUDGET") throw fallbackErr
             if (this.state == "stop" || (isObject(fallbackErr) && fallbackErr.miniAStop === true)) {
               break
             }
@@ -21641,13 +21866,17 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
     }
 
+    var finalRecovery = makeBudgetRecovery(() => $t(this._FINAL_PROMPT.trim(), {
+      goalBlock: cachedGoalBlock, hookContextBlock: cachedHookContextBlock,
+      context: runtime.context.join("\n"), state: getStateSnapshot()
+    }))
     var finalResponseWithStats
     try {
       this.fnI("input", "Interacting with main model (final answer)...")
       this._trace("llm_prompt", { label: "FINAL_PROMPT", model: "main", content: finalPrompt })
       finalResponseWithStats = this._withExponentialBackoff(() => {
         addCall()
-        finalPrompt = this._prepareContextInvocation(finalLLM, finalPrompt, "executor")
+        finalPrompt = this._prepareContextInvocation(finalLLM, finalPrompt, "executor", finalRecovery)
         var jsonFlag = runtime.forceNoJson !== true && !this._noJsonPrompt
         if (args.showthinking) {
           if (jsonFlag && isDef(finalLLM.promptJSONWithStatsRaw)) {
@@ -21662,6 +21891,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         return finalLLM.promptWithStats(finalPrompt)
       }, this._llmRetryOptions("Final answer", { operation: "final" }, { maxDelay: 6000 }))
     } catch (finalErr) {
+      if (isObject(finalErr) && finalErr.code === "MINIA_CONTEXT_BUDGET") throw finalErr
       var finalErrorInfo = this._categorizeError(finalErr, { source: "llm", operation: "final" })
       runtime.context.push(`[OBS FINAL] (error) final answer request failed: ${finalErrorInfo.reason}`)
       this._registerRuntimeError(runtime, {

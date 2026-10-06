@@ -13,7 +13,8 @@
     f.state = function() { return af.fromJson(io.readFileString(wiki + '/.mini-a-wiki-state/manifest.json')) }
     f.save = function(s) { io.writeFileString(wiki + '/.mini-a-wiki-state/manifest.json', stringify(s)) }
     f.runner = function(extra) {
-      var args = merge({ usewiki: true, wikiaccess: 'rw', wikiroot: wiki, ingestsource: src, ingestsection: 'docs', ingestmode: 'normalize', ingestconcurrency: 1 }, extra || {})
+      var options = {}; Object.keys(extra || {}).forEach(function(k) { if (k !== 'wikimanager') options[k] = extra[k] })
+      var args = merge({ usewiki: true, wikiaccess: 'rw', wikiroot: wiki, ingestsource: src, ingestsection: 'docs', ingestmode: 'normalize', ingestconcurrency: 1 }, options)
       if (extra && extra.wikimanager) args.wikimanager = extra.wikimanager
       var r = new MiniAIngest(args, function() {})
       r._setLlm({ promptJSONWithStats: function(p) {

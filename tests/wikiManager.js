@@ -149,7 +149,7 @@
     })
   }
   exports.testLaunchAndGuidance = function() {
-    var consoleSource=io.readFileString("mini-a-con.js"), dreamSource=io.readFileString("mini-a-dreams.js")
+    var consoleSource=io.readFileString("mini-a-session.js"), dreamSource=io.readFileString("mini-a-dreams.js")
     assert(consoleSource.indexOf('wikiman=true conflicts with')>=0,true,"Conflicting modes rejected")
     assert(io.readFileString("mini-a-subtask.js").indexOf('"wikiman"')>=0,true,"UI mode excluded from delegation")
     assert(dreamSource.indexOf('dreamArgs.goal += "\\n\\nAdditional operator guidance')>=0,true,"Guidance appended to established goal")
@@ -169,6 +169,32 @@
       assert(applied.ok, true, "Model-free ingestion apply")
       assert(run(runner, "ingest.recovery").ok, true, "Recovery listing")
       assert(run(runner, "absorb.status").ok, true, "Absorption status")
+    })
+  }
+  exports.testAutoDream = function() {
+    fixture(function(root, runner) {
+      runner.args.usewikigraph = false
+      runner.args.dreamwikillm = false
+      io.writeFileString(root + "/page.md", "# Page\n\nA page needing metadata and navigation.\n")
+      assert(MiniAWikiOps.operation("dream.auto").group, "Dream", "Auto appears in Dream menu")
+      var preview = run(runner, "dream.auto")
+      assert(preview.status, "planned", "Manager auto defaults to dry-run")
+      assert(io.fileExists(root + "/.mini-a-wiki-maintenance"), false, "Preview has no backups")
+      assert(run(runner, "dream.auto", {dryrun:false}).ok, false, "Apply retains operation confirmation")
+      var ro = new MiniAWikiOps({wikiroot:root, wikiretrievalv2:false, dreamwikillm:false})
+      assert(run(ro, "dream.auto", {dryrun:false}, true).ok, false, "Auto never upgrades implicit read-only access")
+      assert(run(ro, "dream.auto").status, "planned", "Read-only preview allowed")
+      var result = run(runner, "dream.auto", {dryrun:false}, true)
+      assert(result.mode, "auto", "Shared coordinator executes auto")
+      assert(result.verification.ok, true, "Repairs verified through fresh reader")
+      assert(isString(result.backup_location), true, "Full recovery report returned")
+      var mounted = new MiniAWikiOps({wikiroot:root, wikiaccess:"rw", wikimounts:[{name:"docs",root:root}], wikitarget:"docs"})
+      assert(run(mounted, "dream.auto").ok, false, "Auto excludes mounted targets")
+      var choices = [0, 1], shown = []
+      var man = new MiniAWikiMan(runner.args, {choose:function(){return choices.shift()}, print:function(v){shown.push(v)}})
+      man.runOperation("dream.auto")
+      assert(man.history[0].result.status, "planned", "TUI preview reaches coordinator")
+      assert(shown.some(function(v){return isMap(v) && v.mode === "auto" && isDef(v.verification)}), true, "TUI displays complete auto report")
     })
   }
   exports.testV2Compaction = function() {
@@ -205,7 +231,7 @@
     assert(new MiniAWikiOps({wikiroot:"/tmp",dreammaxsteps:"17"}).args.dreammaxsteps,17,"CLI numeric tuning normalized")
   }
   exports.testGraphStatsConsoleParity = function() {
-    var source = io.readFileString("mini-a-con.js")
+    var source = io.readFileString("mini-a-session.js")
     var start = source.indexOf("  function printGraph("), end = source.indexOf("  function printIngestRecovery(", start)
     var consoleStats = new Function("wm", "capture", 'var getConsoleWikiManager=function(){return wm}, print=function(){}, printTree=function(v){capture(v);return ""};\n' + source.substring(start,end) + '\nprintGraph("stats");')
     fixture(function(root, runner) {

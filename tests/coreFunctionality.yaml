@@ -1,4 +1,14 @@
 jobs:
+- name: MiniA Core Tests::BudgetFailureStopsDispatch
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testBudgetFailureStopsExecutorAndFinalDispatch
+
+- name: MiniA Core Tests::AutomaticNoteBudgetRecovery
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testAutomaticNoteBudgetRecovery
+
 - name: MiniA Core Tests::WikiContinuationAndBudgetForwarding
   from: MiniA Core Tests::Init
   to: oJob Test
@@ -987,6 +997,16 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testProxyDispatchReadresultHonorsContextGuardLimits
 
+- name: MiniA Core Tests::ResultExcerptRecovery
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResultExcerptRecovery
+
+- name: MiniA Core Tests::ResultWebSpillRecovery
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResultWebSpillRecovery
+
 - name: MiniA Core Tests::ResultAliasToolsExposedWithStdutils
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -1180,6 +1200,8 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Core Tests::BudgetFailureStopsDispatch
+- MiniA Core Tests::AutomaticNoteBudgetRecovery
 - MiniA Core Tests::WikiContinuationAndBudgetForwarding
 - MiniA Core Tests::MountedWikiDiscoveryReplay
 - MiniA Core Tests::SubtaskRemoteAlwaysDrainsQueue
@@ -1363,6 +1385,8 @@ todo:
 - MiniA Core Tests::WikiToolVisibleWhenEnabled
 - MiniA Core Tests::ContextGuardBudgetHelpers
 - MiniA Core Tests::ProxyDispatchReadresultHonorsContextGuardLimits
+- MiniA Core Tests::ResultExcerptRecovery
+- MiniA Core Tests::ResultWebSpillRecovery
 - MiniA Core Tests::ResultAliasToolsExposedWithStdutils
 - MiniA Core Tests::ProxyDispatchSchemaOmitsReadresultParamsWhenStdutilsEnabled
 - MiniA Core Tests::ResultAliasToolsBypassInlineLimitGuard

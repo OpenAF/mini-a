@@ -2408,7 +2408,7 @@ MiniUtilsTool.prototype.mathematics = function(params) {
       var all = { count: n, sum: sum, mean: mean, median: median, min: vals[0], max: vals[n-1] }
       if (isDef(params.metrics) && isArray(params.metrics)) {
         var result = {}
-        params.metrics.forEach(function(m) { if (all[m]) result[m] = all[m] })
+        params.metrics.forEach(function(m) { if (Object.prototype.hasOwnProperty.call(all, m)) result[m] = all[m] })
         return result
       }
       return all
@@ -2423,8 +2423,14 @@ MiniUtilsTool.prototype.mathematics = function(params) {
         kg: 1, g: 0.001, lb: 0.453592, oz: 0.0283495,
         l: 1, ml: 0.001, gal: 3.78541
       }
+      var dimensions = {
+        m: "length", km: "length", cm: "length", mm: "length", mi: "length", ft: "length", in: "length",
+        kg: "mass", g: "mass", lb: "mass", oz: "mass",
+        l: "volume", ml: "volume", gal: "volume"
+      }
 
-      if (!conversions[from] || !conversions[to]) return "[ERROR] Unknown unit"
+      if (!Object.prototype.hasOwnProperty.call(conversions, from) || !Object.prototype.hasOwnProperty.call(conversions, to)) return "[ERROR] Unknown unit"
+      if (dimensions[from] !== dimensions[to]) return "[ERROR] Incompatible unit dimensions: " + from + " and " + to
       var result = (value * conversions[from]) / conversions[to]
       if (isDef(params.precision)) result = Number(result.toFixed(params.precision))
       return { value: value, fromUnit: from, toUnit: to, result: result }
@@ -2437,7 +2443,7 @@ MiniUtilsTool.prototype.mathematics = function(params) {
 
       if (type === "integer") {
         var min = Math.ceil(Number(params.min || 0))
-        var max = Math.floor(Number(params.max || 100))
+        var max = Math.floor(Number(isDef(params.max) ? params.max : 100))
         if (min > max) return "[ERROR] min must be <= max"
         var range = max - min + 1
         var value = min + rng.nextInt(range)
@@ -2445,7 +2451,7 @@ MiniUtilsTool.prototype.mathematics = function(params) {
 
       } else if (type === "sequence") {
         var start = Math.ceil(Number(params.start || 0))
-        var end = Math.floor(Number(params.end || 10))
+        var end = Math.floor(Number(isDef(params.end) ? params.end : 10))
         if (start > end) return "[ERROR] start must be <= end"
 
         var seq = []
@@ -2483,7 +2489,7 @@ MiniUtilsTool.prototype.mathematics = function(params) {
 
       } else if (type === "boolean") {
         var count = Math.max(1, Math.floor(Number(params.count || 1)))
-        var prob = Number(params.probabilityTrue || 0.5)
+        var prob = Number(isDef(params.probabilityTrue) ? params.probabilityTrue : 0.5)
         if (prob < 0 || prob > 1) return "[ERROR] probabilityTrue must be 0-1"
 
         var values = []
@@ -4372,17 +4378,17 @@ MiniUtilsTool._metadataByFn = (function() {
           metrics      : { type: "array", items: { type: "string" }, description: "Specific metrics for statistics: mean, median, min, max, sum, count." },
           value        : { type: "number", description: "Value to convert for convert-unit operation." },
           fromUnit     : { type: "string", description: "Source unit for conversion (m, km, cm, mm, mi, ft, in, kg, g, lb, oz, l, ml, gal)." },
-          toUnit       : { type: "string", description: "Target unit for conversion." },
+          toUnit       : { type: "string", description: "Target unit in the same dimension as fromUnit: length, mass, or volume. Cross-dimension conversions return an error." },
           type         : { type: "string", description: "Random type: integer, sequence, choice, boolean, hex." },
           min          : { type: "number", description: "Minimum value for random integer." },
-          max          : { type: "number", description: "Maximum value for random integer or sequence end." },
+          max          : { type: "number", description: "Inclusive maximum for random integer (default 100; zero is valid)." },
           start        : { type: "number", description: "Start value for random sequence." },
-          end          : { type: "number", description: "End value for random sequence." },
+          end          : { type: "number", description: "Inclusive end for random sequence (default 10; zero is valid)." },
           count        : { type: "number", description: "Count of items to generate or select." },
           items        : { type: "array", description: "Array of items for random choice." },
           unique       : { type: "boolean", description: "Ensure unique choices when true." },
           seed         : { type: "number", description: "Seed for deterministic random generation." },
-          probabilityTrue: { type: "number", description: "Probability (0-1) for random boolean generation." },
+          probabilityTrue: { type: "number", description: "Probability (0-1, default 0.5) for random boolean generation; 0 always returns false and 1 always returns true." },
           length       : { type: "number", description: "Length of random hex string." },
           uppercase    : { type: "boolean", description: "Use uppercase for hex string." }
         },
