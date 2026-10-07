@@ -122,7 +122,7 @@ function functionSource(name) {
 // Use the real browser converter and rendering pipeline for long activity lists.
 const rendering = vm.createContext({ showdown });
 for (const name of ['createMarkdownConverter', 'escapeHtml', 'preprocessChartBlocks',
-  'preprocessSvgBlocks', 'renderConversationMarkdown']) {
+  'preprocessSvgBlocks', 'postprocessChartBlocks', 'postprocessSvgBlocks', 'renderConversationMarkdown']) {
   vm.runInContext(functionSource(name), rendering);
 }
 let mathOptions;
@@ -160,6 +160,28 @@ const renderedFollowup = rendering.renderConversationMarkdown(twoAnswers.content
 assert.equal((renderedFollowup.match(/class="answer-activity"/g) || []).length, 2);
 assert.match(renderedFollowup, /<strong>useful<\/strong>/);
 assert.ok(renderedFollowup.includes('Second answer'));
+
+// A later activity section must not clear diagrams from an earlier answer.
+const firstSvg = '<svg xmlns="http://www.w3.org/2000/svg"><text>First graphic</text></svg>';
+const secondSvg = '<svg xmlns="http://www.w3.org/2000/svg"><text>Second graphic</text></svg>';
+const chart = '{"type":"bar","data":{"labels":["First"],"datasets":[]}}';
+const firstDiagramEvents = [
+  { event: '💭', message: 'Generating diagrams' },
+  { event: 'final', message: '```svg\n' + firstSvg + '\n```\n\n```chart\n' + chart + '\n```' }
+];
+for (const laterEvents of [[],
+  [{ event: '👤', message: 'Another prompt' }, { event: '💭', message: 'Thinking' }],
+  [{ event: '👤', message: 'Another prompt' }, { event: '💭', message: 'Thinking' },
+    { event: 'final', message: '```svg\n' + secondSvg + '\n```' }]
+]) {
+  const html = rendering.renderConversationMarkdown(result([...firstDiagramEvents, ...laterEvents]).content);
+  assert.ok(html.includes('<pre><code class="language-svg">' + rendering.escapeHtml(firstSvg)));
+  assert.ok(html.includes('<pre><code class="language-chart">' + rendering.escapeHtml(chart)));
+  assert.doesNotMatch(html, /(?:svg|chart)-placeholder/);
+  if (laterEvents.some(event => event.event === 'final')) {
+    assert.ok(html.includes('<pre><code class="language-svg">' + rendering.escapeHtml(secondSvg)));
+  }
+}
 
 let panels = [];
 const context = vm.createContext({

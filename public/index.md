@@ -3273,9 +3273,11 @@
         // Activity is already escaped HTML, not Markdown. Showdown hashes its spans
         // and leaves internal tokens visible once its unhashing limit is reached.
         // Keep panels out of both Markdown conversion and diagram preprocessing.
+        // Restore each part before the next one resets the diagram stores.
         return (content || '').split(/(<details class="answer-activity"[\s\S]*?<\/details>)/g)
             .map((part, index) => index % 2 ? part :
-                converter.makeHtml(preprocessChartBlocks(preprocessSvgBlocks(part))))
+                postprocessSvgBlocks(postprocessChartBlocks(
+                    converter.makeHtml(preprocessChartBlocks(preprocessSvgBlocks(part))))))
             .join('');
     }
 
