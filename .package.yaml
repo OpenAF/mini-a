@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20261006'
+version: '20261007'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -210,7 +210,7 @@ filesHash:
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   METRICS.md: d69659b54963e9437929d15bdd2038ef48e50ae4
   README.md: b39709a31fe79321f5e5c4df542caff15a6c696e
-  USAGE.md: df7847abc95ecaa785abf77d22b7ce2a91df1dbd
+  USAGE.md: a5038e0d3420ec954ec6fe04742e82b5250862fd
   docs/ABSORB.md: 31bbe919b680e78b369772608d10dda78d1e015e
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/AGENT-PLUGINS.md: af8f692ac4bc690ac9df180e86bb1a1307a5aae5
@@ -286,7 +286,7 @@ filesHash:
   mcps/mcp-workiq.yaml: 10709d2dccf1032ac4826e8cb512cfb88bf4d14a
   mini-a-absorb.js: 0f9cc681e089d16c282c029879f98f3da2995954
   mini-a-absorb.yaml: af9f87b3ddb0d4f13c7ed23cd6ab57fd258c2309
-  mini-a-advanced.js: 6a24a491cf599b4103628bb40848db7129324771
+  mini-a-advanced.js: cf3264f9ddc5f4176d5c4567a86a0b4d2356eb12
   mini-a-capabilities.js: 04d7a4564d782981bf0b97a65fbfc563a4b4d60c
   mini-a-common.js: e280ff62efe7460bf6cb2c72ce955f18f783d7cf
   mini-a-con.js: 8953d1720b12352191542c1a002b7fece0f4e0da
@@ -311,7 +311,7 @@ filesHash:
   mini-a-response.js: 14d6bbe7dfd7cb9438624954638c8b5148b5b954
   mini-a-router.js: 381d0f2d34864fdca03d5d4f528fa0f827bbed48
   mini-a-sandbox.js: 2844520cfb6595675d7773b29af0943fcc6ed6dd
-  mini-a-session.js: 946e5eaea54403d589365ad216ff5ed469ddfc50
+  mini-a-session.js: 5878c3e217cb4ed8b860d3e09fc0923424d1296a
   mini-a-skills.js: 23629e37fbd10e8ca7377c911c60974a8d256b85
   mini-a-subtask.js: 1754df33071fa1e2880830ef618144a0ea3029f8
   mini-a-tool-selection.js: 0e3d8ecf2182833daef108c5e8fed7cf2271590c
@@ -330,12 +330,12 @@ filesHash:
   mini-a.js: 861a3b5ec6071f5859d79a397f3bf64798fc54b4
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 73eb889c5406c5fc540ee811dea400b6797365e3
-  public/advanced.css: 1173f68f5fd0f96935b0520574372bcde10cd1df
-  public/advanced.js: e051d7681b65e2c0969cfdd58e510d30ef46db01
+  public/advanced.css: 0944b9646bd04393565444572053935285048543
+  public/advanced.js: 051253b3793fba77a5587e06f30e9afd8115e09d
   public/apple-touch-icon.png: 5e22ed6b303b377787779423b97c22f7b20b56ed
   public/data-editor.js: 1433293e0ed9f6486f14b6a91ed88684525a79b3
   public/favicon.ico: 7d62af53ff8c43ba32d022107153e6877567ba75
-  public/index.md: 2ab519071700732826ca91552d0b7679eea6fb8e
+  public/index.md: 92dbde9f7121de411d692b759860547d6ec59dba
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   utils/graphStats.yaml: ce32169c30db09d0e74dfffdbba7d70c27db24bc
   utils/indexStats.yaml: 7fc4b114655146b3b3f94813949867485917bacd
