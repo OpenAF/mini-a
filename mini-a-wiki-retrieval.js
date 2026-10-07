@@ -1381,6 +1381,20 @@ MiniAWikiRetrievalV2.prototype.reclaimSharedBlocks = function(options) {
 MiniAWikiRetrievalV2.prototype._publicationCheckpoint = function(step, dir) {
   if (isFunction(this._publicationFault)) this._publicationFault(step, dir)
 }
+// Called only while holding publish.lock. A generation without a manifest
+// cannot have been served. Complete old generations still require offline
+// reclamation because another process may hold a reader for them.
+MiniAWikiRetrievalV2.prototype._removeAbandonedStaging = function() {
+  var retained = this._retentionClosure(), children = new java.io.File(this.root).listFiles() || [], removed = 0
+  for (var i = 0; i < children.length; i++) {
+    var child = children[i], name = String(child.getName())
+    if (/^[a-f0-9-]{36}$/.test(name) && !retained[name] && child.isDirectory() &&
+        !java.nio.file.Files.isSymbolicLink(child.toPath()) && !io.fileExists(String(child.getPath()) + "/manifest.json")) {
+      io.rm(String(child.getPath())); removed++
+    }
+  }
+  return removed
+}
 MiniAWikiRetrievalV2.prototype._newWriter = function(directory, analyzer) {
   var L = Packages.org.apache.lucene
   return new L.index.IndexWriter(directory, new L.index.IndexWriterConfig(analyzer))
@@ -1438,7 +1452,14 @@ MiniAWikiRetrievalV2.prototype.build = function(changes, options) {
     finishStage("preparation")
     if (isArray(changes)) {
       old = this.acquire()
-      if(Number(old.manifest.catalogue.depth)>=32)throw new Error("compaction-required")
+      // Bound the parent chain without leaving successfully written source
+      // pages permanently unsearchable after the 32nd incremental update.
+      if (Number(old.manifest.catalogue.depth) >= 32) {
+        changes = __
+        work.automaticCompaction = true
+      }
+    }
+    if (isArray(changes)) {
       transaction = new RoutedCatalogueTransaction(this,old,generation,work)
       finishStage("catalogueFork")
       old.manifest.files.forEach(function(file) {
@@ -1723,9 +1744,13 @@ MiniAWikiRetrievalV2.prototype.build = function(changes, options) {
     try { if (directory) directory.close() } catch(ignoreD) {}
     try { if (analyzer) this._closeAnalyzer(analyzer) } catch(ignoreA) {}
     try { if (old) this.release(old) } catch(ignoreO) {}
+    // Only our own unpublished directory is safe to remove without tracking
+    // readers in other processes. Post-rename failures are publications too.
+    if (!activated && fileLock) try { io.rm(dir) } catch(ignoreFailedStaging) {}
+    if (activated && !isArray(changes) && fileLock) try { work.abandonedGenerationsRemoved = this._removeAbandonedStaging() } catch(ignoreAbandonedStaging) {}
     try { if (fileLock) fileLock.release(); if (channel) channel.close() } catch(ignoreL) {}
-    // Full reindex is an explicit maintenance boundary. Incremental updates
-    // must not pay for full-catalogue reachability scans in this finally block.
+    // Full rebuilds (including the depth-limit rebuild) are maintenance
+    // boundaries. Ordinary deltas must not pay for full reachability scans.
     // Deferred residue remains until full reindex or explicit reclamation.
     // The sweeper reacquires the publication lock and preserves recovery roots.
     if (cleanupAfterActivation) try { this.reclaimSharedBlocks() } catch(ignoreCleanup) {}

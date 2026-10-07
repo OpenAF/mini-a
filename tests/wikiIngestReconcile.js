@@ -226,7 +226,7 @@
     try {
       global.__miniAWikiKnowledge.install(wm)
       assert(wm._knowledgeJournalPending(), true, 'derivative guard sees all journals')
-      var pending = wm._retrievalV2._pending()
+      var pending = (wm._retrievalV2 || wm._legacyRetrievalV2)._pending()
       assert(pending['docs/a.md'], true, 'original pending page suppressed')
       assert(pending['other/a.md'], true, 'independent pending page suppressed')
     } finally { wm.close() }
@@ -335,6 +335,28 @@
     } finally { wm.close() }
     assert(f.run(options).status, 'noop', 'recovered ingest is idempotent')
   }) }
+  exports.testBundleExportRecovery = function() { [false, true].forEach(function(explicit) { fixture(function(f) {
+    var wm = new MiniAWikiManager({backend:'fs', root:f.wiki, access:'rw', wikiretrievalv2:true}, function() {})
+    try {
+      assert(wm.reindex().ok, true, 'publish initial serving generation')
+      var engine = wm._retrievalV2, original = engine.exportBundle
+      engine.config.bundlePath = f.wiki + '/serving.zip'
+      engine.exportBundle = function() { return {ok:false, error:'injected-export-failure'} }
+      f.write('a.md', '# A\n\nexportrecoveryneedle')
+      var runner = f.runner({wikimanager:wm}), failed = runner.run()
+      assert(failed.ok, false, 'bundle export failure must fail ingestion')
+      var entries = runner.manageRecovery('list').recoveries
+      assert(entries.length, 1, 'export failure keeps a retryable journal')
+      var generation = io.readFileString(engine.root + '/current.json')
+      engine.exportBundle = original
+      var recovered = explicit ? runner.manageRecovery('resume', entries[0].id) : runner.run()
+      assert(recovered.ok, true, stringify(recovered))
+      assert(io.fileExists(engine.config.bundlePath), true, 'recovery publishes the configured bundle')
+      assert(io.readFileString(engine.root + '/current.json'), generation, 'export retry does not rebuild committed pages')
+      assert(runner.manageRecovery('list').recoveries.length, 0, 'successful export clears journal')
+      assert(wm.agenticSearch('exportrecoveryneedle').results.length, 1, 'local search remains available')
+    } finally { wm.close() }
+  }) }) }
   exports.testFinalizeRecovery = function() { fixture(function(f) {
     var runner = f.runner(); f.write('a.md', '# A\n\nSource'); runner._finalize = function() { return { ok: false, reindexed: false } }
     var r = runner.run(); assert(r.ok, false, 'finalize failure partial'); assert(r.status, 'partial', 'partial result'); assert(io.fileExists(f.wiki + '/.mini-a-wiki-ingest/journal.json'), true, 'pending journal retained')

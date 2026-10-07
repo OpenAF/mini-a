@@ -2,6 +2,39 @@
   load("mini-a-common.js"); load("mini-a-wiki.js")
   var temporary = function() { var p = java.io.File.createTempFile("wiki-v2-test-", "").getCanonicalPath(); io.rm(p); io.mkdir(p); return p }
   var make = function(root, extra) { return new MiniAWikiManager(merge({ backend: "fs", root: root, access: "rw", wikiretrievalv2: true, wikiretrievalconfig: { passageChars: 256 } }, extra || {}), function() {}) }
+  exports.testAutomaticPublicationMaintenance = function() {
+    var dir = temporary(), wm, pin, reader
+    try {
+      wm = make(dir)
+      io.writeFileString(dir + "/a.md", "# A\noriginalneedle")
+      io.writeFileString(dir + "/b.md", "# B\nunchangedneedle")
+      ow.test.assert(wm.reindex().ok, true, "initial index builds")
+      var engine = wm._retrievalV2, orphan = engine.root + "/" + String(java.util.UUID.randomUUID())
+      pin = engine.acquire()
+      io.mkdir(orphan); io.writeFileString(orphan + "/partial", "abandoned staging")
+      // Exercise the exact batching path used by ingestion finalization.
+      wm._servingBatchChanges = { "a.md": true }
+      for (var i = 1; i <= 33; i++) {
+        io.writeFileString(dir + "/a.md", "# A\nupdatedneedle" + i)
+        var built = wm.reindex()
+        ow.test.assert(built.ok, true, "batch publication succeeds at depth " + i)
+      }
+      ow.test.assert(built.updateWork.automaticCompaction, true, "depth limit triggers a full rebuild")
+      ow.test.assert(io.fileExists(orphan), false, "automatic rebuild removes incomplete abandoned staging")
+      ow.test.assert(io.fileExists(pin.dir + "/manifest.json"), true, "pinned generation survives maintenance")
+      wm._servingBatchChanges = __
+      wm.write("a.md", {title:"A"}, "# A\nlatestsearchneedle")
+      ow.test.assert(wm._lastServingUpdate.ok, true, "ordinary updates continue after compaction")
+      reader = make(dir, {access:"ro"})
+      ow.test.assert(reader.agenticSearch("latestsearchneedle").results.length, 1, "fresh search sees subsequent edits")
+      ow.test.assert(reader.agenticSearch("unchangedneedle").results.length, 1, "full rebuild preserves unmodified pages")
+      var fallback = engine.acquire(__, true)
+      try { ow.test.assert(engine.lookupPage(fallback, "b.md").path, "b.md", "rollback stays readable") } finally { engine.release(fallback) }
+      var snippet = wm._snippetFromContent("\n\nRunning services\nDetails", /runs/, 1)
+      ow.test.assert(snippet.line, 3, "analyzed-query fallback reports the actual snippet line")
+      ow.test.assert(snippet.contextAfter[0], "Details", "fallback snippets include requested context")
+    } finally { if(reader)reader.close(); if(pin)wm._retrievalV2.release(pin); if(wm)wm.close(); io.rm(dir) }
+  }
   exports.testControlPageReads = function() {
     var dir=temporary(), writer, reader, mounted
     var raw="# Rules\ncontrolpageneedle\n## Contributions\nRead rules before writing knowledge.\n"
@@ -1868,11 +1901,13 @@
       pin=wm._retrievalV2.acquire()
       var pointer=io.readFileString(wm._retrievalV2.root+"/current.json"), manifest=clone(pin.manifest)
       ;["_reuseFile","_analyzer","_files","_validatePublication","_openSnapshot","_syncGeneration","_atomic"].forEach(function(stage){
+        var before = io.listFiles(wm._retrievalV2.root).files.filter(function(f) { return f.isDirectory }).length
         var original=wm._retrievalV2[stage]
         wm._retrievalV2[stage]=function(){throw new Error("injected failure at "+stage)}
         var failed=wm._retrievalV2.build(["supported.md"])
         wm._retrievalV2[stage]=original
         ow.test.assert(failed.ok,false,"failure reported at "+stage)
+        ow.test.assert(io.listFiles(wm._retrievalV2.root).files.filter(function(f) { return f.isDirectory }).length, before, "failed staging is removed at " + stage)
         ow.test.assert(io.readFileString(wm._retrievalV2.root+"/current.json"),pointer,"active pointer preserved at "+stage)
         var restarted=make(dir,{access:"ro"})
         try {ow.test.assert(restarted.retrieve("recoveryparameter").evidence.length,1,"fresh manager serves old valid generation after "+stage)} finally {restarted.close()}
@@ -2405,12 +2440,11 @@
         var update=wm._retrievalV2.build(["depth.md"])
         ow.test.assert(update.ok,true,"bounded routed update succeeds before the lineage limit: "+i)
       }
-      var pointer=io.readFileString(wm._retrievalV2.root+"/current.json"),blocked=wm._retrievalV2.build(["depth.md"])
-      ow.test.assert(blocked.error,"compaction-required","lineage limit requires explicit compaction instead of hiding corpus work in a small update")
-      ow.test.assert(io.readFileString(wm._retrievalV2.root+"/current.json"),pointer,"compaction-required leaves the active pointer unchanged")
-      ow.test.assert(wm.reindex().ok,true,"authorized full reindex performs explicit compaction")
+      var compacted=wm._retrievalV2.build(["depth.md"])
+      ow.test.assert(compacted.ok,true,"lineage limit automatically rebuilds the serving base")
+      ow.test.assert(compacted.updateWork.automaticCompaction,true,"publication exposes the full rebuild cost")
       var pin=wm._retrievalV2.acquire()
-      try{ow.test.assert(pin.manifest.catalogue.depth,0,"explicit compaction publishes a new routed base")}finally{wm._retrievalV2.release(pin)}
+      try{ow.test.assert(pin.manifest.catalogue.depth,0,"automatic compaction publishes a new routed base")}finally{wm._retrievalV2.release(pin)}
     }finally{if(wm)wm.close();io.rm(dir)}
   }
   exports.testSharedBlockStoreReclamationClosure = function() {

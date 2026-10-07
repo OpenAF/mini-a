@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const page = fs.readFileSync('public/index.md', 'utf8');
 const previewSource = page.slice(page.indexOf('    function addPreview() {'), page.indexOf('    function getPlannerPreviewText() {'));
-const trackSource = page.slice(page.indexOf('            trackRun: data => {') + '            trackRun: '.length, page.indexOf('            newConversation: handleClearClick')).trim().replace(/,$/, '');
+const trackSource = 'data => {' + page.match(/trackRun: data => \{([\s\S]*?)\n            \},/)[1] + '\n}';
 let preview = null;
 const context = vm.createContext({
   isProcessing: false, PREVIEW_ID:'waiting', currentSessionUuid:'session', streamEnabled:false,

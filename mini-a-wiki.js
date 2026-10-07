@@ -4229,8 +4229,14 @@ MiniAWikiManager.prototype._snippetFromContent = function(content, pattern, cont
     }
   }
   // matched by the analyzer but not by the literal pattern (stemming, frontmatter, etc.)
-  var firstBody = lines.filter(function(l) { return String(l).trim().length > 0 })[0] || ""
-  empty.snippet = String(firstBody).substring(0, 180).trim()
+  for (var first = 0; first < lines.length; first++) if (String(lines[first]).trim().length > 0) {
+    empty.line = first + 1
+    empty.snippet = String(lines[first]).substring(0, 180).trim()
+    var ctx = isNumber(contextN) && contextN > 0 ? contextN : 0
+    empty.contextBefore = ctx > 0 ? lines.slice(Math.max(0, first - ctx), first) : []
+    empty.contextAfter = ctx > 0 ? lines.slice(first + 1, Math.min(lines.length, first + 1 + ctx)) : []
+    break
+  }
   return empty
 }
 

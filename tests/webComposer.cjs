@@ -20,7 +20,7 @@ const context = vm.createContext({
   document:{getElementById:id=>elements[id],createComment:()=>element('anchor'),body:{style:{overflow:'auto'}}},
   window:{innerWidth:390,innerHeight:700,addEventListener(){},confirm:()=>confirmed,
     visualViewport:{width:390,height:400,offsetTop:15,offsetLeft:0,addEventListener(){}}},
-  promptInput:input, Event:class {}, autoResizeTextarea:()=>resized++, handleSubmit:()=>submissions++,
+  promptInput:input, composerDialog:elements.composerDialog, Event:class {}, autoResizeTextarea:()=>resized++, handleSubmit:()=>submissions++,
 });
 vm.runInContext(page.slice(page.indexOf('    // Shared composer:'),page.indexOf('    function autoResizeTextarea()')),context);
 context.setComposerExpanded(true);

@@ -50,7 +50,8 @@ async function browser(advanced, response) {
     clearAttachments:()=>{cleared++;},startProcessing:()=>{started++;cleared++;},startPolling(){},collectBrowserContext:()=>({}),
     buildOptimisticUserPromptBlock:value=>{optimistic=value;return '<user/>';},renderRawContent:async()=>{},forceRenderChartBlocks(){},resolveAppUrl:x=>x,
     fetch:async(url,opts)=>{sent=JSON.parse(opts.body);return {ok:true,json:async()=>response};},
-    updateResultsContent:async message=>{warning=message;},escapeHtml:x=>x
+    updateResultsContent:async message=>{warning=message;},escapeHtml:x=>x,
+    composerNotice(){},setComposerExpanded(){},autoResizeTextarea(){}
   });
   vm.runInContext(fn('sanitizeAttachmentName'),b);vm.runInContext(fn('buildPromptWithAttachments'),b);vm.runInContext(fn('buildAttachmentDisplayPrompt'),b);
   vm.runInContext(page.slice(submitStart,submitEnd),b);

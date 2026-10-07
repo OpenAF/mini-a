@@ -1,6 +1,9 @@
 include:
 - oJobTest.yaml
 jobs:
+- name: MiniA Wiki V2::AutomaticPublicationMaintenance
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testAutomaticPublicationMaintenance
 - name: MiniA Wiki V2::ControlPageReads
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testControlPageReads
@@ -209,6 +212,7 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testFederatedRetryBudget
 todo:
+- MiniA Wiki V2::AutomaticPublicationMaintenance
 - MiniA Wiki V2::ControlPageReads
 - MiniA Wiki V2::CanonicalManifestRestart
 - MiniA Wiki V2::OverlappingStructuralSupport

@@ -2606,6 +2606,8 @@ function MiniAInteractiveSession(args, adapter) {
     } catch (completionError) { }
   }
 
+  // Saved browser overrides are startup arguments, not inherited reset defaults.
+  var parameterDefaults = resetOptions()
   var extraCLIArgs = applyArgumentDefaults(args)
 
   function getConversationPath() {
@@ -7645,6 +7647,7 @@ function MiniAInteractiveSession(args, adapter) {
       commandView: commandView,
       subtasks: function() { return isObject(activeAgent) && isObject(activeAgent._subtaskManager) ? activeAgent._subtaskManager.list() : [] },
       definitions: parameterDefinitions,
+      defaultOptions: function() { return merge({}, parameterDefaults) },
       commands: function() { return getAllSlashCommandNames() },
       completions: function() { return { wiki: getWikiSubcommandCompletions(), set: sessionParameterNames, show: sessionParameterNames, toggle: sessionParameterNames.filter(function(k) { return parameterDefinitions[k].type === "boolean" }), unset: sessionParameterNames } },
       agent: function() { return activeAgent },
@@ -7680,7 +7683,7 @@ function MiniAInteractiveSession(args, adapter) {
         names.forEach(function(key) {
           invalidateWikiOption(key)
           if (isDef(inherited[key])) sessionOptions[key] = inherited[key]
-          else if (Object.prototype.hasOwnProperty.call(parameterDefinitions[key], "default")) sessionOptions[key] = parameterDefinitions[key].default
+          else if (Object.prototype.hasOwnProperty.call(parameterDefaults, key)) sessionOptions[key] = parameterDefaults[key]
           else delete sessionOptions[key]
           delete sessionExplicitOptions[key]
         })

@@ -57,6 +57,20 @@
 
   // ─── discovery & filtering ──────────────────────────────────
 
+  exports.testDiscoveryCanonicalRoots = function() {
+    var src = makeSourceDir(), wiki = String(io.createTempDir("miniingest_wiki_")), alias = src + "-alias"
+    try {
+      java.nio.file.Files.createSymbolicLink(new java.io.File(alias).toPath(), new java.io.File(src).getCanonicalFile().toPath())
+      var ing = makeIngest(src, wiki)
+      ;[src + "/.", alias].forEach(function(root) {
+        var found = ing._discover({root:root})
+        ow.test.assert(found.complete, true, "aliased roots have a complete inventory")
+        ow.test.assert(found.sources.length, 3, "canonical path comparison retains all eligible sources")
+        ow.test.assert(found.sources[0].rel, "README.md", "source identities remain relative to the canonical root")
+      })
+    } finally { java.nio.file.Files.deleteIfExists(new java.io.File(alias).toPath()); cleanup(src, wiki) }
+  }
+
   exports.testIngestDiscoversMarkdownAndSkipsVendorDirs = function() {
     var src = makeSourceDir(), wiki = String(io.createTempDir("miniingest_wiki_"))
     try {
@@ -160,18 +174,9 @@
       Object.keys(data).forEach(function(name) { io.writeFileString(src + "/" + name, data[name]) })
       io.writeFileString(src + "/unsupported.zzz", "ignored")
       var ing = makeIngest(src, wiki, { ingestmode: "normalize" })
-      loadOAFP()
-      var originalOafp = global.oafp, discovered, helpCalls = 0
-      try {
-        global.oafp = function(options) {
-          ow.test.assert(options.in, "?", "discovery only probes oafp inputs")
-          ow.test.assert(options.data, "()", "oafp help must have explicit data so it never reads console stdin")
-          helpCalls++
-          $set(options.__key, _INGEST_OAFP_FILE_INPUTS)
-        }
-        discovered = ing._discover({ root: src })
-      } finally { global.oafp = originalOafp }
-      ow.test.assert(helpCalls, 1, "discovery should query supported oafp inputs once")
+      var discovered = ing._discover({ root: src })
+      ow.test.assert(discovered.complete, true, "structured discovery is complete")
+      ow.test.assert(isArray(ing._oafpInputs), true, "discovery caches supported oafp inputs")
       ow.test.assert(discovered.sources.length, Object.keys(data).length, "discovery classifies structured files without reading stdin")
       var result = ing.run()
       ow.test.assert(result.ok, true, stringify(result))

@@ -132,6 +132,9 @@ try {
   check(advanced.events(first,first.sequence-1,1)[0].value==='Unicode café 漢字','UTF-8 journal')
   check(advanced.safe(42,'absorbmaxtokens')===42,'token budgets remain visible')
   check(advanced.safe({parameter:'secpass',value:'private'}).value==='[redacted]','setting table credentials redacted')
+  check(advanced.safe('/set model {"type":"openai","key":"JSON-CREDENTIAL"}').indexOf('JSON-CREDENTIAL') < 0, 'quoted JSON credentials in command text are redacted')
+  check(advanced.safe("/set model (type: openai, 'key': 'SLON-CREDENTIAL')").indexOf('SLON-CREDENTIAL') < 0, 'quoted SLON credentials in command text are redacted')
+  check(advanced.safe('/set model ' + stringify({key:'Escaped-"-CREDENTIAL'}, __, '')).indexOf('CREDENTIAL') < 0, 'escaped quotes cannot leave credential suffixes in command text')
   advanced.request({uuid:'first',action:'settings',values:{model:'{"type":"openai","model":"changed","key":"[redacted]"}'},requestId:'masked-1'});jobs.shift()()
   var model=af.fromJSSLON(first.runtime.options().model)
   check(model.model==='changed' && model.key==='TOP-SECRET','masked editing preserves credentials')
@@ -298,5 +301,33 @@ try {
   waitInput(function(){return inputDone})
   check(!inputState.pending && String(inputResult).indexOf('cancelled')>=0,'agent stop releases pending input independently of Advanced stop route')
   inputState.runtime.dispose()
+
+  // Resume a saved session before resetting: restored overrides must never become
+  // the inherited values shown by the prompt editor or used by its reset action.
+  var restoreArgs = {homedir:testRoot,webadvancedpath:testRoot + '/restore',usehistory:false}
+  var restore = new MiniAAdvanced(restoreArgs)
+  restore.schedule = function(fn) { jobs.push(fn); return {catch:function(){}} }
+  var promptNames = ['knowledge','rules','goalprefix','youare','chatyouare'], promptValues = {}
+  promptNames.forEach(function(key) { promptValues[key] = 'Saved override for ' + key })
+  restore.request({uuid:'prompt-reload',action:'settings',values:promptValues,requestId:'saved-prompts'});jobs.shift()()
+  restore.get('prompt-reload').runtime.dispose()
+  restore = new MiniAAdvanced(restoreArgs)
+  restore.schedule = function(fn) { jobs.push(fn); return {catch:function(){}} }
+  var resumed = restore.get('prompt-reload')
+  var resumedSnapshot = restore.snapshot(resumed,0)
+  promptNames.forEach(function(key) {
+    check(resumed.runtime.options()[key] === promptValues[key], key + ' override survives resume')
+    check(isUnDef(resumedSnapshot.settings.filter(function(setting) { return setting.name === key })[0].inheritedValue), key + ' inherited value excludes saved override')
+  })
+  restore.request({uuid:'prompt-reload',action:'settings',values:{},reset:promptNames,requestId:'reset-resumed-prompts'});jobs.shift()()
+  promptNames.forEach(function(key) {
+    check(isUnDef(resumed.runtime.options()[key]), key + ' resets to unset after resume')
+    check(!Object.prototype.hasOwnProperty.call(resumed.overrides,key), key + ' reset removes saved override')
+  })
+  resumed.runtime.dispose()
+  var resetReload = new MiniAAdvanced(restoreArgs).get('prompt-reload')
+  promptNames.forEach(function(key) { check(isUnDef(resetReload.runtime.options()[key]), key + ' remains unset on next resume') })
+  resetReload.runtime.dispose()
+
   print('Advanced OpenAF integration checks passed')
 } catch(e) { printErr(e); exit(1) } finally { __gHDir = originalHome; io.rm(testRoot) }

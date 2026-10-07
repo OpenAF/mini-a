@@ -72,7 +72,7 @@ MiniAAdvanced.prototype.safe = function(value, key, preserveText) {
       } catch(ignore) {}
     }
     value = value.replace(/(\/set\s+(?:\w*(?:secret|password|accesskey|apikey|webtoken|workerregtoken|secpass|falkorpass))\s*(?:=|\s)\s*)[\s\S]+/ig, "$1[redacted]")
-    return value.replace(/((?:key|api[_-]?key|token|password|secret|authorization|secpass|falkorpass)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,)}]+)/ig, "$1[redacted]")
+    return value.replace(/(["']?(?:key|api[_-]?key|token|password|secret|authorization|secpass|falkorpass)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,)}]+)/ig, "$1[redacted]")
   }
   return value
 }
@@ -84,7 +84,9 @@ MiniAAdvanced.prototype.mergeOptions = function(base, override) {
   ;["model", "modellc", "modelval"].forEach(function(key) {
     if (!isDef(override[key])) return
     try {
-      var previous = isString(base[key]) ? af.fromJSSLON(base[key]) : base[key]
+      var modelEnv = { model: "OAF_MODEL", modellc: "OAF_LC_MODEL", modelval: "OAF_VAL_MODEL" }
+      var previousConfig = isDef(base[key]) ? base[key] : getEnv(modelEnv[key])
+      var previous = isString(previousConfig) ? af.fromJSSLON(previousConfig) : previousConfig
       var next = isString(override[key]) ? af.fromJSSLON(override[key]) : override[key]
       if (isMap(previous) && isMap(next) && previous.type === next.type && previous.url === next.url) out[key] = stringify(merge(previous, next), __, "")
     } catch(ignore) {}
@@ -360,7 +362,7 @@ MiniAAdvanced.prototype.validateInput = function(fields, answers) {
 }
 
 MiniAAdvanced.prototype.snapshot = function(state, after) {
-  var definitions = state.runtime.definitions, options = state.runtime.options(), inherited = this.inheritedOptions(), self = this
+  var definitions = state.runtime.definitions, defaults = state.runtime.defaultOptions(), options = state.runtime.options(), inherited = this.inheritedOptions(), self = this
   return {
     uuid: state.uuid, sequence: state.sequence, busy: !!global.__busy[state.uuid], closed: state.closed,
     operation: state.operation, operationView: state.operationView, kind: state.kind, pending: state.pending ? this.safe(state.pending) : null,
@@ -370,7 +372,7 @@ MiniAAdvanced.prototype.snapshot = function(state, after) {
       var value = options[key]
       var modelEnv = { model: "OAF_MODEL", modellc: "OAF_LC_MODEL", modelval: "OAF_VAL_MODEL" }
       if (isUnDef(value) && modelEnv[key]) value = getEnv(modelEnv[key])
-      return { name: key, type: def.type, dataEditor: def.dataEditor, description: def.description, value: self.safe(value, key, self.isPromptOption(key)), defaultValue: self.safe(def.default, key), inheritedValue: self.safe(isDef(inherited[key]) ? inherited[key] : def.default, key, self.isPromptOption(key)), source: Object.prototype.hasOwnProperty.call(state.overrides, key) ? "session" : isUnDef(options[key]) && modelEnv[key] && isDef(value) ? modelEnv[key] : "server",
+      return { name: key, type: def.type, dataEditor: def.dataEditor, description: def.description, value: self.safe(value, key, self.isPromptOption(key)), defaultValue: self.safe(def.default, key), inheritedValue: self.safe(isDef(inherited[key]) ? inherited[key] : defaults[key], key, self.isPromptOption(key)), source: Object.prototype.hasOwnProperty.call(state.overrides, key) ? "session" : isUnDef(options[key]) && modelEnv[key] && isDef(value) ? modelEnv[key] : "server",
         readOnly: self.isServerOption(key) }
     }), presets: Object.keys(this.presets.presets), defaultPreset: this.presets.defaultPreset
   }

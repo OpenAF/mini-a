@@ -452,10 +452,17 @@ per-file metadata/force operations, Lucene merge costs or fallback copying.
 `wikiretrievalconfig="(sharedBlockStore: true)"` retains revision blocks in an
 opt-in local content-addressed store. Reclamation marks current, previous and
 pinned catalogue lineage under the publication lock and re-marks before unlink.
-Reclamation runs after an explicit full reindex, or an explicit maintenance call
-to the serving engine's `reclaimSharedBlocks()`. Ordinary incremental writes never
-run the full reachability sweep. Unreachable blocks and abandoned generations
-may therefore consume disk until maintenance; read-only readers do not reclaim.
+Reclamation runs after a full reindex, or an explicit maintenance call
+to the serving engine's `reclaimSharedBlocks()`. At a catalogue depth of 32,
+the next update automatically publishes a fresh base and reports
+`updateWork.automaticCompaction=true`; that update pays the full rebuild cost.
+This also applies to ingestion finalization, so repeated ingestion and edits
+continue to become searchable. Other incremental writes do not run the full sweep.
+Failed publications remove their own unpublished staging directory. Full builds
+also remove abandoned UUID staging directories that have no manifest, retaining
+current, previous and locally pinned catalogue lineages. Complete older indexes
+remain subject to offline compaction when shared-block reclamation is disabled;
+other processes' readers are not tracked. Read-only readers never reclaim.
 Bundles materialize referenced blocks into a self-contained schema-3 base.
 Incremental publication uses affected-key routed catalogue deltas; unchanged
 bindings retain their validated immutable owner generation. Publication validates

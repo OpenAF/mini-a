@@ -8,7 +8,7 @@ const stopStart = page.indexOf('    function stopProcessing(');
 const pollStart = page.indexOf('    async function pollOnce(');
 const stopSource = page.slice(stopStart, page.indexOf('    /* ========== API FUNCTIONS', stopStart));
 const pollSource = page.slice(pollStart, page.indexOf('    function hasVisibleStreamText(', pollStart));
-const trackSource = page.match(/trackRun: data => \{([\s\S]*?)\n            \},\n            newConversation/)[1];
+const trackSource = page.match(/trackRun: data => \{([\s\S]*?)\n            \},/)[1];
 const answer = '# Answer\n\nThe final answer belongs in the main conversation.';
 const flush = () => new Promise(resolve => setImmediate(resolve));
 

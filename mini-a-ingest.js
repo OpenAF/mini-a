@@ -186,7 +186,9 @@ MiniAIngest.prototype._shouldSkipPath = function(rel) {
 // Returns [{ id, path, rel, size }] ordered so README/docs come first.
 MiniAIngest.prototype._discover = function(resolved) {
   var self = this
-  var root = String(resolved.root)
+  // io.listFiles returns canonical paths. Temporary clone roots can still
+  // contain aliases such as /var -> /private/var on macOS.
+  var root = String(new java.io.File(String(resolved.root)).getCanonicalPath())
   var maxKb = this._num("ingestmaxfilekb", 512)
   var out = []
   var skippedLarge = [], present = {}, errors = [], complete = true, visited = {}
@@ -551,8 +553,7 @@ MiniAIngest.prototype.manageRecovery = function(action, id, confirmed) {
     if (!isObject(a.wikimanager)) { wm = new MiniAWikiManager(cfg, function(level, msg) { self._log(msg) }); owns = true }
     global.__miniAWikiKnowledge.install(wm)
     self._rebaseRecovery(wm, entry.record, entry.journal)
-    if (entry.record.phase !== "complete") self._applyJournal(wm, entry.record, entry.journal, result)
-    else if (!new java.io.File(entry.journal).delete()) throw new Error("journal cleanup failed")
+    self._applyJournal(wm, entry.record, entry.journal, result)
     result.ok = true; result.status = "recovered"; result.recovered = true
     result.recoveries = result.recoveries.filter(function(e) { return e.id !== entry.id })
   } catch(e) { result.error = __miniAErrMsg(e) }
@@ -626,11 +627,22 @@ MiniAIngest.prototype._applyJournal = function(wm, journal, path, result) {
 }
 
 MiniAIngest.prototype._exportCompletedServing = function(wm, result) {
-  if (wm._retrievalV2 && wm._retrievalV2.config.bundlePath) result.finalize.bundle = wm._retrievalV2.exportBundle(wm._retrievalV2.config.bundlePath)
+  if (wm._retrievalV2 && wm._retrievalV2.config.bundlePath) {
+    if (!isMap(result.finalize)) result.finalize = { ok: true, reindexed: true }
+    result.finalize.bundle = wm._retrievalV2.exportBundle(wm._retrievalV2.config.bundlePath)
+    if (!isMap(result.finalize.bundle) || result.finalize.bundle.ok !== true) throw new Error("bundle finalization failed: " + (result.finalize.bundle && result.finalize.bundle.error || "export failed"))
+  }
 }
 
 MiniAIngest.prototype._applyJournalPages = function(wm, journal, path, result) {
   var self = this
+  // Pages and the local generation are already committed. Retry only the
+  // export before removing the recovery authority, without replaying writes.
+  if (journal.phase === "complete") {
+    self._exportCompletedServing(wm, result)
+    if (!new java.io.File(path).delete()) throw new Error("journal cleanup failed")
+    return
+  }
   if (journal.phase === "finalization-pending") {
     result.finalize = self._finalize(wm)
     if (!result.finalize || result.finalize.ok !== true || result.finalize.reindexed !== true || /^failed/.test(String(result.finalize.graph))) throw new Error("finalization failed during recovery")
@@ -755,8 +767,7 @@ MiniAIngest.prototype.run = function() {
         result.status = "planned"; result.ok = true; return result
       }
       self._rebaseRecovery(wm, recovery, journalPath)
-      if (recovery.phase !== "complete") this._applyJournal(wm, recovery, journalPath, result)
-      else if (!new java.io.File(journalPath).delete()) throw new Error("journal cleanup failed")
+      this._applyJournal(wm, recovery, journalPath, result)
       result.recovered = true; result.recovery_pending = false
     }
     result.recoveries = other.map(function(e) { return self._recoverySummary(e) })
