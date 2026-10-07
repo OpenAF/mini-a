@@ -303,7 +303,7 @@ filesHash:
   mini-a-memory.js: 0d35042c9ac24a6f277bbaa4422374a168fd8116
   mini-a-memoryman.js: a943c4a3f946140f3585940d53eda148fc47e4ab
   mini-a-modelman.js: 893127cfdbd0c007a090e4aa193129155828bc95
-  mini-a-modes.yaml: ce7ed10453265412c256bc85689399080d2e9615
+  mini-a-modes.yaml: 7651d1f85af5c92a80189c41d786aae115619409
   mini-a-orchestration.js: 89cf3571fe3d5cfdff7f53b7b840ce036e38685f
   mini-a-plugins.js: a218cd3d66e80a2626749c4e0440764aa966f58a
   mini-a-policy.js: 2ab148ad151b38936e2590d87d5624fa375b5015
@@ -319,7 +319,7 @@ filesHash:
   mini-a-web-attachments.js: c79a0e7f7dedec4539cb62a9c63d29303303f54a
   mini-a-web-session.js: bf37a573da6b1f012198bfa9645951a6d4adab50
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: 9739f1440d5e0d04778dde0066fbed5c000930b4
+  mini-a-web.yaml: 415eec2b041abdb8abe1f3cf347861ee63314ed7
   mini-a-wiki-knowledge.js: 87754db94e4678b84e27adf9666c7c4975e1d9a9
   mini-a-wiki-maintenance.js: c4eb53388a3674092c0a722e7631de09df759c8a
   mini-a-wiki-retrieval.js: da92718e4a47b5769441bb1fb4acaa9902fbecf6
