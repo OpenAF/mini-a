@@ -1,0 +1,102 @@
+// Run: oaf -f tests/fileAccess.js (real filesystem, no model calls).
+load('mini-a.js')
+load('mini-a-utils.js')
+load('mini-a-wiki.js')
+load('mini-a-advanced.js')
+var root = String(java.nio.file.Files.createTempDirectory('mini-a-fileallow-').toFile().getCanonicalPath())
+var allowed = root + '/allowed', outside = root + '/outside'
+io.mkdir(allowed); io.mkdir(outside)
+io.writeFileString(allowed + '/ok.md', 'ALLOWED CONTENT')
+io.writeFileString(outside + '/secret.md', 'DENIED CONTENT')
+var checks = 0
+function check(value, message) { checks++; if (!value) throw new Error(message) }
+function denied(fn, message) { var failed = false; try { fn() } catch(e) { failed = /fileallow|denied by policy/.test(String(e)) }; check(failed, message) }
+try {
+  var access = new MiniAFileAccess([allowed])
+  check(access.assert(allowed + '/ok.md') === allowed + '/ok.md', 'allowed file')
+  denied(function() { access.assert(outside + '/secret.md') }, 'outside file')
+  denied(function() { access.assert(allowed + '/../outside/secret.md') }, 'traversal')
+  denied(function() { access.assert(allowed + '-sibling/x') }, 'prefix collision')
+  java.nio.file.Files.createSymbolicLink(new java.io.File(allowed + '/escape').toPath(), new java.io.File(outside).toPath())
+  denied(function() { access.assert(allowed + '/escape/secret.md') }, 'symlink escape')
+  denied(function() { new MiniAFileAccess([]).assert(allowed + '/ok.md') }, 'empty denies all')
+  denied(function() { new MiniAFileAccess('not-an-array') }, 'nonexistent single path fails closed')
+  check(new MiniAFileAccess(allowed).allows(allowed + '/ok.md'), 'single path string')
+  var commaAccess = new MiniAFileAccess('  ' + allowed + ' , ' + outside + '  ')
+  check(commaAccess.allows(allowed + '/ok.md') && commaAccess.allows(outside + '/secret.md'), 'comma-delimited paths with whitespace')
+  denied(function() { new MiniAFileAccess(allowed).assert(outside + '/secret.md') }, 'single path retains boundary')
+  ;['', ',', allowed + ',', ',' + allowed, allowed + ',,' + outside, '[invalid'].forEach(function(value) {
+    denied(function() { new MiniAFileAccess(value) }, 'malformed list rejected: ' + value)
+  })
+  var commaPath = root + '/with,comma'; io.mkdir(commaPath)
+  check(new MiniAFileAccess(JSON.stringify([commaPath])).allows(commaPath + '/new.md'), 'JSON array preserves path commas')
+  check(new MiniAFileAccess("['" + allowed + "']").allows(allowed + '/ok.md'), 'SLON array remains supported')
+  denied(function() { new MiniAFileAccess('[]').assert(allowed + '/ok.md') }, 'string empty array denies all')
+  check(new MiniAFileAccess().assert(outside + '/secret.md') === outside + '/secret.md', 'omission preserves compatibility')
+  var exact = new MiniAFileAccess(JSON.stringify([allowed + '/ok.md']))
+  denied(function() { exact.assert(allowed + '/another.md') }, 'exact file only')
+  check(!new MiniAFileAccess([outside]).allows(allowed + '/ok.md') && access.allows(allowed + '/ok.md'), 'instance isolation')
+  var agent = new MiniA(); agent.fnI = function() {}
+  var args = { fileallow: [allowed] }; agent._configureFileAccess(args)
+  check(agent._readPromptFile(allowed + '/ok.md', args) === 'ALLOWED CONTENT', 'prompt control')
+  ;['knowledge','youare','chatyouare','rules'].forEach(function(field) {
+    var promptArgs = {fileallow:[allowed],knowledge:'',youare:'',chatyouare:'',rules:''}; promptArgs[field] = outside + '/secret.md'
+    denied(function() { agent._refreshRunPrompt(promptArgs) }, 'prompt loader denies ' + field)
+  })
+  check(agent._readPromptFile('@' + allowed + '/ok.md', args) === 'ALLOWED CONTENT', '@ prompt control')
+  denied(function() { agent._readPromptFile(outside + '/secret.md', args) }, 'original prompt-file attack')
+  check(agent._readPromptFile('literal\n' + outside + '/secret.md', args).indexOf('literal') === 0, 'multiline remains literal')
+  check(!agent._loadPlanFromArgs({fileallow:[allowed], knowledge:outside + '/secret.md'}), 'plan detection cannot read denied file')
+  denied(function() { agent._readPromptFile(allowed + '/ok.md', {fileallow:[allowed],policy:{filesystem:{read:'deny'}}}) }, 'existing read policy respected')
+  denied(function() { __miniALoadSkillTemplateDocument(outside + '/secret.md', access) }, 'skill template denied')
+  check(__miniALoadSkillTemplateDocument(allowed + '/ok.md', access).rawContent === 'ALLOWED CONTENT', 'skill template control')
+  var utils = new MiniUtilsTool({root:root, fileallow:[allowed], readwrite:true})
+  check(utils.readFile({path:allowed + '/ok.md'}).content === 'ALLOWED CONTENT', 'utils control')
+  check(String(utils.readFile({path:outside + '/secret.md'})).indexOf('fileallow') >= 0, 'utils read denied')
+  check(String(utils.writeFile({path:outside + '/new.md',content:'bad'})).indexOf('fileallow') >= 0 && !io.fileExists(outside + '/new.md'), 'utils write denied')
+  var fileUrl = String(new java.io.File(outside + '/secret.md').toURI())
+  check(String(utils.textUtilities({operation:'webfetch',url:fileUrl})).indexOf('fileallow') >= 0, 'file URL denied')
+  check(String(utils.textUtilities({operation:'fetch',url:'jar:' + fileUrl + '!/x'})).indexOf('fileallow') >= 0, 'jar URL denied')
+  var refs = utils._preprocessSkillTemplateReferences('[ref](../outside/secret.md)', {templatePath:allowed + '/ok.md'}, {})
+  check(refs.text.indexOf('DENIED CONTENT') < 0, 'skill relative include denied')
+  denied(function() { new MiniAWikiManager({root:outside,backend:'fs',fileallow:[allowed],maintenanceSourceOnly:true}) }, 'wiki denied before cached retrieval')
+  var wiki = new MiniAWikiManager({root:allowed,backend:'fs',fileallow:[allowed],maintenanceSourceOnly:true})
+  check(wiki._backend.read('ok.md') === 'ALLOWED CONTENT', 'wiki control')
+  var utilsConfig = agent._createUtilsMcpConfig({useutils:true,utilsroot:root,fileallow:[allowed]})
+  var proxy = agent._createMcpProxyConfig([utilsConfig], {usestdutils:true}).options.fns
+  var resultDenied = proxy['proxy-dispatch']({action:'readresult',resultFile:outside + '/secret.md',op:'read'})
+  check(String(resultDenied.error).indexOf('fileallow') >= 0, 'proxy result file denied')
+  agent._registerOwnedResultFile(outside + '/secret.md')
+  check(!proxy['proxy-dispatch']({action:'readresult',resultFile:outside + '/secret.md',op:'stat'}).error, 'owned result files remain usable')
+  var spillAgent = new MiniA(); spillAgent.fnI = function() {}; spillAgent._configureFileAccess({fileallow:[]})
+  var mock = {id:'fileallow-fixture',type:'dummy',options:{
+    fns:{fileallow_mock:function(){return {content:[{type:'text',text:new Array(501).join('x')}]}}},
+    fnsMeta:{fileallow_mock:{name:'fileallow_mock',inputSchema:{type:'object',properties:{}}}}
+  }}
+  var spillProxy = spillAgent._createMcpProxyConfig([mock],{mcpproxythreshold:100,usestdutils:true}).options.fns
+  var spilled = spillProxy['proxy-dispatch']({action:'call',tool:'fileallow_mock',arguments:{}})
+  check(isString(spilled.resultFile) && !spillProxy.result_stat({resultFile:spilled.resultFile}).error, 'real managed spill works with deny-all policy')
+  if (isString(spilled.resultFile)) io.rm(spilled.resultFile)
+  var otherAgent = new MiniA(); otherAgent._configureFileAccess(args)
+  denied(function() { otherAgent._resultFilePath(outside + '/secret.md') }, 'owned file grants are instance local')
+  global.__mini_a_ingest_lib_mode = true; loadLib('mini-a-ingest.js')
+  var ingest = new MiniAIngest({usewiki:true,ingestsource:allowed,wikiroot:outside,fileallow:[allowed],ingestdryrun:true}, function() {})
+  var ingestResult = ingest.run()
+  check(ingestResult.ok === false && String(ingestResult.error).indexOf('fileallow') >= 0, 'ingestion dry-run cannot open a denied destination')
+  global.__mini_a_dreams_lib_mode = true; loadLib('mini-a-dreams.js')
+  var dream = new MiniADreams({usewiki:true,dreammode:'wiki',fileallow:[allowed],dreamreport:outside + '/report.json'}, function() {})
+  dream.dreamWiki = function() { return {ok:true} }
+  var dreamResult = dream.run()
+  check(dreamResult.ok === false && String(dreamResult.report_error).indexOf('fileallow') >= 0 && !io.fileExists(outside + '/report.json'), 'dream report output denied')
+  loadLib('mini-a-plugins.js')
+  denied(function() { __miniAPluginLoadOne(outside, {fileallow:[allowed]}) }, 'plugin manifest directory denied')
+  loadLib('mini-a-eval.js')
+  var evaluator = new MiniAEval({fileallow:[allowed]})
+  denied(function() { evaluator._readDefinition(outside + '/secret.md') }, 'evaluation definition denied')
+  var advanced = Object.create(MiniAAdvanced.prototype); advanced.args = {fileallow:[allowed]}
+  check(advanced.isServerOption('fileallow'), 'web setting protected')
+  check(advanced.mergeOptions(advanced.args,{fileallow:[]}).fileallow[0] === allowed, 'preset cannot change ceiling')
+  check(advanced.mergeOptions(advanced.args,{fileallow:null}).fileallow[0] === allowed, 'saved session cannot remove ceiling')
+  denied(function() { new MiniAWikiManager({root:outside,backend:'FS',fileallow:[allowed],maintenanceSourceOnly:true}) }, 'normalized wiki backend cannot bypass root check')
+  print('fileAccess: ' + checks + ' checks passed')
+} finally { io.rm(root) }

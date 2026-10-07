@@ -7,11 +7,14 @@
 // Everything except `distill` is deterministic. One source produces one wiki page;
 // cross-page dedup and reorganisation are deliberately left to the wiki dream pass.
 
+loadLib("mini-a-common.js")
+
 var MiniAIngest = function(ingestArgs, logFn) {
   // Live managers contain reader back-references and must never be deep-cloned.
   var options = {}
   if (isMap(ingestArgs)) Object.keys(ingestArgs).forEach(function(k) { if (k !== "wikimanager") options[k] = ingestArgs[k] })
   this._args = merge({}, options)
+  this._fileAccess = new MiniAFileAccess(this._args.fileallow)
   if (isObject(ingestArgs) && isObject(ingestArgs.wikimanager)) this._args.wikimanager = ingestArgs.wikimanager
   this._logFn = isFunction(logFn) ? logFn : log
   this._llm   = __   // injectable for tests
@@ -194,7 +197,7 @@ MiniAIngest.prototype._discover = function(resolved) {
     visited[dir] = true
     self._log("[ingest] Scanning " + dir + "...")
     var listing
-    try { listing = io.listFiles(dir); if (new java.io.File(dir).list() === null) throw new Error("directory inaccessible") } catch(e) { complete = false; errors.push(String(dir) + ": " + __miniAErrMsg(e)); return }
+    try { dir = self._fileAccess.assert(dir); listing = io.listFiles(dir); if (new java.io.File(dir).list() === null) throw new Error("directory inaccessible") } catch(e) { complete = false; errors.push(String(dir) + ": " + __miniAErrMsg(e)); return }
     if (!isMap(listing) || !isArray(listing.files)) { complete = false; errors.push("invalid listing: " + dir); return }
     listing.files.forEach(function(f) {
       inspected++
@@ -512,6 +515,7 @@ MiniAIngest.prototype.manageRecovery = function(action, id, confirmed) {
     if (toBoolean(a.usewiki) !== true) throw new Error("wiki is not enabled")
     var cfg = this._buildWikiConfig()
     if (!isMap(cfg)) throw new Error("no wiki config")
+    if (["fs", "s3fs"].indexOf(String(cfg.backend || "fs").toLowerCase()) >= 0) this._fileAccess.assert(cfg.root || ".")
     wm = isObject(a.wikimanager) ? a.wikimanager : Object.create(MiniAWikiManager.prototype)
     if (!isObject(a.wikimanager)) {
       wm._config = cfg; wm._backendType = String(cfg.backend || "fs"); wm._backend = { root: cfg.root || "." }
@@ -707,6 +711,7 @@ MiniAIngest.prototype.run = function() {
     this._log("[ingest] Discovered " + result.discovered + " eligible source(s); planning reconciliation...")
     var cfg = this._buildWikiConfig()
     if (!isMap(cfg)) throw new Error("no wiki config")
+    if (["fs", "s3fs"].indexOf(String(cfg.backend || "fs").toLowerCase()) >= 0) this._fileAccess.assert(cfg.root || ".")
     loadLib("mini-a-wiki.js"); loadLib("mini-a-wiki-knowledge.js")
     if (isObject(a.wikimanager)) wm = a.wikimanager
     else if (dry) {
@@ -714,7 +719,7 @@ MiniAIngest.prototype.run = function() {
       wm = Object.create(MiniAWikiManager.prototype)
       wm._config = cfg; wm._access = "ro"; wm._backendType = "fs"; wm._logFn = function() {}
       var root = String(new java.io.File(cfg.root || ".").getCanonicalPath())
-      wm._backend = { root: root, read: function(p) { var f = root + "/" + __miniAWikiNormalizePath(p, { requireMarkdown: true }); return io.fileExists(f) ? io.readFileString(f) : __ } }
+      wm._backend = { root: root, read: function(p) { var f = root + "/" + __miniAWikiNormalizePath(p, { requireMarkdown: true }); return io.fileExists(f) ? io.readFileString(self._fileAccess.assert(f)) : __ } }
     } else {
       // Lock before constructor bootstrap can mutate indexes or create wiki pages.
       var descriptor = Object.create(MiniAWikiManager.prototype)
@@ -1011,6 +1016,8 @@ MiniAIngest.prototype._distillAll = function(llm, pending, siblings, concurrency
 }
 
 MiniAIngest.prototype._readSource = function(src) {
+  if (isString(src.path)) this._fileAccess.assert(src.path)
+  if (isString(src.url)) this._fileAccess.url(src.url)
   if (isString(src.url)) {
     try {
       loadLib("mini-a-utils.js")

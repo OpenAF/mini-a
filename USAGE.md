@@ -1202,6 +1202,8 @@ Set `usetools=true mcpdynamic=true` when you want Mini-A to narrow the registere
 Only when every stage returns an empty list (or errors) does Mini-A log the issue and register the full tool catalog so nothing is accidentally hidden. Selection happens per MCP connection, and you will see `mcp` log entries showing which tools were registered. The new `tool_selection` metrics track which selection method was used (keyword, llm_lc, llm_main, connection_chooser, or fallback_all). Leave `mcpdynamic` false when you prefer the traditional "register everything" behaviour or when your model lacks tool-calling support.
 
 #### Knowledge and Context
+
+- **`fileallow`** (array, comma-delimited string, or JSON/SLON string, optional): Shared built-in file access allowlist. See [configuration and scope](#built-in-file-access-allowlist).
 - **`knowledge`** (string): Additional context or knowledge for the agent (can be text or file path)
 - **`maxcontext`** (number): Approximate context budget in tokens; Mini-A auto-summarizes older history when the limit is exceeded. Summarization uses isolated, tool-free requests between execution steps. Provider overflow recovery also replaces main and low-cost provider histories with the compact context while retaining system/developer instructions.
 - **`compressgoal`** (boolean, default: false): Compress oversized rendered goal text before execution; when disabled, Mini-A preserves the original goal verbatim
@@ -2711,6 +2713,33 @@ agent.start({
 ## Security Considerations
 
 Mini-A includes built-in security measures:
+
+### Built-in file access allowlist
+
+Set `fileallow` at startup to constrain built-in access to user-selected local files. It accepts a comma-delimited list or JSON/SLON array of existing files or directories. Comma-delimited entries are trimmed; empty entries are rejected. Use an array for paths containing commas or significant leading/trailing spaces, or beginning with `[`, `(`, or `{`, which identify structured input. File entries authorize that exact file; directory entries authorize their descendants. For plans that create backups, allow the containing directory or separately authorize existing backup files. Paths are resolved from the process working directory, with canonical path checks for `..`, symlinks, and directory-name boundaries. Prefer absolute paths on servers. No glob expansion is performed.
+
+```sh
+# CLI: permit project data and a separate skills directory.
+mini-a goal="Review the project" \
+  fileallow="/srv/project,/srv/mini-a/skills" \
+  utilsroot=/srv/project extraskills=/srv/mini-a/skills
+
+# Advanced web: the server owns the list; browser settings cannot widen it.
+./mini-a-web.sh webadvanced=true \
+  fileallow='["/srv/project", "/srv/mini-a/prompts", "/srv/mini-a/skills"]' \
+  utilsroot=/srv/project
+
+# Deny built-in access to user-selected local files.
+mini-a goal="Answer using the supplied text" fileallow='[]'
+```
+
+The directories in these examples must exist. Omitting `fileallow` preserves existing access; an empty array denies all covered file access. Invalid lists and nonexistent allowlist entries are errors. A file allowed by this list can still be denied by an existing control: `utilsroot` remains an additional boundary, `readwrite` still controls utility writes, and prompt-file reads also honor `policy` filesystem-read restrictions.
+
+Coverage includes persona/knowledge/rules files, goal and plan files, agent profiles and automatic AGENTS.md content, skill templates and their local references, console `@file` attachments, utility file/document/image reads and writes, local-file URL fetching, validator file reads, proxy parameter files, local wiki roots and mounted wikis, ingestion/absorption sources, evaluation definition/baseline files, plugin manifests, and explicit answer/plan/report output files. Skill references outside the list are omitted or reported as denied; their text is never loaded. Local wiki roots must themselves be allowed before indexes can be opened, so an existing index cannot bypass a disallowed root. Include any separately configured wiki index directory too.
+
+`fileallow` is server-controlled in Advanced web sessions, including preset application and restored sessions. Agent-profile metadata cannot replace it, and delegated children inherit their parent's configured list. Restart the server after changing its allowlist; start a new conversation if previously loaded content must no longer be available.
+
+This is an application-level boundary for built-in data access. Mini-A still uses its managed runtime files (installation assets, conversation/history storage, logs, caches and internally created temporary files). Browser-uploaded bytes are staged in managed temporary storage; this does not grant access to other files in the temporary directory. The list does not sandbox shell commands, external MCP servers, custom libraries, hooks or executable plugin code, nor does it restrict remote HTTP/S3/Elasticsearch content. Keep those capabilities disabled or isolate them separately when required. Canonical checks are not an OS sandbox and do not provide atomic protection against another process changing the filesystem during an operation.
 
 ### Banned Commands
 The following commands are restricted by default:

@@ -141,6 +141,8 @@ function MiniAWebPrompt(request) {
             // to the current run; extracted source data stays in the model history.
             var displayMessage
             if (e === "user" && !isString(global._mini_a_web_extractSubtaskId(m))) {
+              var goalPrefix = lma._webGoalPrefix
+              if (isString(goalPrefix) && goalPrefix.length > 0 && isString(m) && m.indexOf(goalPrefix) === 0) m = m.substring(goalPrefix.length)
               var attachmentDisplay = lma._webAttachmentDisplayPrompt
               if (isDef(attachmentDisplay) && global._mini_a_web_owns(uuid, attachmentDisplay.token)) displayMessage = attachmentDisplay.text
               else if (isDef(advancedLive) && isString(advancedLive.displayPrompt) && advancedLive.displayPrompt.length > 0) m = advancedLive.displayPrompt
@@ -389,6 +391,7 @@ function MiniAWebPrompt(request) {
       }
       if (global.__attachmentStops[uuid] === runToken || (advancedState && advancedState.cancelled) || !global._mini_a_web_owns(uuid, runToken)) return
       if (isString(attachmentDisplayPrompt)) lma._webAttachmentDisplayPrompt = { token: runToken, text: attachmentDisplayPrompt }
+      lma._webGoalPrefix = isString(effectiveArgs.goalprefix) ? effectiveArgs.goalprefix : ""
       var _rma
       if (advancedState) {
         // Match console Escape: interrupt the worker even while start() is
@@ -452,6 +455,7 @@ function MiniAWebPrompt(request) {
           global._mini_a_web_dispose(uuid)
         }
       } finally {
+        if (isDef(lma)) delete lma._webGoalPrefix
         if (isDef(lma) && isDef(lma._webAttachmentDisplayPrompt) && lma._webAttachmentDisplayPrompt.token === runToken) delete lma._webAttachmentDisplayPrompt
         binaryAttachments = null
         if (global.__attachmentStops[uuid] === runToken) delete global.__attachmentStops[uuid]

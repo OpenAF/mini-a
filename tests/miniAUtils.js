@@ -1492,4 +1492,18 @@
     var afterSubcommand = __miniACompleteSkillsArgument("search doc", ["search-docs"], true)
     ow.test.assert(afterSubcommand.candidates.length, 0, "Free-form arguments after a skill operation must not be replaced")
   }
+  exports.testFileAllowBoundary = function() {
+    var root = String(java.nio.file.Files.createTempDirectory("mini-a-utils-fileallow-").toFile().getCanonicalPath())
+    try {
+      io.mkdir(root + "/allowed")
+      io.writeFileString(root + "/allowed/ok.txt", "allowed")
+      io.writeFileString(root + "/secret.txt", "secret")
+      var tool = new MiniUtilsTool({ root: root, fileallow: [root + "/allowed"], readwrite: true })
+      ow.test.assert(tool.readFile({path:"allowed/ok.txt"}).content, "allowed", "Allowed reads remain available")
+      ow.test.assert(String(tool.readFile({path:"secret.txt"})).indexOf("fileallow") >= 0, true, "Outside reads are denied")
+      ow.test.assert(String(tool.writeFile({path:"new.txt",content:"bad"})).indexOf("fileallow") >= 0, true, "Outside writes are denied")
+      var listing = tool.listDirectory({path:"allowed",recursive:true})
+      ow.test.assert(stringify(listing).indexOf("ok.txt") >= 0, true, "Allowed recursive listing works")
+    } finally { io.rm(root) }
+  }
 })()

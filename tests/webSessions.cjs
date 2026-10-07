@@ -139,12 +139,14 @@ for (const [prompt, displayPrompt] of [
 ]) {
   call('prompt', {uuid: 'commands', prompt, displayPrompt}); pending.shift()();
   assert.equal(g.__conversations.commands.lastArgs.goal, 'Prefix: ' + prompt);
-  assert.equal(g.__res.commands.filter(e => e.event === '👤').at(-1).message, displayPrompt || 'Prefix: ' + prompt);
-  assert.equal(commandEvents.filter(e => e.type === 'user').at(-1).value, displayPrompt || 'Prefix: ' + prompt);
+  assert.equal(g.__res.commands.filter(e => e.event === '👤').at(-1).message, displayPrompt || prompt);
+  assert.equal(commandEvents.filter(e => e.type === 'user').at(-1).value, displayPrompt || prompt);
   assert.equal(commandState.displayPrompt, undefined, 'display label cleared after the run');
 }
 call('prompt', {uuid: 'simple-label', prompt: 'Simple prompt', displayPrompt: '/ignored'}); pending.shift()();
-assert.equal(g.__res['simple-label'].find(e => e.event === '👤').message, 'Prefix: Simple prompt');
+assert.equal(g.__res['simple-label'].find(e => e.event === '👤').message, 'Simple prompt');
+assert.equal(g.__conversations['simple-label']._webGoalPrefix, undefined, 'prefix expires after the run');
+assert.doesNotMatch(JSON.stringify(call('result', {uuid:'simple-label'})), /Prefix: /, 'prefix is absent from the browser response');
 Agent.prototype.start = originalStart;
 console.log('Advanced custom command display checks passed.');
 
@@ -227,7 +229,7 @@ call('prompt',{uuid:'binary',prompt:'Inspect',attachments:[{name:'image.png',bas
 assert.equal(g.__res.binary.filter(e => e.event === '👤').at(-1).displayMessage,'Inspect\n\n📎 image.png');
 call('prompt',{uuid:'binary',prompt:'Follow up'});pending.shift()();
 assert.equal(g.__res.binary.filter(e => e.event === '👤').at(-1).displayMessage,undefined);
-assert.equal(g.__res.binary.filter(e => e.event === '👤').at(-1).message,'Prefix: Follow up');
+assert.equal(g.__res.binary.filter(e => e.event === '👤').at(-1).message,'Follow up');
 // Advanced user journal and answer pane use the label; the model still sees evidence.
 g.__advanced = {sessions:{'binary-advanced':commandState},persist(){},safe:x=>x,emit(state,type,value){commandEvents.push({type,value});}};
 call('prompt',{uuid:'binary-advanced',prompt:'Explain',attachments:[attachment]});pending.shift()();

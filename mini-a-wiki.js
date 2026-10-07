@@ -2,6 +2,7 @@
 // License: Apache 2.0
 // Description: Wiki manager for Mini-A. Supports filesystem, S3, Elasticsearch and static HTTP(S) backends.
 
+loadLib("mini-a-common.js")
 loadLib("mini-a-wiki-maintenance.js")
 
 // Shared argument mapping. Entry points retain explicit access and model policies.
@@ -10,7 +11,7 @@ function __miniAWikiConfigFromArgs(args, overrides) {
   var backend = isString(args.wikibackend) ? args.wikibackend.trim().toLowerCase() : "fs"
   if (backend === "https") backend = "http"
   if (["fs", "s3", "s3fs", "es", "http"].indexOf(backend) < 0) backend = "fs"
-  var cfg = { access: args.wikiaccess, backend: backend, indexdir: args.wikiindexdir,
+  var cfg = { fileallow: args.fileallow, access: args.wikiaccess, backend: backend, indexdir: args.wikiindexdir,
     s3artifactprefix: args.wikis3artifactprefix, s3artifactbundle: args.s3artifactbundle,
     usegraph: toBoolean(args.usewikigraph) === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0),
     wikigraphsemantic: toBoolean(args.wikigraphsemantic) === true }
@@ -53,7 +54,7 @@ var __MINI_A_WIKI_LEXICAL_LANGUAGES = [
 
 // Keep the on-disk index contract deliberately small and model-free. More
 // expensive lexical features remain explicit opt-ins in wikilexical.
-var __miniAWikiLexicalConfig = function(raw, wikiRoot) {
+var __miniAWikiLexicalConfig = function(raw, wikiRoot, fileAccess) {
   var value = raw
   if (isUnDef(value) || value === null || (isString(value) && value.trim().length === 0)) value = { language: "english" }
   if (isString(value)) {
@@ -89,7 +90,7 @@ var __miniAWikiLexicalConfig = function(raw, wikiRoot) {
     }
     var synonymsJavaFile = new java.io.File(synonymsPath)
     if (!synonymsJavaFile.isFile()) throw new Error("Invalid wikilexical synonymsFile: file not found: " + synonymsPath)
-    var synonymsRaw = io.readFileString(synonymsPath).trim()
+    var synonymsRaw = io.readFileString(fileAccess ? fileAccess.assert(synonymsPath) : synonymsPath).trim()
     var fileRules
     try {
       fileRules = af.fromJSSLON(synonymsRaw)
@@ -2198,6 +2199,9 @@ MiniAWikiManager.prototype.configure = function(config) {
   this._retrievalV2 = __
   this._legacyRetrievalV2 = __
   var cfg = isMap(config) ? config : {}
+  this._fileAccess = new MiniAFileAccess(cfg.fileallow)
+  if (cfg.__catalog !== true && (["s3", "es", "http", "https"].indexOf(String(cfg.backend || "fs").trim().toLowerCase()) < 0)) this._fileAccess.assert(cfg.root || ".")
+  if (isString(cfg.indexdir) && cfg.indexdir.length) this._fileAccess.assert(cfg.indexdir)
   if (isUnDef(cfg.wikiretrievalv2) && isString(getEnv("OAF_MINI_A_WIKI_RETRIEVAL_V2"))) cfg.wikiretrievalv2 = getEnv("OAF_MINI_A_WIKI_RETRIEVAL_V2")
   // Keep launcher defaults unset so an explicit option or environment override wins.
   if (isUnDef(cfg.wikiretrievalv2)) cfg.wikiretrievalv2 = true
@@ -2209,7 +2213,7 @@ MiniAWikiManager.prototype.configure = function(config) {
   if (isUnDef(cfg.wikilexical) && isString(getEnv("OAF_MINI_A_WIKI_LEXICAL"))) cfg.wikilexical = getEnv("OAF_MINI_A_WIKI_LEXICAL")
   // The catalog has no lexical index. Resolve mount-relative resources only
   // inside each mount, never against the process working directory.
-  this._lexicalConfig = __miniAWikiLexicalConfig(cfg.__catalog ? __ : cfg.wikilexical, cfg.root)
+  this._lexicalConfig = __miniAWikiLexicalConfig(cfg.__catalog ? __ : cfg.wikilexical, cfg.root, this._fileAccess)
   this._lexicalFingerprint = __miniAWikiLexicalFingerprint(this._lexicalConfig)
   // Citation URLs (wikisourceurl): opt-in Handlebars template rendering a canonical
   // origin URL onto retrieval results. See "Citation URL templating" helpers above.
@@ -2951,7 +2955,7 @@ MiniAWikiManager.prototype._makeFsBackend = function(cfg) {
     if (canonical !== canonicalRoot && !canonical.startsWith(canonicalRootPrefix)) {
       throw "path escapes wikiroot"
     }
-    return canonical
+    return manager._fileAccess.assert(canonical)
   }
   return {
     type: "fs",
@@ -5333,6 +5337,7 @@ MiniAWikiManager.prototype.attach = function(name, config) {
   }, this)
   cfg.wikiMountName = name
   try {
+    cfg.fileallow = this._config.fileallow
     var manager = new MiniAWikiManager(cfg, this._logFn, this._auditFn)
     var count   = manager._safeListPages("").length
     this._mounts = this._mounts.filter(function(m) {

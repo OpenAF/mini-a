@@ -36,7 +36,7 @@ MiniAAdvanced.prototype.pruneHistory = function() {
 }
 
 MiniAAdvanced.prototype.isServerOption = function(key) {
-  return /^(web|onport|historypath|historys3|historyretention|ssequeuetimeout|memorysessionheader|logpromptheaders|homedir|conversation|useeditor|editor|maxpromptchars|path$|useattach$)/.test(key)
+  return /^(web|onport|historypath|historys3|historyretention|ssequeuetimeout|memorysessionheader|logpromptheaders|homedir|conversation|useeditor|editor|maxpromptchars|path$|useattach$|fileallow$)/.test(key)
 }
 
 MiniAAdvanced.prototype.isPromptOption = function(key) {
@@ -89,6 +89,9 @@ MiniAAdvanced.prototype.mergeOptions = function(base, override) {
       if (isMap(previous) && isMap(next) && previous.type === next.type && previous.url === next.url) out[key] = stringify(merge(previous, next), __, "")
     } catch(ignore) {}
   })
+  // Persisted sessions and presets cannot widen the server's filesystem boundary.
+  if (isDef(this.args.fileallow)) out.fileallow = this.args.fileallow
+  else delete out.fileallow
   return out
 }
 

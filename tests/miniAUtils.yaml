@@ -1,4 +1,9 @@
 jobs:
+- name: MiniA Utils Tests::FileAllowBoundary
+  from: MiniA Utils Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testFileAllowBoundary
+
 - name: MiniA Utils Tests::MathOpsZeroStatistics
   from: MiniA Utils Tests::Init
   to: oJob Test
@@ -272,6 +277,7 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Utils Tests::FileAllowBoundary
 - MiniA Utils Tests::MathOpsZeroStatistics
 - MiniA Utils Tests::MathOpsUnitDimensions
 - MiniA Utils Tests::MathOpsRandomZeroParameters

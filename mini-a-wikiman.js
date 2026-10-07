@@ -3,6 +3,9 @@ loadLib("mini-a-wikiops.js")
 
 var MiniAWikiMan = function(args, ui) {
   this.args = MiniAWikiOps.settings(args || {})
+  this._fileallow = this.args.fileallow
+  this._fileAccess = new MiniAFileAccess(this._fileallow)
+  this._reviewedContent = {}
   this.history = []
   this.tempFiles = []
   this.ui = ui || {
@@ -61,7 +64,10 @@ MiniAWikiMan.prototype.input = function(prompt, fallback) {
 }
 MiniAWikiMan.prototype.runner = function() {
   var self = this
-  return new MiniAWikiOps(this.args, function(msg) { self.show(msg) })
+  this.args.fileallow = this._fileallow
+  var runner = new MiniAWikiOps(this.args, function(msg) { self.show(msg) })
+  runner._reviewedContent = this._reviewedContent
+  return runner
 }
 MiniAWikiMan.prototype.mounts = function() {
   return __miniAWikiPrimaryConfig({}, this.args.wikiroot, this.args.wikimounts).__primaryMounts
@@ -83,6 +89,7 @@ MiniAWikiMan.prototype.setup = function() {
   ;["model", "secpass", "libs", "editor"].forEach(function(k) { if (isDef(this.args[k])) next[k] = this.args[k] }, this)
   var extra = this.input("Additional connection settings as JSON/SLON (use existing credential mechanisms)", "{}")
   next = MiniAWikiOps.settings(merge(next, MiniAWikiOps.parse(extra)))
+  next.fileallow = this._fileallow
   new MiniAWikiOps(next).config()
   this.args = next
 }
@@ -120,9 +127,11 @@ MiniAWikiMan.prototype.editPage = function(params) {
   // Snapshot even imported files so replay within this session uses the reviewed content.
   var snapshot = String(io.createTempFile("mini-a-wikiman-content-", ".md"))
   this.tempFiles.push(snapshot)
+  if (choice === 0) this._fileAccess.assert(source)
   var content = io.readFileString(source)
   io.writeFileString(snapshot, content)
   params.contentfile = snapshot
+  this._reviewedContent[MiniAWikiOps.absolute(snapshot)] = content
   this.show({ page: params.path, content: content })
 }
 MiniAWikiMan.editorArgs = function(command) {
@@ -272,6 +281,7 @@ MiniAWikiMan.prototype.runOperation = function(id, advanced) {
   this.record(runner, spec, gates)
 }
 MiniAWikiMan.prototype.exportRecord = function(index, output) {
+  this._fileAccess.assert(output)
   if (io.fileExists(output)) throw new Error("Export destination exists; choose a new filename")
   var record = clone(this.history[index])
   if (!record.operation) throw new Error("Select a run record")
@@ -281,6 +291,7 @@ MiniAWikiMan.prototype.exportRecord = function(index, output) {
     if (source) {
       var contentPath = String(new java.io.File(output + ".content.md").getCanonicalPath())
       if (io.fileExists(contentPath)) throw new Error("Content export already exists")
+      this._fileAccess.assert(contentPath)
       io.writeFileString(contentPath, io.readFileString(source))
       var oldParams = MiniAWikiOps.quote("params=" + JSON.stringify(record.params))
       record.params.contentfile = contentPath
@@ -297,6 +308,7 @@ MiniAWikiMan.prototype.session = function() {
   if (choice === 1) {
     this.show(this.args)
     var next = MiniAWikiOps.settings(merge(clone(this.args), MiniAWikiOps.parse(this.input("Settings overrides as JSON/SLON", "{}"))))
+    next.fileallow = this._fileallow
     new MiniAWikiOps(next).config(); this.args = next
   }
   if (choice === 2) {

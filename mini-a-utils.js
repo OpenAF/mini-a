@@ -49,6 +49,7 @@ MiniUtilsTool.prototype.init = function(options) {
   try {
     if (isUnDef(options)) options = {}
     if (isString(options) || options instanceof java.lang.String) options = { root: options }
+    this._fileAccess = new MiniAFileAccess(options.fileallow)
     var rootPath = options.root || "."
     var rootFile = io.fileInfo(rootPath)
     var canonicalRoot = rootFile.canonicalPath
@@ -120,7 +121,7 @@ MiniUtilsTool.prototype._resolve = function(target) {
   if (!this._withinRoot(resolved)) {
     throw new Error("Path outside of allowed root: " + target)
   }
-  return resolved
+  return this._fileAccess ? this._fileAccess.assert(resolved) : resolved
 }
 
 MiniUtilsTool.prototype._ensureWritable = function(operation) {
@@ -187,6 +188,7 @@ MiniUtilsTool.prototype._resolveSkillsRoots = function(options) {
     } catch (e) {
       return
     }
+    if (self._fileAccess && !self._fileAccess.allows(canonical)) return
     if (seen[canonical]) return
     if (!io.fileExists(canonical)) return
     var info = io.fileInfo(canonical)
@@ -273,7 +275,7 @@ MiniUtilsTool.prototype._resolveSkillTemplateFromFolder = function(folderPath) {
 
 MiniUtilsTool.prototype._readSkillDescriptionFromTemplate = function(templatePath) {
   if (!(isString(templatePath) || templatePath instanceof java.lang.String)) return __
-  return __miniAReadSkillDescriptionFromTemplate(String(templatePath))
+  return __miniAReadSkillDescriptionFromTemplate(String(templatePath), this._fileAccess)
 }
 
 MiniUtilsTool.prototype._listSkills = function(params) {
@@ -342,12 +344,13 @@ MiniUtilsTool.prototype._listSkills = function(params) {
 
       if (!isString(name) || !validName.test(name)) return
       if (!isString(templatePath) || !io.fileExists(templatePath)) return
+      if (self._fileAccess && !self._fileAccess.allows(templatePath)) return
       if (seenByName[name]) return
 
       var description = sourceType === "folder"
         ? self._readSkillDescriptionFromTemplate(templatePath)
         : (function() {
-            var doc = __miniALoadSkillTemplateDocument(templatePath)
+            var doc = __miniALoadSkillTemplateDocument(templatePath, self._fileAccess)
             return isObject(doc) && isString(doc.description) ? doc.description : __
           })()
       var skillFormat = __miniASkillTemplateFormatFromPath(templatePath)
@@ -607,7 +610,7 @@ MiniUtilsTool.prototype._preprocessSkillTemplateReferences = function(templateTe
     includedPaths[resolvedPath] = true
     try {
       if (!io.fileExists(resolvedPath) || io.fileInfo(resolvedPath).isFile !== true) return _
-      var refContent = io.readFileString(resolvedPath)
+      var refContent = io.readFileString(self._fileAccess.assert(resolvedPath))
       self._recordSkillReference(references, seen, { type: "file", path: resolvedPath, relativePath: cleanTarget })
       includeBlocks.push("\n\n--- Skill reference from " + cleanTarget + " ---\n" + refContent + "\n--- End of " + cleanTarget + " ---\n")
     } catch(ignoreSkillRefError) { }
@@ -643,6 +646,7 @@ MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
   var pushEntry = function(fullPath) {
     if (!isString(fullPath)) return
     if (!self._withinRoot(fullPath)) return
+    if (self._fileAccess && !self._fileAccess.allows(fullPath)) return
     if (fullPath === baseDir) return
     if (seen[fullPath]) return
     var fileObj = new java.io.File(fullPath)
@@ -727,13 +731,17 @@ MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
     }
   }
 
+  var visitedDirectories = {}
   var fallbackEnumerate = function(currentDir) {
+    if (visitedDirectories[currentDir]) return
+    visitedDirectories[currentDir] = true
+    if (!self._withinRoot(currentDir) || self._fileAccess && !self._fileAccess.allows(currentDir)) return
     try {
       var listed = io.listFiles(currentDir).files || []
       if (isArray(listed)) {
         listed.forEach(function(entry) {
           try {
-            var childFile = new java.io.File(currentDir, entry)
+            var childFile = isMap(entry) ? new java.io.File(String(entry.canonicalPath || entry.filepath || currentDir + "/" + entry.filename)) : new java.io.File(currentDir, entry)
             var childPath = String(childFile.getCanonicalPath())
             pushEntry(childPath)
             if (recursive) {
@@ -754,6 +762,10 @@ MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
 
   var raw
   try {
+    if (recursive && self._fileAccess && self._fileAccess.enabled) {
+      fallbackEnumerate(baseDir)
+      return results
+    }
     raw = recursive ? listFilesRecursive(baseDir) : io.listFiles(baseDir).files
   } catch (e) {
     raw = null
@@ -1562,9 +1574,9 @@ MiniUtilsTool.prototype.skills = function(params) {
       }
       if (isUnDef(selected)) return "[ERROR] Skill not found: " + params.name
 
-      var loadedDoc = __miniALoadSkillTemplateDocument(selected.templatePath)
+      var loadedDoc = __miniALoadSkillTemplateDocument(selected.templatePath, this._fileAccess)
       if (!isObject(loadedDoc)) return "[ERROR] Failed to parse skill template: " + selected.name
-      var content = isString(loadedDoc.rawContent) ? loadedDoc.rawContent : io.readFileString(selected.templatePath)
+      var content = isString(loadedDoc.rawContent) ? loadedDoc.rawContent : io.readFileString(this._fileAccess.assert(selected.templatePath))
       var processedContent = isString(loadedDoc.bodyTemplate) ? loadedDoc.bodyTemplate : ""
       var referenced = this._preprocessSkillTemplateReferences(processedContent, selected, loadedDoc)
       var referencedFiles = isMap(referenced) && isArray(referenced.references) ? referenced.references : []
@@ -2780,6 +2792,7 @@ MiniUtilsTool.prototype.textUtilities = function(params) {
       if (isNaN(maxBytes) || maxBytes < 0) maxBytes = 1048576
       var encoding = params.encoding || "utf-8"
 
+      if (this._fileAccess) this._fileAccess.url(url)
       var connection = new java.net.URL(String(url)).openConnection()
       var stream = null
       try {

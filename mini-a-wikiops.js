@@ -10,7 +10,7 @@ var MiniAWikiOps = function(args, logFn) {
 MiniAWikiOps.settings = function(args) {
   var out = {}
   Object.keys(args).forEach(function(k) {
-    if (/^(wiki|dream|ingest|absorb)/.test(k) || ["usewiki", "usewikigraph", "s3artifactbundle", "model", "secpass", "libs", "maxcontext", "contextguard", "toolresultmaxinline", "readresultmaxmatches", "editor"].indexOf(k) >= 0) out[k] = args[k]
+    if (/^(wiki|dream|ingest|absorb)/.test(k) || ["fileallow", "usewiki", "usewikigraph", "s3artifactbundle", "model", "secpass", "libs", "maxcontext", "contextguard", "toolresultmaxinline", "readresultmaxmatches", "editor"].indexOf(k) >= 0) out[k] = args[k]
   })
   delete out.wikiman
   delete out.wikimanager
@@ -185,6 +185,7 @@ MiniAWikiOps.prototype.targetConfig = function() {
   var selected = merge({}, mount)
   ;["usegraph", "wikilexical", "wikiretrievalv2", "wikiretrievalconfig"].forEach(function(k) { if (isUnDef(selected[k])) selected[k] = cfg[k] })
   Object.keys(cfg).forEach(function(k) { if (k.indexOf("wikigraph") === 0 && isUnDef(selected[k])) selected[k] = cfg[k] })
+  selected.fileallow = cfg.fileallow
   selected.access = "ro"
   if (!(selected.backend && selected.backend !== "fs") && !selected.root) throw new Error("Mounted filesystem wiki needs a root")
   return selected
@@ -352,7 +353,13 @@ MiniAWikiOps.prototype._execute = function(spec, gates) {
       if (lint.truncated) lint.next = { offset: offset + lint.issues.length, limit: limit }
       return lint
     }
-    if (action === "write") return wm.write(p.path, io.readFileString(p.contentfile))
+    if (action === "write") {
+      // Only the local TUI can register reviewed snapshots; request parameters cannot grant access.
+      var reviewed = this._reviewedContent
+      var content = reviewed && Object.prototype.hasOwnProperty.call(reviewed, p.contentfile)
+        ? reviewed[p.contentfile] : io.readFileString(new MiniAFileAccess(this.args.fileallow).assert(p.contentfile))
+      return wm.write(p.path, content)
+    }
     if (action === "move") return wm.move(p.from, p.to, p)
     if (action === "init") return wm.init(p.path || "")
     if (action === "delete") return wm.delete(p.path)

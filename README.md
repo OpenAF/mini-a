@@ -434,6 +434,7 @@ Mini-A ships with complementary components:
 | Option | Description | Default |
 |--------|-------------|---------|
 | `goal` | Objective the agent should achieve | Required |
+| `fileallow` | Comma-delimited list or JSON/SLON array of files or directories allowed for built-in file access; directories include descendants. `[]` denies access. Server-controlled in Advanced web sessions. See [configuration and scope](USAGE.md#built-in-file-access-allowlist). | Unset (existing behavior) |
 | `youare` | Override the opening persona sentence in the system prompt (inline text or `@file` path) to craft specialized agents | `"You are a goal-oriented agent running in background."` (Mini-A still appends the step-by-step directive, and adds the no-feedback remark for `mini-a-con`/`mini-a-web`) |
 | `chatyouare` | Override the chatbot persona sentence when `chatbotmode=true` (inline text or `@file` path) | `"You are a helpful conversational AI assistant."` |
 | `useshell` | Allow shell command execution | `false` |

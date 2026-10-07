@@ -260,6 +260,7 @@ SubtaskManager.prototype._buildChildArgs = function(subtask) {
     mergedArgs[key] = explicitArgs[key]
   })
 
+  if (isDef(this.parentArgs.fileallow)) mergedArgs.fileallow = this.parentArgs.fileallow
   this._stripInheritedParentOnlyArgs(mergedArgs, explicitArgs)
 
   // Communication declarations never inherit through argument merging.

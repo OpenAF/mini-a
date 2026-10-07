@@ -282,6 +282,9 @@ help:
     desc     : SLON/JSON browser context injected into the agent (viewport, color scheme, server port, etc.)
     example  : "(viewportWidth: 1280, colorScheme: dark)"
     mandatory: false
+  - name     : fileallow
+    desc     : "Allowed built-in file paths as a comma-delimited list or JSON/SLON array; directories include descendants, [] denies all, omission preserves existing access."
+
   - name     : knowledge
     desc     : Extra knowledge or context injected into the agent
     example  : "This repository uses OpenAF jobs."
@@ -1632,6 +1635,7 @@ jobs:
       compressgoaltokens: toNumber().isNumber().default(250)
       compressgoalchars : toNumber().isNumber().default(1000)
       maxpromptchars  : toNumber().isNumber().default(120000)
+      fileallow       : default(__)
       knowledge       : isString().default(__)
       rules           : isString().default(__)
       youare          : isString().default(__)

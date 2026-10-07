@@ -9,17 +9,18 @@ var MiniAAbsorb = function(args, logFn) {
   loadLib("mini-a-wiki.js")
   this._wiki = Object.create(MiniAWikiManager.prototype)
   this._ingest = new MiniAIngest(this._args, this._log)
+  this._fileAccess = new MiniAFileAccess(this._args.fileallow)
 }
 MiniAAbsorb.prototype._setLlm = function(llm) { this._llm = llm }
 MiniAAbsorb.prototype._hash = function(value) { return sha256(String(value)) }
-MiniAAbsorb.prototype._canonical = function(path) { return String(new java.io.File(String(path)).getCanonicalPath()) }
+MiniAAbsorb.prototype._canonical = function(path) { return this._fileAccess.assert(String(new java.io.File(String(path)).getCanonicalPath())) }
 MiniAAbsorb.prototype._inside = function(path, root) { return path === root || path.indexOf(root + "/") === 0 }
-MiniAAbsorb.prototype._json = function(path, fallback) { return io.fileExists(path) ? af.fromJson(io.readFileString(path)) : fallback }
+MiniAAbsorb.prototype._json = function(path, fallback) { return io.fileExists(path) ? af.fromJson(io.readFileString(this._fileAccess.assert(path))) : fallback }
 MiniAAbsorb.prototype._spec = function(value) {
   var spec = value
   if (isString(value)) {
     if (io.fileExists(value)) {
-      var raw = io.readFileString(value)
+      var raw = io.readFileString(this._fileAccess.assert(value))
       spec = /\.ya?ml$/i.test(value) ? af.fromYAML(raw) : /\.slon$/i.test(value) ? af.fromSLON(raw) : af.fromJson(raw)
     } else {
       spec = af.fromJSSLON(value.trim())
@@ -29,7 +30,7 @@ MiniAAbsorb.prototype._spec = function(value) {
   if (!isMap(spec)) throw new Error("Absorption specification must be a map or sources array (file or inline JSON/SLON)")
   return spec
 }
-MiniAAbsorb.prototype._raw = function(path) { return io.fileExists(path) ? io.readFileString(path) : null }
+MiniAAbsorb.prototype._raw = function(path) { return io.fileExists(path) ? io.readFileString(this._fileAccess.assert(path)) : null }
 MiniAAbsorb.prototype._atomic = function(path, text) {
   if (this._canonical(path) !== path) throw new Error("Symlink artifact path: " + path)
   var parent = new java.io.File(path).getParentFile()
@@ -65,7 +66,7 @@ MiniAAbsorb.prototype._safe = function(root, path) {
 MiniAAbsorb.prototype._inventory = function(root) {
   var self = this, out = {}
   function walk(dir, prefix) {
-    var entries = new java.io.File(dir).listFiles()
+    var entries = new java.io.File(self._fileAccess.assert(dir)).listFiles()
     if (entries === null) throw new Error("Unreadable wiki: " + dir)
     for (var i = 0; i < entries.length; i++) {
       var f = entries[i], name = String(f.getName()), rel = prefix + name

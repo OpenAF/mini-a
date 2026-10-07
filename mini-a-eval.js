@@ -5,7 +5,9 @@
  * policy. Later orchestration and tracing work can reuse the normalized
  * scenario result, metric snapshot, and event records produced here.
  */
-(function() {
+loadLib("mini-a-common.js")
+
+;(function() {
   var MiniAEval = function(options) {
     this.options = isMap(options) ? options : {}
     this.agentFactory = isFunction(this.options.agentFactory) ? this.options.agentFactory : function() { return new MiniA() }
@@ -14,7 +16,7 @@
   }
 
   MiniAEval.prototype._readDefinition = function(path) {
-    var text = io.readFileString(path)
+    var text = io.readFileString(new MiniAFileAccess(this.options.fileallow).assert(path))
     var trimmed = isString(text) ? text.trim() : ""
     if (trimmed.length === 0) throw new Error("Evaluation definition is empty: " + path)
     try {
@@ -229,6 +231,7 @@
     try {
       var agent = this.agentFactory({ name: result.name + " judge", goal: judgeArgs.goal, args: judgeArgs })
       if (isFunction(agent.init)) agent.init(judgeArgs)
+      if (isDef(this.options.fileallow)) judgeArgs.fileallow = this.options.fileallow
       var answer = String(agent.start(judgeArgs))
       return { passed: /^\s*PASS\b/i.test(answer), answer: answer }
     } catch(e) {
@@ -274,6 +277,8 @@
       }
     }
     try {
+      if (isDef(this.options.fileallow)) runArgs.fileallow = this.options.fileallow
+      else if (isMap(sharedArgs) && isDef(sharedArgs.fileallow)) runArgs.fileallow = sharedArgs.fileallow
       if (isFunction(agent.init)) agent.init(runArgs)
       if (isMap(scenario.setup) && isArray(scenario.setup.contextObjects) && isObject(agent._historyVm) && agent._historyVm.contextVirtualization) {
         scenario.setup.contextObjects.forEach(function(source) {

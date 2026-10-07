@@ -1994,7 +1994,7 @@ MiniADreams.prototype.run = function() {
   }
   if (isString(self._args.dreamreport) && self._args.dreamreport.trim().length > 0) {
     try {
-      io.writeFileString(self._args.dreamreport.trim(), stringify(overall, __, ""))
+      io.writeFileString(new MiniAFileAccess(self._args.fileallow).assert(self._args.dreamreport.trim()), stringify(overall, __, ""))
     } catch(reportErr) {
       overall.report_error = __miniAErrMsg(reportErr)
       overall.ok = false

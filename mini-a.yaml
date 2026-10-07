@@ -156,6 +156,9 @@ help:
     desc     : "Deep research only: output file path to save the full results (cycle history, verdicts, learnings). If not provided, the full results print to console."
     example  : "/path/to/full-results.md"
     mandatory: false
+  - name     : fileallow
+    desc     : "Allowed built-in file paths as a comma-delimited list or JSON/SLON array; directories include descendants, [] denies all, omission preserves existing access."
+
   - name     : knowledge
     desc     : "Additional knowledge or context to provide to the agent (in the form of a string or a path to a text file)"
     example  : "You have access to a Linux shell and can run commands like ls, cat, grep, wc, curl, etc."
@@ -1365,6 +1368,7 @@ jobs:
         sandboxprofile : sandboxprofile
         sandboxnonetwork: sandboxnonetwork
         extrahooks     : extrahooks
+        fileallow      : fileallow
         knowledge      : knowledge
         homedir        : homedir
         goalprefix     : goalprefix
@@ -1655,6 +1659,7 @@ jobs:
       sandboxprofile : isString.default(__)
       sandboxnonetwork: toBoolean.isBoolean.default(false)
       extrahooks     : isString.default(__)
+      fileallow      : default(__)
       knowledge      : isString.default(__)
       homedir        : isString.default(__)
       goalprefix     : isString.default(__)
@@ -1908,13 +1913,14 @@ jobs:
   exec : | #js
     if (args.eval === true) {
       if (!isString(args.evalfile) || args.evalfile.trim().length === 0) throw "evalfile is required when eval=true"
-      var _eval = new MiniAEval()
+      var _eval = new MiniAEval({ fileallow: args.fileallow })
+      var _evalFiles = new MiniAFileAccess(args.fileallow)
       var _evalReport = _eval.run(_eval.load(args.evalfile), { args: { __evaluation: true } })
       if (isString(args.evalbaseline) && args.evalbaseline.trim().length > 0) {
-        _evalReport.comparison = _eval.compare(_evalReport, io.readFileJSON(args.evalbaseline))
+        _evalReport.comparison = _eval.compare(_evalReport, io.readFileJSON(_evalFiles.assert(args.evalbaseline)))
       }
-      if (isString(args.evalout) && args.evalout.trim().length > 0) io.writeFileJSON(args.evalout, _evalReport)
-      if (isString(args.evalwritebaseline) && args.evalwritebaseline.trim().length > 0) io.writeFileJSON(args.evalwritebaseline, _evalReport)
+      if (isString(args.evalout) && args.evalout.trim().length > 0) io.writeFileJSON(_evalFiles.assert(args.evalout), _evalReport)
+      if (isString(args.evalwritebaseline) && args.evalwritebaseline.trim().length > 0) io.writeFileJSON(_evalFiles.assert(args.evalwritebaseline), _evalReport)
       print(_eval.format(_evalReport))
       if (_evalReport.summary.failed > 0 || (isMap(_evalReport.comparison) && _evalReport.comparison.regressions.length > 0)) throw "Evaluation failed"
       return

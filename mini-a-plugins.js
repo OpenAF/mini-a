@@ -21,6 +21,8 @@ var __MINI_A_PLUGIN_SCHEMA_ID = "https://agent-plugins.org/schemas/1.0.0/plugin.
 var __MINI_A_PLUGIN_MCP_SCHEMA_ID = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
 var __MINI_A_PLUGIN_NAME_PATTERN = /^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/
 
+loadLib("mini-a-common.js")
+
 function __miniAPluginExpandHomePath(pathValue) {
   if (!(isString(pathValue) || pathValue instanceof java.lang.String)) return pathValue
   pathValue = String(pathValue)
@@ -311,6 +313,9 @@ function __miniAPluginConvertMcpServerEntry(pluginRootCanonical, pluginName, ser
 }
 
 function __miniAPluginLoadOne(pluginDir, options) {
+  options = isMap(options) ? options : {}
+  var fileAccess = new MiniAFileAccess(options.fileallow)
+  fileAccess.assert(pluginDir)
   if (!io.fileExists(pluginDir) || io.fileInfo(pluginDir).isDirectory !== true) {
     return { ok: false, warning: "plugin directory not found: " + pluginDir }
   }
@@ -322,7 +327,7 @@ function __miniAPluginLoadOne(pluginDir, options) {
 
   var parsed
   try {
-    parsed = af.fromJson(io.readFileString(manifestPath))
+    parsed = af.fromJson(io.readFileString(fileAccess.assert(manifestPath)))
   } catch (parseErr) {
     return { ok: false, warning: "plugin at '" + pluginDir + "': plugin.json is not valid JSON (" + __miniAErrMsg(parseErr) + ")" }
   }
@@ -347,7 +352,7 @@ function __miniAPluginLoadOne(pluginDir, options) {
   if (io.fileExists(mcpJsonPath)) {
     var mcpParsed
     try {
-      mcpParsed = af.fromJson(io.readFileString(mcpJsonPath))
+      mcpParsed = af.fromJson(io.readFileString(fileAccess.assert(mcpJsonPath)))
     } catch (mcpParseErr) {
       warnings.push("plugin '" + pluginName + "': mcp.json is not valid JSON (" + __miniAErrMsg(mcpParseErr) + "); MCP servers skipped")
       mcpParsed = __
@@ -380,6 +385,7 @@ function __miniAPluginLoadOne(pluginDir, options) {
 
 function __miniAPluginDiscover(options) {
   options = isMap(options) ? options : {}
+  var fileAccess = new MiniAFileAccess(options.fileallow)
   var warnings = []
   var skillsRoots = []
   var mcpConfigs = []
@@ -398,7 +404,7 @@ function __miniAPluginDiscover(options) {
 
   __miniAPluginResolveRoots(options).forEach(function(root) {
     var listing
-    try { listing = io.listFiles(root) } catch (e) { listing = __ }
+    try { listing = io.listFiles(fileAccess.assert(root)) } catch (e) { listing = __ }
     if (!isMap(listing) || !isArray(listing.files)) return
     listing.files.forEach(function(entry) {
       var entryName = __, isDirectory = false

@@ -2,6 +2,54 @@
 // License: Apache 2.0
 // Description: Shared utility functions used across mini-a components.
 
+// Per-instance policy: never install a process-global IO hook (web sessions share a JVM).
+function MiniAFileAccess(allowed) {
+  this.enabled = isDef(allowed)
+  if (!this.enabled) return
+  if (isString(allowed)) {
+    var text = allowed.trim()
+    // Structured inputs must parse successfully; never reinterpret them as path lists.
+    if (/^[\[({]/.test(text)) {
+      try {
+        try { allowed = JSON.parse(text) } catch(ignoreJSON) { allowed = af.fromJSSLON(text) }
+      } catch(parseError) {
+        throw new Error("fileallow contains an invalid JSON/SLON array")
+      }
+    } else {
+      allowed = text.split(",").map(function(path) { return path.trim() })
+    }
+  }
+  if (!isArray(allowed) || allowed.some(function(path) { return !isString(path) || !path.trim() })) {
+    throw new Error("fileallow must be a comma-delimited list or JSON/SLON array of file or directory paths")
+  }
+  this.roots = allowed.map(function(path) {
+    var file = new java.io.File(path).getCanonicalFile()
+    if (!file.exists()) throw new Error("fileallow entry does not exist: " + path)
+    return { path: file.toPath(), directory: file.isDirectory() }
+  })
+}
+
+MiniAFileAccess.prototype.assert = function(path) {
+  if (!this.enabled) return path
+  var canonical = new java.io.File(String(path)).getCanonicalFile().toPath()
+  if (!this.roots.some(function(root) { return canonical.equals(root.path) || root.directory && canonical.startsWith(root.path) })) {
+    var error = new Error("File access denied by fileallow: " + path)
+    error.code = "MINI_A_FILE_DENIED"
+    throw error
+  }
+  return String(canonical)
+}
+MiniAFileAccess.prototype.allows = function(path) {
+  try { this.assert(path); return true } catch(e) { return false }
+}
+MiniAFileAccess.prototype.url = function(url) {
+  if (!this.enabled) return url
+  var parsed = new java.net.URI(String(url)), scheme = String(parsed.getScheme()).toLowerCase()
+  if (scheme === "file") this.assert(String(new java.io.File(parsed)))
+  else if (scheme !== "http" && scheme !== "https") throw new Error("URL scheme denied by fileallow: " + scheme)
+  return url
+}
+
 /**
  * Returns a formatted error message string from an error value.
  * Replaces the repeated `(e.message || String(e))` / `(isDef(e) && isString(e.message)) ? e.message : e` pattern.
@@ -358,9 +406,10 @@ function __miniANormalizeSkillVirtualFiles(skillDoc) {
   return files
 }
 
-function __miniALoadSkillTemplateDocument(templatePath) {
+function __miniALoadSkillTemplateDocument(templatePath, fileAccess) {
   if (!isString(templatePath) || templatePath.trim().length === 0) return __
   if (!io.fileExists(templatePath) || io.fileInfo(templatePath).isFile !== true) return __
+  if (fileAccess) templatePath = fileAccess.assert(templatePath)
   var raw = io.readFileString(templatePath)
   if (!isString(raw)) raw = String(raw || "")
   var format = __miniASkillTemplateFormatFromPath(templatePath)
@@ -412,10 +461,10 @@ function __miniALoadSkillTemplateDocument(templatePath) {
  *
  * @param {string} templatePath - Absolute path to the template file.
  */
-function __miniAReadSkillDescriptionFromTemplate(templatePath) {
+function __miniAReadSkillDescriptionFromTemplate(templatePath, fileAccess) {
   if (!isString(templatePath) || templatePath.trim().length === 0) return __
   try {
-    var loaded = __miniALoadSkillTemplateDocument(String(templatePath))
+    var loaded = __miniALoadSkillTemplateDocument(String(templatePath), fileAccess)
     if (!isObject(loaded) || !isString(loaded.description)) return __
     var description = loaded.description.replace(/\s+/g, " ").trim()
     return description.length > 0 ? description : __

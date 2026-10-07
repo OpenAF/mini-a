@@ -36,7 +36,7 @@ MiniAPolicyRuntime.prototype.evaluate = function(operation) {
 MiniA.prototype._initPolicyRuntime = function(args) {
   var raw = args.policy
   if (isString(raw) && raw.trim().length > 0) raw = af.fromJSSLON(raw)
-  if (isString(args.policyfile) && args.policyfile.length > 0 && io.fileExists(args.policyfile)) raw = io.readFileJSON(args.policyfile)
+  if (isString(args.policyfile) && args.policyfile.length > 0 && io.fileExists(args.policyfile)) raw = io.readFileJSON(this._filePath(args.policyfile))
   this._policyRuntime = new MiniAPolicyRuntime(raw)
   return this._policyRuntime
 }

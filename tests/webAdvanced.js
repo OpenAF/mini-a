@@ -21,7 +21,7 @@ try {
   var commandsDir = testRoot + '/.openaf-mini-a/commands'
   io.mkdir(commandsDir)
   io.writeFileString(commandsDir + '/git-impact.md', '---\nname: git-impact\ndescription: Fixture command\n---\nReview the complete changes for {{arg1}}.')
-  var advanced = new MiniAAdvanced({homedir:testRoot, webadvancedpath: testRoot, usehistory: false, youare: 'Inherited persona', model: '(type: openai, model: fixture, key: TOP-SECRET)' })
+  var advanced = new MiniAAdvanced({homedir:testRoot, webadvancedpath: testRoot, usehistory: false, fileallow: [testRoot], youare: 'Inherited persona', model: '(type: openai, model: fixture, key: TOP-SECRET)' })
   advanced.schedule = function(fn) { jobs.push(fn); return { catch: function() {} } }
   advanced.submitPrompt = function(req) { submitted.push(jsonParse(req.files.postData)) }
   var first=advanced.get('first'), second=advanced.get('second')
@@ -95,6 +95,10 @@ try {
   check(first.runtime.options().useshell===true,'shared setting applied')
   check(second.runtime.options().useshell!==true,'settings isolated')
   check(!global.__busy.first,'reservation released')
+  advanced.request({uuid:'first',action:'settings',values:{fileallow:'["/"]'},requestId:'blocked-files'}); jobs.shift()()
+  check(first.runtime.options().fileallow[0] === testRoot, 'browser cannot widen fileallow')
+  check(advanced.mergeOptions(advanced.args,{fileallow:null}).fileallow[0] === testRoot, 'restored options cannot remove fileallow')
+
   advanced.request({uuid:'first',action:'command',command:'/set onport 1234',requestId:'blocked-1'});jobs.shift()()
   check(advanced.events(first,0,100).some(function(e){return e.type==='error'}),'server options rejected')
   advanced.request({uuid:'first',action:'preset',op:'save',name:'Personal',requestId:'preset-1'});jobs.shift()()
