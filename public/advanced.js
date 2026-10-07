@@ -5,6 +5,16 @@ window.MiniAAdvancedUI = function(bridge) {
   let history = [], historyIndex = 0, activeScreen = 'activity';
   let viewParams = {}, resultGeneration = 0, resultRefresh = null, submittedView = null, liveFloor = 0, liveClearRun = null;
   const previousSelections = {};
+  const promptFields = [
+    ['youare', 'Agent persona', 'Define the agent role and opening instruction.'],
+    ['chatyouare', 'Chatbot persona', 'Define the role used when chatbot mode is enabled.'],
+    ['rules', 'Rules / instructions', 'Behaviour, constraints, style, and response requirements. Plain text, bullets, or a JSON/SLON array.'],
+    ['knowledge', 'Knowledge / context', 'Background information, domain facts, examples, and reference material.'],
+    ['goalprefix', 'Goal prefix', 'Reusable wording prepended to every submitted goal.']
+  ];
+  const promptDrafts = {};
+  let promptPending = null, promptRefresh = null, promptPopup = null, settingsRefresh = null;
+  let promptFeedback = '';
   let subtaskRefresh = null, subtaskTick = 0;
   const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
   const button = (text, action) => { const n = el('button', text); n.type = 'button'; n.addEventListener('click', () => Promise.resolve().then(action).catch(showError)); return n; };
@@ -26,9 +36,61 @@ window.MiniAAdvancedUI = function(bridge) {
     const text = JSON.stringify(value, (_key, item) => typeof item === 'string' ? strip(item) : item, 2);
     return typeof text === 'string' ? strip(text) : text;
   }
+  const storageChoiceKey = 'mini-a-advanced-storage';
+  const browserPresetsKey = 'mini-a-advanced-presets';
+  let storageMode = 'current';
+  try { if (localStorage.getItem(storageChoiceKey) === 'browser') storageMode = 'browser'; } catch (_) {}
+  function browserPresets() {
+    const raw = localStorage.getItem(browserPresetsKey);
+    if (!raw) return {presets:{}};
+    const library = JSON.parse(raw);
+    if (!library || !library.presets || typeof library.presets !== 'object' || Array.isArray(library.presets)) throw new Error('Browser presets are invalid. Restore or remove the saved browser preset data.');
+    return library;
+  }
+  function usePresetLibrary(data) {
+    if (storageMode === 'browser') {
+      const library = browserPresets();
+      data.presets = Object.keys(library.presets); data.defaultPreset = library.defaultPreset;
+    }
+    return data;
+  }
+  async function presetRequest(data) {
+    if (storageMode !== 'browser' || data.action !== 'preset') return api(data);
+    if (!/^[a-zA-Z0-9 _-]{1,80}$/.test(data.name || '')) throw new Error('Invalid preset name');
+    const library = browserPresets();
+    if (data.op === 'apply') {
+      if (!Object.prototype.hasOwnProperty.call(library.presets, data.name)) throw new Error('Preset not found');
+      return api({...data,values:library.presets[data.name]});
+    }
+    if (data.op === 'save') Object.defineProperty(library.presets, data.name, {value:(await api({action:'preset-export'})).values,enumerable:true,writable:true,configurable:true});
+    else if (data.op === 'default') {
+      if (!Object.prototype.hasOwnProperty.call(library.presets, data.name)) throw new Error('Preset not found');
+      library.defaultPreset = data.name;
+    } else if (data.op === 'delete') {
+      delete library.presets[data.name]; if (library.defaultPreset === data.name) delete library.defaultPreset;
+    } else throw new Error('Unknown preset operation');
+    localStorage.setItem(browserPresetsKey, JSON.stringify(library));
+    if (snapshot) usePresetLibrary(snapshot);
+    return {local:true};
+  }
   const toolbar = el('div', undefined, 'advanced-toolbar');
   const toggle = button('Advanced', () => setEnabled(!enabled));
   toolbar.append(toggle);
+  const storageToggle = button('', async () => {
+    if (busy || promptPending) throw new Error('Finish the current operation before switching storage.');
+    const next = storageMode === 'browser' ? 'current' : 'browser';
+    if (next === 'browser') browserPresets();
+    localStorage.setItem(storageChoiceKey, next);
+    storageMode = next; updateStorageToggle();
+    if (snapshot) { await poll(); renderScreen(); }
+  });
+  function updateStorageToggle() {
+    storageToggle.textContent = storageMode === 'browser' ? '🌐 Browser storage' : '🗄️ Current storage';
+    storageToggle.setAttribute('aria-label', 'Storage for presets and saved conversations');
+    storageToggle.setAttribute('aria-pressed', String(storageMode === 'browser'));
+    storageToggle.title = 'Switch storage for presets and saved conversations. Selection is remembered in this browser. Active agent state remains on the server.';
+  }
+  updateStorageToggle();
   const status = el('span', ''); toolbar.append(status);
   document.querySelector('#promptInput').parentElement.prepend(toolbar);
   const shell = el('section', undefined, 'advanced-shell'); shell.hidden = true;
@@ -136,6 +198,7 @@ window.MiniAAdvancedUI = function(bridge) {
     ['answer', 'Answer', 'Read the previous answer, copy it or download it to your browser.'],
     ['activity', 'Live activity', 'Follow agent actions, tool calls, progress, and results in real time.'],
     ['settings', 'Settings', 'Adjust parameters for this session and manage saved presets.'],
+    ['prompts', 'Prompt workspace', 'Edit personas, instructions, knowledge, and the goal prefix for this session.'],
     ['models', 'Models', 'Choose and configure the main, low-cost, and validation models.'],
     ['history', 'History', 'Open saved conversations, restore history, or rewind exchanges.'],
     ['context', 'Context', 'Inspect, compact, and summarize the agent conversation context.'],
@@ -161,6 +224,13 @@ window.MiniAAdvancedUI = function(bridge) {
     dockleft: 'M3 4h18v16H3ZM9 4v16',
     activity: 'M3 12h4l3-7 4 14 3-7h4',
     settings: 'M4 7h7m4 0h5M4 17h3m4 0h9M11 4v6M7 14v6',
+    prompts: 'M5 3h14v18H5ZM8 7h8m-8 4h8m-8 4h6',
+    apply: 'm5 12 4 4L19 6',
+    discard: 'm6 6 12 12M18 6 6 18',
+    newconversation: 'M4 4h16v12H9l-5 4V4ZM8 10h8m-4-4v8',
+    reset: 'M3 5v5h5M3 10a9 9 0 1 1 1 7',
+    save: 'M4 3h13l3 3v15H4V3ZM8 3v6h8V3M8 21v-8h8v8',
+    load: 'M12 3v12m-4-4 4 4 4-4M4 15v6h16v-6',
     models: 'M8 8h8v8H8zM9 3v3m6-3v3M9 18v3m6-3v3M3 9h3m-3 6h3m12-6h3m-3 6h3',
     history: 'M3 5v5h5M3 10a9 9 0 1 1 1 7M12 7v5l3 2',
     context: 'M8 4H5v16h3M16 4h3v16h-3M9 9h6m-6 6h6',
@@ -207,7 +277,7 @@ window.MiniAAdvancedUI = function(bridge) {
     option.setAttribute('aria-description', description); option.dataset.screen = name;
     screenOptions.append(option); return option;
   });
-  screenPicker.append(screenTrigger, screenOptions); nav.append(screenPicker);
+  screenPicker.append(screenTrigger, screenOptions); nav.append(screenPicker, storageToggle);
   screenPicker.addEventListener('keydown', event => {
     if (event.key === 'Escape' && !screenOptions.hidden) {
       event.preventDefault(); event.stopPropagation(); closeScreenOptions(true);
@@ -251,12 +321,17 @@ window.MiniAAdvancedUI = function(bridge) {
     control.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' + icon + '</svg>';
     return control;
   }
-  controls.append(sessionAction('Stop', '<rect x="5" y="5" width="14" height="14" rx="2"></rect>', () => api({action:'stop'})), sessionAction('New conversation', '<path d="M19 13H13v6h-2v-6H5v-2h6V5h2v6h6v2z" />', async () => {
+  async function newConversation() {
     if (busy) throw new Error('Stop or finish the current operation before starting a new conversation.');
     await bridge.newConversation(); resetSessionView();
     activeScreen = 'activity'; renderScreen();
     sessionStorage.removeItem(storeKey); await poll();
-  }));
+    if (storageMode === 'browser') {
+      const library = browserPresets();
+      if (library.defaultPreset) await submitPromptSettings({action:'preset',op:'apply',name:library.defaultPreset});
+    }
+  }
+  controls.append(sessionAction('Stop', '<rect x="5" y="5" width="14" height="14" rx="2"></rect>', () => api({action:'stop'})), sessionAction('New conversation', '<path d="M19 13H13v6h-2v-6H5v-2h6V5h2v6h6v2z" />', newConversation));
   paneHeader.append(controls);
   async function api(data) {
     const uuid = bridge.uuid();
@@ -268,6 +343,10 @@ window.MiniAAdvancedUI = function(bridge) {
   function showError(error) { status.textContent = String(error.message || error); paneStatus.textContent = 'Error'; paneStatus.dataset.state = 'error'; }
   function resetSessionView() {
     if (dialog.open) dialog.close();
+    if (promptPopup) promptPopup.close();
+    Object.keys(promptDrafts).forEach(key => delete promptDrafts[key]);
+    promptPending = promptRefresh = settingsRefresh = null;
+    promptFeedback = '';
     after = 0; snapshot = null; dialogId = null; liveFloor = 0; liveClearRun = null; submittedView = null; viewParams = {};
     Object.keys(previousSelections).forEach(key => delete previousSelections[key]);
     resultGeneration++; resultRefresh = subtaskRefresh = null; events.replaceChildren();
@@ -333,13 +412,16 @@ window.MiniAAdvancedUI = function(bridge) {
       if (snapshot && current !== snapshot.uuid) resetSessionView();
       const data = await api({action:'snapshot',after});
       if (current !== bridge.uuid()) return;
-      const first = !snapshot; snapshot = data; busy = data.busy; bridge.trackRun(data);
+      const first = !snapshot; usePresetLibrary(data); snapshot = data; busy = data.busy; bridge.trackRun(data);
+      syncPromptDrafts(data);
       if (data.busy && data.operationView) submittedView = {requestId:data.operation,name:data.operationView.name};
       paneStatus.dataset.state = data.closed ? 'closed' : busy ? 'working' : 'ready';
       status.textContent = paneStatus.textContent = data.closed ? 'Session ended' : data.pending ? 'Waiting for your input' : busy ? 'Working' : 'Ready';
       for (const record of data.events) { if (record.sequence > after) { appendEvent(record, !first); after = record.sequence; } }
       if (data.events.length) followActivity();
       if (first || (['settings','models'].includes(activeScreen) && !screen.contains(document.activeElement) && data.events.some(e => e.type === 'complete' && (['settings','preset'].includes(e.value?.action) || e.value?.settingsChanged)))) renderScreen();
+      if (promptRefresh) promptRefresh();
+      if (settingsRefresh) settingsRefresh();
       if (first || data.events.some(e => ['history-clear','history-replace'].includes(e.type))) bridge.refresh();
       if (resultRefresh && data.events.some(e => ['command-result','complete','result-part','output','error','interaction'].includes(e.type))) resultRefresh();
       if (activeScreen === 'subtasks' && subtaskRefresh && Date.now() - subtaskTick > 3000) { subtaskTick = Date.now(); subtaskRefresh(); }
@@ -423,6 +505,182 @@ window.MiniAAdvancedUI = function(bridge) {
     dialog.append(button('Cancel operation', async () => { if (dialogSession !== bridge.uuid() || dialogId !== pending.id) return; try { await api({action:'stop'}); dialog.close(); } catch(error) { showError(error); } }));
     if (!dialog.open) dialog.showModal();
     dialog.querySelector('textarea,input,button')?.focus();
+  }
+  function promptText(value) { return value === undefined || value === null ? '' : asText(value); }
+  function promptDirty(draft) { return draft.reset || draft.value !== draft.baseline; }
+  function syncPromptDrafts(data) {
+    const pending = promptPending;
+    if (pending && pending.uuid === data.uuid) {
+      const error = data.events.find(e => e.runId === pending.requestId && e.type === 'error');
+      if (error) pending.failed = activityText(error.value) || 'The operation failed.';
+      if (data.events.some(e => e.type === 'complete' && e.value?.requestId === pending.requestId)) {
+        if (!pending.failed) Object.entries(pending.entries).forEach(([name, submitted]) => {
+          const draft = promptDrafts[name];
+          const setting = data.settings.find(s => s.name === name);
+          if (draft && setting && draft.value === submitted.value && draft.reset === submitted.reset) {
+            draft.value = promptText(setting.value); draft.reset = false; draft.baseline = draft.value;
+          }
+        });
+        const presetMessage = {save:'saved.',apply:'applied.',default:'set as default.',delete:'deleted.'};
+        promptFeedback = pending.failed ? 'Changes could not be applied: ' + pending.failed : pending.action === 'preset' ? 'Preset ' + presetMessage[pending.op] : 'Changes applied. They take effect on the next goal.';
+        promptPending = null;
+      }
+    }
+    data.settings.forEach(setting => {
+      const draft = promptDrafts[setting.name];
+      if (!draft) return;
+      const dirty = promptDirty(draft), value = promptText(setting.value);
+      if (!dirty) draft.value = value;
+      draft.baseline = value;
+    });
+  }
+  async function submitPromptSettings(data, entries = {}) {
+    if (busy || promptPending) throw new Error('Stop or finish the current operation before applying prompt settings.');
+    const pending = {uuid:bridge.uuid(), requestId:bridge.newRequestId(), entries, action:data.action, op:data.op};
+    promptPending = pending; promptFeedback = ''; if (promptRefresh) promptRefresh(); if (settingsRefresh) settingsRefresh();
+    try {
+      const receipt = await presetRequest({...data,requestId:pending.requestId});
+      if (receipt.local) {
+        promptPending = null; promptFeedback = 'Preset ' + ({save:'saved.',default:'set as default.',delete:'deleted.'}[data.op]);
+        return;
+      }
+      if (pending.uuid !== bridge.uuid()) return;
+      if (receipt.busy) throw new Error('This conversation is busy. Stop or finish the current operation first.');
+      busy = true; await poll();
+    } catch (error) {
+      if (promptPending === pending) promptPending = null;
+      if (pending.uuid === bridge.uuid()) promptFeedback = 'Changes could not be applied: ' + (error.message || String(error));
+      throw error;
+    } finally { if (promptRefresh) promptRefresh(); if (settingsRefresh) settingsRefresh(); }
+  }
+  function updatePromptExpandIcon(control, expanded, label, field) {
+    const action = (expanded ? 'Collapse ' : 'Expand ') + label + ' editor';
+    control.title = action; control.setAttribute('aria-label', action);
+    control.setAttribute('aria-expanded', String(expanded)); control.setAttribute('aria-controls', field.id);
+    control.dataset.expanded = String(expanded);
+    control.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' +
+      (expanded ? 'M20 9h-5V4M4 15h5v5' : 'M15 4h5v5M9 20H4v-5') + '"/></svg>';
+  }
+  function expandPromptEditor(holder, field, label) {
+    if (promptPopup) promptPopup.close();
+    const parent = holder.parentElement, next = holder.nextSibling;
+    const popup = el('dialog', undefined, 'advanced-dialog advanced-prompt-popup');
+    popup.setAttribute('aria-label', label + ' editor');
+    const trigger = holder.querySelector('[data-prompt-expand]');
+    if (trigger) updatePromptExpandIcon(trigger, true, label, field);
+    popup.append(el('h3', label), el('p', 'Edits stay in your draft. Apply changes in Prompt workspace.'), holder);
+    popup.addEventListener('cancel', event => { event.preventDefault(); event.stopPropagation(); popup.close(); });
+    popup.addEventListener('close', () => {
+      parent.insertBefore(holder, next); popup.remove();
+      if (promptPopup === popup) promptPopup = null;
+      if (trigger) updatePromptExpandIcon(trigger, false, label, field);
+      if (trigger && parent.isConnected) trigger.focus();
+    });
+    promptPopup = popup; document.body.append(popup); popup.showModal(); field.focus();
+  }
+  function promptAction(label, icon, action) {
+    const control = button(label, action);
+    control.className = 'advanced-prompt-action'; control.prepend(tabIcon(icon));
+    return control;
+  }
+  function promptWorkspace() {
+    const refreshers = [];
+    const relatedNames = ['chatbotmode','promptprofile','systempromptbudget','noagentsmd','format'];
+    const find = name => snapshot.settings.find(s => s.name === name);
+    const draftFor = setting => promptDrafts[setting.name] || (promptDrafts[setting.name] = {value:promptText(setting.value),baseline:promptText(setting.value),reset:false});
+    const workspaceNames = [...promptFields.map(([name]) => name), ...relatedNames];
+    const dirtyNames = () => workspaceNames.filter(name => promptDrafts[name] && promptDirty(promptDrafts[name]));
+    const locked = () => busy || !!promptPending || !!snapshot.closed;
+    const controls = el('div', undefined, 'advanced-actions');
+    const feedback = el('p', undefined, 'advanced-prompt-help'); feedback.setAttribute('role', 'status');
+    const apply = promptAction('Apply changes', 'apply', () => {
+      const values = {}, reset = [], entries = {};
+      dirtyNames().forEach(name => {
+        const draft = promptDrafts[name], setting = find(name);
+        if (!setting || setting.readOnly) return;
+        entries[name] = {...draft};
+        if (draft.reset) reset.push(name);
+        else values[name] = setting.type === 'boolean' ? draft.value === 'true' : draft.value;
+      });
+      return submitPromptSettings({action:'settings',values,reset}, entries);
+    });
+    const discard = promptAction('Discard edits', 'discard', () => {
+      dirtyNames().forEach(name => {
+        const draft = promptDrafts[name]; draft.value = promptText(find(name)?.value); draft.baseline = draft.value; draft.reset = false;
+      });
+      promptRefresh();
+    });
+    controls.append(apply, discard, promptAction('New conversation', 'newconversation', newConversation));
+    screen.append(el('p', 'Applied changes take effect on the next submitted goal. Existing conversation history still influences answers. For a fresh test, save a preset, start a new conversation, and apply that preset.', 'advanced-prompt-help'), controls, feedback);
+    const list = el('div', undefined, 'advanced-prompt-fields'); screen.append(list);
+    promptFields.forEach(([name, label, help]) => {
+      const setting = find(name); if (!setting) return;
+      const draft = draftFor(setting), row = el('section', undefined, 'advanced-prompt-card');
+      const title = el('label', label + ' (' + name + ')');
+      const field = el('textarea'); field.value = draft.value; field.rows = 6; field.spellcheck = false;
+      field.id = 'advanced-prompt-' + name; title.htmlFor = field.id;
+      const description = el('p', help + ' @file references remain references; this editor does not write to the referenced file.', 'advanced-prompt-help');
+      description.id = field.id + '-help'; field.setAttribute('aria-describedby', description.id);
+      const state = el('small'); state.setAttribute('role', 'status');
+      const holder = el('div', undefined, 'advanced-prompt-entry'); holder.append(field);
+      const actions = el('div', undefined, 'advanced-actions');
+      const expand = button('', () => {
+        if (expand.dataset.expanded === 'true' && promptPopup) promptPopup.close();
+        else expandPromptEditor(holder, field, label);
+      });
+      expand.className = 'advanced-prompt-expand'; expand.dataset.promptExpand = name;
+      updatePromptExpandIcon(expand, false, label, field); holder.append(expand);
+      const reset = promptAction('Reset to inherited value', 'reset', () => { draft.value = promptText(find(name).inheritedValue); draft.reset = true; promptRefresh(); });
+      actions.append(reset); row.append(title, description, state, holder, actions); list.append(row);
+      if (!setting.readOnly && setting.dataEditor === 'array') window.MiniADataEditor.bind(field, {label:name,root:'array'});
+      field.addEventListener('input', () => { draft.value = field.value; draft.reset = false; promptRefresh(); });
+      // Structured rules editing writes the source textarea through input/change events.
+      field.addEventListener('change', () => { draft.value = field.value; draft.reset = false; promptRefresh(); });
+      refreshers.push(() => {
+        const current = find(name);
+        if (field.value !== draft.value) field.value = draft.value;
+        field.disabled = !!current.readOnly || !!snapshot.closed;
+        reset.disabled = locked() || current.readOnly;
+        const inactive = name === 'chatyouare' && find('chatbotmode')?.value !== true;
+        state.textContent = `${promptPending?.entries[name] ? 'Applying…' : draft.reset ? 'Draft reset' : promptDirty(draft) ? 'Draft' : 'Applied'} · ${current.source === 'session' ? 'Session override' : 'Inherited setting'}${inactive ? ' · Inactive: chatbot mode is off' : ''}${current.readOnly ? ' · Server-controlled' : ''}`;
+      });
+    });
+    const related = el('details', undefined, 'advanced-prompt-related'); related.append(el('summary', 'Related settings'));
+    relatedNames.forEach(name => {
+      const setting = find(name); if (!setting) return;
+      const draft = draftFor(setting), label = el('label', name), field = input('', draft.value);
+      field.setAttribute('aria-label', name); field.title = setting.description || '';
+      if (setting.type === 'boolean') { field.type = 'checkbox'; field.checked = draft.value === 'true'; }
+      else if (setting.type === 'number') field.type = 'number';
+      field.oninput = () => { draft.value = setting.type === 'boolean' ? String(field.checked) : field.value; promptRefresh(); };
+      label.append(field); related.append(label);
+      refreshers.push(() => { field.disabled = setting.readOnly || !!snapshot.closed; if (setting.type === 'boolean') field.checked = draft.value === 'true'; else if (field.value !== draft.value) field.value = draft.value; });
+    });
+    screen.append(related);
+    const presets = el('div', undefined, 'advanced-actions');
+    const name = input('Preset name'); name.setAttribute('aria-label', 'Prompt preset name');
+    const names = el('select'); names.setAttribute('aria-label', 'Saved prompt preset');
+    let presetList = '';
+    const save = promptAction('Save preset', 'save', () => submitPromptSettings({action:'preset',op:'save',name:name.value}));
+    const load = promptAction('Apply preset', 'load', () => submitPromptSettings({action:'preset',op:'apply',name:names.value}));
+    presets.append(name, save, names, load); screen.append(el('p', 'Presets save all applied session settings. Apply or discard drafts before saving or loading a preset.', 'advanced-prompt-help'), presets);
+    promptRefresh = () => {
+      refreshers.forEach(refresh => refresh());
+      feedback.textContent = promptPending ? 'Applying…' : promptFeedback;
+      feedback.hidden = !feedback.textContent;
+      apply.disabled = locked() || !dirtyNames().length;
+      discard.disabled = !!promptPending || !dirtyNames().length;
+      save.disabled = load.disabled = locked() || !!dirtyNames().length;
+      const serialized = JSON.stringify(snapshot.presets);
+      if (serialized !== presetList) {
+        const selected = names.value; names.replaceChildren();
+        snapshot.presets.forEach(preset => { const option = el('option', preset); option.value = preset; names.append(option); });
+        if (snapshot.presets.includes(selected)) names.value = selected;
+        presetList = serialized;
+      }
+      if (!snapshot.presets.length) load.disabled = true;
+    };
+    promptRefresh();
   }
   function commandForm(label, build, fields) {
     const form = el('form', undefined, 'advanced-form'); form.append(el('h4',label));
@@ -923,6 +1181,8 @@ window.MiniAAdvancedUI = function(bridge) {
     }
   }).observe(document.body, {attributes: true, attributeFilter: ['class']});
   function renderScreen() {
+    promptRefresh = null;
+    settingsRefresh = null;
     debugGeneration++;
     resultGeneration++; resultRefresh = subtaskRefresh = null;
     statsGeneration++; destroyStatsCharts();
@@ -936,14 +1196,17 @@ window.MiniAAdvancedUI = function(bridge) {
     if (activeScreen === 'activity') { followActivity(); return; }
     screen.replaceChildren(el('h3', selected[1]), el('p', selected[2], 'advanced-screen-description'));
     if (!snapshot) return;
-    if (activeScreen !== 'subtasks') resultPanel();
+    if (!['subtasks','prompts'].includes(activeScreen)) resultPanel();
     if (activeScreen === 'help') { helpScreen(); }
+    else if (activeScreen === 'prompts') { promptWorkspace(); }
     else if (activeScreen === 'answer') { actions([['Previous answer','/last'],['Raw answer','/last md']]); commandForm('Save on server', file => file ? `/save ${quote(file)}` : '/save', ['Server path (default response.md)']); }
     else if (activeScreen === 'settings' || activeScreen === 'models') {
       const search=input('Search settings', viewParams.filter || ''); screen.append(search);
       const list=el('div',undefined,'advanced-settings'); screen.append(list);
       let commandFilter = viewParams.command;
+      let fieldRefreshers = [];
       const render=()=>{
+        fieldRefreshers = [];
         list.replaceChildren();
         snapshot.settings.filter(s=>(activeScreen!=='models'||(viewParams.slot ? s.name === viewParams.slot : ['model','modellc','modelval'].includes(s.name))) && (commandFilter === 'show' ? s.name.startsWith(search.value.toLowerCase()) : ['set','toggle','unset'].includes(commandFilter) ? s.name === search.value.toLowerCase() : `${s.name} ${s.description}`.toLowerCase().includes(search.value.toLowerCase()))).forEach(s=>{
           const row=el('div'); const label=el('label', s.name); const description=el('small',`${s.description || ''} · ${s.source === 'session' ? 'Session override' : s.source === 'server' ? 'Server default' : s.source} · Default: ${asText(s.defaultValue) ?? '(unset)'}${s.readOnly?' · Server-controlled':''}`);
@@ -952,12 +1215,36 @@ window.MiniAAdvancedUI = function(bridge) {
           label.append(field); row.append(label,description);
           if (!s.readOnly && ['map', 'array'].includes(s.dataEditor)) window.MiniADataEditor.bind(field, {label: s.name, root: s.dataEditor});
           if (!s.readOnly) row.append(button('Apply',async()=>{await mutate({action:'settings',values:{[s.name]:s.type==='boolean'?field.checked:field.value}});}));
+          const fieldValue = () => s.type === 'boolean' ? field.checked : field.value;
+          const settingValue = value => s.type === 'boolean' ? value === true : value === undefined ? '' : asText(value);
+          let previousValue = settingValue(s.value);
+          fieldRefreshers.push(() => {
+            const current = snapshot.settings.find(setting => setting.name === s.name);
+            if (!current) return;
+            const value = settingValue(current.value);
+            // Keep unsubmitted field edits while refreshing applied values and presets.
+            if (fieldValue() === previousValue) { if (s.type === 'boolean') field.checked = value; else field.value = value; }
+            previousValue = value;
+          });
           list.append(row);
         });
       }; search.oninput=()=>{commandFilter=null;render();}; render();
       const presets=el('div',undefined,'advanced-actions'); const name=input('Preset name'); const names=el('select'); snapshot.presets.forEach(p=>{const o=el('option',p);o.value=p;names.append(o);});
-      presets.append(name,button('Save preset',()=>mutate({action:'preset',op:'save',name:name.value})),names);
-      ['apply','default','delete'].forEach(op=>presets.append(button(op,()=>mutate({action:'preset',op,name:names.value})))); screen.append(presets);
+      name.setAttribute('aria-label','Preset name'); names.setAttribute('aria-label','Saved preset');
+      const presetControls = [button('Save preset',()=>submitPromptSettings({action:'preset',op:'save',name:name.value}))];
+      presets.append(name,presetControls[0],names);
+      ['apply','default','delete'].forEach(op=>{const control=button(op,()=>submitPromptSettings({action:'preset',op,name:names.value}));presetControls.push(control);presets.append(control);}); screen.append(presets);
+      const feedback=el('p',undefined,'advanced-prompt-help');feedback.setAttribute('role','status');screen.append(feedback);
+      screen.append(el('p',`Presets use ${storageMode === 'browser' ? 'this browser' : 'current server storage'} and contain applied settings. Apply edited fields before saving a preset.`,'advanced-prompt-help'));
+      let presetList = JSON.stringify(snapshot.presets);
+      settingsRefresh = () => {
+        fieldRefreshers.forEach(refresh=>refresh());
+        const serialized=JSON.stringify(snapshot.presets);
+        if(serialized!==presetList){const selected=names.value;names.replaceChildren();snapshot.presets.forEach(p=>{const option=el('option',p);option.value=p;names.append(option);});if(snapshot.presets.includes(selected))names.value=selected;presetList=serialized;}
+        presetControls.forEach((control,index)=>{control.disabled=busy||!!promptPending||!!snapshot.closed||(index>0&&!snapshot.presets.length);});
+        feedback.textContent=promptPending?'Applying…':promptFeedback;feedback.hidden=!feedback.textContent;
+      };
+      settingsRefresh();
     } else if (activeScreen==='debug') {
       debugScreen();
     } else if(activeScreen==='wiki') {
@@ -1003,7 +1290,7 @@ window.MiniAAdvancedUI = function(bridge) {
       const saved=el('ul',undefined,'advanced-history-list');
       saved.setAttribute('aria-label','Saved conversations');
       screen.append(button('Refresh list',()=>renderScreen()),notice,saved);
-      api({action:'sessions'}).then(data=>{
+      (storageMode === 'browser' ? Promise.resolve({sessions:(bridge.browserHistory ? bridge.browserHistory() : []).map(entry=>({uuid:entry.uuid,updated:entry.updatedAt || entry.timestamp,title:entry.title || entry.prompt,entry}))}) : api({action:'sessions'})).then(data=>{
         if(historyGeneration!==resultGeneration || historyUuid!==bridge.uuid())return;
         const sessions=data.sessions||[];
         notice.textContent=sessions.length ? 'Select a conversation to open it.' : 'No saved conversations yet.';
@@ -1012,7 +1299,9 @@ window.MiniAAdvancedUI = function(bridge) {
           const row=el('li');
           const open=button('',async()=>{
             if(busy)throw new Error('Finish the current operation first.');
-            bridge.resume(session.uuid);resetSessionView();
+            if (session.entry) await bridge.openBrowserHistory(session.entry);
+            else bridge.resume(session.uuid);
+            resetSessionView();
             filter.value='';filter.oninput();
             activeScreen='activity';renderScreen();
             bridge.refresh();await poll();
@@ -1020,7 +1309,7 @@ window.MiniAAdvancedUI = function(bridge) {
           open.className='advanced-history-open';
           open.title='Open conversation '+session.uuid;
           if(current)open.setAttribute('aria-current','true');
-          open.append(el('span','Conversation '+session.uuid.slice(0,8),'advanced-history-title'),
+          open.append(el('span',session.title || 'Conversation '+session.uuid.slice(0,8),'advanced-history-title'),
             el('time',new Date(session.updated).toLocaleString(),'advanced-history-date'));
           if(current)open.append(el('span','Current','advanced-history-current'));
           row.append(open);saved.append(row);

@@ -4996,6 +4996,8 @@
                     pollOnce();
                 }
             },
+            browserHistory: () => loadStoredHistory(),
+            openBrowserHistory: entry => loadConversationEntry(entry, true),
             newConversation: handleClearClick
         });
     }
@@ -5206,7 +5208,7 @@
         return entry;
     }
 
-    async function sendHistoryToServer(entry) {
+    async function sendHistoryToServer(entry, strict = false) {
         if (!entry || !entry.uuid) return;
         const payload = {
             uuid: entry.uuid,
@@ -5236,13 +5238,15 @@
                 throw new Error('Failed to communicate with history endpoint');
             }
 
-            await response.json().catch(() => ({}));
+            const result = await response.json();
+            if (result.error) throw new Error(result.error);
         } catch (error) {
+            if (strict) throw error;
             console.error('Error sending history to server:', error);
         }
     }
 
-    async function loadConversationEntry(entry) {
+    async function loadConversationEntry(entry, strict = false) {
         if (!entry) return;
         resetActivityDisclosure = true;
 
@@ -5253,7 +5257,7 @@
         stopStream();
 
         activeHistoryId = entry.id;
-        await sendHistoryToServer(entry);
+        await sendHistoryToServer(entry, strict);
 
         lastKnownHistory = sanitizeHistoryEvents(entry.events || []);
         const historyPrompt = extractLastUserPromptFromEvents(lastKnownHistory);
@@ -5881,7 +5885,8 @@
             }).catch(error => console.error('Error stopping request:', error));
         }
 
-        currentSessionUuid = null;
+        // Advanced keeps the session attached for the final result fetch and later refreshes.
+        if (!advancedUI) currentSessionUuid = null;
         removePreview();
 
         // Force close and hide plan panel when processing is stopped/canceled

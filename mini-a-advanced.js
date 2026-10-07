@@ -39,6 +39,16 @@ MiniAAdvanced.prototype.isServerOption = function(key) {
   return /^(web|onport|historypath|historys3|historyretention|ssequeuetimeout|memorysessionheader|logpromptheaders|homedir|conversation|useeditor|editor|maxpromptchars|path$|useattach$)/.test(key)
 }
 
+MiniAAdvanced.prototype.isPromptOption = function(key) {
+  return /^(youare|chatyouare|rules|knowledge|goalprefix)$/.test(key)
+}
+
+MiniAAdvanced.prototype.inheritedOptions = function() {
+  var options = merge({}, this.args)
+  var preset = this.presets.presets[this.presets.defaultPreset]
+  return isMap(preset) ? this.mergeOptions(options, preset) : options
+}
+
 MiniAAdvanced.prototype.safe = function(value, key, preserveText) {
   var self = this
   if (isUnDef(value)) return value
@@ -70,6 +80,7 @@ MiniAAdvanced.prototype.safe = function(value, key, preserveText) {
 // Keep saved model selections while resolving credentials from the current server/session.
 MiniAAdvanced.prototype.mergeOptions = function(base, override) {
   var out = merge(base, override)
+  Object.keys(override).forEach(function(key) { if (override[key] === null) delete out[key] })
   ;["model", "modellc", "modelval"].forEach(function(key) {
     if (!isDef(override[key])) return
     try {
@@ -316,6 +327,21 @@ MiniAAdvanced.prototype.persist = function(state, full) {
   return clean
 }
 
+MiniAAdvanced.prototype.presetOptions = function(state) {
+  var self = this, clean = this.persist(state, true)
+  delete clean.conversation
+  delete clean.resume
+  Object.keys(clean).forEach(function(key) { if (self.isServerOption(key)) delete clean[key] })
+  // JSON cannot represent undefined. Record unset editable options explicitly
+  // so applying a complete preset can clear values added after it was saved.
+  var appliedOptions = state.runtime.options()
+  Object.keys(state.runtime.definitions).forEach(function(key) {
+    if (!self.isServerOption(key) && isUnDef(appliedOptions[key]) &&
+        !/^key$|^token$|api.?key|access.?key|secret|pass(?:word)?$|authorization|credential|webtoken|workerregtoken/i.test(key)) clean[key] = null
+  })
+  return clean
+}
+
 // Only accept indexes/text matching the server-held field descriptors.
 MiniAAdvanced.prototype.validateInput = function(fields, answers) {
   if (!isArray(answers) || answers.length !== fields.length) throw new Error("Invalid input response")
@@ -331,7 +357,7 @@ MiniAAdvanced.prototype.validateInput = function(fields, answers) {
 }
 
 MiniAAdvanced.prototype.snapshot = function(state, after) {
-  var definitions = state.runtime.definitions, options = state.runtime.options(), self = this
+  var definitions = state.runtime.definitions, options = state.runtime.options(), inherited = this.inheritedOptions(), self = this
   return {
     uuid: state.uuid, sequence: state.sequence, busy: !!global.__busy[state.uuid], closed: state.closed,
     operation: state.operation, operationView: state.operationView, kind: state.kind, pending: state.pending ? this.safe(state.pending) : null,
@@ -341,7 +367,7 @@ MiniAAdvanced.prototype.snapshot = function(state, after) {
       var value = options[key]
       var modelEnv = { model: "OAF_MODEL", modellc: "OAF_LC_MODEL", modelval: "OAF_VAL_MODEL" }
       if (isUnDef(value) && modelEnv[key]) value = getEnv(modelEnv[key])
-      return { name: key, type: def.type, dataEditor: def.dataEditor, description: def.description, value: self.safe(value, key), defaultValue: self.safe(def.default, key), source: Object.prototype.hasOwnProperty.call(state.overrides, key) ? "session" : isUnDef(options[key]) && modelEnv[key] && isDef(value) ? modelEnv[key] : "server",
+      return { name: key, type: def.type, dataEditor: def.dataEditor, description: def.description, value: self.safe(value, key, self.isPromptOption(key)), defaultValue: self.safe(def.default, key), inheritedValue: self.safe(isDef(inherited[key]) ? inherited[key] : def.default, key, self.isPromptOption(key)), source: Object.prototype.hasOwnProperty.call(state.overrides, key) ? "session" : isUnDef(options[key]) && modelEnv[key] && isDef(value) ? modelEnv[key] : "server",
         readOnly: self.isServerOption(key) }
     }), presets: Object.keys(this.presets.presets), defaultPreset: this.presets.defaultPreset
   }
@@ -356,6 +382,7 @@ MiniAAdvanced.prototype.request = function(data) {
       return file.isFile && /^[0-9a-f-]{36}\.json$/i.test(file.filename)
     }).map(function(file) { return { uuid: file.filename.replace(/\.json$/, ""), updated: file.lastModified } }).sort(function(a,b) { return b.updated - a.updated }).slice(0,100) }
   }
+  if (data.action === "preset-export") return { values: this.presetOptions(state) }
   if (data.action === "snapshot") return this.snapshot(state, after)
   if (data.action === "subtasks") return { tasks: this.safe(state.runtime.subtasks()) }
   if (data.action === "results") {
@@ -432,6 +459,7 @@ MiniAAdvanced.prototype.request = function(data) {
   state.cancelled = false
   try { this.persist(state) } catch(e) { state.operation = null; global._mini_a_web_release(state.uuid, token); throw e }
   try { this.schedule(function() {
+    var resetKeys = [], presetUnsetKeys = []
     try {
       var agent = global.__conversations[state.uuid]
       state.runtime.sync(agent)
@@ -447,6 +475,10 @@ MiniAAdvanced.prototype.request = function(data) {
       } else if (data.action === "settings") {
         if (!isMap(data.values)) throw new Error("Settings must be an object")
         var values = merge({}, data.values), current = state.runtime.options()
+        var requestedReset = isUnDef(data.reset) ? [] : data.reset
+        if (!isArray(requestedReset) || requestedReset.some(function(key) {
+          return !isString(key) || !self.isPromptOption(key) || self.isServerOption(key) || Object.prototype.hasOwnProperty.call(values, key)
+        })) throw new Error("Reset requires prompt setting names without overlapping values")
         function retainMasked(value, previous) {
           if (value === "[redacted]") return previous
           if (isMap(value)) { Object.keys(value).forEach(function(key) { value[key] = retainMasked(value[key], isMap(previous) ? previous[key] : __) }) }
@@ -462,27 +494,34 @@ MiniAAdvanced.prototype.request = function(data) {
             values[key] = stringify(retainMasked(af.fromJSSLON(values[key]), previous), __, "")
           }
         })
-        state.runtime.setOptions(values, true)
+        if (Object.keys(values).length) state.runtime.setOptions(values, true)
+        state.runtime.resetOptions(requestedReset, self.inheritedOptions())
+        resetKeys = requestedReset
       } else if (data.action === "preset") {
         if (!isString(data.name) || !/^[a-zA-Z0-9 _-]{1,80}$/.test(data.name)) throw new Error("Invalid preset name")
         if (data.op === "save") {
-          var clean = self.persist(state, true)
-          delete clean.conversation
-          delete clean.resume
-          Object.keys(clean).forEach(function(key) { if (self.isServerOption(key)) delete clean[key] })
+          var clean = self.presetOptions(state)
           self.presets.presets[data.name] = clean
         } else if (data.op === "apply") {
-          if (!self.presets.presets[data.name]) throw new Error("Preset not found")
-          var values = merge({}, self.presets.presets[data.name])
+          if (!isMap(data.values) && !self.presets.presets[data.name]) throw new Error("Preset not found")
+          var values = merge({}, isMap(data.values) ? data.values : self.presets.presets[data.name])
           Object.keys(values).forEach(function(key) { if (self.isServerOption(key)) delete values[key] })
+          var unsetKeys = []
+          Object.keys(values).forEach(function(key) {
+            if (values[key] === null || isUnDef(values[key])) { unsetKeys.push(key); delete values[key] }
+          })
           var resolved = self.mergeOptions(state.runtime.options(), values)
           Object.keys(values).forEach(function(key) { values[key] = resolved[key] })
-          state.runtime.setOptions(values)
+          state.runtime.setOptions(values, true)
+          state.runtime.resetOptions(unsetKeys, {})
+          presetUnsetKeys = unsetKeys
         } else if (data.op === "default") self.presets.defaultPreset = data.name
         else if (data.op === "delete") { delete self.presets.presets[data.name]; if (self.presets.defaultPreset === data.name) delete self.presets.defaultPreset }
         else throw new Error("Unknown preset operation")
-        self.lock.lock()
-        try { io.writeFileJSON(self.presetPath, self.presets, "") } finally { self.lock.unlock() }
+        if (!(data.op === "apply" && isMap(data.values))) {
+          self.lock.lock()
+          try { io.writeFileJSON(self.presetPath, self.presets, "") } finally { self.lock.unlock() }
+        }
         self.emit(state, "output", "Preset " + data.op + ": " + data.name)
       } else throw new Error("Unknown advanced action")
       if (previousOptions !== stringify(state.runtime.options(), __, "")) {
@@ -503,6 +542,8 @@ MiniAAdvanced.prototype.request = function(data) {
         if (isDef(beforeOptions) && stringify(beforeOptions[key]) !== stringify(afterOptions[key])) state.overrides[key] = afterOptions[key]
       })
       if (isDef(beforeOptions)) Object.keys(beforeOptions).forEach(function(key) { if (isUnDef(afterOptions[key])) delete state.overrides[key] })
+      resetKeys.forEach(function(key) { delete state.overrides[key] })
+      presetUnsetKeys.forEach(function(key) { state.overrides[key] = null })
       self.emit(state, "complete", { requestId: data.requestId, action: data.action, settingsChanged: isDef(previousOptions) && previousOptions !== stringify(afterOptions, __, "") })
       state.operation = null
       try { self.persist(state) } finally { global._mini_a_web_release(state.uuid, token) }

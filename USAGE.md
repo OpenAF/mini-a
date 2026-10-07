@@ -4178,6 +4178,44 @@ Successful submission collapses the composer; failed submissions keep it open.
 Advanced history **Edit** uses this composer in place of the separate Goal editor
 screen. `/edit` and `/editor` retain their server-managed Submit goal/Cancel dialog.
 
+The global **🗄️ Current storage / 🌐 Browser storage** switch chooses the library
+used by all Advanced preset controls and the saved conversation list. The choice
+is remembered in browser `localStorage` between sessions. Current storage uses
+server presets under `webadvancedpath`; Browser storage keeps personal presets
+in `localStorage` and lists the browser's existing saved conversations. History
+saving must be enabled for new browser conversations to be recorded. Switching
+preserves both libraries and does not migrate existing entries. Browser presets
+contain applied settings, omit credentials, and preserve unset fields so applying
+a preset clears later overrides. A browser default preset is applied when using
+**New conversation**. Storage errors are displayed; failed writes do not report
+success. Browser data is specific to the browser profile and site origin and is
+removed when site data is cleared. Active agent state, journals, and wiki files
+remain server-managed in both modes.
+
+**Prompt workspace** groups five multiline editors: **Agent persona** (`youare`),
+**Chatbot persona** (`chatyouare`), **Rules / instructions** (`rules`),
+**Knowledge / context** (`knowledge`), and **Goal prefix** (`goalprefix`).
+The top-right expand icon matches the main input and opens an editor across the
+browser viewport; the same control switches to the collapse icon. Collapse or Escape
+returns to the workspace and retains its draft. Switching Advanced views also
+retains drafts for the current conversation. Drafts are local to the browser and
+are cleared by a reload or conversation switch.
+
+**Apply changes** submits the edited fields together; they take effect on the next
+goal. **Discard edits** restores the currently applied values. **Reset to inherited
+value** stages removal of that field's session override, restoring the server
+configuration or default preset when applied. Each editor shows draft/applied
+state and inherited/session source; chatbot persona is marked inactive when
+`chatbotmode` is off. Rules retain the existing structured JSON/SLON editor.
+Text stays literal, and editing an `@file` reference does not modify its file.
+
+**Related settings** includes `chatbotmode`, `promptprofile`, `systempromptbudget`,
+`noagentsmd`, and output `format`. Workspace preset controls reuse the existing
+presets, which save all applied session settings. Apply or discard drafts before
+saving or loading one. Existing conversation history still influences results;
+to compare a configuration with fresh history, save a preset, choose **New
+conversation**, and apply the saved preset in Prompt workspace.
+
 Text fields in Advanced Settings, Models, command forms, and console interaction
 dialogs have a small **Edit data** icon inside the right edge of the field. It
 opens a modal with editable, nested

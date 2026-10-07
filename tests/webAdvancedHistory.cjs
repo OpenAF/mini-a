@@ -8,16 +8,16 @@ const node = (tag, text, className) => ({tag, textContent: text, className, chil
   replaceChildren(...children) { this.children = children; },
   setAttribute(name, value) { this.attributes[name] = value; }
 });
-async function render(sessions, error) {
+async function render(sessions, error, storageMode = "current") {
   let uuid = 'current-session';
-  const context = vm.createContext({
+  const context = vm.createContext({storageMode,
     el: node, screen: node('section'), busy: false, snapshot: {}, after: 42, dialogId: 'old',
     events: node('div'), activeScreen: 'history', resultGeneration: 0, previousSelections: {}, viewParams: {},
     resetSessionView() { context.snapshot=null;context.after=0;context.dialogId=null;context.events.replaceChildren(); },
     filter: {value: 'old search', oninput() { this.applied = this.value; }},
     button: (text, onclick) => Object.assign(node('button', text), {onclick}),
     api: async () => { if (error) throw error; return {sessions}; },
-    bridge: {uuid: () => uuid, resume: value => { uuid = value; }, refresh() { context.refreshed = uuid; }},
+    bridge: {browserHistory: () => sessions, openBrowserHistory: async entry => { uuid = entry.uuid; context.loaded = entry; }, uuid: () => uuid, resume: value => { uuid = value; }, refresh() { context.refreshed = uuid; }},
     renderScreen() { context.rendered = context.activeScreen; },
     poll: async () => { context.polled = uuid; },
     showError(error) { context.error = error.message; }
@@ -47,6 +47,10 @@ async function render(sessions, error) {
   assert.equal(context.after, 0);
   assert.equal(context.dialogId, null);
   assert.equal(context.filter.applied, '');
+  const local = await render([{uuid:'browser-session',timestamp:1000,title:'Local conversation'}], undefined, 'browser');
+  await local.screen.children[2].children[0].children[0].onclick();
+  assert.equal(local.loaded.title,'Local conversation');
+  assert.equal(local.polled,'browser-session');
   const empty = await render([]);
   assert.equal(empty.screen.children[1].textContent, 'No saved conversations yet.');
   const failed = await render([], new Error('Offline'));

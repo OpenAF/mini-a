@@ -21,7 +21,7 @@ try {
   var commandsDir = testRoot + '/.openaf-mini-a/commands'
   io.mkdir(commandsDir)
   io.writeFileString(commandsDir + '/git-impact.md', '---\nname: git-impact\ndescription: Fixture command\n---\nReview the complete changes for {{arg1}}.')
-  var advanced = new MiniAAdvanced({homedir:testRoot, webadvancedpath: testRoot, usehistory: false, model: '(type: openai, model: fixture, key: TOP-SECRET)' })
+  var advanced = new MiniAAdvanced({homedir:testRoot, webadvancedpath: testRoot, usehistory: false, youare: 'Inherited persona', model: '(type: openai, model: fixture, key: TOP-SECRET)' })
   advanced.schedule = function(fn) { jobs.push(fn); return { catch: function() {} } }
   advanced.submitPrompt = function(req) { submitted.push(jsonParse(req.files.postData)) }
   var first=advanced.get('first'), second=advanced.get('second')
@@ -43,6 +43,49 @@ try {
   check(settingByName.wikimounts.dataEditor === 'array', 'array editor metadata reaches browser')
   check(isUnDef(settingByName.absorboutput.dataEditor) && isUnDef(settingByName.policyfile.dataEditor), 'path-only settings do not offer data editors')
   check(stringify(snap).indexOf('TOP-SECRET')<0,'model credentials redacted')
+  check(settingByName.youare.inheritedValue === 'Inherited persona', 'workspace receives inherited server value')
+  var literalKnowledge = '  "Quoted context"\n\n  Keep indentation.  \n'
+  var literalRules = '[ "Keep  spaces", "Second rule" ]'
+  advanced.request({uuid:'first',action:'settings',values:{knowledge:literalKnowledge,rules:literalRules,youare:'"""'},requestId:'prompt-text'});jobs.shift()()
+  check(first.runtime.options().knowledge === literalKnowledge && first.runtime.options().youare === '"""', 'structured settings preserve literal quotes and multiline whitespace')
+  var promptSnap = advanced.snapshot(first,0)
+  check(promptSnap.settings.filter(function(s) { return s.name === 'rules' })[0].value === literalRules, 'structured rules retain exact source text in snapshots')
+  check(second.runtime.options().knowledge !== literalKnowledge, 'prompt settings remain session-local')
+  advanced.request({uuid:'first',action:'preset',op:'save',name:'PromptText',requestId:'prompt-save'});jobs.shift()()
+  check(advanced.presets.presets.PromptText.knowledge === literalKnowledge && advanced.presets.presets.PromptText.rules === literalRules, 'presets preserve exact prompt source')
+  var browserPreset = advanced.request({uuid:'first',action:'preset-export'}).values
+  check(browserPreset.goalprefix === null && browserPreset.useshell === null, 'export includes unset options')
+  check(stringify(browserPreset).indexOf('TOP-SECRET') < 0 && isUnDef(browserPreset.webadvancedpath), 'browser export omits credentials and server paths')
+  advanced.request({uuid:'second',action:'settings',values:{goalprefix:'remove me',knowledge:'replace me'},requestId:'preset-modify'});jobs.shift()()
+  advanced.request({uuid:'second',action:'preset',op:'apply',name:'Browser',values:browserPreset,requestId:'browser-apply'});jobs.shift()()
+  check(second.runtime.options().knowledge === literalKnowledge && second.runtime.options().rules === literalRules, 'browser preset apply preserves literal prompt text')
+  check(isUnDef(second.runtime.options().goalprefix), 'browser preset clears fields unset at save time')
+  check(!Object.prototype.hasOwnProperty.call(advanced.presets.presets,'Browser'), 'browser apply does not write server preset library')
+  check(!advanced.events(second,0,100).some(function(e) { return e.runId === 'browser-apply' && e.type === 'error' }), 'unset booleans do not cause parsing errors')
+  check(second.runtime.options().model.indexOf('TOP-SECRET') >= 0, 'preset apply retains current model credentials')
+  check(io.readFileJSON(second.file).options.goalprefix === null, 'unset markers persist across reloads')
+  advanced.request({uuid:'second',action:'preset',op:'save',name:'Unset',requestId:'unset-save'});jobs.shift()()
+  check(io.readFileJSON(advanced.presetPath).presets.Unset.goalprefix === null, 'saved preset retains unset markers on disk')
+  advanced.presets.defaultPreset = 'Unset'
+  check(isUnDef(advanced.get('unset-default').runtime.options().goalprefix), 'default presets resolve unset markers before runtime parsing')
+  delete advanced.presets.defaultPreset
+
+
+  advanced.request({uuid:'first',action:'settings',values:{},reset:['youare','knowledge','rules'],requestId:'prompt-reset'});jobs.shift()()
+  check(first.runtime.options().youare === 'Inherited persona' && isUnDef(first.runtime.options().knowledge), 'reset restores inherited values including unset fields')
+  check(!advanced.events(first,0,100).some(function(e) { return e.runId === 'prompt-reset' && e.type === 'command-result' }), 'reset does not emit an empty set command')
+  check(!Object.prototype.hasOwnProperty.call(first.overrides,'youare'), 'reset removes the persisted override')
+  advanced.presets.presets.PromptDefaults = {youare:'Default preset persona'}
+  advanced.presets.defaultPreset = 'PromptDefaults'
+  advanced.request({uuid:'first',action:'settings',values:{},reset:['youare'],requestId:'prompt-preset-reset'});jobs.shift()()
+  check(first.runtime.options().youare === 'Default preset persona', 'reset respects the current default preset')
+  delete advanced.presets.defaultPreset;delete advanced.presets.presets.PromptDefaults
+  advanced.request({uuid:'first',action:'settings',values:{youare:'Must not apply'},reset:['onport'],requestId:'prompt-invalid-reset'});jobs.shift()()
+  check(first.runtime.options().youare === 'Default preset persona', 'invalid reset is rejected before applying any values')
+  advanced.request({uuid:'first',action:'settings',values:{},reset:['youare'],requestId:'prompt-restore-base'});jobs.shift()()
+  var promptRecovered = new MiniAAdvanced(advanced.args).get('first')
+  check(promptRecovered.runtime.options().youare === 'Inherited persona' && isUnDef(promptRecovered.runtime.options().knowledge), 'reset survives reloading persisted session settings')
+  promptRecovered.runtime.dispose()
   jobs = []
   var change={uuid:'first',action:'command',command:'/set useshell true',requestId:'change-1'}
   var received = advanced.request(change); check(jobs.length===1,'command scheduled: jobs=' + jobs.length + ' receipt=' + stringify(received))

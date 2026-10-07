@@ -4039,7 +4039,15 @@ function MiniAInteractiveSession(args, adapter) {
     return msg
   }
 
-  function setOption(name, rawValue) {
+  function invalidateWikiOption(key) {
+    if (adapter && /^(wiki|skillwiki|usewiki|useskillswiki)/.test(key)) {
+      if (webWikiManager && isFunction(webWikiManager.close)) webWikiManager.close()
+      if (webSkillWikiManager && webSkillWikiManager !== webWikiManager && isFunction(webSkillWikiManager.close)) webSkillWikiManager.close()
+      webWikiManager = __; webSkillWikiManager = __
+    }
+  }
+
+  function setOption(name, rawValue, literal) {
     if (adapter) adapter.validateOption(String(name).toLowerCase())
     var key = name.toLowerCase()
     if (!Object.prototype.hasOwnProperty.call(parameterDefinitions, key)) {
@@ -4048,7 +4056,7 @@ function MiniAInteractiveSession(args, adapter) {
     }
     var def = parameterDefinitions[key]
     var value = rawValue
-    if (rawValue === '"""') {
+    if (literal !== true && rawValue === '"""') {
       value = collectMultiline("")
       if (isUnDef(value)) return
     }
@@ -4068,13 +4076,9 @@ function MiniAInteractiveSession(args, adapter) {
       value = parsedNum
     } else if (def.type === "string") {
       if (!isString(value)) value = String(value)
-      value = unwrapConsoleQuotedValue(value)
+      if (literal !== true) value = unwrapConsoleQuotedValue(value)
     }
-    if (adapter && /^(wiki|skillwiki|usewiki|useskillswiki)/.test(key)) {
-      if (webWikiManager && isFunction(webWikiManager.close)) webWikiManager.close()
-      if (webSkillWikiManager && webSkillWikiManager !== webWikiManager && isFunction(webSkillWikiManager.close)) webSkillWikiManager.close()
-      webWikiManager = __; webSkillWikiManager = __
-    }
+    invalidateWikiOption(key)
     sessionOptions[key] = value
     sessionExplicitOptions[key] = true
     if (key === "conversation") {
@@ -7653,12 +7657,25 @@ function MiniAInteractiveSession(args, adapter) {
         if (isDef(result)) { lastResult = result; lastOrigResult = result }
       },
       setOptions: function(values, report) {
-        var apply = function() { Object.keys(values).forEach(function(key) { setOption(key, values[key]) }) }
+        var apply = function() { Object.keys(values).forEach(function(key) { setOption(key, values[key], true) }) }
         if (report === true) {
           var key = Object.keys(values)[0] || ""
           return executeBrowserCommand("/set " + key + " " + (isString(values[key]) ? values[key] : stringify(values[key])), apply)
         }
         return apply()
+      },
+      resetOptions: function(names, inherited) {
+        names.forEach(function(key) {
+          adapter.validateOption(key)
+          if (!Object.prototype.hasOwnProperty.call(parameterDefinitions, key)) throw new Error(buildUnknownParameterMessage(key))
+        })
+        names.forEach(function(key) {
+          invalidateWikiOption(key)
+          if (isDef(inherited[key])) sessionOptions[key] = inherited[key]
+          else if (Object.prototype.hasOwnProperty.call(parameterDefinitions[key], "default")) sessionOptions[key] = parameterDefinitions[key].default
+          else delete sessionOptions[key]
+          delete sessionExplicitOptions[key]
+        })
       },
       beginTrace: function(goal) { return toBoolean(sessionOptions.debugtrace) === true ? createDebugTrace(goal) : function() {} },
       tracePage: function(after, limit, category, sequence) {
