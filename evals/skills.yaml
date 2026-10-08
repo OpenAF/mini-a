@@ -1,0 +1,78 @@
+# Run from the checkout with OAF_MODEL configured. Synthetic read-only tasks.
+# The model-led comparison may fail markers; compare its results with automatic.
+# ojob mini-a.yaml eval=true evalfile=evals/skills.yaml evalout=/tmp/mini-a-skills-eval.json
+scenarios:
+- name: local-semantic-selection
+  goal: Prepare a synthetic account ledger report for Alder.
+  args: &local
+    useskills: true
+    extraskills: evals/fixtures/skill-runtime/local
+    useshell: false
+    readwrite: false
+    useutils: false
+    usedecide: false
+    useplanning: false
+    usememory: false
+    usetools: true
+    usejsontool: true
+    maxsteps: 4
+  expected:
+    contains: "LEDGER_EVIDENCE: Alder; balance=73 EUR"
+  variants: &variants
+  - name: model-led
+    args:
+      skillsautosearch: false
+  - name: automatic
+    args:
+      skillsautosearch: true
+    assertions:
+    - path: result.skill_activity.selection_calls
+      equals: 1
+    - path: result.skill_activity.loads
+      min: 1
+- name: wiki-semantic-selection
+  goal: Review a synthetic service incident and report its recovery verification.
+  args: &wiki
+    useskillswiki: true
+    skillwikiroot: evals/fixtures/skill-runtime/wiki
+    wikiretrievalv2: false
+    useshell: false
+    readwrite: false
+    useutils: false
+    usedecide: false
+    useplanning: false
+    usememory: false
+    usetools: true
+    usejsontool: true
+    maxsteps: 4
+  expected:
+    contains: "INCIDENT_EVIDENCE: expired connection pool lease; verify=three healthy probes"
+  variants: *variants
+- name: mixed-source-selection
+  goal: Review a synthetic service incident and report its recovery verification.
+  args:
+    <<: *wiki
+    useskills: true
+    extraskills: evals/fixtures/skill-runtime/local
+  expected:
+    contains: "INCIDENT_EVIDENCE: expired connection pool lease; verify=three healthy probes"
+  variants: *variants
+- name: explicit-arguments
+  goal: '$local:ledger-report "Alder"'
+  args: *local
+  expected:
+    contains: "LEDGER_EVIDENCE: Alder; balance=73 EUR"
+- name: irrelevant-task
+  goal: Reply with only the word ready.
+  args:
+    <<: *local
+    useskillswiki: true
+    skillwikiroot: evals/fixtures/skill-runtime/wiki
+    wikiretrievalv2: false
+  expected:
+    matches: "^\\s*ready\\s*$"
+- name: missing-explicit-skill
+  goal: "$missing-fixture"
+  args: *local
+  expected:
+    contains: "requested-skill-unavailable"

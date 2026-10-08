@@ -1,0 +1,85 @@
+include:
+- oJobTest.yaml
+
+jobs:
+- name: MiniA Skill Runtime::testSkillExplicitBoundaryAndArguments
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillExplicitBoundaryAndArguments
+
+- name: MiniA Skill Runtime::testSkillAutomaticSelectionAndRunReset
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillAutomaticSelectionAndRunReset
+
+- name: MiniA Skill Runtime::testSkillAutomaticOptOutAndDisabledMetadata
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillAutomaticOptOutAndDisabledMetadata
+
+- name: MiniA Skill Runtime::testSkillStructuredSelectionValidation
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillStructuredSelectionValidation
+
+- name: MiniA Skill Runtime::testSkillYamlRenderingAliasAndProgressivePages
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillYamlRenderingAliasAndProgressivePages
+
+- name: MiniA Skill Runtime::testSkillWikiBudgetDirectReadAndResolve
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillWikiBudgetDirectReadAndResolve
+
+- name: MiniA Skill Runtime::testSkillProviderResolvePreservesErrors
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillProviderResolvePreservesErrors
+
+- name: MiniA Skill Runtime::testSkillContextContinuityRevisionAndCompletion
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillContextContinuityRevisionAndCompletion
+
+- name: MiniA Skill Runtime::testSkillExtraRootsAddToDefaultsAndFileAllow
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillExtraRootsAddToDefaultsAndFileAllow
+
+- name: MiniA Skill Runtime::testSkillMixedCandidatesAndSourceCollision
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillMixedCandidatesAndSourceCollision
+
+- name: MiniA Skill Runtime::testSkillWikiProgressiveResolution
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillWikiProgressiveResolution
+
+- name: MiniA Skill Runtime::testSkillSelectorNoneAndFailure
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillSelectorNoneAndFailure
+
+- name: MiniA Skill Runtime::testSkillStartLoadsBeforeExecutionAndBlocksMissing
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillStartLoadsBeforeExecutionAndBlocksMissing
+
+- name: MiniA Skill Runtime::testSkillSharedLocalWikiBudgetAndSupportingReferences
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillSharedLocalWikiBudgetAndSupportingReferences
+
+- name: MiniA Skill Runtime::testSkillHandoffRespectsChildPermissionsAndRevision
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillHandoffRespectsChildPermissionsAndRevision
+
+- name: MiniA Skill Runtime::testSkillPrimarySelectorIndependentOfDecisionModel
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillPrimarySelectorIndependentOfDecisionModel
+
+todo:
+- MiniA Skill Runtime::testSkillExplicitBoundaryAndArguments
+- MiniA Skill Runtime::testSkillAutomaticSelectionAndRunReset
+- MiniA Skill Runtime::testSkillAutomaticOptOutAndDisabledMetadata
+- MiniA Skill Runtime::testSkillStructuredSelectionValidation
+- MiniA Skill Runtime::testSkillYamlRenderingAliasAndProgressivePages
+- MiniA Skill Runtime::testSkillWikiBudgetDirectReadAndResolve
+- MiniA Skill Runtime::testSkillProviderResolvePreservesErrors
+- MiniA Skill Runtime::testSkillContextContinuityRevisionAndCompletion
+- MiniA Skill Runtime::testSkillExtraRootsAddToDefaultsAndFileAllow
+- MiniA Skill Runtime::testSkillMixedCandidatesAndSourceCollision
+- MiniA Skill Runtime::testSkillWikiProgressiveResolution
+- MiniA Skill Runtime::testSkillSelectorNoneAndFailure
+- MiniA Skill Runtime::testSkillStartLoadsBeforeExecutionAndBlocksMissing
+- MiniA Skill Runtime::testSkillSharedLocalWikiBudgetAndSupportingReferences
+- MiniA Skill Runtime::testSkillHandoffRespectsChildPermissionsAndRevision
+- MiniA Skill Runtime::testSkillPrimarySelectorIndependentOfDecisionModel

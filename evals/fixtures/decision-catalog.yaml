@@ -1,0 +1,25 @@
+# Isolated, read-only MCP data for enabled/disabled decision evaluations.
+ojob:
+  daemon: true
+  logToConsole: false
+jobs:
+- name: Fixture MCP
+  typeArgs:
+    noLog: true
+  exec: |
+    ow.loadServer()
+    var meta = [
+      { name: "forecast", description: "Predicted weather and maximum temperature in Porto tomorrow.", inputSchema: { type: "object", properties: {} } },
+      { name: "ledger", description: "Account ledger of payments, refunds and duplicate charges for customer Ada.", inputSchema: { type: "object", properties: {} } },
+      { name: "receipt", description: "Receipt for the original purchase by customer Ada. Does not contain the complete account ledger.", inputSchema: { type: "object", properties: {} } },
+      { name: "appointment", description: "Tomorrow's scheduled appointment in Porto, including whether it is indoors or outdoors.", inputSchema: { type: "object", properties: {} } }
+    ]
+    meta.forEach(function(tool) { tool.annotations = { readOnlyHint: true, idempotentHint: true } })
+    ow.server.mcpStdio({ serverInfo: { name: "decision-eval-fixture", version: "1.0.0" } }, meta, {
+      forecast: function() { return { city: "Porto", day: "tomorrow", maximum_celsius: 22, condition: "sunny" } },
+      ledger: function() { return { customer: "Ada", charges_eur: [19, 19], duplicates: 1, refund_due_eur: 19 } },
+      receipt: function() { return { customer: "Ada", original_purchase_eur: 19 } },
+      appointment: function() { return { city: "Porto", day: "tomorrow", time: "14:00", outdoors: true } }
+    })
+todo:
+- Fixture MCP

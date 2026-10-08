@@ -266,6 +266,11 @@ SubtaskManager.prototype._buildChildArgs = function(subtask) {
   // Communication declarations never inherit through argument merging.
   mergedArgs.agentcomms = explicitArgs.agentcomms
   mergedArgs.goal = subtask.goal
+  if (isObject(this.parentAgent) && isFunction(this.parentAgent._skillHandoffForGoal)) {
+    mergedArgs._skillHandoff = this.parentAgent._skillHandoffForGoal(subtask.goal)
+    if ((!isDef(explicitArgs.useskills) || toBoolean(explicitArgs.useskills) === true) && mergedArgs._skillHandoff.some(function(item) { return item.ref.indexOf("local:") === 0 })) mergedArgs.useskills = true
+    if ((!isDef(explicitArgs.useskillswiki) || toBoolean(explicitArgs.useskillswiki) === true) && mergedArgs._skillHandoff.some(function(item) { return item.ref.indexOf("wiki:") === 0 })) mergedArgs.useskillswiki = true
+  }
   mergedArgs._delegationDepth = subtask.depth
   mergedArgs._parentSubtaskId = subtask.parentId
   // Prevent auto-delegation cascades in child agents
@@ -1047,6 +1052,13 @@ SubtaskManager.prototype._remoteObservationTimeoutMs = function(subtask) {
 
 SubtaskManager.prototype._completeSubtask = function(subtask, prefix, answer, metrics, state) {
   var completedAt = new Date().getTime()
+  if (isMap(state) && isMap(state.skills) && isArray(state.skills.blocked) && state.skills.blocked.length) {
+    var reason = "Required skill blocked: " + state.skills.blocked.map(function(item) { return item.ref + " (" + item.reason + ")" }).join("; ")
+    if (!this._claimTerminal(subtask, "failed", completedAt, reason, { answer: answer, state: state, metrics: metrics })) return false
+    this.metrics.failed++
+    this.interactionFn("delegate", prefix + " Skill-dependent work blocked: " + reason)
+    return true
+  }
   var diagnosticsScope = {
     scope: "child_execution",
     subtask_id: subtask.id,

@@ -349,6 +349,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 - **Built-in Performance Optimizations** - Automatic context management, dynamic escalation, and parallel action support deliver 40-60% token reduction and 50-70% cost savings (see [docs/OPTIMIZATIONS.md](docs/OPTIMIZATIONS.md))
 - **Real-Time Streaming** - Display LLM tokens as they arrive with markdown-aware buffering for smooth rendering (`usestream=true`)
 - **MCP Integration** - Seamless integration with Model Context Protocol servers (STDIO & HTTP)
+  - **Decision Model** - `OAF_DECIDE_MODEL` enables semantic selection in dynamic/capability modes and ambiguous complexity assessment; `usedecide=false` opts out. A generic decision MCP is also available. See [Decisions](docs/DECISIONS.md).
   - **Dynamic Tool Selection** - Intelligent filtering of MCP tools using stemming, synonyms, n-grams, and fuzzy matching (`mcpdynamic=true`)
   - **Tool Caching** - Smart caching for deterministic and read-only tools to avoid redundant operations
   - **Circuit Breakers** - Automatic connection health management with cooldown periods
@@ -451,6 +452,9 @@ Mini-A ships with complementary components:
 | `usestdutils` | When `useutils=true`, expose standard aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names | `false` |
 | `useskills` | Expose the Mini Utils `skills` operation; when `useutils=false`, only the skills tool is registered | `false` |
 | `useskillswiki` | Enable the on-demand [virtual skill library](docs/VIRTUAL-SKILLS.md); separate from local `useskills` | `false` |
+| `skillsautosearch` | Discover/select enabled local/wiki skills before execution using the primary model; `false` keeps model-led or explicit loading | `true` |
+| `skillsautolimit` | Combined skill candidate limit | `5` |
+| `skillsmaxloaded` / `skillsmaxchars` | Shared per-run skill count / guidance character limits | `3` / `12000` |
 | `skillwikiroot` | Directory for a dedicated virtual skill library; omit dedicated source settings to reuse `usewiki` | - |
 | `utilsroot` | Root directory for Mini Utils Tool file operations (only when `useutils=true`) | `.` |
 | `utilsallow` | Comma-separated allowlist of Mini Utils Tool names to expose (only when `useutils=true`) | unset |

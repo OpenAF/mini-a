@@ -747,10 +747,10 @@ function MiniAInteractiveSession(args, adapter) {
     skillwikibackend: { type: "string", description: "Skill library backend: fs, s3, s3fs, es, or http. Defaults to fs. Only needed for a dedicated skill wiki separate from usewiki." },
     skillwikiroot  : { type: "string", description: "Root directory for a dedicated skill library (fs backend). Only needed when not reusing usewiki's wiki." },
     skillwikimounts: { type: "string", dataEditor: "array", description: "SLON/JSON array of read-only skill-library mounts, same shape as wikimounts. Only used with a dedicated skill wiki." },
-    skillsautosearch: { type: "boolean", default: false, description: "Allow mini-a to consult the skill library automatically during planning (opt-in, bounded by skillsautolimit/skillsmaxloaded/skillsmaxchars)." },
+    skillsautosearch: { type: "boolean", default: true, description: "Automatically discover and select enabled local/wiki skills before execution; false keeps model-led or explicit loading." },
     skillsautolimit: { type: "number", default: 5, description: "Maximum results per automatic skill search." },
-    skillsmaxloaded: { type: "number", default: 3, description: "Maximum distinct skills opened per agent run." },
-    skillsmaxchars : { type: "number", default: 12000, description: "Maximum skill-body characters read per agent run." },
+    skillsmaxloaded: { type: "number", default: 3, description: "Maximum distinct local/wiki skills consulted per agent run." },
+    skillsmaxchars : { type: "number", default: 12000, description: "Shared local/wiki skill guidance character budget per agent run." },
     planmode       : { type: "boolean", default: false, description: "Run in plan-only mode without executing actions" },
     validateplan   : { type: "boolean", default: false, description: "Validate a plan using LLM-based critique and structure validation" },
     convertplan    : { type: "boolean", default: false, description: "Convert plan to requested format and exit" },
@@ -776,7 +776,8 @@ function MiniAInteractiveSession(args, adapter) {
     lcbudget       : { type: "number", default: 0, description: "Maximum total low-cost model tokens for the session (0 disables)." },
     lcreplytool    : { type: "boolean", default: false, description: "Use a capture-only MCP tool for LC JSON retries (OpenAI-compatible/Ollama)." },
     lcjsonretries  : { type: "number", default: 1, description: "Extra same-step low-cost model retries on invalid JSON before falling back to main model (0 disables)." },
-    llmcomplexity  : { type: "boolean", default: false, description: "Use an extra low-cost complexity check for medium-complexity goals." },
+    usedecide      : { type: "boolean", description: "Enable decision-assisted selection and complexity with OAF_DECIDE_MODEL (false disables)." },
+    llmcomplexity  : { type: "boolean", description: "Refine medium complexity with the decision model; false disables, true also enables the legacy LC check." },
     mcplazy        : { type: "boolean", default: false, description: "Defer MCP connection initialization" },
     mcpdynamic     : { type: "boolean", default: false, description: "Select MCP tools dynamically per goal" },
     mcpproxy       : { type: "boolean", default: false, description: "Aggregate all MCP connections through a single proxy interface" },
@@ -2117,9 +2118,10 @@ function MiniAInteractiveSession(args, adapter) {
     lastSkillReferenceFiles.push(ref)
   }
 
-  function buildSkillUsage(templateDef, refs) {
+  function buildSkillUsage(templateDef, refs, parsedArgs) {
     if (!isMap(templateDef) || templateDef.sourceCategory !== "skill") return __
     return {
+      args          : isMap(parsedArgs) && isString(parsedArgs.raw) ? parsedArgs.raw : "",
       name          : isString(templateDef.name) ? templateDef.name : "",
       templatePath  : templateDef.file,
       referencedFiles: isArray(refs) ? refs.slice() : []
@@ -2185,6 +2187,7 @@ function MiniAInteractiveSession(args, adapter) {
         var goalFromSkillTemplate = renderCustomSlashTemplate(skillTemplate, parsedSkillArgs)
         goalFromSkillTemplate = preprocessSkillTemplateReferences(goalFromSkillTemplate, matchedSkillDef)
         var skillUsage = buildSkillUsage(matchedSkillDef, getLastSkillReferenceFiles())
+        skillUsage.args = argsRaw
         var prefix = goalText.substring(0, tokenStart)
         var separator = ""
         if (prefix.length > 0 && !/\s$/.test(prefix)) separator = "\n\n"
@@ -5177,6 +5180,7 @@ function MiniAInteractiveSession(args, adapter) {
     lastGoalPrompt = isString(goalText) ? goalText : (isDef(goalText) ? String(goalText) : "")
     if (adapter) return adapter.goal(processFileAttachments(effectiveGoal), skillUsage, displayPrompt)
     var _args = buildArgs(effectiveGoal)
+    if (isMap(skillUsage) && skillUsage.name) { _args.useskills = true; _args._skillHandoff = [{ ref: "local:" + skillUsage.name, args: skillUsage.args || "", required: true }] }
     clearDebugTrace()
     if (!ensureModel(_args)) return false
     var traceSink = __
@@ -5393,7 +5397,7 @@ function MiniAInteractiveSession(args, adapter) {
       var template = isString(loadedTemplateDoc.bodyTemplate) ? loadedTemplateDoc.bodyTemplate : ""
       var goalFromTemplate = renderCustomSlashTemplate(template, parsedArgs)
       goalFromTemplate = preprocessSkillTemplateReferences(goalFromTemplate, matchedDef)
-      return runGoal(goalFromTemplate, buildSkillUsage(matchedDef, getLastSkillReferenceFiles())) === true
+      return runGoal(goalFromTemplate, buildSkillUsage(matchedDef, getLastSkillReferenceFiles(), parsedArgs)) === true
     } catch (templateExecError) {
       var failurePrefix = inputPrefix === "$" ? "$" : "/"
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to execute '" + failurePrefix + parsedSlashCommand.name + "': " + templateExecError, errorColor))
@@ -7077,7 +7081,7 @@ function MiniAInteractiveSession(args, adapter) {
           var skillTemplate = isString(_loadedSkillDoc.bodyTemplate) ? _loadedSkillDoc.bodyTemplate : ""
           var goalFromSkillTemplate = renderCustomSlashTemplate(skillTemplate, parsedSkillArgs)
           goalFromSkillTemplate = preprocessSkillTemplateReferences(goalFromSkillTemplate, _matchedSkillDef)
-          runGoal(goalFromSkillTemplate, buildSkillUsage(_matchedSkillDef, getLastSkillReferenceFiles()))
+          runGoal(goalFromSkillTemplate, buildSkillUsage(_matchedSkillDef, getLastSkillReferenceFiles(), parsedSkillArgs))
         } catch (skillTemplateExecError) {
           printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to execute '$" + parsedSkillCommand.name + "': " + skillTemplateExecError, errorColor))
         }
@@ -7614,7 +7618,7 @@ function MiniAInteractiveSession(args, adapter) {
           var template = isString(_loadedTemplateDoc.bodyTemplate) ? _loadedTemplateDoc.bodyTemplate : ""
           var goalFromTemplate = renderCustomSlashTemplate(template, parsedArgs)
           goalFromTemplate = preprocessSkillTemplateReferences(goalFromTemplate, _matchedDef)
-          runGoal(goalFromTemplate, buildSkillUsage(_matchedDef, getLastSkillReferenceFiles()), "/" + parsedSlashCommand.name)
+          runGoal(goalFromTemplate, buildSkillUsage(_matchedDef, getLastSkillReferenceFiles(), parsedArgs), "/" + parsedSlashCommand.name)
         } catch (templateExecError) {
           printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to execute '/" + parsedSlashCommand.name + "': " + templateExecError, errorColor))
         }

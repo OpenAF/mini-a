@@ -861,11 +861,14 @@ jobs:
       var allowedRemoteKeys = {
         goal: true, format: true, raw: true, chatbotmode: true, useplanning: true,
         updatefreq: true, updateinterval: true, forceupdates: true, planlog: true,
-        planmode: true, planformat: true, convertplan: true, maxsteps: true
+        planmode: true, planformat: true, convertplan: true, maxsteps: true,
+        usedecide: true, llmcomplexity: true
       }
       var mergedArgs = merge({}, wargs)
       delete mergedArgs.agentcomms
       Object.keys(taskArgs).forEach(function(key) {
+        // Remote tasks may opt out, but cannot undo an operator decision opt-out.
+        if (["usedecide", "llmcomplexity"].indexOf(key) >= 0 && isDef(wargs[key]) && toBoolean(wargs[key]) === false && toBoolean(taskArgs[key]) === true) return
         if (allowedRemoteKeys[key] === true) { mergedArgs[key] = taskArgs[key] }
       })
       // Pass fork state to child agent via existing args.state deserialization path
@@ -873,6 +876,11 @@ jobs:
       if (isString(forkStatePayload) && forkStatePayload.length > 0) {
         mergedArgs.state = forkStatePayload
         mergedArgs._autoDelegate = false
+      }
+      if (isArray(taskArgs._skillHandoff)) {
+        mergedArgs._skillHandoff = taskArgs._skillHandoff.slice(0, 3).filter(function(item) {
+          return isMap(item) && isString(item.ref) && item.ref.length <= 512 && /^(local:|wiki:)/.test(item.ref)
+        }).map(function(item) { return { ref: item.ref, revision: isString(item.revision) ? item.revision : "", required: true } })
       }
       mergedArgs.goal = goalTrimmed
       var timeout = wargs.defaulttimeout

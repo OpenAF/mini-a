@@ -408,12 +408,28 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : skillsautosearch
+    desc     : Automatically discover and select enabled local/wiki skills; false keeps model-led or explicit loading
+    example  : "true"
+    mandatory: false
+  - name     : skillsautolimit
+    desc     : Combined compact candidate limit for automatic skill selection
+    example  : "5"
+    mandatory: false
+  - name     : skillsmaxloaded
+    desc     : Maximum distinct local/wiki skills consulted per run
+    example  : "3"
+    mandatory: false
+  - name     : skillsmaxchars
+    desc     : Shared skill guidance character budget per run
+    example  : "12000"
+    mandatory: false
   - name     : skillmaxautoload
     desc     : Maximum number of high-confidence matching skills to auto-load into bounded runtime context
     example  : "1"
     mandatory: false
   - name     : skillcontextchars
-    desc     : Maximum characters read from each auto-loaded SKILL.md for runtime context
+    desc     : Maximum characters loaded initially from each selected skill for runtime context
     example  : "8000"
     mandatory: false
   - name     : skillmanifestchars
@@ -905,8 +921,12 @@ help:
     desc     : Extra same-step low-cost model retries on invalid JSON before falling back to the main model (0 disables)
     example  : "1"
     mandatory: false
+  - name     : usedecide
+    desc     : Enable decision-assisted selection and complexity when OAF_DECIDE_MODEL is configured (false disables).
+    example  : "true"
+    mandatory: false
   - name     : llmcomplexity
-    desc     : When true, fire a quick LC model call to validate "medium" complexity heuristic results
+    desc     : Refine medium complexity with OAF_DECIDE_MODEL; false disables, true also enables the legacy LC check
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
@@ -1426,6 +1446,10 @@ jobs:
         usestdutils    : usestdutils
         useskills      : useskills
         useasciiviz    : useasciiviz
+        skillsautosearch: skillsautosearch
+        skillsautolimit: skillsautolimit
+        skillsmaxloaded: skillsmaxloaded
+        skillsmaxchars: skillsmaxchars
         skillmaxautoload: skillmaxautoload
         skillcontextchars: skillcontextchars
         skillmanifestchars: skillmanifestchars
@@ -1533,6 +1557,7 @@ jobs:
         lcbudget       : lcbudget
         lcreplytool    : lcreplytool
         lcjsonretries  : lcjsonretries
+        usedecide      : usedecide
         llmcomplexity  : llmcomplexity
         autodelegation : autodelegation
         autodelegationthreshold: autodelegationthreshold
@@ -1717,6 +1742,10 @@ jobs:
       usestdutils    : toBoolean.isBoolean.default(__)
       useskills      : toBoolean.isBoolean.default(false)
       useasciiviz    : toBoolean.isBoolean.default(false)
+      skillsautosearch: toBoolean.isBoolean.default(true)
+      skillsautolimit: toNumber.isNumber.default(5)
+      skillsmaxloaded: toNumber.isNumber.default(3)
+      skillsmaxchars: toNumber.isNumber.default(12000)
       skillmaxautoload: toNumber.isNumber.default(1)
       skillcontextchars: toNumber.isNumber.default(8000)
       skillmanifestchars: toNumber.isNumber.default(1536)
@@ -1824,7 +1853,8 @@ jobs:
       lcbudget       : toNumber.isNumber.default(0)
       lcreplytool    : toBoolean.isBoolean.default(false)
       lcjsonretries  : toNumber.isNumber.default(1)
-      llmcomplexity  : toBoolean.isBoolean.default(false)
+      usedecide      : toBoolean.isBoolean.default(__)
+      llmcomplexity  : toBoolean.isBoolean.default(__)
       autodelegation : toBoolean.isBoolean.default(false)
       autodelegationthreshold: toNumber.isNumber.default(__)
       autodelegationmaxperstep: toNumber.isNumber.default(__)

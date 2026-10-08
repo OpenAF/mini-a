@@ -8,6 +8,7 @@ Mini-A (Mini Agent) is a goal-oriented autonomous agent that uses Large Language
 
 - **OpenAF**: Mini-A is built for the OpenAF platform
 - **OAF_MODEL Environment Variable**: Must be set to your desired LLM model configuration
+- **OAF_DECIDE_MODEL Environment Variable** (optional): Automatically enables decision-assisted selection in existing dynamic/capability selection modes and ambiguous complexity assessment. `useutils=true usedecide=true` also exposes the bounded `decide` consultation tool. Disable with `usedecide=false`; see [Decision integration and MCP](docs/DECISIONS.md).
 - **OAF_LC_MODEL Environment Variable** (optional): Low-cost model for cost optimization
 - **OAF_VAL_MODEL Environment Variable** (optional): Dedicated model for deep research validation
 - **OAF_MINI_A_CON_HIST_SIZE Environment Variable** (optional): Set the maximum console history size (default is JLine's default)
@@ -108,6 +109,24 @@ consult one. Plain `/skills` still lists local templates. `useskills=true` does
 not enable virtual skills, and a local `skills=0` count says nothing about the
 wiki library. See the [Virtual Skills guide](docs/VIRTUAL-SKILLS.md) for a sample
 page, shared-wiki setup, limits, MCP access and troubleshooting.
+
+### Automatic skill use
+
+With `useskills=true` or `useskillswiki=true`, Mini-A discovers compact candidates
+and uses one isolated primary-model call to select relevant skills before task
+execution. Explicit `$name` requests skip selection. Use `$local:name` or a
+`$wiki:path.md` reference to disambiguate sources. `skillsautosearch=false` keeps
+model-led or explicit loading. The skill selector uses the primary model regardless
+of `OAF_DECIDE_MODEL`/`usedecide` settings.
+
+`skillsautolimit=5` bounds combined candidates; `skillmaxautoload=1` bounds automatic
+selection. `skillsmaxloaded=3` and `skillsmaxchars=12000` bound all local/wiki
+consultation in the run. `skillcontextchars=8000` limits the initial local page.
+Long procedures expose pending complete sections and supporting references for
+on-demand loading. Missing explicit skills, incomplete required instructions,
+and changed source revisions block affected work with a reported reason.
+Activity records show discovery, selection, activation and blocking; loading
+alone does not prove compliance. See [Virtual Skills](docs/VIRTUAL-SKILLS.md).
 
 ### Agent Plugins
 

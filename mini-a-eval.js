@@ -93,6 +93,7 @@ loadLib("mini-a-common.js")
   MiniAEval.prototype._normalizeMetrics = function(delta, elapsedMs, after) {
     var perf = delta.performance || {}
     var llm = delta.llm_calls || {}
+    var decisions = delta.decisions || {}
     var actions = delta.actions || {}
     var delegation = delta.delegation || {}
     var wiki = delta.wiki || {}
@@ -104,7 +105,13 @@ loadLib("mini-a-common.js")
       elapsed_ms: elapsedMs,
       total_steps: perf.steps_taken,
       llm_calls: llm.total,
-      model_calls: { main: llm.normal, low_cost: llm.low_cost, validation: llm.validation },
+      model_calls: { main: llm.normal, low_cost: llm.low_cost, validation: llm.validation, decision: llm.decision || 0 },
+      decision_calls: decisions.calls || 0,
+      decision_failures: decisions.failures || 0,
+      decision_fallbacks: decisions.fallbacks || 0,
+      decision_elapsed_ms: decisions.duration_ms || 0,
+      decision_total_tokens: decisions.total_tokens || 0,
+      decision_usage_reports: decisions.usage_reports || 0,
       advisor_calls: delta.advisor ? delta.advisor.calls : 0,
       delegations: delegation.total,
       replans: delta.planning ? delta.planning.plans_replanned : 0,
@@ -112,8 +119,8 @@ loadLib("mini-a-common.js")
       failed_tool_calls: actions.mcp_actions_failed || 0,
       retries: delta.behavior_patterns ? delta.behavior_patterns.retries : 0,
       retrieval_operations: wiki ? (wiki.ops_search || 0) + (wiki.ops_read || 0) + (wiki.ops_list || 0) : 0,
-      input_tokens: (perf.llm_normal_input_tokens || 0) + (perf.llm_lc_input_tokens || 0) + (perf.llm_val_input_tokens || 0),
-      output_tokens: (perf.llm_normal_output_tokens || 0) + (perf.llm_lc_output_tokens || 0) + (perf.llm_val_output_tokens || 0),
+      input_tokens: (perf.llm_normal_input_tokens || 0) + (perf.llm_lc_input_tokens || 0) + (perf.llm_val_input_tokens || 0) + (decisions.input_tokens || 0),
+      output_tokens: (perf.llm_normal_output_tokens || 0) + (perf.llm_lc_output_tokens || 0) + (perf.llm_val_output_tokens || 0) + (decisions.output_tokens || 0),
       context_tokens: perf.max_context_tokens,
       context_candidate_tokens: historyVmDelta.context_candidate_tokens || 0,
       context_materialized_tokens: historyVmMetrics.context_materialized_tokens || 0,
@@ -298,9 +305,11 @@ loadLib("mini-a-common.js")
     metrics.model_usage = {
       main: { calls: metrics.model_calls.main, model: this._modelName(agent._oaf_model) },
       low_cost: { calls: metrics.model_calls.low_cost, model: this._modelName(agent._oaf_lc_model) },
-      validation: { calls: metrics.model_calls.validation, model: this._modelName(agent._oaf_val_model) }
+      validation: { calls: metrics.model_calls.validation, model: this._modelName(agent._oaf_val_model) },
+      decision: { calls: metrics.model_calls.decision, model: agent._decision && agent._decision._config ? this._modelName(agent._decision._config) : __ }
     }
     var result = { version: 1, name: scenario.name || scenario.goal, scenario: scenario.scenarioName || scenario.name || scenario.goal, variant: scenario.variant, goal: scenario.goal, answer: answer, error: error, metrics: metrics, assertions: [], events: events, regression: isMap(scenario.regression) ? scenario.regression : {} }
+    result.skill_activity = agent._skillRuntime && isFunction(agent._skillRuntime.snapshot) ? agent._skillRuntime.snapshot() : {}
     this._buildAssertions(scenario).forEach(function(assertion) { result.assertions.push(this._assert(answer, result, assertion)) }, this)
     var limits = isMap(scenario.limits) ? scenario.limits : (isMap(scenario.maximum) ? scenario.maximum : {})
     var limitPaths = { cost: "metrics.estimated_cost_usd", tokens: "metrics.input_tokens", steps: "metrics.total_steps", time: "metrics.elapsed_ms" }
@@ -324,7 +333,7 @@ loadLib("mini-a-common.js")
       var base = byName[item.name]
       if (!base) return
       var comparison = { name: item.name, success_changed: item.success !== base.success, metrics: {} }
-      ;["elapsed_ms", "total_steps", "llm_calls", "tool_calls", "failed_tool_calls", "input_tokens", "output_tokens", "context_candidate_tokens", "context_materialized_tokens", "effective_context_ratio", "history_vm_rehydrations", "shadow_actual_tokens", "shadow_projected_tokens", "shadow_expected_savings", "active_context_input_tokens", "active_context_output_tokens", "active_context_tokens_saved"].forEach(function(key) {
+      ;["elapsed_ms", "total_steps", "llm_calls", "tool_calls", "failed_tool_calls", "input_tokens", "output_tokens", "decision_calls", "decision_failures", "decision_fallbacks", "decision_elapsed_ms", "decision_total_tokens", "context_candidate_tokens", "context_materialized_tokens", "effective_context_ratio", "history_vm_rehydrations", "shadow_actual_tokens", "shadow_projected_tokens", "shadow_expected_savings", "active_context_input_tokens", "active_context_output_tokens", "active_context_tokens_saved"].forEach(function(key) {
         comparison.metrics[key] = (item.metrics[key] || 0) - (base.metrics[key] || 0)
       })
       if (base.success && !item.success) regressions.push({ name: item.name, reason: "success regressed" })
@@ -352,7 +361,7 @@ loadLib("mini-a-common.js")
       if (!isArray(groups[key])) groups[key] = []
       groups[key].push(item)
     })
-    var metricKeys = ["elapsed_ms", "total_steps", "llm_calls", "tool_calls", "failed_tool_calls", "input_tokens", "output_tokens", "context_materialized_tokens", "effective_context_ratio", "history_vm_rehydrations", "shadow_projected_tokens", "active_context_output_tokens", "active_context_tokens_saved"]
+    var metricKeys = ["elapsed_ms", "total_steps", "llm_calls", "tool_calls", "failed_tool_calls", "input_tokens", "output_tokens", "decision_calls", "decision_failures", "decision_fallbacks", "decision_elapsed_ms", "decision_total_tokens", "context_materialized_tokens", "effective_context_ratio", "history_vm_rehydrations", "shadow_projected_tokens", "active_context_output_tokens", "active_context_tokens_saved"]
     var comparisons = []
     Object.keys(groups).sort().forEach(function(key) {
       var items = groups[key]

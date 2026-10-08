@@ -378,6 +378,15 @@ window.MiniAAdvancedUI = function(bridge) {
     toggle.textContent = value ? 'Simple' : 'Advanced';
     if (value) { const uuid = sessionStorage.getItem(storeKey); if (uuid && !snapshot) bridge.resume(uuid); if (activeScreen === 'debug') renderScreen(); poll().catch(showError); }
   }
+  // Keep agent event emojis aligned with MiniA.fnI's console mapping.
+  const activityEventEmojis = {
+    user: '👤', exec: '⚙️', shell: '🖥️', think: '💡', final: '🏁',
+    input: '➡️', output: '⬅️', thought: '💭', size: '📏', rate: '⏳',
+    mcp: '🤖', plan: '🗺️', deepresearch: '🔍', done: '✅', error: '❌',
+    libs: '📚', info: 'ℹ️', skill: '🧩', load: '📂', warn: '⚠️',
+    stop: '🛑', summarize: '🌀', progcall: '📟', subagent: '🤝',
+    compress: '🗜️', planner_stream: '💡'
+  };
   function appendEvent(record, navigate = true) {
     if (record.type === 'view') {
       // Navigation happens once, from the submission receipt. Replays never move focus.
@@ -387,7 +396,14 @@ window.MiniAAdvancedUI = function(bridge) {
     if (record.sequence <= liveFloor || (liveClearRun && record.runId === liveClearRun)) return;
     const details = el('details'); details.dataset.sequence = record.sequence; details.dataset.runId = record.runId || '';
     const summary = el('summary');
-    summary.append(el('time', record.timestamp.slice(11,19), 'advanced-event-time'), el('span', record.type, 'advanced-event-type'), el('span', activityText(record.value)?.replace(/\s+/g,' ').slice(0,150) || '', 'advanced-event-text'));
+    const eventType = el('span', undefined, 'advanced-event-type');
+    if (Object.prototype.hasOwnProperty.call(activityEventEmojis, record.type)) {
+      const emoji = el('span', activityEventEmojis[record.type]);
+      emoji.setAttribute('aria-hidden', 'true');
+      eventType.append(emoji, document.createTextNode(' '));
+    }
+    eventType.append(document.createTextNode(record.type));
+    summary.append(el('time', record.timestamp.slice(11,19), 'advanced-event-time'), eventType, el('span', activityText(record.value)?.replace(/\s+/g,' ').slice(0,150) || '', 'advanced-event-text'));
     details.dataset.type = record.type;
     details.append(summary);
     const content = el('div', undefined, 'advanced-event-content');

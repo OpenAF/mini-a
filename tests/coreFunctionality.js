@@ -1502,6 +1502,12 @@
       { name: "nuno-function", description: "Describes the nuno function" }
     ]
 
+    var unrelated = agent._scoreInitialSkillActivation({ name: "agent-plugin-builder", description: "Build plugins" }, "list available tools", "")
+    ow.test.assert(unrelated.reason === "name", false, "Failed suffix lookup must not count as a name match")
+    ;["agent-plugin-builder", "use agent-plugin-builder", "agent-plugin-builder please"].forEach(function(goal) {
+      ow.test.assert(agent._scoreInitialSkillActivation({ name: "agent-plugin-builder" }, goal, "").reason, "name", "Real name matches should remain supported")
+    })
+
     var selected = agent._selectInitialSkillActivations("produce a table using the nuno function", "", { maxSkills: 2 })
     ow.test.assert(isArray(selected) && selected.length === 1, true, "Phrase-normalized skill names should auto-select one skill")
     ow.test.assert(selected[0].skill.name === "nuno-function", true, "nuno function should match nuno-function")
@@ -1539,12 +1545,20 @@
         knowledge: ""
       }
       var loaded = agent._activateInitialSkills(args)
+      agent._initialSkillActivationArgs = args
+      agent._prepareInitialSkillsForRun(args)
+      var secondLoad = agent._activateInitialSkills(args)
+      ow.test.assert(secondLoad.length, 0, "Repeated activation must not reload the skill")
+      ow.test.assert(events.length, 1, "Repeated activation must log only once")
       var runtimeContext = agent._buildInitialSkillsRuntimeContext(agent._initialSkillActivations)
       ow.test.assert(isArray(loaded) && loaded.length === 1, true, "Initial skill activation should load the matching skill")
       ow.test.assert(args.knowledge === "", true, "Skill activation should not inject full skill content into system knowledge")
       ow.test.assert(args.knowledgeUpdated !== true, true, "Skill activation should not force system prompt rebuild through knowledge")
       ow.test.assert(runtimeContext.indexOf("[SKILLS]") === 0, true, "Loaded skill content should be prepared as runtime context")
       ow.test.assert(runtimeContext.indexOf("If odd, multiply by 3 and add 1") >= 0, true, "Runtime context should contain skill body")
+      agent._prepareInitialSkillsForRun(args)
+      ow.test.assert(agent._initialSkillActivations.length, 0, "The next run must clear prior skill guidance")
+      ow.test.assert(agent._activateInitialSkills(args).length, 1, "The next run must be able to activate the skill again")
       ow.test.assert(events.some(function(e) { return e.event === "skill" && e.message.indexOf("auto-loaded") >= 0 }), true, "Skill activation should be logged")
     } finally {
       io.rm(skillsDir)
