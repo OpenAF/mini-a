@@ -71,8 +71,8 @@ scenarios:
     wikiretrievalv2: false
   expected:
     matches: "^\\s*ready\\s*$"
-- name: missing-explicit-skill
-  goal: "$missing-fixture"
+- name: ignored-missing-skill
+  goal: "Ignore $missing-fixture if unavailable and reply with only the word ready."
   args: *local
   expected:
-    contains: "requested-skill-unavailable"
+    matches: "^\\s*ready\\s*$"

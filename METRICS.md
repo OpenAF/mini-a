@@ -456,3 +456,12 @@ and contributes to normal model-call/token metrics. `compliance_verified=false`
 distinguishes runtime loading/completion from verified adherence. Evaluation
 reports include the same snapshot as `skill_activity`. No skill bodies are
 included in these metrics.
+
+Skill activity logs describe enabled sources and local discovery roots, discovered
+and eligible counts, bounded candidate lists, explicit requests and ignored unknown
+references, primary-model selection start/result/duration, and reasons for skipping
+selection. Loading reports returned characters and shared count/character budgets;
+activation reports source revision, loaded and pending sections, and supporting
+reference names. Blocked requests include available references and corrective hints.
+Activity omits goal text, invocation arguments, and instruction bodies. Lists show
+at most twelve entries; full event metadata remains in the `skill_state` audit trace.

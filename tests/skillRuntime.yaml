@@ -66,6 +66,14 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/skillRuntime.js").testSkillPrimarySelectorIndependentOfDecisionModel
 
+- name: MiniA Skill Runtime::testSkillCodeMentionsAndUnknownRequestsAreIgnored
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillCodeMentionsAndUnknownRequestsAreIgnored
+
+- name: MiniA Skill Runtime::testSkillActivityLogsDescribeSelectionAndLoading
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillActivityLogsDescribeSelectionAndLoading
+
 todo:
 - MiniA Skill Runtime::testSkillExplicitBoundaryAndArguments
 - MiniA Skill Runtime::testSkillAutomaticSelectionAndRunReset
@@ -83,3 +91,5 @@ todo:
 - MiniA Skill Runtime::testSkillSharedLocalWikiBudgetAndSupportingReferences
 - MiniA Skill Runtime::testSkillHandoffRespectsChildPermissionsAndRevision
 - MiniA Skill Runtime::testSkillPrimarySelectorIndependentOfDecisionModel
+- MiniA Skill Runtime::testSkillCodeMentionsAndUnknownRequestsAreIgnored
+- MiniA Skill Runtime::testSkillActivityLogsDescribeSelectionAndLoading

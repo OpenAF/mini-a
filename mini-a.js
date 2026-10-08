@@ -13795,7 +13795,7 @@ MiniA.prototype._scoreInitialSkillActivation = function(skill, goalText, hookCon
     "/" + namePhrase
   ]
   for (var i = 0; i < explicitPatterns.length; i++) {
-    if (explicitPatterns[i].length > 1 && new RegExp("(^|[\\s([{])" + explicitPatterns[i].replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?=$|[^a-z0-9_-])", "i").test(haystack)) {
+    if (explicitPatterns[i].length > 1 && new RegExp("(^|[\\s([{])" + explicitPatterns[i].replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?=$|[^a-z0-9_-])", "i").test(__miniASkillRequestText(haystack))) {
       return { score: 120, reason: "explicit" }
     }
   }

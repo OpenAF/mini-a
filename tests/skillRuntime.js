@@ -37,7 +37,8 @@
       ow.test.assert(agent._consultSkillsForRun({ useskills: true, goal: '$pdf "Jane Doe"' }).length, 0, "Explicit skill loads without selector")
       ow.test.assert(agent._skillGuidanceContext().indexOf("Report for Jane Doe") >= 0, true, "Explicit arguments are rendered")
       var other = agentFor(root)
-      ow.test.assert(other._consultSkillsForRun({ useskills: true, goal: "$pdf-tools" })[0].reason, "requested-skill-unavailable", "Unknown explicit skill is blocked rather than prefix-loaded")
+      ow.test.assert(other._consultSkillsForRun({ useskills: true, skillsautosearch: false, goal: "$pdf-tools" }).length, 0, "Unknown explicit skill is ignored rather than prefix-loaded")
+      ow.test.assert(other._skillRuntime.chars, 0, "Unknown reference loads no guidance")
     })
   }
 
@@ -68,6 +69,45 @@
       agent = agentFor(root)
       ow.test.assert(agent._consultSkillsForRun({ useskills: true, skillsautosearch: false, goal: "$report" }).length, 0, "User can explicitly invoke disabled skill with auto search off")
       ow.test.assert(agentFor(root)._skillUtils.skills({ name: "report", operation: "render" }).error, "skill-model-invocation-disabled", "Model tool cannot invoke a user-only skill")
+    })
+  }
+
+
+  exports.testSkillCodeMentionsAndUnknownRequestsAreIgnored = function() {
+    fixture(function(root) {
+      writeSkill(root, "report", "Report for {{arg1}}")
+      writeSkill(root, "nf", "Must not load shell variables")
+      var agent = agentFor(root), events = []
+      agent.fnI = function(kind, message) { events.push(message) }
+      var goal = "Run `git remote show origin | awk '{print $NF}'`\n```sh\necho $report\n```\n~~~sh\necho $nf\n~~~\nUse $not-installed and $report Ada"
+      ow.test.assert(agent._consultSkillsForRun({ useskills: true, goal: goal }).length, 0, "Unknown references and code do not block real invocation")
+      ow.test.assert(Object.keys(agent._skillRuntime.records), ["local:report"], "Only prose invocation is active")
+      ow.test.assert(agent._skillGuidanceContext().indexOf("Report for Ada") >= 0, true, "Masked code preserves argument offsets")
+      ow.test.assert(events.some(function(message) { return message.indexOf("ignored not-installed") >= 0 && message.indexOf("continuing") >= 0 }), true, "Ignored unknown requests explained")
+      ow.test.assert(events.some(function(message) { return /(?:ignored|blocked|selected) nf/.test(message) }), false, "Awk variable is not a skill event")
+      ow.test.assert(agent._scoreInitialSkillActivation({ name: "nf" }, "Run `awk '{print $NF}'`", "").reason !== "explicit", true, "Legacy activation also excludes inline code")
+      agent = agentFor(root)
+      agent._selectSkillCandidates = function() { return [] }
+      ow.test.assert(agent._consultSkillsForRun({ useskills: true, goal: "Generate test reports $missing" }).length, 0, "Unknown mention permits automatic selection")
+      ow.test.assert(agent._consultSkillsForRun({ useskills: true, goal: "$wiki:missing.md", skillsautosearch: false }).length, 0, "Unknown wiki source is ignored when unavailable")
+    })
+  }
+
+  exports.testSkillActivityLogsDescribeSelectionAndLoading = function() {
+    fixture(function(root) {
+      writeSkill(root, "report", "CONFIDENTIAL_BODY {{arg1}}")
+      var agent = agentFor(root), messages = []
+      agent.fnI = function(kind, message) { messages.push(message) }
+      agent._createBareLlmInstance = function() { return { withInstructions: function() {}, promptJSONWithStats: function() { return { response: { selected: ["local:report"] }, stats: {} } } } }
+      agent._consultSkillsForRun({ useskills: true, goal: "Generate test reports" })
+      ;["roots=[", "localCount=1", "candidates=[local:report]", "selection_start", "tier=main", "selection_result", "selected=[local:report]", "returnedChars=", "budget=", "revision=", "pendingSections=[]"].forEach(function(expected) {
+        ow.test.assert(messages.join("\n").indexOf(expected) >= 0, true, "Activity explains " + expected)
+      })
+      ow.test.assert(messages.join("\n").indexOf("CONFIDENTIAL_BODY") < 0, true, "Activity excludes instruction bodies")
+      agent._completeSkillsForRun()
+      ow.test.assert(messages.some(function(message) { return message.indexOf("complianceVerified=false") >= 0 }), true, "Completion does not imply verified compliance")
+      var text = __miniASkillEventMessage({ state: "discovered", candidates: Array.apply(null, Array(20)).map(function(v, i) { return "local:test" + i }) })
+      ow.test.assert(text.indexOf("... +8") >= 0, true, "Large candidate lists are bounded")
     })
   }
 
@@ -227,9 +267,11 @@
         ow.test.assert(agent.start(merge({}, args)), "VERIFIED_REPORT", "Actual agent run completes")
         ow.test.assert(selections, 1, "One selection before execution")
         ow.test.assert(turns, 1, "One execution turn")
-        var blocked = agent.start(merge(args, { goal: "$missing-report" }))
-        ow.test.assert(blocked.indexOf("blocked") >= 0, true, "Missing explicit skill returns actionable blocked result")
+        var blocked = agent.start(merge(args, { goal: "$missing-report", _skillHandoff: [{ ref: "local:missing-report", required: true }] }))
+        ow.test.assert(blocked.indexOf("blocked") >= 0, true, "Missing required handoff returns actionable blocked result")
         ow.test.assert(turns, 1, "Blocked run does not call execution model")
+        ow.test.assert(agent.start(merge(args, { goal: "$missing-report", _skillHandoff: [] })), "VERIFIED_REPORT", "Unknown goal mention permits normal task execution")
+        ow.test.assert(turns, 2, "Ignored unknown reference does not prevent execution")
       } finally { agent._stopAgentResources() }
     })
   }

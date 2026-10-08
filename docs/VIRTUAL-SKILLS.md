@@ -371,8 +371,11 @@ selection/complexity roles and do not change this selector.
 
 Use `$local:report` to disambiguate a local skill or `$wiki:report.md` for an
 existing wiki reference. `$report` works when exactly one enabled source resolves
-the name. Missing or ambiguous explicit requests, loading errors, and unavailable
-required guidance block execution with an actionable result. A selection failure
+the name. Unknown `$name` references are logged as ignored and the task continues.
+Markdown inline code and fenced blocks are excluded from explicit request detection,
+so shell variables such as `$NF` in an example command cannot request a skill.
+Ambiguous requests, loading errors, and unavailable required handoff guidance
+block execution with an actionable result. A selection failure
 is visible rather than silently switching to general knowledge. Set
 `skillsautosearch=false` to keep explicit requests while disabling automatic
 consultation. Local default directories remain available when `extraskills` is
