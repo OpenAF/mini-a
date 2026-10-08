@@ -1329,6 +1329,8 @@ todo:
             } else if (isDef(r.event)) {
               // Group only the messages that were visible before activity disclosures.
               if (!(r.event == "🧩" || r.event == "💡" || r.event == "💭" || r.event == "🌀" || r.event == "🛑" || r.event == "⏳" || ((r.event == "⚙️" || r.event == "🖥️") && global.__showexecs))) continue
+              // Show requested/used skills; keep consultation diagnostics in full logging.
+              if (r.event === "🧩" && !/^(?:selected|loading|loaded|active|completed|blocked|ignored|incomplete|missing_prerequisites)(?:\s|:|$)|^requests:.*requests=\[\s*[^\s\]]/.test(String(r.message || ""))) continue;
               if (/^(⚠️|❌|❗|warn|warning|error)$/.test(r.event) || (r.event == "🤝" && /❌|❗|⚠️|failed|timeout/i.test(String(r.message)))) activityWarnings++
               activityLines.push('<div class="activity-event">' + __escapeHtml(r.event) + ' <span>' + __escapeHtml(r.message).replace(/\n/g, '<br>') + '</span></div>')
             }
