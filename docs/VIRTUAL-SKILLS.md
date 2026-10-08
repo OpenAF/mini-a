@@ -347,7 +347,7 @@ Related parameters for enabling, locating, and limiting the virtual skill librar
 | `skillwikimounts` | Unset | Read-only mounts for a dedicated skill wiki, supplied as a SLON/JSON array using the `wikimounts` shape. |
 | `skillsmaxloaded` | `3` | Maximum distinct local/wiki skills consulted per run, shared by automatic and tool loading. |
 | `skillsmaxchars` | `12000` | Shared local/wiki guidance character budget per run, including `resolve` and supporting references. |
-| `skillsautosearch` | `true` | Automatically retrieve compact candidates and select skills before execution when a skill source is enabled. Set `false` for model-led or explicit loading. |
+| `skillsautosearch` | Conditional | Defaults to `false`, or `true` when `usedecide=true` and `OAF_DECIDE_MODEL` is set. Explicit overrides win. Set `false` for model-led or explicit loading. |
 | `skillsautolimit` | `5` | Combined local/wiki candidate limit for the primary-model selector. |
 
 If any dedicated `skillwiki*` source setting is supplied, Mini-A creates a separate
@@ -362,12 +362,19 @@ indexes through the normal writable wiki workflow.
 
 ### Automatic selection and instruction continuity
 
-Enabling `useskills=true` or `useskillswiki=true` enables automatic consultation
-by default. Mini-A retrieves at most `skillsautolimit` compact candidates from
-the enabled sources, then makes one isolated primary-model selection call. The
-selector may choose no skill. Explicit requests bypass that call. Skill selection
-uses `OAF_MODEL`; `OAF_DECIDE_MODEL` and `usedecide` retain their separate decision
-selection/complexity roles and do not change this selector.
+Enabling `useskills=true` or `useskillswiki=true` makes those skill sources
+available. Automatic consultation defaults to off unless `usedecide=true` and
+`OAF_DECIDE_MODEL` is set; `skillsautosearch=true` explicitly enables it, and
+`skillsautosearch=false` explicitly disables it. Mini-A retrieves at most
+`skillsautolimit` compact candidates, then tries the decision model (when
+`usedecide=true` and configured), the configured low-cost model, and finally
+`OAF_MODEL`. The decision tier asks bounded boolean relevance questions and
+selects up to `skillmaxautoload` relevant candidates in discovery order. Chat
+selectors use isolated clients without tools. Errors and invalid responses
+trigger fallback; a valid empty selection does not. Each attempt reports its
+tier and duration. A failure across all available tiers blocks selection.
+Explicit requests bypass selection entirely. Fallbacks may increase latency
+when a provider is unavailable.
 
 Use `$local:report` to disambiguate a local skill or `$wiki:report.md` for an
 existing wiki reference. `$report` works when exactly one enabled source resolves

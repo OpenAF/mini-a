@@ -112,12 +112,17 @@ page, shared-wiki setup, limits, MCP access and troubleshooting.
 
 ### Automatic skill use
 
-With `useskills=true` or `useskillswiki=true`, Mini-A discovers compact candidates
-and uses one isolated primary-model call to select relevant skills before task
-execution. Explicit `$name` requests skip selection. Use `$local:name` or a
-`$wiki:path.md` reference to disambiguate sources. `skillsautosearch=false` keeps
-model-led or explicit loading. The skill selector uses the primary model regardless
-of `OAF_DECIDE_MODEL`/`usedecide` settings.
+With `useskills=true` or `useskillswiki=true`, automatic search defaults to off.
+It defaults to on only when `usedecide=true` and `OAF_DECIDE_MODEL` is set.
+Explicit `skillsautosearch=true` or `false` overrides that default. When enabled,
+Mini-A discovers compact candidates and tries the decision model (if
+`usedecide=true` and configured), then the configured low-cost model, then the
+main model. Errors or invalid responses advance to the next tier; a valid
+selection of no skills stops there. Exhausting all available tiers reports a
+selection failure. Provider failures can therefore increase selection latency.
+Explicit `$name` requests skip selection. Use `$local:name` or a `$wiki:path.md`
+reference to disambiguate sources. `skillsautosearch=false` keeps model-led or
+explicit loading.
 
 `skillsautolimit=5` bounds combined candidates; `skillmaxautoload=1` bounds automatic
 selection. `skillsmaxloaded=3` and `skillsmaxchars=12000` bound all local/wiki

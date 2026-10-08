@@ -62,9 +62,9 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/skillRuntime.js").testSkillHandoffRespectsChildPermissionsAndRevision
 
-- name: MiniA Skill Runtime::testSkillPrimarySelectorIndependentOfDecisionModel
+- name: MiniA Skill Runtime::testSkillSelectorDefaultsAndFallbacks
   to: oJob Test
-  exec: args.func = require("tests/skillRuntime.js").testSkillPrimarySelectorIndependentOfDecisionModel
+  exec: args.func = require("tests/skillRuntime.js").testSkillSelectorDefaultsAndFallbacks
 
 - name: MiniA Skill Runtime::testSkillCodeMentionsAndUnknownRequestsAreIgnored
   to: oJob Test
@@ -90,6 +90,6 @@ todo:
 - MiniA Skill Runtime::testSkillStartLoadsBeforeExecutionAndBlocksMissing
 - MiniA Skill Runtime::testSkillSharedLocalWikiBudgetAndSupportingReferences
 - MiniA Skill Runtime::testSkillHandoffRespectsChildPermissionsAndRevision
-- MiniA Skill Runtime::testSkillPrimarySelectorIndependentOfDecisionModel
+- MiniA Skill Runtime::testSkillSelectorDefaultsAndFallbacks
 - MiniA Skill Runtime::testSkillCodeMentionsAndUnknownRequestsAreIgnored
 - MiniA Skill Runtime::testSkillActivityLogsDescribeSelectionAndLoading

@@ -47,7 +47,7 @@
       writeSkill(root, "report", "Always include VERIFIED_REPORT")
       var agent = agentFor(root), calls = 0
       agent._selectSkillCandidates = function(candidates) { calls++; return [candidates[0]] }
-      var args = { useskills: true, goal: "Generate test reports" }
+      var args = { useskills: true, skillsautosearch: true, goal: "Generate test reports" }
       ow.test.assert(agent._consultSkillsForRun(args).length, 0, "Automatic consultation works")
       ow.test.assert(agent._skillGuidanceContext().indexOf("VERIFIED_REPORT") >= 0, true, "Selected guidance is pinned before work")
       agent._consultSkillsForRun(args)
@@ -64,7 +64,7 @@
       writeSkill(root, "report", "Only explicitly requested", "disable-model-invocation: true\n")
       var agent = agentFor(root)
       agent._selectSkillCandidates = function() { throw new Error("Disabled skill must never be offered") }
-      ow.test.assert(agent._consultSkillsForRun({ useskills: true, goal: "Generate test reports" }).length, 0, "Disabled metadata excludes auto activation")
+      ow.test.assert(agent._consultSkillsForRun({ useskills: true, skillsautosearch: true, goal: "Generate test reports" }).length, 0, "Disabled metadata excludes auto activation")
       ow.test.assert(agent._skillRuntime.chars, 0, "No disabled body loaded")
       agent = agentFor(root)
       ow.test.assert(agent._consultSkillsForRun({ useskills: true, skillsautosearch: false, goal: "$report" }).length, 0, "User can explicitly invoke disabled skill with auto search off")
@@ -88,7 +88,7 @@
       ow.test.assert(agent._scoreInitialSkillActivation({ name: "nf" }, "Run `awk '{print $NF}'`", "").reason !== "explicit", true, "Legacy activation also excludes inline code")
       agent = agentFor(root)
       agent._selectSkillCandidates = function() { return [] }
-      ow.test.assert(agent._consultSkillsForRun({ useskills: true, goal: "Generate test reports $missing" }).length, 0, "Unknown mention permits automatic selection")
+      ow.test.assert(agent._consultSkillsForRun({ useskills: true, skillsautosearch: true, goal: "Generate test reports $missing" }).length, 0, "Unknown mention permits automatic selection")
       ow.test.assert(agent._consultSkillsForRun({ useskills: true, goal: "$wiki:missing.md", skillsautosearch: false }).length, 0, "Unknown wiki source is ignored when unavailable")
     })
   }
@@ -99,7 +99,7 @@
       var agent = agentFor(root), messages = []
       agent.fnI = function(kind, message) { messages.push(message) }
       agent._createBareLlmInstance = function() { return { withInstructions: function() {}, promptJSONWithStats: function() { return { response: { selected: ["local:report"] }, stats: {} } } } }
-      agent._consultSkillsForRun({ useskills: true, goal: "Generate test reports" })
+      agent._consultSkillsForRun({ useskills: true, skillsautosearch: true, goal: "Generate test reports" })
       ;["roots=[", "localCount=1", "candidates=[local:report]", "selection_start", "tier=main", "selection_result", "selected=[local:report]", "returnedChars=", "budget=", "revision=", "pendingSections=[]"].forEach(function(expected) {
         ow.test.assert(messages.join("\n").indexOf(expected) >= 0, true, "Activity explains " + expected)
       })
@@ -211,7 +211,7 @@
       agent._skillWikiEnabled = true
       var offered = []
       agent._selectSkillCandidates = function(candidates) { offered = candidates; return [candidates.filter(function(item) { return item.source === "wiki" })[0]] }
-      var args = { useskills: true, useskillswiki: true, goal: "Generate test reports", skillsautolimit: 5 }
+      var args = { useskills: true, useskillswiki: true, skillsautosearch: true, goal: "Generate test reports", skillsautolimit: 5 }
       ow.test.assert(agent._consultSkillsForRun(args).length, 0, "Mixed consultation succeeds")
       ow.test.assert(offered.some(function(item) { return item.id === "local:report" }), true, "Local source represented")
       ow.test.assert(offered.some(function(item) { return item.id === "wiki:report.md" }), true, "Wiki source represented")
@@ -240,11 +240,11 @@
       writeSkill(root, "report", "Instructions")
       var agent = agentFor(root)
       agent._selectSkillCandidates = function() { return [] }
-      ow.test.assert(agent._consultSkillsForRun({ useskills: true, goal: "Generate test reports" }).length, 0, "None relevant is valid")
+      ow.test.assert(agent._consultSkillsForRun({ useskills: true, skillsautosearch: true, goal: "Generate test reports" }).length, 0, "None relevant is valid")
       ow.test.assert(agent._skillRuntime.chars, 0, "None selection loads no body")
       agent._resetSkillRuntime({})
       agent._selectSkillCandidates = function() { throw new Error("invalid-skill-selection") }
-      ow.test.assert(agent._consultSkillsForRun({ useskills: true, goal: "Generate test reports" })[0].ref, "selection", "Selector failures visibly block dependent work")
+      ow.test.assert(agent._consultSkillsForRun({ useskills: true, skillsautosearch: true, goal: "Generate test reports" })[0].ref, "selection", "Selector failures visibly block dependent work")
     })
   }
 
@@ -255,7 +255,7 @@
       agent.fnI = function() {}
       agent._selectSkillCandidates = function(candidates) { selections++; return [candidates[0]] }
       // Explicit synthetic model configuration; initialization does not contact it.
-      var args = { model: "(type: openai, model: fixture, key: fixture)", usedecide: false, useskills: true, extraskills: root, useutils: false, usetools: false, usejsontool: true, usememory: false, useplanning: false, goal: "Generate test reports", raw: true, maxsteps: 3 }
+      var args = { model: "(type: openai, model: fixture, key: fixture)", usedecide: false, useskills: true, skillsautosearch: true, extraskills: root, useutils: false, usetools: false, usejsontool: true, usememory: false, useplanning: false, goal: "Generate test reports", raw: true, maxsteps: 3 }
       try {
         agent.init(args)
         agent.llm.promptJSONWithStats = agent.llm.promptWithStats = function(prompt) {
@@ -315,15 +315,62 @@
     })
   }
 
-  exports.testSkillPrimarySelectorIndependentOfDecisionModel = function() {
-    var agent = new MiniA(), primaryCalls = 0
-    agent._decision = { isConfigured: function() { return true }, decide: function() { throw new Error("Skill selection must not use decision model") } }
+  exports.testSkillSelectorDefaultsAndFallbacks = function() {
+    var agent = new MiniA(), candidate = { id: "local:report", name: "report" }, calls = [], events = []
+    var configuredEnv = function() { return "(type: openai, model: fixture)" }, emptyEnv = function() { return "" }
+    ow.test.assert(agent._resolveSkillsAutoSearch({}, configuredEnv), false, "Decision use must be explicitly enabled")
+    ow.test.assert(agent._resolveSkillsAutoSearch({ usedecide: true }, configuredEnv), true, "Configured decision enables default search")
+    ow.test.assert(agent._resolveSkillsAutoSearch({ usedecide: true, skillsautosearch: false }, configuredEnv), false, "Explicit opt-out wins")
+    ow.test.assert(agent._resolveSkillsAutoSearch({ usedecide: true }, emptyEnv), false, "No decision config defaults off")
+    ow.test.assert(agent._resolveSkillsAutoSearch({ skillsautosearch: true }, emptyEnv), true, "Explicit opt-in works without decision config")
+    agent._resetSkillRuntime({})
+    agent._skillRuntime.eventFn = function(event) { events.push(event) }
+    agent._use_lc = true
+    agent._oaf_lc_model = { model: "lc" }
+    agent._oaf_model = { model: "main" }
+    agent._decision = { isConfigured: function() { return true }, decide: function(state, questions) {
+      calls.push("decide")
+      ow.test.assert(state.candidates[0].id, candidate.id, "Source identity preserved")
+      ow.test.assert(questions.candidate_0.type, "boolean", "Bounded relevance question")
+      return { response: { answers: { candidate_0: { type: "boolean", value: false } } }, stats: { total_tokens: 4 } }
+    } }
     agent._createBareLlmInstance = function(config) {
-      ow.test.assert(config.model, "primary-fixture", "Selector uses primary configuration")
-      return { withInstructions: function() {}, promptJSONWithStats: function() { primaryCalls++; return { response: { selected: [] } } } }
+      calls.push(config.model)
+      return { withInstructions: function() {}, promptJSONWithStats: function() {
+        if (config.model === "lc") throw new Error("fixture-lc-failure")
+        return { response: { selected: [candidate.id] }, stats: {} }
+      } }
     }
-    agent._oaf_model = { type: "openai", model: "primary-fixture" }
-    ow.test.assert(agent._selectSkillCandidates([{ id: "local:report", name: "report" }], { usedecide: true }).length, 0, "None remains valid")
-    ow.test.assert(primaryCalls, 1, "Decision configuration adds no skill calls")
+    var usage = [], controls = { beforeCall: function() { usage.push("before") }, afterCall: function(tokens, tier) { usage.push(tier) } }
+    ow.test.assert(agent._selectSkillCandidates([candidate], { usedecide: true }, controls), [], "Valid none stops fallback")
+    ow.test.assert(calls, ["decide"], "No slower calls for irrelevant task")
+    ow.test.assert(usage, ["before", "decide"], "Decision call participates in rate limits")
+    calls = []
+    agent._decision.decide = function() { calls.push("decide"); return { response: { answers: { candidate_0: { type: "boolean", value: true } } } } }
+    ow.test.assert(agent._selectSkillCandidates([candidate], { usedecide: true })[0].id, candidate.id, "Relevant decision loads the original candidate")
+    ow.test.assert(calls, ["decide"], "Successful decision skips chat selectors")
+    calls = []
+    agent._decision.decide = function() { calls.push("decide"); return { response: { answers: { candidate_0: { type: "boolean", value: "invalid" } } } } }
+    ow.test.assert(agent._selectSkillCandidates([candidate], { usedecide: true })[0].id, candidate.id, "Invalid decision and failed LC fall back to main")
+    ow.test.assert(calls, ["decide", "lc", "main"], "Fallback order is decide then LC then main")
+    ow.test.assert(events.filter(function(event) { return event.state === "selection_fallback" }).length, 2, "Fallbacks are visible")
+    calls = []
+    agent._createBareLlmInstance = function(config) { calls.push(config.model); return { withInstructions: function() {}, promptJSONWithStats: function() { return { response: { selected: [] } } } } }
+    ow.test.assert(agent._selectSkillCandidates([candidate], { usedecide: false }), [], "LC can return none")
+    ow.test.assert(calls, ["lc"], "Decision disabled skips decide and valid LC stops main")
+    calls = []
+    var blocked = false
+    try { agent._selectSkillCandidates([candidate], { usedecide: true }, { beforeCall: function() { throw new Error("rate-limit") } }) } catch(e) { blocked = true }
+    ow.test.assert(blocked, true, "Rate-limit failure aborts selection")
+    ow.test.assert(calls, [], "Rate limits do not cause provider fallback")
+    fixture(function(root) {
+      writeSkill(root, "report", "Report")
+      var localAgent = agentFor(root)
+      localAgent._selectSkillCandidates = function() { throw new Error("Default must avoid selection") }
+      localAgent._consultSkillsForRun({ useskills: true, goal: "Generate test reports" })
+      ow.test.assert(localAgent._skillRuntime.metrics.selection_calls, 0, "Default has no selection inference")
+      ow.test.assert(localAgent._skillRuntime.chars, 0, "Default has no automatic load")
+    })
   }
+
 })()

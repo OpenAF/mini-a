@@ -1142,7 +1142,7 @@ and skill pages side by side.
 | `skillwikibackend` | string | `fs` for a dedicated library | Select the backend for a dedicated skill wiki: `fs`, `s3`, `s3fs`, `es`, or `http` |
 | `skillwikiroot` | string | `.` for a dedicated library | Filesystem root for a dedicated skill wiki; prefer an explicit absolute path |
 | `skillwikimounts` | SLON/JSON | - | Read-only mounts for a dedicated skill wiki, using the same array shape as `wikimounts` |
-| `skillsautosearch` | boolean | `false` | Reserved for future opt-in automatic skill consultation during planning; not implemented |
+| `skillsautosearch` | boolean | Conditional | Defaults off unless `usedecide=true` and `OAF_DECIDE_MODEL` is set; enabled search tries decide, low-cost, then main on failure |
 | `skillsautolimit` | number | `5` | Reserved maximum results per future automatic skill search; not implemented |
 | `skillsmaxloaded` | number | `3` | Max distinct skills `open()`-ed per agent run |
 | `skillsmaxchars` | number | `12000` | Max skill-body characters `read()` may return per agent run |

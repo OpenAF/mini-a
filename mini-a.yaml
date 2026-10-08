@@ -409,7 +409,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : skillsautosearch
-    desc     : Automatically discover and select enabled local/wiki skills; false keeps model-led or explicit loading
+    desc     : Automatically select skills via decide, low-cost, then main; defaults off unless usedecide=true and OAF_DECIDE_MODEL is set
     example  : "true"
     mandatory: false
   - name     : skillsautolimit
@@ -1742,7 +1742,7 @@ jobs:
       usestdutils    : toBoolean.isBoolean.default(__)
       useskills      : toBoolean.isBoolean.default(false)
       useasciiviz    : toBoolean.isBoolean.default(false)
-      skillsautosearch: toBoolean.isBoolean.default(true)
+      skillsautosearch: toBoolean.isBoolean.default(__)
       skillsautolimit: toNumber.isNumber.default(5)
       skillsmaxloaded: toNumber.isNumber.default(3)
       skillsmaxchars: toNumber.isNumber.default(12000)

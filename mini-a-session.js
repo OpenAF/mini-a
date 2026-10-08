@@ -747,7 +747,7 @@ function MiniAInteractiveSession(args, adapter) {
     skillwikibackend: { type: "string", description: "Skill library backend: fs, s3, s3fs, es, or http. Defaults to fs. Only needed for a dedicated skill wiki separate from usewiki." },
     skillwikiroot  : { type: "string", description: "Root directory for a dedicated skill library (fs backend). Only needed when not reusing usewiki's wiki." },
     skillwikimounts: { type: "string", dataEditor: "array", description: "SLON/JSON array of read-only skill-library mounts, same shape as wikimounts. Only used with a dedicated skill wiki." },
-    skillsautosearch: { type: "boolean", default: true, description: "Automatically discover and select enabled local/wiki skills before execution; false keeps model-led or explicit loading." },
+    skillsautosearch: { type: "boolean", description: "Automatically select skills via decide, low-cost, then main. Defaults off unless usedecide=true and OAF_DECIDE_MODEL is set; false keeps model-led or explicit loading." },
     skillsautolimit: { type: "number", default: 5, description: "Maximum results per automatic skill search." },
     skillsmaxloaded: { type: "number", default: 3, description: "Maximum distinct local/wiki skills consulted per agent run." },
     skillsmaxchars : { type: "number", default: 12000, description: "Shared local/wiki skill guidance character budget per agent run." },
