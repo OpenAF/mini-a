@@ -74,7 +74,17 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/skillRuntime.js").testSkillActivityLogsDescribeSelectionAndLoading
 
+- name: MiniA Bundled Skills::testBundledSkillsActivation
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testBundledSkillsActivation
+
+- name: MiniA Bundled Skills::testBundledConsoleDiscovery
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testBundledConsoleDiscovery
+
 todo:
+- MiniA Bundled Skills::testBundledConsoleDiscovery
+- MiniA Bundled Skills::testBundledSkillsActivation
 - MiniA Skill Runtime::testSkillExplicitBoundaryAndArguments
 - MiniA Skill Runtime::testSkillAutomaticSelectionAndRunReset
 - MiniA Skill Runtime::testSkillAutomaticOptOutAndDisabledMetadata

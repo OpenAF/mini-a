@@ -76,3 +76,89 @@ scenarios:
   args: *local
   expected:
     matches: "^\\s*ready\\s*$"
+
+# Bundled workflows: inspect events in eval output for the concrete search/open/read
+# requests and results. Load counts alone do not establish instruction adherence.
+- name: bundled-explicit-retrieval
+  goal: 'Use $local:mini-a-wiki-retrieval to find the synthetic recovery verification and report its ticket and required checks with a citation.'
+  args: &bundled
+    useskills: true
+    skillsautosearch: false
+    usewiki: true
+    wikiroot: evals/fixtures/bundled-skills
+    wikiretrievalv2: false
+    useshell: false
+    readwrite: false
+    wikiaccess: ro
+    useutils: false
+    usedecide: false
+    useplanning: false
+    usememory: false
+    usetools: true
+    usejsontool: true
+    maxsteps: 10
+  expected:
+    contains: BR-731
+  assertions:
+  - path: result.skill_activity.loads
+    min: 1
+  - path: result.skill_activity.selection_calls
+    equals: 0
+  - path: metrics.tool_calls
+    min: 2
+- name: bundled-semantic-retrieval
+  goal: Find the synthetic recovery verification in the configured knowledge library and report the ticket and checks with a citation.
+  args:
+    <<: *bundled
+    skillsautosearch: true
+  expected:
+    contains: BR-731
+  assertions:
+  - path: result.skill_activity.loads
+    min: 1
+  - path: result.skill_activity.selection_calls
+    equals: 1
+  - path: metrics.tool_calls
+    min: 2
+- name: bundled-authoring-formats
+  goal: 'Use $local:mini-a-skill-authoring. Return a self-contained YAML skill named review-note with an embedded checks.md reference and an argument placeholder. Explain the additional metadata needed to make a Markdown version a virtual wiki skill. Do not write files.'
+  args: *bundled
+  expected:
+    contains: mini-a.skill/v1
+  assertions:
+  - contains: 'type: skill'
+  - contains: 'refs:'
+  - path: result.skill_activity.loads
+    min: 1
+- name: bundled-runtime-diagnostics
+  goal: 'Use $local:mini-a-runtime-diagnostics to diagnose this supplied evidence: the CLI loads /opt/mini-a, but changes were made in /work/mini-a; a tool schema was registered but the transcript contains no tool request. Explain what is established and how to verify a correction. Do not change configuration or restart anything.'
+  args: *bundled
+  expected:
+    contains: /opt/mini-a
+  assertions:
+  - contains: /work/mini-a
+  - path: result.skill_activity.loads
+    min: 1
+- name: bundled-no-selection
+  goal: Reply with only the word ready.
+  args:
+    <<: *bundled
+    skillsautosearch: true
+  expected:
+    matches: "^\\s*ready\\s*$"
+  assertions:
+  - path: result.skill_activity.loads
+    equals: 0
+- name: bundled-disabled
+  goal: Reply with only the word ready.
+  args:
+    <<: *bundled
+    useskills: false
+    skillsautosearch: true
+  expected:
+    matches: "^\\s*ready\\s*$"
+  assertions:
+  - path: result.skill_activity.loads
+    equals: 0
+  - path: result.skill_activity.selection_calls
+    equals: 0

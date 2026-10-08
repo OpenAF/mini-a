@@ -228,7 +228,7 @@ MiniUtilsTool.prototype._resolveSkillsRoots = function(options) {
   }
 
 
-  // Agent Plugins skills/ contributions - appended last (after defaults) so
+  // Agent Plugins skills/ contributions - appended after user/default roots so
   // plugin skills never shadow user/default skills on a name collision
   // (_listSkills is first-root-wins).
   if (isArray(options.pluginskillsroots)) {
@@ -236,6 +236,8 @@ MiniUtilsTool.prototype._resolveSkillsRoots = function(options) {
       addRoot(entry)
     })
   }
+  // Bundled skills share canonical deduplication and the file-access boundary.
+  addRoot(options.bundledskillsroot)
   return roots
 }
 
@@ -347,7 +349,7 @@ MiniUtilsTool.prototype._listSkills = function(params) {
       if (!isString(templatePath) || !io.fileExists(templatePath)) return
       if (self._fileAccess && !self._fileAccess.allows(templatePath)) return
       if (seenByName[name]) {
-        if (isFunction(self._skillCollisionFn)) self._skillCollisionFn({ name: name, ignored: templatePath })
+        if (isFunction(self._skillCollisionFn)) self._skillCollisionFn({ name: name, winner: seenByName[name], ignored: templatePath })
         return
       }
 
@@ -366,7 +368,7 @@ MiniUtilsTool.prototype._listSkills = function(params) {
       ].join(" ").toLowerCase()
       if (query.length > 0 && queryText.indexOf(query) < 0) return
 
-      seenByName[name] = true
+      seenByName[name] = templatePath
       results.push({
         name        : name,
         sourceType  : sourceType,

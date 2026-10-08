@@ -93,6 +93,26 @@ Shell access is disabled by default for safety; add `useshell=true` when you exp
 - Hooks: `~/.openaf-mini-a/hooks/*.{yaml,yml,json}` with events `before_goal`, `after_goal`, `before_tool`, `after_tool`, `before_shell`, `after_shell` (`extrahooks=<path1>,<path2>`)
 - Agent Plugins ([agent-plugins.org](https://agent-plugins.org)): `plugins=<dir1,dir2>` or `pluginsroot(s)=<dir>` — see [docs/AGENT-PLUGINS.md](docs/AGENT-PLUGINS.md)
 - Starter generators: `mini-a --command`, `mini-a --skill`, `mini-a --hook`, `mini-a --agent`
+
+With `useskills=true`, Mini-A also discovers three bundled skills:
+`mini-a-wiki-retrieval`, `mini-a-skill-authoring`, and
+`mini-a-runtime-diagnostics`. For example:
+
+```bash
+opack exec mini-a useskills=true skillsautosearch=false goal='Use $local:mini-a-skill-authoring to draft a local review skill.'
+```
+
+The bundle follows the running checkout or installed package, including when
+launched from another directory; `utilsroot` does not redirect it. Local roots
+are ordered user/default, `extraskills`, plugin, then bundled, with the first
+matching name winning. Collision diagnostics identify the winning and ignored
+paths. Use `$local:<name>` when a virtual skill has the same name.
+
+Bundling preserves `useskills=false` and the conditional `skillsautosearch`
+default. It adds no selection calls by itself. Instructions and supporting
+references ship locally; execution still requires the relevant tools and sources.
+Normal `fileallow`, tool filters, access modes, and skill budgets apply.
+
 - Override the base home directory: `homedir=<path>` (reads `.openaf-mini-a` from `<path>` instead of `~`)
 
 See [USAGE.md](USAGE.md) for full template placeholders, precedence rules, and examples.

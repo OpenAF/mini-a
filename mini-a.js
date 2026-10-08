@@ -2,6 +2,10 @@
 // License: Apache 2.0
 // Description: Mini Agent (Mini-A) to achieve goals using an LLM and shell commands.
 
+// Capture before loadLib changes OpenAF's __loadedfrom. Bundle assets follow
+// the executing agent, independently of the caller's cwd and utilsroot.
+var __miniABundleRoot = String(new java.io.File(String(__loadedfrom)).getCanonicalFile().getParent())
+
 ow.loadMetrics()
 loadLib("mini-a-common.js")
 loadLib("mini-a-router.js")
@@ -10916,7 +10920,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
 
     if (typeof MiniUtilsTool !== "function") {
       //if (io.fileExists("mini-a-utils.js")) {
-      loadLib("mini-a-utils.js")
+      loadLib(__miniABundleRoot + "/mini-a-utils.js")
       //}
     }
 
@@ -10925,7 +10929,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       return __
     }
 
-    var toolOptions = { fileallow: args.fileallow }
+    var toolOptions = { fileallow: args.fileallow, bundledskillsroot: __miniABundleRoot + "/skills" }
     if (args.readwrite === true) toolOptions.readwrite = true
     if (args.__interaction_source === "mini-a-web" && this._supportsUserInput(args) && isFunction(this._userInputFn)) {
       toolOptions.inputFn = function(request) { return parent._userInputFn(request) }

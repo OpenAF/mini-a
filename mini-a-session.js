@@ -2,6 +2,8 @@
 // License: Apache 2.0
 // Description: Mini-A interactive console session
 
+var __miniASessionBundleRoot = String(new java.io.File(String(__loadedfrom)).getCanonicalFile().getParent())
+
 function MiniAInteractiveSession(args, adapter) {
   var host = MiniAInteractiveSession.host
   var commandResult
@@ -45,9 +47,7 @@ function MiniAInteractiveSession(args, adapter) {
   var __conAnsi = adapter ? false : host.getAnsi()
   var cls = adapter ? function() { adapter.view("clear") } : host.cls
   if (!adapter) plugin("Console")
-  var miniABasePath = (io.fileExists("mini-a.js") && io.fileExists("mini-a-modes.yaml"))
-    ? io.fileInfo(".").canonicalPath
-    : getOPackPath("mini-a")
+  var miniABasePath = __miniASessionBundleRoot
   if (typeof MiniA === "undefined") {
     load(miniABasePath + "/mini-a.js")
   }
@@ -461,7 +461,7 @@ function MiniAInteractiveSession(args, adapter) {
 
   if (!adapter) { __initializeCon(); __conAnsi = host.getAnsi() }
   loadLib("mini-a-common.js")
-  loadLib("mini-a.js")
+  loadLib(miniABasePath + "/mini-a.js")
 
   ow.loadFormat()
   var con          = adapter ? { readLinePrompt: function(label) { return adapter.ask("text", label) } } : new Console()
@@ -1708,6 +1708,7 @@ function MiniAInteractiveSession(args, adapter) {
           fullPath = canonicalizePath(dirPath + "/" + file.filename)
         }
 
+        if (!fileAccess.allows(fullPath)) return
         if (!/^[a-z0-9][a-z0-9_-]*$/.test(commandName)) {
           logWarn("Ignoring " + sourceLabel + " entry with invalid name: " + file.filename)
           return
@@ -1717,7 +1718,7 @@ function MiniAInteractiveSession(args, adapter) {
           return
         }
         if (isObject(existingNames) && Object.prototype.hasOwnProperty.call(existingNames, commandName)) {
-          logWarn("Ignoring '/" + commandName + "' in '" + dirPath + "' because it conflicts with an existing command.")
+          logWarn("Ignoring '/" + commandName + "' at '" + fullPath + "'; using '" + existingNames[commandName].file + "'.")
           return
         }
         if (Object.prototype.hasOwnProperty.call(loaded, commandName)) {
@@ -2250,6 +2251,15 @@ function MiniAInteractiveSession(args, adapter) {
       if (!Object.prototype.hasOwnProperty.call(customSkillSlashCommands, k)) customSkillSlashCommands[k] = extra[k]
     })
   })
+
+  if (toBoolean(findArgumentValue(args, "useskills")) === true) {
+    var bundleDir = canonicalizePath(__miniASessionBundleRoot + "/skills")
+    var existingSkillDirs = [customSkillsDirPath].concat(extraSkillsDirs, pluginSkillsDirs).map(canonicalizePath)
+    if (existingSkillDirs.indexOf(bundleDir) < 0) {
+      var bundled = loadSlashCommandsFromDir(bundleDir, customSkillSlashCommands, { sourceLabel: "bundled skills", enableSkillFolders: true, sourceCategory: "skill" })
+      Object.keys(bundled).forEach(function(k) { customSkillSlashCommands[k] = bundled[k] })
+    }
+  }
 
   var extraHooksDirs = parseExtraDirPaths(findArgumentValue(args, "extrahooks"))
   extraHooksDirs.forEach(function(dir) {

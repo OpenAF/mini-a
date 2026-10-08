@@ -1,4 +1,8 @@
 jobs:
+- name: MiniA Bundled Skills::testBundledSkillRootsAndOverrides
+  to: oJob Test
+  exec: args.func = require("tests/miniAUtils.js").testBundledSkillRootsAndOverrides
+
 - name: MiniA Utils Tests::FileAllowBoundary
   from: MiniA Utils Tests::Init
   to: oJob Test
@@ -277,6 +281,7 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Bundled Skills::testBundledSkillRootsAndOverrides
 - MiniA Utils Tests::FileAllowBoundary
 - MiniA Utils Tests::MathOpsZeroStatistics
 - MiniA Utils Tests::MathOpsUnitDimensions

@@ -16,12 +16,13 @@ function __miniASkillRequestText(text) {
 function __miniASkillEventMessage(event, debug) {
   if (debug !== true) {
     if (["active", "blocked", "ignored", "collision", "incomplete"].indexOf(event.state) < 0) return ""
+    if (event.state === "collision") return "collision " + event.name + ": using " + event.winner + "; ignored " + event.ignored
     return event.state + (event.ref ? " " + event.ref : "") + (event.reason ? ": " + event.reason : "") + ((event.state === "blocked" || event.state === "ignored") && event.hint ? ". " + event.hint : "")
   }
   var message = event.state + (event.ref ? " " + event.ref : "")
   var fields = []
   if (event.reason) fields.push("reason=" + event.reason)
-  ;["localEnabled", "wikiEnabled", "automatic", "localCount", "wikiCount", "eligibleCount", "disabledCount", "candidateCount", "selectionLimit", "returnedChars", "durationMs", "tier", "explicit", "origin", "source", "path", "partial", "complianceVerified"].forEach(function(key) {
+  ;["localEnabled", "wikiEnabled", "automatic", "localCount", "wikiCount", "eligibleCount", "disabledCount", "candidateCount", "selectionLimit", "returnedChars", "durationMs", "tier", "explicit", "origin", "source", "path", "winner", "ignored", "partial", "complianceVerified"].forEach(function(key) {
     if (isDef(event[key])) fields.push(key + "=" + event[key])
   })
   ;["roots", "candidates", "available", "requests", "selected", "tools", "sections", "pendingSections", "references"].forEach(function(key) {

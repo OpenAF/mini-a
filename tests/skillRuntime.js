@@ -28,6 +28,67 @@
     return agent
   }
 
+  exports.testBundledSkillsActivation = function() {
+    fixture(function(root) {
+      var makeAgent = function(options) {
+        var agent = new MiniA()
+        agent.fnI = function() {}; agent._trace = function() {}
+        agent._agentState = {}; agent._runtime = { context: [] }
+        agent._getPluginsDiscovery = function() { return { skillsRoots: [] } }
+        agent._resetSkillRuntime(options)
+        agent._createUtilsMcpConfig(merge({ utilsroot: root }, options))
+        agent._skillLocalEnabled = options.useskills === true
+        agent._selectSkillCandidates = function() { throw new Error("Default must not select automatically") }
+        return agent
+      }
+      var names = ["mini-a-wiki-retrieval", "mini-a-skill-authoring", "mini-a-runtime-diagnostics"]
+      names.forEach(function(name) {
+        var agent = makeAgent({ useskills: true })
+        ow.test.assert(agent._skillUtils._skillsRoots.indexOf(__miniABundleRoot + "/skills") >= 0, true, "utilsroot does not redirect bundle")
+        ow.test.assert(agent._consultSkillsForRun({ useskills: true, skillsautosearch: false, goal: "$local:" + name }).length, 0, "Explicit bundle activation succeeds")
+        ow.test.assert(agent._skillRuntime.records["local:" + name].state, "active", "Shared runtime activates bundle")
+        ow.test.assert(agent._skillRuntime.metrics.selection_calls, 0, "Explicit request avoids selector")
+        var skill = agent._skillUtils._listSkills({}).filter(function(item) { return item.name === name })[0]
+        var doc = __miniALoadSkillTemplateDocument(skill.templatePath, agent._skillUtils._fileAccess)
+        var reference = doc.bodyTemplate.match(/@references\/([a-z]+\.md)/)[1]
+        var support = agent._skillUtils.skills({ operation: "read", name: name, reference: "references/" + reference })
+        ow.test.assert(isString(support.body) && support.body.length > 100, true, "Supporting procedure loads offline under shared budget")
+      })
+      var idle = makeAgent({ useskills: true })
+      idle._consultSkillsForRun({ useskills: true, goal: "Reply ready" })
+      ow.test.assert(idle._skillRuntime.chars, 0, "Default does not preload bundle bodies")
+      var disabled = makeAgent({ useskills: false })
+      disabled._consultSkillsForRun({ useskills: false, goal: "$local:mini-a-wiki-retrieval" })
+      ow.test.assert(disabled._skillRuntime.chars, 0, "Disabled skills do not activate")
+      var denied = makeAgent({ useskills: true, fileallow: [root] })
+      ow.test.assert(denied._skillUtils._skillsRoots.indexOf(__miniABundleRoot + "/skills"), -1, "Denied bundled root is excluded")
+    })
+  }
+
+  exports.testBundledConsoleDiscovery = function() {
+    load("mini-a-session.js")
+    fixture(function(root) {
+      var makeSession = function(options) {
+        return MiniAInteractiveSession(merge({ homedir: root, usehistory: false }, options), {
+          print: function() {}, error: function() {}, event: function() {}, view: function() {},
+          validateOption: function() {}, ask: function() {}, goal: function() {}, commandResult: function() {}
+        })
+      }
+      var enabled = makeSession({ useskills: true })
+      try {
+        ow.test.assert(enabled.commands().indexOf("mini-a-wiki-retrieval") >= 0, true, "Console discovers bundled commands")
+      } finally { enabled.dispose() }
+      var disabled = makeSession({ useskills: false })
+      try {
+        ow.test.assert(disabled.commands().indexOf("mini-a-wiki-retrieval"), -1, "Disabled bundle is absent from console")
+      } finally { disabled.dispose() }
+      var denied = makeSession({ useskills: true, fileallow: [root] })
+      try {
+        ow.test.assert(denied.commands().indexOf("mini-a-wiki-retrieval"), -1, "Console honours fileallow for bundle")
+      } finally { denied.dispose() }
+    })
+  }
+
   exports.testSkillExplicitBoundaryAndArguments = function() {
     fixture(function(root) {
       writeSkill(root, "pdf", "Report for {{arg1}}")
