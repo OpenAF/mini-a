@@ -113,7 +113,7 @@ page, shared-wiki setup, limits, MCP access and troubleshooting.
 ### Automatic skill use
 
 With `useskills=true` or `useskillswiki=true`, automatic search defaults to off.
-It defaults to on only when `usedecide=true` and `OAF_DECIDE_MODEL` is set.
+It defaults to on only when `usedecide=true` and `modeldec` or `OAF_DECIDE_MODEL` is set.
 Explicit `skillsautosearch=true` or `false` overrides that default. When enabled,
 Mini-A discovers compact candidates and tries the decision model (if
 `usedecide=true` and configured), then the configured low-cost model, then the
@@ -1059,6 +1059,8 @@ For the Elasticsearch/OpenSearch wiki backend, there is no separate top-level `e
 - **`agent`** (string): Path to a markdown agent profile (or inline markdown text) with YAML frontmatter metadata. Supported keys include `model`, `capabilities` (`useshell`, `readwrite`, `useutils`, `usetools`), `tools` (MCP entries such as `type: ojob`, `type: stdio` + `cmd`, `type: remote`, or `type: sse`), `constraints` (appended to `rules`), `knowledge`, `youare`, and `mini-a` (map of direct Mini-A arg overrides). When the profile uses Markdown front matter, any text after the closing `---` is used as the default `goal=` input unless you pass `goal=` explicitly. (`agentfile` remains a backward-compatible alias.)
 
 #### Dual-Model Controls
+- **`modeldec`** (string): Override `OAF_DECIDE_MODEL` with a SLON/JSON configuration for this run. Select interactively with `/model dec`; `/models` displays the decision slot. See [Decisions](docs/DECISIONS.md).
+
 - **`modellc`** (string): Override the low-cost model configuration at runtime (same format as `OAF_LC_MODEL`). Useful for quick per-run model selection without changing environment variables.
 - **`modelval`** (string): Override the validation model configuration at runtime (same format as `OAF_VAL_MODEL`). Useful when you want a dedicated validation model for one run without changing environment variables.
 - **`deescalate`** (number, default: 3): Number of consecutive successful steps required after an escalation before Mini-A automatically reverts to the low-cost model. Set to a higher value for more conservative de-escalation or `0` to disable de-escalation entirely.
@@ -4332,7 +4334,7 @@ The shared dispatcher covers these command families:
 | --- | --- |
 | `/help` | Searchable Help with syntax, examples, aliases, prerequisites, discovered commands and skills; **Insert command** fills the composer without executing |
 | `/show [prefix]`, `/set`, `/unset`, `/toggle`, `/reset` | Settings filtered to the supplied prefix or affected parameter; existing validation, secret masking and server restrictions apply |
-| `/model [main\|lc\|val]`, `/models` | Models with the requested slot selected, or all slots; invalid slots report an error |
+| `/model [main\|lc\|val\|dec]`, `/models` | Models with the requested slot selected, or all slots; invalid slots report an error |
 | `/last [md]`, `/save [file]` | Answer reader with previous goal, Markdown/raw mode, Copy and browser Download; `/save` still writes on the server (default `response.md`) |
 | `/history [n]`, `/restore`, `/clear`, `/rewind [n]` | History with recent goals and Insert/Edit actions; saved-conversation Open picker; shared clear and rewind operations update the transcript |
 | `/context [llm\|analyze\|vm]`, `/compact [n]`, `/summarize [n]` | Context measurements, virtual-memory details and readable generated summaries |

@@ -39,6 +39,22 @@
     return caught
   }
 
+  exports.testModelDecOverride = function() {
+    var override = { type: "openai", model: "override", key: "private-override" }
+    var d = manager(function() {}, { modeldec: stringify(override) })
+    ow.test.assert(d._config.model, "override", "Explicit model overrides environment")
+    ow.test.assert(config.model, "fixture", "Environment config remains unchanged")
+    var a = new MiniA()
+    a._initDecisionRuntime({ modeldec: stringify(override) })
+    ow.test.assert(a._decision._config.model, "override", "Runtime forwards override")
+    ow.test.assert(a._decisionMetrics.model, "override", "Metrics identify effective model")
+    ow.test.assert(a._decisionMetrics.source, "modeldec", "Metrics identify source")
+    ow.test.assert(isUnDef(a._decisionMetrics.key), true, "Metrics omit credentials")
+    ow.test.assert(a._resolveSkillsAutoSearch({ usedecide: true, modeldec: stringify(override) }, function() { return __ }), true, "Override enables conditional skill search")
+    ow.test.assert(manager(function() {}, { enabled: false, modeldec: stringify(override) }).isConfigured(), false, "Opt-out wins")
+    expectError(function() { manager(function() {}, { modeldec: "invalid" }).decide({}, {}) }, "MINI_A_DECISION_INVALID_CONFIG")
+  }
+
   exports.testActivationAndErrors = function() {
     var calls = 0
     var factory = function() { calls++; return {} }

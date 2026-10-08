@@ -330,6 +330,10 @@ help:
     desc     : Validation verdict label expected to pass deep research validation
     example  : "PASS"
     mandatory: false
+  - name     : modeldec
+    desc     : Override OAF_DECIDE_MODEL configuration for this run
+    example  : "(type: openai, model: gpt-4o-mini, key: '...')"
+    mandatory: false
   - name     : modelval
     desc     : Override OAF_VAL_MODEL configuration for this run
     example  : "(type: openai, model: gpt-4o-mini, key: '...')"
@@ -409,7 +413,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : skillsautosearch
-    desc     : Automatically select skills via decide, low-cost, then main; defaults off unless usedecide=true and OAF_DECIDE_MODEL is set
+    desc     : Automatically select skills via decide, low-cost, then main; defaults off unless usedecide=true and a decision model (modeldec or OAF_DECIDE_MODEL) is set
     example  : "true"
     mandatory: false
   - name     : skillsautolimit
@@ -922,11 +926,11 @@ help:
     example  : "1"
     mandatory: false
   - name     : usedecide
-    desc     : Enable decision-assisted selection and complexity when OAF_DECIDE_MODEL is configured (false disables).
+    desc     : Enable decision-assisted selection and complexity when modeldec or OAF_DECIDE_MODEL is configured (false disables).
     example  : "true"
     mandatory: false
   - name     : llmcomplexity
-    desc     : Refine medium complexity with OAF_DECIDE_MODEL; false disables, true also enables the legacy LC check
+    desc     : Refine medium complexity with modeldec or OAF_DECIDE_MODEL; false disables, true also enables the legacy LC check
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
@@ -1401,6 +1405,7 @@ jobs:
         model          : model
         modellc        : modellc
         modelval       : modelval
+        modeldec       : modeldec
         conversation   : conversation
         historyvm      : historyvm
         historyvmmode  : historyvmmode
@@ -1697,6 +1702,7 @@ jobs:
       model          : default(__)
       modellc        : default(__)
       modelval       : default(__)
+      modeldec       : default(__)
       conversation   : isString.default(__)
       historyvm      : toBoolean.isBoolean.default(false)
       historyvmmode  : isString.default("safe")

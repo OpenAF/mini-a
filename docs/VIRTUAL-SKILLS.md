@@ -347,7 +347,7 @@ Related parameters for enabling, locating, and limiting the virtual skill librar
 | `skillwikimounts` | Unset | Read-only mounts for a dedicated skill wiki, supplied as a SLON/JSON array using the `wikimounts` shape. |
 | `skillsmaxloaded` | `3` | Maximum distinct local/wiki skills consulted per run, shared by automatic and tool loading. |
 | `skillsmaxchars` | `12000` | Shared local/wiki guidance character budget per run, including `resolve` and supporting references. |
-| `skillsautosearch` | Conditional | Defaults to `false`, or `true` when `usedecide=true` and `OAF_DECIDE_MODEL` is set. Explicit overrides win. Set `false` for model-led or explicit loading. |
+| `skillsautosearch` | Conditional | Defaults to `false`, or `true` when `usedecide=true` and `modeldec` or `OAF_DECIDE_MODEL` is set. Explicit overrides win. Set `false` for model-led or explicit loading. |
 | `skillsautolimit` | `5` | Combined local/wiki candidate limit for the primary-model selector. |
 
 If any dedicated `skillwiki*` source setting is supplied, Mini-A creates a separate

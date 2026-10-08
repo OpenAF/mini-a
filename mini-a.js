@@ -1920,7 +1920,7 @@ MiniA.prototype._sanitizeArgsForAudit = function(args) {
   var self = this
   var out = {}
   var redactKeys = {
-    model: true, modellc: true, modelval: true, auditch: true, debugch: true, debuglcch: true, debugvalch: true
+    model: true, modellc: true, modelval: true, modeldec: true, auditch: true, debugch: true, debuglcch: true, debugvalch: true
   }
   Object.keys(args).forEach(function(key) {
     if (!isString(key) || key.length === 0) return
@@ -11310,6 +11310,10 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       if (["read", "get", "view", "cat", "render", "invoke"].indexOf(op) < 0) return
 
       var skillName = isString(result.name) ? result.name : (isString(payload.name) ? payload.name : "")
+      if (toBoolean(args.debug) !== true) {
+        parent.fnI("skill", "Skill '" + skillName + "' loaded")
+        return
+      }
       if (isString(result.templatePath) && result.templatePath.length > 0) {
         parent.fnI("skill", "Skill '" + skillName + "' loaded from " + result.templatePath)
       }
@@ -15901,7 +15905,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
   var known = {}
   ;[
     "rpm", "tpm", "rtm", "maxsteps", "knowledge", "fileallow", "chatyouare", "youare", "homedir",
-    "promptprofile", "systempromptbudget", "outfile", "outfileall", "libs", "model", "modellc", "modelval",
+    "promptprofile", "systempromptbudget", "outfile", "outfileall", "libs", "model", "modellc", "modelval", "modeldec",
     "conversation", "historyvm", "historyvmmode", "historyvmshadow", "contextvirtualization", "contextvirtualizationshadow", "shell", "usesandbox", "sandboxprofile", "sandboxnonetwork", "shellallow", "shellbanextra",
     "shelltimeout", "shellmaxbytes", "toolcachettl", "mcplazy", "mcpdynamic", "mcpproxy", "mcpproxythreshold", "toolargcheck", "toolargrepair",
     "mcpproxytoon", "contextguard", "contextguardbudget", "toolresultmaxinline", "readresultmaxmatches",
@@ -16411,6 +16415,7 @@ MiniA.prototype.init = function(args) {
       { name: "model", type: "string", default: __ },
       { name: "modellc", type: "string", default: __ },
       { name: "modelval", type: "string", default: __ },
+      { name: "modeldec", type: "string", default: __ },
       { name: "conversation", type: "string", default: __ },
       { name: "historyvm", type: "boolean", default: false },
       { name: "historyvmmode", type: "string", default: "safe" },

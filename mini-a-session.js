@@ -747,7 +747,7 @@ function MiniAInteractiveSession(args, adapter) {
     skillwikibackend: { type: "string", description: "Skill library backend: fs, s3, s3fs, es, or http. Defaults to fs. Only needed for a dedicated skill wiki separate from usewiki." },
     skillwikiroot  : { type: "string", description: "Root directory for a dedicated skill library (fs backend). Only needed when not reusing usewiki's wiki." },
     skillwikimounts: { type: "string", dataEditor: "array", description: "SLON/JSON array of read-only skill-library mounts, same shape as wikimounts. Only used with a dedicated skill wiki." },
-    skillsautosearch: { type: "boolean", description: "Automatically select skills via decide, low-cost, then main. Defaults off unless usedecide=true and OAF_DECIDE_MODEL is set; false keeps model-led or explicit loading." },
+    skillsautosearch: { type: "boolean", description: "Automatically select skills via decide, low-cost, then main. Defaults off unless usedecide=true and a decision model (modeldec or OAF_DECIDE_MODEL) is set; false keeps model-led or explicit loading." },
     skillsautolimit: { type: "number", default: 5, description: "Maximum results per automatic skill search." },
     skillsmaxloaded: { type: "number", default: 3, description: "Maximum distinct local/wiki skills consulted per agent run." },
     skillsmaxchars : { type: "number", default: 12000, description: "Shared local/wiki skill guidance character budget per agent run." },
@@ -776,7 +776,7 @@ function MiniAInteractiveSession(args, adapter) {
     lcbudget       : { type: "number", default: 0, description: "Maximum total low-cost model tokens for the session (0 disables)." },
     lcreplytool    : { type: "boolean", default: false, description: "Use a capture-only MCP tool for LC JSON retries (OpenAI-compatible/Ollama)." },
     lcjsonretries  : { type: "number", default: 1, description: "Extra same-step low-cost model retries on invalid JSON before falling back to main model (0 disables)." },
-    usedecide      : { type: "boolean", description: "Enable decision-assisted selection and complexity with OAF_DECIDE_MODEL (false disables)." },
+    usedecide      : { type: "boolean", description: "Enable decision-assisted selection and complexity with modeldec or OAF_DECIDE_MODEL (false disables)." },
     llmcomplexity  : { type: "boolean", description: "Refine medium complexity with the decision model; false disables, true also enables the legacy LC check." },
     mcplazy        : { type: "boolean", default: false, description: "Defer MCP connection initialization" },
     mcpdynamic     : { type: "boolean", default: false, description: "Select MCP tools dynamically per goal" },
@@ -859,6 +859,7 @@ function MiniAInteractiveSession(args, adapter) {
     maxcontent     : { type: "number", description: "Alias for maxcontext." },
     model          : { type: "string", dataEditor: "map", description: "Override OAF_MODEL configuration" },
     modellc        : { type: "string", dataEditor: "map", description: "Override OAF_LC_MODEL configuration" },
+    modeldec       : { type: "string", dataEditor: "map", description: "Override OAF_DECIDE_MODEL configuration" },
     modelval       : { type: "string", dataEditor: "map", description: "Override OAF_VAL_MODEL configuration" },
     auditch        : { type: "string", dataEditor: "map", description: "Audit channel definition or native file path" },
     toollog        : { type: "string", dataEditor: "map", description: "Tool usage log channel definition or native file path" },
@@ -2131,6 +2132,10 @@ function MiniAInteractiveSession(args, adapter) {
   function logSkillUsage(agent, usage) {
     if (!isObject(agent) || !isFunction(agent.fnI) || !isMap(usage)) return
     var skillName = isString(usage.name) && usage.name.length > 0 ? usage.name : "unknown"
+    if (toBoolean(args.debug) !== true) {
+      agent.fnI("skill", "Skill '" + skillName + "' loaded")
+      return
+    }
     if (isString(usage.templatePath) && usage.templatePath.length > 0) {
       agent.fnI("skill", "Skill '" + skillName + "' loaded from " + usage.templatePath)
     }
@@ -2258,7 +2263,7 @@ function MiniAInteractiveSession(args, adapter) {
       var debugFilterCompletions = ["all", "calls", "answers", "memory", "system", "prompts", "responses", "thinking", "problems"]
       var lastCompletions = ["md"]
       var editCompletions = ["last"]
-      var modelCompletions = ["model", "modellc", "modelval"]
+      var modelCompletions = ["model", "modellc", "modelval", "modeldec"]
       var contextCompletions = ["llm", "analyze"]
       var wikiReadPathCommands = { list: true, tree: true, browse: true, read: true, write: true, backlinks: true, move: true }
       consoleReader.addCompleter(
@@ -4263,7 +4268,8 @@ function MiniAInteractiveSession(args, adapter) {
     var rows = [
       getModelRow("main", "model", "OAF_MODEL"),
       getModelRow("low", "modellc", "OAF_LC_MODEL"),
-      getModelRow("validation", "modelval", "OAF_VAL_MODEL")
+      getModelRow("validation", "modelval", "OAF_VAL_MODEL"),
+      getModelRow("decision", "modeldec", "OAF_DECIDE_MODEL")
     ]
 
     print(colorifyText("Current models:", accentColor))
@@ -5640,7 +5646,8 @@ function MiniAInteractiveSession(args, adapter) {
           total: metrics.llm_calls.total || 0,
           normal: metrics.llm_calls.normal || 0,
           low_cost: metrics.llm_calls.low_cost || 0,
-          validation: metrics.llm_calls.validation || 0
+          validation: metrics.llm_calls.validation || 0,
+          decision: metrics.llm_calls.decision || 0
         }
         if ((metrics.llm_calls.fallback_to_main || 0) > 0) summaryExport.llm_calls.fallback_to_main = metrics.llm_calls.fallback_to_main || 0
         summaryRows.push({
@@ -5663,6 +5670,13 @@ function MiniAInteractiveSession(args, adapter) {
           metric: "Validation",
           value: metrics.llm_calls.validation || 0
         })
+        summaryRows.push({ category: "", metric: "Decision", value: metrics.llm_calls.decision || 0 })
+        if (isMap(metrics.decisions)) {
+          summaryExport.decisions = clone(metrics.decisions)
+          ;["model", "provider", "source", "failures", "fallbacks", "duration_ms", "input_tokens", "output_tokens", "total_tokens"].forEach(function(key) {
+            summaryRows.push({ category: "Decision", metric: key, value: metrics.decisions[key] || 0 })
+          })
+        }
         if ((metrics.llm_calls.fallback_to_main || 0) > 0) {
           summaryRows.push({
             category: "",
@@ -6106,8 +6120,8 @@ function MiniAInteractiveSession(args, adapter) {
       { command: "/compact [n]", description: "Summarize old context, keep last n messages" },
       { command: "/summarize [n]", description: "Compact and display an LLM-generated conversation summary" },
       { command: "/history [n]", description: "Show the last n user goals (one per line)" },
-      { command: "/model [main|lc|val]", description: "Choose a model definition for a slot (no arg = interactive slot picker)" },
-      { command: "/models", description: "List current main, low and validation models" },
+      { command: "/model [main|lc|val|dec]", description: "Choose a model definition for a slot (no arg = interactive slot picker)" },
+      { command: "/models", description: "List current main, low, validation and decision models" },
       { command: "/stats [mode] [out=file.json]", description: "Show session statistics (modes: detailed, tools, memory, wiki)" },
       { command: "/debug [filter]", description: "Inspect previous-goal events; filters: all, calls, answers, memory, system, prompts, responses, thinking, problems" },
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
@@ -6143,7 +6157,7 @@ function MiniAInteractiveSession(args, adapter) {
       set: "Update a session parameter. Server-controlled settings cannot be changed here.",
       restore: "Open the saved-conversation picker. Cancel leaves this conversation untouched.",
       cls: "Clear visible Live activity; retain stored events and conversation.",
-      model: "Select main, lc or val; omit the slot to show all models.",
+      model: "Select main, lc, val or dec; omit the slot to show all models.",
       edit: "Open the multiline goal editor. Submit goal runs it; Cancel closes it.",
       exit: "End this session and retain saved history. Use New conversation to continue."
     }
@@ -6154,7 +6168,7 @@ function MiniAInteractiveSession(args, adapter) {
       if (name !== canonical) syntax = syntax.replace("/" + canonical, "/" + name)
       return { name: name, command: "/" + name, syntax: syntax, arguments: syntax.indexOf(" ") < 0 ? "" : syntax.substring(syntax.indexOf(" ") + 1),
         description: descriptions[canonical] || row.description || "", destination: destinations[name],
-        subcommands: ({ context: ["llm", "analyze", "vm"], model: ["main", "lc", "val"], last: ["md"], edit: ["last"], editor: ["last"], stats: ["detailed", "tools", "memory", "wiki", "out="], debug: debugTraceFilters.map(function(f) { return f.key }),
+        subcommands: ({ context: ["llm", "analyze", "vm"], model: ["main", "lc", "val", "dec"], last: ["md"], edit: ["last"], editor: ["last"], stats: ["detailed", "tools", "memory", "wiki", "out="], debug: debugTraceFilters.map(function(f) { return f.key }),
           wiki: ["context", "list", "tree", "browse", "read", "search", "backlinks", "lint", "write", "move", "mv", "delete", "remove", "rm", "init", "reindex", "compact", "mounts", "attach", "detach"],
           graph: ["query", "retrieve", "answer", "neighbors", "path", "cross", "communities", "surprise", "stats", "report", "build", "falkor", "export"],
           skills: ["search", "remote", "recommend", "open", "read", "related", "context"], absorb: ["plan", "show", "apply", "status", "resume", "delete", "cancel"], ingest: ["recovery", "dryrun", "force", "prune", "allowemptyprune", "sourceid=", "independent"],
@@ -6181,7 +6195,7 @@ function MiniAInteractiveSession(args, adapter) {
     // Navigation never needs a setting value (which may be a credential).
     var params = { command: name, args: name === "set" ? "" : raw }
     if (["set", "toggle", "unset", "show"].indexOf(name) >= 0) params.filter = name === "show" ? raw.trim() : raw.split(/[=\s]/)[0]
-    if (name === "model") params.slot = { main: "model", model: "model", lc: "modellc", modellc: "modellc", val: "modelval", modelval: "modelval" }[raw.trim().toLowerCase()] || ""
+    if (name === "model") params.slot = { main: "model", model: "model", lc: "modellc", modellc: "modellc", val: "modelval", modelval: "modelval", dec: "modeldec", decide: "modeldec", modeldec: "modeldec" }[raw.trim().toLowerCase()] || ""
     if (name === "debug") params.filter = raw.trim().toLowerCase() || "all"
     if (name === "stats") params.mode = raw.trim().split(/\s+/).filter(function(v) { return ["detailed", "tools", "memory", "wiki"].indexOf(v) >= 0 })[0] || "summary"
     if (name === "last") params.raw = raw.trim().toLowerCase() === "md"
@@ -7316,7 +7330,7 @@ function MiniAInteractiveSession(args, adapter) {
       if (commandLower === "model" || commandLower.indexOf("model ") === 0) {
         if (adapter) {
           var requestedSlot = parsedSlashCommand.argsRaw.trim().toLowerCase()
-          if (requestedSlot && ["main", "model", "lc", "modellc", "val", "modelval"].indexOf(requestedSlot) < 0) printErr("Invalid target. Use 'main', 'lc' or 'val'.")
+          if (requestedSlot && ["main", "model", "lc", "modellc", "val", "modelval", "dec", "decide", "modeldec"].indexOf(requestedSlot) < 0) printErr("Invalid target. Use 'main', 'lc', 'val' or 'dec'.")
           else printCurrentModels()
           continue
         }
@@ -7324,7 +7338,7 @@ function MiniAInteractiveSession(args, adapter) {
         if (commandLower === "model") {
           // Interactive slot picker: show the current model name for each slot,
           // checking sessionOptions first then the OAF_*_MODEL env vars.
-          var _envVarForSlot = { model: "OAF_MODEL", modellc: "OAF_LC_MODEL", modelval: "OAF_VAL_MODEL" }
+          var _envVarForSlot = { model: "OAF_MODEL", modellc: "OAF_LC_MODEL", modelval: "OAF_VAL_MODEL", modeldec: "OAF_DECIDE_MODEL" }
           var _slotLabel = function(slotKey) {
             var raw = sessionOptions[slotKey]
             var source = "session"
@@ -7347,21 +7361,24 @@ function MiniAInteractiveSession(args, adapter) {
             "🎯 main       (currently: " + _slotLabel("model") + ")",
             "💸 low-cost   (currently: " + _slotLabel("modellc") + ")",
             "✅ validation (currently: " + _slotLabel("modelval") + ")",
+            "🧭 decision   (currently: " + _slotLabel("modeldec") + ")",
             "🔙 Cancel"
           ]
-          var slotIdx = __miniANormalizeChoiceIndex(askChoose("Choose target model slot: ", slotOptions, 8), 3)
-          if (slotIdx < 0 || slotIdx >= 3) continue
-          target = ["model", "modellc", "modelval"][slotIdx]
+          var slotIdx = __miniANormalizeChoiceIndex(askChoose("Choose target model slot: ", slotOptions, 8), 4)
+          if (slotIdx < 0 || slotIdx >= 4) continue
+          target = ["model", "modellc", "modelval", "modeldec"][slotIdx]
         } else if (commandLower.indexOf("model ") === 0) {
           var targetArg = command.substring(6).trim().toLowerCase()
           if (targetArg === "modellc" || targetArg === "lc") {
             target = "modellc"
           } else if (targetArg === "modelval" || targetArg === "val") {
             target = "modelval"
+          } else if (["dec", "decide", "modeldec"].indexOf(targetArg) >= 0) {
+            target = "modeldec"
           } else if (targetArg === "model" || targetArg === "main") {
             target = "model"
           } else {
-            print(colorifyText("Invalid target. Use 'main', 'lc' or 'val'.", errorColor))
+            print(colorifyText("Invalid target. Use 'main', 'lc', 'val' or 'dec'.", errorColor))
             continue
           }
         }

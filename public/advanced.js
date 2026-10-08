@@ -199,7 +199,7 @@ window.MiniAAdvancedUI = function(bridge) {
     ['activity', 'Live activity', 'Follow agent actions, tool calls, progress, and results in real time.'],
     ['settings', 'Settings', 'Adjust parameters for this session and manage saved presets.'],
     ['prompts', 'Prompt workspace', 'Edit personas, instructions, knowledge, and the goal prefix for this session.'],
-    ['models', 'Models', 'Choose and configure the main, low-cost, and validation models.'],
+    ['models', 'Models', 'Choose and configure the main, low-cost, validation, and decision models.'],
     ['history', 'History', 'Open saved conversations, restore history, or rewind exchanges.'],
     ['context', 'Context', 'Inspect, compact, and summarize the agent conversation context.'],
     ['stats', 'Statistics', 'Inspect token usage, tools, memory, and wiki statistics.'],
@@ -1049,7 +1049,7 @@ window.MiniAAdvancedUI = function(bridge) {
       chart('Token usage by model', [['Main', p.llm_normal_tokens], ['Low cost', p.llm_lc_tokens], ['Validation', p.llm_val_tokens]], 'Tokens');
       chart('Token accounting', [['Actual', p.llm_actual_tokens], ['Estimated', p.llm_estimated_tokens]], 'Tokens');
       group('Goals', metrics.goals);
-      chart('LLM calls', ['normal', 'low_cost', 'validation'].map(key => [key, metrics.llm_calls?.[key]]).concat([['Advisor', metrics.advisor?.calls]]));
+      chart('LLM calls', ['normal', 'low_cost', 'validation', 'decision'].map(key => [key, metrics.llm_calls?.[key]]).concat([['Advisor', metrics.advisor?.calls]]));
       group('Actions', metrics.actions);
       chart('Time spent', ['step_prompt_build_ms_total', 'step_llm_wait_ms_total', 'step_tool_exec_ms_total', 'step_context_maintenance_ms_total'].map(key => [key.replace('step_', '').replace('_ms_total', ''), p[key]]), 'Milliseconds');
     } else if (statsMode === 'tools') {
@@ -1224,7 +1224,7 @@ window.MiniAAdvancedUI = function(bridge) {
       const render=()=>{
         fieldRefreshers = [];
         list.replaceChildren();
-        snapshot.settings.filter(s=>(activeScreen!=='models'||(viewParams.slot ? s.name === viewParams.slot : ['model','modellc','modelval'].includes(s.name))) && (commandFilter === 'show' ? s.name.startsWith(search.value.toLowerCase()) : ['set','toggle','unset'].includes(commandFilter) ? s.name === search.value.toLowerCase() : `${s.name} ${s.description}`.toLowerCase().includes(search.value.toLowerCase()))).forEach(s=>{
+        snapshot.settings.filter(s=>(activeScreen!=='models'||(viewParams.slot ? s.name === viewParams.slot : ['model','modellc','modelval','modeldec'].includes(s.name))) && (commandFilter === 'show' ? s.name.startsWith(search.value.toLowerCase()) : ['set','toggle','unset'].includes(commandFilter) ? s.name === search.value.toLowerCase() : `${s.name} ${s.description}`.toLowerCase().includes(search.value.toLowerCase()))).forEach(s=>{
           const row=el('div'); const label=el('label', s.name); const description=el('small',`${s.description || ''} · ${s.source === 'session' ? 'Session override' : s.source === 'server' ? 'Server default' : s.source} · Default: ${asText(s.defaultValue) ?? '(unset)'}${s.readOnly?' · Server-controlled':''}`);
           const field=input('',s.value === undefined ? '' : asText(s.value)); field.disabled=s.readOnly; field.setAttribute('aria-label',s.name);
           if (s.type==='boolean') {field.type='checkbox';field.checked=s.value===true;label.className='advanced-boolean-setting';}

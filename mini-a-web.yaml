@@ -321,12 +321,16 @@ help:
     desc     : Override OAF_LC_MODEL for this web server session
     example  : "(type: openai, model: gpt-5-nano, key: '...')"
     mandatory: false
+  - name     : modeldec
+    desc     : Override OAF_DECIDE_MODEL for this web server session
+    example  : "(type: openai, model: gpt-5-mini, key: '...')"
+    mandatory: false
   - name     : modelval
     desc     : Override OAF_VAL_MODEL for this web server session
     example  : "(type: openai, model: gpt-5-mini, key: '...')"
     mandatory: false
   - name     : skillsautosearch
-    desc     : Automatically select skills via decide, low-cost, then main; defaults off unless usedecide=true and OAF_DECIDE_MODEL is set
+    desc     : Automatically select skills via decide, low-cost, then main; defaults off unless usedecide=true and a decision model (modeldec or OAF_DECIDE_MODEL) is set
     example  : "true"
     mandatory: false
   - name     : skillsautolimit
@@ -424,11 +428,11 @@ help:
     example  : "1"
     mandatory: false
   - name     : usedecide
-    desc     : Enable decision-assisted selection and complexity when OAF_DECIDE_MODEL is configured (false disables).
+    desc     : Enable decision-assisted selection and complexity when modeldec or OAF_DECIDE_MODEL is configured (false disables).
     example  : "true"
     mandatory: false
   - name     : llmcomplexity
-    desc     : Refine medium complexity with OAF_DECIDE_MODEL; false disables, true also enables the legacy LC check
+    desc     : Refine medium complexity with modeldec or OAF_DECIDE_MODEL; false disables, true also enables the legacy LC check
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
@@ -1668,6 +1672,7 @@ jobs:
       model           : isString().default(__)
       modellc         : isString().default(__)
       modelval        : isString().default(__)
+      modeldec        : isString().default(__)
       skillsautosearch: toBoolean().isBoolean().default(__)
       skillsautolimit: toNumber().isNumber().default(5)
       skillsmaxloaded: toNumber().isNumber().default(3)

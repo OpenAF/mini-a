@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const env = {...process.env};
-for (const [slot, name] of Object.entries({model:'OAF_MODEL',modellc:'OAF_LC_MODEL',modelval:'OAF_VAL_MODEL'})) {
+for (const [slot, name] of Object.entries({model:'OAF_MODEL',modellc:'OAF_LC_MODEL',modelval:'OAF_VAL_MODEL',modeldec:'OAF_DECIDE_MODEL'})) {
   env[name] = '(type: openai, model: fixture, url: "https://fixture.invalid/v1", key: ENV-' + slot + ')';
 }
 const result = spawnSync('oaf', ['-f', 'tests/webAdvancedModelRestore.js'], {

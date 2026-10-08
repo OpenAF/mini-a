@@ -5,7 +5,7 @@ var MiniADecision = function(options) {
   this._config = __
   this._error = __
   if (this._options.enabled === false) return
-  var raw = (this._options.env || getEnv)("OAF_DECIDE_MODEL")
+  var raw = isDef(this._options.modeldec) ? this._options.modeldec : (this._options.env || getEnv)("OAF_DECIDE_MODEL")
   if (isUnDef(raw) || (isString(raw) && raw.trim().length === 0)) return
   try {
     var config = isString(raw) ? af.fromJSSLON(raw) : raw
@@ -125,7 +125,7 @@ if (typeof MiniA === "function") {
     var self = this
     if (!this._decisionMetrics) this._decisionMetrics = { calls: 0, failures: 0, fallbacks: 0, empty_selections: 0,
       duration_ms: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, usage_reports: 0, reasons: {} }
-    this._decision = new MiniADecision({ enabled: isUnDef(args.usedecide) || toBoolean(args.usedecide) === true, observe: function(event) {
+    this._decision = new MiniADecision({ modeldec: args.modeldec, enabled: isUnDef(args.usedecide) || toBoolean(args.usedecide) === true, observe: function(event) {
       var metrics = self._decisionMetrics
       if (event.called) metrics.calls++
       metrics.duration_ms += event.duration_ms
@@ -140,6 +140,9 @@ if (typeof MiniA === "function") {
       else if (isNumber(input) && isNumber(output)) metrics.total_tokens += input + output
       if (isNumber(input) || isNumber(output) || isNumber(total)) metrics.usage_reports++
     } })
+    this._decisionMetrics.model = this._decision._config ? this._decision._config.model : ""
+    this._decisionMetrics.provider = this._decision._config ? this._decision._config.type : ""
+    this._decisionMetrics.source = isDef(args.modeldec) ? "modeldec" : "OAF_DECIDE_MODEL"
   }
 
   MiniA.prototype._decisionFallback = function(operation, reason) {

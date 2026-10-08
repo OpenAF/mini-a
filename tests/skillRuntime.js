@@ -96,18 +96,26 @@
   exports.testSkillActivityLogsDescribeSelectionAndLoading = function() {
     fixture(function(root) {
       writeSkill(root, "report", "CONFIDENTIAL_BODY {{arg1}}")
-      var agent = agentFor(root), messages = []
+      var agent = agentFor(root, { debug: true }), messages = []
       agent.fnI = function(kind, message) { messages.push(message) }
       agent._createBareLlmInstance = function() { return { withInstructions: function() {}, promptJSONWithStats: function() { return { response: { selected: ["local:report"] }, stats: {} } } } }
-      agent._consultSkillsForRun({ useskills: true, skillsautosearch: true, goal: "Generate test reports" })
+      agent._consultSkillsForRun({ useskills: true, skillsautosearch: true, debug: true, goal: "Generate test reports" })
       ;["roots=[", "localCount=1", "candidates=[local:report]", "selection_start", "tier=main", "selection_result", "selected=[local:report]", "returnedChars=", "budget=", "revision=", "pendingSections=[]"].forEach(function(expected) {
         ow.test.assert(messages.join("\n").indexOf(expected) >= 0, true, "Activity explains " + expected)
       })
       ow.test.assert(messages.join("\n").indexOf("CONFIDENTIAL_BODY") < 0, true, "Activity excludes instruction bodies")
       agent._completeSkillsForRun()
       ow.test.assert(messages.some(function(message) { return message.indexOf("complianceVerified=false") >= 0 }), true, "Completion does not imply verified compliance")
-      var text = __miniASkillEventMessage({ state: "discovered", candidates: Array.apply(null, Array(20)).map(function(v, i) { return "local:test" + i }) })
+      var text = __miniASkillEventMessage({ state: "discovered", candidates: Array.apply(null, Array(20)).map(function(v, i) { return "local:test" + i }) }, true)
       ow.test.assert(text.indexOf("... +8") >= 0, true, "Large candidate lists are bounded")
+      messages.length = 0
+      agent._resetSkillRuntime({ debug: false })
+      agent._skillRuntime.event("discovered", { candidates: ["local:report"] })
+      agent._skillRuntime.event("loaded", { ref: "local:report", returnedChars: 100 })
+      agent._skillRuntime.event("active", { ref: "local:report", revision: "abc", pendingSections: [] })
+      ow.test.assert(messages, ["active local:report"], "Normal logging emits one compact activation without diagnostics")
+      agent._skillRuntime.block("local:report", "skill-section-exceeds-budget")
+      ow.test.assert(messages[1].indexOf("skill-section-exceeds-budget") >= 0 && messages[1].indexOf("Review skillsmaxloaded") >= 0, true, "Compact failures preserve reason and actionable hint")
     })
   }
 

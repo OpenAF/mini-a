@@ -1,6 +1,6 @@
 # Decision-assisted selection and complexity
 
-`OAF_DECIDE_MODEL` configures a dedicated, stateless OpenAF decision model. Mini-A automatically uses it for semantic selection when `mcpdynamic=true` or `capabilityselection=true`, and for ambiguous (`medium`) goal complexity at the escalation-threshold check. The environment variable alone does not enable dynamic selection. This requires an OpenAF runtime exposing `$llm().getCapabilities()` and `decideWithStats()`.
+`modeldec` (per run/session) or `OAF_DECIDE_MODEL` (environment fallback) configures a dedicated, stateless OpenAF decision model. Mini-A automatically uses it for semantic selection when `mcpdynamic=true` or `capabilityselection=true`, and for ambiguous (`medium`) goal complexity at the escalation-threshold check. The environment variable alone does not enable dynamic selection. This requires an OpenAF runtime exposing `$llm().getCapabilities()` and `decideWithStats()`.
 
 ```bash
 # Choose a model supported by your installed OpenAF decision adapter.
@@ -16,9 +16,7 @@ ojob mini-a.yaml goal="Find the duplicate payment in Ada's ledger" mcpdynamic=tr
   mcp="(cmd: 'ojob evals/fixtures/decision-catalog.yaml')"
 ```
 
-Skill activation uses its own bounded primary-model selector. `OAF_DECIDE_MODEL`
-and `usedecide` do not change that selection path. Decision ranking of skill
-entries in the capability registry does not activate skills.
+Automatic skill activation uses a bounded selector with decide, low-cost, then main fallback. It defaults on only with `usedecide=true` and a configured `modeldec` or `OAF_DECIDE_MODEL`; explicit `skillsautosearch` overrides win. Decision ranking of skill entries in the capability registry does not itself activate skills.
 
 `usedecide=false` disables both internal decision integrations and the decision utility. `llmcomplexity=false` disables the automatic complexity check; `llmcomplexity=true` also enables the previous low-cost complexity check as a fallback when an LC model is configured. Omitted complexity configuration retains the heuristic when no decision model is present. Console, web, CLI, and worker sessions accept these switches. Remote worker tasks may opt out but cannot override an operator's explicit opt-out.
 
@@ -150,3 +148,11 @@ ojob mini-a.yaml eval=true evalfile=evals/decide.yaml evalout=/tmp/mini-a-decide
 ```
 
 `evals/decide.yaml` includes enabled/disabled variants for ambiguous phrasing, overlapping tools, an irrelevant catalog, and complexity-driven escalation. It uses an isolated, read-only fixture MCP. Review task success, tool failures, selection traces, total latency/tokens, and decision fallback rates. Keep evaluation judgments independent of the model under evaluation. Fixture passes establish contract behavior; claiming a quality improvement requires held-out task-success evidence with no regression. Cost is not inferred when provider pricing or usage is unavailable.
+
+### Per-run decision model
+
+`modeldec` accepts a SLON/JSON model configuration and overrides `OAF_DECIDE_MODEL` for the run or session. Configure it with `/model dec` or `/set modeldec` in the console and the advanced web Models screen. `/models` shows its effective source. `usedecide=false` still disables decision calls. Decision stats and metrics include the model, provider, source, call counts, timing, and token usage without credentials. The standalone decision MCP continues to use its server environment.
+
+```sh
+mini-a modeldec="(type: openai, model: gpt-5-mini, key: '...')" usedecide=true goal="Review the available tools"
+```

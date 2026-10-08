@@ -13,7 +13,11 @@ function __miniASkillRequestText(text) {
 }
 
 // Keep console and web activity readable without printing prompts or skill bodies.
-function __miniASkillEventMessage(event) {
+function __miniASkillEventMessage(event, debug) {
+  if (debug !== true) {
+    if (["active", "blocked", "ignored", "collision", "incomplete"].indexOf(event.state) < 0) return ""
+    return event.state + (event.ref ? " " + event.ref : "") + (event.reason ? ": " + event.reason : "") + ((event.state === "blocked" || event.state === "ignored") && event.hint ? ". " + event.hint : "")
+  }
   var message = event.state + (event.ref ? " " + event.ref : "")
   var fields = []
   if (event.reason) fields.push("reason=" + event.reason)
@@ -127,7 +131,8 @@ function __miniAInstallSkillRuntime() {
     this._skillRuntime = new MiniASkillRuntime(args, function(event) {
       parent._trace("skill_state", event)
       if (isMap(parent._agentState)) parent._agentState.skills = { active: Object.keys(parent._skillRuntime.records).filter(function(key) { return parent._skillRuntime.records[key].state === "active" }), blocked: parent._skillRuntime.blocked, chars: parent._skillRuntime.chars, limit: parent._skillRuntime.maxChars }
-      parent.fnI("skill", __miniASkillEventMessage(event))
+      var message = __miniASkillEventMessage(event, toBoolean(args.debug) === true)
+      if (message) parent.fnI("skill", message)
     })
     this._skillSelectionKey = __
     if (this._skillUtils) this._skillUtils._skillRuntime = this._skillRuntime
@@ -256,7 +261,7 @@ function __miniAInstallSkillRuntime() {
 
   MiniA.prototype._resolveSkillsAutoSearch = function(args, env) {
     if (isDef(args.skillsautosearch)) return toBoolean(args.skillsautosearch) === true
-    var config = (env || getEnv)("OAF_DECIDE_MODEL")
+    var config = isDef(args.modeldec) ? args.modeldec : (env || getEnv)("OAF_DECIDE_MODEL")
     return toBoolean(args.usedecide) === true && isDef(config) && String(config).trim().length > 0
   }
 
