@@ -3479,6 +3479,7 @@ discard the old recovery first. Do not manually delete journals to dismiss error
 | `ingestsource` | string | - | Folder, git repository (path or clone URL), or page URL — **required** |
 | `ingesttype` | string | auto | `markdown`, `repo` or `url` |
 | `ingestsection` | string | source name | Wiki section ingested pages are written into |
+| `ingestlayout` | string | `flat` | New-page paths: `flat` joins source directories with hyphens; `source` preserves sanitized directories. Existing bindings stay in place. |
 | `ingestinclude` | string | - | Comma-separated path fragments to include |
 | `ingestexclude` | string | - | Comma-separated path fragments to exclude |
 | `ingestchunkchars` | number | `24000` | Maximum characters per distillation chunk |
@@ -3489,6 +3490,18 @@ discard the old recovery first. Do not manually delete journals to dismiss error
 | `ingestforce` | boolean | `false` | Re-ingest sources the ledger reports as unchanged |
 | `ingestledger` | string | `<indexRoot>/.mini-a-wiki-ingest/ledger.json` | Ledger file path |
 
+### Source folders and topic organization
+
+Use `/ingest ./docs reference layout=source dryrun` to preview source folders, then remove `dryrun` to apply. The standalone equivalent is `ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=/tmp/wiki ingestlayout=source`. For example, `Guide/Setup.md` becomes `reference/guide/setup.md`; generated section indexes are kept separate from ingested source index pages. Sanitized path collisions receive a stable source-key suffix.
+
+Layout affects new source mappings only. Existing ingested pages keep their destinations when layout changes. For newly written or refreshed pages, local Markdown page links are resolved against the current ingestion mappings, including pages relocated through wiki moves; anchors and external URLs are preserved. Unresolved page links are reported in `unresolved_links`. Code fences, inline code, and image links are left intact. Web-page URL sources retain their single-page naming. Asset copying and conversion of arbitrary HTML links are not included.
+
+For semantic organization, use `/dream reorg topics`. It retains the approval gate: explicitly set `/set dreamwikiapproval auto` when ready to authorize the pass; `ask` reports that approval is required and `never` denies it. The wiki manager also offers the topic policy with its existing review and backup confirmations. Standalone callers can set `dreamwikimode=reorg dreamwikireorg=true dreamwikiapproval=auto dreamwikiorganize=topics` alongside their normal Dream/wiki configuration. The topic policy prefers existing sections and shallow groups of related pages, records uncertain moves, and accepts additional `dreamwikiinstructions`. It makes model calls only when explicitly invoked; ingestion never starts it automatically.
+
+Wiki moves record verified link repairs and ingestion destinations in a structural journal at `<indexRoot>/.mini-a-wiki-move/journal.json`. Unchanged sources can then be skipped, while changed sources refresh at their organized destinations. Manual edits and Dream content rewrites still produce ownership conflicts; moving a page cannot authorize overwriting those edits. Prefer moves for organization and keep editorial additions in separate pages.
+
+If a move is interrupted, repeat the wiki move or run writable ingestion to replay its journal. Dry-run ingestion reports pending structural recovery without applying it. Other writes are blocked until recovery completes. Replay verifies every affected page and the manifest; conflicting edits leave the journal for investigation. Local writers share the existing lock; separate machines writing a remote backend are not coordinated by that lock.
+
 ### How it works
 
 1. **Resolve** — detect the source type; shallow-clone remote repos to a temp dir and record the commit SHA.
@@ -3496,7 +3509,7 @@ discard the old recovery first. Do not manually delete journals to dismiss error
 3. **Ledger** — skip sources whose sha1 is unchanged since the last ingest (`ingestforce=true` overrides).
 4. **Chunk** — split oversized sources on `##`/`###` boundaries (paragraphs when headingless).
 5. **Distill** — one LLM call per source, in parallel batches, producing `{title, description, tags, type, body}`.
-6. **Write** — one source produces **one page**. Cross-page dedup and reorganisation are left to `/dream wiki apply`.
+6. **Write** — one source produces **one page**. Topic organization is available through explicit `/dream reorg topics`; deterministic maintenance uses `/dream wiki apply`.
 7. **Finalize** — regenerate indexes, rebuild the search index and the knowledge graph, append to `log.md`.
 
 Office and PDF text extraction uses the `readDocument` utility and Tika (installed lazily unless preinstalled). Scanned PDFs need OCR, which is not enabled. PNG/JPEG descriptions use `inspectImage` and require a vision-capable `OAF_MODEL`; image text is treated as untrusted source data. Empty or truncated extraction fails that source without writing a partial page. The input size limit applies to these files too.
@@ -3552,6 +3565,7 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 | `dreammemorymode` | string | `apply` | Memory dream mode: `plan` or `apply` |
 | `dreamwikidryrun` | boolean | `false` | Propose wiki changes without writing (opt-out of `apply`) |
 | `dreamwikiapproval` | string | `ask` | Reorg approval mode: `auto`, `ask`, `never` |
+| `dreamwikiorganize` | string | `none` | Explicit reorg policy: `topics` assesses topic folders even when lint is clean; `none` retains maintenance behavior |
 | `dreamwikiinstructions` | string | _(none)_ | Additional operator guidance appended to the wiki reorg objective |
 | `dreamwikireorg` | boolean | `false` | Allow structural reorg operations |
 | `dreammaxsteps` | number | `40` | Total model-step budget for `auto` or agent-step budget for `reorg` |

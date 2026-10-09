@@ -24,14 +24,15 @@ try {
     }
     return emit.apply(this, arguments)
   }
-  function command(text) {
+  function command(text, blockType) {
     var receipt = advanced.request({ uuid: 'dream', action: 'command', command: text, requestId: 'dream-' + (++count) })
     check(receipt.accepted, 'command accepted')
     jobs.shift()()
     var page = advanced.request({ uuid: 'dream', action: 'results', view: receipt.view.name, limit: 1 })
     var record = advanced.request({ uuid: 'dream', action: 'result', sequence: page.results[0].sequence })
     check(record.value.blocks.length > 0, 'structured dream result: ' + JSON.stringify(record))
-    return record.value.blocks.filter(function(b) { return b.type === 'dream' })[0].value
+    if (blockType === false) return record.value.blocks
+    return record.value.blocks.filter(function(b) { return b.type === (blockType || 'dream') })[0].value
   }
   var dry = command('/dream wiki auto dryrun')
   check(dry.mode === 'auto' && dry.status === 'planned', 'shared auto dry-run routing')
@@ -45,7 +46,16 @@ try {
   check(result.reconciled_run === cancelled.run_id && result.verification.ok, 'next command reconciles and verifies')
   check(phases.length >= 3, 'phase progress reached Advanced events')
   var definitions = state.runtime.definitions
+  check(definitions.ingestlayout && definitions.ingestlayout.default === 'flat' && definitions.dreamwikiorganize && definitions.dreamwikiorganize.default === 'none', 'organization settings exposed with compatible defaults')
   check(definitions.dreamwikillm && definitions.dreammaxsteps, 'same settings exposed in shared session')
+  io.mkdir(root + '/source/Guide'); io.writeFileString(root + '/source/Guide/Setup.md', '# Setup\n\nExample instructions.')
+  var preview = command('/ingest "' + root + '/source" reference layout=source dryrun', false)
+  check(JSON.stringify(preview).indexOf('reference/guide/setup.md') >= 0, 'shared ingestion command forwards source layout')
+  check(!io.fileExists(root + '/wiki/reference/guide/setup.md'), 'shared ingestion preview writes no pages')
+  var topic = command('/dream reorg topics')
+  check(topic.reason === 'approval-required' && topic.organization === 'topics', 'shared topic command retains approval gate')
+  command('/set dreamwikiapproval never', false)
+  check(command('/dream reorg topics').reason === 'approval-denied', 'shared reorg honors explicit denial')
   print('PASS Advanced auto routing, dry-run, progress, structured results and Stop')
 } finally {
   if (advanced) Object.keys(advanced.sessions).forEach(function(id) { advanced.sessions[id].runtime.dispose() })

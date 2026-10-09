@@ -1172,6 +1172,10 @@ help:
   - name     : ingestsourceid
     desc     : Stable logical ingestion origin identity
     mandatory: false
+  - name     : ingestlayout
+    desc     : "New-page layout: flat (default) or source folders; existing mappings stay in place"
+    mandatory: false
+    options  : ["flat", "source"]
   - name     : ingestmode
     desc     : "Wiki ingestion mode: auto (deterministic first), normalize, distill or raw"
     example  : "auto"
@@ -1305,6 +1309,10 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : dreamwikiorganize
+    desc     : "Explicit reorg organization: none (default) or topics"
+    mandatory: false
+    options  : ["none", "topics"]
   - name     : dreamwikiinstructions
     desc     : Additional operator guidance appended to the wiki reorg objective
     mandatory: false
@@ -1597,6 +1605,7 @@ jobs:
         toolargcheck    : toolargcheck
         toolargrepair   : toolargrepair
         usewiki        : usewiki
+        ingestlayout   : ingestlayout
         wikiaccess     : wikiaccess
         wikibackend    : wikibackend
         wikiroot       : wikiroot
@@ -1645,6 +1654,7 @@ jobs:
         dreamwikillm   : dreamwikillm
         dreammaxsteps  : dreammaxsteps
         dreamwikidryrun: dreamwikidryrun
+        dreamwikiorganize: dreamwikiorganize
         dreamwikiinstructions: dreamwikiinstructions
         dreamwikiapproval: dreamwikiapproval
         dreamwikireorg : dreamwikireorg
@@ -1894,6 +1904,7 @@ jobs:
       toolargcheck    : toBoolean.isBoolean.default(true)
       toolargrepair   : toBoolean.isBoolean.default(true)
       usewiki        : toBoolean.isBoolean.default(false)
+      ingestlayout   : isString.default("flat")
       wikiaccess     : isString.default(__)
       wikibackend    : isString.default(__)
       wikiroot       : isString.default(__)
@@ -1942,6 +1953,7 @@ jobs:
       dreamwikillm   : toBoolean.isBoolean.default(true)
       dreammaxsteps  : toNumber.isNumber.default(40)
       dreamwikidryrun: toBoolean.isBoolean.default(false)
+      dreamwikiorganize: isString.default("none")
       dreamwikiinstructions: isString.default(__)
       dreamwikiapproval: isString.default(__)
       dreamwikireorg : toBoolean.isBoolean.default(false)

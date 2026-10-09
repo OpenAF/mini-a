@@ -936,6 +936,7 @@ function MiniAInteractiveSession(args, adapter) {
     dreamwikillm   : { type: "boolean", default: true, description: "Allow bounded model proposals for wiki auto repairs." },
     dreammaxsteps  : { type: "number", default: 40, description: "Total model step budget for wiki auto/reorg." },
     dreamwikidryrun: { type: "boolean", default: false, description: "Propose wiki changes without writing (opt-out of apply)." },
+    dreamwikiorganize: { type: "string", default: "none", description: "Explicit reorg organization: none or topics." },
     dreamwikiinstructions: { type: "string", description: "Additional guidance appended to the wiki reorg objective." },
     dreamwikiapproval: { type: "string", description: "Wiki reorg approval mode: auto, ask, or never." },
     dreamwikireorg : { type: "boolean", default: false, description: "Allow structural wiki reorg operations." },
@@ -948,6 +949,7 @@ function MiniAInteractiveSession(args, adapter) {
     absorbmaxtokens: { type: "number", default: 100000, description: "Aggregate absorption model input token estimate limit." },
     ingestsource   : { type: "string", description: "Folder, git repository or page URL to ingest into the wiki." },
     ingesttype     : { type: "string", description: "Ingest source type: markdown, repo or url (auto-detected when unset)." },
+    ingestlayout: { type: "string", default: "flat", description: "New-page layout: flat or source folders." },
     ingestsection  : { type: "string", description: "Wiki section ingested pages are written into." },
     ingestinclude  : { type: "string", description: "Comma-separated path fragments to include when ingesting." },
     ingestexclude  : { type: "string", description: "Comma-separated path fragments to exclude when ingesting." },
@@ -6892,12 +6894,13 @@ function MiniAInteractiveSession(args, adapter) {
       if (lower === "force")  { flags.force  = true; return }
       if (lower === "prune") { flags.prune = true; return }
       if (lower === "allowemptyprune") { flags.allowemptyprune = true; return }
+      if (lower.indexOf("layout=") === 0) { flags.layout = p.substring(7); return }
       if (lower.indexOf("sourceid=") === 0) { flags.sourceid = p.substring(9); return }
       operands.push(p)
     })
 
     if (operands.length > 2) {
-      print(colorifyText("Usage: /ingest <folder|repo-url|page-url> [section] [dryrun] [force] [prune] [allowemptyprune] [sourceid=<id>] [independent]", errorColor))
+      print(colorifyText("Usage: /ingest <folder|repo-url|page-url> [section] [dryrun] [force] [prune] [allowemptyprune] [sourceid=<id>] [layout=flat|source] [independent]", errorColor))
       print(colorifyText('  Ingests a docs folder, git repo or web page into the active wiki. Quote paths with spaces: /ingest "/path/My Docs" "Team Docs"', hintColor))
       return
     }
@@ -6930,6 +6933,7 @@ function MiniAInteractiveSession(args, adapter) {
     if (flags.force)  ingestArgs.ingestforce  = "true"
     if (flags.prune) ingestArgs.ingestprune = "true"
     if (flags.allowemptyprune) ingestArgs.ingestallowemptyprune = "true"
+    if (flags.layout) ingestArgs.ingestlayout = flags.layout
     if (flags.sourceid) ingestArgs.ingestsourceid = flags.sourceid
 
     try {
@@ -6983,6 +6987,7 @@ function MiniAInteractiveSession(args, adapter) {
     }
 
     var dreamArgs = merge({}, dreamSessionOptions)
+    if (parts.indexOf("topics") >= 0) dreamArgs.dreamwikiorganize = "topics"
     dreamArgs.dryrun = dryrun ? "true" : "false"
     // sessionOptions always carries wikigraphsemantic (schema default: false) whether or not the
     // user ever set it, which would defeat MiniADreams' own apply/plan default (usewikigraph=true
@@ -7003,9 +7008,8 @@ function MiniAInteractiveSession(args, adapter) {
         if (parts.indexOf("reorg") >= 0) {
           dreamArgs.dreamwikimode = "reorg"
           dreamArgs.dreamwikireorg = "true"
-          // Keep the interactive command behind the existing approval gate. An
-          // unattended caller can still opt in explicitly with dreamwikiapproval=auto.
-          dreamArgs.dreamwikiapproval = "ask"
+          // Default to the approval gate and honor an explicitly configured auto/never policy.
+          dreamArgs.dreamwikiapproval = String(dreamArgs.dreamwikiapproval || "ask").toLowerCase()
         }
       }
 

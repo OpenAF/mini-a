@@ -173,11 +173,12 @@
     var r = f.run({ ingestprune: true }); assert(r.ok, false, 'corrupt manifest fails closed'); assert(io.fileExists(f.wiki + '/docs/b.md'), true, 'corrupt state never authorizes deletion')
   }) }
   exports.testLegacyMigration = function() { fixture(function(f) {
-    f.initial(); var s = f.state(), old = {}, root = String(new java.io.File(f.src).getCanonicalPath())
+    f.initial(); io.mkdir(f.src + '/nested'); f.write('nested/setup.md', '# Setup\n\nLegacy nested source'); f.run(); var s = f.state(), old = {}, root = String(new java.io.File(f.src).getCanonicalPath())
     Object.keys(s.sources).forEach(function(k) { var v = s.sources[k], key = sha1('markdown|' + root + '|' + v.source); old[key] = { source: v.source, sourceHash: v.sourceHash, page: v.page, chunks: v.chunks.slice(0, 1) } })
     s.version = 1; s.sources = old; f.save(s)
-    var r = f.run(); assert(r.ok, true, stringify(r)); assert(r.migrated.length, 2, 'validated records reassociated'); assert(io.fileExists(f.wiki + '/.mini-a-wiki-ingest/pre-migration.json'), true, 'migration backup')
-    assert(f.run().status, 'noop', 'migration idempotent'); assert(Object.keys(f.state().chunks).length, 5, 'full chunks repaired')
+    var r = f.run({ ingestlayout: 'source' }); assert(r.ok, true, stringify(r)); assert(r.migrated.length, 3, 'validated records reassociated'); assert(io.fileExists(f.wiki + '/.mini-a-wiki-ingest/pre-migration.json'), true, 'migration backup')
+    assert(io.fileExists(f.wiki + '/docs/nested-setup.md'), true, 'legacy flat binding retained under source layout'); assert(io.fileExists(f.wiki + '/docs/nested/setup.md'), false, 'legacy source layout creates no duplicate')
+    assert(f.run().status, 'noop', 'migration idempotent'); assert(Object.keys(f.state().chunks).length, 6, 'full chunks repaired')
   }) }
   exports.testAmbiguousLegacyPreserved = function() { fixture(function(f) {
     f.initial(); var s = f.state(), k = Object.keys(s.sources).filter(function(k) { return s.sources[k].source === 'b.md' })[0]
@@ -410,10 +411,121 @@
       assert(Object.keys(f.state().chunks).length, 4, 'repeated cycles do not accumulate chunks')
     }
   }) }
+  exports.testStructuralMoveInterruptedWritesAndPublication = function() {
+    fixture(function(f) {
+      f.write('a.md', '# A\n\n[Other](b.md)'); f.write('b.md', '# B\n\n[Back](a.md)'); f.run()
+      var wm = new MiniAWikiManager({ backend: 'fs', root: f.wiki, access: 'rw' }, function() {}), write = wm._backend.write
+      wm._backend.write = function(path, raw) { if (path === 'docs/b.md') throw new Error('injected page failure'); return write.call(this, path, raw) }
+      assert(wm.move('docs/a.md', 'topics/a.md').ok, false, 'partial page failure reported')
+      assert(wm.knowledgeMovePending(), true, 'partial operation retained for replay'); wm._backend.write = write; wm.close()
+      var r = f.run(); assert(r.ok, true, stringify(r)); assert(f.body('docs/b.md').indexOf('../topics/a.md') >= 0, true, 'replay finishes incoming link repair')
+      wm = new MiniAWikiManager({ backend: 'fs', root: f.wiki, access: 'rw' }, function() {})
+      var build = wm._retrievalV2.build; wm._retrievalV2.build = function() { return { ok: false, error: 'injected publication failure' } }
+      assert(wm.move('topics/a.md', 'topics/setup/a.md').ok, false, 'publication failure reported')
+      assert(wm.knowledgeMovePending(), true, 'publication failure retains journal'); wm._retrievalV2.build = build
+      assert(wm.move('topics/a.md', 'topics/setup/a.md').ok, true, 'same manager can recover despite its earlier failed publication')
+      wm._retrievalV2.build = function() { return { ok: false, error: 'injected restart publication failure' } }
+      assert(wm.move('topics/setup/a.md', 'topics/recovered/a.md').ok, false, 'prepare publication failure before restart'); wm._retrievalV2.build = build; wm.close()
+      r = f.run(); assert(r.ok, true, stringify(r)); assert(io.fileExists(f.wiki + '/topics/a.md'), false, 'recovered publication retains only current path')
+      var reader = new MiniAWikiManager({ backend: 'fs', root: f.wiki, access: 'ro' }, function() {})
+      assert(reader.retrieve('Other').evidence.some(function(e) { return e.path === 'topics/recovered/a.md' }), true, 'fresh retrieval sees recovered destination'); reader.close()
+    })
+    fixture(function(f) {
+      f.write('a.md', '# A\n\n[Other](b.md)'); f.write('b.md', '# B\n\n[Back](a.md)'); f.run()
+      var wm = new MiniAWikiManager({ backend: 'fs', root: f.wiki, access: 'rw' }, function() {}), write = wm._backend.write
+      wm._backend.write = function(path, raw) {
+        var result = write.call(this, path, raw)
+        if (path === 'topics/a.md') io.writeFileString(f.wiki + '/docs/b.md', f.body('docs/b.md') + '\nCONCURRENT EDIT')
+        return result
+      }
+      assert(wm.move('docs/a.md', 'topics/a.md').ok, false, 'external edit between preflight and write blocks move')
+      assert(f.body('docs/b.md').indexOf('CONCURRENT EDIT') >= 0, true, 'concurrent edit is never overwritten')
+      wm._backend.write = write; wm.close()
+    })
+    fixture(function(f) {
+      f.initial(); var wm = new MiniAWikiManager({ backend: 'fs', root: f.wiki, access: 'rw' }, function() {}), save = wm.knowledgeSaveState
+      wm.knowledgeSaveState = function() { return false }; assert(wm.move('docs/a.md', 'topics/a.md').ok, false, 'prepare interrupted state'); wm.knowledgeSaveState = save; wm.close()
+      var external = f.body('topics/a.md') + '\nEXTERNAL EDIT'; io.writeFileString(f.wiki + '/topics/a.md', external)
+      var r = f.run(); assert(r.ok, false, 'external edit prevents replay'); assert(r.recovery_pending, true, 'structural recovery remains visible')
+      assert(f.body('topics/a.md'), external, 'replay never overwrites conflicting content')
+    })
+  }
+  exports.testSourceLayoutCollisionsAndLinkForms = function() { fixture(function(f) {
+    f.write('a b.md', '# First\n\nFirst page'); f.write('a+b.md', '# Second\n\nSecond page')
+    f.write('entry.md', '# Entry\n\n[First](<a b.md>)\n[`Second`](a%2Bb.md#section)\n`[Literal](a%20b.md)`\n[Reference][ref]\n\n[ref]: <a b.md> "Title"\n[Outside](../a%20b.md)')
+    var r = f.run({ ingestlayout: 'source' }); assert(r.ok, true, stringify(r))
+    var paths = {}, state = f.state(); Object.keys(state.sources).forEach(function(key) { paths[state.sources[key].source] = state.sources[key].page.replace(/^docs\//, '') })
+    assert(paths['a b.md'] !== paths['a+b.md'], true, 'sanitized collisions get different destinations')
+    var body = f.body('docs/entry.md')
+    assert(body.indexOf('[First](<' + paths['a b.md'] + '>)') >= 0, true, 'angle-delimited link resolves spaces')
+    assert(body.indexOf('[`Second`](' + paths['a+b.md'] + '#section)') >= 0, true, 'code in a link label does not disable rewriting')
+    assert(body.indexOf('`[Literal](a%20b.md)`') >= 0, true, 'inline code remains literal')
+    assert(body.indexOf('[ref]: <' + paths['a b.md'] + '> "Title"') >= 0, true, 'reference definition keeps title')
+    assert(body.indexOf('[Outside](../a%20b.md)') >= 0, true, 'out-of-root page link is not rebound inside the source')
+    assert(r.unresolved_links.length, 1, 'out-of-root page link reported')
+    assert(f.runner({ ingestlayout: 'source' })._wikiPathFor('docs', { rel: 'https://example.com/a', url: 'https://example.com/a' }).substring(5).indexOf('/'), -1, 'URL sources do not acquire artificial folders')
+  }) }
+  exports.testSourceFolderLayoutAndLinks = function() { fixture(function(f) {
+    io.mkdir(f.src + '/Guide'); io.mkdir(f.src + '/api')
+    f.write('Guide/Setup.md', '# Setup\n\n[Auth](../api/auth.md#token)\n[External](https://example.com/a.md)\n[Missing](missing.md)\n\n```md\n[Literal](../api/auth.md)\n```')
+    f.write('api/auth.md', '# Auth\n\n## Token\n\n[Setup](../Guide/Setup.md)')
+    f.write('api/index.md', '# Source index\n\nContent')
+    f.write('api-auth.md', '# Distinct\n\nDifferent source')
+    var preview = f.run({ ingestlayout: 'source', ingestdryrun: true })
+    assert(preview.ok, true, stringify(preview)); assert(io.fileExists(f.wiki + '/docs/guide/setup.md'), false, 'preview writes no pages')
+    assert(preview.planned_writes.indexOf('docs/guide/setup.md') >= 0, true, 'preview exposes nested destination')
+    var r = f.run({ ingestlayout: 'source' }); assert(r.ok, true, stringify(r))
+    assert(f.body('docs/guide/setup.md').indexOf('[Auth](../api/auth.md#token)') >= 0, true, 'parent link and anchor resolve')
+    assert(f.body('docs/api/auth.md').indexOf('[Setup](../guide/setup.md)') >= 0, true, 'sanitized destination used')
+    assert(f.body('docs/guide/setup.md').indexOf('[Literal](../api/auth.md)') >= 0, true, 'code fence preserved')
+    assert(r.unresolved_links.length, 1, 'unresolved local page reported')
+    assert(io.fileExists(f.wiki + '/docs/guide/index.md'), true, 'nested index generated')
+    var state = f.state(), indexSource = Object.keys(state.sources).map(function(k) { return state.sources[k] }).filter(function(x) { return x.source === 'api/index.md' })[0]
+    assert(indexSource.page !== 'docs/api/index.md', true, 'source index cannot occupy generated index')
+    assert(io.fileExists(f.wiki + '/docs/api-auth.md'), true, 'flat-looking leaf stays distinct')
+    f.write('new.md', '# New\n\nNew page'); r = f.run({ ingestlayout: 'flat' })
+    assert(r.ok, true, stringify(r)); assert(io.fileExists(f.wiki + '/docs/guide/setup.md'), true, 'changing layout keeps existing binding')
+    assert(io.fileExists(f.wiki + '/docs/guide-setup.md'), false, 'no implicit migration')
+    assert(f.run({ ingestlayout: 'invalid' }).ok, false, 'invalid layout rejected')
+  }) }
+  exports.testOrganizedMoveReingestionAndPrune = function() { fixture(function(f) {
+    f.write('a.md', '# A\n\n[Other](b.md#section)'); f.write('b.md', '# B\n\n## Section\n\n[Back](a.md)')
+    assert(f.run().ok, true, 'initial ingestion')
+    var wm = new MiniAWikiManager({ backend: 'fs', root: f.wiki, access: 'rw' }, function() {})
+    assert(wm.move('docs/a.md', 'topics/setup/a.md').ok, true, 'move publishes structural changes'); wm.close()
+    assert(f.body('docs/b.md').indexOf('../topics/setup/a.md') >= 0, true, 'incoming link repaired')
+    assert(f.body('topics/setup/a.md').indexOf('../../docs/b.md#section') >= 0, true, 'outgoing link rebased')
+    var r = f.run(); assert(r.ok, true, stringify(r)); assert(r.written.length, 0, 'link-only changes are not source edits')
+    f.write('a.md', '# A\n\nUpdated [Other](b.md#section)'); f.write('b.md', '# B\n\n## Section\n\nUpdated [Back](a.md)')
+    r = f.run(); assert(r.ok, true, stringify(r)); assert(r.written.indexOf('topics/setup/a.md') >= 0, true, 'refresh stays at organized destination')
+    assert(f.body('topics/setup/a.md').indexOf('../../docs/b.md#section') >= 0, true, 'refreshed outgoing link remains correct')
+    assert(f.body('docs/b.md').indexOf('../topics/setup/a.md') >= 0, true, 'refreshed incoming link remains correct')
+    assert(io.fileExists(f.wiki + '/docs/a.md'), false, 'old destination never recreated')
+    var reader = new MiniAWikiManager({ backend: 'fs', root: f.wiki, access: 'ro' }, function() {})
+    assert(reader.read('topics/setup/a.md').raw.indexOf('Updated') >= 0, true, 'fresh reader sees moved update'); reader.close()
+    io.rm(f.src + '/a.md'); r = f.run({ ingestprune: true })
+    assert(r.ok, true, stringify(r)); assert(r.removed.indexOf('topics/setup/a.md') >= 0, true, 'prune follows organized binding')
+  }) }
+  exports.testStructuralMoveRecoveryAndConflicts = function() { fixture(function(f) {
+    f.write('a.md', '# A\n\n[Other](b.md)'); f.write('b.md', '# B\n\n[Back](a.md)'); f.run()
+    var wm = new MiniAWikiManager({ backend: 'fs', root: f.wiki, access: 'rw' }, function() {}), save = wm.knowledgeSaveState
+    wm.knowledgeSaveState = function() { return false }
+    var moved = wm.move('docs/a.md', 'topics/a.md')
+    assert(moved.ok, false, 'manifest failure reported'); assert(wm.knowledgeMovePending(), true, 'journal retained')
+    assert(wm.write('manual.md', { title: 'Manual' }, '# Manual').ok, false, 'unrelated writes blocked during recovery')
+    wm.knowledgeSaveState = save; wm.close()
+    assert(f.run({ ingestdryrun: true }).ok, false, 'dry run does not replay journal')
+    var r = f.run(); assert(r.ok, true, stringify(r)); assert(io.fileExists(f.wiki + '/.mini-a-wiki-move/journal.json'), false, 'ingestion recovers move')
+    wm = new MiniAWikiManager({ backend: 'fs', root: f.wiki, access: 'rw' }, function() {})
+    var edited = wm.read('topics/a.md'); wm.write('topics/a.md', edited.meta, '# A\n\nMANUAL CHANGE')
+    assert(wm.move('topics/a.md', 'topics/edited.md').ok, true, 'manual content may be relocated'); wm.close()
+    r = f.run({ ingestforce: true }); assert(r.ok, false, 'move cannot adopt manual edits'); assert(r.conflicts.length > 0, true, 'manual edit ownership conflict retained')
+    assert(f.body('topics/edited.md').indexOf('MANUAL CHANGE') >= 0, true, 'manual edit preserved')
+  }) }
   exports.testExistingWikiMoveBinding = function() { fixture(function(f) {
     f.initial(); var wm = new MiniAWikiManager({ backend: 'fs', root: f.wiki, access: 'rw' }, function() {})
     assert(wm.move('docs/a.md', 'docs/moved.md').ok, true, 'wiki tool move'); wm.close()
-    var r = f.run(); assert(r.ok, true, stringify(r)); assert(io.fileExists(f.wiki + '/docs/a.md'), false, 'old path is not recreated'); assert(r.written[0], 'docs/moved.md', 'unique moved binding repaired')
+    var r = f.run(); assert(r.ok, true, stringify(r)); assert(io.fileExists(f.wiki + '/docs/a.md'), false, 'old path is not recreated'); assert(r.written.length, 0, 'verified structural move needs no source rewrite'); assert(r.skipped_unchanged, 2, 'unchanged sources skipped')
   }) }
   exports.testDryMigrationNoWrite = function() { fixture(function(f) {
     f.initial(); var s = f.state(), old = {}, root = String(new java.io.File(f.src).getCanonicalPath())
