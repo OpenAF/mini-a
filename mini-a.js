@@ -9197,6 +9197,18 @@ MiniA.prototype._buildRelevantMemoryBlock = function(args) {
   })
   flat.sort(function(a, b) { return b.score - a.score })
 
+  // Decision re-rank (explicit usedecide=true): drops entries judged irrelevant and orders by semantic relevance.
+  // Unavailable, failing or all-irrelevant decisions keep the lexical order and selection unchanged.
+  if (toBoolean(args.usedecide) === true && flat.length > 0) {
+    var memoryWindow = flat.slice(0, 64)
+    var memoryRanked = this._selectByDecision(goal, memoryWindow.map(function(item, idx) {
+      return { name: "memory_" + idx, description: item.kind + " " + item.key + ": " + item.value.substring(0, 300), type: "memory" }
+    }))
+    if (isArray(memoryRanked) && memoryRanked.length > 0) {
+      flat = memoryRanked.map(function(entry) { return memoryWindow[parseInt(entry.name.substring(7), 10)] }).concat(flat.slice(64))
+    }
+  }
+
   var picked = []
   var used = 0
   var self = this

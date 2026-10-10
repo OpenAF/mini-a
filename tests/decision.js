@@ -377,4 +377,23 @@
     a = gateAgent(ranked([0, 0, 0]), {})
     ow.test.assert(a._selectChildMcpHandoffTools(goal, {}, tools).join(","), baseline.join(","), "An all-irrelevant decision keeps the keyword fallback")
   }
+
+  exports.testRelevantMemoryRerank = function() {
+    global.__mini_a_metrics = global.__mini_a_metrics || {}
+    var mk = function(key, score) { return { score: score, entry: { k: "preference", key: key, v: "value of " + key } } }
+    var agentWithMemory = function(handler) {
+      var a = gateAgent(handler, {})
+      a._memoryConfig = { enabled: true }
+      a._deriveMemoryTaskScope = function() { return "family::task" }
+      a._memorySearchScored = function() { return { decisions: [mk("alpha", 3), mk("beta", 2), mk("gamma", 1)] } }
+      return a
+    }
+    var keys = function(a, args) { return a._buildRelevantMemoryBlock(merge({ goal: "pick something" }, args || { usedecide: true })).map(function(m) { return m.key }).join(",") }
+    var baseline = keys(agentWithMemory(__))
+    ow.test.assert(baseline, "alpha,beta,gamma", "Unconfigured decide keeps the lexical order")
+    ow.test.assert(keys(agentWithMemory(ranked([0, 1, 2]))), "gamma,beta", "Decision reorders by relevance and drops irrelevant entries")
+    ow.test.assert(keys(agentWithMemory(ranked([0, 1, 2])), {}), "alpha,beta,gamma", "Without explicit usedecide=true the lexical order is kept")
+    ow.test.assert(keys(agentWithMemory(function() { throw { code: "LLM_DECISION_PROVIDER_ERROR" } })), baseline, "Decision error keeps the lexical order")
+    ow.test.assert(keys(agentWithMemory(ranked([0, 0, 0]))), baseline, "All-irrelevant decision keeps the lexical order")
+  }
 })()
