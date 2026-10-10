@@ -67,6 +67,8 @@ var SubtaskManager = function(parentArgs, opts) {
     remotePollRetries: 0,
     remoteOutcomeUnknown: 0,
     remoteCancelFailures: 0,
+    remoteSubmissionRecoveries: 0,
+    remoteSubmissionRecoveryFailures: 0,
     totalDurationMs: 0,
     maxDepthUsed: 0
   }
@@ -287,20 +289,22 @@ SubtaskManager.prototype._buildChildArgs = function(subtask) {
   if (subtask.fork === true && isMap(subtask.forkState)) {
     var forkStateStr = stringify(subtask.forkState, __, "")
     var maxBytes = isNumber(this.parentArgs.forkstatemaxbytes) ? this.parentArgs.forkstatemaxbytes : 65536
-    if (forkStateStr.length > maxBytes) {
+    var forkBytes = function(value) { return af.fromString2Bytes(value).length }
+    if (forkBytes(forkStateStr) > maxBytes) {
       // Truncate oldest forkedContext entries first, then workingMemorySession if still oversized
-      var trimmed = merge({}, subtask.forkState)
+      var trimmed = jsonParse(forkStateStr)
       if (isArray(trimmed.forkedContext) && trimmed.forkedContext.length > 0) {
         while (trimmed.forkedContext.length > 0) {
           trimmed.forkedContext.shift()
           forkStateStr = stringify(trimmed, __, "")
-          if (forkStateStr.length <= maxBytes) break
+          if (forkBytes(forkStateStr) <= maxBytes) break
         }
       }
-      if (forkStateStr.length > maxBytes && isObject(trimmed.workingMemorySession)) {
+      if (forkBytes(forkStateStr) > maxBytes && isObject(trimmed.workingMemorySession)) {
         delete trimmed.workingMemorySession
         forkStateStr = stringify(trimmed, __, "")
       }
+      if (forkBytes(forkStateStr) > maxBytes) throw new Error("Fork state exceeds forkstatemaxbytes (" + maxBytes + " UTF-8 bytes) after trimming")
     }
     mergedArgs.state = forkStateStr
   }
@@ -464,7 +468,8 @@ SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl, inlineCard) {
     response = {
       name: inlineCard.name,
       description: inlineCard.description || "",
-      capabilities: ["run-goal", "delegation", "planning"].concat(isArray(inlineCard.additionalInterfaces) && inlineCard.additionalInterfaces.indexOf("agent-comms-v1") >= 0 ? ["agent-comms-v1"] : []),
+      workerInstanceId: inlineCard.workerInstanceId,
+      capabilities: ["run-goal", "delegation", "planning"].concat(isArray(inlineCard.additionalInterfaces) && inlineCard.additionalInterfaces.indexOf("submission-recovery-v1") >= 0 ? ["submission-recovery-v1"] : []).concat(isArray(inlineCard.additionalInterfaces) && inlineCard.additionalInterfaces.indexOf("agent-comms-v1") >= 0 ? ["agent-comms-v1"] : []),
       skills: isArray(inlineCard.skills) ? inlineCard.skills : [],
       limits: isMap(inlineCard.limits) ? inlineCard.limits : {}
     }
@@ -476,7 +481,8 @@ SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl, inlineCard) {
         response = {
           name: cardResp.name,
           description: cardResp.description || "",
-          capabilities: ["run-goal", "delegation", "planning", "a2a-http-json-rest"].concat(isArray(cardResp.additionalInterfaces) && cardResp.additionalInterfaces.indexOf("agent-comms-v1") >= 0 ? ["agent-comms-v1"] : []),
+          workerInstanceId: cardResp.workerInstanceId,
+          capabilities: ["run-goal", "delegation", "planning", "a2a-http-json-rest"].concat(isArray(cardResp.additionalInterfaces) && cardResp.additionalInterfaces.indexOf("submission-recovery-v1") >= 0 ? ["submission-recovery-v1"] : []).concat(isArray(cardResp.additionalInterfaces) && cardResp.additionalInterfaces.indexOf("agent-comms-v1") >= 0 ? ["agent-comms-v1"] : []),
           skills: isArray(cardResp.skills) ? cardResp.skills : [],
           limits: isMap(cardResp.limits) ? cardResp.limits : {}
         }
@@ -546,6 +552,7 @@ SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl, inlineCard) {
       capabilities: capabilities,
       skills: skills,
       limits: normalizedLimits,
+      workerInstanceId: isString(response.workerInstanceId) ? response.workerInstanceId : __,
       signature: stringify(signatureObj, __, "")
     }
   } catch(ignoreProfileErr) {
@@ -1023,8 +1030,10 @@ SubtaskManager.prototype._remoteCall = function(method, workerUrl, path, data) {
     throw new Error("Remote worker response is not a map for endpoint " + path)
   }
 
-  if (isString(response.error) && response.error.length > 0) {
-    throw new Error("Remote worker error: " + response.error)
+  if (isDef(response.error) && response.error !== "") {
+    // $rest may wrap non-2xx responses in an error map instead of throwing.
+    // Such responses must not be interpreted as successful worker replies.
+    throw new Error("Remote worker error: " + (isString(response.error) ? response.error : "HTTP request failed"))
   }
 
   return response
@@ -1112,6 +1121,26 @@ SubtaskManager.prototype._failRemoteOutcomeUnknown = function(subtask, prefix, e
   this._cancelRemoteSubtask(subtask, message)
   this.interactionFn("delegate", prefix + " ❌ " + message)
   return true
+}
+
+SubtaskManager.prototype._recoverRemoteSubmission = function(subtask) {
+  // Observation only: an absent receipt never authorizes replay of execution.
+  for (var attempt = 0; attempt < 3; attempt++) {
+    if (subtask.status === "running" && isMap(this._getSubtaskTimeoutReason(subtask))) break
+    try {
+      var receipt = this._remoteRequest(subtask.workerUrl, "/submission/status", {
+        submissionId: subtask.remoteSubmissionId, workerInstanceId: subtask.workerInstanceId
+      }, subtask.status === "running" ? this._remoteObservationTimeoutMs(subtask) : 5000)
+      if (receipt.workerInstanceId === subtask.workerInstanceId && isString(receipt.taskId) && receipt.taskId.length > 0) {
+        subtask.remoteTaskId = receipt.taskId
+        this.metrics.remoteSubmissionRecoveries++
+        return true
+      }
+    } catch(ignoreReceiptError) {}
+    if (attempt < 2) sleep(Math.min(1000, this.remotePollIntervalMs), true)
+  }
+  this.metrics.remoteSubmissionRecoveryFailures++
+  return false
 }
 
 SubtaskManager.prototype._failOrRetrySubtask = function(subtask, prefix, error) {
@@ -1231,6 +1260,8 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
     // cancel the previous attempt if selection or submission fails.
     subtask.workerUrl = __
     subtask.remoteTaskId = __
+    subtask.remoteSubmissionId = __
+    subtask.workerInstanceId = __
     try {
       if (subtask.status !== "running") return
       var mergedArgs = parent._buildChildArgs(subtask)
@@ -1254,56 +1285,69 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
         subtask.commsToken = genUUID()
         commsWire = { version: 1, token: subtask.commsToken, id: subtask.comms.id, config: subtask.comms.config }
       }
-      var taskResponse
-      if (subtask.status !== "running") return
-      if (parent.useA2A) {
-        submissionAttempted = true
-        taskResponse = parent._remoteRequest(workerUrl, "/message:send", {
-          message: {
-            messageId: "mini-a-" + subtask.id,
-            role: "user",
-            parts: [
-              {
-                kind: "text",
-                text: subtask.goal
-              }
-            ]
-          },
-          contextId: isString(subtask.parentId) ? subtask.parentId : subtask.id,
-          metadata: {
-            args: mergedArgs,
-            communication: commsWire,
-            forkState: (subtask.fork === true && isString(mergedArgs.state) && mergedArgs.state.length > 0) ? mergedArgs.state : __
-          },
-          configuration: {
-            timeoutSeconds: timeoutSec
-          }
-        })
-      } else {
-        var legacyPayload = {
-          goal: subtask.goal,
-          args: mergedArgs,
-          timeout: timeoutSec,
-          metadata: metadata,
-          communication: commsWire
-        }
-        if (subtask.fork === true && isString(mergedArgs.state) && mergedArgs.state.length > 0) {
-          legacyPayload.forkState = mergedArgs.state
-        }
-        submissionAttempted = true
-        taskResponse = parent._remoteRequest(workerUrl, "/task", legacyPayload)
+      var profile = parent._workerProfiles[workerUrl]
+      if (isMap(profile) && isArray(profile.capabilities) && profile.capabilities.indexOf("submission-recovery-v1") >= 0 && isString(profile.workerInstanceId) && profile.workerInstanceId.length > 0) {
+        subtask.remoteSubmissionId = genUUID()
+        subtask.workerInstanceId = profile.workerInstanceId
       }
+      var taskResponse
+      try {
+        if (subtask.status !== "running") return
+        if (parent.useA2A) {
+          submissionAttempted = true
+          taskResponse = parent._remoteRequest(workerUrl, "/message:send", {
+            message: {
+              messageId: "mini-a-" + subtask.id,
+              role: "user",
+              parts: [
+                {
+                  kind: "text",
+                  text: subtask.goal
+                }
+              ]
+            },
+            contextId: isString(subtask.parentId) ? subtask.parentId : subtask.id,
+            metadata: {
+              args: mergedArgs,
+              submissionId: subtask.remoteSubmissionId,
+              workerInstanceId: subtask.workerInstanceId,
+              communication: commsWire,
+              forkState: (subtask.fork === true && isString(mergedArgs.state) && mergedArgs.state.length > 0) ? mergedArgs.state : __
+            },
+            configuration: {
+              timeoutSeconds: timeoutSec
+            }
+          })
+        } else {
+          var legacyPayload = {
+            goal: subtask.goal,
+            submissionId: subtask.remoteSubmissionId,
+            workerInstanceId: subtask.workerInstanceId,
+            args: mergedArgs,
+            timeout: timeoutSec,
+            metadata: metadata,
+            communication: commsWire
+          }
+          if (subtask.fork === true && isString(mergedArgs.state) && mergedArgs.state.length > 0) {
+            legacyPayload.forkState = mergedArgs.state
+          }
+          submissionAttempted = true
+          taskResponse = parent._remoteRequest(workerUrl, "/task", legacyPayload)
+        }
 
-      if (parent.useA2A) {
-        if (!isMap(taskResponse.task) || !isString(taskResponse.task.id) || taskResponse.task.id.length === 0) {
-          throw new Error("Remote worker did not return task.id")
+        if (parent.useA2A) {
+          if (!isMap(taskResponse.task) || !isString(taskResponse.task.id) || taskResponse.task.id.length === 0) {
+            throw new Error("Remote worker did not return task.id")
+          }
+          subtask.remoteTaskId = taskResponse.task.id
+        } else {
+          if (!isString(taskResponse.taskId) || taskResponse.taskId.length === 0) {
+            throw new Error("Remote worker did not return taskId")
+          }
+          subtask.remoteTaskId = taskResponse.taskId
         }
-        subtask.remoteTaskId = taskResponse.task.id
-      } else {
-        if (!isString(taskResponse.taskId) || taskResponse.taskId.length === 0) {
-          throw new Error("Remote worker did not return taskId")
-        }
-        subtask.remoteTaskId = taskResponse.taskId
+      } catch(submissionError) {
+        if (!submissionAttempted || !isString(subtask.remoteSubmissionId) || !parent._recoverRemoteSubmission(subtask)) throw submissionError
       }
       // Cancellation can win while the submission request is in flight. Once
       // the worker returns an ID, stop that late-accepted task before exiting.
@@ -1906,6 +1950,8 @@ SubtaskManager.prototype.getMetrics = function() {
     remotePollRetries: this.metrics.remotePollRetries,
     remoteOutcomeUnknown: this.metrics.remoteOutcomeUnknown,
     remoteCancelFailures: this.metrics.remoteCancelFailures,
+    remoteSubmissionRecoveries: this.metrics.remoteSubmissionRecoveries,
+    remoteSubmissionRecoveryFailures: this.metrics.remoteSubmissionRecoveryFailures,
     avgDurationMs: avgDurationMs,
     maxDepthUsed: this.metrics.maxDepthUsed,
     workers: {
@@ -1979,21 +2025,7 @@ SubtaskManager.prototype._startWatchdog = function() {
               parent.metrics.timedout++
 
               // Best-effort remote cancel after claiming the transition
-              if (parent.remoteDelegation && isString(subtask.workerUrl) && isString(subtask.remoteTaskId)) {
-                try {
-                  if (parent.useA2A) {
-                    parent._remoteRequest(subtask.workerUrl, "/tasks:cancel", {
-                      id: subtask.remoteTaskId,
-                      reason: timeoutReason.message
-                    })
-                  } else {
-                    parent._remoteRequest(subtask.workerUrl, "/cancel", {
-                      taskId: subtask.remoteTaskId,
-                      reason: timeoutReason.message
-                    })
-                  }
-                } catch(ignoreRemoteCancel) {}
-              }
+              parent._cancelRemoteSubtask(subtask, timeoutReason.message)
 
               if (isObject(subtask.childAgent)) {
                 try {

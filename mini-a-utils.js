@@ -2060,6 +2060,26 @@ MiniUtilsTool.prototype.skillwiki = function(params) {
       if (!readOut || readOut.error) return readOut || { error: "skill-read-failed", ref: ref }
       var field = op === "resolve" ? "bodyTemplate" : "body"
       if (!isString(readOut[field])) return { error: "skill-read-failed", ref: ref }
+      if (params.progressive === true && readOut.truncated === true && readOut.progressive !== true) return { error: "skill-required-guidance-exceeds-budget", ref: ref }
+      // Runtime activation charges the rendered guidance, including invocation arguments.
+      // Plain resolve continues to return a template for existing callers.
+      if (op === "resolve" && isString(params._renderArgs)) {
+        if (readOut.bodyTemplate.length > readParams.maxChars) return { error: "skill-required-guidance-exceeds-budget", ref: ref }
+        var parsedArgs = this._parseSkillArgs(params._renderArgs)
+        if (!parsedArgs || parsedArgs.ok !== true) return { error: "invalid-skill-args", ref: ref }
+        var rendered = __miniARenderSkillTemplate(readOut.bodyTemplate, parsedArgs)
+        var page = __miniASkillPage(rendered, readParams.maxChars, params.section)
+        if (page.error) return merge(page, { ref: ref })
+        var pending = (readOut.pendingSections || []).slice()
+        page.pendingSections.forEach(function(title) { if (pending.indexOf(title) < 0) pending.push(title) })
+        readOut.rendered = page.body
+        readOut.args = parsedArgs
+        readOut.sections = page.sections
+        readOut.pendingSections = pending
+        readOut.truncated = readOut.truncated === true || page.truncated
+        readOut.progressive = true
+        field = "rendered"
+      }
       // Backend readers may impose a minimum page size. Enforce the wrapper ceiling too.
       if (readOut[field].length > readParams.maxChars) {
         readOut[field] = readOut[field].substring(0, readParams.maxChars)
@@ -5120,6 +5140,8 @@ MiniUtilsTool._metadataByFn = (function() {
             default    : "search"
           },
           ref          : { type: "string", description: "Skill reference returned by search/recommend/open/related. Required for open/read/related/compose/resolve." },
+          args         : { type: "string", description: "Invocation arguments for operation=resolve; rendered guidance counts toward skillsmaxchars." },
+          argv         : { type: "array", items: { type: "string" }, description: "Tokenized invocation arguments for operation=resolve; takes precedence over args." },
           query        : { type: "string", description: "Lexical keyword query for operation=search." },
           task         : { type: "string", description: "Natural-language task description for operation=recommend." },
           environment  : { type: "object", description: "Optional free-form environment hints for operation=recommend, e.g. {language: 'java', platform: 'kubernetes'}." },

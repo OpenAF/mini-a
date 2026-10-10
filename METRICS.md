@@ -366,6 +366,11 @@ Delegation metrics mirror the `SubtaskManager` internal counters, synced at `get
 | `cancelled` | Subtasks explicitly cancelled (e.g. because the parent goal was stopped). |
 | `timedout` | Subtasks that exceeded their deadline. |
 | `retried` | Subtasks retried after a transient failure. |
+| `remote_poll_retries` | Failed remote status observations, including the final failed observation. |
+| `remote_outcome_unknown` | Remote attempts whose execution or result could not be confirmed; these are never automatically resubmitted. |
+| `remote_cancel_failures` | Failed bounded remote cancellation requests, including watchdog timeouts. |
+| `remote_submission_recoveries` | Ambiguous submissions recovered through a same-process worker receipt. |
+| `remote_submission_recovery_failures` | Negotiated receipt lookups that exhausted their bounded recovery attempt. |
 | `worker_hint_used` | Subtask dispatches that carried a preferred-worker hint. |
 | `worker_hint_matched` | Hint-carrying dispatches where the hinted worker was available and used. |
 | `worker_hint_fallthrough` | Hint-carrying dispatches where the hinted worker was unavailable; fell back to normal selection. |

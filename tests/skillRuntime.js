@@ -28,6 +28,53 @@
     return agent
   }
 
+  exports.testWikiSkillActivationRetainsArguments = function() {
+    var originalOpen = MiniAWikiSkillProvider.prototype.open
+    var wm = {}, descriptor = { name: "report", ref: "wiki:report.md", version: "v1" }
+    var args = { useskillswiki: true, skillsautosearch: false, skillsmaxchars: 100, goal: "$wiki:report.md customer-42" }
+    var agent = new MiniA()
+    agent.fnI = function() {}; agent._trace = function() {}; agent._resetSkillRuntime(args)
+    agent._skillWikiManager = wm; agent._skillWikiEnabled = true
+    agent._skillUtils = new MiniUtilsTool({})
+    agent._skillUtils._skillWikiManager = wm
+    agent._skillUtils._skillRuntime = agent._skillRuntime
+    agent._skillUtils._skillProvider = { _wm: wm, open: function() { return descriptor }, resolve: function() {
+      return { bodyTemplate: "# Intro\nUse {{args}}", revision: "v1", progressive: true, truncated: false }
+    } }
+    agent._scoreSkillForPrompt = function() { return 2 }
+    try {
+      MiniAWikiSkillProvider.prototype.open = function() { return descriptor }
+      ow.test.assert(agent._consultSkillsForRun(args), [], "Wiki activation uses the shared renderer")
+      ow.test.assert(agent._skillRuntime.records["wiki:report.md"].content, "# Intro\nUse customer-42", "Actual active guidance includes invocation arguments")
+      ow.test.assert(agent._skillRuntime.chars, "# Intro\nUse customer-42".length, "Active guidance is charged after rendering")
+      ow.test.assert(agent._skillHandoffForGoal("Generate report")[0].args, "customer-42", "Child handoff retains wiki invocation arguments")
+    } finally { MiniAWikiSkillProvider.prototype.open = originalOpen }
+  }
+
+  exports.testWikiSkillMcpRenderedBudget = function() {
+    fixture(function(root) {
+      var agent = new MiniA()
+      agent.fnI = function() {}; agent._trace = function() {}
+      var options = { useskillswiki: true, skillwikiroot: root, skillsmaxchars: 100, useutils: false }
+      agent._resetSkillRuntime(options)
+      agent._skillWikiManager = {}
+      try {
+        var cfg = agent._createUtilsMcpConfig(options)
+        var wm = agent._skillUtils._skillWikiManager
+        agent._skillUtils._skillProvider = { _wm: wm, open: function() { return {} }, resolve: function() {
+          return { bodyTemplate: "Instructions: {{arg1}}", revision: "v1", progressive: true, truncated: false }
+        } }
+        var rejected = cfg.options.fns.skillwiki({ operation: "resolve", ref: "wiki:report.md", args: new Array(501).join("x") })
+        ow.test.assert(isDef(rejected.error), true, "MCP argument expansion cannot exceed the shared budget")
+        ow.test.assert(agent._skillRuntime.chars, 0, "Rejected MCP rendering does not consume budget")
+        var accepted = cfg.options.fns.skillwiki({ operation: "resolve", ref: "wiki:report.md", argv: ["Ada Lovelace"] })
+        ow.test.assert(isUnDef(accepted.error), true, "MCP argv supports arguments containing spaces")
+        ow.test.assert(agent._skillRuntime.records["wiki:report.md"].content, "Instructions: Ada Lovelace", "MCP records rendered guidance")
+        ow.test.assert(agent._skillRuntime.chars, "Instructions: Ada Lovelace".length, "MCP charges rendered guidance exactly")
+      } finally { agent._stopAgentResources() }
+    })
+  }
+
   exports.testBundledSkillsActivation = function() {
     fixture(function(root) {
       var makeAgent = function(options) {

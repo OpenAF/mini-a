@@ -2077,6 +2077,10 @@
       }
       var unrelated = merge({}, meta)
       unrelated.name = "unrelated"
+      unrelated.inputSchema = merge({}, meta.inputSchema)
+      unrelated.inputSchema.properties = merge({}, meta.inputSchema.properties)
+      delete unrelated.inputSchema.properties.args
+      delete unrelated.inputSchema.properties.argv
       var other = agent._getToolSchemaSummary(unrelated, { profile: profile, toolCount: 1 })
       if (profile !== "verbose") ow.test.assert(other.compactParamsText, profile === "minimal" ? "appliesTo, capabilities, ..." : "appliesTo, capabilities, compatibility, ...", "Other tool ordering is unchanged")
       var rendered = renderAgentPrompt(agent, { promptProfile: profile, actionsdesc: [summary], actionsList: "skillwiki", actionFieldValues: "think | skillwiki | final", toolCount: 1 })
@@ -2144,6 +2148,7 @@
       var cfg = agent._createUtilsMcpConfig({
         useutils: true,
         useskills: true,
+        debug: true,
         utilsroot: rootDir,
         extraskills: skillsDir
       })
@@ -3023,6 +3028,41 @@
       ow.test.assert(calls[0].payload.taskId, "task-1", "Remote cancellation must target the submitted task")
       ow.test.assert(calls[0].timeoutMs, 5000, "Remote cancellation must remain bounded during shutdown")
     } finally { manager.destroy() }
+  }
+
+  exports.testSubtaskForkUtf8Budget = function() {
+    var manager = new SubtaskManager({ forkstatemaxbytes: 100 }, {})
+    try {
+      var original = { forkedContext: [repeat(50, "界")], workingMemory: { facts: [] } }
+      var task = { goal: "fixture", args: {}, depth: 1, fork: true, forkState: original }
+      var state = manager._buildChildArgs(task).state
+      ow.test.assert(af.fromString2Bytes(state).length <= 100, true, "Serialized UTF-8 bytes fit the configured ceiling")
+      ow.test.assert(original.forkedContext.length, 1, "Trimming never changes the parent's snapshot")
+      task.forkState = { workingMemory: { facts: [{ value: repeat(100, "界") }] } }
+      var error = ""
+      try { manager._buildChildArgs(task) } catch(e) { error = String(e) }
+      ow.test.assert(error.indexOf("forkstatemaxbytes") >= 0, true, "Oversized remaining memory fails before execution")
+    } finally { manager.destroy() }
+  }
+
+  exports.testSubtaskWatchdogCancelBoundAndMetric = function() {
+    ;[false, true].forEach(function(useA2A) {
+      var manager = new SubtaskManager({}, {})
+      manager.remoteDelegation = true
+      manager.useA2A = useA2A
+      var calls = [], now = Date.now()
+      manager._remoteRequest = function(url, path, data, timeout) { calls.push({ path: path, timeout: timeout }); throw new Error("fixture unreachable") }
+      manager.subtasks.fixture = { id: "fixture", status: "running", startedAt: now - 1000, hardTimeoutMs: 1, workerUrl: "http://fixture", remoteTaskId: "task" }
+      manager.runningCount = manager.metrics.running = 1
+      try {
+        manager._startWatchdog()
+        var until = Date.now() + 3000
+        while (manager.metrics.remoteCancelFailures < 1 && Date.now() < until) sleep(10, true)
+        ow.test.assert(calls, [{ path: useA2A ? "/tasks:cancel" : "/cancel", timeout: 5000 }], "Watchdog uses bounded cancellation for both transports")
+        ow.test.assert(manager.metrics.remoteCancelFailures, 1, "Failed timeout cancellation is counted")
+        ow.test.assert(manager.metrics.timedout, 1, "Only one terminal timeout is claimed")
+      } finally { manager.destroy() }
+    })
   }
 
   exports.testSubtaskRemoteOutcomeUnknownDoesNotRetry = function() {

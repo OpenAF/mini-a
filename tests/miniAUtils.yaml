@@ -1,4 +1,8 @@
 jobs:
+- name: MiniA Utils Tests::WikiSkillRenderedBudget
+  to: oJob Test
+  exec: args.func = require("tests/miniAUtils.js").testWikiSkillRenderedBudget
+
 - name: MiniA Bundled Skills::testBundledSkillRootsAndOverrides
   to: oJob Test
   exec: args.func = require("tests/miniAUtils.js").testBundledSkillRootsAndOverrides
@@ -281,6 +285,7 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Utils Tests::WikiSkillRenderedBudget
 - MiniA Bundled Skills::testBundledSkillRootsAndOverrides
 - MiniA Utils Tests::FileAllowBoundary
 - MiniA Utils Tests::MathOpsZeroStatistics

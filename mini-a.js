@@ -230,6 +230,8 @@ var MiniA = function() {
     delegation_remote_poll_retries: $atomic(0, "long"),
     delegation_remote_outcome_unknown: $atomic(0, "long"),
     delegation_remote_cancel_failures: $atomic(0, "long"),
+    delegation_remote_submission_recoveries: $atomic(0, "long"),
+    delegation_remote_submission_recovery_failures: $atomic(0, "long"),
     delegation_worker_hint_used: $atomic(0, "long"),
     delegation_worker_hint_matched: $atomic(0, "long"),
     delegation_worker_hint_fallthrough: $atomic(0, "long"),
@@ -2258,6 +2260,8 @@ MiniA.prototype.getMetrics = function() {
             remote_poll_retries: global.__mini_a_metrics.delegation_remote_poll_retries.get(),
             remote_outcome_unknown: global.__mini_a_metrics.delegation_remote_outcome_unknown.get(),
             remote_cancel_failures: global.__mini_a_metrics.delegation_remote_cancel_failures.get(),
+            remote_submission_recoveries: global.__mini_a_metrics.delegation_remote_submission_recoveries.get(),
+            remote_submission_recovery_failures: global.__mini_a_metrics.delegation_remote_submission_recovery_failures.get(),
             worker_hint_used: global.__mini_a_metrics.delegation_worker_hint_used.get(),
             worker_hint_matched: global.__mini_a_metrics.delegation_worker_hint_matched.get(),
             worker_hint_fallthrough: global.__mini_a_metrics.delegation_worker_hint_fallthrough.get(),
@@ -3229,6 +3233,8 @@ MiniA.prototype._syncDelegationMetrics = function() {
     if (isNumber(delegationMetrics.remotePollRetries)) global.__mini_a_metrics.delegation_remote_poll_retries.set(Math.max(0, Math.round(delegationMetrics.remotePollRetries)))
     if (isNumber(delegationMetrics.remoteOutcomeUnknown)) global.__mini_a_metrics.delegation_remote_outcome_unknown.set(Math.max(0, Math.round(delegationMetrics.remoteOutcomeUnknown)))
     if (isNumber(delegationMetrics.remoteCancelFailures)) global.__mini_a_metrics.delegation_remote_cancel_failures.set(Math.max(0, Math.round(delegationMetrics.remoteCancelFailures)))
+    if (isNumber(delegationMetrics.remoteSubmissionRecoveries)) global.__mini_a_metrics.delegation_remote_submission_recoveries.set(Math.max(0, Math.round(delegationMetrics.remoteSubmissionRecoveries)))
+    if (isNumber(delegationMetrics.remoteSubmissionRecoveryFailures)) global.__mini_a_metrics.delegation_remote_submission_recovery_failures.set(Math.max(0, Math.round(delegationMetrics.remoteSubmissionRecoveryFailures)))
   } catch(ignoreSync) {}
 }
 
@@ -11450,14 +11456,19 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         try {
           parent.fnI("exec", _buildUtilsIntentMessage(name, payload))
           parent._trace("tool_call", { name: name, params: payload, source: "mini-utils" })
-          var result = parent._runRawOutputGuarded(function() { return fileTool[name](payload) })
+          var toolPayload = payload
+          if (name === "skillwiki" && _normalizeOp(payload.operation || payload.op) === "resolve") {
+            var renderArgs = isArray(payload.argv) ? payload.argv.map(function(value) { return stringify(String(value)) }).join(" ") : payload.args || ""
+            toolPayload = merge({}, payload)
+            toolPayload._renderArgs = renderArgs
+          }
+          var result = parent._runRawOutputGuarded(function() { return fileTool[name](toolPayload) })
           parent._captureContextToolResult(name, payload, result)
           if (name === "skills" || name === "skill") {
             _logSkillSourceUsage(payload, result)
             if (isMap(result) && !result.error) parent._recordSkillContent("local:" + result.name, result)
           }
           if (name === "skillwiki" && isMap(result) && !result.error) {
-            if (isString(result.bodyTemplate)) result.rendered = __miniARenderSkillTemplate(result.bodyTemplate, { raw: payload.args || "", argv: payload.argv || [], argc: (payload.argv || []).length })
             parent._recordSkillContent(payload.ref || payload.path, result)
           }
           var response = formatResponse(result)

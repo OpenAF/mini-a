@@ -360,8 +360,8 @@ function __miniAInstallSkillRuntime() {
         else {
           var descriptor = utils.skillwiki({ operation: "open", ref: item.ref, cacheTtlMs: 0 })
           if (descriptor.error) throw new Error(descriptor.error)
-          result = utils.skillwiki({ operation: "resolve", ref: item.ref, progressive: true, maxChars: args.skillcontextchars || 8000, cacheTtlMs: 0, revision: item.expectedRevision || undefined, _userSelected: explicit.indexOf(item) >= 0 })
-          if (result && !result.error) { result.rendered = __miniARenderSkillTemplate(result.bodyTemplate, utils._parseSkillArgs(item.invocationArgs || "")); result.revision = result.revision || descriptor.version }
+          result = utils.skillwiki({ operation: "resolve", ref: item.ref, progressive: true, maxChars: args.skillcontextchars || 8000, cacheTtlMs: 0, revision: item.expectedRevision || undefined, _userSelected: explicit.indexOf(item) >= 0, _renderArgs: item.invocationArgs || "" })
+          if (result && !result.error) result.revision = result.revision || descriptor.version
         }
         if (!isMap(result) || result.error || !isString(result.rendered) || !result.rendered.trim()) throw new Error(isMap(result) && result.error || "empty-skill-guidance")
         if (item.expectedRevision && (result.fingerprint || result.revision) !== item.expectedRevision) throw new Error("skill-source-revision-changed")

@@ -1,4 +1,14 @@
 jobs:
+- name: MiniA Core Tests::SubtaskForkUtf8Budget
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testSubtaskForkUtf8Budget
+
+- name: MiniA Core Tests::SubtaskWatchdogCancelBoundAndMetric
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testSubtaskWatchdogCancelBoundAndMetric
+
 - name: MiniA Core Tests::NativeBudgetGuardPreservesAuxiliaryAndShadow
   from: MiniA Core Tests::Init
   to: oJob Test
@@ -1215,6 +1225,8 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Core Tests::SubtaskForkUtf8Budget
+- MiniA Core Tests::SubtaskWatchdogCancelBoundAndMetric
 - MiniA Core Tests::NativeBudgetGuardPreservesAuxiliaryAndShadow
 - MiniA Core Tests::NativeReportWithEmbeddedJsonCompletes
 - MiniA Core Tests::MemorySnapshotLoggingOnlyChanges

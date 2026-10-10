@@ -40,6 +40,35 @@
     } finally {if(writer)writer.close();if(wm)wm.close();cleanupTestDir(dir)}
   }
 
+  exports.testWikiSkillRenderedBudget = function() {
+    load("mini-a-skill-runtime.js")
+    load("mini-a-skills.js")
+    var makeTool = function(template, pending) {
+      var tool = new MiniUtilsTool({}), wm = {}
+      tool._skillWikiManager = wm
+      tool._skillRuntime = new MiniASkillRuntime({ skillsmaxchars: 100 })
+      tool._skillProvider = { _wm: wm, open: function() { return {} }, resolve: function() {
+        return { bodyTemplate: template, revision: "v1", progressive: true, truncated: !!pending, pendingSections: pending || [] }
+      } }
+      return tool
+    }
+    var tool = makeTool("Instructions: {{args}}")
+    var blocked = tool.skillwiki({ operation: "resolve", ref: "wiki:report.md", progressive: true, _renderArgs: repeat(500, "x") })
+    ow.test.assert(blocked.error, "skill-required-guidance-exceeds-budget", "Argument expansion cannot bypass the shared budget")
+    ow.test.assert(tool._skillRuntime.chars, 0, "Rejected guidance consumes no character budget")
+    var template = "# Intro\nHello {{arg1}}\n# Steps\n{{args}}"
+    tool = makeTool(template, ["Verify"])
+    var out = tool.skillwiki({ operation: "resolve", ref: "wiki:report.md", progressive: true, _renderArgs: "Ada " + repeat(120, "x") })
+    ow.test.assert(out.rendered, "# Intro\nHello Ada", "Rendered complete sections are selected within budget")
+    ow.test.assert(out.pendingSections, ["Verify", "Steps"], "Source and rendered deferred procedures remain pending")
+    ow.test.assert(tool._skillRuntime.chars, out.rendered.length, "Charge rendered guidance exactly once")
+    ow.test.assert(out.args.raw, "Ada " + repeat(120, "x"), "Retain invocation arguments for delegation")
+    tool = makeTool("Instructions: {{args}}")
+    var plain = tool.skillwiki({ operation: "resolve", ref: "wiki:report.md" })
+    ow.test.assert(plain.bodyTemplate, "Instructions: {{args}}", "Existing resolve remains a template API")
+    ow.test.assert(isUnDef(plain.rendered), true, "Plain resolve does not implicitly render")
+  }
+
   exports.testWikiSearchOptionForwarding = function() {
     var captured, wm={supportsRetrievalV2:function(options){return options.wiki==="published"},agenticSearch:function(query,options){captured=options;return {results:[{path:"@published/page.md"}]}}}
     var utility={_ensureInitialized:function(){},_wikiManager:wm,_wikiAgenticRetrieval:true}

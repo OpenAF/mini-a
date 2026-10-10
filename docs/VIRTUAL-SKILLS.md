@@ -346,7 +346,7 @@ Related parameters for enabling, locating, and limiting the virtual skill librar
 | `skillwikibackend` | `fs` for a dedicated library | Select the backend for a dedicated skill wiki: `fs`, `s3`, `s3fs`, `es`, or `http`. |
 | `skillwikimounts` | Unset | Read-only mounts for a dedicated skill wiki, supplied as a SLON/JSON array using the `wikimounts` shape. |
 | `skillsmaxloaded` | `3` | Maximum distinct local/wiki skills consulted per run, shared by automatic and tool loading. |
-| `skillsmaxchars` | `12000` | Shared local/wiki guidance character budget per run, including `resolve` and supporting references. |
+| `skillsmaxchars` | `12000` | Shared local/wiki guidance character budget per run, including rendered invocation arguments, `resolve`, and supporting references. |
 | `skillsautosearch` | Conditional | Defaults to `false`, or `true` when `usedecide=true` and `modeldec` or `OAF_DECIDE_MODEL` is set. Explicit overrides win. Set `false` for model-led or explicit loading. |
 | `skillsautolimit` | `5` | Combined local/wiki candidate limit for the primary-model selector. |
 
@@ -482,8 +482,12 @@ for a local `SKILL.md`/`SKILL.yaml` -- `bodyTemplate` plus `meta` -- so it can b
 rendered with the existing `{{args}}`/`{{argv}}`/`{{arg1}}` machinery
 (`__miniARenderSkillTemplate`) instead of a parallel remote-execution path.
 
-Calling `resolve` does not execute the skill, render its placeholders, install it,
-or register a `/name` command. It returns a bounded template (default `maxChars: 32000`) and a `truncated` flag; callers should check that flag before using it.
+The provider's `resolve` returns a bounded template (default `maxChars: 32000`)
+and a `truncated` flag; callers should check that flag before using it. The
+in-process `skillwiki` MCP tool also renders placeholders, accepting `args` as a
+command argument string or `argv` as an array. Its shared skill budget includes
+the rendered arguments; required guidance that cannot fit is rejected.
+Resolving does not execute or install the skill or register a `/name` command.
 Linked supporting pages remain separate (`virtualFiles` is empty).
 
 ## Multi-wiki / cross-wiki

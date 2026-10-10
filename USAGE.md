@@ -1686,6 +1686,8 @@ Mini-A supports **delegation** — the ability to spawn child Mini-A agents to h
 | `delegationhardtimeout` | number | - | Optional absolute delegated subtask timeout regardless of activity (ms) |
 | `delegationmaxretries` | number | `2` | Maximum execution attempts for confirmed failures, including the initial attempt |
 
+Workers advertising `submission-recovery-v1` allow Mini-A to recover a lost submission response through a same-process receipt, without replaying execution. Recovery stops at worker restarts or receipt expiration (`taskretention`); older workers retain the explicit unknown-outcome behavior. See [submission recovery](docs/DELEGATION.md#submission-recovery) for the wire contract and metrics.
+
 **Worker startup parameters** (used when starting a worker with `workermode=true`):
 
 | Parameter | Type | Default | Description |
