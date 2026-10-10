@@ -9665,6 +9665,7 @@ MiniA.prototype._reflectRunMemory = function(args) {
   }
 
   var validated = this._validateReflectionEntries(rawItems, existingKeys, goal, answer)
+  validated = this._decideFilterReflections(args, validated, goal, answer)
   if (validated.rejected > 0 && isObject(global.__mini_a_metrics.memory_reflection_rejected)) global.__mini_a_metrics.memory_reflection_rejected.getAdd(validated.rejected)
   if (validated.accepted.length === 0) return
 

@@ -396,4 +396,24 @@
     ow.test.assert(keys(agentWithMemory(function() { throw { code: "LLM_DECISION_PROVIDER_ERROR" } })), baseline, "Decision error keeps the lexical order")
     ow.test.assert(keys(agentWithMemory(ranked([0, 0, 0]))), baseline, "All-irrelevant decision keeps the lexical order")
   }
+
+  exports.testReflectionFilterGate = function() {
+    var validated = function() { return { accepted: [{ kind: "preference", value: "durable one", key: "a", tags: [] }, { kind: "preference", value: "oneoff two", key: "b", tags: [] }], rejected: 1 } }
+    var run = function(a, args) { return a._decideFilterReflections(args || { usedecide: true }, validated(), "goal", "answer") }
+    var yesNo = function(first, second) { return answering({ entry_0: { type: "boolean", value: first }, entry_1: { type: "boolean", value: second } }) }
+    var r = run(gateAgent(__, {}))
+    ow.test.assert([r.accepted.length, r.rejected], [2, 1], "Unconfigured decide keeps every validated entry")
+    r = run(gateAgent(yesNo(true, false), {}))
+    ow.test.assert([r.accepted.map(function(e) { return e.key }).join(","), r.rejected], ["a", 2], "Decision drops entries judged one-off and counts them rejected")
+    r = run(gateAgent(yesNo(true, true), {}))
+    ow.test.assert(r.accepted.length, 2, "All-durable decision keeps everything")
+    r = run(gateAgent(yesNo(false, false), {}))
+    ow.test.assert(r.accepted.length, 0, "Decision may reject all entries")
+    r = run(gateAgent(yesNo(false, false), {}), {})
+    ow.test.assert(r.accepted.length, 2, "Without explicit usedecide=true nothing is dropped")
+    var a = gateAgent(function() { throw { code: "LLM_DECISION_PROVIDER_ERROR" } }, {})
+    ow.test.assert([run(a).accepted.length, a._decisionMetrics.fallbacks], [2, 1], "Decision error keeps every validated entry")
+    r = run(gateAgent(answering({ entry_0: { type: "boolean", value: true } }), {}))
+    ow.test.assert(r.accepted.length, 2, "Incomplete answers keep every validated entry")
+  }
 })()
