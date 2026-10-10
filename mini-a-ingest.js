@@ -847,7 +847,7 @@ MiniAIngest.prototype.run = function() {
     try { model = modelRaw.charAt(0) === "{" ? af.fromJson(modelRaw) : af.fromSLON(modelRaw) } catch(ignoreModel) {}
     var publicModel = {}; ["type", "model", "temperature", "url", "maxTokens"].forEach(function(k) { if (isDef(model[k])) publicModel[k] = model[k] })
     var fingerprint = sha1(mode + "|" + this._num("ingestchunkchars", 24000) + "|" + stringify(global.__miniAWikiKnowledge.versions, __, "") + "|" + stringify(publicModel, __, "") + "|" + this._distillPrompt({ id: "" }, [], []))
-    var sourcePaths = {}, legacy = this._loadLedger(wm), paths = {}, pending = [], deletions = [], observed = {}, oldIds = [], migration = false
+    var sourcePaths = {}, legacy = this._loadLedger(wm), paths = {}, pending = [], unchanged = [], deletions = [], observed = {}, oldIds = [], migration = false
     Object.keys(manifest.sources).forEach(function(k) {
       var record = manifest.sources[k], p = record.page
       if (p) paths[p] = k
@@ -911,11 +911,13 @@ MiniAIngest.prototype.run = function() {
       chunks.forEach(function(c) { if (byId[c.id] && byId[c.id].hash === c.hash) result.chunks_reused++; else if (byId[c.id]) result.chunks_changed++; else result.chunks_added++ })
       oldChunks.forEach(function(c) { if (!chunks.some(function(n) { return c.id === n.id })) result.planned_chunks_removed++ })
       var intact = prev && oldChunks.length === chunks.length && chunks.every(function(c) { return byId[c.id] && byId[c.id].hash === c.hash && manifest.chunks[c.id] && manifest.chunks[c.id].generation === prev.generation && manifest.chunks[c.id].page === pagePath && manifest.chunks[c.id].sourceKey === key && manifest.chunks[c.id].hash === c.hash && sha1(String(manifest.chunks[c.id].text || "")) === c.hash })
-      if (toBoolean(a.ingestforce) !== true && prev && prev.sourceHash === hash && prev.fingerprint === fingerprint && !prev.legacyRepair && !prev.bindingRepair && page && intact) { result.skipped_unchanged++; return }
+      var candidate = { src: src, key: key, hash: hash, content: content, chunks: chunks, path: pagePath, before: self._signature(page), legacyRetiredIds: legacyRetiredIds }
+      if (toBoolean(a.ingestforce) !== true && prev && prev.sourceHash === hash && prev.fingerprint === fingerprint && !prev.legacyRepair && !prev.bindingRepair && page && intact) { unchanged.push(candidate); return }
       result.sources_changed++
       if (prev && (!page || prev.legacyRepair || prev.bindingRepair || !intact)) result.planned_repairs.push(pagePath)
       var needs = mode === "distill" || mode === "auto" && chunks.some(function(c) { return wm.knowledgeNeedsDistillation(c).needs })
-      pending.push({ src: src, key: key, hash: hash, content: content, chunks: chunks, path: pagePath, before: self._signature(page), needs: needs, legacyRetiredIds: legacyRetiredIds })
+      candidate.needs = needs
+      pending.push(candidate)
       result.planned_writes.push(pagePath)
     })
     Object.keys(manifest.sources).forEach(function(k) {
@@ -933,6 +935,21 @@ MiniAIngest.prototype.run = function() {
       if (!prev.signature || page && self._signature(page) !== prev.signature) { result.conflicts.push({ source: rel, page: prev.page, reason: "prune ownership or local edit conflict" }); reason = "ownership conflict" }
       if (reason) result.prune_blocked.push({ source: rel, reason: reason })
       else { deletions.push({ key: k, kind: "delete", path: prev.page, before: self._signature(page), sourceRoot: resolved.root, sourceRel: rel }); result.planned_removals.push(prev.page) }
+    })
+    // Check resolved source identities after discovery. Structural wiki moves already repair
+    // links, so changing a destination path alone must not regenerate distilled content.
+    var linkTargets = {}
+    Object.keys(sourcePaths).forEach(function(rel) { linkTargets[rel] = "source:" + rel })
+    var linkIdentityWriter = { _relativePath: function(from, target) { return target } }
+    var linksHash = function(p) { return sha1(self._rewriteSourceLinks(linkIdentityWriter, p.src, p.path, p.content, linkTargets, {})) }
+    pending.forEach(function(p) { p.sourceLinksHash = linksHash(p) })
+    unchanged.forEach(function(p) {
+      p.sourceLinksHash = linksHash(p)
+      // Old records with no resolved local links already match their original source hash.
+      var previousLinksHash = manifest.sources[p.key].sourceLinksHash || p.hash
+      if (previousLinksHash === p.sourceLinksHash) { result.skipped_unchanged++; return }
+      p.needs = mode === "distill" || mode === "auto" && p.chunks.some(function(c) { return wm.knowledgeNeedsDistillation(c).needs })
+      pending.push(p); result.sources_changed++; result.planned_writes.push(p.path)
     })
     if (!found.complete) result.failed.push({ source: "discovery", error: "incomplete source inventory" })
     this._log("[ingest] Planned " + found.sources.length + " source(s): " + pending.length + " changed, " + result.skipped_unchanged + " unchanged, " + result.failed.length + " failed.")
@@ -978,7 +995,7 @@ MiniAIngest.prototype.run = function() {
       ;(manifest.sources[p.key] && manifest.sources[p.key].chunks || []).forEach(function(c) { oldIds.push(c.id) })
       p.chunks.forEach(function(c) { c.page = p.path; c.sourceKey = p.key; c.generation = generation; manifest.chunks[c.id] = c })
       manifest.sources[p.key] = { scopeId: scope, sourceKey: p.key, source: p.src.rel, sourceId: p.src.id, sourceHash: p.hash, normalizedHash: sha1(wm.knowledgeNormalize(p.content)),
-        fingerprint: fingerprint, discoveryConfig: discoveryConfig, page: p.path, chunks: p.chunks, generation: generation, signature: after, active: true }
+        fingerprint: fingerprint, sourceLinksHash: p.sourceLinksHash, discoveryConfig: discoveryConfig, page: p.path, chunks: p.chunks, generation: generation, signature: after, active: true }
       operations.push({ kind: "write", path: p.path, before: p.before, after: after, meta: meta, body: d.page.body })
     }
     // No destructive operations after failed/deferred writes or conflicts.

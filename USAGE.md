@@ -3511,7 +3511,7 @@ If a move is interrupted, repeat the wiki move or run writable ingestion to repl
 
 1. **Resolve** — detect the source type; shallow-clone remote repos to a temp dir and record the commit SHA.
 2. **Discover** — walk for native text, HTML, document and image formats, then passive structured formats advertised by the installed oafp. Skip vendor directories (`.git`, `node_modules`, `target`, `build`, `dist`, `vendor`, `.venv`, `__pycache__`, …). `README*` and `docs/**` come first.
-3. **Ledger** — skip sources whose sha1 is unchanged since the last ingest (`ingestforce=true` overrides).
+3. **Ledger** — skip sources whose content, transformation settings and resolved source links are unchanged (`ingestforce=true` overrides). Adding a previously missing link target refreshes referring pages; unrelated new sources do not. Older ledger records with resolved local links refresh once to establish tracking, under the normal budgets and ownership checks.
 4. **Chunk** — split oversized sources on `##`/`###` boundaries (paragraphs when headingless).
 5. **Distill** — one LLM call per source, in parallel batches, producing `{title, description, tags, type, body}`.
 6. **Write** — one source produces **one page**. Topic organization is available through explicit `/dream reorg topics`; deterministic maintenance uses `/dream wiki apply`.

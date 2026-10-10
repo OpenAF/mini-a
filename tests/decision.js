@@ -447,6 +447,23 @@
     ow.test.assert(r.accepted.length, 2, "Incomplete answers keep every validated entry")
   }
 
+  exports.testGateRateLimitAccounting = function() {
+    var calls = 0, before = 0, usage = []
+    var a = gateAgent(function() { calls++; return answering({ worth: { type: "boolean", value: false } }).apply(null, arguments) }, {})
+    a._decisionToolControls = { beforeCall: function() { before++ }, afterCall: function(tokens) { usage.push(tokens) } }
+    var run = function() { return a._decideAdvisorWorth({ usedecide: true, goal: "g" }, { context: [] }, {}, []) }
+    ow.test.assert(run(), false, "Provider verdict is retained")
+    run()
+    ow.test.assert([calls, before, usage], [1, 1, [6]], "Only uncached requests consume RPM and reported TPM")
+    a._decisionGateCache = __
+    a._decision = { isConfigured: function() { return true }, decide: function() { calls++; throw new Error("provider failure") } }
+    ow.test.assert(isUnDef(run()), true, "Provider failure preserves fallback behavior")
+    ow.test.assert([calls, before, usage], [2, 2, [6, 0]], "Failed provider request counts toward RPM without inventing tokens")
+    a._decisionToolControls.beforeCall = function() { throw new Error("cancelled before dispatch") }
+    run()
+    ow.test.assert([calls, usage], [2, [6, 0]], "Rejected dispatch neither calls the provider nor records a completed request")
+  }
+
   exports.testGateCachePerRun = function() {
     var calls = 0
     var handler = function() { calls++; return answering({ worth: { type: "boolean", value: false } }).apply(null, arguments) }

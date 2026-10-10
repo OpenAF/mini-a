@@ -179,8 +179,10 @@ function __miniAInstallSkillRuntime() {
       if (references[result.reference] && references[result.reference] !== result.referenceRevision) { this._skillRuntime.block(ref, "skill-reference-revision-changed"); return }
       references[result.reference] = result.referenceRevision
     }
-    var pending = result.pendingSections || old && old.pendingSections || []
-    if (old && isArray(result.sections)) pending = pending.filter(function(title) { return result.sections.indexOf(title) < 0 })
+    var pending = old && old.pendingSections ? old.pendingSections.slice() : []
+    ;(result.pendingSections || []).forEach(function(title) { if (pending.indexOf(title) < 0) pending.push(title) })
+    // A supporting reference has its own headings; it cannot complete main skill sections.
+    if (!result.reference && isArray(result.sections)) pending = pending.filter(function(title) { return result.sections.indexOf(title) < 0 })
     this._skillRuntime.records[ref] = {
       ref: ref, state: "active", name: candidate && candidate.name || result.name || ref,
       content: old && old.content.indexOf(content) >= 0 ? old.content : (old ? old.content + "\n\n" : "") + content,

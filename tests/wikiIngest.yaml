@@ -2,6 +2,10 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA Wiki Ingest Tests::IncrementalSourceLinkResolution
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testIncrementalSourceLinkResolution
+
 - name: MiniA Wiki Ingest Tests::SourceLayoutCollisionsAndLinkForms
   to: oJob Test
   exec: args.func = require("tests/wikiIngestReconcile.js").testSourceLayoutCollisionsAndLinkForms
@@ -304,6 +308,7 @@ jobs:
   exec: args.func = require("tests/wikiIngestReconcile.js").testPreparedRecoveryWithIncompleteOrigin
 
 todo:
+- MiniA Wiki Ingest Tests::IncrementalSourceLinkResolution
 - MiniA Wiki Ingest Tests::SourceLayoutCollisionsAndLinkForms
 - MiniA Wiki Ingest Tests::StructuralMoveInterruptedWritesAndPublication
 - MiniA Wiki Ingest Tests::SourceFolderLayoutAndLinks

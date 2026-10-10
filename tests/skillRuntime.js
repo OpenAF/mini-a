@@ -232,6 +232,22 @@
     ow.test.assert(provider.resolve("wiki:broken.md", {}).error, "not-found", "Open failure preserved")
   }
 
+  exports.testSkillDeferredSectionsSurvivePartialReads = function() {
+    var agent = new MiniA()
+    agent.fnI = function() {}; agent._trace = function() {}; agent._resetSkillRuntime({})
+    var text = "# Intro\nBrief\n\n## First\n" + repeat(120, "a") + "\n\n## Second\n" + repeat(120, "b")
+    var record = function(page) { page.fingerprint = "stable"; agent._recordSkillContent("local:report", page) }
+    record(__miniASkillPage(text, 60))
+    ow.test.assert(agent._skillRuntime.records["local:report"].pendingSections, ["First", "Second"], "Initial page defers both procedures")
+    record(merge(__miniASkillPage("## Second\nReference content", 200), { reference: "support.md", referenceRevision: "r1" }))
+    ow.test.assert(agent._skillRuntime.records["local:report"].pendingSections, ["First", "Second"], "Supporting reference cannot complete a main section with the same name")
+    record(__miniASkillPage(text, 200, "First"))
+    ow.test.assert(agent._skillRuntime.records["local:report"].pendingSections, ["Second"], "Reading one section retains the other deferred section")
+    ow.test.assert(agent._skillGuidanceContext().indexOf("Pending sections (load before performing their steps): Second") >= 0, true, "Unread procedure remains visible in model guidance")
+    record(__miniASkillPage(text, 200, "Second"))
+    ow.test.assert(agent._skillRuntime.records["local:report"].pendingSections.length, 0, "All deferred sections clear only after both reads")
+  }
+
   exports.testSkillContextContinuityRevisionAndCompletion = function() {
     var agent = new MiniA()
     agent.fnI = function() {}; agent._trace = function() {}

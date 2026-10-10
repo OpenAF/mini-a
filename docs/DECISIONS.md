@@ -28,7 +28,7 @@ Decision requests use a fresh bare client, sharing neither tools nor conversatio
 
 ## Verdict gates
 
-With an explicit `usedecide=true` and a configured decision model, selected internal verdicts consult the decision model first. A gate may only **skip an expensive call**; it never replaces output that other code consumes. Whenever the decision is unavailable, fails, returns an invalid answer, exceeds the 48 KiB / 32-question budget, or does not give a confident "all clear", the original code path runs unchanged. Each fallback is counted in the decision metrics (`fallbacks`, `reasons`) and traced as `decision_fallback`. A configuration or runtime-support error disables further gate attempts for the rest of the run.
+With an explicit `usedecide=true` and a configured decision model, selected internal verdicts consult the decision model first. A gate may only **skip an expensive call**; it never replaces output that other code consumes. Whenever the decision is unavailable, fails, returns an invalid answer, exceeds the 48 KiB / 32-question budget, or does not give a confident "all clear", the original code path runs unchanged. Each fallback is counted in the decision metrics (`fallbacks`, `reasons`) and traced as `decision_fallback`. Uncached gate requests use the run's `rpm`/`tpm` limiter; cached answers consume no additional requests or tokens. Failed dispatched requests count toward `rpm`. A configuration or runtime-support error disables further gate attempts for the rest of the run.
 
 | Site | Decision question | Decide skips the call when | Otherwise |
 |------|-------------------|----------------------------|-----------|

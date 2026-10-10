@@ -450,6 +450,26 @@
       assert(f.body('topics/a.md'), external, 'replay never overwrites conflicting content')
     })
   }
+  exports.testIncrementalSourceLinkResolution = function() { fixture(function(f) {
+    f.write('entry.md', '# Entry\n\n[Target](<Target File.md>#details)')
+    var r = f.run(); assert(r.ok, true, stringify(r))
+    assert(f.body('docs/entry.md').indexOf('Target File.md') >= 0, true, 'missing destination remains unresolved')
+    f.write('Target File.md', '# Target\n\n## Details\n\nAvailable later')
+    r = f.run(); assert(r.ok, true, stringify(r))
+    assert(r.written.length, 2, 'new target also regenerates unchanged referring source')
+    assert(f.body('docs/entry.md').indexOf('[Target](<target-file.md>#details)') >= 0, true, 'incremental ingestion resolves newly available target')
+    assert(f.run().status, 'noop', 'stable bindings need no repeated writes')
+    f.write('unrelated.md', '# Unrelated\n\nIndependent source')
+    r = f.run(); assert(r.ok, true, stringify(r)); assert(r.written.length, 1, 'unrelated new source does not regenerate existing pages')
+    var state = f.state(); Object.keys(state.sources).forEach(function(key) { delete state.sources[key].sourceLinksHash }); f.save(state)
+    r = f.run(); assert(r.ok, true, stringify(r)); assert(r.written.length, 1, 'legacy migration refreshes resolved links without rewriting sources that have no links')
+    assert(f.run().status, 'noop', 'legacy link tracking is established once')
+    var edited = f.body('docs/entry.md') + '\nManual note\n'
+    io.writeFileString(f.wiki + '/docs/entry.md', edited)
+    state = f.state(); Object.keys(state.sources).forEach(function(key) { delete state.sources[key].sourceLinksHash }); f.save(state)
+    r = f.run(); assert(r.conflicts.length > 0, true, 'legacy dependency migration preserves local edit conflict')
+    assert(f.body('docs/entry.md'), edited, 'link repair never overwrites manual edits')
+  }) }
   exports.testSourceLayoutCollisionsAndLinkForms = function() { fixture(function(f) {
     f.write('a b.md', '# First\n\nFirst page'); f.write('a+b.md', '# Second\n\nSecond page')
     f.write('entry.md', '# Entry\n\n[First](<a b.md>)\n[`Second`](a%2Bb.md#section)\n`[Literal](a%20b.md)`\n[Reference][ref]\n\n[ref]: <a b.md> "Title"\n[Outside](../a%20b.md)')

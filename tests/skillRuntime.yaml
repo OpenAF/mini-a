@@ -2,6 +2,10 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA Skill Runtime::testSkillDeferredSectionsSurvivePartialReads
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillDeferredSectionsSurvivePartialReads
+
 - name: MiniA Skill Runtime::testSkillExplicitBoundaryAndArguments
   to: oJob Test
   exec: args.func = require("tests/skillRuntime.js").testSkillExplicitBoundaryAndArguments
@@ -91,6 +95,7 @@ jobs:
   exec: args.func = require("tests/skillRuntime.js").testBundledToolSkillsGatedByEnabledTools
 
 todo:
+- MiniA Skill Runtime::testSkillDeferredSectionsSurvivePartialReads
 - MiniA Bundled Skills::testBundledConsoleDiscovery
 - MiniA Bundled Skills::testBundledSkillsActivation
 - MiniA Skill Runtime::testSkillExplicitBoundaryAndArguments

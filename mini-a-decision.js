@@ -232,7 +232,14 @@ if (typeof MiniA === "function") {
         this._trace("decision_gate", { operation: operation, cached: true })
         return clone(this._decisionGateCache[cacheKey])
       }
-      var answers = this._decision.decide(state, questions).response.answers
+      var controls = this._decisionToolControls, gateResult
+      if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
+      try { gateResult = this._decision.decide(state, questions) }
+      finally {
+        // Failed requests still count toward RPM; successful usage also counts toward TPM.
+        if (controls && isFunction(controls.afterCall)) controls.afterCall(this._getTotalTokens(gateResult && gateResult.stats || {}))
+      }
+      var answers = gateResult.response.answers
       if (!isMap(answers) || keys.some(function(key) { return !isMap(answers[key]) }) || (isFunction(validate) && validate(answers) !== true)) {
         throw MiniADecision.error("LLM_DECISION_INVALID_RESPONSE")
       }
