@@ -217,4 +217,96 @@
     ow.test.assert(report.scenarios.filter(function(s) { return s.variant === "baseline" }).every(function(s) { return s.metrics.decision_calls === 0 }), true, "Disabled variants make no decision calls")
     ow.test.assert(report.scenarios.filter(function(s) { return s.variant === "decide" }).every(function(s) { return s.metrics.decision_calls >= 1 }), true, "Enabled variants exercise decision integration")
   }
+
+  // ---- verdict gates: decide may only skip an expensive call; unavailable/failing decide == existing behaviour ----
+  var gateAgent = function(handler, llmResponse) {
+    var a = new MiniA()
+    a.fnI = function() {}
+    a._trace = function() {}
+    a._memoryAppend = function() {}
+    a._convertPlanObject = function() { return "1. Do the thing" }
+    a._prepareContextInvocation = function(llm, prompt) { return prompt }
+    a._initDecisionRuntime({})
+    a._decision = manager(handler || function() {}, { env: handler ? function() { return config } : function() { return __ }, observe: a._decision._options.observe })
+    a.llmCalls = 0
+    a.llm = { promptJSONWithStats: function() { a.llmCalls++; return { response: llmResponse, stats: {} } } }
+    return a
+  }
+  var answering = function(answers) {
+    return function(state, questions) {
+      a_lastQuestions = Object.keys(questions)
+      return { response: { answers: answers }, stats: { tokens: { prompt: 5, completion: 1, total: 6 } } }
+    }
+  }
+  var a_lastQuestions
+  var choice = function(value) { return { type: "choice", value: value } }
+  var critiqueReply = { verdict: "REVISE", issues: ["unclear"], missingWork: ["tests"], qualityRisks: [], summary: "needs work" }
+
+  exports.testPlanCritiqueGate = function() {
+    var run = function(a, args) { var plan = {}; a._critiquePlanWithLLM({ plan: plan, format: "markdown" }, args || { usedecide: true, goal: "ship" }); return plan.meta.llmCritique }
+    var a = gateAgent(__, critiqueReply), c = run(a)
+    ow.test.assert(a.llmCalls, 1, "Unconfigured decide runs the existing validator")
+    ow.test.assert(c.verdict, "REVISE", "Unconfigured decide keeps the existing critique")
+    a = gateAgent(answering({ verdict: choice("pass") }), critiqueReply); c = run(a)
+    ow.test.assert(a.llmCalls, 0, "PASS skips the validator call")
+    ow.test.assert(c.verdict, "PASS", "PASS is recorded in the existing critique shape")
+    ow.test.assert(isArray(c.issues) && isArray(c.missingWork) && isArray(c.qualityRisks), true, "Critique keeps its list fields")
+    ow.test.assert(c.raw.source, "decide", "Critique is tagged with its source")
+    a = gateAgent(answering({ verdict: choice("revise") }), critiqueReply); c = run(a)
+    ow.test.assert(a.llmCalls, 1, "REVISE still runs the full critique")
+    ow.test.assert(c.issues[0], "unclear", "REVISE keeps the issues replanning needs")
+    a = gateAgent(function() { throw { code: "LLM_DECISION_PROVIDER_ERROR" } }, critiqueReply); c = run(a)
+    ow.test.assert(a.llmCalls, 1, "Decision error runs the existing path")
+    ow.test.assert(a._decisionMetrics.fallbacks, 1, "Decision error is counted as a fallback")
+    a = gateAgent(answering({ verdict: choice("maybe") }), critiqueReply); run(a)
+    ow.test.assert(a.llmCalls, 1, "Invalid decision answers fall back")
+    a = gateAgent(answering({ verdict: choice("pass") }), critiqueReply); run(a, { goal: "ship" })
+    ow.test.assert(a.llmCalls, 1, "Without explicit usedecide=true the gate is inactive")
+  }
+
+  exports.testResearchValidationGate = function() {
+    var reply = { verdict: "REVISE", feedback: "gaps", score: 0.3, specificIssues: ["i"], suggestions: ["s"] }
+    var run = function(a, args) { return a._validateResearchOutcome("findings", "cover X", args || { usedecide: true }) }
+    var pass = { verdict: choice("pass"), quality: { type: "score", level: 2 } }
+    var a = gateAgent(__, reply), r = run(a)
+    ow.test.assert([a.llmCalls, r.verdict, r.score], [1, "REVISE", 0.3], "Unconfigured decide keeps the existing validation")
+    a = gateAgent(answering(pass), reply); r = run(a)
+    ow.test.assert(a.llmCalls, 0, "Full PASS skips the validator")
+    ow.test.assert([r.verdict, r.score, isArray(r.specificIssues), isArray(r.suggestions)], ["PASS", 1, true, true], "Short-circuit keeps the result shape and meets any threshold")
+    ow.test.assert(a._checkValidationThreshold(r, "score>=1.0"), true, "Short-circuit meets a maximal score threshold")
+    a = gateAgent(answering({ verdict: choice("pass"), quality: { type: "score", level: 1 } }), reply); r = run(a)
+    ow.test.assert([a.llmCalls, r.verdict], [1, "REVISE"], "Partial score runs the validator so feedback is produced")
+    a = gateAgent(answering({ verdict: choice("revise"), quality: { type: "score", level: 0 } }), reply); run(a)
+    ow.test.assert(a.llmCalls, 1, "REVISE runs the validator")
+    a = gateAgent(function() { throw { code: "LLM_DECISION_PROVIDER_ERROR" } }, reply); r = run(a)
+    ow.test.assert([a.llmCalls, r.verdict, a._decisionMetrics.fallbacks], [1, "REVISE", 1], "Decision error runs the existing path")
+    var called = 0
+    a = gateAgent(function() { called++; return answering(pass).apply(null, arguments) }, reply); a._oaf_model = {}; run(a, { usedecide: true, valtools: true })
+    ow.test.assert(called, 0, "valtools=true never consults decide")
+    a = gateAgent(function() { called++; return answering(pass).apply(null, arguments) }, reply); run(a, {})
+    ow.test.assert(called, 0, "Without explicit usedecide=true the gate is inactive")
+    a = gateAgent(answering(pass), reply)
+    var big = new Array(60 * 1024).join("x")
+    r = a._validateResearchOutcome(big, "cover X", { usedecide: true })
+    ow.test.assert([a.llmCalls, a._decisionMetrics.reasons.request_budget], [1, 1], "Oversized research falls back instead of truncating")
+  }
+
+  exports.testLcEscalationGate = function() {
+    var runtime = { recentSimilarThoughts: ["a", "b", "c", "d"] }
+    var a = gateAgent(__, {})
+    ow.test.assert(isUnDef(a._decideLcDeferral({ usedecide: true, goal: "g" }, runtime, "r", "resp")), true, "Unconfigured decide defers to the heuristic")
+    a = gateAgent(answering({ progress: choice("progressing") }), {})
+    ow.test.assert(a._decideLcDeferral({ usedecide: true, goal: "g" }, runtime, "r", "resp"), true, "Progress defers escalation")
+    ow.test.assert(isUnDef(a._decideLcDeferral({ goal: "g" }, runtime, "r", "resp")), true, "Without explicit usedecide=true the gate is inactive")
+    a = gateAgent(answering({ progress: choice("stuck") }), {})
+    ow.test.assert(a._decideLcDeferral({ usedecide: true, goal: "g" }, runtime, "r", "resp"), false, "Stuck escalates")
+    a = gateAgent(function() { throw { code: "LLM_DECISION_PROVIDER_ERROR" } }, {})
+    ow.test.assert(isUnDef(a._decideLcDeferral({ usedecide: true, goal: "g" }, runtime, "r", "resp")), true, "Decision error defers to the heuristic")
+    ow.test.assert(a._decisionMetrics.fallbacks, 1, "Decision error is counted as a fallback")
+    var calls = 0
+    a = gateAgent(function() { calls++; throw { code: "LLM_DECISION_UNSUPPORTED" } }, {})
+    a._decision._options.clientFactory = function() { return {} }
+    a._decideLcDeferral({ usedecide: true }, runtime, "r", "x"); a._decideLcDeferral({ usedecide: true }, runtime, "r", "x")
+    ow.test.assert(a._decisionMetrics.fallbacks, 1, "An unsupported runtime disables further gate attempts for the run")
+  }
 })()

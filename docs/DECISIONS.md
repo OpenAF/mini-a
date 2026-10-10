@@ -26,6 +26,18 @@ A decision failure uses the existing Mini-A path. It does not retry the decision
 
 Decision requests use a fresh bare client, sharing neither tools nor conversational history. `getCapabilities()` describes adapter support without making a provider request; unknown availability still permits an attempt. Native probabilities are provider information, not calibrated correctness. Structured decisions have null probability fields. Internal selection uses ordinal answers and does not require probabilities.
 
+## Verdict gates
+
+With an explicit `usedecide=true` and a configured decision model, selected internal verdicts consult the decision model first. A gate may only **skip an expensive call**; it never replaces output that other code consumes. Whenever the decision is unavailable, fails, returns an invalid answer, exceeds the 48 KiB / 32-question budget, or does not give a confident "all clear", the original code path runs unchanged. Each fallback is counted in the decision metrics (`fallbacks`, `reasons`) and traced as `decision_fallback`. A configuration or runtime-support error disables further gate attempts for the rest of the run.
+
+| Site | Decision question | Decide skips the call when | Otherwise |
+|------|-------------------|----------------------------|-----------|
+| Plan critique (`_critiquePlanWithLLM`) | Is the plan immediately executable? | Verdict is `pass`: a `PASS` critique tagged `raw.source: "decide"` is recorded in the usual shape | The validator model runs and produces issues/missing work for replanning |
+| Research validation (`_validateResearchOutcome`) | Does the output fully meet the criteria? | Verdict `pass` **and** top quality level (score 1, meeting any `PASS`/`score>=` threshold) | The validator model runs, so the next cycle still receives issues and suggestions. Never consulted when `valtools=true` |
+| LC escalation deferral (`_decideLcDeferral`) | Is the latest low-cost response making real progress despite the escalation signal? | Not a skip: replaces the heuristic `_scoreLCResponse >= 0.7` deferral rule with `progressing`/`stuck` | The heuristic confidence score decides exactly as before |
+
+Gates use `_decisionGate(operation, args, state, questions, validate)` in `mini-a-decision.js`, which never throws. It is separate from the existing selection and complexity paths, which keep their own defaults.
+
 ## Decision utility
 
 With a valid `OAF_DECIDE_MODEL` configuration, `useutils=true usedecide=true`
