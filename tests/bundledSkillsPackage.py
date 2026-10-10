@@ -14,7 +14,7 @@ checkout = Path(__file__).resolve().parents[1]
 manifest = (checkout / '.package.yaml').read_text()
 files = [line[2:] for line in manifest.split('files:\n', 1)[1].split('filesHash:', 1)[0].splitlines() if line.startswith('- ')]
 bundled = sorted(str(path.relative_to(checkout)) for path in (checkout / 'skills').rglob('*') if path.is_file())
-assert len(bundled) == 6, bundled
+assert len(bundled) == 13, bundled
 for name in bundled:
     assert name in files, f'Missing package file: {name}'
     digest = hashlib.sha1((checkout / name).read_bytes()).hexdigest()

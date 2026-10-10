@@ -8,7 +8,7 @@ var MiniAHistoryVM = function(options) {
   this.normalizerVersion = 1
   this.policyVersion = 1
   this.contextSchemaVersion = 2
-  this.representationVersion = 2
+  this.representationVersion = 3
   this.summarizerVersion = isString(opts.summarizerVersion) ? opts.summarizerVersion : "deterministic-v1"
   this.semanticCompression = opts.semanticCompression === true && isFunction(opts.semanticCompressor)
   this.semanticCompressor = this.semanticCompression ? opts.semanticCompressor : __
@@ -960,6 +960,9 @@ MiniAHistoryVM.prototype._structuralRepresentation = function(object, level, ser
 
 MiniAHistoryVM.prototype._buildRepresentation = function(object, level) {
   var serialized = isString(object.content) ? object.content : stringify(object.content, __, "")
+  // Summarize the evidence, rather than the provider envelope's role/content schema.
+  // Exact L4 backing and history_get still expose the original object.
+  if (object.event.sourceKind === "provider_message" && isMap(object.content) && isString(object.content.content)) serialized = object.content.content
   var text = ""
   var complete = true
   if (level === "L0") text = "[" + object.handle + "] " + object.type.replace(/_/g, " ")
@@ -1701,7 +1704,8 @@ MiniAHistoryVM.prototype.projectRequestContext = function(input, options) {
     return isMap(object) && object.branchId === this.branchId && stringify(object.content, __, "") === stringify(canonical[index], __, "")
   }.bind(this)
   var knownShape = function(entry) {
-    return isMap(entry) && Object.keys(entry).every(function(key) { return ["role", "content", "tool_calls", "tool_call_id", "name"].indexOf(key) >= 0 })
+    return isMap(entry) && (!isDef(entry.tool_name) || entry.role === "tool" && isString(entry.tool_name)) &&
+      Object.keys(entry).every(function(key) { return ["role", "content", "tool_calls", "tool_call_id", "name", "tool_name"].indexOf(key) >= 0 })
   }
 
   for (var gi = 0; gi < canonical.length - recent; gi++) {
@@ -1722,9 +1726,13 @@ MiniAHistoryVM.prototype.projectRequestContext = function(input, options) {
     if (complete) { groups[gi] = members; members.forEach(function(index) { grouped[index] = gi }) }
   }
   var protectedEntries = {}, eligible = {}, excluded = [], fixed = 0
+  var latestStepPrompt = -1
+  for (var si = canonical.length - 1; si >= 0; si--) {
+    if (this._isSyntheticStepPrompt(canonical[si])) { latestStepPrompt = si; break }
+  }
   for (var i = 0; i < canonical.length; i++) {
     var entry = canonical[i], object = this._providerObjectForIndex(i)
-    var safe = knownShape(entry) && isString(entry.content) && i < canonical.length - recent &&
+    var safe = i !== latestStepPrompt && knownShape(entry) && isString(entry.content) && i < canonical.length - recent &&
       !isDef(entry.tool_calls) && !isDef(entry.tool_call_id) && !isDef(entry.function_call) &&
       (entry.role === "assistant" || this._isSyntheticStepPrompt(entry)) && isMap(object) && stringify(object.content, __, "") === stringify(entry, __, "")
     if (safe || isDef(grouped[i]) && isMap(object)) {

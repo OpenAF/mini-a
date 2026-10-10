@@ -116,6 +116,7 @@ See [Agent Plugins support](docs/AGENT-PLUGINS.md) for the manifest layout, supp
 | `debugfile` | string | - | Redirect debug output to a file as NDJSON instead of screen (implies `debug=true`) |
 | `debugch` | string | - | SLON/JSON debug channel for main LLM (requires `$llm.setDebugCh`) |
 | `debuglcch` | string | - | SLON/JSON debug channel for low-cost LLM |
+| `debugdecch` | string | - | SLON/JSON debug channel or native file path for decision LLM |
 | `debugvalch` | string | - | SLON/JSON debug channel for validation LLM; when no dedicated `modelval` is configured, validation calls to the main LLM are logged directly to this channel |
 | `raw` | boolean | `false` | Return raw string instead of formatted output |
 | `nologtrunc` | boolean | `false` | Disable truncation of long log output lines (show full content) |

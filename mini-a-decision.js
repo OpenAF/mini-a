@@ -34,6 +34,7 @@ MiniADecision.prototype._client = function() {
   if (!client || !isFunction(client.getCapabilities) || !isFunction(client.decideWithStats)) {
     throw MiniADecision.error("MINI_A_DECISION_RUNTIME_UNSUPPORTED")
   }
+  if (isFunction(this._options.configureClient)) this._options.configureClient(client)
   return client
 }
 
@@ -134,7 +135,9 @@ if (typeof MiniA === "function") {
     this._decisionComplexity = __
     if (!this._decisionMetrics) this._decisionMetrics = { calls: 0, failures: 0, fallbacks: 0, empty_selections: 0,
       duration_ms: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, usage_reports: 0, reasons: {} }
-    this._decision = new MiniADecision({ modeldec: args.modeldec, enabled: isUnDef(args.usedecide) || toBoolean(args.usedecide) === true, observe: function(event) {
+    this._decision = new MiniADecision({ modeldec: args.modeldec, configureClient: function(client) {
+      self._configureDebugChannel(client, args.debugdecch, "__mini_a_de_llm_debug", "Decision LLM")
+    }, enabled: isUnDef(args.usedecide) || toBoolean(args.usedecide) === true, observe: function(event) {
       var metrics = self._decisionMetrics
       if (event.called) metrics.calls++
       metrics.duration_ms += event.duration_ms

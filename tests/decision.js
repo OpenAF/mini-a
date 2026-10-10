@@ -55,6 +55,36 @@
     expectError(function() { manager(function() {}, { modeldec: "invalid" }).decide({}, {}) }, "MINI_A_DECISION_INVALID_CONFIG")
   }
 
+  exports.testDecisionDebugChannel = function() {
+    var a = new MiniA(), attached = [], clients = 0
+    a.fnI = function() {}
+    var channel = "__mini_a_decision_test_debug"
+    try {
+      a._initDecisionRuntime({ modeldec: stringify(config), debugdecch: stringify({ name: channel, type: "simple" }) })
+      a._decision._options.clientFactory = function() {
+        clients++
+        return {
+          getCapabilities: function() { return caps },
+          setDebugCh: function(name) { attached.push(name) },
+          decideWithStats: function() { return { response: { answers: {} }, stats: {} } }
+        }
+      }
+      a._decision.decide({}, {})
+      a._decision.decide({}, {})
+      ow.test.assert(clients, 2, "Decisions keep fresh clients")
+      ow.test.assert(attached, [channel, channel], "Every decision client receives the debug channel")
+      ow.test.assert($ch().list().indexOf(channel) >= 0, true, "Debug channel is created")
+      a._initDecisionRuntime({ modeldec: stringify(config) })
+      a._decision._options.clientFactory = function() {
+        return { getCapabilities: function() { return caps }, decideWithStats: function() { return {} },
+          setDebugCh: function() { throw "Debugging must remain opt-in" } }
+      }
+      a._decision.decide({}, {})
+    } finally {
+      if ($ch().list().indexOf(channel) >= 0) $ch(channel).destroy()
+    }
+  }
+
   exports.testActivationAndErrors = function() {
     var calls = 0
     var factory = function() { calls++; return {} }

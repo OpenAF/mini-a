@@ -442,4 +442,56 @@
     })
   }
 
+  exports.testSkillRequirementsGateDiscovery = function() {
+    fixture(function(root) {
+      writeSkill(root, "plain", "Plain")
+      writeSkill(root, "gated", "Gated", "requires:\n  anyTools: [alpha, beta]\n  anyFlags: [usecharts]\n")
+      writeSkill(root, "alltools", "All", "requires:\n  tools: [alpha, beta]\n")
+      var agent = agentFor(root)
+      agent._skillUtils._skillVisibilityFn = function(req) { return agent._skillRequirementsMet(req, agent._gateArgs) }
+      var names = function() { return agent._skillUtils._listSkills({}).map(function(i) { return i.name }).sort().join(",") }
+      var names2 = function() { return agent._skillUtils.skills({ operation: "list" }).skills.map(function(i) { return i.name }).sort().join(",") }
+      agent.mcpToolNames = []; agent._utilsToolNames = []; agent._gateArgs = {}
+      ow.test.assert(names(), "plain", "Unmet requirements hide gated skills; requires-less skills stay")
+      ow.test.assert(names2(), "plain", "Model-callable skills list honors gating")
+      var hidden = agent._skillUtils.skills({ operation: "render", name: "gated" })
+      ow.test.assert(isDef(hidden.error) || (isString(hidden) && hidden.indexOf("[ERROR]") === 0), true, "Render of hidden skill fails")
+      agent._utilsToolNames = ["alpha"]
+      ow.test.assert(names(), "gated,plain", "anyTools satisfied by utils tool")
+      agent._utilsToolNames = []; agent.mcpToolNames = ["beta"]
+      ow.test.assert(names(), "gated,plain", "anyTools satisfied by MCP tool")
+      agent.mcpToolNames = []; agent._gateArgs = { usecharts: true }
+      ow.test.assert(names(), "gated,plain", "anyFlags satisfied by flag")
+      agent._utilsToolNames = ["alpha", "beta"]; agent._gateArgs = {}
+      ow.test.assert(names(), "alltools,gated,plain", "All-of tools satisfied")
+      agent._utilsToolNames = ["alpha"]
+      ow.test.assert(agent._skillRequirementsMet({ tools: ["alpha", "beta"] }, {}), false, "All-of needs every tool")
+      ow.test.assert(agent._skillRequirementsMet({ anyTools: ["shell", "bash"] }, { useshell: true }), true, "shell/bash map to useshell")
+      ow.test.assert(agent._skillRequirementsMet({ anyTools: ["shell", "bash"] }, {}), false, "shell/bash hidden without useshell")
+      ow.test.assert(agent._skillRequirementsMet(__, {}), true, "No requires means available")
+    })
+  }
+
+  exports.testBundledToolSkillsGatedByEnabledTools = function() {
+    var inv = function(options) {
+      var agent = new MiniA()
+      agent.fnI = function() {}; agent._trace = function() {}
+      agent._agentState = {}; agent._runtime = { context: [] }
+      agent._getPluginsDiscovery = function() { return { skillsRoots: [] } }
+      agent._resetSkillRuntime(options)
+      agent.mcpToolNames = []
+      agent._createUtilsMcpConfig(merge({ utilsroot: String(java.lang.System.getProperty("java.io.tmpdir")) }, options))
+      return agent._skillUtils._listSkills({}).map(function(i) { return i.name }).filter(function(n) { return /^mini-a-(files|planning|memory|shell|visual-output)$/.test(n) }).sort().join(",")
+    }
+    ow.test.assert(inv({ useskills: true }), "", "Tool skills hidden when utils tools are off")
+    var legacy = inv({ useskills: true, useutils: true })
+    ow.test.assert(legacy.indexOf("mini-a-files") >= 0 && legacy.indexOf("mini-a-planning") >= 0 && legacy.indexOf("mini-a-memory") >= 0, true, "Files, planning and memory visible with useutils")
+    ow.test.assert(legacy.indexOf("mini-a-shell") < 0, true, "Shell skill hidden without useshell")
+    ow.test.assert(inv({ useskills: true, useutils: true, useshell: true }).indexOf("mini-a-shell") >= 0, true, "Shell skill visible with useshell")
+    var std = inv({ useskills: true, useutils: true, usestdutils: true })
+    ow.test.assert(std.indexOf("mini-a-files") >= 0, true, "Files skill visible under usestdutils aliases")
+    ow.test.assert(inv({ useskills: true, useutils: true, usecharts: true }).indexOf("mini-a-visual-output") >= 0, true, "Visual skill visible via flag")
+    ow.test.assert(inv({ useskills: true, useutils: true, utilsdeny: "memoryStore" }).indexOf("mini-a-memory") < 0, true, "Denied tool hides its skill")
+  }
+
 })()

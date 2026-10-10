@@ -2,6 +2,16 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA History VM Tests::GoalAndEvidencePaging
+  from: MiniA History VM Tests::Init
+  to: oJob Test
+  exec: args.func = require("tests/historyVM.js").testPagingRetainsGoalAndEvidence
+
+- name: MiniA History VM Tests::NativeRoundBudgetGuard
+  from: MiniA History VM Tests::Init
+  to: oJob Test
+  exec: args.func = require("tests/historyVM.js").testNativeRoundBudgetGuard
+
 - name: MiniA History VM Tests::EmergencyRecovery
   from: MiniA History VM Tests::Init
   to: oJob Test
@@ -221,6 +231,8 @@ jobs:
   exec: args.func = require("tests/historyVM.js").testRecoverBranchWithoutCheckpoint
 
 todo:
+- MiniA History VM Tests::GoalAndEvidencePaging
+- MiniA History VM Tests::NativeRoundBudgetGuard
 - MiniA History VM Tests::EmergencyRecovery
 - MiniA History VM Tests::EmergencyToolProtocol
 - MiniA History VM Tests::CleanupSymbolicLinks

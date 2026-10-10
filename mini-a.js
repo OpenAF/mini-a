@@ -1924,7 +1924,7 @@ MiniA.prototype._sanitizeArgsForAudit = function(args) {
   var self = this
   var out = {}
   var redactKeys = {
-    model: true, modellc: true, modelval: true, modeldec: true, auditch: true, debugch: true, debuglcch: true, debugvalch: true
+    model: true, modellc: true, modelval: true, modeldec: true, auditch: true, debugch: true, debuglcch: true, debugdecch: true, debugvalch: true
   }
   Object.keys(args).forEach(function(key) {
     if (!isString(key) || key.length === 0) return
@@ -2577,6 +2577,7 @@ MiniA.prototype.getCurrentConversationStatus = function() {
 // the last input per consumer so our own prepared prompts are never nested.
 MiniA.prototype._prepareContextInvocation = function(llm, prompt, consumer, recovery) {
   var key = consumer || "executor"
+  this._guardNativeToolRounds(llm, key)
   if (!isMap(this._contextInvocationInputs)) this._contextInvocationInputs = {}
   var previous = this._contextInvocationInputs[key]
   if (isMap(previous) && prompt === previous.prepared) prompt = previous.original
@@ -3016,6 +3017,48 @@ MiniA.prototype._restoreNoToolsModels = function(preserveConversation) {
     if (isDef(rebuiltLowCost.bare)) this._lcLlmNoTools = rebuiltLowCost.bare
     if (isDef(rebuiltLowCost.working)) this.lc_llm = rebuiltLowCost.working
   }
+}
+
+// OpenAF adapters recurse through these methods after native tool execution.
+// Re-project at each dispatch, after complete tool replies have entered history.
+MiniA.prototype._guardNativeToolRounds = function(llm, consumer) {
+  if (!isObject(llm) || !isFunction(llm.getGPT)) return
+  var gpt = llm.getGPT(), agent = this
+  if (!isObject(gpt) || !isObject(gpt.model)) return
+  gpt.model._miniABudgetConsumer = consumer || "executor"
+  ;["rawPrompt", "rawPromptStream"].forEach(function(name) {
+    var original = gpt.model[name]
+    if (!isFunction(original) || original._miniANativeBudgetGuard === agent) return
+    var guarded = function() {
+      var vm = agent._historyVm
+      if (gpt.model._miniABudgetConsumer === "executor" && agent._useToolsActual === true && isObject(vm) && vm.contextVirtualization && !vm.contextVirtualizationShadow) {
+        var pending = arguments[0]
+        var text = isString(pending) ? pending : isUnDef(pending) || isArray(pending) && pending.length === 0 ? "" : stringify(pending, __, "")
+        agent._projectContextInvocation(llm, text, "executor")
+      }
+      return original.apply(this, arguments)
+    }
+    guarded._miniANativeBudgetGuard = agent
+    gpt.model[name] = guarded
+  })
+}
+
+// Parse only a whole reply envelope here. The permissive action-recovery parser
+// can find JSON examples or chart arrays inside an otherwise complete report.
+MiniA.prototype._nativeToolFinalText = function(response) {
+  var text = isString(response) ? response : this._extractPrimaryResponseText(response)
+  if (!isString(text) || text.trim().length === 0) return __
+  text = text.trim()
+  var candidate = text.replace(/^```(?:json|js|javascript)?\s*\n([\s\S]*?)\n```\s*$/i, "$1").trim()
+  if (/^[\[{]/.test(candidate)) {
+    try {
+      var parsed = JSON.parse(candidate)
+      if (isMap(parsed) && isDef(parsed.action) || isArray(parsed)) return __
+    } catch(ignore) {
+      if (/^\{|^\[\s*\{/.test(candidate)) return __
+    }
+  }
+  return text
 }
 
 MiniA.prototype._promptStreamWithStatsCompat = function(llmInstance, prompt, jsonFlag, onDelta) {
@@ -8763,6 +8806,7 @@ MiniA.prototype._injectJustInTimeMemory = function(runtime, toolName, phase) {
 MiniA.prototype._syncWorkingMemoryState = function() {
   if (!isObject(this._agentState)) this._agentState = {}
   if (this._memoryConfig.enabled !== true) {
+    this._lastWorkingMemoryCounts = __
     delete this._agentState.workingMemory
     delete this._agentState.workingMemorySession
     delete this._agentState.workingMemorySessionId
@@ -8781,12 +8825,20 @@ MiniA.prototype._syncWorkingMemoryState = function() {
   var resolved = this._buildResolvedWorkingMemory(this._memoryScope)
   if (isObject(resolved)) {
     this._agentState.workingMemory = resolved
-    var _nonEmpty = Object.keys(resolved.sections || {}).filter(function(k) { return resolved.sections[k].length > 0 })
+    var _nonEmpty = Object.keys(resolved.sections || {}).sort().filter(function(k) { return resolved.sections[k].length > 0 })
     if (_nonEmpty.length > 0) {
       var _counts = _nonEmpty.map(function(k) { return k + "=" + resolved.sections[k].length }).join(", ")
-      this.fnI("info", `📋 [mem:list] ${_counts}`)
+      if (_counts !== this._lastWorkingMemoryCounts) {
+        this._lastWorkingMemoryCounts = _counts
+        this.fnI("info", `📋 [mem:list] ${_counts}`)
+      }
+    } else {
+      this._lastWorkingMemoryCounts = __
     }
-  } else delete this._agentState.workingMemory
+  } else {
+    this._lastWorkingMemoryCounts = __
+    delete this._agentState.workingMemory
+  }
 }
 
 MiniA.prototype._persistWorkingMemoryNow = function(reason) {
@@ -10991,6 +11043,8 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     if (!this._skillRuntime) this._resetSkillRuntime(args)
     fileTool._skillRuntime = this._skillRuntime
     fileTool._skillCollisionFn = function(event) { parent._skillRuntime.event("collision", event) }
+    this._skillGateArgs = args
+    fileTool._skillVisibilityFn = function(requires) { return parent._skillRequirementsMet(requires, parent._skillGateArgs) }
     if (fileTool._initialized !== true) {
       var initResult = fileTool.init(toolOptions)
       if (isString(initResult) && initResult.indexOf("[ERROR]") === 0) {
@@ -11094,9 +11148,13 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       _STD_ALIAS_NAMES.forEach(function(n) { _aliasSet[n] = true })
       methodNames = methodNames.filter(function(name) { return _aliasSet[name] !== true })
     }
+    this._utilsToolNames = methodNames.slice()
     this._skillLocalEnabled = methodNames.indexOf("skills") >= 0 || methodNames.indexOf("skill") >= 0
     this._skillWikiEnabled = methodNames.indexOf("skillwiki") >= 0
     if (!this._skillLocalEnabled) this._availableSkills = []
+    else if (includeSkillsTool) {
+      try { this._availableSkills = fileTool._listSkills({}) } catch(e) { this._availableSkills = [] }
+    }
     if (methodNames.length === 0) return __
 
     var formatResponse = function(result) {
@@ -13853,6 +13911,30 @@ MiniA.prototype._scoreInitialSkillActivation = function(skill, goalText, hookCon
   return { score: this._scoreSkillForPrompt(skill, goalText, hookContextText), reason: "rank" }
 }
 
+// Evaluates a skill's `requires` map against the effective tool/flag set.
+// tools: all-of; anyTools / anyFlags: at least one (either list satisfying is enough
+// when both are given). Skills without a `requires` map are always available.
+MiniA.prototype._skillRequirementsMet = function(requires, args) {
+  if (!isMap(requires)) return true
+  args = isMap(args) ? args : {}
+  var parent = this
+  var list = function(v) { return isArray(v) ? v : (isString(v) ? [ v ] : []) }
+  var present = function(tool) {
+    if (tool === "shell" || tool === "bash") return args.useshell === true
+    if ((parent.mcpToolNames || []).indexOf(tool) >= 0) return true
+    return (parent._utilsToolNames || []).indexOf(tool) >= 0
+  }
+  var allTools = list(requires.tools), anyTools = list(requires.anyTools), anyFlags = list(requires.anyFlags)
+  if (allTools.some(function(t) { return !present(t) })) return false
+  if (anyTools.length === 0 && anyFlags.length === 0) return true
+  return anyTools.some(present) || anyFlags.some(function(f) { return toBoolean(args[f]) === true })
+}
+
+MiniA.prototype._refreshAvailableSkills = function() {
+  if (this._skillLocalEnabled !== true || !isObject(this._skillUtils)) return
+  try { this._availableSkills = this._skillUtils._listSkills({}) } catch(e) { this._availableSkills = [] }
+}
+
 MiniA.prototype._loadSkillFrontMatter = function(skill) {
   if (!isMap(skill) || !isString(skill.templatePath) || skill.templatePath.length === 0) return {}
   this._filePath(skill.templatePath)
@@ -15954,7 +16036,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "conversation", "historyvm", "historyvmmode", "historyvmshadow", "contextvirtualization", "contextvirtualizationshadow", "shell", "usesandbox", "sandboxprofile", "sandboxnonetwork", "shellallow", "shellbanextra",
     "shelltimeout", "shellmaxbytes", "toolcachettl", "mcplazy", "mcpdynamic", "mcpproxy", "mcpproxythreshold", "toolargcheck", "toolargrepair",
     "mcpproxytoon", "contextguard", "contextguardbudget", "toolresultmaxinline", "readresultmaxmatches",
-    "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugvalch", "capabilityselection", "capabilitylimit", "policy", "policyfile", "planfile",
+    "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugdecch", "debugvalch", "capabilityselection", "capabilitylimit", "policy", "policyfile", "planfile",
     "planformat", "plancontent", "planstyle", "forceplanning", "saveplannotes", "outputfile", "updatefreq",
     "updateinterval", "forceupdates", "planlog", "nosetmcpwd", "noagentsmd", "utilsroot", "utilsallow", "utilsdeny",
     "useskills", "usestdutils", "useasciiviz", "mini-a-docs", "miniadocs",
@@ -16493,6 +16575,7 @@ MiniA.prototype.init = function(args) {
       { name: "metricsch", type: "string", default: __ },
       { name: "debugch", type: "string", default: __ },
       { name: "debuglcch", type: "string", default: __ },
+      { name: "debugdecch", type: "string", default: __ },
       { name: "debugvalch", type: "string", default: __ },
       { name: "valtools", type: "boolean", default: false },
       { name: "planfile", type: "string", default: __ },
@@ -17396,6 +17479,7 @@ MiniA.prototype.init = function(args) {
       })
 
       this.fnI("done", `Total MCP tools available: ${this.mcpTools.length}`)
+      this._refreshAvailableSkills()
       if (args.usejsontool === true) {
         this.fnI("info", `JSON compatibility tool active. Registered MCP tools: ${this.mcpToolNames.join(", ")}`)
       }
@@ -20505,10 +20589,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var nativeToolFinish = isMap(rmsg) && isString(rmsg.finishReason) ? rmsg.finishReason : ""
         var nativeToolCalls = isMap(rmsg) && isArray(rmsg.toolCalls) ? rmsg.toolCalls : []
         if (isString(nativeToolText) && nativeToolText.trim().length > 0 && nativeToolCalls.length === 0 && (nativeToolFinish.length === 0 || nativeToolFinish === "stop")) {
-          var nativeToolAnswer = nativeToolText.trim()
-          var nativeToolParsed = nativeToolAnswer === "{}" ? {} : this._parseModelJsonResponse(nativeToolAnswer)
-          var nativeToolIsActionPayload = isArray(nativeToolParsed) || (isMap(nativeToolParsed) && isDef(nativeToolParsed.action))
-          if (!nativeToolIsActionPayload && nativeToolAnswer !== "{}") {
+          var nativeToolAnswer = this._nativeToolFinalText(nativeToolText)
+          if (isString(nativeToolAnswer) && nativeToolAnswer !== "{}") {
             runtime.context.push(`[OBS ${step + 1}] (recover) treating native tool follow-up text as final answer.`)
             global.__mini_a_metrics.finals_made.inc()
             global.__mini_a_metrics.goals_achieved.inc()

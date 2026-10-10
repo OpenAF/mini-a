@@ -193,7 +193,7 @@
   exports.testEmergencyToolProtocol = function() {
     withVm(function(vm) {
       var history = [{ role: "assistant", content: "", tool_calls: [{ id: "a", type: "function", function: { name: "lookup", arguments: "{}" } }] },
-        { role: "tool", tool_call_id: "a", content: new Array(40000).join("output ") },
+        { role: "tool", tool_call_id: "a", tool_name: "lookup", content: new Array(40000).join("output ") },
         { role: "assistant", content: [{ type: "image", url: "unknown" }] },
         { role: "assistant", content: "incomplete", tool_calls: [{ id: "missing", type: "function", function: { name: "lookup", arguments: "{}" } }] }]
       vm.captureProviderConversation(history)
@@ -201,8 +201,80 @@
       ow.test.assert(result.overflow, false, "Completed recent tools compact safely")
       ow.test.assert(result.conversation[0].tool_calls[0].id, "a", "Call IDs survive")
       ow.test.assert(result.conversation[1].tool_call_id, "a", "Tool reply stays paired")
+      ow.test.assert(result.conversation[1].tool_name, "lookup", "Ollama tool name survives paging")
+      ow.test.assert(stringify(vm.materializeConversation(result.conversation)), stringify(history), "Provider metadata and full tool output stay canonical")
       ow.test.assert(stringify(result.conversation[2], __, ""), stringify(history[2], __, ""), "Unknown content stays exact")
       ow.test.assert(stringify(result.conversation[3], __, ""), stringify(history[3], __, ""), "Incomplete exchange stays exact")
+    }, { contextVirtualization: true })
+  }
+
+  exports.testNativeRoundBudgetGuard = function() {
+    load("mini-a.js")
+    ;[false, true].forEach(function(streaming) {
+      withVm(function(vm) {
+        var agent = new MiniA(), requests = 0, executions = 0
+        agent.fnI = function() {}
+        agent._historyVm = vm
+        agent._sessionArgs = { goal: "Inspect diffs" }
+        agent._getEffectiveContextBudget = function() { return 5000 }
+        agent._oaf_model = { type: "ollama", model: "fixture", url: "http://localhost:1", max_tokens: 256 }
+        agent._useToolsActual = true
+        var huge = new Array(5001).join("diff output ")
+        var llm = $llm(agent._oaf_model).withTool("lookup", "Read fixture", { type: "object", properties: {} }, function() { executions++; return huge })
+        agent.llm = llm
+        var model = llm.getGPT().model
+        var reply = function(uri, body) {
+          if (isArray(body.messages) && body.messages.length === 0) return { message: { role: "assistant", content: "" }, done: true }
+          requests++
+          ow.test.assert(vm.estimateTokens(stringify(body.messages, __, "")) + vm.estimateTokens(stringify(body.tools, __, "")) + 256 + 256 <= 5000, true, "Every actual native dispatch fits, including recursive tool rounds")
+          return { message: requests < 3
+            ? { role: "assistant", content: "", tool_calls: [{ id: "call-" + requests, function: { name: "lookup", arguments: { round: requests } } }] }
+            : { role: "assistant", content: "Complete report" }, done: true, done_reason: requests < 3 ? "tool_calls" : "stop", prompt_eval_count: 100, eval_count: 10 }
+        }
+        model._request = reply
+        model._requestStream = function(uri, body) {
+          return new java.io.ByteArrayInputStream(new java.lang.String(stringify(reply(uri, body), __, "") + "\n").getBytes("UTF-8"))
+        }
+        var prompt = agent._prepareContextInvocation(llm, "Inspect diffs", "executor")
+        var guarded = model.rawPrompt
+        agent._guardNativeToolRounds(llm)
+        ow.test.assert(model.rawPrompt === guarded, true, "Guard installation is idempotent")
+        var response = streaming ? model.rawPromptStream(prompt, __, __, false, __, function() {}) : model.rawPrompt(prompt)
+        ow.test.assert(agent._extractPrimaryResponseText(response), "Complete report", "Final native response survives paging")
+        ow.test.assert(requests, 3, "Both recursive rounds dispatch exactly once")
+        ow.test.assert(executions, 2, "Tools are never replayed")
+        var canonical = vm.materializeConversation(llm.getGPT().getConversation())
+        ow.test.assert(canonical.filter(function(entry) { return entry.role === "tool" && entry.content === huge }).length, 2, "Full tool results remain available in canonical history")
+        llm.getGPT().setConversation([{ role: "user", content: huge }])
+        var failure
+        try { if (streaming) model.rawPromptStream([]); else model.rawPrompt([]) } catch(e) { failure = e }
+        ow.test.assert(failure.code, "MINIA_CONTEXT_BUDGET", "Irreducible input stops recursive dispatch")
+        ow.test.assert(requests, 3, "An overflowing request is never sent")
+      }, { contextVirtualization: true })
+    })
+  }
+
+  exports.testPagingRetainsGoalAndEvidence = function() {
+    withVm(function(vm) {
+      var goal = "SYSTEM REMINDER:\nBEGIN_UNTRUSTED_GOAL\nCompare local and branch changes.\nEND_UNTRUSTED_GOAL\nCURRENT STATE:\nfacts: 1"
+      var history = [{ role: "system", content: "Analyze repository evidence." }, { role: "user", content: goal }]
+      for (var i = 0; i < 12; i++) history.push({ role: "assistant", content: new Array(300).join("older inspection ") })
+      history.push({ role: "assistant", content: "Ready to report." })
+      vm.captureProviderConversation(history)
+      ;[false, true].forEach(function(emergency) {
+        var result = vm.projectActiveContext(history, { freezeUnselected: true, budget: 3000, recentCount: 2, emergency: emergency })
+        ow.test.assert(result.overflow, false, "Paging still fits the request budget")
+        ow.test.assert(result.conversation.some(function(entry) { return entry.role === "user" && entry.content === goal }), true, "Latest goal remains exact after many native tool rounds")
+        ow.test.assert(stringify(vm.materializeConversation(result.conversation)), stringify(history), "Goal protection preserves canonical backing")
+      })
+      var evidence = { role: "tool", content: "diff --git a/mini-a.js b/mini-a.js\n+ fixed goal retention", tool_name: "bash" }
+      var event = vm.append("provider_message", evidence, { providerIndex: history.length, role: "tool" })
+      var object = vm._providerObjectForIndex(history.length)
+      ow.test.assert(isDef(event), true, "Evidence is captured")
+      var detail = vm.getRepresentation(object.handle, "L3")
+      ow.test.assert(detail.text.indexOf("fixed goal retention") >= 0, true, "Detailed summaries show evidence rather than envelope schema")
+      ow.test.assert(detail.text.indexOf("role: string") < 0, true, "Provider metadata does not replace the evidence")
+      ow.test.assert(stringify(vm.getRepresentation(object.handle, "L4").content), stringify(evidence), "Exact provider envelope stays unchanged")
     }, { contextVirtualization: true })
   }
 

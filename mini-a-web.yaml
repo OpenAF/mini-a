@@ -28,6 +28,10 @@ help:
     desc     : SLON/JSON definition or native file path for a debug channel for the low-cost LLM
     example  : "(type: file, options: (file: '/tmp/mini-a-lc-debug.ndjson'))"
     mandatory: false
+  - name     : debugdecch
+    desc     : SLON/JSON definition or native file path for a debug channel for the decision LLM
+    example  : "(type: file, options: (file: '/tmp/mini-a-de-debug.ndjson'))"
+    mandatory: false
   - name     : debugvalch
     desc     : SLON/JSON definition or native file path for a debug channel for the validation LLM
     example  : "(type: file, options: (file: '/tmp/mini-a-val-debug.ndjson'))"
@@ -1642,6 +1646,7 @@ jobs:
       debugfile       : isString().default(__)
       debugch         : isString().default(__)
       debuglcch       : isString().default(__)
+      debugdecch      : isString().default(__)
       debugvalch      : isString().default(__)
       usestream       : toBoolean().isBoolean().default(false)
       showthinking    : toBoolean().isBoolean().default(false)

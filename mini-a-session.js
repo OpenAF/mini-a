@@ -866,6 +866,7 @@ function MiniAInteractiveSession(args, adapter) {
     metricsch      : { type: "string", dataEditor: "map", description: "Metrics channel definition or native file path" },
     debugch        : { type: "string", dataEditor: "map", description: "Debug channel definition or native file path for the main model." },
     debuglcch      : { type: "string", dataEditor: "map", description: "Debug channel definition or native file path for the low-cost model." },
+    debugdecch     : { type: "string", dataEditor: "map", description: "Debug channel definition or native file path for the decision model." },
     debugvalch     : { type: "string", dataEditor: "map", description: "Debug channel definition or native file path for the validation model." },
     deepresearch   : { type: "boolean", default: false, description: "Enable deep research mode with iterative validation" },
     maxcycles      : { type: "number", default: 3, description: "Maximum research cycles in deep research mode" },
@@ -4917,14 +4918,13 @@ function MiniAInteractiveSession(args, adapter) {
       printnl(_msg)
       _prevEventRenderLines = _getRenderedLineCount(_msg)
       _prevEventLastUpdate = now()
-      if (type != "final" && type != "error") {
+      if (type != "final" && type != "error" && !(type === "info" && /\[mem:(list|read|write)\]/.test(message))) {
         var _animEventStartTime = now()
         var _animIsInteracting = (
           type === "input" ||
           type === "rate" ||
           (type === "mcp" && /^(Preparing|Initializing|Analyzing|Requesting)\b/.test(message)) ||
-          (type === "info" && /^Execution of action '.+' finished (successfully|unsuccessfully)\b/.test(message)) ||
-          (type === "info" && /\[(mem:(list|read|write))\]/.test(message))
+          (type === "info" && /^Execution of action '.+' finished (successfully|unsuccessfully)\b/.test(message))
         )
         var _animBaseMsg = _animIsInteracting ? message.replace(/\.\.\.+$/, "") : message
         _prevEventAnimatedRenderer = function(resetToDefault) {

@@ -26,3 +26,16 @@ Within a folder, template precedence is `SKILL.yaml`, `SKILL.yml`, `SKILL.json`,
 Use a wiki page with frontmatter `type: skill`, `name`, and `description`. Optional `tags` and `intent` support discovery. Supply navigable headings such as When to use, Procedure, and Acceptance checks. Ordinary wiki pages are not automatically skills. Use managed wiki writes and regenerate indexes/reindex only when part of the authorized authoring work and supported by the backend. Verify `skillwiki` context/search/open/read/resolve against the selected source and access mode.
 
 Local invocation: `$local:<name> "argument"`; virtual invocation uses the exact `wiki:` reference returned by discovery. Bare names can be ambiguous across providers. User/default, extra, and plugin roots precede bundled roots; first local root wins.
+
+## Availability requirements
+
+A local skill may declare `requires` frontmatter. A skill whose requirements are unmet is hidden from listing, search, `$name` matching, and automatic selection:
+
+```yaml
+requires:
+  tools: [name, ...]     # all of these tools must be present
+  anyTools: [name, ...]  # at least one tool present
+  anyFlags: [usecharts]  # at least one Mini-A option is true
+```
+
+When both `anyTools` and `anyFlags` are given, either satisfies the skill. `shell` and `bash` count as present when `useshell=true`. Skills without `requires` are always available.

@@ -1,4 +1,19 @@
 jobs:
+- name: MiniA Core Tests::NativeBudgetGuardPreservesAuxiliaryAndShadow
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testNativeBudgetGuardPreservesAuxiliaryAndShadow
+
+- name: MiniA Core Tests::NativeReportWithEmbeddedJsonCompletes
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testNativeReportWithEmbeddedJsonCompletes
+
+- name: MiniA Core Tests::MemorySnapshotLoggingOnlyChanges
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testMemorySnapshotLoggingOnlyChanges
+
 - name: MiniA Core Tests::BudgetFailureStopsDispatch
   from: MiniA Core Tests::Init
   to: oJob Test
@@ -1200,6 +1215,9 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Core Tests::NativeBudgetGuardPreservesAuxiliaryAndShadow
+- MiniA Core Tests::NativeReportWithEmbeddedJsonCompletes
+- MiniA Core Tests::MemorySnapshotLoggingOnlyChanges
 - MiniA Core Tests::BudgetFailureStopsDispatch
 - MiniA Core Tests::AutomaticNoteBudgetRecovery
 - MiniA Core Tests::WikiContinuationAndBudgetForwarding

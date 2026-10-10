@@ -82,6 +82,14 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/skillRuntime.js").testBundledConsoleDiscovery
 
+- name: MiniA Skill Runtime::testSkillRequirementsGateDiscovery
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testSkillRequirementsGateDiscovery
+
+- name: MiniA Skill Runtime::testBundledToolSkillsGatedByEnabledTools
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testBundledToolSkillsGatedByEnabledTools
+
 todo:
 - MiniA Bundled Skills::testBundledConsoleDiscovery
 - MiniA Bundled Skills::testBundledSkillsActivation
@@ -103,3 +111,5 @@ todo:
 - MiniA Skill Runtime::testSkillSelectorDefaultsAndFallbacks
 - MiniA Skill Runtime::testSkillCodeMentionsAndUnknownRequestsAreIgnored
 - MiniA Skill Runtime::testSkillActivityLogsDescribeSelectionAndLoading
+- MiniA Skill Runtime::testSkillRequirementsGateDiscovery
+- MiniA Skill Runtime::testBundledToolSkillsGatedByEnabledTools

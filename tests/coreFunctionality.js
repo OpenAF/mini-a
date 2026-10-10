@@ -6,6 +6,87 @@
     return new MiniA()
   }
 
+  exports.testNativeReportWithEmbeddedJsonCompletes = function() {
+    var report = '# Impact report\n\n```json\n[{"value":4320,"label":"Branch insertions"}]\n```\n\nReview complete.'
+    var agent = createAgent(), requests = 0
+    agent.fnI = function() {}
+    var args = { goal: "Inspect fixture", raw: true, maxsteps: 2, usememory: false, usetools: true, usejsontool: false, usestream: true }
+    try {
+      agent.init(args)
+      agent._use_lc = false
+      agent._supportsPromptStreamWithStatsCompat = function() { return true }
+      agent._prepareContextInvocation = function(llm, prompt) {
+        if (requests > 0) throw new Error("Completed report must not trigger another preparation")
+        return prompt
+      }
+      agent._promptStreamWithStatsCompat = function() {
+        requests++
+        agent._useToolsActual = true
+        agent._runtime.modelToolCallDetected = true
+        return { response: { content: report, events: [{ message: { tool_calls: [{ function: { name: "lookup", arguments: {} } }] } }] }, stats: {} }
+      }
+      ow.test.assert(agent.start(merge({}, args)), report, "A report containing a chart array completes through the real executor")
+      ow.test.assert(requests, 1, "No retry or historical tool replay follows a complete answer")
+      ;['{"action":"final","answer":"ok"}', '[{"action":"think"}]', '```json\n{"action":"final","answer":"ok"}\n```', '{"action":'].forEach(function(text) {
+        ow.test.assert(isUnDef(agent._nativeToolFinalText(text)), true, "Action envelopes still use action processing and malformed envelopes still recover")
+      })
+    } finally { agent._stopAgentResources() }
+  }
+
+  exports.testMemorySnapshotLoggingOnlyChanges = function() {
+    var agent = createAgent(), logs = [], resolved = { sections: { facts: [{ value: "first" }], artifacts: [] } }
+    agent._memoryConfig = { enabled: true }
+    agent._buildResolvedWorkingMemory = function() { return resolved }
+    agent.fnI = function(type, text) { logs.push(text) }
+    agent._syncWorkingMemoryState()
+    agent._syncWorkingMemoryState()
+    resolved.sections.facts[0].value = "updated"
+    agent._syncWorkingMemoryState()
+    ow.test.assert(logs.length, 1, "Repeated syncs and content-only changes do not repeat counts")
+    ow.test.assert(agent._agentState.workingMemory.sections.facts[0].value, "updated", "Silent sync still refreshes memory state")
+    resolved.sections.artifacts.push({ value: "new" })
+    agent._syncWorkingMemoryState()
+    ow.test.assert(logs.length, 2, "Changed counts produce one update")
+    agent._memoryConfig.enabled = false
+    agent._syncWorkingMemoryState()
+    agent._memoryConfig.enabled = true
+    agent._syncWorkingMemoryState()
+    ow.test.assert(logs.length, 3, "Re-enabling memory emits the initial snapshot")
+  }
+
+  exports.testNativeBudgetGuardPreservesAuxiliaryAndShadow = function() {
+    var agent = createAgent(), checks = 0, dispatches = 0
+    agent._useToolsActual = true
+    agent._historyVm = { contextVirtualization: true, contextVirtualizationShadow: false }
+    var model = { rawPrompt: function(prompt, modelName) {
+      dispatches++
+      ow.test.assert(this === model, true, "Guard preserves adapter receiver")
+      ow.test.assert(modelName, "fixture", "Guard preserves dispatch arguments")
+      return prompt
+    } }
+    var llm = { getGPT: function() { return { model: model } } }
+    agent._projectContextInvocation = function(instance, prompt, consumer) {
+      checks++
+      ow.test.assert(instance === llm && consumer === "executor", true, "Only executor history is rebound")
+      return prompt
+    }
+    agent._guardNativeToolRounds(llm, "executor")
+    ow.test.assert(model.rawPrompt("executor", "fixture"), "executor", "Executor return value stays exact")
+    agent._guardNativeToolRounds(llm, "advisor")
+    model.rawPrompt("auxiliary", "fixture")
+    agent._guardNativeToolRounds(llm, "executor")
+    agent._historyVm.contextVirtualizationShadow = true
+    model.rawPrompt("shadow", "fixture")
+    agent._historyVm.contextVirtualizationShadow = false
+    agent._historyVm.contextVirtualization = false
+    model.rawPrompt("disabled", "fixture")
+    agent._historyVm.contextVirtualization = true
+    agent._useToolsActual = false
+    model.rawPrompt("action mode", "fixture")
+    ow.test.assert(checks, 1, "Auxiliary, shadow, disabled, and non-native calls bypass executor projection")
+    ow.test.assert(dispatches, 5, "All modes still dispatch exactly once")
+  }
+
   exports.testJsonDispatchSessionMode = function() {
     var agent = createAgent()
     agent.fnI = function() {}

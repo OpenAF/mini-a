@@ -349,6 +349,10 @@ function __miniAInstallSkillRuntime() {
           var missing = requirements.tools.filter(function(tool) { return tool === "shell" ? args.useshell !== true : (parent.mcpToolNames || []).indexOf(tool) < 0 })
           if (missing.length) { runtime.event("missing_prerequisites", { ref: item.id, tools: missing }); throw new Error("skill-required-tools-unavailable: " + missing.join(", ")) }
         }
+        if (requirements && (isArray(requirements.anyTools) || isArray(requirements.anyFlags)) && !parent._skillRequirementsMet(requirements, args)) {
+          runtime.event("missing_prerequisites", { ref: item.id, anyTools: requirements.anyTools, anyFlags: requirements.anyFlags })
+          throw new Error("skill-required-tools-unavailable: any of " + [].concat(requirements.anyTools || [], requirements.anyFlags || []).join(", "))
+        }
         var result
         if (item.source === "local") result = utils.skills({ operation: "render", name: item.name, args: item.invocationArgs || "", progressive: true, maxChars: args.skillcontextchars || 8000, _userSelected: explicit.indexOf(item) >= 0 })
         else {

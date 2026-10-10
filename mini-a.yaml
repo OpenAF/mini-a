@@ -829,6 +829,10 @@ help:
     desc     : SLON/JSON definition or native file path for a debug channel for low-cost LLM debugging (requires $llm.setDebugCh support)
     example  : "(type: file, options: (file: '/tmp/mini-a-lc-llm-debug.log'))"
     mandatory: false
+  - name     : debugdecch
+    desc     : SLON/JSON definition or native file path for a debug channel for decision LLM debugging (requires $llm.setDebugCh support)
+    example  : "(type: file, options: (file: '/tmp/mini-a-de-llm-debug.log'))"
+    mandatory: false
   - name     : debugvalch
     desc     : SLON/JSON definition or native file path for a debug channel for validation LLM debugging (requires $llm.setDebugCh support)
     example  : "(type: file, options: (file: '/tmp/mini-a-val-llm-debug.log'))"
@@ -1541,6 +1545,7 @@ jobs:
         metricsch      : metricsch
         debugch        : debugch
         debuglcch      : debuglcch
+        debugdecch     : debugdecch
         debugvalch     : debugvalch
         nosetmcpwd     : nosetmcpwd
         miniadocs      : miniadocs
@@ -1840,6 +1845,7 @@ jobs:
       metricsch      : default(__)
       debugch        : default(__)
       debuglcch      : default(__)
+      debugdecch     : default(__)
       debugvalch     : default(__)
       nosetmcpwd     : toBoolean.isBoolean.default(false)
       miniadocs      : toBoolean.isBoolean.default(false)

@@ -113,13 +113,22 @@ MiniUtilsTool.prototype._toRelative = function(targetPath) {
   return relative
 }
 
-MiniUtilsTool.prototype._resolve = function(target) {
+// Spilled observation files (mini-a-tool-obs-*) live in the system temp dir; allow read-only access to those the agent itself registered.
+MiniUtilsTool.prototype._isSpilledResultFile = function(resolved) {
+  if (typeof MiniA === "undefined" || !isArray(MiniA._proxyTempFiles)) return false
+  return MiniA._proxyTempFiles.some(function(f) {
+    try { return String(new java.io.File(f).getCanonicalPath()) === resolved } catch(e) { return false }
+  })
+}
+
+MiniUtilsTool.prototype._resolve = function(target, readOnly) {
   var candidate = new java.io.File(target)
   if (!candidate.isAbsolute()) {
     candidate = new java.io.File(this._root, target)
   }
   var resolved = String(candidate.getCanonicalPath())
   if (!this._withinRoot(resolved)) {
+    if (readOnly === true && this._isSpilledResultFile(resolved)) return resolved
     throw new Error("Path outside of allowed root: " + target)
   }
   return this._fileAccess ? this._fileAccess.assert(resolved) : resolved
@@ -351,6 +360,13 @@ MiniUtilsTool.prototype._listSkills = function(params) {
       if (seenByName[name]) {
         if (isFunction(self._skillCollisionFn)) self._skillCollisionFn({ name: name, winner: seenByName[name], ignored: templatePath })
         return
+      }
+
+      // Hide skills whose frontmatter `requires` (tools/anyTools/anyFlags) are not met.
+      if (isFunction(self._skillVisibilityFn)) {
+        var gateDoc = __miniALoadSkillTemplateDocument(templatePath, self._fileAccess)
+        var gateReq = isMap(gateDoc) ? merge(isMap(gateDoc.meta) ? gateDoc.meta : {}, isMap(gateDoc.skillData) ? gateDoc.skillData : {}, true).requires : __
+        if (isMap(gateReq) && self._skillVisibilityFn(gateReq) !== true) return
       }
 
       var description = sourceType === "folder"
@@ -904,7 +920,7 @@ MiniUtilsTool.prototype.readFile = function(params) {
   if (isUnDef(params.path)) return "[ERROR] path is required"
   try {
     this._ensureInitialized()
-    var filePath = this._resolve(params.path)
+    var filePath = this._resolve(params.path, true)
     if (!io.fileExists(filePath)) {
       return "[ERROR] File not found: " + params.path
     }
