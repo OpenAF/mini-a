@@ -4687,6 +4687,11 @@ MiniA.prototype._shouldEnablePlanning = function(args) {
 
 MiniA.prototype._preparePlanning = function(args) {
   var assessment = this._assessGoalComplexity(args.goal)
+  if (toBoolean(args.useplanning) === true) {
+    // Ambiguous (medium) goals use the decision model when available; unchanged heuristic otherwise.
+    var decisionLevel = this._assessComplexityByDecision(args.goal, assessment.level, args)
+    if (isDef(decisionLevel)) assessment = merge(clone(assessment), { level: decisionLevel, source: "decide" })
+  }
   this._planningAssessment = assessment
   var strategy = this._selectPlanningStrategy(assessment, args)
   this._planningStrategy = strategy

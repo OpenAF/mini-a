@@ -124,6 +124,7 @@ if (typeof MiniA === "function") {
   MiniA.prototype._initDecisionRuntime = function(args) {
     var self = this
     this._decisionGateDisabled = false
+    this._decisionComplexity = __
     if (!this._decisionMetrics) this._decisionMetrics = { calls: 0, failures: 0, fallbacks: 0, empty_selections: 0,
       duration_ms: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, usage_reports: 0, reasons: {} }
     this._decision = new MiniADecision({ modeldec: args.modeldec, enabled: isUnDef(args.usedecide) || toBoolean(args.usedecide) === true, observe: function(event) {
@@ -191,12 +192,15 @@ if (typeof MiniA === "function") {
 
   MiniA.prototype._assessComplexityByDecision = function(goal, level, args) {
     if (level !== "medium" || !this._decision || !this._decision.isConfigured() || (isDef(args.llmcomplexity) && toBoolean(args.llmcomplexity) === false)) return __
+    // One decision per run and goal: planning preparation and the run loop share the answer.
+    if (isMap(this._decisionComplexity) && this._decisionComplexity.goal === goal) return this._decisionComplexity.level
     try {
       var result = this._decision.decide({ goal: goal }, { complexity: { type: "choice", instructions: "Classify task complexity based on dependencies, required reasoning and verification.",
         criteria: { simple: "One straightforward action with little uncertainty", medium: "Several actions or some uncertainty", complex: "Multiple dependent stages, substantial uncertainty or difficult verification" } } })
       var answer = result.response.answers.complexity
       if (!answer || answer.type !== "choice" || ["simple", "medium", "complex"].indexOf(answer.value) < 0) throw MiniADecision.error("LLM_DECISION_INVALID_RESPONSE")
       this._trace("decision_complexity", { level: answer.value })
+      this._decisionComplexity = { goal: goal, level: answer.value }
       return answer.value
     } catch(e) { this._decisionFallback("complexity", MiniADecision.sanitize(e).code); return __ }
   }

@@ -334,4 +334,27 @@
     a = gateAgent(answering({ worth: { type: "boolean", value: false } }), {})
     ow.test.assert(verdict(a).reason, "advisor_disabled", "Existing policy reasons are preserved")
   }
+
+  exports.testPlanningStrategyUsesDecision = function() {
+    var goal = "Review the ledger and then update the accounts" // heuristic: ambiguous (multi-step)
+    var prep = function(a, args) { a._preparePlanning(merge({ goal: goal, useplanning: true }, args || {})); return a._planningStrategy }
+    var a = gateAgent(__, {})
+    var baseline = prep(a), level = a._planningAssessment.level
+    ow.test.assert(level, "medium", "Fixture goal is heuristically ambiguous")
+    ow.test.assert(isUnDef(a._planningAssessment.source), true, "Unconfigured decide leaves the heuristic assessment")
+    var asking = function(value) { var n = { calls: 0 }; n.fn = function() { n.calls++; return answering({ complexity: choice(value) }).apply(null, arguments) }; return n }
+    var h = asking("complex"); a = gateAgent(h.fn, {})
+    ow.test.assert([prep(a), a._planningAssessment.source], ["tree", "decide"], "Decision escalates an ambiguous goal to a tree plan")
+    prep(a); a._assessComplexityByDecision(goal, "medium", { goal: goal })
+    ow.test.assert(h.calls, 1, "One complexity decision per run and goal")
+    h = asking("simple"); a = gateAgent(h.fn, {})
+    ow.test.assert(prep(a), "off", "Decision can classify an ambiguous goal as simple")
+    h = asking("complex"); a = gateAgent(h.fn, {})
+    ow.test.assert(prep(a, { useplanning: false }), baseline, "Heuristic strategy when planning is not requested")
+    ow.test.assert(h.calls, 0, "Planning off does not consult decide")
+    a = gateAgent(function() { throw { code: "LLM_DECISION_PROVIDER_ERROR" } }, {})
+    ow.test.assert([prep(a), a._decisionMetrics.fallbacks], [baseline, 1], "Decision error keeps the heuristic strategy")
+    h = asking("complex"); a = gateAgent(h.fn, {})
+    ow.test.assert(prep(a, { llmcomplexity: false }), baseline, "llmcomplexity=false keeps the heuristic strategy")
+  }
 })()
