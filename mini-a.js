@@ -3568,7 +3568,7 @@ MiniA.prototype._isAdvisorCallWorthIt = function(runtime, signalSet) {
   return { ok: true, reason: "worth_it", score: score, cap: cap, spent: advisorSpent }
 }
 
-MiniA.prototype._shouldConsultAdvisor = function(runtime, signalSet) {
+MiniA.prototype._shouldConsultAdvisor = function(runtime, signalSet, args) {
   var signals = isMap(signalSet) ? signalSet : {}
   var policy = isObject(runtime) && isObject(runtime.advisorPolicy) ? runtime.advisorPolicy : {}
   var reasons = []
@@ -3592,6 +3592,8 @@ MiniA.prototype._shouldConsultAdvisor = function(runtime, signalSet) {
 
   var worth = this._isAdvisorCallWorthIt(runtime, signals)
   if (!worth.ok) return { ok: false, reason: worth.reason, reasons: reasons, worth: worth }
+  // Decision gate (skip-only): an advisor consult is expensive, so decide may veto one judged low value.
+  if (this._decideAdvisorWorth(args, runtime, signals, reasons) === false) return { ok: false, reason: "decision_low_value", reasons: reasons, worth: worth }
   return { ok: true, reason: "allowed", reasons: reasons, worth: worth }
 }
 
@@ -19756,7 +19758,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._finalizeToolExecution = finalizeToolExecution
     var consultAdvisor = (signalSet, meta) => {
       var signals = isMap(signalSet) ? signalSet : {}
-      var decision = this._shouldConsultAdvisor(runtime, signals)
+      var decision = this._shouldConsultAdvisor(runtime, signals, args)
       var entry = {
         step     : runtime.currentStepNumber,
         reason   : decision.reason,

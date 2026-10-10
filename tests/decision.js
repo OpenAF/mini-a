@@ -309,4 +309,29 @@
     a._decideLcDeferral({ usedecide: true }, runtime, "r", "x"); a._decideLcDeferral({ usedecide: true }, runtime, "r", "x")
     ow.test.assert(a._decisionMetrics.fallbacks, 1, "An unsupported runtime disables further gate attempts for the run")
   }
+
+  exports.testAdvisorWorthGate = function() {
+    var runtime = { advisorPolicy: { enabled: true, onHardDecision: true, onAmbiguity: true, maxUses: 5, cooldownSteps: 0 }, advisorUses: 0,
+      currentStepNumber: 3, advisorLastStep: 0, context: ["[OBS 1] ok", "[OBS 2] ok"] }
+    var args = { usedecide: true, goal: "g" }
+    var verdict = function(a, signals, runArgs) { return a._shouldConsultAdvisor(runtime, signals || { hardDecision: true }, runArgs || args) }
+    var a = gateAgent(__, {})
+    ow.test.assert(verdict(a).ok, true, "Unconfigured decide keeps the existing allow")
+    a = gateAgent(answering({ worth: { type: "boolean", value: true } }), {})
+    ow.test.assert(verdict(a).ok, true, "Worth keeps the consult")
+    a = gateAgent(answering({ worth: { type: "boolean", value: false } }), {})
+    var v = verdict(a)
+    ow.test.assert([v.ok, v.reason], [false, "decision_low_value"], "Low value skips the consult")
+    ow.test.assert(verdict(a, __, { goal: "g" }).ok, true, "Without explicit usedecide=true the gate is inactive")
+    var called = 0
+    a = gateAgent(function() { called++; return answering({ worth: { type: "boolean", value: false } }).apply(null, arguments) }, {})
+    ow.test.assert(verdict(a, { risk: true, hardDecision: true }).ok, true, "Risk consults are never vetoed")
+    ow.test.assert(verdict(a, { errorRecovery: true }).ok, true, "Error-recovery consults are never vetoed")
+    ow.test.assert(called, 0, "Protected signals do not consult decide")
+    a = gateAgent(function() { throw { code: "LLM_DECISION_PROVIDER_ERROR" } }, {})
+    ow.test.assert([verdict(a).ok, a._decisionMetrics.fallbacks], [true, 1], "Decision error keeps the existing allow")
+    runtime.advisorPolicy.enabled = false
+    a = gateAgent(answering({ worth: { type: "boolean", value: false } }), {})
+    ow.test.assert(verdict(a).reason, "advisor_disabled", "Existing policy reasons are preserved")
+  }
 })()

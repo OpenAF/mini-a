@@ -35,6 +35,7 @@ With an explicit `usedecide=true` and a configured decision model, selected inte
 | Plan critique (`_critiquePlanWithLLM`) | Is the plan immediately executable? | Verdict is `pass`: a `PASS` critique tagged `raw.source: "decide"` is recorded in the usual shape | The validator model runs and produces issues/missing work for replanning |
 | Research validation (`_validateResearchOutcome`) | Does the output fully meet the criteria? | Verdict `pass` **and** top quality level (score 1, meeting any `PASS`/`score>=` threshold) | The validator model runs, so the next cycle still receives issues and suggestions. Never consulted when `valtools=true` |
 | LC escalation deferral (`_decideLcDeferral`) | Is the latest low-cost response making real progress despite the escalation signal? | Not a skip: replaces the heuristic `_scoreLCResponse >= 0.7` deferral rule with `progressing`/`stuck` | The heuristic confidence score decides exactly as before |
+| Advisor consult (`_decideAdvisorWorth`) | Would a stronger advisor likely change the next step? | Answer is `false`: the consult is skipped (`decision_low_value`). Never consulted for `risk` or `errorRecovery` signals | The existing policy/budget decision stands |
 
 Gates use `_decisionGate(operation, args, state, questions, validate)` in `mini-a-decision.js`, which never throws. It is separate from the existing selection and complexity paths, which keep their own defaults.
 
