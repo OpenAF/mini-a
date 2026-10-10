@@ -416,4 +416,23 @@
     r = run(gateAgent(answering({ entry_0: { type: "boolean", value: true } }), {}))
     ow.test.assert(r.accepted.length, 2, "Incomplete answers keep every validated entry")
   }
+
+  exports.testGateCachePerRun = function() {
+    var calls = 0
+    var handler = function() { calls++; return answering({ worth: { type: "boolean", value: false } }).apply(null, arguments) }
+    var a = gateAgent(handler, {})
+    var args = { usedecide: true, goal: "g" }
+    var first = a._decisionGate("advisor_worth", args, { x: 1 }, { worth: { type: "boolean", instructions: "i" } }, function(r) { return r.worth.type === "boolean" })
+    var second = a._decisionGate("advisor_worth", args, { x: 1 }, { worth: { type: "boolean", instructions: "i" } }, function(r) { return r.worth.type === "boolean" })
+    ow.test.assert([calls, second.worth.value, first.worth.value], [1, false, false], "Identical requests in one run are answered from cache")
+    a._decisionGate("advisor_worth", args, { x: 2 }, { worth: { type: "boolean", instructions: "i" } }, function() { return true })
+    ow.test.assert(calls, 2, "A different state is a different request")
+    a._decisionGate("other_op", args, { x: 1 }, { worth: { type: "boolean", instructions: "i" } }, function() { return true })
+    ow.test.assert(calls, 3, "A different operation is a different request")
+    second.worth.value = true
+    var third = a._decisionGate("advisor_worth", args, { x: 1 }, { worth: { type: "boolean", instructions: "i" } }, function() { return true })
+    ow.test.assert(third.worth.value, false, "Cached answers are copies, not shared state")
+    a._initDecisionRuntime({})
+    ow.test.assert(isUnDef(a._decisionGateCache), true, "A new run clears the cache")
+  }
 })()

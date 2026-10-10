@@ -55,6 +55,12 @@ MiniADecision.sanitize = function(error) {
   return MiniADecision.error(code, error && error.status)
 }
 
+MiniADecision.digest = function(text) {
+  var md = java.security.MessageDigest.getInstance("SHA-256")
+  var bytes = md.digest(new java.lang.String(text).getBytes("UTF-8"))
+  return java.util.Base64.getEncoder().encodeToString(bytes)
+}
+
 MiniADecision.request = function(request) {
   try {
     if (!isMap(request) || Object.keys(request).some(function(key) { return ["state", "questions", "options"].indexOf(key) < 0 }) || isUnDef(request.state) || !isMap(request.questions)) {
@@ -124,6 +130,7 @@ if (typeof MiniA === "function") {
   MiniA.prototype._initDecisionRuntime = function(args) {
     var self = this
     this._decisionGateDisabled = false
+    this._decisionGateCache = __
     this._decisionComplexity = __
     if (!this._decisionMetrics) this._decisionMetrics = { calls: 0, failures: 0, fallbacks: 0, empty_selections: 0,
       duration_ms: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, usage_reports: 0, reasons: {} }
@@ -212,13 +219,22 @@ if (typeof MiniA === "function") {
     if (!this._decision || !this._decision.isConfigured() || this._decisionGateDisabled === true) return __
     try {
       var keys = Object.keys(questions || {})
-      if (keys.length === 0 || keys.length > 32 || af.fromString2Bytes(stringify({ state: state, questions: questions }, __, "")).length > 48 * 1024) {
+      var requestText = stringify({ state: state, questions: questions }, __, "")
+      if (keys.length === 0 || keys.length > 32 || af.fromString2Bytes(requestText).length > 48 * 1024) {
         this._decisionFallback(operation, "request_budget"); return __
+      }
+      // Identical requests within one run reuse the validated answers instead of paying for another call.
+      var cacheKey = operation + ":" + MiniADecision.digest(requestText)
+      if (isMap(this._decisionGateCache) && isMap(this._decisionGateCache[cacheKey])) {
+        this._trace("decision_gate", { operation: operation, cached: true })
+        return clone(this._decisionGateCache[cacheKey])
       }
       var answers = this._decision.decide(state, questions).response.answers
       if (!isMap(answers) || keys.some(function(key) { return !isMap(answers[key]) }) || (isFunction(validate) && validate(answers) !== true)) {
         throw MiniADecision.error("LLM_DECISION_INVALID_RESPONSE")
       }
+      if (!isMap(this._decisionGateCache)) this._decisionGateCache = {}
+      if (Object.keys(this._decisionGateCache).length < 64) this._decisionGateCache[cacheKey] = clone(answers)
       this._trace("decision_gate", { operation: operation })
       return answers
     } catch(e) {

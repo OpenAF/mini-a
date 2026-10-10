@@ -41,7 +41,7 @@ With an explicit `usedecide=true` and a configured decision model, selected inte
 | Relevant-memory injection (`_buildRelevantMemoryBlock`) | Ordinal relevance per lexically matched memory (reuses `_selectByDecision`) | Not a skip: reorders by semantic relevance and drops entries judged irrelevant. Requires explicit `usedecide=true` | An unavailable, failing or all-irrelevant decision keeps the lexical order and selection |
 | Memory reflection (`_decideFilterReflections`) | Per validated entry: is it a durable, reusable fact rather than a one-off detail of this run? | Drop-only: entries answered `false` are discarded and counted as rejected. Requires explicit `usedecide=true` | An unavailable, failing or incomplete decision keeps every validated entry |
 
-Gates use `_decisionGate(operation, args, state, questions, validate)` in `mini-a-decision.js`, which never throws. It is separate from the existing selection and complexity paths, which keep their own defaults.
+Identical gate requests within one run (same operation, state and questions) reuse the validated answers from a per-run cache, cleared by `_initDecisionRuntime`. Gates use `_decisionGate(operation, args, state, questions, validate)` in `mini-a-decision.js`, which never throws. It is separate from the existing selection and complexity paths, which keep their own defaults.
 
 ### Deliberately not gated
 
