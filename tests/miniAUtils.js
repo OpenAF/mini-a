@@ -1002,6 +1002,39 @@
     }
   }
 
+  exports.testBundledSkillRootsAndOverrides = function() {
+    var dir = String(createTestDir())
+    try {
+      var roots = ["user", "extra", "plugin", "bundle"]
+      roots.forEach(function(root) {
+        io.mkdir(dir + "/" + root); io.mkdir(dir + "/" + root + "/same")
+        io.writeFileString(dir + "/" + root + "/same/SKILL.md", "---\ndescription: collision fixture\n---\n" + root)
+      })
+      io.mkdir(dir + "/bundle/hidden.disabled")
+      io.writeFileString(dir + "/bundle/hidden.disabled/SKILL.md", "Hidden")
+      var options = { skillsroot: dir + "/user", skillsroots: [dir + "/extra"], pluginskillsroots: [dir + "/plugin"], bundledskillsroot: dir + "/bundle" }
+      var tool = new MiniUtilsTool(options), events = []
+      tool._skillCollisionFn = function(event) { events.push(event) }
+      ow.test.assert(tool._listSkills({}).length, 1, "Disabled bundle folder excluded and duplicate names collapse")
+      ow.test.assert(events.length, 3, "Every shadowed source reported")
+      ow.test.assert(events[2].winner, dir + "/user/same/SKILL.md", "User root wins")
+      ow.test.assert(events[2].ignored, dir + "/bundle/same/SKILL.md", "Bundle loser identified")
+      ow.test.assert(__miniASkillEventMessage(merge({state: "collision"}, events[2]), false).indexOf(events[2].winner) >= 0, true, "Visible diagnostic includes winner")
+      var plugin = new MiniUtilsTool({ skillsroot: dir + "/plugin", bundledskillsroot: dir + "/bundle" })
+      ow.test.assert(plugin.skills({ operation: "render", name: "same" }).rendered, "plugin", "Plugin precedes bundle")
+      var dedup = new MiniUtilsTool({ skillsroot: dir + "/bundle", bundledskillsroot: dir + "/bundle/../bundle" })
+      ow.test.assert(dedup._skillsRoots.length, 1, "Canonical bundle roots deduplicate")
+      io.writeFileString(dir + "/bundle/same/SKILL.md", "Read @secret.md")
+      io.writeFileString(dir + "/secret.md", "PRIVATE_REFERENCE")
+      java.nio.file.Files.createSymbolicLink(new java.io.File(dir + "/bundle/same/secret.md").toPath(), new java.io.File(dir + "/secret.md").toPath())
+      var denied = new MiniUtilsTool({ skillsroot: dir + "/bundle", fileallow: [dir + "/bundle"] })
+      denied._skillRuntime = new MiniASkillRuntime({})
+      var result = denied.skills({ operation: "read", name: "same", reference: "secret.md" })
+      ow.test.assert(stringify(result).indexOf("PRIVATE_REFERENCE") < 0, true, "Denied supporting reference never leaks")
+      ow.test.assert(isString(result) || isDef(result.error), true, "Denied reference returns a failure")
+    } finally { cleanupTestDir(dir) }
+  }
+
   exports.testSkillsDefaultRoots = function() {
     var testDir = createTestDir()
     var fakeHome = createTestDir()

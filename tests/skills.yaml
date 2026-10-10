@@ -114,7 +114,12 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/skills.js").testSkillRestrictedRejectsTooShortQuery
 
+- name: MiniA Skills Tests::BundledRetrievalWorkflow
+  to: oJob Test
+  exec: args.func = require("tests/skills.js").testBundledRetrievalWorkflow
+
 todo:
+- MiniA Skills Tests::BundledRetrievalWorkflow
 - MiniA Skills Tests::CacheHonorsHeadingLimit
 - MiniA Skills Tests::V2MetadataParity
 - MiniA Skills Tests::SchemaOnlyDiscovery

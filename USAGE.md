@@ -8,6 +8,7 @@ Mini-A (Mini Agent) is a goal-oriented autonomous agent that uses Large Language
 
 - **OpenAF**: Mini-A is built for the OpenAF platform
 - **OAF_MODEL Environment Variable**: Must be set to your desired LLM model configuration
+- **OAF_DECIDE_MODEL Environment Variable** (optional): Automatically enables decision-assisted selection in existing dynamic/capability selection modes and ambiguous complexity assessment. `useutils=true usedecide=true` also exposes the bounded `decide` consultation tool. Disable with `usedecide=false`; see [Decision integration and MCP](docs/DECISIONS.md).
 - **OAF_LC_MODEL Environment Variable** (optional): Low-cost model for cost optimization
 - **OAF_VAL_MODEL Environment Variable** (optional): Dedicated model for deep research validation
 - **OAF_MINI_A_CON_HIST_SIZE Environment Variable** (optional): Set the maximum console history size (default is JLine's default)
@@ -108,6 +109,29 @@ consult one. Plain `/skills` still lists local templates. `useskills=true` does
 not enable virtual skills, and a local `skills=0` count says nothing about the
 wiki library. See the [Virtual Skills guide](docs/VIRTUAL-SKILLS.md) for a sample
 page, shared-wiki setup, limits, MCP access and troubleshooting.
+
+### Automatic skill use
+
+With `useskills=true` or `useskillswiki=true`, automatic search defaults to off.
+It defaults to on only when `usedecide=true` and `modeldec` or `OAF_DECIDE_MODEL` is set.
+Explicit `skillsautosearch=true` or `false` overrides that default. When enabled,
+Mini-A discovers compact candidates and tries the decision model (if
+`usedecide=true` and configured), then the configured low-cost model, then the
+main model. Errors or invalid responses advance to the next tier; a valid
+selection of no skills stops there. Exhausting all available tiers reports a
+selection failure. Provider failures can therefore increase selection latency.
+Explicit `$name` requests skip selection. Use `$local:name` or a `$wiki:path.md`
+reference to disambiguate sources. `skillsautosearch=false` keeps model-led or
+explicit loading.
+
+`skillsautolimit=5` bounds combined candidates; `skillmaxautoload=1` bounds automatic
+selection. `skillsmaxloaded=3` and `skillsmaxchars=12000` bound all local/wiki
+consultation in the run. `skillcontextchars=8000` limits the initial local page.
+Long procedures expose pending complete sections and supporting references for
+on-demand loading. Missing explicit skills, incomplete required instructions,
+and changed source revisions block affected work with a reported reason.
+Activity records show discovery, selection, activation and blocking; loading
+alone does not prove compliance. See [Virtual Skills](docs/VIRTUAL-SKILLS.md).
 
 ### Agent Plugins
 
@@ -1035,6 +1059,8 @@ For the Elasticsearch/OpenSearch wiki backend, there is no separate top-level `e
 - **`agent`** (string): Path to a markdown agent profile (or inline markdown text) with YAML frontmatter metadata. Supported keys include `model`, `capabilities` (`useshell`, `readwrite`, `useutils`, `usetools`), `tools` (MCP entries such as `type: ojob`, `type: stdio` + `cmd`, `type: remote`, or `type: sse`), `constraints` (appended to `rules`), `knowledge`, `youare`, and `mini-a` (map of direct Mini-A arg overrides). When the profile uses Markdown front matter, any text after the closing `---` is used as the default `goal=` input unless you pass `goal=` explicitly. (`agentfile` remains a backward-compatible alias.)
 
 #### Dual-Model Controls
+- **`modeldec`** (string): Override `OAF_DECIDE_MODEL` with a SLON/JSON configuration for this run. Select interactively with `/model dec`; `/models` displays the decision slot. See [Decisions](docs/DECISIONS.md).
+
 - **`modellc`** (string): Override the low-cost model configuration at runtime (same format as `OAF_LC_MODEL`). Useful for quick per-run model selection without changing environment variables.
 - **`modelval`** (string): Override the validation model configuration at runtime (same format as `OAF_VAL_MODEL`). Useful when you want a dedicated validation model for one run without changing environment variables.
 - **`deescalate`** (number, default: 3): Number of consecutive successful steps required after an escalation before Mini-A automatically reverts to the low-cost model. Set to a higher value for more conservative de-escalation or `0` to disable de-escalation entirely.
@@ -3453,6 +3479,7 @@ discard the old recovery first. Do not manually delete journals to dismiss error
 | `ingestsource` | string | - | Folder, git repository (path or clone URL), or page URL — **required** |
 | `ingesttype` | string | auto | `markdown`, `repo` or `url` |
 | `ingestsection` | string | source name | Wiki section ingested pages are written into |
+| `ingestlayout` | string | `flat` | New-page paths: `flat` joins source directories with hyphens; `source` preserves sanitized directories. Existing bindings stay in place. |
 | `ingestinclude` | string | - | Comma-separated path fragments to include |
 | `ingestexclude` | string | - | Comma-separated path fragments to exclude |
 | `ingestchunkchars` | number | `24000` | Maximum characters per distillation chunk |
@@ -3463,6 +3490,18 @@ discard the old recovery first. Do not manually delete journals to dismiss error
 | `ingestforce` | boolean | `false` | Re-ingest sources the ledger reports as unchanged |
 | `ingestledger` | string | `<indexRoot>/.mini-a-wiki-ingest/ledger.json` | Ledger file path |
 
+### Source folders and topic organization
+
+Use `/ingest ./docs reference layout=source dryrun` to preview source folders, then remove `dryrun` to apply. The standalone equivalent is `ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=/tmp/wiki ingestlayout=source`. For example, `Guide/Setup.md` becomes `reference/guide/setup.md`; generated section indexes are kept separate from ingested source index pages. Sanitized path collisions receive a stable source-key suffix.
+
+Layout affects new source mappings only. Existing ingested pages keep their destinations when layout changes. For newly written or refreshed pages, local Markdown page links are resolved against the current ingestion mappings, including pages relocated through wiki moves; anchors and external URLs are preserved. Unresolved page links are reported in `unresolved_links`. Code fences, inline code, and image links are left intact. Web-page URL sources retain their single-page naming. Asset copying and conversion of arbitrary HTML links are not included.
+
+For semantic organization, use `/dream reorg topics`. It retains the approval gate: explicitly set `/set dreamwikiapproval auto` when ready to authorize the pass; `ask` reports that approval is required and `never` denies it. The wiki manager also offers the topic policy with its existing review and backup confirmations. Standalone callers can set `dreamwikimode=reorg dreamwikireorg=true dreamwikiapproval=auto dreamwikiorganize=topics` alongside their normal Dream/wiki configuration. The topic policy prefers existing sections and shallow groups of related pages, records uncertain moves, and accepts additional `dreamwikiinstructions`. It makes model calls only when explicitly invoked; ingestion never starts it automatically.
+
+Wiki moves record verified link repairs and ingestion destinations in a structural journal at `<indexRoot>/.mini-a-wiki-move/journal.json`. Unchanged sources can then be skipped, while changed sources refresh at their organized destinations. Manual edits and Dream content rewrites still produce ownership conflicts; moving a page cannot authorize overwriting those edits. Prefer moves for organization and keep editorial additions in separate pages.
+
+If a move is interrupted, repeat the wiki move or run writable ingestion to replay its journal. Dry-run ingestion reports pending structural recovery without applying it. Other writes are blocked until recovery completes. Replay verifies every affected page and the manifest; conflicting edits leave the journal for investigation. Local writers share the existing lock; separate machines writing a remote backend are not coordinated by that lock.
+
 ### How it works
 
 1. **Resolve** — detect the source type; shallow-clone remote repos to a temp dir and record the commit SHA.
@@ -3470,7 +3509,7 @@ discard the old recovery first. Do not manually delete journals to dismiss error
 3. **Ledger** — skip sources whose sha1 is unchanged since the last ingest (`ingestforce=true` overrides).
 4. **Chunk** — split oversized sources on `##`/`###` boundaries (paragraphs when headingless).
 5. **Distill** — one LLM call per source, in parallel batches, producing `{title, description, tags, type, body}`.
-6. **Write** — one source produces **one page**. Cross-page dedup and reorganisation are left to `/dream wiki apply`.
+6. **Write** — one source produces **one page**. Topic organization is available through explicit `/dream reorg topics`; deterministic maintenance uses `/dream wiki apply`.
 7. **Finalize** — regenerate indexes, rebuild the search index and the knowledge graph, append to `log.md`.
 
 Office and PDF text extraction uses the `readDocument` utility and Tika (installed lazily unless preinstalled). Scanned PDFs need OCR, which is not enabled. PNG/JPEG descriptions use `inspectImage` and require a vision-capable `OAF_MODEL`; image text is treated as untrusted source data. Empty or truncated extraction fails that source without writing a partial page. The input size limit applies to these files too.
@@ -3526,6 +3565,7 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 | `dreammemorymode` | string | `apply` | Memory dream mode: `plan` or `apply` |
 | `dreamwikidryrun` | boolean | `false` | Propose wiki changes without writing (opt-out of `apply`) |
 | `dreamwikiapproval` | string | `ask` | Reorg approval mode: `auto`, `ask`, `never` |
+| `dreamwikiorganize` | string | `none` | Explicit reorg policy: `topics` assesses topic folders even when lint is clean; `none` retains maintenance behavior |
 | `dreamwikiinstructions` | string | _(none)_ | Additional operator guidance appended to the wiki reorg objective |
 | `dreamwikireorg` | boolean | `false` | Allow structural reorg operations |
 | `dreammaxsteps` | number | `40` | Total model-step budget for `auto` or agent-step budget for `reorg` |
@@ -4308,7 +4348,7 @@ The shared dispatcher covers these command families:
 | --- | --- |
 | `/help` | Searchable Help with syntax, examples, aliases, prerequisites, discovered commands and skills; **Insert command** fills the composer without executing |
 | `/show [prefix]`, `/set`, `/unset`, `/toggle`, `/reset` | Settings filtered to the supplied prefix or affected parameter; existing validation, secret masking and server restrictions apply |
-| `/model [main\|lc\|val]`, `/models` | Models with the requested slot selected, or all slots; invalid slots report an error |
+| `/model [main\|lc\|val\|dec]`, `/models` | Models with the requested slot selected, or all slots; invalid slots report an error |
 | `/last [md]`, `/save [file]` | Answer reader with previous goal, Markdown/raw mode, Copy and browser Download; `/save` still writes on the server (default `response.md`) |
 | `/history [n]`, `/restore`, `/clear`, `/rewind [n]` | History with recent goals and Insert/Edit actions; saved-conversation Open picker; shared clear and rewind operations update the transcript |
 | `/context [llm\|analyze\|vm]`, `/compact [n]`, `/summarize [n]` | Context measurements, virtual-memory details and readable generated summaries |

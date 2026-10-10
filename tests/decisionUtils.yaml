@@ -1,0 +1,22 @@
+include:
+- oJobTest.yaml
+
+ojob:
+  opacks:
+  - oJob-common
+  catch: |
+    logErr(exception)
+    exit(1)
+
+jobs:
+- name: Decision utility tests
+  exec: |
+    var tests = require("tests/decisionUtils.js")
+    Object.keys(tests).forEach(function(name) {
+      ow.loadTest().test("Mini-A decision utility::" + name, tests[name])
+    })
+    if (ow.test.getCountFail() > 0) exit(1)
+
+todo:
+- Decision utility tests
+- oJob Test Results

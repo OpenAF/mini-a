@@ -35,7 +35,7 @@ Two steps to use:
    ```bash
    export OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000, temperature: 1)"
    ```
-   Optional: add `OAF_LC_MODEL` for a low-cost helper model and `OAF_VAL_MODEL` to use a dedicated validation model in deep research mode. You can also override them per run with `modellc=...` and `modelval=...`.
+   Optional: add `OAF_LC_MODEL` for a low-cost helper model and `OAF_VAL_MODEL` to use a dedicated validation model in deep research mode. You can also override them per run with `modellc=...` and `modelval=...`. Use `modeldec=...` to override `OAF_DECIDE_MODEL` for decision calls.
 
    Use the built-in model manager when you prefer to store encrypted
    definitions instead of exporting raw environment variables:
@@ -93,6 +93,26 @@ Shell access is disabled by default for safety; add `useshell=true` when you exp
 - Hooks: `~/.openaf-mini-a/hooks/*.{yaml,yml,json}` with events `before_goal`, `after_goal`, `before_tool`, `after_tool`, `before_shell`, `after_shell` (`extrahooks=<path1>,<path2>`)
 - Agent Plugins ([agent-plugins.org](https://agent-plugins.org)): `plugins=<dir1,dir2>` or `pluginsroot(s)=<dir>` — see [docs/AGENT-PLUGINS.md](docs/AGENT-PLUGINS.md)
 - Starter generators: `mini-a --command`, `mini-a --skill`, `mini-a --hook`, `mini-a --agent`
+
+With `useskills=true`, Mini-A also discovers three bundled skills:
+`mini-a-wiki-retrieval`, `mini-a-skill-authoring`, and
+`mini-a-runtime-diagnostics`. For example:
+
+```bash
+opack exec mini-a useskills=true skillsautosearch=false goal='Use $local:mini-a-skill-authoring to draft a local review skill.'
+```
+
+The bundle follows the running checkout or installed package, including when
+launched from another directory; `utilsroot` does not redirect it. Local roots
+are ordered user/default, `extraskills`, plugin, then bundled, with the first
+matching name winning. Collision diagnostics identify the winning and ignored
+paths. Use `$local:<name>` when a virtual skill has the same name.
+
+Bundling preserves `useskills=false` and the conditional `skillsautosearch`
+default. It adds no selection calls by itself. Instructions and supporting
+references ship locally; execution still requires the relevant tools and sources.
+Normal `fileallow`, tool filters, access modes, and skill budgets apply.
+
 - Override the base home directory: `homedir=<path>` (reads `.openaf-mini-a` from `<path>` instead of `~`)
 
 See [USAGE.md](USAGE.md) for full template placeholders, precedence rules, and examples.
@@ -349,6 +369,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 - **Built-in Performance Optimizations** - Automatic context management, dynamic escalation, and parallel action support deliver 40-60% token reduction and 50-70% cost savings (see [docs/OPTIMIZATIONS.md](docs/OPTIMIZATIONS.md))
 - **Real-Time Streaming** - Display LLM tokens as they arrive with markdown-aware buffering for smooth rendering (`usestream=true`)
 - **MCP Integration** - Seamless integration with Model Context Protocol servers (STDIO & HTTP)
+  - **Decision Model** - `OAF_DECIDE_MODEL` enables semantic selection in dynamic/capability modes and ambiguous complexity assessment; `usedecide=false` opts out. A generic decision MCP is also available. See [Decisions](docs/DECISIONS.md).
   - **Dynamic Tool Selection** - Intelligent filtering of MCP tools using stemming, synonyms, n-grams, and fuzzy matching (`mcpdynamic=true`)
   - **Tool Caching** - Smart caching for deterministic and read-only tools to avoid redundant operations
   - **Circuit Breakers** - Automatic connection health management with cooldown periods
@@ -451,6 +472,9 @@ Mini-A ships with complementary components:
 | `usestdutils` | When `useutils=true`, expose standard aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names | `false` |
 | `useskills` | Expose the Mini Utils `skills` operation; when `useutils=false`, only the skills tool is registered | `false` |
 | `useskillswiki` | Enable the on-demand [virtual skill library](docs/VIRTUAL-SKILLS.md); separate from local `useskills` | `false` |
+| `skillsautosearch` | Discover/select enabled local/wiki skills via decide → low-cost → main; explicit overrides win | `false`, or `true` with `usedecide=true` and `OAF_DECIDE_MODEL` set |
+| `skillsautolimit` | Combined skill candidate limit | `5` |
+| `skillsmaxloaded` / `skillsmaxchars` | Shared per-run skill count / guidance character limits | `3` / `12000` |
 | `skillwikiroot` | Directory for a dedicated virtual skill library; omit dedicated source settings to reuse `usewiki` | - |
 | `utilsroot` | Root directory for Mini Utils Tool file operations (only when `useutils=true`) | `.` |
 | `utilsallow` | Comma-separated allowlist of Mini Utils Tool names to expose (only when `useutils=true`) | unset |

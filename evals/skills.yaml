@@ -1,0 +1,164 @@
+# Run from the checkout with OAF_MODEL configured. Synthetic read-only tasks.
+# The model-led comparison may fail markers; compare its results with automatic.
+# ojob mini-a.yaml eval=true evalfile=evals/skills.yaml evalout=/tmp/mini-a-skills-eval.json
+scenarios:
+- name: local-semantic-selection
+  goal: Prepare a synthetic account ledger report for Alder.
+  args: &local
+    useskills: true
+    extraskills: evals/fixtures/skill-runtime/local
+    useshell: false
+    readwrite: false
+    useutils: false
+    usedecide: false
+    useplanning: false
+    usememory: false
+    usetools: true
+    usejsontool: true
+    maxsteps: 4
+  expected:
+    contains: "LEDGER_EVIDENCE: Alder; balance=73 EUR"
+  variants: &variants
+  - name: model-led
+    args:
+      skillsautosearch: false
+  - name: automatic
+    args:
+      skillsautosearch: true
+    assertions:
+    - path: result.skill_activity.selection_calls
+      equals: 1
+    - path: result.skill_activity.loads
+      min: 1
+- name: wiki-semantic-selection
+  goal: Review a synthetic service incident and report its recovery verification.
+  args: &wiki
+    useskillswiki: true
+    skillwikiroot: evals/fixtures/skill-runtime/wiki
+    wikiretrievalv2: false
+    useshell: false
+    readwrite: false
+    useutils: false
+    usedecide: false
+    useplanning: false
+    usememory: false
+    usetools: true
+    usejsontool: true
+    maxsteps: 4
+  expected:
+    contains: "INCIDENT_EVIDENCE: expired connection pool lease; verify=three healthy probes"
+  variants: *variants
+- name: mixed-source-selection
+  goal: Review a synthetic service incident and report its recovery verification.
+  args:
+    <<: *wiki
+    useskills: true
+    extraskills: evals/fixtures/skill-runtime/local
+  expected:
+    contains: "INCIDENT_EVIDENCE: expired connection pool lease; verify=three healthy probes"
+  variants: *variants
+- name: explicit-arguments
+  goal: '$local:ledger-report "Alder"'
+  args: *local
+  expected:
+    contains: "LEDGER_EVIDENCE: Alder; balance=73 EUR"
+- name: irrelevant-task
+  goal: Reply with only the word ready.
+  args:
+    <<: *local
+    useskillswiki: true
+    skillwikiroot: evals/fixtures/skill-runtime/wiki
+    wikiretrievalv2: false
+  expected:
+    matches: "^\\s*ready\\s*$"
+- name: ignored-missing-skill
+  goal: "Ignore $missing-fixture if unavailable and reply with only the word ready."
+  args: *local
+  expected:
+    matches: "^\\s*ready\\s*$"
+
+# Bundled workflows: inspect events in eval output for the concrete search/open/read
+# requests and results. Load counts alone do not establish instruction adherence.
+- name: bundled-explicit-retrieval
+  goal: 'Use $local:mini-a-wiki-retrieval to find the synthetic recovery verification and report its ticket and required checks with a citation.'
+  args: &bundled
+    useskills: true
+    skillsautosearch: false
+    usewiki: true
+    wikiroot: evals/fixtures/bundled-skills
+    wikiretrievalv2: false
+    useshell: false
+    readwrite: false
+    wikiaccess: ro
+    useutils: false
+    usedecide: false
+    useplanning: false
+    usememory: false
+    usetools: true
+    usejsontool: true
+    maxsteps: 10
+  expected:
+    contains: BR-731
+  assertions:
+  - path: result.skill_activity.loads
+    min: 1
+  - path: result.skill_activity.selection_calls
+    equals: 0
+  - path: metrics.tool_calls
+    min: 2
+- name: bundled-semantic-retrieval
+  goal: Find the synthetic recovery verification in the configured knowledge library and report the ticket and checks with a citation.
+  args:
+    <<: *bundled
+    skillsautosearch: true
+  expected:
+    contains: BR-731
+  assertions:
+  - path: result.skill_activity.loads
+    min: 1
+  - path: result.skill_activity.selection_calls
+    equals: 1
+  - path: metrics.tool_calls
+    min: 2
+- name: bundled-authoring-formats
+  goal: 'Use $local:mini-a-skill-authoring. Return a self-contained YAML skill named review-note with an embedded checks.md reference and an argument placeholder. Explain the additional metadata needed to make a Markdown version a virtual wiki skill. Do not write files.'
+  args: *bundled
+  expected:
+    contains: mini-a.skill/v1
+  assertions:
+  - contains: 'type: skill'
+  - contains: 'refs:'
+  - path: result.skill_activity.loads
+    min: 1
+- name: bundled-runtime-diagnostics
+  goal: 'Use $local:mini-a-runtime-diagnostics to diagnose this supplied evidence: the CLI loads /opt/mini-a, but changes were made in /work/mini-a; a tool schema was registered but the transcript contains no tool request. Explain what is established and how to verify a correction. Do not change configuration or restart anything.'
+  args: *bundled
+  expected:
+    contains: /opt/mini-a
+  assertions:
+  - contains: /work/mini-a
+  - path: result.skill_activity.loads
+    min: 1
+- name: bundled-no-selection
+  goal: Reply with only the word ready.
+  args:
+    <<: *bundled
+    skillsautosearch: true
+  expected:
+    matches: "^\\s*ready\\s*$"
+  assertions:
+  - path: result.skill_activity.loads
+    equals: 0
+- name: bundled-disabled
+  goal: Reply with only the word ready.
+  args:
+    <<: *bundled
+    useskills: false
+    skillsautosearch: true
+  expected:
+    matches: "^\\s*ready\\s*$"
+  assertions:
+  - path: result.skill_activity.loads
+    equals: 0
+  - path: result.skill_activity.selection_calls
+    equals: 0

@@ -202,6 +202,7 @@ jobs:
       auditch        : isString.default(__)
       model          : isString.default(__)
       modellc        : isString.default(__)
+      modeldec       : isString.default(__)
       __format       : isString.default(__)
   exec : | #js
     var baseArgs = {}
@@ -334,7 +335,7 @@ jobs:
       delete preparedArgs.mcpConfig
     }
 
-    [ "knowledge", "rules", "state", "model", "modellc", "auditch" ].forEach(function(key) {
+    [ "knowledge", "rules", "state", "model", "modellc", "modeldec", "auditch" ].forEach(function(key) {
       if (isDef(preparedArgs[key]) && !isString(preparedArgs[key])) {
         preparedArgs[key] = stringify(preparedArgs[key], __, "")
       }

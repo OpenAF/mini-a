@@ -504,6 +504,9 @@ function __miniASkillOpen(wm, ref, options, logFn) {
     trust   : isMap(fm.trust) ? fm.trust : {},
     version : isDef(fm.version) ? String(fm.version) : "",
     links   : descriptor.links,
+    revision: descriptor.revision || descriptor.version || "",
+    frontmatter: fm,
+    disableModelInvocation: toBoolean(fm["disable-model-invocation"] || fm.disableModelInvocation || fm.disable_model_invocation) === true,
     headingsTruncated: descriptor.headingsTruncated === true,
     linksTruncated: descriptor.linksTruncated === true
   }
@@ -621,21 +624,55 @@ MiniAWikiSkillProvider.prototype.compose = function(ref, opts) { return __miniAS
 // explicitly selected via search/recommend/open, it never runs anything).
 MiniAWikiSkillProvider.prototype.resolve = function(ref, opts) {
   var descriptor = this.open(ref, opts)
-  if (!isObject(descriptor) || isDef(descriptor.error)) return __
+  if (!isObject(descriptor) || isDef(descriptor.error)) return descriptor || { error: "not-found", ref: ref }
   var bodyOpts = merge({ maxChars: 32000 }, isMap(opts) ? opts : {})
   var body = this.read(ref, bodyOpts)
+  if (!isObject(body) || body.error) return body || { error: "skill-read-failed", ref: ref }
+  if (!isString(body.body) || !body.body.trim()) return { error: "empty-skill-guidance", ref: ref }
+  var pendingSections = [], loadedSections = []
+  if (opts && opts.progressive === true && body.truncated === true && !opts.section) {
+    descriptor = this.open(ref, merge(opts, { maxHeadings: 100, cacheTtlMs: 0 }))
+    if (!descriptor || descriptor.error || descriptor.headingsTruncated || !descriptor.headingsDetailed.length) return { error: "skill-required-guidance-exceeds-budget", ref: ref }
+    var headings = descriptor.headingsDetailed, blocks = [], used = 0, self = this
+    var firstLine = headings[0].lineStart
+    if (firstLine > 1) {
+      var preamble = this.read(ref, { startLine: 1, endLine: firstLine - 1, maxChars: bodyOpts.maxChars, revision: body.revision, cacheTtlMs: 0 })
+      if (!preamble || preamble.error || preamble.truncated) return { error: "skill-required-guidance-exceeds-budget", ref: ref }
+      var intro = __miniAExtractFrontMatterMeta(preamble.body).body
+      if (intro && intro.trim()) { blocks.push(intro); used = intro.length }
+    }
+    var ordered = headings.map(function(h, i) { return { heading: h, index: i, mandatory: i < 2 || /safety|permission|mandatory|prerequisite|constraint|before|when to use/i.test(h.title) } }).sort(function(a, b) { return a.mandatory === b.mandatory ? a.index - b.index : a.mandatory ? -1 : 1 })
+    for (var i = 0; i < ordered.length; i++) {
+      var item = ordered[i], remaining = bodyOpts.maxChars - used - (blocks.length ? 2 : 0)
+      if (remaining <= 0) { if (item.mandatory) return { error: "skill-required-guidance-exceeds-budget", ref: ref }; pendingSections.push(item.heading.title); continue }
+      var piece = self.read(ref, { startLine: item.heading.lineStart, endLine: item.index + 1 < headings.length ? headings[item.index + 1].lineStart - 1 : undefined, maxChars: remaining, revision: body.revision, cacheTtlMs: 0 })
+      if (!piece || piece.error) return piece || { error: "skill-read-failed", ref: ref }
+      if (piece.truncated) { if (item.mandatory) return { error: "skill-required-guidance-exceeds-budget", ref: ref }; pendingSections.push(item.heading.title); continue }
+      blocks.push(piece.body); used += piece.body.length + (blocks.length > 1 ? 2 : 0); loadedSections.push(item.heading.title)
+    }
+    body = { body: blocks.join("\n\n"), revision: body.revision, truncated: pendingSections.length > 0 }
+  } else {
+    body.body = __miniAExtractFrontMatterMeta(body.body).body
+    if (opts && opts.section) loadedSections = [opts.section]
+  }
+
   return {
     format      : "wiki",
     name        : descriptor.name,
     description : descriptor.summary,
-    meta        : {
+    meta        : merge(descriptor.frontmatter || {}, {
       tags: descriptor.tags, risk: descriptor.risk, compatibility: descriptor.compatibility,
       requires: descriptor.requires, version: descriptor.version, appliesTo: descriptor.appliesTo,
       intents: descriptor.intents
-    },
+    }),
     bodyTemplate: isObject(body) && isString(body.body) ? body.body : "",
     virtualFiles: {},
     ref         : ref,
+    revision    : body.revision || descriptor.revision,
+    chars       : body.body.length,
+    sections    : loadedSections,
+    pendingSections: pendingSections,
+    progressive : opts && opts.progressive === true,
     truncated   : isObject(body) ? body.truncated === true : false
   }
 }

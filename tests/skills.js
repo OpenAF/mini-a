@@ -379,6 +379,39 @@
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 
+  exports.testBundledRetrievalWorkflow = function() {
+    load("mini-a.js")
+    load("mini-a-utils.js")
+    var dir = mkTmp(), wm
+    try {
+      wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikiretrievalv2: true }, function() {})
+      wm.write("evidence.md", { title: "Bundle probe" }, "# Evidence\nBUNDLE_EVIDENCE: recovery requires three healthy probes.\n# Other\nUnrelated material.")
+      ow.test.assert(wm.reindex().ok, true, "Publish fixture retrieval generation")
+      wm.close()
+      wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro", wikiretrievalv2: true }, function() {})
+      var tool = new MiniUtilsTool({ bundledskillsroot: __miniABundleRoot + "/skills" })
+      tool._skillRuntime = new MiniASkillRuntime({})
+      var loaded = tool.skills({ operation: "render", name: "mini-a-wiki-retrieval" })
+      ow.test.assert(isString(loaded.rendered), true, "Bundled procedure uses shared renderer")
+      tool._wikiManager = wm; tool._wikiAgenticRetrieval = true
+      var calls = [], call = function(params) { calls.push(params); return tool.wiki(params) }
+      var found = call({ operation: "search", query: "healthy probes" })
+      ow.test.assert(stringify(found).indexOf("evidence.md") >= 0, true, "Fixture search returns evidence path")
+      var opened = call({ operation: "open", path: "evidence.md" })
+      ow.test.assert(stringify(opened).indexOf("Evidence") >= 0, true, "Descriptor exposes section")
+      var part = call({ operation: "read", path: "evidence.md", section: "Evidence", compact: true, maxChars: 12 })
+      var body = part.body, next = part.next, steps = 0
+      while (next && steps++ < 100) {
+        part = call(merge(next, { operation: "read", compact: true }))
+        body += part.body; next = part.next
+      }
+      ow.test.assert(body.indexOf("BUNDLE_EVIDENCE") >= 0, true, "Continuation retrieves distinctive evidence")
+      ow.test.assert(body.indexOf("Unrelated material"), -1, "Bounded section excludes unrelated content")
+      ow.test.assert(calls.length > 3, true, "Recorded calls establish real continuation plumbing")
+      ow.test.assert(calls.every(function(item) { return ["search", "open", "read"].indexOf(item.operation) >= 0 }), true, "Retrieval fixture performs no repair writes")
+    } finally { if (wm) wm.close(); io.rm(dir) }
+  }
+
   exports.testSkillReadSectionBounded = function() {
     var dir = mkTmp()
     try {

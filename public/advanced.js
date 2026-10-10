@@ -199,7 +199,7 @@ window.MiniAAdvancedUI = function(bridge) {
     ['activity', 'Live activity', 'Follow agent actions, tool calls, progress, and results in real time.'],
     ['settings', 'Settings', 'Adjust parameters for this session and manage saved presets.'],
     ['prompts', 'Prompt workspace', 'Edit personas, instructions, knowledge, and the goal prefix for this session.'],
-    ['models', 'Models', 'Choose and configure the main, low-cost, and validation models.'],
+    ['models', 'Models', 'Choose and configure the main, low-cost, validation, and decision models.'],
     ['history', 'History', 'Open saved conversations, restore history, or rewind exchanges.'],
     ['context', 'Context', 'Inspect, compact, and summarize the agent conversation context.'],
     ['stats', 'Statistics', 'Inspect token usage, tools, memory, and wiki statistics.'],
@@ -378,6 +378,15 @@ window.MiniAAdvancedUI = function(bridge) {
     toggle.textContent = value ? 'Simple' : 'Advanced';
     if (value) { const uuid = sessionStorage.getItem(storeKey); if (uuid && !snapshot) bridge.resume(uuid); if (activeScreen === 'debug') renderScreen(); poll().catch(showError); }
   }
+  // Keep agent event emojis aligned with MiniA.fnI's console mapping.
+  const activityEventEmojis = {
+    user: '👤', exec: '⚙️', shell: '🖥️', think: '💡', final: '🏁',
+    input: '➡️', output: '⬅️', thought: '💭', size: '📏', rate: '⏳',
+    mcp: '🤖', plan: '🗺️', deepresearch: '🔍', done: '✅', error: '❌',
+    libs: '📚', info: 'ℹ️', skill: '🧩', load: '📂', warn: '⚠️',
+    stop: '🛑', summarize: '🌀', progcall: '📟', subagent: '🤝',
+    compress: '🗜️', planner_stream: '💡'
+  };
   function appendEvent(record, navigate = true) {
     if (record.type === 'view') {
       // Navigation happens once, from the submission receipt. Replays never move focus.
@@ -387,7 +396,14 @@ window.MiniAAdvancedUI = function(bridge) {
     if (record.sequence <= liveFloor || (liveClearRun && record.runId === liveClearRun)) return;
     const details = el('details'); details.dataset.sequence = record.sequence; details.dataset.runId = record.runId || '';
     const summary = el('summary');
-    summary.append(el('time', record.timestamp.slice(11,19), 'advanced-event-time'), el('span', record.type, 'advanced-event-type'), el('span', activityText(record.value)?.replace(/\s+/g,' ').slice(0,150) || '', 'advanced-event-text'));
+    const eventType = el('span', undefined, 'advanced-event-type');
+    if (Object.prototype.hasOwnProperty.call(activityEventEmojis, record.type)) {
+      const emoji = el('span', activityEventEmojis[record.type]);
+      emoji.setAttribute('aria-hidden', 'true');
+      eventType.append(emoji, document.createTextNode(' '));
+    }
+    eventType.append(document.createTextNode(record.type));
+    summary.append(el('time', record.timestamp.slice(11,19), 'advanced-event-time'), eventType, el('span', activityText(record.value)?.replace(/\s+/g,' ').slice(0,150) || '', 'advanced-event-text'));
     details.dataset.type = record.type;
     details.append(summary);
     const content = el('div', undefined, 'advanced-event-content');
@@ -1033,7 +1049,7 @@ window.MiniAAdvancedUI = function(bridge) {
       chart('Token usage by model', [['Main', p.llm_normal_tokens], ['Low cost', p.llm_lc_tokens], ['Validation', p.llm_val_tokens]], 'Tokens');
       chart('Token accounting', [['Actual', p.llm_actual_tokens], ['Estimated', p.llm_estimated_tokens]], 'Tokens');
       group('Goals', metrics.goals);
-      chart('LLM calls', ['normal', 'low_cost', 'validation'].map(key => [key, metrics.llm_calls?.[key]]).concat([['Advisor', metrics.advisor?.calls]]));
+      chart('LLM calls', ['normal', 'low_cost', 'validation', 'decision'].map(key => [key, metrics.llm_calls?.[key]]).concat([['Advisor', metrics.advisor?.calls]]));
       group('Actions', metrics.actions);
       chart('Time spent', ['step_prompt_build_ms_total', 'step_llm_wait_ms_total', 'step_tool_exec_ms_total', 'step_context_maintenance_ms_total'].map(key => [key.replace('step_', '').replace('_ms_total', ''), p[key]]), 'Milliseconds');
     } else if (statsMode === 'tools') {
@@ -1208,7 +1224,7 @@ window.MiniAAdvancedUI = function(bridge) {
       const render=()=>{
         fieldRefreshers = [];
         list.replaceChildren();
-        snapshot.settings.filter(s=>(activeScreen!=='models'||(viewParams.slot ? s.name === viewParams.slot : ['model','modellc','modelval'].includes(s.name))) && (commandFilter === 'show' ? s.name.startsWith(search.value.toLowerCase()) : ['set','toggle','unset'].includes(commandFilter) ? s.name === search.value.toLowerCase() : `${s.name} ${s.description}`.toLowerCase().includes(search.value.toLowerCase()))).forEach(s=>{
+        snapshot.settings.filter(s=>(activeScreen!=='models'||(viewParams.slot ? s.name === viewParams.slot : ['model','modellc','modelval','modeldec'].includes(s.name))) && (commandFilter === 'show' ? s.name.startsWith(search.value.toLowerCase()) : ['set','toggle','unset'].includes(commandFilter) ? s.name === search.value.toLowerCase() : `${s.name} ${s.description}`.toLowerCase().includes(search.value.toLowerCase()))).forEach(s=>{
           const row=el('div'); const label=el('label', s.name); const description=el('small',`${s.description || ''} · ${s.source === 'session' ? 'Session override' : s.source === 'server' ? 'Server default' : s.source} · Default: ${asText(s.defaultValue) ?? '(unset)'}${s.readOnly?' · Server-controlled':''}`);
           const field=input('',s.value === undefined ? '' : asText(s.value)); field.disabled=s.readOnly; field.setAttribute('aria-label',s.name);
           if (s.type==='boolean') {field.type='checkbox';field.checked=s.value===true;label.className='advanced-boolean-setting';}

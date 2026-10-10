@@ -2,6 +2,26 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA Wiki Ingest Tests::SourceLayoutCollisionsAndLinkForms
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testSourceLayoutCollisionsAndLinkForms
+
+- name: MiniA Wiki Ingest Tests::StructuralMoveInterruptedWritesAndPublication
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testStructuralMoveInterruptedWritesAndPublication
+
+- name: MiniA Wiki Ingest Tests::SourceFolderLayoutAndLinks
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testSourceFolderLayoutAndLinks
+
+- name: MiniA Wiki Ingest Tests::OrganizedMoveReingestionAndPrune
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testOrganizedMoveReingestionAndPrune
+
+- name: MiniA Wiki Ingest Tests::StructuralMoveRecoveryAndConflicts
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testStructuralMoveRecoveryAndConflicts
+
 - name: MiniA Wiki Ingest Tests::DiscoveryCanonicalRoots
   to: oJob Test
   exec: args.func = require("tests/wikiIngest.js").testDiscoveryCanonicalRoots
@@ -284,6 +304,11 @@ jobs:
   exec: args.func = require("tests/wikiIngestReconcile.js").testPreparedRecoveryWithIncompleteOrigin
 
 todo:
+- MiniA Wiki Ingest Tests::SourceLayoutCollisionsAndLinkForms
+- MiniA Wiki Ingest Tests::StructuralMoveInterruptedWritesAndPublication
+- MiniA Wiki Ingest Tests::SourceFolderLayoutAndLinks
+- MiniA Wiki Ingest Tests::OrganizedMoveReingestionAndPrune
+- MiniA Wiki Ingest Tests::StructuralMoveRecoveryAndConflicts
 - MiniA Wiki Ingest Tests::DiscoveryCanonicalRoots
 - MiniA Wiki Ingest Tests::BundleExportRecovery
 - MiniA Wiki Ingest Tests::RecoveryRebaseConflict

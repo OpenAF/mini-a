@@ -2,6 +2,10 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA Dreams Tests::DreamWikiTopicOrganization
+  to: oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiTopicOrganization
+
 
 - name: MiniA Dreams Tests::AutoBoundedSearchCoverage
   to  : oJob Test
@@ -256,6 +260,7 @@ jobs:
   exec: args.func = require("tests/dreams.js").testDreamWikiPlanPreviewsGraphWithoutPersisting
 
 todo:
+- MiniA Dreams Tests::DreamWikiTopicOrganization
 - MiniA Dreams Tests::AutoBoundedSearchCoverage
 - MiniA Dreams Tests::AutoMalformedMetadataIsPreserved
 - MiniA Dreams Tests::AutoConsoleParity

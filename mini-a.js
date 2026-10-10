@@ -2,6 +2,10 @@
 // License: Apache 2.0
 // Description: Mini Agent (Mini-A) to achieve goals using an LLM and shell commands.
 
+// Capture before loadLib changes OpenAF's __loadedfrom. Bundle assets follow
+// the executing agent, independently of the caller's cwd and utilsroot.
+var __miniABundleRoot = String(new java.io.File(String(__loadedfrom)).getCanonicalFile().getParent())
+
 ow.loadMetrics()
 loadLib("mini-a-common.js")
 loadLib("mini-a-router.js")
@@ -592,7 +596,7 @@ Arguments: { "query": "CNN" }{{/if}}
 {{#each availableSkillsList}}
 • {{name}}{{#if includeDescription}}: {{{description}}}{{/if}}
 {{/each}}
-Use the \`skills\` tool (operation="render" or "invoke") to use them.
+Load selected skills before applying their procedures. Use the exposed \`skills\` tool (operation="render" or "invoke"), or the \`skill\` alias when that is the exposed interface.
 {{/if}}
 {{#if knowledge}}
 ## KNOWLEDGE:
@@ -742,6 +746,7 @@ load("mini-a-sandbox.js")
 load("mini-a-tool-selection.js")
 load("mini-a-orchestration.js")
 load("mini-a-capabilities.js")
+load("mini-a-decision.js")
 load("mini-a-policy.js")
 
 MiniA.prototype._stopAgentResources = function() {
@@ -1919,7 +1924,7 @@ MiniA.prototype._sanitizeArgsForAudit = function(args) {
   var self = this
   var out = {}
   var redactKeys = {
-    model: true, modellc: true, modelval: true, auditch: true, debugch: true, debuglcch: true, debugvalch: true
+    model: true, modellc: true, modelval: true, modeldec: true, auditch: true, debugch: true, debuglcch: true, debugvalch: true
   }
   Object.keys(args).forEach(function(key) {
     if (!isString(key) || key.length === 0) return
@@ -2013,14 +2018,18 @@ MiniA.prototype.getMetrics = function() {
     var llmValCalls = global.__mini_a_metrics.llm_val_calls.get()
     var advisorCalls = global.__mini_a_metrics.advisor_calls.get()
     var memorySnapshot = this._getMemoryMetricsSnapshot()
+    var decisionMetrics = this._decisionMetrics || {}
 
     return {
+        decisions: clone(decisionMetrics),
+        skills: this._skillRuntime ? this._skillRuntime.snapshot() : {},
         communication: this._comms ? MiniAComms.clone(this._comms.broker.metrics) : __,
         llm_calls: {
             normal: llmNormalCalls,
             low_cost: llmLcCalls,
             validation: llmValCalls,
-            total: llmNormalCalls + llmLcCalls + llmValCalls + advisorCalls,
+            decision: decisionMetrics.calls || 0,
+            total: llmNormalCalls + llmLcCalls + llmValCalls + advisorCalls + (decisionMetrics.calls || 0),
             fallback_to_main: global.__mini_a_metrics.fallback_to_main_llm.get(),
             lc_json_retries: global.__mini_a_metrics.lc_json_retries.get(),
             lc_reply_tool_attempts: global.__mini_a_metrics.lc_reply_tool_attempts.get(),
@@ -6603,6 +6612,12 @@ MiniA.prototype._buildLegacyPlanningPrompt = function(args, insights, format) {
 }
 
 MiniA.prototype._runPlanningMode = function(args, controls) {
+  if (args.useskills === true || args.useskillswiki === true) {
+    this._prepareInitialSkillsForRun(args)
+    this.init(args)
+    var blocked = this._consultSkillsForRun(args, { beforeCall: controls && controls.beforeCall })
+    if (blocked.length) throw new Error("Skill-dependent planning is blocked: " + blocked.map(function(item) { return item.ref + " (" + item.reason + ")" }).join("; "))
+  }
   var targetFormat = this._detectPlanFormatFromFilename(args.planfile) || (args.planfile ? "markdown" : (args.planformat || "markdown"))
   if (isString(args.planformat)) {
     var formatLower = args.planformat.toLowerCase()
@@ -6624,6 +6639,7 @@ MiniA.prototype._runPlanningMode = function(args, controls) {
   })
 
   var prompt = this._buildPlanningPrompt(args, insights, targetFormat)
+  if (this._skillGuidanceContext()) prompt += "\n\n" + this._skillGuidanceContext()
   var plannerLLM = this.llm
 
   this.fnI("input", "Interacting with main model (plan generation)...")
@@ -9886,6 +9902,7 @@ MiniA.prototype._recordRunOutcome = function(args, status, answer, errorClass) {
 }
 
 MiniA.prototype._processFinalAnswer = function(answer, args) {
+  this._completeSkillsForRun()
   var structuredOutput = this._isStructuredOutputFormat(args.format)
 
   if (isObject(this._historyVm) && !this._historyVm.degraded) {
@@ -10903,7 +10920,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
 
     if (typeof MiniUtilsTool !== "function") {
       //if (io.fileExists("mini-a-utils.js")) {
-      loadLib("mini-a-utils.js")
+      loadLib(__miniABundleRoot + "/mini-a-utils.js")
       //}
     }
 
@@ -10912,7 +10929,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       return __
     }
 
-    var toolOptions = { fileallow: args.fileallow }
+    var toolOptions = { fileallow: args.fileallow, bundledskillsroot: __miniABundleRoot + "/skills" }
     if (args.readwrite === true) toolOptions.readwrite = true
     if (args.__interaction_source === "mini-a-web" && this._supportsUserInput(args) && isFunction(this._userInputFn)) {
       toolOptions.inputFn = function(request) { return parent._userInputFn(request) }
@@ -10936,6 +10953,10 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       toolOptions.pluginskillsroots = pluginSkillsRoots
     }
     var fileTool = new MiniUtilsTool(toolOptions)
+    this._skillUtils = fileTool
+    if (!this._skillRuntime) this._resetSkillRuntime(args)
+    fileTool._skillRuntime = this._skillRuntime
+    fileTool._skillCollisionFn = function(event) { parent._skillRuntime.event("collision", event) }
     if (fileTool._initialized !== true) {
       var initResult = fileTool.init(toolOptions)
       if (isString(initResult) && initResult.indexOf("[ERROR]") === 0) {
@@ -10944,6 +10965,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       }
     }
     fileTool._inspectImageFn = function(request) { return parent._inspectImageWithModel(request) }
+    fileTool._decideFn = this._createDecisionToolRunner(args)
     if (isObject(this._wikiManager)) fileTool._wikiManager = this._wikiManager
     if (isObject(this._skillWikiManager)) {
       fileTool._skillWikiManager = this._skillWikiManager
@@ -10984,12 +11006,13 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     methodNames = methodNames.filter(function(name) {
       return isFunction(fileTool[name])
     })
+    if (!isFunction(fileTool._decideFn)) methodNames = methodNames.filter(function(name) { return name !== "decide" })
     if (includeSkillsTool !== true) {
       methodNames = methodNames.filter(function(name) { return name !== "skills" })
     }
     if ((includeSkillsTool === true || toBoolean(args.useskillswiki) === true) && args.useutils !== true) {
       methodNames = methodNames.filter(function(name) {
-        return (includeSkillsTool && name === "skills") || (toBoolean(args.useskillswiki) === true && name === "skillwiki")
+        return (includeSkillsTool && (name === "skills" || (useStdUtils && name === "skill"))) || (toBoolean(args.useskillswiki) === true && name === "skillwiki")
       })
     }
     if (this._supportsUserInput(args) !== true) {
@@ -11026,10 +11049,9 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       })
     }
 
-    if (methodNames.indexOf("skills") < 0) this._availableSkills = []
     var _STD_ALIAS_NAMES = ["read", "glob", "grep", "webfetch", "question", "skill", "todowrite", "apply_patch"]
     if (useStdUtils) {
-      var stdVisible = ["readDocument", "inspectImage", "init", "filesystemModify", "mathematics", "timeUtilities", "pathUtilities", "filesystemBatch", "validationUtilities", "systemInfo", "memoryStore", "showMessage", "markdownFiles", "wiki", "skillwiki", "printChart"].concat(_STD_ALIAS_NAMES)
+      var stdVisible = ["readDocument", "inspectImage", "init", "filesystemModify", "mathematics", "timeUtilities", "pathUtilities", "filesystemBatch", "validationUtilities", "systemInfo", "memoryStore", "showMessage", "markdownFiles", "wiki", "skillwiki", "decide", "printChart"].concat(_STD_ALIAS_NAMES)
       var stdMap = {}
       stdVisible.forEach(function(n) { stdMap[n] = true })
       methodNames = methodNames.filter(function(name) { return stdMap[name] === true })
@@ -11038,6 +11060,9 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       _STD_ALIAS_NAMES.forEach(function(n) { _aliasSet[n] = true })
       methodNames = methodNames.filter(function(name) { return _aliasSet[name] !== true })
     }
+    this._skillLocalEnabled = methodNames.indexOf("skills") >= 0 || methodNames.indexOf("skill") >= 0
+    this._skillWikiEnabled = methodNames.indexOf("skillwiki") >= 0
+    if (!this._skillLocalEnabled) this._availableSkills = []
     if (methodNames.length === 0) return __
 
     var formatResponse = function(result) {
@@ -11289,6 +11314,10 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       if (["read", "get", "view", "cat", "render", "invoke"].indexOf(op) < 0) return
 
       var skillName = isString(result.name) ? result.name : (isString(payload.name) ? payload.name : "")
+      if (toBoolean(args.debug) !== true) {
+        parent.fnI("skill", "Skill '" + skillName + "' loaded")
+        return
+      }
       if (isString(result.templatePath) && result.templatePath.length > 0) {
         parent.fnI("skill", "Skill '" + skillName + "' loaded from " + result.templatePath)
       }
@@ -11316,6 +11345,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       fns[name] = function(params) {
         var payload = params
         if (isUnDef(payload)) payload = {}
+        if (isMap(payload)) { payload = merge({}, payload); delete payload._userSelected }
         var prepared = parent._prepareToolArgs(meta.inputSchema, payload)
         payload = prepared.params
         if (prepared.repairs.length > 0) parent._trace("tool_call", { name: name, params: payload, source: "mini-utils", repairs: prepared.repairs })
@@ -11330,8 +11360,19 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
           parent._trace("tool_call", { name: name, params: payload, source: "mini-utils" })
           var result = parent._runRawOutputGuarded(function() { return fileTool[name](payload) })
           parent._captureContextToolResult(name, payload, result)
-          if (name === "skills") _logSkillSourceUsage(payload, result)
+          if (name === "skills" || name === "skill") {
+            _logSkillSourceUsage(payload, result)
+            if (isMap(result) && !result.error) parent._recordSkillContent("local:" + result.name, result)
+          }
+          if (name === "skillwiki" && isMap(result) && !result.error) {
+            if (isString(result.bodyTemplate)) result.rendered = __miniARenderSkillTemplate(result.bodyTemplate, { raw: payload.args || "", argv: payload.argv || [], argc: (payload.argv || []).length })
+            parent._recordSkillContent(payload.ref || payload.path, result)
+          }
           var response = formatResponse(result)
+          if ((name === "skills" || name === "skill" || name === "skillwiki") && isMap(response) && response.error) {
+            var requestedRef = name === "skillwiki" ? payload.ref || payload.path : "local:" + String(payload.name || "").replace(/^local:/, "")
+            if (parent._skillRuntime.records[requestedRef] && /source|revision|budget|max.chars|max.loaded|denied|not.found|exceeds/.test(String(response.error))) parent._skillRuntime.block(requestedRef, String(response.error))
+          }
           if (isMap(response) && isString(response.error) && isMap(meta.inputSchema)) {
             var enriched = MiniA._enrichToolCallError(response.error, meta.inputSchema, payload)
             if (enriched !== response.error) {
@@ -13400,7 +13441,7 @@ MiniA.prototype._computeToolCacheSettings = function(tool, defaultTtl) {
     metadata.idempotentHint
   ]
 
-  var enabled = deterministicHints.some(hint => toBoolean(hint) === true)
+  var enabled = annotations.cacheable !== false && metadata.cacheable !== false && deterministicHints.some(hint => toBoolean(hint) === true)
   var keyFields = []
   var keyCandidates = annotations.cacheKeyFields || metadata.cacheKeyFields
   if (isArray(keyCandidates)) {
@@ -13762,12 +13803,12 @@ MiniA.prototype._scoreInitialSkillActivation = function(skill, goalText, hookCon
     "/" + namePhrase
   ]
   for (var i = 0; i < explicitPatterns.length; i++) {
-    if (explicitPatterns[i].length > 1 && haystack.indexOf(explicitPatterns[i]) >= 0) {
+    if (explicitPatterns[i].length > 1 && new RegExp("(^|[\\s([{])" + explicitPatterns[i].replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?=$|[^a-z0-9_-])", "i").test(__miniASkillRequestText(haystack))) {
       return { score: 120, reason: "explicit" }
     }
   }
 
-  if (lookupKey === nameKey || lookupKey.indexOf("-" + nameKey + "-") >= 0 || lookupKey.indexOf(nameKey + "-") === 0 || lookupKey.lastIndexOf("-" + nameKey) === lookupKey.length - nameKey.length - 1) {
+  if (lookupKey === nameKey || lookupKey.indexOf("-" + nameKey + "-") >= 0 || lookupKey.indexOf(nameKey + "-") === 0 || (lookupKey.length > nameKey.length && lookupKey.lastIndexOf("-" + nameKey) === lookupKey.length - nameKey.length - 1)) {
     return { score: 95, reason: "name" }
   }
 
@@ -13815,10 +13856,10 @@ MiniA.prototype._skillDisablesModelInvocation = function(skill) {
 MiniA.prototype._getSkillContextCharLimit = function(skill, fallback) {
   var limit = isNumber(fallback) && fallback > 0 ? Math.floor(fallback) : 8000
   var value = this._getSkillFrontMatterValue(skill, [ "max-context-chars", "maxContextChars", "max_context_chars" ])
-  if (isNumber(value) && value > 0) return Math.floor(value)
+  if (isNumber(value) && value > 0) return Math.min(limit, Math.floor(value))
   if (isString(value) && value.trim().length > 0) {
     var parsed = Number(value)
-    if (!isNaN(parsed) && parsed > 0) return Math.floor(parsed)
+    if (!isNaN(parsed) && parsed > 0) return Math.min(limit, Math.floor(parsed))
   }
   return limit
 }
@@ -13873,12 +13914,18 @@ MiniA.prototype._loadInitialSkillActivation = function(entry, options) {
 
   var maxChars = isNumber(options.maxChars) && options.maxChars > 0 ? Math.floor(options.maxChars) : 8000
   maxChars = this._getSkillContextCharLimit(skill, maxChars)
-  var content = io.readFileString(this._filePath(skill.templatePath))
-  var truncated = false
-  if (isString(content) && content.length > maxChars) {
-    content = content.substring(0, maxChars) + "\n\n[Skill content truncated after " + maxChars + " characters.]"
-    truncated = true
+  this._filePath(skill.templatePath)
+  if (typeof MiniUtilsTool !== "function") loadLib("mini-a-utils.js")
+  var tool = this._skillUtils || new MiniUtilsTool({ skillsroot: skill.rootPath || String(new java.io.File(skill.templatePath).getParentFile().getParent()), fileallow: this._promptArgs && this._promptArgs.fileallow })
+  if (this._skillRuntime) tool._skillRuntime = this._skillRuntime
+  var result = tool.skills({ operation: "render", name: skill.name, maxChars: maxChars, progressive: true, _userSelected: entry.reason === "explicit" })
+  if (!isMap(result) || result.error || !isString(result.rendered)) {
+    if (this._skillRuntime) this._skillRuntime.block("local:" + skill.name, isMap(result) ? result.error : String(result))
+    return __
   }
+  var content = result.rendered
+  var truncated = result.truncated === true
+  this._recordSkillContent("local:" + skill.name, result, skill)
 
   return {
     name        : skill.name,
@@ -13905,6 +13952,16 @@ MiniA.prototype._buildInitialSkillsRuntimeContext = function(activations) {
   return "[SKILLS] Auto-loaded skill guidance for this run. Use this task guidance before guessing missing definitions.\n\n" + sections.join("\n\n---\n\n")
 }
 
+// Preserve an explicit init(args) handoff once; subsequent runs start fresh.
+MiniA.prototype._prepareInitialSkillsForRun = function(args) {
+  if (this._initialSkillActivationArgs !== args) {
+    this._initialSkillActivations = []
+    this._initialSkillActivationKeys = {}
+    this._resetSkillRuntime(args)
+  }
+  this._initialSkillActivationArgs = __
+}
+
 MiniA.prototype._activateInitialSkills = function(args) {
   if (!isMap(args) || toBoolean(args.useskills) !== true) return []
   if (!isArray(this._availableSkills) || this._availableSkills.length === 0) return []
@@ -13912,6 +13969,7 @@ MiniA.prototype._activateInitialSkills = function(args) {
   var maxAutoLoad = isNumber(args.skillmaxautoload) && args.skillmaxautoload > 0 ? Math.floor(args.skillmaxautoload) : 1
   var contextChars = isNumber(args.skillcontextchars) && args.skillcontextchars > 0 ? Math.floor(args.skillcontextchars) : 8000
   var selected = this._selectInitialSkillActivations(args.goal, args.hookcontext, { maxSkills: maxAutoLoad })
+  if (args.skillsautosearch === false) selected = selected.filter(function(entry) { return entry.reason === "explicit" })
   if (selected.length === 0) return []
 
   if (!isObject(this._initialSkillActivationKeys)) this._initialSkillActivationKeys = {}
@@ -13966,13 +14024,13 @@ MiniA.prototype._buildSkillPromptEntries = function(profile, goalText, hookConte
   if (!isArray(this._availableSkills) || this._availableSkills.length === 0) return []
   options = isMap(options) ? options : {}
   var normalized = this._normalizePromptProfile(profile)
-  var includeDescription = normalized === "verbose"
+  var includeDescription = true
   var maxSkills = normalized === "minimal" ? 8 : normalized === "balanced" ? 12 : this._availableSkills.length
   var manifestChars = isNumber(options.manifestChars) && options.manifestChars > 0 ? Math.floor(options.manifestChars) : 1536
   var rankedSkills = this._rankSkillsForPrompt(goalText, hookContextText)
   var selected = rankedSkills.slice(0, maxSkills).map(function(entry) { return entry.skill })
   if (selected.length === 0) selected = this._availableSkills.slice(0, maxSkills)
-  var perDescriptionChars = Math.max(120, Math.floor(manifestChars / Math.max(1, selected.length)))
+  var perDescriptionChars = Math.max(1, Math.floor(manifestChars / Math.max(1, selected.length)))
   var self = this
   return selected.map(function(s) {
     return {
@@ -15851,7 +15909,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
   var known = {}
   ;[
     "rpm", "tpm", "rtm", "maxsteps", "knowledge", "fileallow", "chatyouare", "youare", "homedir",
-    "promptprofile", "systempromptbudget", "outfile", "outfileall", "libs", "model", "modellc", "modelval",
+    "promptprofile", "systempromptbudget", "outfile", "outfileall", "libs", "model", "modellc", "modelval", "modeldec",
     "conversation", "historyvm", "historyvmmode", "historyvmshadow", "contextvirtualization", "contextvirtualizationshadow", "shell", "usesandbox", "sandboxprofile", "sandboxnonetwork", "shellallow", "shellbanextra",
     "shelltimeout", "shellmaxbytes", "toolcachettl", "mcplazy", "mcpdynamic", "mcpproxy", "mcpproxythreshold", "toolargcheck", "toolargrepair",
     "mcpproxytoon", "contextguard", "contextguardbudget", "toolresultmaxinline", "readresultmaxmatches",
@@ -15887,7 +15945,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "agentcomms", "showdelegate", "usea2a", "modellock", "modelstrategy", "advisormaxuses", "advisorenable",
     "advisoronrisk", "advisoronambiguity", "advisoronharddecision", "advisorcooldownsteps",
     "advisorbudgetratio", "emergencyreserve", "harddecision", "evidencegate", "evidencegatestrictness",
-    "lcescalatedefer", "lcbudget", "lcjsonretries", "lcreplytool", "llmcomplexity",
+    "lcescalatedefer", "lcbudget", "lcjsonretries", "lcreplytool", "llmcomplexity", "usedecide",
     "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix", "wikiindexdir", "wikis3artifactprefix", "s3artifactbundle", "wikihttpindexurl", "wikihttptimeout", "wikiartifactrefreshsecs",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
     "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "wikiretrievalv2", "wikiretrievalconfig", "wikisourceurl", "wikisourcefield", "wikisourceinline", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphmounts", "wikimountgraphttlms", "wikigraphcross", "wikigraphcrossjoin", "wikigraphcrosscap", "wikigraphcrossdepth", "wikigraphcrossmaxdf", "wikigraphcrossminkeylen", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
@@ -16265,6 +16323,7 @@ MiniA.prototype.init = function(args) {
   var explicitExternalArgs = jsonParse(stringify(args, __, ""), __, __, true)
   this._applyAgentMetadata(args)
   this._applyExplicitExternalArgs(args, explicitExternalArgs)
+  this._initDecisionRuntime(args)
   if (MiniA.shouldWarnUnknownArgs(args)) this._warnUnknownArgs(args)
   var currentWorkingDir = __
   try {
@@ -16360,6 +16419,7 @@ MiniA.prototype.init = function(args) {
       { name: "model", type: "string", default: __ },
       { name: "modellc", type: "string", default: __ },
       { name: "modelval", type: "string", default: __ },
+      { name: "modeldec", type: "string", default: __ },
       { name: "conversation", type: "string", default: __ },
       { name: "historyvm", type: "boolean", default: false },
       { name: "historyvmmode", type: "string", default: "safe" },
@@ -16380,6 +16440,8 @@ MiniA.prototype.init = function(args) {
       { name: "contextguardbudget", type: "number", default: 32000 },
       { name: "toolresultmaxinline", type: "number", default: __ },
       { name: "readresultmaxmatches", type: "number", default: __ },
+      { name: "usedecide", type: "boolean", default: __ },
+      { name: "llmcomplexity", type: "boolean", default: __ },
       { name: "mcpproxy", type: "boolean", default: false },
       { name: "mcpproxythreshold", type: "number", default: 0 },
       { name: "mcpproxytoon", type: "boolean", default: false },
@@ -17346,6 +17408,7 @@ MiniA.prototype.init = function(args) {
 // Rebuild generated instructions after the current memory session is bound.
 // Connections and the model conversation belong to the session, not this prompt.
 MiniA.prototype._refreshRunPrompt = function(args) {
+  var activationArgs = args
   var previousArgs = this._promptArgs || {}
   args = merge(previousArgs, args)
   this._configureFileAccess(args)
@@ -17364,7 +17427,8 @@ MiniA.prototype._refreshRunPrompt = function(args) {
 
     if (this._isStructuredOutputFormat(args.format)) rules.push("When you provide the final answer, it must be a valid JSON object or array.")
 
-    this._activateInitialSkills(args)
+    // Skill consultation runs after tool registration, before planning/execution.
+    this._initialSkillActivationArgs = activationArgs
 
     var baseKnowledge = isString(args.knowledge) ? args.knowledge : ""
     var strippedKnowledge = MiniA.stripVisualKnowledge(baseKnowledge)
@@ -17808,6 +17872,8 @@ MiniA.prototype._supportsConsoleUserInput = function(args) {
  * </odoc>
  */
 MiniA.prototype.start = function(args) {
+    this._resetDecisionToolBudget()
+    this._decisionToolControls = __
     this._configureFileAccess(args)
     this._origAnswer = __
     this._lastStartArgs = args
@@ -18214,7 +18280,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.useskillswiki = _$(toBoolean(args.useskillswiki), "args.useskillswiki").isBoolean().default(false)
     args.skillwikibackend = _$(args.skillwikibackend, "args.skillwikibackend").isString().default(__)
     args.skillwikiroot = _$(args.skillwikiroot, "args.skillwikiroot").isString().default(__)
-    args.skillsautosearch = _$(toBoolean(args.skillsautosearch), "args.skillsautosearch").isBoolean().default(false)
+    args.skillsautosearch = this._resolveSkillsAutoSearch(args)
     var _skillsAutoLimit = isNumber(args.skillsautolimit) ? args.skillsautolimit : Number(args.skillsautolimit)
     if (isNaN(_skillsAutoLimit)) _skillsAutoLimit = __
     args.skillsautolimit = _$(_skillsAutoLimit, "args.skillsautolimit").isNumber().default(5)
@@ -18326,6 +18392,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
     }
 
+    this._initDecisionRuntime(args)
     this._applyOrchestration(args, explicitExternalArgs)
     this._planningAssessment = null
     this._planningStrategy = "off"
@@ -18384,6 +18451,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var rateLimiter = this._createRateLimiter(args)
     var addCall = () => rateLimiter.beforeCall()
     var registerCallUsage = tokens => rateLimiter.afterCall(tokens)
+    this._decisionToolControls = { beforeCall: addCall, afterCall: registerCallUsage }
 
     var planCallControls = {
       beforeCall: () => addCall(),
@@ -18735,7 +18803,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
 
       runtime.context = [`[SUMMARY] Auto-recovery after provider context-window error: ${summarized}`]
-      this._resetProviderHistoryAfterOverflow(summarized)
+      this._syncSkillContext(runtime)
+      this._resetProviderHistoryAfterOverflow(summarized + "\n\n" + this._skillGuidanceContext())
       runtime.contextOverflowRecoveries = (runtime.contextOverflowRecoveries || 0) + 1
       this._clearRuntimeErrors(runtime, function(entry) {
         if (!isObject(entry)) return false
@@ -18778,8 +18847,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (args.debug && isString(args.knowledge) && args.knowledge.length > 0) {
       this.fnI("debug", `Knowledge before init(): ${args.knowledge.substring(0, 100)}... (${args.knowledge.length} chars total)`)
     }
-    this._initialSkillActivations = []
-    this._initialSkillActivationKeys = {}
+    this._prepareInitialSkillsForRun(args)
 
     // Reset initialization flag if knowledge was enriched with plan, to force re-init with updated knowledge
     if (args.knowledgeUpdated === true) {
@@ -18822,6 +18890,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
 
     this.init(args)
+    this._initialSkillActivationArgs = __
     args.goal = this._coerceGoalText(args.goal)
     if (isObject(this._historyVm) && !this._historyVm.degraded) {
       this._historyVm.captureUserMessage(args.goal, { interactionId: "goal-" + String(nowNano()), explicitPin: true })
@@ -18845,6 +18914,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
 
     this._registerMcpToolsForGoal(args)
+    var skillBlocked = this._consultSkillsForRun(args, { beforeCall: addCall, afterCall: registerCallUsage })
+    if (skillBlocked.length > 0) {
+      var skillBlockedAnswer = "Skill-dependent work is blocked: " + skillBlocked.map(function(item) { return item.ref + " (" + item.reason + ")" }).join("; ") + ". Restore the required guidance or adjust the skill limits before retrying."
+      this._origAnswer = skillBlockedAnswer
+      return this._processFinalAnswer(skillBlockedAnswer, args)
+    }
     if (args.debug || args.verbose) this._memoryAppend("facts", "Runtime started for new execution loop", { provenance: { source: "runtime", event: "run-start" } })
     if (this._hasExternalPlan) {
       this._memoryAppend("facts", "Loaded external plan for execution.", { provenance: { source: "planning", event: "plan-loaded", path: isObject(preloadedPlan) ? (preloadedPlan.path || "") : "" } })
@@ -19000,7 +19075,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (isString(carryoverContext) && carryoverContext.length > 0) {
       runtime.context.push(carryoverContext)
     }
-    var initialSkillsContext = this._buildInitialSkillsRuntimeContext(this._initialSkillActivations)
+    var initialSkillsContext = this._skillGuidanceContext() || this._buildInitialSkillsRuntimeContext(this._initialSkillActivations)
     if (isString(initialSkillsContext) && initialSkillsContext.length > 0) {
       runtime.context.push(initialSkillsContext)
     }
@@ -19302,8 +19377,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
     var goalComplexityLevel = goalComplexity && goalComplexity.level ? goalComplexity.level : "medium"
 
+    var decisionComplexityLevel = this._assessComplexityByDecision(args.goal, goalComplexityLevel, args)
+    if (isDef(decisionComplexityLevel)) goalComplexityLevel = decisionComplexityLevel
+
     // Issue 6: LLM-assisted complexity assessment for ambiguous medium results
-    if (toBoolean(args.llmcomplexity) && goalComplexityLevel === "medium" && this._use_lc && isObject(this.lc_llm)) {
+    if (isUnDef(decisionComplexityLevel) && toBoolean(args.llmcomplexity) && goalComplexityLevel === "medium" && this._use_lc && isObject(this.lc_llm)) {
       try {
         // Use a fixed instruction prefix; include the goal as a quoted, sanitized string
         // to reduce prompt-injection risk from adversarial goal text.
@@ -19767,6 +19845,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     // Context will hold the history of thoughts, actions, and observations
     // We iterate until requested stop or hitting the consecutive no-progress limit
     for (var step = 0; this.state != "stop"; step++) {
+      if (this._skillRuntime && this._skillRuntime.blocked.length) {
+        this._origAnswer = "Skill-dependent work is blocked: " + this._skillRuntime.blocked.map(function(item) { return item.ref + " (" + item.reason + ")" }).join("; ") + ". Restore the skill source or adjust the limits before retrying."
+        return this._processFinalAnswer(this._origAnswer, args)
+      }
       runtime.currentStepNumber = step + 1
       if (runtime.earlyStopTriggered === true && runtime.earlyStopHandled !== true) {
         var stopReason = isString(runtime.earlyStopReason) && runtime.earlyStopReason.length > 0
@@ -22008,6 +22090,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       context            : [],
       currentStepNumber  : 0
     }
+    this._syncSkillContext(runtime)
 
     var hasToolCallsPayload = value => {
       if (isUnDef(value)) return false
@@ -22028,6 +22111,10 @@ MiniA.prototype._runChatbotMode = function(options) {
     }
 
     for (var step = 0; step < maxSteps && this.state != "stop"; step++) {
+      if (this._skillRuntime && this._skillRuntime.blocked.length) {
+        this._origAnswer = "Skill-dependent work is blocked: " + this._skillRuntime.blocked.map(function(item) { return item.ref + " (" + item.reason + ")" }).join("; ") + ". Restore the skill source or adjust the limits before retrying."
+        return this._processFinalAnswer(this._origAnswer, args)
+      }
       runtime.currentStepNumber = step + 1
       var commsObservation = this._drainCommsObservation()
       if (commsObservation) pendingPrompt += "\n" + commsObservation
@@ -23388,3 +23475,6 @@ MiniA.prototype._initComms = function(args) {
     this._ownsComms = true
   } catch(e) { broker.close(); throw e }
 }
+
+loadLib("mini-a-skill-runtime.js")
+__miniAInstallSkillRuntime()

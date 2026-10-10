@@ -3079,6 +3079,8 @@
             } else {
                 if (!['🧩', '💡', '💭', '🌀', '🛑', '⏳'].includes(ev.event) &&
                     !(showExecsEnabled && ['⚙️', '🖥️'].includes(ev.event))) return;
+                // Show requested/used skills; keep consultation diagnostics in full logging.
+                if (ev.event === "🧩" && !/^(?:selected|loading|loaded|active|completed|blocked|ignored|incomplete|missing_prerequisites)(?:\s|:|$)|^requests:.*requests=\[\s*[^\s\]]/.test(String(ev.message || ""))) return;
                 if (/^(⚠️|❌|❗|warn|warning|error)$/.test(ev.event) ||
                     (ev.event === '🤝' && /❌|❗|⚠️|failed|timeout/i.test(ev.message || ''))) warnings++;
                 lines.push(`<div class="activity-event">${escapeHtml(ev.event)} <span>${escapeHtml(ev.message).replace(/\n/g, '<br>')}</span></div>`);

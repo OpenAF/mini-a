@@ -4872,6 +4872,15 @@ MiniAWikiManager.prototype._rewriteLinksForMove = function(raw, sourcePage, from
 }
 
 MiniAWikiManager.prototype.move = function(from, to, options) {
+  if (this._catalog || this._access !== "rw") return this._movePages(from, to, options)
+  if (!global.__miniAWikiKnowledge) loadLib("mini-a-wiki-knowledge.js")
+  global.__miniAWikiKnowledge.install(this)
+  if (this.knowledgeMovePending()) {
+    try {
+      var recovered = this.knowledgeRecoverMove()
+      if (recovered.from === from && recovered.to === to) return recovered
+    } catch(e) { return { ok: false, error: __miniAErrMsg(e), recovery_pending: true } }
+  }
   if (!this._retrievalV2 || this._access !== "rw" || !io.fileExists(this._retrievalV2.root + "/current.json")) return this._movePages(from, to, options)
   if (isMap(this._servingBatchChanges)) return { ok: false, error: "move-during-journal-not-supported" }
   var fromPath, toPath, snapshot, priorOrigins = this._servingMoveOrigins, priorBatch = this._servingBatchChanges, priorSnapshot = this._servingMoveSnapshot
@@ -4889,8 +4898,12 @@ MiniAWikiManager.prototype.move = function(from, to, options) {
       result.servingPublication = this._lastServingUpdate
       if (!this._lastServingUpdate.ok) { result.ok = false; result.error = "move-serving-publication-failed: " + this._lastServingUpdate.error }
     }
+    if (result.ok && this.knowledgeMovePending()) {
+      this._knowledgeFinishMove()
+      result.recovery_pending = false
+    }
     return result
-  } catch(e) { return {ok:false,error:__miniAErrMsg(e)} }
+  } catch(e) { return {ok:false,error:__miniAErrMsg(e),recovery_pending:this.knowledgeMovePending()} }
   finally {
     this._servingMoveOrigins = priorOrigins; this._servingBatchChanges = priorBatch; this._servingMoveSnapshot = priorSnapshot
     if(snapshot)this._retrievalV2.release(snapshot)
@@ -4918,55 +4931,11 @@ MiniAWikiManager.prototype._movePages = function(from, to, options) {
 
   var raw = this._backend.read(fromPath)
   if (!isString(raw)) return { ok: false, error: "page not readable: " + fromPath }
-  var movedRaw = this._rewriteLinksForMove(raw, fromPath, fromPath, toPath, true)
-  var writeMoved = this.write(toPath, movedRaw)
-  if (!isObject(writeMoved) || writeMoved.ok !== true) return writeMoved
+  if (!global.__miniAWikiKnowledge) loadLib("mini-a-wiki-knowledge.js")
+  global.__miniAWikiKnowledge.install(this)
+  try { return this.knowledgeMove(fromPath, toPath, opts) }
+  catch(e) { return { ok: false, error: __miniAErrMsg(e), recovery_pending: this.knowledgeMovePending() } }
 
-  var pagesChanged = []
-  var self = this
-  var candidates = this.list(""), linkDiscovery = "legacy-full-scan"
-  if (this._servingMoveSnapshot && isMap(this._servingMoveSnapshot.catalog.moveReverse)) {
-    var servingCatalog = this._servingMoveSnapshot.catalog, incoming = servingCatalog.moveReverse[fromPath] || [], pending = this._retrievalV2._pending()
-    candidates = this._safeListPages("").filter(function(p) { return incoming.indexOf(p) >= 0 || !servingCatalog.pages[p] || !self._retrievalV2._active(servingCatalog.pages[p], pending, __, __, __, __, self._servingMoveSnapshot) })
-    linkDiscovery = "derived-with-changed-page-validation"
-  }
-  candidates.forEach(function(p) {
-    if (p === fromPath || p === toPath) return
-    var pageRaw = self._backend.read(p)
-    if (!isString(pageRaw)) return
-    var rewritten = self._rewriteLinksForMove(pageRaw, p, fromPath, toPath, false)
-    if (rewritten !== pageRaw) {
-      var res = self.write(p, rewritten)
-      if (isObject(res) && res.ok === true) pagesChanged.push(p)
-    }
-  })
-
-  var redirectCreated = false
-  if (opts.leaveRedirect === true || opts.redirect === true || opts.stub === true) {
-    var oldPage = this.parseFrontmatter(raw)
-    var meta = isObject(oldPage.meta) ? oldPage.meta : {}
-    meta.title = isString(meta.title) ? meta.title : fromPath
-    meta.superseded_by = toPath
-    var rel = this._relativePath(fromPath, toPath)
-    var stubBody = "> Superseded - this page moved to [" + toPath + "](" + rel + ").\n"
-    var stub = this.write(fromPath, meta, stubBody)
-    redirectCreated = isObject(stub) && stub.ok === true
-  } else {
-    var del = this.delete(fromPath)
-    if (!isObject(del) || del.ok !== true) return del
-  }
-
-  try { this.appendLog("move", fromPath + " → " + toPath, toPath) } catch(le) {}
-  return {
-    ok: true,
-    from: fromPath,
-    to: toPath,
-    pages_moved: 1,
-    link_discovery: linkDiscovery,
-    pages_changed: pagesChanged.length,
-    changed_pages: pagesChanged,
-    redirect_created: redirectCreated
-  }
 }
 
 // ── Lint ──────────────────────────────────────────────────────────────────────
@@ -5517,10 +5486,16 @@ MiniAWikiManager.prototype._assembleContextPlaceholder = MiniAWikiManager.protot
   var original = MiniAWikiManager.prototype[name]
   if (!isFunction(original)) return
   MiniAWikiManager.prototype[name] = function() {
+    var writesGraph = name !== "graph" || ["build", "report", "falkor"].indexOf(String(arguments[0])) >= 0
+    var pendingMove = function(manager) {
+      return writesGraph && name !== "configure" && name !== "move" && manager._knowledgeRecoveringMove !== true &&
+        manager._backend && !manager._catalog && io.fileExists(manager._getIndexRoot() + "/.mini-a-wiki-move/journal.json")
+    }
+    if (pendingMove(this)) return { ok: false, error: "structural-move-recovery-required" }
     var cfg = name === "configure" ? arguments[0] || {} : this._config || {}
     var local = name === "configure" ? String(cfg.backend || "fs") === "fs" : this._backendType === "fs"
     var writable = name === "configure" ? cfg.access === "rw" : this._access === "rw"
-    var graphWrite = name !== "graph" || ["build", "report", "falkor"].indexOf(String(arguments[0])) >= 0
+    var graphWrite = writesGraph
     var root = name === "configure" ? cfg.root || "." : this._backend.root
     if (!local || !writable || !graphWrite || cfg.__catalog === true || new java.io.File(String(root)).isFile()) return original.apply(this, arguments)
     var lock
@@ -5529,6 +5504,9 @@ MiniAWikiManager.prototype._assembleContextPlaceholder = MiniAWikiManager.protot
       if (name === "configure") throw e
       return { ok: false, error: __miniAErrMsg(e) }
     }
-    try { return original.apply(this, arguments) } finally { lock.release() }
+    try {
+      if (pendingMove(this)) return { ok: false, error: "structural-move-recovery-required" }
+      return original.apply(this, arguments)
+    } finally { lock.release() }
   }
 })

@@ -143,6 +143,7 @@ mini-a goal="generate project report" outfile=report.md useshell=true
 | Parameter | Description | Example |
 |-----------|-------------|---------|
 | `model` | Override OAF_MODEL for this session | `model="(type: openai, model: gpt-4, key: '...')"` |
+| `modeldec` | Override OAF_DECIDE_MODEL for this session | `/model dec` or `modeldec="(type: openai, model: gpt-5-mini, key: '...')"` |
 | `modellc` | Override OAF_LC_MODEL for this session | `modellc="(type: openai, model: gpt-3.5-turbo, key: '...')"` |
 | `modelval` | Override OAF_VAL_MODEL for this session | `modelval="(type: openai, model: gpt-4o-mini, key: '...')"` |
 | `modelman` | Launch interactive model manager | `modelman=true` |
@@ -1142,7 +1143,7 @@ and skill pages side by side.
 | `skillwikibackend` | string | `fs` for a dedicated library | Select the backend for a dedicated skill wiki: `fs`, `s3`, `s3fs`, `es`, or `http` |
 | `skillwikiroot` | string | `.` for a dedicated library | Filesystem root for a dedicated skill wiki; prefer an explicit absolute path |
 | `skillwikimounts` | SLON/JSON | - | Read-only mounts for a dedicated skill wiki, using the same array shape as `wikimounts` |
-| `skillsautosearch` | boolean | `false` | Reserved for future opt-in automatic skill consultation during planning; not implemented |
+| `skillsautosearch` | boolean | Conditional | Defaults off unless `usedecide=true` and `modeldec` or `OAF_DECIDE_MODEL` is set; enabled search tries decide, low-cost, then main on failure |
 | `skillsautolimit` | number | `5` | Reserved maximum results per future automatic skill search; not implemented |
 | `skillsmaxloaded` | number | `3` | Max distinct skills `open()`-ed per agent run |
 | `skillsmaxchars` | number | `12000` | Max skill-body characters `read()` may return per agent run |

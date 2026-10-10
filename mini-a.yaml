@@ -330,6 +330,10 @@ help:
     desc     : Validation verdict label expected to pass deep research validation
     example  : "PASS"
     mandatory: false
+  - name     : modeldec
+    desc     : Override OAF_DECIDE_MODEL configuration for this run
+    example  : "(type: openai, model: gpt-4o-mini, key: '...')"
+    mandatory: false
   - name     : modelval
     desc     : Override OAF_VAL_MODEL configuration for this run
     example  : "(type: openai, model: gpt-4o-mini, key: '...')"
@@ -408,12 +412,28 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : skillsautosearch
+    desc     : Automatically select skills via decide, low-cost, then main; defaults off unless usedecide=true and a decision model (modeldec or OAF_DECIDE_MODEL) is set
+    example  : "true"
+    mandatory: false
+  - name     : skillsautolimit
+    desc     : Combined compact candidate limit for automatic skill selection
+    example  : "5"
+    mandatory: false
+  - name     : skillsmaxloaded
+    desc     : Maximum distinct local/wiki skills consulted per run
+    example  : "3"
+    mandatory: false
+  - name     : skillsmaxchars
+    desc     : Shared skill guidance character budget per run
+    example  : "12000"
+    mandatory: false
   - name     : skillmaxautoload
     desc     : Maximum number of high-confidence matching skills to auto-load into bounded runtime context
     example  : "1"
     mandatory: false
   - name     : skillcontextchars
-    desc     : Maximum characters read from each auto-loaded SKILL.md for runtime context
+    desc     : Maximum characters loaded initially from each selected skill for runtime context
     example  : "8000"
     mandatory: false
   - name     : skillmanifestchars
@@ -905,8 +925,12 @@ help:
     desc     : Extra same-step low-cost model retries on invalid JSON before falling back to the main model (0 disables)
     example  : "1"
     mandatory: false
+  - name     : usedecide
+    desc     : Enable decision-assisted selection and complexity when modeldec or OAF_DECIDE_MODEL is configured (false disables).
+    example  : "true"
+    mandatory: false
   - name     : llmcomplexity
-    desc     : When true, fire a quick LC model call to validate "medium" complexity heuristic results
+    desc     : Refine medium complexity with modeldec or OAF_DECIDE_MODEL; false disables, true also enables the legacy LC check
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
@@ -1148,6 +1172,10 @@ help:
   - name     : ingestsourceid
     desc     : Stable logical ingestion origin identity
     mandatory: false
+  - name     : ingestlayout
+    desc     : "New-page layout: flat (default) or source folders; existing mappings stay in place"
+    mandatory: false
+    options  : ["flat", "source"]
   - name     : ingestmode
     desc     : "Wiki ingestion mode: auto (deterministic first), normalize, distill or raw"
     example  : "auto"
@@ -1281,6 +1309,10 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : dreamwikiorganize
+    desc     : "Explicit reorg organization: none (default) or topics"
+    mandatory: false
+    options  : ["none", "topics"]
   - name     : dreamwikiinstructions
     desc     : Additional operator guidance appended to the wiki reorg objective
     mandatory: false
@@ -1381,6 +1413,7 @@ jobs:
         model          : model
         modellc        : modellc
         modelval       : modelval
+        modeldec       : modeldec
         conversation   : conversation
         historyvm      : historyvm
         historyvmmode  : historyvmmode
@@ -1426,6 +1459,10 @@ jobs:
         usestdutils    : usestdutils
         useskills      : useskills
         useasciiviz    : useasciiviz
+        skillsautosearch: skillsautosearch
+        skillsautolimit: skillsautolimit
+        skillsmaxloaded: skillsmaxloaded
+        skillsmaxchars: skillsmaxchars
         skillmaxautoload: skillmaxautoload
         skillcontextchars: skillcontextchars
         skillmanifestchars: skillmanifestchars
@@ -1533,6 +1570,7 @@ jobs:
         lcbudget       : lcbudget
         lcreplytool    : lcreplytool
         lcjsonretries  : lcjsonretries
+        usedecide      : usedecide
         llmcomplexity  : llmcomplexity
         autodelegation : autodelegation
         autodelegationthreshold: autodelegationthreshold
@@ -1567,6 +1605,7 @@ jobs:
         toolargcheck    : toolargcheck
         toolargrepair   : toolargrepair
         usewiki        : usewiki
+        ingestlayout   : ingestlayout
         wikiaccess     : wikiaccess
         wikibackend    : wikibackend
         wikiroot       : wikiroot
@@ -1615,6 +1654,7 @@ jobs:
         dreamwikillm   : dreamwikillm
         dreammaxsteps  : dreammaxsteps
         dreamwikidryrun: dreamwikidryrun
+        dreamwikiorganize: dreamwikiorganize
         dreamwikiinstructions: dreamwikiinstructions
         dreamwikiapproval: dreamwikiapproval
         dreamwikireorg : dreamwikireorg
@@ -1672,6 +1712,7 @@ jobs:
       model          : default(__)
       modellc        : default(__)
       modelval       : default(__)
+      modeldec       : default(__)
       conversation   : isString.default(__)
       historyvm      : toBoolean.isBoolean.default(false)
       historyvmmode  : isString.default("safe")
@@ -1717,6 +1758,10 @@ jobs:
       usestdutils    : toBoolean.isBoolean.default(__)
       useskills      : toBoolean.isBoolean.default(false)
       useasciiviz    : toBoolean.isBoolean.default(false)
+      skillsautosearch: toBoolean.isBoolean.default(__)
+      skillsautolimit: toNumber.isNumber.default(5)
+      skillsmaxloaded: toNumber.isNumber.default(3)
+      skillsmaxchars: toNumber.isNumber.default(12000)
       skillmaxautoload: toNumber.isNumber.default(1)
       skillcontextchars: toNumber.isNumber.default(8000)
       skillmanifestchars: toNumber.isNumber.default(1536)
@@ -1824,7 +1869,8 @@ jobs:
       lcbudget       : toNumber.isNumber.default(0)
       lcreplytool    : toBoolean.isBoolean.default(false)
       lcjsonretries  : toNumber.isNumber.default(1)
-      llmcomplexity  : toBoolean.isBoolean.default(false)
+      usedecide      : toBoolean.isBoolean.default(__)
+      llmcomplexity  : toBoolean.isBoolean.default(__)
       autodelegation : toBoolean.isBoolean.default(false)
       autodelegationthreshold: toNumber.isNumber.default(__)
       autodelegationmaxperstep: toNumber.isNumber.default(__)
@@ -1858,6 +1904,7 @@ jobs:
       toolargcheck    : toBoolean.isBoolean.default(true)
       toolargrepair   : toBoolean.isBoolean.default(true)
       usewiki        : toBoolean.isBoolean.default(false)
+      ingestlayout   : isString.default("flat")
       wikiaccess     : isString.default(__)
       wikibackend    : isString.default(__)
       wikiroot       : isString.default(__)
@@ -1906,6 +1953,7 @@ jobs:
       dreamwikillm   : toBoolean.isBoolean.default(true)
       dreammaxsteps  : toNumber.isNumber.default(40)
       dreamwikidryrun: toBoolean.isBoolean.default(false)
+      dreamwikiorganize: isString.default("none")
       dreamwikiinstructions: isString.default(__)
       dreamwikiapproval: isString.default(__)
       dreamwikireorg : toBoolean.isBoolean.default(false)

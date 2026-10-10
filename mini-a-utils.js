@@ -3,6 +3,7 @@
 // Description: Mini-A utils tool for basic file operations within a specified root directory
 
 loadLib("mini-a-common.js")
+loadLib("mini-a-skill-runtime.js")
 
 /**
  * <odoc>
@@ -198,12 +199,6 @@ MiniUtilsTool.prototype._resolveSkillsRoots = function(options) {
   }
 
   if (isString(options.skillsroot) || options.skillsroot instanceof java.lang.String) addRoot(options.skillsroot)
-  if (isArray(options.skillsroots)) {
-    options.skillsroots.forEach(function(entry) {
-      addRoot(entry)
-    })
-  }
-
   if (roots.length === 0) {
     var userHome = java.lang.System.getProperty("user.home")
     if (isString(userHome) || userHome instanceof java.lang.String) {
@@ -226,8 +221,14 @@ MiniUtilsTool.prototype._resolveSkillsRoots = function(options) {
       }
     }
   }
+  if (isArray(options.skillsroots)) {
+    options.skillsroots.forEach(function(entry) {
+      addRoot(entry)
+    })
+  }
 
-  // Agent Plugins skills/ contributions - appended last (after defaults) so
+
+  // Agent Plugins skills/ contributions - appended after user/default roots so
   // plugin skills never shadow user/default skills on a name collision
   // (_listSkills is first-root-wins).
   if (isArray(options.pluginskillsroots)) {
@@ -235,6 +236,8 @@ MiniUtilsTool.prototype._resolveSkillsRoots = function(options) {
       addRoot(entry)
     })
   }
+  // Bundled skills share canonical deduplication and the file-access boundary.
+  addRoot(options.bundledskillsroot)
   return roots
 }
 
@@ -345,7 +348,10 @@ MiniUtilsTool.prototype._listSkills = function(params) {
       if (!isString(name) || !validName.test(name)) return
       if (!isString(templatePath) || !io.fileExists(templatePath)) return
       if (self._fileAccess && !self._fileAccess.allows(templatePath)) return
-      if (seenByName[name]) return
+      if (seenByName[name]) {
+        if (isFunction(self._skillCollisionFn)) self._skillCollisionFn({ name: name, winner: seenByName[name], ignored: templatePath })
+        return
+      }
 
       var description = sourceType === "folder"
         ? self._readSkillDescriptionFromTemplate(templatePath)
@@ -362,7 +368,7 @@ MiniUtilsTool.prototype._listSkills = function(params) {
       ].join(" ").toLowerCase()
       if (query.length > 0 && queryText.indexOf(query) < 0) return
 
-      seenByName[name] = true
+      seenByName[name] = templatePath
       results.push({
         name        : name,
         sourceType  : sourceType,
@@ -478,7 +484,7 @@ MiniUtilsTool.prototype._recordSkillReference = function(references, seen, ref) 
   references.push(ref)
 }
 
-MiniUtilsTool.prototype._preprocessSkillTemplateReferences = function(templateText, selected, loadedDoc) {
+MiniUtilsTool.prototype._preprocessSkillTemplateReferences = function(templateText, selected, loadedDoc, progressive) {
   var result = {
     text: isString(templateText) ? String(templateText) : "",
     references: []
@@ -562,7 +568,7 @@ MiniUtilsTool.prototype._preprocessSkillTemplateReferences = function(templateTe
       var virtualBody = virtualFiles[normalizedVirtualPath]
       if (!isString(virtualBody)) virtualBody = String(virtualBody || "")
       self._recordSkillReference(references, seen, { type: "embedded", path: normalizedVirtualPath })
-      replacement = "\n\n--- Skill reference from " + normalizedVirtualPath + " ---\n" + virtualBody + "\n--- End of " + normalizedVirtualPath + " ---\n"
+      if (progressive !== true) replacement = "\n\n--- Skill reference from " + normalizedVirtualPath + " ---\n" + virtualBody + "\n--- End of " + normalizedVirtualPath + " ---\n"
     } else if (isString(filePath) && filePath.length > 0 && !self._isAbsoluteOrExternalSkillPath(filePath)) {
       var resolved = String(new java.io.File(templateDir, filePath).getCanonicalPath())
       try {
@@ -601,7 +607,7 @@ MiniUtilsTool.prototype._preprocessSkillTemplateReferences = function(templateTe
       var virtualRefContent = virtualFiles[normalizedVirtualTarget]
       if (!isString(virtualRefContent)) virtualRefContent = String(virtualRefContent || "")
       self._recordSkillReference(references, seen, { type: "embedded", path: normalizedVirtualTarget })
-      includeBlocks.push("\n\n--- Skill reference from " + normalizedVirtualTarget + " ---\n" + virtualRefContent + "\n--- End of " + normalizedVirtualTarget + " ---\n")
+      if (progressive !== true) includeBlocks.push("\n\n--- Skill reference from " + normalizedVirtualTarget + " ---\n" + virtualRefContent + "\n--- End of " + normalizedVirtualTarget + " ---\n")
       return _
     }
 
@@ -610,7 +616,10 @@ MiniUtilsTool.prototype._preprocessSkillTemplateReferences = function(templateTe
     includedPaths[resolvedPath] = true
     try {
       if (!io.fileExists(resolvedPath) || io.fileInfo(resolvedPath).isFile !== true) return _
-      var refContent = io.readFileString(self._fileAccess.assert(resolvedPath))
+      self._fileAccess.assert(resolvedPath)
+      self._recordSkillReference(references, seen, { type: "file", path: resolvedPath, relativePath: cleanTarget })
+      if (progressive === true) return _
+      var refContent = io.readFileString(resolvedPath)
       self._recordSkillReference(references, seen, { type: "file", path: resolvedPath, relativePath: cleanTarget })
       includeBlocks.push("\n\n--- Skill reference from " + cleanTarget + " ---\n" + refContent + "\n--- End of " + cleanTarget + " ---\n")
     } catch(ignoreSkillRefError) { }
@@ -1563,7 +1572,7 @@ MiniUtilsTool.prototype.skills = function(params) {
 
     if (op === "read" || op === "render" || op === "invoke") {
       if (!isString(params.name) || params.name.trim().length === 0) return "[ERROR] name is required"
-      var requestedName = params.name.trim().toLowerCase()
+      var requestedName = params.name.trim().toLowerCase().replace(/^local:/, "")
       var discovered = this._listSkills({ includeHidden: params.includeHidden === true })
       var selected = __
       for (var i = 0; i < discovered.length; i++) {
@@ -1578,8 +1587,42 @@ MiniUtilsTool.prototype.skills = function(params) {
       if (!isObject(loadedDoc)) return "[ERROR] Failed to parse skill template: " + selected.name
       var content = isString(loadedDoc.rawContent) ? loadedDoc.rawContent : io.readFileString(this._fileAccess.assert(selected.templatePath))
       var processedContent = isString(loadedDoc.bodyTemplate) ? loadedDoc.bodyTemplate : ""
-      var referenced = this._preprocessSkillTemplateReferences(processedContent, selected, loadedDoc)
+      var skillMeta = merge(loadedDoc.meta || {}, loadedDoc.skillData || {})
+      if (this._skillRuntime && params._userSelected !== true && !(this._skillRuntime.records["local:" + selected.name] && this._skillRuntime.records["local:" + selected.name].userSelected) && toBoolean(skillMeta["disable-model-invocation"] || skillMeta.disableModelInvocation || skillMeta.disable_model_invocation) === true) return { error: "skill-model-invocation-disabled" }
+      var skillRef = "local:" + selected.name
+      var budget = this._skillRuntime
+      if (budget) {
+        var denied = budget.reserve(skillRef)
+        if (denied) return denied
+        if (budget.limit(params.maxChars || 8000) <= 0) return { error: "skills-max-chars-exceeded", limit: budget.maxChars }
+      }
+      var referenced = this._preprocessSkillTemplateReferences(processedContent, selected, loadedDoc, params.progressive === true || !!budget)
       var referencedFiles = isMap(referenced) && isArray(referenced.references) ? referenced.references : []
+      if (op === "read" && budget && isString(params.reference) && params.reference.trim()) {
+        var reference = this._normalizeSkillVirtualPath(params.reference)
+        var virtual = loadedDoc.virtualFiles || {}
+        var referenceContent, sourcePath = reference
+        if (Object.prototype.hasOwnProperty.call(virtual, reference)) referenceContent = String(virtual[reference])
+        else {
+          var directory = String(new java.io.File(selected.templatePath).getParent())
+          sourcePath = String(new java.io.File(directory, params.reference).getCanonicalPath())
+          var known = referencedFiles.some(function(item) { return item.path === sourcePath })
+          if (!known) return { error: "skill-reference-not-declared" }
+          referenceContent = io.readFileString(this._fileAccess.assert(sourcePath))
+        }
+        var referencePage = __miniASkillPage(referenceContent, budget.limit(params.maxChars || 4000), params.section)
+        if (referencePage.error) return referencePage
+        budget.consume(skillRef, referencePage.chars)
+        return merge(referencePage, { name: selected.name, fingerprint: sha256(content), reference: sourcePath, referenceRevision: sha256(referenceContent) })
+      }
+      if (op === "read" && budget) {
+        var activeArgs = budget.records[skillRef] && budget.records[skillRef].args
+        var readTemplate = this._renderSkillTemplate(processedContent, activeArgs || this._parseSkillArgs(params.args || ""))
+        var page = __miniASkillPage(readTemplate, budget.limit(params.maxChars || 8000), params.section)
+        if (page.error) return page
+        budget.consume(skillRef, page.chars)
+        return merge(page, { name: selected.name, templatePath: selected.templatePath, fingerprint: sha256(content), referencedFiles: referencedFiles })
+      }
       if (op === "read") {
         if (params.compact === true) {
           return {
@@ -1622,6 +1665,15 @@ MiniUtilsTool.prototype.skills = function(params) {
 
       var renderedTemplate = isMap(referenced) && isString(referenced.text) ? referenced.text : processedContent
       var rendered = this._renderSkillTemplate(renderedTemplate, parsedArgs)
+      if (budget) {
+        var ceiling = isNumber(params.maxChars) && params.maxChars > 0 ? params.maxChars : 8000
+        var authored = Number(skillMeta["max-context-chars"] || skillMeta.maxContextChars || skillMeta.max_context_chars)
+        if (authored > 0) ceiling = Math.min(ceiling, authored)
+        var renderedPage = __miniASkillPage(rendered, budget.limit(ceiling), params.section)
+        if (renderedPage.error) return renderedPage
+        budget.consume(skillRef, renderedPage.chars)
+        return merge(renderedPage, { name: selected.name, templatePath: selected.templatePath, fingerprint: sha256(content), referencedFiles: referencedFiles, rendered: renderedPage.body, args: parsedArgs, invocation: "$" + selected.name, slashCommand: "/" + selected.name })
+      }
       var invocationSuffix = isString(parsedArgs.raw) && parsedArgs.raw.length > 0 ? " " + parsedArgs.raw : ""
       var skillInvocation = "$" + selected.name + invocationSuffix
       var slashInvocation = "/" + selected.name + invocationSuffix
@@ -1966,39 +2018,45 @@ MiniUtilsTool.prototype.skillwiki = function(params) {
       return "[ERROR] ref is required for operation=" + op
     }
 
-    if (op === "open") {
-      // Bounded, opt-in consultation (skillsmaxloaded): counts distinct skills
-      // opened in this agent run, not searches -- search/recommend stay unlimited
-      // since they only ever return compact metadata, never skill content.
-      var maxLoaded = isNumber(this._skillsMaxLoaded) ? this._skillsMaxLoaded : 3
-      this._skillsLoadedRefs = this._skillsLoadedRefs || {}
-      var alreadyLoaded = this._skillsLoadedRefs[ref] === true
-      if (!alreadyLoaded && Object.keys(this._skillsLoadedRefs).length >= maxLoaded) {
-        return { error: "skills-max-loaded-exceeded", limit: maxLoaded, message: "Already consulted " + maxLoaded + " skill(s) this run; skillsmaxloaded=" + maxLoaded + " reached." }
-      }
-      var opened = provider.open(ref, params)
-      if (isObject(opened) && !isDef(opened.error)) this._skillsLoadedRefs[ref] = true
-      return opened
+    var budget = this._skillRuntime
+    if (!budget) {
+      budget = this._skillRuntime = new MiniASkillRuntime({ skillsmaxloaded: this._skillsMaxLoaded, skillsmaxchars: this._skillsMaxChars })
     }
-
-    if (op === "read") {
-      var maxChars = isNumber(this._skillsMaxChars) ? this._skillsMaxChars : 12000
-      this._skillsCharsLoaded = isNumber(this._skillsCharsLoaded) ? this._skillsCharsLoaded : 0
-      if (this._skillsCharsLoaded >= maxChars) {
-        return { error: "skills-max-chars-exceeded", limit: maxChars, message: "skillsmaxchars=" + maxChars + " already consumed this run." }
-      }
-      var readParams = merge({}, params)
-      if (!isNumber(readParams.maxChars) || readParams.maxChars > (maxChars - this._skillsCharsLoaded)) {
-        readParams.maxChars = Math.max(200, maxChars - this._skillsCharsLoaded)
-      }
-      var readOut = provider.read(ref, readParams)
-      if (isObject(readOut) && isNumber(readOut.chars)) this._skillsCharsLoaded += readOut.chars
-      return readOut
-    }
-
     if (op === "related") return provider.related(ref, params)
     if (op === "compose") return provider.compose(ref, params)
-    if (op === "resolve")  return provider.resolve(ref, params)
+    var denied = budget.reserve(ref)
+    if (denied) return denied
+    if (op === "open") {
+      var opened = provider.open(ref, params)
+      if (opened && !opened.error) budget.refs[ref] = true
+      return opened
+    }
+    if (op === "read" || op === "resolve") {
+      var readParams = merge({}, params)
+      readParams.maxChars = budget.limit(params.maxChars || (op === "resolve" ? 8000 : 4000))
+      if (readParams.maxChars <= 0) return { error: "skills-max-chars-exceeded", limit: budget.maxChars }
+      var activeRecord = budget.records[ref]
+      if (activeRecord && activeRecord.revision && !readParams.revision) readParams.revision = activeRecord.revision
+      var descriptor = provider.open(ref, params)
+      if (!descriptor || descriptor.error) return descriptor || { error: "not-found", ref: ref }
+      if (params._userSelected !== true && !(activeRecord && activeRecord.userSelected) && descriptor.disableModelInvocation) return { error: "skill-model-invocation-disabled" }
+      var readOut = op === "resolve" ? provider.resolve(ref, readParams) : provider.read(ref, readParams)
+      if (!readOut || readOut.error) return readOut || { error: "skill-read-failed", ref: ref }
+      var field = op === "resolve" ? "bodyTemplate" : "body"
+      if (!isString(readOut[field])) return { error: "skill-read-failed", ref: ref }
+      // Backend readers may impose a minimum page size. Enforce the wrapper ceiling too.
+      if (readOut[field].length > readParams.maxChars) {
+        readOut[field] = readOut[field].substring(0, readParams.maxChars)
+        readOut.truncated = true
+      }
+      if (params.progressive === true && readOut.truncated === true && readOut.progressive !== true) return { error: "skill-required-guidance-exceeds-budget", ref: ref }
+      if (isString(params.section) && readOut.truncated !== true) readOut.sections = [params.section]
+      readOut.chars = readOut[field].length
+      budget.consume(ref, readOut.chars)
+      this._skillsLoadedRefs = budget.refs
+      this._skillsCharsLoaded = budget.chars
+      return readOut
+    }
 
     return "[ERROR] Unknown skillwiki operation: " + op + ". Use context, search, recommend, open, read, related, compose, resolve."
   } catch (e) {
@@ -4042,7 +4100,13 @@ MiniUtilsTool.prototype.question = function(params) {
 
 MiniUtilsTool.prototype.skill = function(params) {
   var p = isMap(params) ? params : {}
-  return this.skills({ operation: "invoke", name: p.name })
+  return this.skills({ operation: p.operation || "invoke", name: p.name, args: p.args, argv: p.argv, query: p.query, reference: p.reference, section: p.section, maxChars: p.maxChars })
+}
+
+MiniUtilsTool.prototype.decide = function(params) {
+  // Standalone utilities never implicitly read credentials or create a client.
+  if (!isFunction(this._decideFn)) return { error: "MINI_A_DECISION_NOT_CONFIGURED" }
+  return this._decideFn(params)
 }
 
 MiniUtilsTool.prototype.todowrite = function(params) {
@@ -4302,6 +4366,31 @@ MiniUtilsTool._metadataByFn = (function() {
   var skillOps = ["list", "search", "read", "get", "view", "cat", "render", "use", "expand", "apply", "invoke", "run"]
 
   return {
+    decide: {
+      name: "decide",
+      description: "Evaluate bounded choice, boolean or ordinal score questions against supplied evidence using the configured decision model. Batch related questions; use only when this consultation adds value. Returns typed answers and available usage, never executes actions or grants permissions. Probabilities are not calibrated correctness.",
+      annotations: { readOnlyHint: true, idempotentHint: false, cacheable: false, openWorldHint: true },
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          state: { description: "Evidence shared by all questions; nonempty text or JSON object/array.", anyOf: [{ type: "string", minLength: 1 }, { type: "object" }, { type: "array" }] },
+          questions: {
+            type: "object", minProperties: 1, maxProperties: 32,
+            additionalProperties: {
+              type: "object", additionalProperties: false,
+              properties: {
+                type: { type: "string", enum: ["choice", "boolean", "score"] },
+                instructions: { type: "string", minLength: 1 },
+                criteria: { anyOf: [{ type: "object", additionalProperties: { type: "string", minLength: 1 } }, { type: "array", minItems: 2, items: { type: "string", minLength: 1 } }] }
+              },
+              required: ["type", "instructions"]
+            }
+          }
+        },
+        required: ["state", "questions"]
+      }
+    },
     init: {
       name       : "init",
       description: "Re-initialize the MiniUtilsTool with a new root directory and permissions for file operations.",
@@ -4790,6 +4879,9 @@ MiniUtilsTool._metadataByFn = (function() {
           },
           name         : { type: "string", description: "Skill name for read/render/invoke operations." },
           query        : { type: "string", description: "Search query for operation=search." },
+          section      : { type: "string", description: "Complete section to load for read/render/invoke." },
+          reference    : { type: "string", description: "Declared supporting file, relative to the skill, for operation=read." },
+          maxChars     : { type: "number", description: "Requested content ceiling, capped by the run budget." },
           args         : { type: "string", description: "Raw argument string for render/invoke operations." },
           argv         : { type: "array", items: { type: "string" }, description: "Explicit argument array for render/invoke operations (overrides parsed args parsing)." },
           includeHidden: { type: "boolean", description: "Include hidden files/folders during skill discovery." },
@@ -4894,11 +4986,11 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     skill: {
       name       : "skill",
-      description: "standard alias over skills invoke.",
+      description: "Skill discovery and loading alias; defaults to invoke. Use read with section/reference for progressive guidance.",
       inputSchema: {
         type      : "object",
-        properties: { name: { type: "string", description: "Skill name to invoke." } },
-        required : ["name"]
+        properties: { name: { type: "string", description: "Skill name to invoke." }, operation: { type: "string", enum: ["list", "search", "read", "render", "invoke"] }, query: { type: "string" }, reference: { type: "string" }, args: { type: "string" }, argv: { type: "array", items: { type: "string" } }, section: { type: "string" }, maxChars: { type: "number" } },
+        allOf: [{ if: { required: ["operation"], properties: { operation: { enum: ["read", "render", "invoke"] } } }, then: { required: ["name"] } }]
       }
     },
     todowrite: {

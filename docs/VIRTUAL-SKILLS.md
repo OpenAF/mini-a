@@ -345,10 +345,10 @@ Related parameters for enabling, locating, and limiting the virtual skill librar
 | `skillwikiroot` | Generated catalog with nonempty `skillwikimounts`; otherwise `.` | Filesystem root for a dedicated skill wiki; prefer an explicit absolute path. |
 | `skillwikibackend` | `fs` for a dedicated library | Select the backend for a dedicated skill wiki: `fs`, `s3`, `s3fs`, `es`, or `http`. |
 | `skillwikimounts` | Unset | Read-only mounts for a dedicated skill wiki, supplied as a SLON/JSON array using the `wikimounts` shape. |
-| `skillsmaxloaded` | `3` | Maximum distinct references opened through the agent's `skillwiki` tool per run. |
-| `skillsmaxchars` | `12000` | Maximum skill-body characters read through the agent's `skillwiki` tool per run. |
-| `skillsautosearch` | `false` | Reserved for planner-level consultation; not implemented. |
-| `skillsautolimit` | `5` | Reserved maximum results per future automatic skill search; not implemented. |
+| `skillsmaxloaded` | `3` | Maximum distinct local/wiki skills consulted per run, shared by automatic and tool loading. |
+| `skillsmaxchars` | `12000` | Shared local/wiki guidance character budget per run, including `resolve` and supporting references. |
+| `skillsautosearch` | Conditional | Defaults to `false`, or `true` when `usedecide=true` and `modeldec` or `OAF_DECIDE_MODEL` is set. Explicit overrides win. Set `false` for model-led or explicit loading. |
+| `skillsautolimit` | `5` | Combined local/wiki candidate limit for the primary-model selector. |
 
 If any dedicated `skillwiki*` source setting is supplied, Mini-A creates a separate
 manager instead of reusing `usewiki`. Its filesystem root defaults to `.` when
@@ -360,6 +360,65 @@ The `skillwiki` interface provides retrieval operations only. It does not author
 pages or grant the tools declared in a skill's metadata. Maintain pages and build
 indexes through the normal writable wiki workflow.
 
+### Automatic selection and instruction continuity
+
+Enabling `useskills=true` or `useskillswiki=true` makes those skill sources
+available. Automatic consultation defaults to off unless `usedecide=true` and
+`OAF_DECIDE_MODEL` is set; `skillsautosearch=true` explicitly enables it, and
+`skillsautosearch=false` explicitly disables it. Mini-A retrieves at most
+`skillsautolimit` compact candidates, then tries the decision model (when
+`usedecide=true` and configured), the configured low-cost model, and finally
+`OAF_MODEL`. The decision tier asks bounded boolean relevance questions and
+selects up to `skillmaxautoload` relevant candidates in discovery order. Chat
+selectors use isolated clients without tools. Errors and invalid responses
+trigger fallback; a valid empty selection does not. Each attempt reports its
+tier and duration. A failure across all available tiers blocks selection.
+Explicit requests bypass selection entirely. Fallbacks may increase latency
+when a provider is unavailable.
+
+Use `$local:report` to disambiguate a local skill or `$wiki:report.md` for an
+existing wiki reference. `$report` works when exactly one enabled source resolves
+the name. Unknown `$name` references are logged as ignored and the task continues.
+Markdown inline code and fenced blocks are excluded from explicit request detection,
+so shell variables such as `$NF` in an example command cannot request a skill.
+Ambiguous requests, loading errors, and unavailable required handoff guidance
+block execution with an actionable result. A selection failure
+is visible rather than silently switching to general knowledge. Set
+`skillsautosearch=false` to keep explicit requests while disabling automatic
+consultation. Local default directories remain available when `extraskills` is
+set; default skills win local name collisions, which are reported in activity.
+
+The shared runtime tracks discovery, selection, loading, activation, blocking,
+and completion. Audit traces use `skill_state`; console/web activity shows skill
+state transitions. `state.skills` reports active references, blocked reasons,
+and consumed characters. Completion records `complianceVerified=false`: loaded
+instructions are not evidence that a model followed every step.
+
+Local automatic activation uses the same Markdown/YAML/JSON parser and argument
+renderer as explicit tool invocation. The `skill` alias forwards `args`/`argv`.
+`disable-model-invocation` excludes automatic and model tool invocation but still
+permits an explicit user request. A skill's `max-context-chars` may reduce, but
+cannot enlarge, the configured ceiling. `skillmaxautoload=1` limits automatic
+selection; explicit selections remain subject to `skillsmaxloaded=3`.
+
+Long skills load complete sections progressively. The initial page retains the
+introduction and recognized safety, permission, prerequisite, and mandatory
+sections; omitted sections are listed as pending and must be loaded before their
+steps are performed. Unstructured guidance or required sections that cannot fit
+block loading. Keep mandatory instructions under descriptive headings so this
+conservative paging can recognize them. Supporting local files remain separate:
+`skills` with `operation=read`, `name`, and `reference` loads a declared relative
+reference under the same budgets and file-access policy. Arbitrary files are not
+accepted as supporting references.
+
+Active guidance is retained in the model instructions and runtime anchors,
+restored after provider-overflow recovery, and pinned in History VM when enabled.
+Each new run resets selection and budgets. Relevant delegated subtasks receive
+source-qualified references and revisions; children resolve those references
+under their own configuration and permissions. An unavailable or changed required
+source produces a blocked child outcome rather than silently using different
+instructions. Skills never enable shell access or grant additional permissions.
+
 ### Check availability
 
 The presence of `skillwiki` in the available tool catalog means that the virtual
@@ -368,9 +427,11 @@ questions must call `skillwiki` with `operation=context` and use the returned
 `skillCount`; the ordinary local-skill prompt count belongs to the separate
 `useskills` feature and must not be used as virtual-skill status.
 
-These per-run budgets apply to the agent tool's `open` and `read` branches.
-Console commands and standalone MCP servers use their own retrieval settings;
-`resolve` calls the provider directly and does not use those two budget counters.
+These per-run budgets apply to agent-facing local and wiki loading, including
+direct `read`, `render`, `invoke`, `open`, and `resolve`. Reads count distinct
+skills even without a preceding `open`; `resolve` uses the same remaining
+character budget. Console browsing and standalone MCP servers retain their own
+retrieval settings.
 For public MCP access, use the separate restricted server described above.
 
 From the console:
@@ -475,6 +536,11 @@ require a growing tool catalog or loading every procedure into a prompt. Counts
 and metadata-only browsing can still scan page records, and cold-cache cost grows
 with the corpus. Retrieval mode and available indexes determine search behavior.
 
+`tests/skillRuntime.yaml` covers automatic/explicit activation, rendering, shared
+budgets, progressive loading, continuity, and child handoff. `evals/skills.yaml`
+provides paired live scenarios; run it from this checkout with `OAF_MODEL` set.
+Inspect skill traces alongside task outcomes, latency, and token usage.
+
 `tests/skills.yaml` covers a small corpus across multiple mounts, V2 metadata
 aliases and prerequisite composition, schema-only discovery, mount-only browsing,
 and cache isolation between libraries and heading limits. It does not
@@ -483,11 +549,6 @@ latency against your own corpus before sizing a deployment.
 
 ## What's intentionally deferred
 
-- **Automatic planner-level consultation.** `skillwiki` is available to the LLM
-  as a normal tool call today (bounded by `skillsmaxloaded`/`skillsmaxchars`).
-  Wiring a planner heuristic that decides *for* the model when to search the
-  skill library (`skillsautosearch`) is a natural next step once the above has
-  seen real use.
 - **Materialization/export** (`skills-materialize`, turning a selected remote
   skill into a portable local `SKILL.md`/`SKILL.yaml`, or a group of skills into
   an Agent Plugin pack) is future work. `resolve()` already produces the

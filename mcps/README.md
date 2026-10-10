@@ -4,6 +4,7 @@
 
 | Name       | Description                     | Type             | oPack      | Location                           |
 |------------|---------------------------------|------------------|------------|------------------------------------|
+| mcp-decide | Stateless choice, boolean and ordinal score decisions | STDIO/HTTP | Updated OpenAF | [mcp-decide.yaml](mcp-decide.yaml), [Guide](../docs/DECISIONS.md) |
 | mcp-db     | Database access MCP             | STDIO/HTTP       | (included) | [mcp-db.yaml](mcp-db.yaml)         |
 | mcp-email  | Email sending MCP               | STDIO/HTTP       | (included) | [mcp-email.yaml](mcp-email.yaml)   |
 | mcp-es-search | ElasticSearch/OpenSearch full-text search MCP | STDIO/HTTP | ElasticSearch | [mcp-es-search.yaml](mcp-es-search.yaml) |

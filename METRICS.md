@@ -1,6 +1,6 @@
 # mini-a Metrics Reference
 
-All metrics live on the global `__mini_a_metrics` object as `$atomic(0, "long")` counters.  
+Most metrics live on the global `__mini_a_metrics` object as `$atomic(0, "long")` counters. Decision metrics accumulate separately on each agent instance.
 They accumulate across goals within a session and reset only when `/clear` is run.  
 `getMetrics()` on a `MiniA` instance returns them grouped into sections; `/stats` in the console displays them.
 
@@ -9,13 +9,20 @@ They accumulate across goals within a session and reset only when `/clear` is ru
 ## 1. LLM Calls (`llm_calls`)
 
 | Key | Internal counter | Description |
-|-----|-----------------|-------------|
+|### Decision usage (`decisions`)
+
+The instance records `calls`, `failures`, `fallbacks`, `empty_selections`, `duration_ms`, and fallback `reasons`. Eligibility/configuration failures can occur before an API invocation, so `failures` need not be bounded by `calls`. `input_tokens`, `output_tokens`, and `total_tokens` sum only available reported usage; `usage_reports` distinguishes absent usage from reported zero. No usage is inferred for failed requests. These counters survive decision-client reinitialization and reset with a new agent instance.
+
+MiniAEval includes decision usage in total input/output tokens, adds separate `decision_*` metrics, and compares them across enabled/disabled variants. Missing provider usage remains missing in the OpenAF response; normalized aggregate counters start at zero.
+
+-----|-----------------|-------------|
 | `normal` | `llm_normal_calls` | Calls made to the main LLM (full-cost model). |
 | `low_cost` | `llm_lc_calls` | Calls made to the low-cost LLM (`lc_llm`). Includes complexity-screening calls and steps where the budget favours the cheaper model. |
-| `total` | computed | `normal + low_cost + advisor_calls`. Advisor calls are included here but not in either per-tier counter. |
+| `decision` | instance `decisions.calls` | Invocations of the dedicated decision API; includes failures during execution. |
+| `total` | computed | `normal + low_cost + validation + advisor_calls + decision`. |
 | `fallback_to_main` | `fallback_to_main_llm` | Times a low-cost LLM response failed JSON parsing and the agent retried with the main LLM instead. High values indicate the lc model is struggling to produce valid JSON. |
 
-**Nuance:** `advisor_calls` is counted separately (see §7) and is folded into `total` at read-time. Neither `normal` nor `low_cost` includes advisor calls, so `normal + low_cost ≠ total` when the advisor has been used.
+**Nuance:** `advisor_calls` is counted separately (see §7) and is folded into `total` at read-time. Neither `normal` nor `low_cost` includes advisor, validation, or decision calls; those are folded into `total` at read-time.
 
 ---
 
@@ -439,3 +446,22 @@ These counters are tracked directly on `__mini_a_metrics` (not via SubtaskManage
 ## Metrics Channel (`metricsch`)
 
 Beyond the in-memory counters, mini-a supports publishing metrics to an OpenAF channel via the `metricsch` startup argument. This uses `ow.metrics.startCollecting(channelName, period, some, noDate)` to periodically snapshot OpenAF system metrics (CPU, memory, GC, etc.) into a named channel. The channel is reference-counted — multiple `MiniA` instances sharing a channel name will not double-register it, and the channel is torn down only when the last instance releases it. This is orthogonal to the `__mini_a_metrics` counters above; it covers host-level observability rather than agent behaviour.
+
+### Skill runtime evidence
+
+`skills` reports per-run discoveries, `selection_calls`, selections, loads,
+blocks, `selection_duration_ms`, consumed characters, consulted source-qualified
+references, and revision/pending-section status. Selection uses the primary model
+and contributes to normal model-call/token metrics. `compliance_verified=false`
+distinguishes runtime loading/completion from verified adherence. Evaluation
+reports include the same snapshot as `skill_activity`. No skill bodies are
+included in these metrics.
+
+Skill activity logs describe enabled sources and local discovery roots, discovered
+and eligible counts, bounded candidate lists, explicit requests and ignored unknown
+references, primary-model selection start/result/duration, and reasons for skipping
+selection. Loading reports returned characters and shared count/character budgets;
+activation reports source revision, loaded and pending sections, and supporting
+reference names. Blocked requests include available references and corrective hints.
+Activity omits goal text, invocation arguments, and instruction bodies. Lists show
+at most twelve entries; full event metadata remains in the `skill_state` audit trace.
