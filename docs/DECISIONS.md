@@ -43,6 +43,17 @@ With an explicit `usedecide=true` and a configured decision model, selected inte
 
 Gates use `_decisionGate(operation, args, state, questions, validate)` in `mini-a-decision.js`, which never throws. It is separate from the existing selection and complexity paths, which keep their own defaults.
 
+### Deliberately not gated
+
+These candidate sites were evaluated and left on their existing logic:
+
+- **Phase-completion detection** (`_markPhaseCompletionFromAnswer`) and **planning obstacles**: a decision would *add* state changes (marking work done, choosing a replan path). A wrong answer silently removes work, unlike the skip-only gates above.
+- **Remote worker choice** (`SubtaskManager._nextWorkerForSubtask`) and the **tool router** intent hints: worker choice is already a scored, load-balanced selection and the subtask manager has no decision client. Router decisions must stay explainable and may never grant `shellallow`/`readwrite`.
+- **Near-duplicate detection** (`MiniAMemoryManager._isNearDuplicate`): runs on every memory append, so a model call there would be far too frequent.
+- **Wiki ingest, graph relation types, dream consolidation and retrieval sufficiency**: these would add calls to otherwise single-call generative steps or touch the wiki retrieval invariants. Revisit with held-out evidence.
+
+Quality claims for any gate need paired enabled/disabled runs (`evals/decide.yaml`) on held-out tasks; the offline tests only establish fallback and contract behaviour.
+
 ## Decision utility
 
 With a valid `OAF_DECIDE_MODEL` configuration, `useutils=true usedecide=true`
