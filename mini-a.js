@@ -15065,6 +15065,13 @@ MiniA.prototype._selectChildMcpHandoffTools = function(goal, request, availableT
   }
   if (selected.length > 0) return selected
 
+  // Semantic ranking replaces the lexical fallback only when the decision model is available and
+  // gives a non-empty answer; otherwise the keyword match below decides exactly as before.
+  var decisionRanked = this._selectByDecision(goal, availableTools.filter(function(tool) { return isMap(tool) && isString(tool.name) && tool.name.length > 0 }).map(function(tool) {
+    return { name: tool.name, description: tool.description || "", type: "mcp-tool" }
+  }), 4)
+  if (isArray(decisionRanked) && decisionRanked.length > 0) return decisionRanked.map(function(entry) { return entry.name })
+
   var keywordSelected = this._selectToolsByKeywordMatch(goal, availableTools)
   if (keywordSelected.length > 0) return keywordSelected.slice(0, 4)
 

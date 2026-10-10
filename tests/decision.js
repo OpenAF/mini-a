@@ -357,4 +357,24 @@
     h = asking("complex"); a = gateAgent(h.fn, {})
     ow.test.assert(prep(a, { llmcomplexity: false }), baseline, "llmcomplexity=false keeps the heuristic strategy")
   }
+
+  exports.testChildHandoffToolSelection = function() {
+    var tools = [
+      { name: "ledger", description: "Query payments and invoices" },
+      { name: "weather", description: "Forecast temperature" },
+      { name: "calendar", description: "Book appointments" }
+    ]
+    var goal = "payments invoices reconciliation"
+    var a = gateAgent(__, {})
+    var baseline = a._selectChildMcpHandoffTools(goal, {}, tools)
+    ow.test.assert(baseline[0], "ledger", "Keyword fallback picks the lexical match")
+    a = gateAgent(ranked([0, 1, 2]), {})
+    ow.test.assert(a._selectChildMcpHandoffTools("book something", {}, tools).join(","), "calendar,weather", "Decision ranks semantically relevant tools first")
+    ow.test.assert(a._selectChildMcpHandoffTools(goal, { tools: ["weather"] }, tools).join(","), "weather", "Explicit tool requests still win without a decision call")
+    ow.test.assert(a._decisionMetrics.calls, 1, "Explicit and name-mention requests never consult decide")
+    a = gateAgent(function() { throw { code: "LLM_DECISION_PROVIDER_ERROR" } }, {})
+    ow.test.assert([a._selectChildMcpHandoffTools(goal, {}, tools).join(","), a._decisionMetrics.fallbacks], [baseline.join(","), 1], "Decision error keeps the keyword fallback")
+    a = gateAgent(ranked([0, 0, 0]), {})
+    ow.test.assert(a._selectChildMcpHandoffTools(goal, {}, tools).join(","), baseline.join(","), "An all-irrelevant decision keeps the keyword fallback")
+  }
 })()
