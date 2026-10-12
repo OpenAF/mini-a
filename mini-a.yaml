@@ -856,10 +856,18 @@ help:
     mandatory: false
     options  : ["main", "lc", "auto"]
   - name     : modelstrategy
-    desc     : "Model strategy profile. Use \"default\" (existing behavior) or \"advisor\" (LC executor + main advisor consults)"
+    desc     : "Model strategy profile (default|advisor|delegate|supervised|auto)"
     example  : "advisor"
     mandatory: false
-    options  : ["default", "advisor"]
+    options  : ["default", "advisor", "delegate", "supervised", "auto"]
+  - name     : contractfile
+    desc     : Explicit existing supervised CONTRACT.md (takes precedence over automatic reuse)
+  - name     : contractargs
+    desc     : Positional inputs for supervised contracts (same quoting as skill arguments)
+  - name     : savecontract
+    desc     : Save accepted supervised contracts to the Mini-A configuration home (default false)
+  - name     : reusecontract
+    desc     : Discover exact-goal supervised contracts in the current workspace scope (default false)
   - name     : advisormaxuses
     desc     : Maximum number of advisor consultations per run when modelstrategy=advisor
     example  : "2"
@@ -1560,6 +1568,10 @@ jobs:
         saveplannotes  : saveplannotes
         modellock      : modellock
         modelstrategy  : modelstrategy
+        contractfile   : contractfile
+        contractargs   : contractargs
+        savecontract   : savecontract
+        reusecontract  : reusecontract
         advisormaxuses : advisormaxuses
         advisorenable  : advisorenable
         advisoronrisk  : advisoronrisk
@@ -1860,6 +1872,10 @@ jobs:
       saveplannotes  : toBoolean.isBoolean.default(false)
       modellock      : isString.default(__)
       modelstrategy  : isString.default(__)
+      contractfile   : isString.default(__)
+      contractargs   : isString.default(__)
+      savecontract   : toBoolean.isBoolean.default(false)
+      reusecontract  : toBoolean.isBoolean.default(false)
       advisormaxuses : toNumber.isNumber.default(__)
       advisorenable  : toBoolean.isBoolean.default(true)
       advisoronrisk  : toBoolean.isBoolean.default(true)

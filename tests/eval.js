@@ -160,4 +160,346 @@
     ow.test.assert(report.scenarios[2].name === "changed-requirement [phase2-active]", true, "Variant results should retain stable descriptive names")
     ow.test.assert(report.variant_comparisons.length === 2 && report.variant_comparisons[1].metrics.input_tokens === -32000, true, "Variant comparisons should report deltas against Phase 1 without claiming causal savings")
   }
+
+  exports.testEvalSkillCountersAndIsolation = function() {
+    var fixtures = require("examples/eval-skills.js")
+    var ownedRoot
+    fixtures.withSuite({}, function(scenarios, fixture) {
+      ownedRoot = fixture.root
+      var treatment = scenarios[0].variants[1].args
+      var baseline = scenarios[0].variants[0].args
+      ow.test.assert(new MiniAFileAccess(baseline.fileallow).allows(fixture.target), false, "Baseline cannot read treatment skill")
+      var make = function(standard, jsonTool) {
+        var agent = new MiniA()
+        agent.fnI = function() {}; agent._trace = function() {}
+        agent.init = function(args) {
+          this._resetSkillRuntime(args)
+          this.cfg = this._createUtilsMcpConfig(merge(merge({}, treatment, true), { useskills: true, useutils: false, usestdutils: standard, usejsontool: jsonTool, skillsmaxchars: 4000 }))
+        }
+        agent.start = function(args) {
+          var tool = this.cfg.options.fns[standard ? "skill" : "skills"]
+          tool({ operation: "list" })
+          ow.test.assert(this._skillRuntime.snapshot().loads, 0, "Metadata discovery does not load bodies")
+          tool({ operation: "get", name: "ledger-reconciliation" })
+          ow.test.assert(this._skillRuntime.snapshot().loads, 1, "Read alias consumes once")
+          tool({ operation: "run", name: "ledger-reconciliation" })
+          ow.test.assert(this._skillRuntime.snapshot().loads, 2, "Invocation alias consumes once")
+          tool({ operation: "read", name: "missing" })
+          ow.test.assert(this._skillRuntime.snapshot().loads, 2, "Missing skill is not a successful load")
+          this._skillRuntime.maxChars = this._skillRuntime.chars
+          tool({ operation: "read", name: "ledger-reconciliation" })
+          ow.test.assert(this._skillRuntime.snapshot().loads, 2, "Budget failure is not a successful load")
+          return "ok"
+        }
+        return agent
+      }
+      ;[false, true].forEach(function(standard) {
+        ;[false, true].forEach(function(jsonTool) {
+          var agent = make(standard, jsonTool)
+          try {
+            var result = new MiniAEval({ agentFactory: function() { return agent } }).runScenario({ goal: "read", expected: { metrics: { "skills.loads": 2, "skills.telemetry_available": true } } })
+            ow.test.assert(result.success, true, "Registered native/JSON utility boundary normalizes loads")
+            ow.test.assert(result.metrics.skills.returned_chars > 0, true, "Content size comes from runtime consumption")
+            ow.test.assert(isArray(result.skill_activity.consulted), true, "Legacy snapshot identities are preserved")
+          } finally { agent._stopAgentResources() }
+        })
+      })
+      var disabled = new MiniA()
+      disabled.fnI = function() {}; disabled._trace = function() {}
+      disabled.init = function(args) { this._resetSkillRuntime(args); this._createUtilsMcpConfig(merge(merge({}, baseline, true), { useskills: false, useutils: false })) }
+      disabled.start = function() { this._consultSkillsForRun({ goal: "ready", useskills: false, skillsautosearch: false }); return "ready" }
+      try {
+        var result = new MiniAEval({ agentFactory: function() { return disabled } }).runScenario({ goal: "ready" })
+        ow.test.assert(result.metrics.skills.loads, 0, "Disabled skill runtime reports measured zero")
+        ow.test.assert(result.metrics.skills.telemetry_available, true, "Disabled differs from unavailable telemetry")
+      } finally { disabled._stopAgentResources() }
+    })
+    ow.test.assert(io.fileExists(ownedRoot), false, "Example removes owned fixtures")
+    try { fixtures.withSuite({}, function(scenarios, fixture) { ownedRoot = fixture.root; throw new Error("fixture failure") }) } catch(ignoreFixtureFailure) {}
+    ow.test.assert(io.fileExists(ownedRoot), false, "Example also cleans fixtures when evaluation throws")
+  }
+
+  exports.testEvalWikiMetadataAndRetrieval = function() {
+    loadLib("mini-a-skills.js")
+    var fixtures = require("examples/eval-skills.js")
+    fixtures.withSuite({}, function(scenarios, fixture) {
+      var wiki = fixture.root + "/wiki"
+      io.mkdir(wiki)
+      io.writeFileString(wiki + "/report.md", "---\ntype: skill\nschema: mini-a.skill/v1\nname: report\ndescription: Report checks\n---\n# Checks\nVerify the total.\n")
+      var agent = new MiniA()
+      agent.fnI = function() {}; agent._trace = function() {}
+      agent.init = function(args) {
+        this._resetSkillRuntime(args)
+        this._skillWikiManager = new MiniAWikiManager({ backend: "fs", root: wiki, access: "ro", wikiretrievalv2: false })
+        this.cfg = this._createUtilsMcpConfig({ utilsroot: wiki, fileallow: [wiki], useutils: false, useskillswiki: true })
+      }
+      agent.start = function() {
+        var fn = this.cfg.options.fns.skillwiki
+        var metadata = fn({ operation: "open", ref: "wiki:report.md" })
+        ow.test.assert(isUnDef(metadata.error), true, "Real wiki metadata opens successfully")
+        ow.test.assert(this._skillRuntime.snapshot().loads, 0, "Wiki open is metadata-only")
+        ow.test.assert(this._skillRuntime.snapshot().consulted.length, 1, "Consulted includes metadata opens")
+        var body = fn({ operation: "read", ref: "wiki:report.md", section: "Checks" })
+        ow.test.assert(isUnDef(body.error), true, "Real wiki section reads successfully")
+        return "ok"
+      }
+      try {
+        var result = new MiniAEval({ agentFactory: function() { return agent } }).runScenario({ goal: "read", expected: { metrics: { "skills.loads": 1 } } })
+        ow.test.assert(result.success, true, "Wiki retrieval normalizes shared consumption exactly once")
+      } finally { agent._stopAgentResources() }
+    })
+  }
+
+  exports.testEvalSkillDeltasAndUnavailable = function() {
+    var agent = new FakeAgent("ok")
+    agent._skillRuntime = new MiniASkillRuntime({})
+    agent.getMetrics = function() { this.metrics.skills = this._skillRuntime.snapshot(); return this.metrics }
+    agent.start = function() { this._skillRuntime.consume("local:test", 10); return "ok" }
+    var evaluator = new MiniAEval({ agentFactory: function() { return agent } })
+    var first = evaluator.runScenario({ goal: "first" }), second = evaluator.runScenario({ goal: "second" })
+    ow.test.assert([first.metrics.skills.loads, second.metrics.skills.loads, second.metrics.skills.returned_chars], [1, 1, 10], "Shared runtime counters use per-scenario deltas")
+    agent.init = function() { this._skillRuntime = new MiniASkillRuntime({}) }
+    var reset = evaluator.runScenario({ goal: "replacement" })
+    ow.test.assert(reset.metrics.skills.returned_chars, 10, "New runtime uses its own origin, not a previous run's counts")
+    ow.test.assert(reset.metrics.raw.skills.max_chars, 12000, "Raw skill limits remain final gauges rather than numeric deltas")
+    var unavailable = new MiniAEval({ agentFactory: function() { return new FakeAgent("ok") } }).runScenario({ goal: "missing" })
+    ow.test.assert(unavailable.metrics.skills.loads, null, "Missing telemetry is not zero")
+    ow.test.assert(unavailable.metrics.skills.telemetry_available, false, "Missing telemetry is explicitly unavailable")
+    var compared = evaluator.compare({ scenarios: [reset] }, { scenarios: [{ name: reset.name, success: true, metrics: {} }] })
+    ow.test.assert(compared.comparisons[0].metrics.skills.loads, null, "Legacy reports do not invent a measured comparison")
+    var comparison = evaluator._variantComparisons({ scenarios: [
+      { scenario: "same", variant: "baseline", metrics: first.metrics, success: true },
+      { scenario: "same", variant: "with-skill", metrics: second.metrics, success: true }
+    ] })
+    ow.test.assert(comparison[0].metrics.skills.loads, 0, "Nested scalar comparisons reuse report variants")
+    agent.init = function() {}
+    agent.start = function() { this._skillRuntime.chars = 0; return "ok" }
+    ow.test.assert(evaluator.runScenario({ goal: "unexpected decrease" }).metrics.skills.returned_chars, null, "An unexplained decrease is unavailable rather than a negative count")
+    agent.getMetrics = function() { throw new Error("unavailable") }
+    ow.test.assert(evaluator.runScenario({ goal: "snapshot failed" }).metrics.skills.telemetry_available, false, "Snapshot errors remain unavailable")
+  }
+
+  exports.testEvalDecideJudge = function() {
+    var calls = 0, seenState, config = { type: "openai", model: "judge-fixture", key: "secret-fixture" }
+    var evaluator = new MiniAEval({
+      agentFactory: function() { return new FakeAgent("ready", { input: 12 }) },
+      nowFn: (function() { var tick = 0; return function() { return ++tick } })(),
+      decisionClientFactory: function(c) {
+        ow.test.assert(c.model, "judge-fixture", "Judge reuses explicit decision configuration")
+        return { getCapabilities: function() { return {} }, decideWithStats: function(state, questions) {
+          calls++; seenState = state
+          var answers = {}
+          Object.keys(questions).forEach(function(key) { answers[key] = { type: "boolean", value: true } })
+          return { response: { answers: answers }, stats: { tokens: { prompt: 9, completion: 2, total: 11 } } }
+        } }
+      }
+    })
+    var scenario = { name: "private-variant-label", goal: "Respond", args: { usedecide: true, modeldec: config }, expected: { contains: "ead", metrics: { input_tokens: 12 } }, assertions: [{ equals: "ready" }], llm_judge: { enabled: true, backend: "decide" } }
+    var result = evaluator.runScenario(scenario)
+    ow.test.assert(result.success, true, "Typed Decide judge composes with deterministic assertions")
+    ow.test.assert(calls, 1, "All judge questions use one request")
+    ow.test.assert(Object.keys(seenState.expectations).length, 2, "Only answer expectations enter the judge")
+    ow.test.assert(Object.keys(seenState).sort().join(","), "answer,expectations,goal", "Judge excludes variant names and activation telemetry")
+    ow.test.assert(result.metrics.input_tokens, 12, "Judge usage is excluded from agent tokens")
+    ow.test.assert(result.judge.usage.total_tokens, 11, "Judge usage is reported separately")
+    ow.test.assert(result.metrics.llm_calls, 1, "Judge does not increase agent call counts")
+    scenario.llm_judge.args = { modeldec: config }
+    scenario.args.modeldec = { type: "openai", model: "unused-run-model" }
+    ow.test.assert(evaluator.runScenario(scenario).success, true, "Judge-specific model overrides the run configuration")
+    scenario.args.modeldec = config
+    delete scenario.llm_judge.args
+    ow.test.assert(stringify(result).indexOf("secret-fixture") < 0, true, "Report contains no configuration secrets")
+    scenario.llm_judge.enabled = false
+    evaluator.runScenario(scenario)
+    delete scenario.llm_judge
+    evaluator.runScenario(scenario)
+    ow.test.assert(calls, 2, "Decide configuration alone adds no judge calls")
+    scenario.llm_judge = { enabled: true, backend: "decide" }
+    scenario.args.usedecide = false
+    result = evaluator.runScenario(scenario)
+    ow.test.assert(result.judge.error, "MINI_A_DECISION_NOT_CONFIGURED", "Explicit opt-out disables Decide judging")
+    ow.test.assert(calls, 2, "Opt-out makes no provider calls")
+    evaluator.judgeFn = function() { return { passed: true, injected: true } }
+    ow.test.assert(evaluator.runScenario(scenario).judge.injected, true, "Existing judgeFn overrides backend selection")
+    var legacy = new MiniAEval({ agentFactory: function(scenario) {
+      return scenario.name === "legacy judge" ? new FakeAgent("PASS verified", { input: 100 }) : new FakeAgent("ready", { input: 12 })
+    }, decisionClientFactory: function() { throw new Error("Default judge must not use Decide") } }).runScenario({ name: "legacy", goal: "Respond", expected: { equals: "ready" }, llm_judge: { enabled: true } })
+    ow.test.assert(legacy.success && legacy.judge.answer === "PASS verified", true, "Omitting backend preserves the existing agent judge")
+    ow.test.assert(legacy.metrics.input_tokens, 12, "Legacy judge usage stays outside evaluated-agent metrics")
+  }
+
+  exports.testEvalDecideJudgeFailures = function() {
+    var config = { type: "openai", model: "fixture", key: "fixture" }
+    var check = function(handler, expected, scenarioOverrides) {
+      var calls = 0
+      var evaluator = new MiniAEval({ agentFactory: function() { return new FakeAgent("ok") }, decisionClientFactory: function() {
+        return { getCapabilities: function() { return {} }, decideWithStats: function() { calls++; return handler.apply(null, arguments) } }
+      } })
+      var scenario = merge({ goal: "Respond", args: { modeldec: config }, expected: { equals: "ok" }, llm_judge: { enabled: true, backend: "decide" } }, scenarioOverrides || {}, true)
+      if (scenarioOverrides && isDef(scenarioOverrides.expected)) scenario.expected = scenarioOverrides.expected
+      var result = evaluator.runScenario(scenario)
+      ow.test.assert(result.success, false, "Judge failure fails the scenario")
+      if (expected) ow.test.assert(result.judge.error, expected, "Judge failures have sanitized codes")
+      ow.test.assert(calls <= 1, true, "No fallback or retries")
+      return result
+    }
+    check(function() { return { response: { answers: {} } } }, "LLM_DECISION_INVALID_RESPONSE")
+    check(function() { return { response: { answers: { check_0: { type: "boolean", value: "true" } } } } }, "LLM_DECISION_INVALID_RESPONSE")
+    check(function() { return { response: { answers: { extra: { type: "boolean", value: true } } } } }, "LLM_DECISION_INVALID_RESPONSE")
+    check(function() { throw MiniADecision.error("LLM_DECISION_UNSUPPORTED") }, "LLM_DECISION_UNSUPPORTED")
+    check(function() { throw new Error("provider key=secret") }, "LLM_DECISION_PROVIDER_ERROR")
+    var rejected = check(function() { return { response: { answers: { check_0: { type: "boolean", value: false } } } } })
+    ow.test.assert(rejected.judge.checks.check_0, false, "False is a verdict, not a malformed response")
+    ow.test.assert(rejected.judge.usage.input_tokens, null, "Unavailable usage is not zero")
+    check(function() { throw new Error("should not call") }, "MINI_A_DECISION_REQUEST_BUDGET", { goal: new Array(50001).join("x") })
+    check(function() { throw new Error("should not call") }, "LLM_DECISION_INVALID_REQUEST", { expected: {}, assertions: [] })
+  }
+
+  exports.testEvalSkillExamplePairs = function() {
+    var fixtures = require("examples/eval-skills.js")
+    fixtures.withSuite({ decide: true, reverse: true }, function(scenarios) {
+      var evaluator = new MiniAEval()
+      ow.test.assert(scenarios.length, 4, "Normal and Decide policies have separate relevant/unrelated pairs")
+      var expanded = evaluator._expandVariants(scenarios)
+      ow.test.assert(expanded.length, 8, "Each experiment has an unavailable and available target")
+      scenarios.forEach(function(scenario) {
+        ow.test.assert(scenario.variants[0].name, "with-skill", "Pair order can alternate")
+        ow.test.assert(isUnDef(scenario.llm_judge), true, "Example adds no automatic judge calls")
+      })
+      ow.test.assert(scenarios[2].args.usedecide && scenarios[2].args.skillsautosearch, true, "Decide selection is explicitly enabled only for its experiment")
+    })
+  }
+
+  exports.testEvalSkillExampleExecution = function() {
+    var fixtures = require("examples/eval-skills.js")
+    fixtures.withSuite({}, function(scenarios) {
+      var agents = []
+      try {
+        var evaluator = new MiniAEval({ agentFactory: function(scenario) {
+          var agent = new MiniA(), init = agent.init, create = agent._createBareLlmInstance, turns = 0
+          agents.push(agent)
+          agent.fnI = function() {}; agent._trace = function() {}
+          var respond = function() {
+            turns++
+            var relevant = scenario.scenarioName.indexOf("ledger reconciliation") >= 0
+            if (relevant && scenario.variant === "with-skill" && turns === 1) return {
+              response: { action: "skills", params: { operation: "read", name: "ledger-reconciliation" } }, stats: {}
+            }
+            return { response: { action: "final", answer: relevant ? "total=73 EUR; discrepancies=INV-03,INV-07" : "ready" }, stats: {} }
+          }
+          var inject = function(client) {
+            ;["promptJSONWithStats", "promptWithStats", "promptJSONWithStatsRaw", "rawPromptWithStats", "promptStreamWithStats", "promptStreamJSONWithStats"].forEach(function(method) { client[method] = respond })
+            return client
+          }
+          // Context assembly may replace the working client after init. Intercept
+          // every newly-created client as well as the initial model channels.
+          agent._createBareLlmInstance = function() { return inject(create.apply(this, arguments)) }
+          agent.init = function(args) {
+            args.model = "(type: openai, model: fixture, key: fixture)"
+            args.modellc = args.model
+            args.modelval = args.model
+            args.llmcomplexity = false
+            args.usestream = false
+            args.showthinking = false
+            args.raw = true
+            var initialized = init.call(this, args)
+            fixtures.assertIsolation(this, args, scenario.variant === "with-skill")
+            inject(this.llm)
+            if (this.lc_llm) inject(this.lc_llm)
+            if (this.val_llm) inject(this.val_llm)
+            return initialized
+          }
+          return agent
+        } })
+        var report = evaluator.run(scenarios)
+        ow.test.assert(report.summary.passed, 4, "Example tasks run through real init/start with injected provider responses: " + stringify(report.scenarios.map(function(result) { return { name: result.name, error: result.error, answer: result.answer } })))
+        var loaded = report.scenarios.filter(function(result) { return result.metrics.skills.loads > 0 })
+        ow.test.assert(loaded.length, 1, "Only relevant treatment retrieves through real JSON dispatch")
+        ow.test.assert(loaded[0].metrics.skills.loads, 1, "JSON dispatch counts successful retrieval exactly once")
+        ow.test.assert(report.variant_comparisons.length, 2, "Real example results retain paired comparisons")
+      } finally { agents.forEach(function(agent) { agent._stopAgentResources() }) }
+    })
+  }
+
+  exports.testEvalDecideSkillSelection = function() {
+    var fixtures = require("examples/eval-skills.js")
+    fixtures.withSuite({ decide: true }, function(scenarios) {
+      var agents = []
+      try {
+        var evaluator = new MiniAEval({ agentFactory: function(scenario) {
+          var agent = new MiniA()
+          agents.push(agent)
+          agent.fnI = function() {}; agent._trace = function() {}
+          agent.init = function(args) {
+            this._resetSkillRuntime(args)
+            this._createUtilsMcpConfig(args)
+            this._initDecisionRuntime({ usedecide: true, modeldec: { type: "openai", model: "fixture" } })
+            var observe = this._decision._options.observe
+            this._decision = new MiniADecision({ modeldec: { type: "openai", model: "fixture" }, observe: observe, clientFactory: function() {
+              return { getCapabilities: function() { return {} }, decideWithStats: function(state, questions) {
+                var answers = {}
+                Object.keys(questions).forEach(function(key) { answers[key] = { type: "boolean", value: scenario.scenarioName.indexOf("ledger reconciliation") >= 0 } })
+                return { response: { answers: answers }, stats: { tokens: { prompt: 10, completion: 2, total: 12 } } }
+              } }
+            } })
+          }
+          agent.start = function(args) {
+            this._consultSkillsForRun(args)
+            return scenario.scenarioName.indexOf("ledger reconciliation") >= 0 ? "total=73 EUR; discrepancies=INV-03,INV-07" : "ready"
+          }
+          return agent
+        } })
+        var report = evaluator.run(scenarios.slice(2))
+        ow.test.assert(report.summary.passed, 4, "Decide-assisted pair keeps identical outcome checks")
+        var treatment = report.scenarios.filter(function(result) { return result.variant === "with-skill" && result.scenario.indexOf("ledger reconciliation") >= 0 })[0]
+        ow.test.assert(treatment.metrics.skills.loads, 1, "Real Decide selection activates the available relevant skill")
+        ow.test.assert(treatment.metrics.skills.selection_calls, 1, "Skill selection request is counted")
+        ow.test.assert(treatment.metrics.decision_calls, 1, "Existing decision metrics count the same request")
+        ow.test.assert(treatment.metrics.decision_total_tokens, 12, "Existing decision usage is reused")
+        ow.test.assert(report.scenarios.filter(function(result) { return result.variant === "baseline" }).every(function(result) { return result.metrics.skills.loads === 0 && result.metrics.skills.selection_calls === 0 }), true, "No target or other candidates leak into the baseline")
+        ow.test.assert(report.scenarios.filter(function(result) { return result.scenario.indexOf("unrelated") >= 0 }).every(function(result) { return result.metrics.skills.loads === 0 }), true, "Unrelated tasks do not activate the skill")
+      } finally { agents.forEach(function(agent) { agent._stopAgentResources() }) }
+    })
+  }
+  exports.testEvalSupervisedWorkspaceAndWarmup = function() {
+    var starts = 0, paths = []
+    var evaluator = new MiniAEval({ agentFactory: function() {
+      var agent = new FakeAgent("ready")
+      agent.start = function(args) {
+        starts++; paths.push(args.homedir)
+        var result = FakeAgent.prototype.start.call(this, args)
+        ow.test.assert(io.readFileString(args.homedir + "/input.txt"), "fresh", "Each attempt starts from identical fixture")
+        io.writeFileString(args.homedir + "/output.json", '{"ok":true}')
+        if (args.savecontract) { io.mkdir(args.homedir + "/.openaf-mini-a"); io.writeFileString(args.homedir + "/.openaf-mini-a/receipt", "saved") }
+        if (args.reusecontract) ow.test.assert(io.fileExists(args.homedir + "/.openaf-mini-a/receipt"), true, "Warmup store retained")
+        this._supervised = { accepted: true }
+        return result
+      }
+      return agent
+    } })
+    var result = evaluator.runScenario({ goal: "fixture", args: { reusecontract: true }, setup: { warmup: true, workspace: { files: { "input.txt": "fresh" } } },
+      artifact_assertions: [{ file: "{{workspace}}/output.json", format: "json", assertion: { path: "ok", equals: true } }] })
+    ow.test.assert(starts, 2, "Cold warmup and isolated warm attempt")
+    ow.test.assert(result.success, true, "Independent artifact acceptance passes")
+    ow.test.assert(result.warmup.success, true, "Warmup independently checked")
+    ow.test.assert(result.total_with_warmup.estimated_cost_usd, null, "Unknown combined cost stays unknown")
+    ow.test.assert(io.fileExists(paths[0]), false, "Owned fixtures cleaned after checking")
+  }
+  exports.testEvalLcBaselineAndIncorrectCompletion = function() {
+    var evaluator = new MiniAEval({ agentFactory: function() {
+      var agent = new FakeAgent("wrong")
+      agent._supervised = { accepted: true }
+      return agent
+    } })
+    var report = evaluator.run([{ goal: "independent", audit_all: true, expected: { equals: "right" } }])
+    ow.test.assert(report.summary.incorrect_automatic_completions, 1, "Runtime acceptance is not independent success")
+    ow.test.assert(report.summary.audit_required, 1, "Automatic acceptance selected for audit")
+    var noJudge = evaluator.runScenario({ goal: "no independent judge" })
+    ow.test.assert(noJudge.success, false, "Runtime decider cannot be sole evaluation judge")
+    var agent = { llm: { promptWithStats: function() {} }, lc_llm: {}, _prepareContextInvocation: function() {} }
+    evaluator._guardLcBaseline(agent)
+    var denied = false
+    try { agent.llm.promptWithStats("fallback") } catch(e) { denied = true }
+    ow.test.assert(denied, true, "LC baseline blocks hidden main dispatch")
+  }
 })()

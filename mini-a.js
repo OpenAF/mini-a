@@ -1719,6 +1719,7 @@ MiniA.prototype._checkpointRun = function(reason) {
   state.checkpoints = (isNumber(state.checkpoints) ? state.checkpoints : 0) + 1
   state.last_checkpoint = { reason: reason, at: (new Date()).toISOString() }
   state.agent_state = this._runSafeValue(this._agentState || {})
+  if (this._supervised && this._supervised.contract) state.supervised = this._supervised.checkpoint()
   this._syncRunTasksFromPlan()
   if (isString(this._lastPlanSnapshot) && this._lastPlanSnapshot.length > 0) state.plan_snapshot = this._lastPlanSnapshot
   this._writeRunState()
@@ -1784,8 +1785,13 @@ MiniA.prototype._beginRun = function(args) {
   if (resumed) {
     if (state.status === "complete") throw "Run is already complete: " + runId
     state.resume_count = (isNumber(state.resume_count) ? state.resume_count : 0) + 1
+    if (state.supervised) {
+      if (this._normalizeModelStrategy(args.modelstrategy) !== "supervised") throw new Error("Resume requires modelstrategy=supervised")
+      if (isDef(args.state)) throw new Error("Supervised resume conflicts with explicit state")
+      this._supervisedResume = state.supervised
+    }
     if (isObject(state.agent_state) && isUnDef(args.state)) args.state = state.agent_state
-    if (isString(state.planfile) && state.planfile.length > 0 && isUnDef(args.planfile)) args.planfile = state.planfile
+    if (!state.supervised && isString(state.planfile) && state.planfile.length > 0 && isUnDef(args.planfile)) args.planfile = state.planfile
   }
   state.status = "running"
   state.last_started_at = (new Date()).toISOString()
@@ -1841,11 +1847,12 @@ MiniA.prototype._applyOrchestration = function(args, rawArgs) {
   var decisions = orchestrator.assess(assessment, args, {
     lowCostModel: isDef(args.modellc) || isDef(getEnv("OAF_LC_MODEL"))
   })
+  if (isMap(this._modelStrategyDecision)) decisions.push(this._modelStrategyDecision)
   this._orchestrationDecisions = decisions
   if (mode !== "auto") return decisions
   decisions.forEach(function(decision) {
     if (decision.decision === "planning" && !this._isExplicitArgument("useplanning", rawArgs)) args.useplanning = decision.selected !== "off"
-    if (decision.decision === "advisor" && !this._isExplicitArgument("modelstrategy", rawArgs)) args.modelstrategy = decision.selected === "enabled" ? "advisor" : "default"
+    if (decision.decision === "advisor" && args.modelstrategy !== "supervised" && args.__modelstrategyrequested !== "auto" && !this._isExplicitArgument("modelstrategy", rawArgs)) args.modelstrategy = decision.selected === "enabled" ? "advisor" : "default"
     if (decision.decision === "validation" && !this._isExplicitArgument("evidencegate", rawArgs)) args.evidencegate = decision.selected === "enabled"
     this._trace("orchestration_decision", decision)
   }, this)
@@ -3504,8 +3511,39 @@ MiniA.prototype.getCostStats = function() {
 
 MiniA.prototype._normalizeModelStrategy = function(v) {
   var s = isString(v) ? v.trim().toLowerCase() : "default"
-  if (s !== "advisor" && s !== "delegate") return "default"
+  if (s !== "advisor" && s !== "delegate" && s !== "supervised" && s !== "auto") return "default"
   return s
+}
+
+// Resolve modelstrategy=auto (or an implicit strategy under orchestration=auto) to a concrete strategy.
+// Runs in init() before the system prompt is built, because the prompt depends on the planning state.
+MiniA.prototype._resolveModelStrategy = function(args, rawArgs) {
+  var strategy = this._normalizeModelStrategy(args.modelstrategy)
+  var orchestrationAuto = isString(args.orchestration) && args.orchestration.trim().toLowerCase() === "auto" && !this._isExplicitArgument("modelstrategy", rawArgs)
+  if (strategy !== "auto" && !orchestrationAuto) return
+  if (!isString(args.goal) || args.goal.length === 0) return
+  var assessment = this._assessGoalComplexity(args.goal)
+  var decisionLevel = this._assessComplexityByDecision(args.goal, assessment.level, args)
+  if (isDef(decisionLevel)) assessment = merge(clone(assessment), { level: decisionLevel, source: "decide" })
+  var resumeState = __
+  if (isString(args.resumerun) && args.resumerun.trim().length > 0) {
+    var statePath = this._runHome(args) + "/" + args.resumerun.trim() + "/state.json"
+    try { if (io.fileExists(statePath)) resumeState = io.readFileJSON(statePath) } catch(ignoreResumePeek) {}
+  }
+  var orchestrator = new MiniAOrchestrator({ mode: "auto" })
+  var decision = orchestrator.resolveModelStrategy(assessment, args, {
+    lowCostModel: this._use_lc === true,
+    resumeState: resumeState,
+    supervisedEligible: this._supervisedConflicts(args).length === 0
+  })
+  args.modelstrategy = decision.selected
+  args.__modelstrategyrequested = "auto"
+  this._modelStrategyDecision = decision
+  if (decision.selected === "supervised") {
+    this._validateSupervisedArgs(args)
+    this._enablePlanning = toBoolean(args.chatbotmode) !== true && toBoolean(args.useplanning) === true
+  }
+  this.fnI("info", `Model strategy auto -> ${decision.selected} (${decision.reason})`)
 }
 
 MiniA.prototype._safeParseAdvisorJson = function(raw) {
@@ -3984,7 +4022,14 @@ MiniA.prototype._promptIsolatedSummary = function(text, instructions, useLowCost
   summarizer.withInstructions(instructions)
   var prompt = this._prepareContextInvocation(summarizer, text, "summarizer", { model: config })
   // Summaries are prose, not agent action JSON.
-  return summarizer.promptWithStats(prompt)
+  if (!this._supervised) return summarizer.promptWithStats(prompt)
+  this._supervised.executionCall(useLowCost === true ? "lc" : "main", "maintenance")
+  var started = now(), response
+  try { response = summarizer.promptWithStats(prompt); return response }
+  finally {
+    this._supervised.recordUsage(useLowCost === true ? "lc" : "main", response && response.stats)
+    this._supervised.executionTime(useLowCost === true ? "lc" : "main", now() - started)
+  }
 }
 
 MiniA.prototype._resetProviderHistoryAfterOverflow = function(summary) {
@@ -4019,7 +4064,7 @@ MiniA.prototype.summarizeText = function(ctx, options) {
 
     var opts = isObject(options) ? options : {}
     var summarizeLLM = this.llm
-    var llmType = "main"
+    var llmType = this._supervised ? "low-cost" : "main"
 
     var originalTokens = this._estimateTokens(ctx)
     if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.summaries_original_tokens)) {
@@ -4035,7 +4080,7 @@ MiniA.prototype.summarizeText = function(ctx, options) {
     try {
         this.fnI("input", `Interacting with ${llmType} model (summarizing)...`)
         summaryResponseWithStats = this._withExponentialBackoff(function() {
-            return self._promptIsolatedSummary(ctx, instructionText, false)
+            return self._promptIsolatedSummary(ctx, instructionText, !!self._supervised)
         }, self._llmRetryOptions("Summarization", { operation: "summarize" }))
     } catch (e) {
         var summaryError = this._categorizeError(e, { source: "llm", operation: "summarize" })
@@ -4054,7 +4099,7 @@ MiniA.prototype.summarizeText = function(ctx, options) {
     var summaryStats = isObject(summaryResponseWithStats) ? summaryResponseWithStats.stats : {}
     var summaryTokenTotal = this._getTotalTokens(summaryStats)
 
-    this._recordLlmStatsMetrics(summaryStats, "main", this._estimateTokens(ctx))
+    this._recordLlmStatsMetrics(summaryStats, this._supervised ? "lc" : "main", this._estimateTokens(ctx))
     if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.summaries_made)) {
         global.__mini_a_metrics.summaries_made.inc()
     }
@@ -4735,6 +4780,12 @@ MiniA.prototype._shouldEnablePlanning = function(args) {
 }
 
 MiniA.prototype._preparePlanning = function(args) {
+  if (this._normalizeModelStrategy(args.modelstrategy) === "supervised") {
+    this._planningStrategy = "simple"
+    this._enablePlanning = true
+    args.useplanning = true
+    return
+  }
   var assessment = this._assessGoalComplexity(args.goal)
   if (toBoolean(args.useplanning) === true) {
     // Ambiguous (medium) goals use the decision model when available; unchanged heuristic otherwise.
@@ -10145,7 +10196,7 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
   this.state = "stop"
 
   // Mark goal as achieved if not already counted
-  if (global.__mini_a_metrics.goals_achieved.get() === 0 && global.__mini_a_metrics.goals_stopped.get() === 0) {
+  if (!this._supervised && global.__mini_a_metrics.goals_achieved.get() === 0 && global.__mini_a_metrics.goals_stopped.get() === 0) {
     global.__mini_a_metrics.goals_achieved.inc()
   }
 
@@ -10351,7 +10402,8 @@ MiniA.prototype._executeRouteAttempt = function(routeName, toolName, params, con
         usesandbox     : params.usesandbox,
         sandboxprofile : params.sandboxprofile,
         sandboxnonetwork: params.sandboxnonetwork
-      }).output
+      })
+      if (!this._supervised) rawResult = rawResult.output
     } else {
       rawResult = this._executeToolWithCache(connectionId, toolName, params, context)
     }
@@ -13597,7 +13649,7 @@ MiniA.prototype._executeToolWithCache = function(connectionId, toolName, params,
     callParams.returnOutput = true
   }
 
-  var cacheConfig = this._toolCacheSettings[toolName]
+  var cacheConfig = this._supervised ? __ : this._toolCacheSettings[toolName]
   var inputToolName = toolName === "proxy-dispatch" && isMap(params) && isString(params.tool) ? params.tool : toolName
   var shouldCache = ["userInput", "question"].indexOf(inputToolName) < 0 && !MiniA._isCommsTool(toolName, params) && isObject(cacheConfig) && cacheConfig.enabled === true
   var cacheKey = shouldCache ? this._buildToolCacheKey(toolName, callParams) : ""
@@ -14941,6 +14993,10 @@ MiniA.prototype._truncateShellOutput = function(output, maxBytes) {
 }
 
 MiniA.prototype._runCommand = function(args) {
+    if (this._supervised) {
+      if (this._supervised.alreadySatisfied) throw new Error("Current criteria already satisfied; shell execution unnecessary")
+      this._supervised.invalidate()
+    }
     _$(args.command, "args.command").isString().$_()
     args.readwrite  = _$(args.readwrite, "args.readwrite").isBoolean().default(false)
     args.checkall   = _$(args.checkall,  "args.checkall").isBoolean().default(false)
@@ -15092,6 +15148,7 @@ MiniA.prototype._runCommand = function(args) {
         if (isNumber(args.shelltimeout)) shellExec = shellExec.timeout(args.shelltimeout)
         if (isObject(this._progCallEnv)) shellExec = shellExec.envs(this._progCallEnv)
         var _r = shellExec.get(0)
+        if (this._supervised) args.exitcode = _r.exitcode
         args.output = _r.stdout + (isDef(_r.stderr) && _r.stderr.length > 0 ? "\n[stderr] " + _r.stderr : "")
         args.output = this._truncateShellOutput(args.output, shellMaxBytesValue)
         args.executedCommand = finalCommand
@@ -15126,6 +15183,7 @@ MiniA.prototype._runCommand = function(args) {
       blocked        : exec !== true || String(args.output || "").indexOf("[blocked") === 0
     })
 
+    if (this._supervised) this._supervised.observe("shell", { command: args.command }, { output: args.output, exitcode: args.exitcode }, isUnDef(args.exitcode), false)
     return args
 }
 
@@ -16076,6 +16134,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "logpromptheaders", "historys3bucket", "historys3prefix", "historys3url", "historys3accesskey",
     "historys3secret", "historys3region", "historys3useversion1", "historys3ignorecertcheck", "extracommands",
     "extraskills", "extrahooks", "plugins", "pluginsroot", "pluginsroots", "workerregurl", "workerskills", "workertags", "workerreginterval", "secpass",
+    "contractfile", "contractargs", "savecontract", "reusecontract",
     "agentcomms", "showdelegate", "usea2a", "modellock", "modelstrategy", "advisormaxuses", "advisorenable",
     "advisoronrisk", "advisoronambiguity", "advisoronharddecision", "advisorcooldownsteps",
     "advisorbudgetratio", "emergencyreserve", "harddecision", "evidencegate", "evidencegatestrictness",
@@ -16099,7 +16158,7 @@ MiniA._IGNORED_INTERNAL_ARGUMENT_NAMES = (function() {
   ;[
     "exec", "mini-a", "__id", "init", "objid", "execid", "agent",
     "__format", "__interaction_source", "__explicitargkeys", "__unknownargsreported",
-    "__modeapplied", "_agentbasedir", "_mcpdefaultdir", "_delegationdepth", "_workerhint", "_requiredskills",
+    "__modeapplied", "__modelstrategyrequested", "_agentbasedir", "_mcpdefaultdir", "_delegationdepth", "_workerhint", "_requiredskills",
     "_autodelegate", "_mcphandofftools", "_mcphandoffproxy",
     "knowledgeupdated"
   ].forEach(function(name) {
@@ -16458,6 +16517,7 @@ MiniA.prototype.init = function(args) {
   this._applyAgentMetadata(args)
   this._applyExplicitExternalArgs(args, explicitExternalArgs)
   this._initDecisionRuntime(args)
+  this._validateSupervisedArgs(args)
   if (MiniA.shouldWarnUnknownArgs(args)) this._warnUnknownArgs(args)
   var currentWorkingDir = __
   try {
@@ -17145,6 +17205,9 @@ MiniA.prototype.init = function(args) {
       this._use_lc = false
       if (args.usetoolslc === true) this.fnI("warn", "usetoolslc=true was requested but no low-cost model is configured.")
     }
+
+    this._modelStrategyDecision = __
+    this._resolveModelStrategy(args, explicitExternalArgs)
 
     // Re-evaluate validation model config on every init() call so reused MiniA
     // instances do not keep a stale validation model when the current run omits it.
@@ -18008,6 +18071,9 @@ MiniA.prototype._supportsConsoleUserInput = function(args) {
  * </odoc>
  */
 MiniA.prototype.start = function(args) {
+    this._supervised = __
+    this._supervisedResume = __
+    this._validateSupervisedArgs(args)
     this._resetDecisionToolBudget()
     this._decisionToolControls = __
     this._configureFileAccess(args)
@@ -18093,7 +18159,7 @@ MiniA.prototype.start = function(args) {
         } else {
             // Normal mode: run once
             runResult = this._startInternal(args, sessionStartTime)
-            runStatus = this.state === "stop" ? "stopped" : "complete"
+            runStatus = this._supervised ? (this._supervised.accepted ? "complete" : "stopped") : this.state === "stop" ? "stopped" : "complete"
             return runResult
         }
     } catch (e) {
@@ -18120,7 +18186,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var explicitExternalArgs = jsonParse(stringify(args, __, ""), __, __, true)
 
     // Load plan FIRST, before any validation that might reset knowledge
-    var preloadedPlan = this._loadPlanFromArgs(args)
+    var preloadedPlan = args.contractfile ? __ : this._loadPlanFromArgs(args)
     if (isObject(this._runState) && this._runState.persist === true && isString(args.planfile) && args.planfile.length > 0) {
       this._runState.state.planfile = args.planfile
       this._checkpointRun("plan_load")
@@ -18529,6 +18595,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
 
     this._initDecisionRuntime(args)
+    if (this._normalizeModelStrategy(args.modelstrategy) === "auto") this._resolveModelStrategy(args, explicitExternalArgs)
+    if (isMap(this._modelStrategyDecision)) {
+      this._trace("model_strategy_decision", this._modelStrategyDecision)
+      if (isObject(this._runState) && isObject(this._runState.state)) {
+        this._runState.state.model_strategy = this._modelStrategyDecision.selected
+        if (this._runState.persist === true) this._writeRunState()
+      }
+    }
     this._applyOrchestration(args, explicitExternalArgs)
     this._planningAssessment = null
     this._planningStrategy = "off"
@@ -18657,7 +18731,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     // Missing or invalid requested files already produce precise loader errors.
     // With no external plan, planning normally falls back to automatic generation.
-    this._preparePreloadedPlan(preloadedPlan, args)
+    if (this._normalizeModelStrategy(args.modelstrategy) !== "supervised") this._preparePreloadedPlan(preloadedPlan, args)
 
     this._alwaysExec = args.readwrite
     if (isDef(args.outfile) && isUnDef(args.format)) args.format = "json"
@@ -19060,7 +19134,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (this._hasExternalPlan) {
       this._memoryAppend("facts", "Loaded external plan for execution.", { provenance: { source: "planning", event: "plan-loaded", path: isObject(preloadedPlan) ? (preloadedPlan.path || "") : "" } })
     }
-    if (this._enablePlanning) {
+    if (this._enablePlanning && this._normalizeModelStrategy(args.modelstrategy) !== "supervised") {
       // PHASE 1: Generate plan upfront (separate call)
       this._planningPhase = "planning"
       this._initializePlanningState({ goal: args.goal, args: args })
@@ -19217,6 +19291,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
 
     var optimizeGoalBlock = () => {
+      if (this._normalizeModelStrategy(args.modelstrategy) === "supervised") return this._buildUntrustedPromptBlock("UNTRUSTED_GOAL", args.goal)
       // Strategy: summarize long goals to reduce prompt size while preserving intent
       var goalText = isString(args.goal) ? args.goal : ""
       var goalTokens = this._estimateTokens(goalText)
@@ -19253,6 +19328,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
 
     var optimizeHookContextBlock = () => {
+      if (this._normalizeModelStrategy(args.modelstrategy) === "supervised") return this._buildUntrustedPromptBlock("UNTRUSTED_HOOK_CONTEXT", args.hookcontext || "")
       // Strategy: compress verbose hook context while preserving critical instructions
       var hookText = isString(args.hookcontext) ? args.hookcontext.trim() : ""
       if (hookText.length === 0) return ""
@@ -19503,6 +19579,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     var maxSteps = isNumber(args.maxsteps) ? Math.max(0, args.maxsteps) : 0
     var maxTotalSteps = isNumber(args.maxtotalsteps) ? Math.max(0, Math.round(args.maxtotalsteps)) : 0
+    if (this._normalizeModelStrategy(args.modelstrategy) === "supervised") maxTotalSteps = maxTotalSteps > 0 ? Math.min(maxTotalSteps, 60) : 60
 
     // Assess goal complexity for dynamic escalation thresholds
     var goalComplexity = this._assessGoalComplexity(args.goal)
@@ -19646,6 +19723,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         contextId    : contextId,
         fromCache    : false
       }, baseInfo)
+      if (this._supervised && !this._supervised.readOnly(currentToolContext.action, currentToolContext.params)) {
+        if (this._supervised.alreadySatisfied) throw new Error("Current criteria already satisfied; synthesize a final answer before any mutation")
+        this._supervised.invalidate()
+      }
       runtime.toolContexts[contextId] = currentToolContext
       runtime.currentTool = currentToolContext
       return currentToolContext
@@ -19669,6 +19750,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var updateContext = isBoolean(details.updateContext) ? details.updateContext : toolCtx.updateContext
       var observation = details.observation
       var rawResult = isDef(details.result) ? details.result : details.rawResult
+      if (this._supervised) this._supervised.observe(toolName, params, rawResult, details.error === true || (isMap(rawResult) && isDef(rawResult.error)), toolCtx.fromCache === true)
       this._captureContextToolResult(toolName, params, rawResult)
       if (isObject(this._historyVm) && !this._historyVm.degraded) {
         this._historyVm.captureToolExchange(toolName, params, rawResult, {
@@ -19876,6 +19958,23 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
     }
     this._finalizeToolExecution = finalizeToolExecution
+    if (modelStrategy === "supervised") {
+      if (!this._use_lc || !this._oaf_model) throw new Error("supervised requires main and low-cost models")
+      this.state = "processing"
+      this._supervised = new MiniASupervised(this, args, this._decisionToolControls, this._supervisedResume)
+      this._supervised.prepare(preloadedPlan)
+      if (this._supervisedResume) {
+        var remainingSupervisedTurns = maxTotalSteps - this._supervised.executedTurns
+        if (remainingSupervisedTurns <= 0) { this._supervised.stopped = true; this._supervised.reason = "Resumed execution budget exhausted" }
+        else maxTotalSteps = remainingSupervisedTurns
+      }
+      this._supervised.preflight()
+      runtime.forceNoStream = true
+      runtime.context.push("[SUPERVISED CONTRACT] " + this._supervised.boundInstructions)
+      runtime.context.push("[SUPERVISED POLICY] Follow the protected contract. Propose blockers or instruction changes; never weaken criteria. A final answer requests acceptance, it does not mark checks passed.")
+      this._handlePlanUpdate()
+      this._checkpointRun("supervised_prepared")
+    }
     var consultAdvisor = (signalSet, meta) => {
       var signals = isMap(signalSet) ? signalSet : {}
       var decision = this._shouldConsultAdvisor(runtime, signals, args)
@@ -19976,7 +20075,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       return { consulted: false, decision: decision, outcome: __ }
     }
 
-    sessionStartTime = now()
+    if (!this._supervised) sessionStartTime = now()
     this.state = "processing"
     // Context will hold the history of thoughts, actions, and observations
     // We iterate until requested stop or hitting the consecutive no-progress limit
@@ -19985,6 +20084,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         this._origAnswer = "Skill-dependent work is blocked: " + this._skillRuntime.blocked.map(function(item) { return item.ref + " (" + item.reason + ")" }).join("; ") + ". Restore the skill source or adjust the limits before retrying."
         return this._processFinalAnswer(this._origAnswer, args)
       }
+      if (this._supervised && this._supervised.stopped) break
       runtime.currentStepNumber = step + 1
       if (runtime.earlyStopTriggered === true && runtime.earlyStopHandled !== true) {
         var stopReason = isString(runtime.earlyStopReason) && runtime.earlyStopReason.length > 0
@@ -20135,6 +20235,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         runtime.context.push(commsObservation)
         markContextDirty()
       }
+      if (this._supervised) prompt += "\n[ACTIVE CONTRACT] " + this._supervised.boundInstructions + "\n[REQUIRED CHECKS] " + stringify(this._supervised.contract.checks, __, "")
       prompt = this._maybeInjectPlanReminder(prompt, runtime.currentStepNumber, maxSteps)
       prompt = this._injectSimplePlanStepContext(prompt)
       prompt = this._maybeInjectRepeatedActionWarning(prompt, runtime)
@@ -20305,6 +20406,17 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         useLowCost = this._use_lc && (step > 0 || goalComplexityLevel === "simple") && !shouldEscalate
       }
 
+      if (this._supervised) {
+        if (lcBudgetExceeded || (lcBudget > 0 && this._supervised.lcTokensSpent >= lcBudget)) { this._supervised.stopped = true; this._supervised.reason = "LC token budget exhausted"; break }
+        if ((shouldEscalate || runtime.forceMainModel) && this._supervised.takeover === 0) {
+          try { this._supervised.route({ reason: escalationReason || "error_recovery" }) }
+          catch (supervisedRouteError) { this._supervised.stopped = true; this._supervised.reason = __miniAErrMsg(supervisedRouteError); break }
+          runtime.forceMainModel = false
+        }
+        if (this._supervised.stopped) break
+        useLowCost = this._supervised.takeover <= 0
+        if (!useLowCost) this._supervised.takeover--
+      }
       this._syncConversationForModelSwitch(useLowCost ? "lc" : "main")
       this._refreshConfiguredLlmChannels()
       var currentLLM = useLowCost ? this.lc_llm : this.llm
@@ -20399,6 +20511,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         responseWithStats = this._withExponentialBackoff(() => {
           addCall()
           prompt = this._prepareContextInvocation(currentLLM, prompt, "executor", stepRecovery)
+          if (this._supervised) this._supervised.executionCall(useLowCost ? "lc" : "main")
           var jsonFlag = !noJsonPromptFlag && !isOllamaToolJsonConflict
           if (args.showthinking) {
             // Streaming not compatible with showthinking - use regular prompts
@@ -20515,6 +20628,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var responseTokenTotal = this._getTotalTokens(stats)
       registerCallUsage(responseTokenTotal)
       var trackedResponseTokens = this._recordLlmStatsMetrics(stats, useLowCost ? "lc" : "main", estimatedPromptTokens)
+      if (this._supervised) { this._supervised.recordUsage(useLowCost ? "lc" : "main", stats); this._supervised.executionTime(useLowCost ? "lc" : "main", now() - llmWaitStart) }
       global.__mini_a_metrics.llm_estimated_tokens.getAdd(estimatedPromptTokens)
 
       // Attach actual token stats to conversation message for later accurate analysis
@@ -20602,9 +20716,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         if (isString(nativeToolText) && nativeToolText.trim().length > 0 && nativeToolCalls.length === 0 && (nativeToolFinish.length === 0 || nativeToolFinish === "stop")) {
           var nativeToolAnswer = this._nativeToolFinalText(nativeToolText)
           if (isString(nativeToolAnswer) && nativeToolAnswer !== "{}") {
+            if (this._supervised && !this._supervised.proposeFinal(nativeToolAnswer)) continue
             runtime.context.push(`[OBS ${step + 1}] (recover) treating native tool follow-up text as final answer.`)
             global.__mini_a_metrics.finals_made.inc()
-            global.__mini_a_metrics.goals_achieved.inc()
+            if (!this._supervised) global.__mini_a_metrics.goals_achieved.inc()
             global.__mini_a_metrics.total_session_time.set(now() - sessionStartTime)
             return this._processFinalAnswer(nativeToolAnswer, args)
           }
@@ -20648,6 +20763,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             try {
               lcRetryResponseWithStats = this._withExponentialBackoff(() => {
                 addCall()
+                if (this._supervised) this._supervised.executionCall("lc")
                 if (toBoolean(args.lcreplytool) === true) {
                   var toolRetry = this._promptLcReplyTool(lcRetryPrompt, args, currentModelConfig)
                   if (isDef(toolRetry)) return toolRetry
@@ -20670,6 +20786,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             var lcRetryEstimatedPromptTokens = this._estimateTokens(lcRetryPrompt)
             registerCallUsage(this._getTotalTokens(lcRetryStats))
             var lcRetryTrackedTokens = this._recordLlmStatsMetrics(lcRetryStats, "lc", lcRetryEstimatedPromptTokens)
+            if (this._supervised) { this._supervised.recordUsage("lc", lcRetryStats) }
             global.__mini_a_metrics.llm_estimated_tokens.getAdd(lcRetryEstimatedPromptTokens)
             this._attachTokenStatsToConversation(lcRetryStats, currentLLM)
             if (isMap(this._costTracker)) {
@@ -20721,6 +20838,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           if (lcRetryStopRequested || this.state == "stop") break
         }
 
+        if (this._supervised && useLowCost && (isUnDef(msg) || !(isMap(msg) || isArray(msg)))) {
+          try { this._supervised.route({ reason: "invalid_lc_json", response: String(rmsg).substring(0, 1000) }) }
+          catch (supervisedJsonError) { this._supervised.stopped = true; this._supervised.reason = __miniAErrMsg(supervisedJsonError) }
+          continue
+        }
         // If low-cost LLM still produced invalid JSON after retries, fall back to main LLM
         if ((isUnDef(msg) || !(isMap(msg) || isArray(msg))) && useLowCost) {
           var responseSample = isString(rmsg) && rmsg.length > 200 ? rmsg.substring(0, 200) + "..." : rmsg
@@ -21060,6 +21182,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (isMap(baseMsg) && isDef(baseMsg.state)) {
         var extractedState = parseStatePayload(baseMsg.state)
         if (isObject(extractedState)) {
+          if (this._supervised) { this._supervised.progress(extractedState.plan); delete extractedState.plan; delete extractedState.supervised; delete extractedState.contract }
           // For version 3 plans, merge plan updates instead of replacing entirely
           if (this._enablePlanning && this._isSimplePlanStyle() && isObject(extractedState.plan)) {
             this._mergeSimplePlanUpdate(extractedState.plan)
@@ -21690,6 +21813,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             break
           }
 
+          if (this._supervised && !this._supervised.proposeFinal(answerValue)) break
           global.__mini_a_metrics.finals_made.inc()
 
           runtime.consecutiveThoughts = 0
@@ -21700,7 +21824,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
           var totalTime = now() - sessionStartTime
           global.__mini_a_metrics.total_session_time.set(totalTime)
-          global.__mini_a_metrics.goals_achieved.inc()
+          if (!this._supervised) global.__mini_a_metrics.goals_achieved.inc()
 
           if (stateUpdatedThisStep && !stateRecordedInContext) {
             runtime.context.push(`[STATE ${stepLabel}] ${updatedStateSnapshot}`)
@@ -22082,6 +22206,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     })
 
     // If already in stop state, just exit
+    if (this._supervised) {
+      this._supervised.stopped = true
+      this._supervised.reason = this._supervised.reason || "Execution stopped or runtime limit reached before acceptance"
+      return this._processFinalAnswer("", args)
+    }
     if (this.state == "stop") {
       this.fnI("stop", `Agent already in 'stop' state. Exiting...`)
       return "(no answer)"
@@ -23636,3 +23765,6 @@ MiniA.prototype._initComms = function(args) {
 
 loadLib("mini-a-skill-runtime.js")
 __miniAInstallSkillRuntime()
+
+loadLib("mini-a-supervised.js")
+__miniAInstallSupervised()

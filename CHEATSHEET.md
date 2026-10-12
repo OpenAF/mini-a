@@ -167,6 +167,7 @@ mini-a goal="generate project report" outfile=report.md useshell=true
 |------|-------------|
 | `default` | General-purpose work. Mini-A starts on the main model for the first step of complex goals, then switches to LC. Automatically escalates back to main when errors or stalled reasoning are detected. Best baseline — start here unless you have a specific reason to deviate. |
 | `advisor` | Long or risky tasks where LC cost savings matter but you still want main-model judgment on hard calls. LC executes every step; the main model is consulted (not executed) only on risk signals, ambiguity, or hard-decision checkpoints. Use when you want to cap spend but cannot afford a wrong decision mid-task. |
+| `auto` | Let Mini-A choose per run (opt-in; `default` stays the default). Rules are deterministic and evaluated in order: resumed runs keep their strategy; contract options (`contractfile`, `contractargs`, `savecontract`, `reusecontract`) pick `supervised`; without an LC model or with `modellock=main\|lc` it picks `default`; complex goals with a verification requirement (test/validate/verify/ensure, or `outfile`) pick `supervised` when no supervised-conflicting option is set; other complex goals pick `advisor`; medium low-risk goals with `lcbudget>0` pick `delegate`; everything else picks `default`. Medium goals are re-classified by the decision model when `OAF_DECIDE_MODEL`/`modeldec` is configured. The choice is logged as `Model strategy auto -> X` and traced as `model_strategy_decision`. |
 | `delegate` | Batch / throughput scenarios where speed and cost matter more than best-first-step quality. LC executes all steps including step 0 (skips the `default` behavior of using main for the first step on complex goals). Escalation to main is still active when error/stall thresholds are hit. Use for repetitive, well-understood tasks. |
 
 **Quick decision guide:**
@@ -177,7 +178,7 @@ mini-a goal="generate project report" outfile=report.md useshell=true
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `modelstrategy` | string | `default` | Model orchestration profile: `"default"` (adaptive LC-first with escalation), `"advisor"` (LC executor + main model as selective advisor), or `"delegate"` (LC executes all steps including step 0, escalation still active) |
+| `modelstrategy` | string | `default` | Model orchestration profile: `"default"` (adaptive LC-first with escalation), `"advisor"` (LC executor + main model as selective advisor), `"delegate"` (LC executes all steps including step 0, escalation still active), `"supervised"` (main prepares a contract, LC executes it), or `"auto"` (deterministic per-run choice among the others) |
 | `advisormaxuses` | number | `2` | Maximum advisor consultations per run when `modelstrategy=advisor` |
 | `advisorenable` | boolean | `true` | Master toggle for advisor consultations when `modelstrategy=advisor` |
 | `advisoronrisk` | boolean | `true` | Allow advisor consults on risk signals |

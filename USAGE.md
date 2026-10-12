@@ -1069,7 +1069,7 @@ For the Elasticsearch/OpenSearch wiki backend, there is no separate top-level `e
 - **`deescalate`** (number, default: 3): Number of consecutive successful steps required after an escalation before Mini-A automatically reverts to the low-cost model. Set to a higher value for more conservative de-escalation or `0` to disable de-escalation entirely.
 - **`lccontextlimit`** (number, default: 0 = disabled): Maximum context token count before escalating to the main model. When the estimated context size reaches this threshold, Mini-A switches to the main model for that step. Useful when the low-cost model has a smaller context window than the main model. Set to `0` to disable context-based escalation.
 - **`modellock`** (string, one of `"main"`, `"lc"`, or `"auto"` = default): Select a model tier for normal steps, bypassing score-based escalation and de-escalation. Recovery paths (including invalid-JSON fallback) can still call the main model, so this is not a strict spending or provider-isolation boundary. Use `modellock=main` to select the main model (`OAF_MODEL`), `modellock=lc` to select the low-cost model (`OAF_LC_MODEL`), or leave unset/`auto` for the default adaptive behaviour. A one-time info message is logged at startup when a lock is active.
-- **`modelstrategy`** (string, one of `"default"` or `"advisor"`, default: `"default"`): Select the model orchestration profile. `default` keeps current LC-first behavior with escalation. `advisor` keeps LC as the executor and selectively calls the main model as an internal advisor for difficult steps.
+- **`modelstrategy`** (string, one of `"default"`, `"advisor"`, `"delegate"`, `"supervised"` or `"auto"`, default: `"default"`): Select the model orchestration profile. `auto` resolves once per run (in `init()`, before the system prompt is built) to a concrete strategy: resumed runs keep theirs, contract options pick `supervised`, no LC model or `modellock=main|lc` picks `default`, complex goals with a verification requirement (`test`/`validate`/`verify`/`ensure` words or `outfile`) pick `supervised` when no supervised-conflicting option is set, other complex goals pick `advisor`, medium low-risk goals with `lcbudget>0` pick `delegate`, otherwise `default`. Medium goals are refined by the decision model when configured. `orchestration=auto` uses the same resolver when `modelstrategy` is not set explicitly. Subtasks of an `auto` run resolve for their own goal. `default` keeps current LC-first behavior with escalation. `advisor` keeps LC as the executor and selectively calls the main model as an internal advisor for difficult steps.
 - **`advisormaxuses`** (number, default: `2`): Maximum advisor consultations per run when `modelstrategy=advisor`.
 - **`advisorenable`** (boolean, default: `true`): Master toggle for advisor consultations inside `modelstrategy=advisor` runs.
 - **`advisoronrisk`** (boolean, default: `true`): Allow advisor consults on risk signals.
@@ -3868,6 +3868,131 @@ the CLI uses the configured model and therefore requires normal model setup.
 Set `llm_judge: { enabled: true }` for an opt-in isolated judge call; tests can
 instead inject `judgeFn` and remain fully deterministic.
 
+## Comparing outcomes with and without skills
+
+Run the isolated paired example explicitly with your configured `OAF_MODEL`:
+
+```bash
+ojob examples/eval-skills-ojob.yaml output=/tmp/skills-pair-01.json
+# Optional second experiment; requires OAF_DECIDE_MODEL:
+ojob examples/eval-skills-ojob.yaml decide=true reverse=true output=/tmp/skills-pair-02.json
+```
+
+The example creates temporary baseline/treatment trees and removes them in
+`finally`. Both variants expose the same skills interface and use the same task,
+model settings and budgets. Only treatment contains the ledger-checking skill;
+all ledger facts and rules are in the shared task. An unrelated `ready` task
+checks unnecessary activation. The baseline uses `useskills=true`: disabling a
+flag alone is not isolation. Canonical per-variant `fileallow` denies the other
+tree, home defaults, bundled skills and plugin contributions. Preflight checks
+actual discovered roots, available skills and utility names. The live agent's
+initialization repeats those checks. General utilities, shell, wiki, external
+MCP configuration, delegation, automatic AGENTS.md, memory and history VM are
+disabled; each scenario uses a fresh agent and no conversation or profile.
+
+`extraskills` adds roots; it does not replace defaults or bundled/plugin roots.
+Likewise, redirecting `homedir` alone does not redirect every home-skill lookup.
+The example verifies both source availability and denial of baseline access to
+the treatment skill. Do not remove its file policy when adapting the example.
+Configured main/low-cost models are shared across variants; record those model
+identities from `metrics.model_usage` when comparing runs.
+
+Normal discovery sets `skillsautosearch=false`, making no additional selector
+calls. `decide=true` adds a separate paired experiment with `usedecide=true` and
+`skillsautosearch=true` in both variants. Existing automatic selection prefers
+Decide, then follows the existing low-cost/main fallback. Compare skill effects
+within each policy pair; comparing treatment across policies measures selection
+policy differences. A baseline with no candidates may make no selector calls.
+`skills.selection_calls` includes fallback attempts; general `decision_calls`
+cannot be attributed entirely to skills. No judge runs in this example.
+
+Task correctness remains in ordinary answer assertions. `skill_diagnostic`
+records expected retrieval and observed loads outside those assertions. Review
+activation separately: relevant treatment should retrieve content, and the
+unrelated task should not. More loads, a skill name in an answer, or a successful
+read do not demonstrate adherence or quality uplift. No combined skill-value
+score is calculated. The existing semantic skill suite (`evals/skills.yaml`)
+also includes explicit invocation diagnostics; these do not substitute for
+normal discovery testing.
+
+Reports retain `raw.skills` and `skill_activity`, and add `metrics.skills`.
+For example (illustrative, not measured):
+
+```json
+{"variant":"with-skill","success":true,"metrics":{"skills":{"telemetry_available":true,"loads":1,"returned_chars":320}}}
+```
+
+See [skill metric definitions](METRICS.md#skill-lifecycle-skills-and-evaluation-deltas)
+for scope, missing values and nested `expected.metrics` assertions. Activation
+assertions may be useful in diagnostic suites, but including them in outcome
+success would conflate retrieval with correctness.
+
+Repeat paired runs using ordinary oJob/OpenAF facilities, not an evaluator
+repetition setting. Use `jobsInclude` to import the example jobs without running
+its standalone `todo`, then call its job from a sequential loop:
+
+```yaml
+jobsInclude:
+- examples/eval-skills-ojob.yaml
+jobs:
+- name: Repeat pairs
+  exec: |
+    for (var i = 0; i < 10; i++) {
+      $job("Paired skill evaluation", {
+        reverse: i % 2 === 1,
+        output: "/tmp/skills-pair-" + i + ".json"
+      })
+    }
+todo:
+- Repeat pairs
+- oJob Test Results
+- Eval exit status
+```
+
+Retain one report per pair, alternate order, and report completed pair counts,
+correctness rates, retrieval diagnostics and token/time/tool differences.
+Separate failed/incomplete samples. One pair establishes that the experiment
+runs; it cannot establish an improvement. Live evaluations are opt-in; the
+regression tests use injected agents and decision clients without providers.
+
+## Structured Decide outcome judge
+
+For an explicit additional outcome check, select Decide through the existing
+judge configuration:
+
+```yaml
+llm_judge:
+  enabled: true
+  backend: decide
+  # Optional args: { modeldec: "(type: ..., model: ...)" }
+```
+
+The judge reuses `MiniADecision` and OpenAF `decideWithStats()`. It batches the
+existing answer expectations (`equals`, `contains`, `notContains`, `matches`,
+including answer assertions) into boolean questions. At least one answer
+expectation is required. Metric assertions remain deterministic. This adds no
+rubric language or score. Deterministic assertions still run and must pass;
+semantic judging does not waive an exact answer mismatch.
+
+Model configuration precedence is `llm_judge.args.modeldec`, scenario/shared
+`modeldec`, then `OAF_DECIDE_MODEL`. Explicit `usedecide=false` on the evaluated
+run or judge args disables Decide judging and yields a failed judge without a
+provider call. Simply setting `usedecide=true` or the environment variable never
+enables an evaluator judge. Omitting `backend` retains the existing isolated
+agent judge. `judgeFn` injection still takes precedence; `decisionClientFactory`
+in evaluator options lets tests exercise the real decision wrapper provider-free.
+
+The judge receives only goal, final answer and answer expectations, excluding
+variant labels, skill activity and metric assertions. Treat its verdict as model
+judgment, not proof. Use identical judge configuration across paired variants
+and report its verdict separately from deterministic checks. Judge calls/tokens
+and duration are under `result.judge`, outside evaluated-agent metrics. There is
+one request with at most 32 checks and 48 KiB of UTF-8 evidence/questions; oversized
+evidence is rejected rather than truncated. Missing configuration, unsupported
+runtime/provider capabilities, incomplete or invalid boolean answers and provider
+errors fail with sanitized codes, without retries or fallback calls. No model
+configuration credentials are included in judge results.
+
 ## Evals in oJob tests
 
 Include `mini-a-eval.yaml` to register eval scenarios as ordinary OpenAF tests.
@@ -4482,3 +4607,7 @@ Advanced slash-command browser smoke checklist (separate from fixture tests):
 Node tests exercise presentation fixtures and OpenAF tests exercise the shared
 runtime/journal with fixture subsystems. They do not establish live browser layout,
 provider, remote backend or deployed-server behavior.
+
+## Supervised contracts
+
+Use `modelstrategy=supervised` with both main and LC configured. Optional `contractfile=<path>` selects a readable CONTRACT.md; `contractargs` binds positional inputs. `savecontract=false` and `reusecontract=false` are independent defaults. Explicit `usedecide=true` enables selective decision review; otherwise acceptance requires generative review. See [the complete contract format and compatibility rules](docs/SUPERVISED.md) and [the illustrative contract](examples/CONTRACT.md).

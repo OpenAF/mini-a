@@ -1,0 +1,50 @@
+# Live model opt-in: ojob examples/eval-skills-ojob.yaml output=/tmp/skills.json
+# Add decide=true with OAF_DECIDE_MODEL configured for a second paired experiment.
+include:
+- mini-a-eval.yaml
+
+ojob:
+  catch: |
+    logErr(exception)
+    exit(1)
+
+jobs:
+- name: Paired skill evaluation
+  exec: |
+    var fixtures = require("examples/eval-skills.js")
+    if (toBoolean(args.decide) === true) {
+      var decision = new MiniADecision({ enabled: true })
+      if (!decision._config || decision._error) throw new Error("decide=true requires a valid OAF_DECIDE_MODEL")
+    }
+    fixtures.withSuite({ decide: toBoolean(args.decide) === true, reverse: toBoolean(args.reverse) === true }, function(scenarios) {
+      var evaluator = new MiniAEval({ agentFactory: function(scenario) {
+        var agent = new MiniA(), originalInit = agent.init
+        agent.init = function(runArgs) {
+          var result = originalInit.call(this, runArgs)
+          fixtures.assertIsolation(this, runArgs, scenario.variant === "with-skill")
+          return result
+        }
+        return agent
+      } })
+      args.evalReport = evaluator.runTests(scenarios, { suite: "Paired skills" + (isString(args.output) ? " " + args.output : "") })
+      // Diagnostics stay outside outcome assertions and do not affect success.
+      args.evalReport.scenarios.forEach(function(result) {
+        var relevant = isString(result.scenario) ? result.scenario.indexOf("ledger reconciliation") >= 0 : null
+        var observed = isMap(result.metrics.skills) ? result.metrics.skills : { telemetry_available: false, loads: null }
+        result.skill_diagnostic = {
+          expected_retrieval: relevant === null ? null : relevant && result.variant === "with-skill",
+          telemetry_available: observed.telemetry_available,
+          loads: observed.loads
+        }
+      })
+      io.writeFileJSON(isString(args.output) ? args.output : "/tmp/mini-a-skills-eval.json", args.evalReport)
+      print(evaluator.format(args.evalReport))
+    })
+
+- name: Eval exit status
+  exec: if (ow.loadTest().getCountFail() > 0) exit(1)
+
+todo:
+- Paired skill evaluation
+- oJob Test Results
+- Eval exit status

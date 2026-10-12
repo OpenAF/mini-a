@@ -404,58 +404,7 @@ MiniUtilsTool.prototype._listSkills = function(params) {
 }
 
 MiniUtilsTool.prototype._parseSkillArgs = function(rawValue) {
-  var raw = isString(rawValue) ? rawValue.trim() : ""
-  if (raw.length === 0) return { ok: true, raw: "", argv: [], argc: 0 }
-
-  var argv = []
-  var current = ""
-  var quote = ""
-  var escaping = false
-  for (var i = 0; i < raw.length; i++) {
-    var ch = raw.charAt(i)
-
-    if (escaping) {
-      current += ch
-      escaping = false
-      continue
-    }
-
-    if (ch === "\\") {
-      escaping = true
-      continue
-    }
-
-    if (quote.length > 0) {
-      if (ch === quote) quote = ""
-      else current += ch
-      continue
-    }
-
-    if (ch === "'" || ch === "\"") {
-      quote = ch
-      continue
-    }
-
-    if (/\s/.test(ch)) {
-      if (current.length > 0) {
-        argv.push(current)
-        current = ""
-      }
-      continue
-    }
-    current += ch
-  }
-
-  if (escaping || quote.length > 0) {
-    return { ok: false, error: "Unbalanced quotes or trailing escape in arguments." }
-  }
-  if (current.length > 0) argv.push(current)
-  return {
-    ok  : true,
-    raw : raw,
-    argv: argv,
-    argc: argv.length
-  }
+  return __miniAParseSkillArgs(rawValue)
 }
 
 MiniUtilsTool.prototype._renderSkillTemplate = function(template, parsedArgs) {

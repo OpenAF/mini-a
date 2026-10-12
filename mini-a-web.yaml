@@ -366,9 +366,17 @@ help:
     example  : "lc"
     mandatory: false
   - name     : modelstrategy
-    desc     : Model orchestration profile (default or advisor)
+    desc     : Model orchestration profile (default|advisor|delegate|supervised|auto)
     example  : "advisor"
     mandatory: false
+  - name     : contractfile
+    desc     : Explicit existing supervised CONTRACT.md (takes precedence over automatic reuse)
+  - name     : contractargs
+    desc     : Positional inputs for supervised contracts (same quoting as skill arguments)
+  - name     : savecontract
+    desc     : Save accepted supervised contracts to the Mini-A configuration home (default false)
+  - name     : reusecontract
+    desc     : Discover exact-goal supervised contracts in the current workspace scope (default false)
   - name     : advisormaxuses
     desc     : Maximum advisor consultations per run
     example  : "2"
@@ -1687,6 +1695,10 @@ jobs:
       skillmanifestchars: toNumber().isNumber().default(1536)
       modellock       : isString().default(__)
       modelstrategy   : isString().default(__)
+      contractfile    : isString().default(__)
+      contractargs    : isString().default(__)
+      savecontract    : toBoolean().isBoolean().default(false)
+      reusecontract   : toBoolean().isBoolean().default(false)
       advisormaxuses  : toNumber().isNumber().default(__)
       advisorenable   : toBoolean().isBoolean().default(__)
       advisoronrisk   : toBoolean().isBoolean().default(__)

@@ -37,6 +37,56 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testEvalExpandsPhaseVariantMatrix
 
+- name: MiniA Eval Tests::SkillCountersAndIsolation
+  from: MiniA Eval Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testEvalSkillCountersAndIsolation
+
+- name: MiniA Eval Tests::WikiMetadataAndRetrieval
+  from: MiniA Eval Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testEvalWikiMetadataAndRetrieval
+
+- name: MiniA Eval Tests::SkillDeltasAndUnavailable
+  from: MiniA Eval Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testEvalSkillDeltasAndUnavailable
+
+- name: MiniA Eval Tests::DecideJudge
+  from: MiniA Eval Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testEvalDecideJudge
+
+- name: MiniA Eval Tests::DecideJudgeFailures
+  from: MiniA Eval Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testEvalDecideJudgeFailures
+
+- name: MiniA Eval Tests::SkillExamplePairs
+  from: MiniA Eval Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testEvalSkillExamplePairs
+
+- name: MiniA Eval Tests::SkillExampleExecution
+  from: MiniA Eval Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testEvalSkillExampleExecution
+
+- name: MiniA Eval Tests::DecideSkillSelection
+  from: MiniA Eval Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testEvalDecideSkillSelection
+
+- name: MiniA Eval Tests::SupervisedWorkspace
+  from: MiniA Eval Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testEvalSupervisedWorkspaceAndWarmup
+
+- name: MiniA Eval Tests::SupervisedIndependentAcceptance
+  from: MiniA Eval Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testEvalLcBaselineAndIncorrectCompletion
+
 include:
 - oJobTest.yaml
 
@@ -45,6 +95,8 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Eval Tests::SupervisedWorkspace
+- MiniA Eval Tests::SupervisedIndependentAcceptance
 - MiniA Eval Tests::ScenarioMetrics
 - MiniA Eval Tests::FailuresAndJudge
 - MiniA Eval Tests::SuiteAndBaseline
@@ -52,3 +104,11 @@ todo:
 - MiniA Eval Tests::HistoryVmShadowMetrics
 - MiniA Eval Tests::ConversationReplay
 - MiniA Eval Tests::PhaseVariantMatrix
+- MiniA Eval Tests::SkillCountersAndIsolation
+- MiniA Eval Tests::WikiMetadataAndRetrieval
+- MiniA Eval Tests::SkillDeltasAndUnavailable
+- MiniA Eval Tests::DecideJudge
+- MiniA Eval Tests::DecideJudgeFailures
+- MiniA Eval Tests::SkillExamplePairs
+- MiniA Eval Tests::SkillExampleExecution
+- MiniA Eval Tests::DecideSkillSelection

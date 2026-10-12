@@ -452,21 +452,69 @@ These counters are tracked directly on `__mini_a_metrics` (not via SubtaskManage
 
 Beyond the in-memory counters, mini-a supports publishing metrics to an OpenAF channel via the `metricsch` startup argument. This uses `ow.metrics.startCollecting(channelName, period, some, noDate)` to periodically snapshot OpenAF system metrics (CPU, memory, GC, etc.) into a named channel. The channel is reference-counted — multiple `MiniA` instances sharing a channel name will not double-register it, and the channel is torn down only when the last instance releases it. This is orthogonal to the `__mini_a_metrics` counters above; it covers host-level observability rather than agent behaviour.
 
-### Skill runtime evidence
+## Skill lifecycle (`skills`) and evaluation deltas
 
-`skills` reports per-run discoveries, `selection_calls`, selections, loads,
-blocks, `selection_duration_ms`, consumed characters, consulted source-qualified
-references, and revision/pending-section status. Selection uses the primary model
-and contributes to normal model-call/token metrics. `compliance_verified=false`
-distinguishes runtime loading/completion from verified adherence. Evaluation
-reports include the same snapshot as `skill_activity`. No skill bodies are
-included in these metrics.
+`getMetrics().skills` is the existing `MiniASkillRuntime.snapshot()`. Unlike the
+session-wide atomic counters, this runtime is replaced for a new skill run.
+MiniAEval exposes a compact `metrics.skills` section without adding runtime counters:
+
+| Eval field | Snapshot source | Meaning |
+|---|---|---|
+| `telemetry_available` | Counter snapshot availability | All listed counters have measurable run deltas. |
+| `discoveries` | `discoveries` | Consultation discovery passes, not individual search/list operations or candidate counts. |
+| `selection_calls` | `selection_calls` | Selector attempts, including Decide/low-cost/main fallback attempts. |
+| `selections` | `selections` | Selected candidates, not verified adherence. |
+| `loads` | `loads` | Successful content consumptions, including sections and supporting references. Repeated reads count again. |
+| `blocks` | `blocks` | Runtime block events, not a count of every tool failure. |
+| `selection_duration_ms` | `selection_duration_ms` | Cumulative selector duration during the scenario. |
+| `returned_chars` | `chars` | Charged content characters (JavaScript string length), including repeated reads; not bytes or tokens. |
+
+Counter deltas use snapshots around the scenario; a replaced skill runtime has
+its own zero origin. Session metrics are never reset. Missing snapshots/fields
+or unexplained counter decreases produce `null`, not measured zero. Disabled
+skills with a valid runtime can report zero. Limits and identity/state collections
+remain final snapshots under `metrics.raw.skills` and `result.skill_activity`;
+they are not counter deltas. Raw skill field names are retained, including `chars`.
+
+Wiki metadata `open` can add a consulted reference without retrieving a body.
+Local discovery returns metadata too. Neither has a separate operation counter.
+`loads` covers the shared built-in local/wiki consumption boundary; aliases and
+native/JSON dispatch do not add counts. Local reads can render templates, so
+loads cannot distinguish explicit invocation from automatic activation or reading.
+External MCPs, arbitrary file reads and provider-internal skill usage are not
+covered: their absent telemetry must not be interpreted as measured inactivity.
+No skill bodies or credentials are added to these metrics.
+
+Nested assertions work through `expected.metrics`, for example
+`"skills.loads": { min: 1 }`. Baseline and variant comparisons include a nested
+`metrics.skills` object of scalar differences, with `null` when either measurement
+is unavailable. Increased activity is neither an automatic benefit nor a regression.
+Retrieval demonstrates access, not instruction adherence or answer quality.
+
+Opt-in Decide judge usage is separate under `result.judge.usage`, with calls,
+usage reports, input/output/total tokens and judge-only `elapsed_ms` beside it.
+Unavailable judge token usage is `null`; judge usage is excluded from evaluated-agent
+metrics and their comparisons. The existing `decision_*` eval metrics measure
+agent decision activity, which may include more than skill selection.
+
+
+`result.skill_activity` retains the final lifecycle snapshot, including consulted
+source-qualified references and revision/pending-section state. Its
+`compliance_verified=false` distinguishes loading/completion from verified
+adherence. Selection uses Decide, low-cost or main according to existing
+configuration, and contributes to the corresponding agent usage metrics.
 
 Skill activity logs describe enabled sources and local discovery roots, discovered
 and eligible counts, bounded candidate lists, explicit requests and ignored unknown
-references, primary-model selection start/result/duration, and reasons for skipping
+references, selector tier/start/result/duration, and reasons for skipping
 selection. Loading reports returned characters and shared count/character budgets;
 activation reports source revision, loaded and pending sections, and supporting
 reference names. Blocked requests include available references and corrective hints.
 Activity omits goal text, invocation arguments, and instruction bodies. Lists show
 at most twelve entries; full event metadata remains in the `skill_state` audit trace.
+
+## Supervised execution
+
+`getMetrics().supervised` / `getSupervisedStats()` exposes actual planning, review, question, revision, takeover, LC execution/repair, reconnaissance and decision dispatches; decision fallbacks; save/load/hit/miss/rejection/invalidation counts and reasons; `initial_generation_skipped`; and per-role usage/duration reports. Criterion outcomes and exact content hashes appear in `supervised_*` trace events. Rejected final proposals are not repair dispatches.
+
+MiniAEval adds current artifact assertions, independent success, incorrect automatic completion, audit selection, optional per-role estimated cost, and separate/combined warmup metrics. Unknown usage/pricing remains unknown. Cost per independently successful task includes failed attempts and warmup; skipping planning alone does not establish monetary savings. See [supervised evaluation](docs/SUPERVISED.md#tests-and-evaluation).

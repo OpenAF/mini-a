@@ -300,6 +300,23 @@ mini-a goal="explain the history of computing" usestream=true
 3. Set your model configuration (see Quick Start above)
 4. Start using Mini-A via `opack exec mini-a` (or the `mini-a` alias if you added it)!
 
+## Parameter Help
+
+Run `mini-a help` (or `mini-a --help`) to see launch shortcuts followed by
+parameters grouped by category and subcategory:
+
+| Category | Subcategories |
+| --- | --- |
+| Session | Goals and prompts; history and attachments; context management; durable runs; console and editor |
+| Models and execution | Model selection; decisions and advisors; budgets and limits; planning; research and validation; prompt and tool routing |
+| Tools and permissions | Shell and sandbox; tools and utilities; MCP connections; MCP proxy and programmatic calls; skills and extensions |
+| Memory and knowledge | Memory stores and retention; wiki graph; wiki retrieval and maintenance; wiki storage and access; ingestion and absorption; dream consolidation |
+| Delegation and servers | Delegation and subtasks; worker registry; web interface |
+| Output and diagnostics | Display and visualizations; files and logging |
+
+Parameters are alphabetical within each subcategory, with their type, default,
+and description. See [USAGE.md](USAGE.md) for the full parameter reference.
+
 ## Testing MCP Servers
 
 Mini-A includes an interactive MCP server testing tool that helps you test and debug MCP servers before integrating them into your workflows.
@@ -817,3 +834,7 @@ See [ABSORB.md](ABSORB.md) for source selection, repeat runs, job arguments and 
 
 Microsoft 365 work context is available through the [WorkIQ MCP connector](docs/WORKIQ.md),
 with browser sign-in, SBucket credential persistence and read-only tools by default.
+
+### Supervised execution
+
+Opt in with `modelstrategy=supervised` to prepare a protected contract with main and execute with LC. `savecontract=true` and `reusecontract=true` separately enable accepted-contract persistence and exact-goal reuse. See [supervised contracts](docs/SUPERVISED.md) for configuration, validation and evaluation.

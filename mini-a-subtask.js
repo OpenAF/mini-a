@@ -268,6 +268,8 @@ SubtaskManager.prototype._buildChildArgs = function(subtask) {
   // Communication declarations never inherit through argument merging.
   mergedArgs.agentcomms = explicitArgs.agentcomms
   mergedArgs.goal = subtask.goal
+  // A parent that resolved modelstrategy=auto lets each child resolve for its own goal.
+  if (this.parentArgs.__modelstrategyrequested === "auto" && !isDef(explicitArgs.modelstrategy)) mergedArgs.modelstrategy = "auto"
   if (isObject(this.parentAgent) && isFunction(this.parentAgent._skillHandoffForGoal)) {
     mergedArgs._skillHandoff = this.parentAgent._skillHandoffForGoal(subtask.goal)
     if ((!isDef(explicitArgs.useskills) || toBoolean(explicitArgs.useskills) === true) && mergedArgs._skillHandoff.some(function(item) { return item.ref.indexOf("local:") === 0 })) mergedArgs.useskills = true

@@ -760,7 +760,11 @@ function MiniAInteractiveSession(args, adapter) {
     promptprofile  : { type: "string", description: "Prompt verbosity profile (minimal|balanced|verbose); defaults to minimal in chatbot mode, verbose with debug=true outside chatbot mode, otherwise balanced" },
     systempromptbudget: { type: "number", description: "Maximum system prompt size in estimated tokens before low-priority sections are dropped" },
     modellock      : { type: "string", description: "Lock model selection to main, lc, or auto." },
-    modelstrategy  : { type: "string", description: "Model orchestration profile (default|advisor|delegate)." },
+    modelstrategy  : { type: "string", description: "Model orchestration profile (default|advisor|delegate|supervised|auto)." },
+    contractfile  : { type: "string", description: "Explicit supervised CONTRACT.md." },
+    contractargs  : { type: "string", description: "Positional supervised contract inputs." },
+    savecontract  : { type: "boolean", default: false, description: "Save accepted supervised contracts." },
+    reusecontract : { type: "boolean", default: false, description: "Reuse applicable supervised contracts in the workspace." },
     advisormaxuses : { type: "number", default: 2, description: "Maximum advisor consultations per run when modelstrategy=advisor." },
     advisorenable  : { type: "boolean", default: true, description: "Master toggle for advisor consultations." },
     advisoronrisk  : { type: "boolean", default: true, description: "Allow advisor consults on risk signals." },
@@ -1010,6 +1014,37 @@ function MiniAInteractiveSession(args, adapter) {
     }
   }
 
+  // Explicit help taxonomy; uncategorized future parameters remain visible below.
+  var argumentHelpGroups = [
+    { category: "Session", subcategory: "Goals and prompts", names: "agent agentfile chatbotmode chatyouare goal goalprefix knowledge noagentsmd rules state youare".split(" ") },
+    { category: "Session", subcategory: "History and attachments", names: "conversation historykeep historykeepcount historykeepperiod historypath historyretention historys3accesskey historys3bucket historys3ignorecertcheck historys3prefix historys3region historys3secret historys3url historys3useversion1 resume useattach usehistory".split(" ") },
+    { category: "Session", subcategory: "Context management", names: "compressgoal compressgoalchars compressgoaltokens contextvirtualization contextvirtualizationshadow historyvm historyvmmode historyvmshadow maxcontent maxcontext maxpromptchars".split(" ") },
+    { category: "Session", subcategory: "Durable runs", names: "durable resumerun runid runroot".split(" ") },
+    { category: "Session", subcategory: "Console and editor", names: "editor homedir libs mode showseparator useeditor".split(" ") },
+    { category: "Models and execution", subcategory: "Model selection", names: "model modeldec modellc modellock modelstrategy contractfile contractargs savecontract reusecontract modelval secpass".split(" ") },
+    { category: "Models and execution", subcategory: "Decisions and advisors", names: "advisorbudgetratio advisorcooldownsteps advisorenable advisormaxuses advisoronambiguity advisoronharddecision advisoronrisk emergencyreserve evidencegate evidencegatestrictness harddecision lcbudget lcescalatedefer lcjsonretries lcreplytool llmcomplexity usedecide".split(" ") },
+    { category: "Models and execution", subcategory: "Budgets and limits", names: "maxsteps maxtotalsteps rpm rtm tpm".split(" ") },
+    { category: "Models and execution", subcategory: "Planning", names: "convertplan earlystopthreshold forceplanning forceupdates orchestration plancontent planfile planformat planlog planmode planstyle resumefailed saveplannotes updatefreq updateinterval useplanning validateplan".split(" ") },
+    { category: "Models and execution", subcategory: "Research and validation", names: "deepresearch maxcycles persistlearnings valgoal validationgoal validationthreshold valtools".split(" ") },
+    { category: "Models and execution", subcategory: "Prompt and tool routing", names: "adaptiverouting promptprofile routerallow routerdeny routerorder routerproxythreshold systempromptbudget".split(" ") },
+    { category: "Tools and permissions", subcategory: "Shell and sandbox", names: "checkall readwrite sandboxnonetwork sandboxprofile shell shellallow shellallowpipes shellbanextra shellbatch shellmaxbytes shellprefix shelltimeout usesandbox useshell".split(" ") },
+    { category: "Tools and permissions", subcategory: "Tools and utilities", names: "capabilitylimit capabilityselection fileallow policy policyfile toolcachettl toolfallback usejsontool usestdutils usetools usetoolslc useutils utilsallow utilsdeny utilsroot".split(" ") },
+    { category: "Tools and permissions", subcategory: "MCP connections", names: "mcp mcpdynamic mcplazy mcptest nosetmcpwd".split(" ") },
+    { category: "Tools and permissions", subcategory: "MCP proxy and programmatic calls", names: "mcpprogcall mcpprogcallbatchmax mcpprogcallmaxbytes mcpprogcallport mcpprogcallresultttl mcpprogcalltools mcpproxy mcpproxythreshold mcpproxytoon".split(" ") },
+    { category: "Tools and permissions", subcategory: "Skills and extensions", names: "extracommands extrahooks extraskills mini-a-docs miniadocs plugins pluginsroot pluginsroots skillcontextchars skillmanifestchars skillmaxautoload skillsautolimit skillsautosearch skillsmaxchars skillsmaxloaded skillwikibackend skillwikimounts skillwikiroot useskills useskillswiki".split(" ") },
+    { category: "Memory and knowledge", subcategory: "Memory stores and retention", names: "memorych memorycompactevery memorydedup memoryman memorymaxentries memorymaxpersection memorypromote memoryscope memorysessionch memorysessionheader memorysessionid memorystaledays memoryuser memoryusersession usememory".split(" ") },
+    { category: "Memory and knowledge", subcategory: "Wiki graph", names: "usewikigraph wikigraphcommunity wikigraphcross wikigraphcrosscap wikigraphcrossdepth wikigraphcrossjoin wikigraphcrossmaxdf wikigraphcrossminkeylen wikigraphfalkorgraph wikigraphfalkorhost wikigraphfalkorpass wikigraphfalkorport wikigraphfalkoruser wikigraphhintcap wikigraphmounts wikigraphsearchhints wikigraphsemantic wikimountgraphttlms".split(" ") },
+    { category: "Memory and knowledge", subcategory: "Wiki retrieval and maintenance", names: "wikilexical wikilintresultlimit wikilintstaleddays wikiretrievalconfig wikiretrievalv2 wikitarget wikitelemetry".split(" ") },
+    { category: "Memory and knowledge", subcategory: "Wiki storage and access", names: "s3artifactbundle usewiki wikiaccess wikiaccesskey wikiartifactrefreshsecs wikibackend wikibucket wikihttpindexurl wikihttptimeout wikiignorecertcheck wikiman wikimounts wikiprefix wikiregion wikiroot wikis3artifactprefix wikisecret wikiurl wikiuseversion1".split(" ") },
+    { category: "Memory and knowledge", subcategory: "Ingestion and absorption", names: "absorbmaxpages absorbmaxtokens absorboutput ingestallowemptyprune ingestchunkchars ingestconcurrency ingestdryrun ingestexclude ingestforce ingestinclude ingestindependent ingestlayout ingestledger ingestmaxfilekb ingestprune ingestsection ingestsource ingestsourceid ingesttype".split(" ") },
+    { category: "Memory and knowledge", subcategory: "Dream consolidation", names: "dream dreammaxsteps dreammemorymode dreammode dreamreport dreamwiki dreamwikiapproval dreamwikidryrun dreamwikiinstructions dreamwikilintresultlimit dreamwikillm dreamwikimaxdepth dreamwikiminpages dreamwikimode dreamwikiorganize dreamwikireorg".split(" ") },
+    { category: "Delegation and servers", subcategory: "Delegation and subtasks", names: "autodelegation autodelegationmaxperstep autodelegationthreshold delegationhardtimeout delegationmaxdepth delegationmaxretries delegationstalltimeout delegationtimeout forkstatemaxbytes maxconcurrent noisytools showdelegate subtasks subtasksfile subtaskssequential usea2a usedelegation".split(" ") },
+    { category: "Delegation and servers", subcategory: "Worker registry", names: "workerevictionttl workermode workerreg workerreginterval workerregtoken workerregurl workers workerskills workertags".split(" ") },
+    { category: "Delegation and servers", subcategory: "Web interface", names: "browsercontext onport path ssequeuetimeout web webadvanced webadvancedpath".split(" ") },
+    { category: "Output and diagnostics", subcategory: "Display and visualizations", names: "format raw showexecs showthinking useascii useasciiviz usecharts usediagrams usemaps usemath usemermaid usestream usesvg usevectors".split(" ") },
+    { category: "Output and diagnostics", subcategory: "Files and logging", names: "auditch debug debugch debugdecch debugfile debuglcch debugtrace debugvalch logpromptheaders metricsch nologtrunc outfile outfileall outputfile toollog verbose".split(" ") }
+  ]
+
   function buildSharedArgumentRows() {
     if (!isObject(parameterDefinitions)) return []
     var rows = []
@@ -1068,7 +1103,26 @@ function MiniAInteractiveSession(args, adapter) {
     if (sharedRows.length > 0) {
       print("")
       print(colorifyText("Shared Mini-A arguments (common across modules):", "BOLD") + "\n")
-      print(printTable(sharedRows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi ? "utf" : __), __, true, false, true))
+      var remaining = {}
+      sharedRows.forEach(function(row) { remaining[row.Argument] = row })
+      var lastCategory
+      var groups = argumentHelpGroups.concat([{ category: "Other parameters", subcategory: "Uncategorized", names: sharedRows.map(function(row) { return row.Argument }) }])
+      groups.forEach(function(group) {
+        var rows = []
+        group.names.slice().sort().forEach(function(name) {
+          if (!Object.prototype.hasOwnProperty.call(remaining, name)) return
+          rows.push(remaining[name])
+          delete remaining[name]
+        })
+        if (rows.length === 0) return
+        if (lastCategory !== group.category) {
+          print(colorifyText(group.category + ":", "BOLD"))
+          lastCategory = group.category
+        }
+        print("  " + colorifyText(group.subcategory, accentColor))
+        print(printTable(rows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi ? "utf" : __), __, true, false, true))
+        print("")
+      })
     }
 
     print("")

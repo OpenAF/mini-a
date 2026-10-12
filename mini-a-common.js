@@ -58,6 +58,36 @@ function __miniAErrMsg(e) {
   return (isDef(e) && isString(e.message)) ? e.message : String(e)
 }
 
+// Shared by evaluation and supervised acceptance. No executable expressions.
+function __miniACompareAssertion(actual, assertion) {
+  var label = assertion.name || assertion.path || "answer"
+  var out = { passed: false, assertion: label, actual: actual, expected: "recognized assertion" }
+  if (isDef(assertion.equals)) { out.expected = assertion.equals; out.passed = actual === assertion.equals }
+  else if (isDef(assertion.contains)) { out.expected = assertion.contains; out.passed = String(actual).indexOf(String(assertion.contains)) >= 0 }
+  else if (isDef(assertion.notContains)) { out.expected = assertion.notContains; out.passed = String(actual).indexOf(String(assertion.notContains)) < 0 }
+  else if (isDef(assertion.matches)) { out.expected = assertion.matches; out.passed = new RegExp(assertion.matches).test(String(actual)) }
+  else if (isDef(assertion.max)) { out.expected = "<= " + assertion.max; out.passed = isNumber(actual) && actual <= assertion.max }
+  else if (isDef(assertion.min)) { out.expected = ">= " + assertion.min; out.passed = isNumber(actual) && actual >= assertion.min }
+  return out
+}
+
+function __miniAParseSkillArgs(rawValue) {
+  var raw = isString(rawValue) ? rawValue.trim() : ""
+  var argv = [], current = "", quote = "", escaping = false
+  for (var i = 0; i < raw.length; i++) {
+    var ch = raw.charAt(i)
+    if (escaping) { current += ch; escaping = false; continue }
+    if (ch === "\\") { escaping = true; continue }
+    if (quote.length > 0) { if (ch === quote) quote = ""; else current += ch; continue }
+    if (ch === "'" || ch === '"') { quote = ch; continue }
+    if (/\s/.test(ch)) { if (current.length > 0) { argv.push(current); current = "" }; continue }
+    current += ch
+  }
+  if (escaping || quote.length > 0) return { ok: false, error: "Unbalanced quotes or trailing escape in arguments." }
+  if (current.length > 0) argv.push(current)
+  return { ok: true, raw: raw, argv: argv, argc: argv.length }
+}
+
 /**
  * Normalizes console event text while preserving message line boundaries.
  * Providers can supply either actual line feeds or escaped `\\n` sequences.

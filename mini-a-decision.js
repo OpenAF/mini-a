@@ -132,7 +132,8 @@ if (typeof MiniA === "function") {
     var self = this
     this._decisionGateDisabled = false
     this._decisionGateCache = __
-    this._decisionComplexity = __
+    // Keep a complexity answer already obtained for this goal (modelstrategy=auto asks during init()).
+    if (!(isMap(this._decisionComplexity) && isMap(args) && this._decisionComplexity.goal === args.goal)) this._decisionComplexity = __
     if (!this._decisionMetrics) this._decisionMetrics = { calls: 0, failures: 0, fallbacks: 0, empty_selections: 0,
       duration_ms: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, usage_reports: 0, reasons: {} }
     this._decision = new MiniADecision({ modeldec: args.modeldec, configureClient: function(client) {
