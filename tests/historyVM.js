@@ -51,6 +51,34 @@
     }
   }
 
+  exports.testConcurrentAppends = function() {
+    withVm(function(vm, conversation) {
+      // Widen the checkpoint window to reliably overlap concurrent callbacks.
+      var writeCheckpoint = vm._writeCheckpoint
+      vm._writeCheckpoint = function() {
+        java.lang.Thread.sleep(10)
+        return writeCheckpoint.call(this)
+      }
+      var inputs = []
+      for (var i = 0; i < 32; i++) inputs.push(i)
+      var results = parallel4Array(inputs, function(i) {
+        return isMap(vm.append("user_message", "message-" + i, {}))
+      }, 8)
+      ow.test.assert(results.every(function(ok) { return ok === true }), true, "Every concurrent append must commit")
+      ow.test.assert(vm.degraded, false, "Concurrent callbacks must not disable History VM")
+      var resumed = new MiniAHistoryVM({ enabled: true, conversationPath: conversation, conversationId: vm.conversationId })
+      ow.test.assert(resumed.events.length, inputs.length, "Every committed event must survive reopening")
+      ow.test.assert(stringify(resumed.events), stringify(vm.events), "Reopened journal must match live history")
+      var contents = {}
+      resumed.events.forEach(function(event, index) {
+        ow.test.assert(event.seq, index + 1, "Concurrent appends must keep contiguous sequences")
+        contents[event.content] = true
+      })
+      ow.test.assert(Object.keys(contents).length, inputs.length, "Concurrent appends must preserve every distinct message")
+      ow.test.assert(io.readFileJSON(vm.checkpointPath).lastCommittedSequence, inputs.length, "Checkpoint must cover the entire journal")
+    })
+  }
+
   exports.testAppendDetachesCallerData = function() {
     withVm(function(vm, conversation) {
       var content = { nested: { text: "original" } }

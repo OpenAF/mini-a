@@ -2,6 +2,11 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA History VM Tests::ConcurrentAppends
+  from: MiniA History VM Tests::Init
+  to: oJob Test
+  exec: args.func = require("tests/historyVM.js").testConcurrentAppends
+
 - name: MiniA History VM Tests::GoalAndEvidencePaging
   from: MiniA History VM Tests::Init
   to: oJob Test
@@ -231,6 +236,7 @@ jobs:
   exec: args.func = require("tests/historyVM.js").testRecoverBranchWithoutCheckpoint
 
 todo:
+- MiniA History VM Tests::ConcurrentAppends
 - MiniA History VM Tests::GoalAndEvidencePaging
 - MiniA History VM Tests::NativeRoundBudgetGuard
 - MiniA History VM Tests::EmergencyRecovery

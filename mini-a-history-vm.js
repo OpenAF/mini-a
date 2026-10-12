@@ -24,6 +24,7 @@ var MiniAHistoryVM = function(options) {
   this.sessionId = isString(opts.sessionId) && opts.sessionId.length > 0 ? opts.sessionId : genUUID()
   this.agentId = isString(opts.agentId) && opts.agentId.length > 0 ? opts.agentId : "parent"
   this.writerId = genUUID()
+  this._writeLock = new java.util.concurrent.locks.ReentrantLock()
   this.logFn = isFunction(opts.logFn) ? opts.logFn : function() {}
   this.estimateTokens = isFunction(opts.estimateTokens) ? opts.estimateTokens : function(value) {
     var text = isString(value) ? value : stringify(value, __, "")
@@ -171,7 +172,7 @@ MiniAHistoryVM.prototype._ensureStore = function() {
 }
 
 MiniAHistoryVM.prototype._atomicWriteJSON = function(path, value) {
-  var tmp = path + ".tmp-" + this.writerId
+  var tmp = path + ".tmp-" + genUUID()
   io.writeFileJSON(tmp, value, "")
   var source = java.nio.file.Paths.get(tmp)
   var target = java.nio.file.Paths.get(path)
@@ -329,8 +330,11 @@ MiniAHistoryVM.prototype._writeCheckpoint = function() {
 }
 
 MiniAHistoryVM.prototype.append = function(sourceKind, content, metadata) {
-  if ((!this.enabled && !this.shadow) || this.degraded) return __
+  // Serialize the sequence check, journal append, indexing and checkpoint as one
+  // transaction when callbacks share this VM across threads.
+  this._writeLock.lock()
   try {
+    if ((!this.enabled && !this.shadow) || this.degraded) return __
     var diskSeq = 0
     if (io.fileExists(this.checkpointPath)) {
       var diskCheckpoint = io.readFileJSON(this.checkpointPath)
@@ -370,6 +374,8 @@ MiniAHistoryVM.prototype.append = function(sourceKind, content, metadata) {
   } catch(e) {
     this._fail(__miniAErrMsg(e))
     return __
+  } finally {
+    this._writeLock.unlock()
   }
 }
 
