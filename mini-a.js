@@ -2714,7 +2714,7 @@ MiniA.prototype._projectContextInvocation = function(llm, prompt, consumer, reco
     })
   }
   var fixed = { prompt: vm.estimateTokens(prompt), tools: consumer === "summarizer" ? 0 : vm.estimateTokens(stringify(schemas, __, "")), safety: 256 }
-  fixed.instructions = (!consumer || consumer === "executor") && isString(this._systemInst) && !conversation.some(function(entry) { return isMap(entry) && (entry.role === "system" || entry.role === "developer") && entry.content === this._systemInst }, this) ? vm.estimateTokens(this._systemInst) : 0
+  fixed.instructions = (!consumer || consumer === "executor") && isString(this._systemInst) && !conversation.some(function(entry) { return isMap(entry) && (entry.role === "system" || entry.role === "developer") && (entry.content === this._systemInst || isArray(entry.parts) && isMap(entry.parts[0]) && entry.parts[0].text === this._systemInst) }, this) ? vm.estimateTokens(this._systemInst) : 0
   var total = configured > 0 ? configured : vm.estimateTokens(stringify(vm.materializeConversation(conversation), __, "")) + fixed.prompt + fixed.tools + fixed.instructions + fixed.safety + output
   if (vm.degraded) {
     var degradedTokens = vm.estimateTokens(stringify(conversation, __, ""))
@@ -15373,24 +15373,44 @@ MiniA.prototype._applySystemInstructions = function(args) {
 
   this._currentMode = toBoolean(args.chatbotmode) ? "chatbot" : "agent"
   var parent = this
-  ;[this.llm, this.lc_llm].forEach(function(llm) {
+  var instructionsApplied = [false, false]
+  var stub = "[superseded Mini-A system instructions]"
+  // Mini-A is the only writer of system entries (via withInstructions), so every
+  // system entry in the provider conversation is Mini-A-owned. Rewrite them in
+  // place (first = current prompt, later = stubs) to keep provider indexes stable
+  // and avoid stacking one full system prompt per resumed turn.
+  ;[this.llm, this.lc_llm].forEach(function(llm, li) {
     if (!isObject(llm) || !isFunction(llm.getGPT)) return
     var gpt = llm.getGPT()
     if (!isObject(gpt) || !isFunction(gpt.getConversation) || !isFunction(gpt.setConversation)) return
     var conversation = gpt.getConversation()
-    if (isArray(conversation)) gpt.setConversation(conversation.filter(function(entry) {
-      return !(isMap(entry) && entry.role === "system" &&
-        (entry.content === parent._appliedSystemInst || entry.content === parent._systemInst))
-    }))
+    if (!isArray(conversation)) return
+    var first = true, found = false
+    var rewritten = conversation.map(function(entry) {
+      if (!isMap(entry) || entry.role !== "system") return entry
+      found = true
+      var text = first ? parent._systemInst : stub
+      first = false
+      var copy = merge({}, entry, true)
+      if (isArray(copy.parts)) copy.parts = [{ text: text }]
+      else copy.content = text
+      return copy
+    })
+    if (found) {
+      gpt.setConversation(rewritten)
+      instructionsApplied[li] = true
+    }
   })
   this._appliedSystemInst = this._systemInst
 
-  var updatedMainLLM = isDef(this.llm) && isFunction(this.llm.withInstructions)
-    ? this.llm.withInstructions(this._systemInst)
-    : __
-  if (isDef(updatedMainLLM)) this.llm = updatedMainLLM
+  if (!instructionsApplied[0]) {
+    var updatedMainLLM = isDef(this.llm) && isFunction(this.llm.withInstructions)
+      ? this.llm.withInstructions(this._systemInst)
+      : __
+    if (isDef(updatedMainLLM)) this.llm = updatedMainLLM
+  }
 
-  if (this._use_lc && isDef(this.lc_llm) && isFunction(this.lc_llm.withInstructions)) {
+  if (this._use_lc && !instructionsApplied[1] && isDef(this.lc_llm) && isFunction(this.lc_llm.withInstructions)) {
     var updatedLowCostLLM = this.lc_llm.withInstructions(this._systemInst)
     if (isDef(updatedLowCostLLM)) this.lc_llm = updatedLowCostLLM
   }
