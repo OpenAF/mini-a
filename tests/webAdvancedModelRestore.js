@@ -18,7 +18,7 @@ global._mini_a_web_dispose = function(id) { delete global.__conversations[id] }
 try {
   // Supply fixture credentials through the real environment lookup boundary.
   // No model requests are made and the actual environment is left untouched.
-  var fixtureModels = {}, slots = {model:'OAF_MODEL',modellc:'OAF_LC_MODEL',modelval:'OAF_VAL_MODEL'}
+  var fixtureModels = {}, slots = {model:'OAF_MODEL',modellc:'OAF_LC_MODEL',modelval:'OAF_VAL_MODEL',modeldec:'OAF_DECIDE_MODEL'}
   Object.keys(slots).forEach(function(key) { fixtureModels[slots[key]] = '(type: openai, model: fixture, url: "https://fixture.invalid/v1", key: ENV-' + key + ')' })
   Object.keys(fixtureModels).forEach(function(key) { check(getEnv(key) === fixtureModels[key], 'Run this test with the documented fixture model environment: ' + key) })
   var models = new MiniAAdvanced({homedir:testRoot,webadvancedpath:testRoot,usehistory:false})

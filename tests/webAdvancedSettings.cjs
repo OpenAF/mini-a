@@ -33,7 +33,7 @@ context.renderScreen();
 for (const name of ['absorboutput', 'policyfile', 'dreamreport', 'wikiroot', 'debugfile', 'subtasksfile', 'planfile', 'outfile', 'conversation', 'utilsroot', 'homedir', 'path', 'format', 'goal']) {
   assert.ok(!bindings.some(binding => binding.label === name), name + ' remains plain text');
 }
-for (const name of ['policy', 'model', 'modellc', 'modelval', 'wikimounts', 'memorych', 'auditch', 'rules', 'subtasks']) {
+for (const name of ['policy', 'model', 'modellc', 'modelval', 'modeldec', 'wikimounts', 'memorych', 'auditch', 'rules', 'subtasks']) {
   assert.ok(bindings.some(binding => binding.label === name), name + ' retains structured editing');
 }
 assert.equal(bindings.find(binding => binding.label === 'wikimounts').root, 'array');

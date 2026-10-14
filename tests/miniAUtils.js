@@ -40,6 +40,35 @@
     } finally {if(writer)writer.close();if(wm)wm.close();cleanupTestDir(dir)}
   }
 
+  exports.testWikiSkillRenderedBudget = function() {
+    load("mini-a-skill-runtime.js")
+    load("mini-a-skills.js")
+    var makeTool = function(template, pending) {
+      var tool = new MiniUtilsTool({}), wm = {}
+      tool._skillWikiManager = wm
+      tool._skillRuntime = new MiniASkillRuntime({ skillsmaxchars: 100 })
+      tool._skillProvider = { _wm: wm, open: function() { return {} }, resolve: function() {
+        return { bodyTemplate: template, revision: "v1", progressive: true, truncated: !!pending, pendingSections: pending || [] }
+      } }
+      return tool
+    }
+    var tool = makeTool("Instructions: {{args}}")
+    var blocked = tool.skillwiki({ operation: "resolve", ref: "wiki:report.md", progressive: true, _renderArgs: repeat(500, "x") })
+    ow.test.assert(blocked.error, "skill-required-guidance-exceeds-budget", "Argument expansion cannot bypass the shared budget")
+    ow.test.assert(tool._skillRuntime.chars, 0, "Rejected guidance consumes no character budget")
+    var template = "# Intro\nHello {{arg1}}\n# Steps\n{{args}}"
+    tool = makeTool(template, ["Verify"])
+    var out = tool.skillwiki({ operation: "resolve", ref: "wiki:report.md", progressive: true, _renderArgs: "Ada " + repeat(120, "x") })
+    ow.test.assert(out.rendered, "# Intro\nHello Ada", "Rendered complete sections are selected within budget")
+    ow.test.assert(out.pendingSections, ["Verify", "Steps"], "Source and rendered deferred procedures remain pending")
+    ow.test.assert(tool._skillRuntime.chars, out.rendered.length, "Charge rendered guidance exactly once")
+    ow.test.assert(out.args.raw, "Ada " + repeat(120, "x"), "Retain invocation arguments for delegation")
+    tool = makeTool("Instructions: {{args}}")
+    var plain = tool.skillwiki({ operation: "resolve", ref: "wiki:report.md" })
+    ow.test.assert(plain.bodyTemplate, "Instructions: {{args}}", "Existing resolve remains a template API")
+    ow.test.assert(isUnDef(plain.rendered), true, "Plain resolve does not implicitly render")
+  }
+
   exports.testWikiSearchOptionForwarding = function() {
     var captured, wm={supportsRetrievalV2:function(options){return options.wiki==="published"},agenticSearch:function(query,options){captured=options;return {results:[{path:"@published/page.md"}]}}}
     var utility={_ensureInitialized:function(){},_wikiManager:wm,_wikiAgenticRetrieval:true}
@@ -1000,6 +1029,39 @@
       cleanupTestDir(testDir)
       cleanupTestDir(skillsDir)
     }
+  }
+
+  exports.testBundledSkillRootsAndOverrides = function() {
+    var dir = String(createTestDir())
+    try {
+      var roots = ["user", "extra", "plugin", "bundle"]
+      roots.forEach(function(root) {
+        io.mkdir(dir + "/" + root); io.mkdir(dir + "/" + root + "/same")
+        io.writeFileString(dir + "/" + root + "/same/SKILL.md", "---\ndescription: collision fixture\n---\n" + root)
+      })
+      io.mkdir(dir + "/bundle/hidden.disabled")
+      io.writeFileString(dir + "/bundle/hidden.disabled/SKILL.md", "Hidden")
+      var options = { skillsroot: dir + "/user", skillsroots: [dir + "/extra"], pluginskillsroots: [dir + "/plugin"], bundledskillsroot: dir + "/bundle" }
+      var tool = new MiniUtilsTool(options), events = []
+      tool._skillCollisionFn = function(event) { events.push(event) }
+      ow.test.assert(tool._listSkills({}).length, 1, "Disabled bundle folder excluded and duplicate names collapse")
+      ow.test.assert(events.length, 3, "Every shadowed source reported")
+      ow.test.assert(events[2].winner, dir + "/user/same/SKILL.md", "User root wins")
+      ow.test.assert(events[2].ignored, dir + "/bundle/same/SKILL.md", "Bundle loser identified")
+      ow.test.assert(__miniASkillEventMessage(merge({state: "collision"}, events[2]), false).indexOf(events[2].winner) >= 0, true, "Visible diagnostic includes winner")
+      var plugin = new MiniUtilsTool({ skillsroot: dir + "/plugin", bundledskillsroot: dir + "/bundle" })
+      ow.test.assert(plugin.skills({ operation: "render", name: "same" }).rendered, "plugin", "Plugin precedes bundle")
+      var dedup = new MiniUtilsTool({ skillsroot: dir + "/bundle", bundledskillsroot: dir + "/bundle/../bundle" })
+      ow.test.assert(dedup._skillsRoots.length, 1, "Canonical bundle roots deduplicate")
+      io.writeFileString(dir + "/bundle/same/SKILL.md", "Read @secret.md")
+      io.writeFileString(dir + "/secret.md", "PRIVATE_REFERENCE")
+      java.nio.file.Files.createSymbolicLink(new java.io.File(dir + "/bundle/same/secret.md").toPath(), new java.io.File(dir + "/secret.md").toPath())
+      var denied = new MiniUtilsTool({ skillsroot: dir + "/bundle", fileallow: [dir + "/bundle"] })
+      denied._skillRuntime = new MiniASkillRuntime({})
+      var result = denied.skills({ operation: "read", name: "same", reference: "secret.md" })
+      ow.test.assert(stringify(result).indexOf("PRIVATE_REFERENCE") < 0, true, "Denied supporting reference never leaks")
+      ow.test.assert(isString(result) || isDef(result.error), true, "Denied reference returns a failure")
+    } finally { cleanupTestDir(dir) }
   }
 
   exports.testSkillsDefaultRoots = function() {

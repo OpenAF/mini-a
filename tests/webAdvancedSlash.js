@@ -37,6 +37,7 @@ try {
   check(command('/reset').result.status==='completed' && runtime.options().conversation===resetPath,'reset preserves session path')
   check(command('/show wiki').view.params.filter==='wiki','settings prefix')
   check(command('/model lc').view.params.slot==='modellc','model slot')
+  check(command('/model dec').view.params.slot==='modeldec','decision model slot')
   check(command('/model bad').result.status==='failed','invalid model slot')
   check(command('/debug calls').view.params.filter==='calls','debug filter')
   check(command('/debug bad').result.status==='failed','invalid debug filter')

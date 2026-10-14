@@ -597,6 +597,13 @@ Conflicts preserve pages, prevent destructive work, and return unsuccessful resu
 Resolve a conflict by reviewing and restoring the last ingestion-managed version,
 or preserve the edited page separately and remove the managed destination using wiki
 tools before retrying. Never discard the manifest to bypass ownership protection.
+
+Ingestion tracks resolved source links as well as source content. Adding a missing
+link target refreshes unchanged referring pages under the normal transformation
+budgets and ownership checks. Unrelated new sources do not trigger those refreshes.
+Older manifest records with resolved local links refresh once to establish tracking;
+this can require model calls for distilled pages. Manual edits remain conflicts.
+
 Moved pages with a unique unchanged ingestion binding are located and rebound;
 rewritten content or multiple bindings remain conflicts. New naming collisions use
 deterministic suffixes; ingestion cannot occupy generated `index.md` pages.

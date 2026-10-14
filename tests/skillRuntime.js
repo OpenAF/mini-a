@@ -1,0 +1,560 @@
+(function() {
+  load("mini-a.js")
+  load("mini-a-utils.js")
+  load("mini-a-skills.js")
+  load("mini-a-subtask.js")
+
+  function fixture(fn) {
+    var root = String(java.io.File.createTempFile("mini-a-skill-runtime-", "").getCanonicalPath())
+    io.rm(root); io.mkdir(root)
+    try { fn(root) } finally { io.rm(root) }
+  }
+
+  function writeSkill(root, name, body, meta) {
+    io.mkdir(root + "/" + name)
+    io.writeFileString(root + "/" + name + "/SKILL.md", "---\nname: " + name + "\ndescription: Generate test reports\n" + (meta || "") + "---\n" + body)
+  }
+
+  function agentFor(root, options) {
+    var agent = new MiniA()
+    agent.fnI = function() {}
+    agent._trace = function() {}
+    agent._agentState = {}
+    agent._resetSkillRuntime(options || {})
+    agent._skillUtils = new MiniUtilsTool({ skillsroot: root })
+    agent._skillUtils._skillRuntime = agent._skillRuntime
+    agent._skillLocalEnabled = true
+    agent._runtime = { context: [] }
+    return agent
+  }
+
+  exports.testWikiSkillActivationRetainsArguments = function() {
+    var originalOpen = MiniAWikiSkillProvider.prototype.open
+    var wm = {}, descriptor = { name: "report", ref: "wiki:report.md", version: "v1" }
+    var args = { useskillswiki: true, skillsautosearch: false, skillsmaxchars: 100, goal: "$wiki:report.md customer-42" }
+    var agent = new MiniA()
+    agent.fnI = function() {}; agent._trace = function() {}; agent._resetSkillRuntime(args)
+    agent._skillWikiManager = wm; agent._skillWikiEnabled = true
+    agent._skillUtils = new MiniUtilsTool({})
+    agent._skillUtils._skillWikiManager = wm
+    agent._skillUtils._skillRuntime = agent._skillRuntime
+    agent._skillUtils._skillProvider = { _wm: wm, open: function() { return descriptor }, resolve: function() {
+      return { bodyTemplate: "# Intro\nUse {{args}}", revision: "v1", progressive: true, truncated: false }
+    } }
+    agent._scoreSkillForPrompt = function() { return 2 }
+    try {
+      MiniAWikiSkillProvider.prototype.open = function() { return descriptor }
+      ow.test.assert(agent._consultSkillsForRun(args), [], "Wiki activation uses the shared renderer")
+      ow.test.assert(agent._skillRuntime.records["wiki:report.md"].content, "# Intro\nUse customer-42", "Actual active guidance includes invocation arguments")
+      ow.test.assert(agent._skillRuntime.chars, "# Intro\nUse customer-42".length, "Active guidance is charged after rendering")
+      ow.test.assert(agent._skillHandoffForGoal("Generate report")[0].args, "customer-42", "Child handoff retains wiki invocation arguments")
+    } finally { MiniAWikiSkillProvider.prototype.open = originalOpen }
+  }
+
+  exports.testWikiSkillMcpRenderedBudget = function() {
+    fixture(function(root) {
+      var agent = new MiniA()
+      agent.fnI = function() {}; agent._trace = function() {}
+      var options = { useskillswiki: true, skillwikiroot: root, skillsmaxchars: 100, useutils: false }
+      agent._resetSkillRuntime(options)
+      agent._skillWikiManager = {}
+      try {
+        var cfg = agent._createUtilsMcpConfig(options)
+        var wm = agent._skillUtils._skillWikiManager
+        agent._skillUtils._skillProvider = { _wm: wm, open: function() { return {} }, resolve: function() {
+          return { bodyTemplate: "Instructions: {{arg1}}", revision: "v1", progressive: true, truncated: false }
+        } }
+        var rejected = cfg.options.fns.skillwiki({ operation: "resolve", ref: "wiki:report.md", args: new Array(501).join("x") })
+        ow.test.assert(isDef(rejected.error), true, "MCP argument expansion cannot exceed the shared budget")
+        ow.test.assert(agent._skillRuntime.chars, 0, "Rejected MCP rendering does not consume budget")
+        var accepted = cfg.options.fns.skillwiki({ operation: "resolve", ref: "wiki:report.md", argv: ["Ada Lovelace"] })
+        ow.test.assert(isUnDef(accepted.error), true, "MCP argv supports arguments containing spaces")
+        ow.test.assert(agent._skillRuntime.records["wiki:report.md"].content, "Instructions: Ada Lovelace", "MCP records rendered guidance")
+        ow.test.assert(agent._skillRuntime.chars, "Instructions: Ada Lovelace".length, "MCP charges rendered guidance exactly")
+      } finally { agent._stopAgentResources() }
+    })
+  }
+
+  exports.testBundledSkillsActivation = function() {
+    fixture(function(root) {
+      var makeAgent = function(options) {
+        var agent = new MiniA()
+        agent.fnI = function() {}; agent._trace = function() {}
+        agent._agentState = {}; agent._runtime = { context: [] }
+        agent._getPluginsDiscovery = function() { return { skillsRoots: [] } }
+        agent._resetSkillRuntime(options)
+        agent._createUtilsMcpConfig(merge({ utilsroot: root }, options))
+        agent._skillLocalEnabled = options.useskills === true
+        agent._selectSkillCandidates = function() { throw new Error("Default must not select automatically") }
+        return agent
+      }
+      var names = ["mini-a-wiki-retrieval", "mini-a-skill-authoring", "mini-a-runtime-diagnostics"]
+      names.forEach(function(name) {
+        var agent = makeAgent({ useskills: true })
+        ow.test.assert(agent._skillUtils._skillsRoots.indexOf(__miniABundleRoot + "/skills") >= 0, true, "utilsroot does not redirect bundle")
+        ow.test.assert(agent._consultSkillsForRun({ useskills: true, skillsautosearch: false, goal: "$local:" + name }).length, 0, "Explicit bundle activation succeeds")
+        ow.test.assert(agent._skillRuntime.records["local:" + name].state, "active", "Shared runtime activates bundle")
+        ow.test.assert(agent._skillRuntime.metrics.selection_calls, 0, "Explicit request avoids selector")
+        var skill = agent._skillUtils._listSkills({}).filter(function(item) { return item.name === name })[0]
+        var doc = __miniALoadSkillTemplateDocument(skill.templatePath, agent._skillUtils._fileAccess)
+        var reference = doc.bodyTemplate.match(/@references\/([a-z]+\.md)/)[1]
+        var support = agent._skillUtils.skills({ operation: "read", name: name, reference: "references/" + reference })
+        ow.test.assert(isString(support.body) && support.body.length > 100, true, "Supporting procedure loads offline under shared budget")
+      })
+      var idle = makeAgent({ useskills: true })
+      idle._consultSkillsForRun({ useskills: true, goal: "Reply ready" })
+      ow.test.assert(idle._skillRuntime.chars, 0, "Default does not preload bundle bodies")
+      var disabled = makeAgent({ useskills: false })
+      disabled._consultSkillsForRun({ useskills: false, goal: "$local:mini-a-wiki-retrieval" })
+      ow.test.assert(disabled._skillRuntime.chars, 0, "Disabled skills do not activate")
+      var denied = makeAgent({ useskills: true, fileallow: [root] })
+      ow.test.assert(denied._skillUtils._skillsRoots.indexOf(__miniABundleRoot + "/skills"), -1, "Denied bundled root is excluded")
+    })
+  }
+
+  exports.testBundledConsoleDiscovery = function() {
+    load("mini-a-session.js")
+    fixture(function(root) {
+      var makeSession = function(options) {
+        return MiniAInteractiveSession(merge({ homedir: root, usehistory: false }, options), {
+          print: function() {}, error: function() {}, event: function() {}, view: function() {},
+          validateOption: function() {}, ask: function() {}, goal: function() {}, commandResult: function() {}
+        })
+      }
+      var enabled = makeSession({ useskills: true })
+      try {
+        ow.test.assert(enabled.commands().indexOf("mini-a-wiki-retrieval") >= 0, true, "Console discovers bundled commands")
+      } finally { enabled.dispose() }
+      var disabled = makeSession({ useskills: false })
+      try {
+        ow.test.assert(disabled.commands().indexOf("mini-a-wiki-retrieval"), -1, "Disabled bundle is absent from console")
+      } finally { disabled.dispose() }
+      var denied = makeSession({ useskills: true, fileallow: [root] })
+      try {
+        ow.test.assert(denied.commands().indexOf("mini-a-wiki-retrieval"), -1, "Console honours fileallow for bundle")
+      } finally { denied.dispose() }
+    })
+  }
+
+  exports.testSkillExplicitBoundaryAndArguments = function() {
+    fixture(function(root) {
+      writeSkill(root, "pdf", "Report for {{arg1}}")
+      var agent = agentFor(root)
+      ow.test.assert(agent._scoreInitialSkillActivation({ name: "pdf" }, "use $pdf-tools", "").reason !== "explicit", true, "Prefix collisions are not explicit requests")
+      agent._selectSkillCandidates = function() { throw new Error("Explicit selection must skip model") }
+      ow.test.assert(agent._consultSkillsForRun({ useskills: true, goal: '$pdf "Jane Doe"' }).length, 0, "Explicit skill loads without selector")
+      ow.test.assert(agent._skillGuidanceContext().indexOf("Report for Jane Doe") >= 0, true, "Explicit arguments are rendered")
+      var other = agentFor(root)
+      ow.test.assert(other._consultSkillsForRun({ useskills: true, skillsautosearch: false, goal: "$pdf-tools" }).length, 0, "Unknown explicit skill is ignored rather than prefix-loaded")
+      ow.test.assert(other._skillRuntime.chars, 0, "Unknown reference loads no guidance")
+    })
+  }
+
+  exports.testSkillAutomaticSelectionAndRunReset = function() {
+    fixture(function(root) {
+      writeSkill(root, "report", "Always include VERIFIED_REPORT")
+      var agent = agentFor(root), calls = 0
+      agent._selectSkillCandidates = function(candidates) { calls++; return [candidates[0]] }
+      var args = { useskills: true, skillsautosearch: true, goal: "Generate test reports" }
+      ow.test.assert(agent._consultSkillsForRun(args).length, 0, "Automatic consultation works")
+      ow.test.assert(agent._skillGuidanceContext().indexOf("VERIFIED_REPORT") >= 0, true, "Selected guidance is pinned before work")
+      agent._consultSkillsForRun(args)
+      ow.test.assert(calls, 1, "No repeated selection within run")
+      agent._prepareInitialSkillsForRun(args)
+      ow.test.assert(agent._skillRuntime.chars, 0, "New run resets character budget")
+      agent._consultSkillsForRun(args)
+      ow.test.assert(calls, 2, "New run selects afresh")
+    })
+  }
+
+  exports.testSkillAutomaticOptOutAndDisabledMetadata = function() {
+    fixture(function(root) {
+      writeSkill(root, "report", "Only explicitly requested", "disable-model-invocation: true\n")
+      var agent = agentFor(root)
+      agent._selectSkillCandidates = function() { throw new Error("Disabled skill must never be offered") }
+      ow.test.assert(agent._consultSkillsForRun({ useskills: true, skillsautosearch: true, goal: "Generate test reports" }).length, 0, "Disabled metadata excludes auto activation")
+      ow.test.assert(agent._skillRuntime.chars, 0, "No disabled body loaded")
+      agent = agentFor(root)
+      ow.test.assert(agent._consultSkillsForRun({ useskills: true, skillsautosearch: false, goal: "$report" }).length, 0, "User can explicitly invoke disabled skill with auto search off")
+      ow.test.assert(agentFor(root)._skillUtils.skills({ name: "report", operation: "render" }).error, "skill-model-invocation-disabled", "Model tool cannot invoke a user-only skill")
+    })
+  }
+
+
+  exports.testSkillCodeMentionsAndUnknownRequestsAreIgnored = function() {
+    fixture(function(root) {
+      writeSkill(root, "report", "Report for {{arg1}}")
+      writeSkill(root, "nf", "Must not load shell variables")
+      var agent = agentFor(root), events = []
+      agent.fnI = function(kind, message) { events.push(message) }
+      var goal = "Run `git remote show origin | awk '{print $NF}'`\n```sh\necho $report\n```\n~~~sh\necho $nf\n~~~\nUse $not-installed and $report Ada"
+      ow.test.assert(agent._consultSkillsForRun({ useskills: true, goal: goal }).length, 0, "Unknown references and code do not block real invocation")
+      ow.test.assert(Object.keys(agent._skillRuntime.records), ["local:report"], "Only prose invocation is active")
+      ow.test.assert(agent._skillGuidanceContext().indexOf("Report for Ada") >= 0, true, "Masked code preserves argument offsets")
+      ow.test.assert(events.some(function(message) { return message.indexOf("ignored not-installed") >= 0 && message.indexOf("continuing") >= 0 }), true, "Ignored unknown requests explained")
+      ow.test.assert(events.some(function(message) { return /(?:ignored|blocked|selected) nf/.test(message) }), false, "Awk variable is not a skill event")
+      ow.test.assert(agent._scoreInitialSkillActivation({ name: "nf" }, "Run `awk '{print $NF}'`", "").reason !== "explicit", true, "Legacy activation also excludes inline code")
+      agent = agentFor(root)
+      agent._selectSkillCandidates = function() { return [] }
+      ow.test.assert(agent._consultSkillsForRun({ useskills: true, skillsautosearch: true, goal: "Generate test reports $missing" }).length, 0, "Unknown mention permits automatic selection")
+      ow.test.assert(agent._consultSkillsForRun({ useskills: true, goal: "$wiki:missing.md", skillsautosearch: false }).length, 0, "Unknown wiki source is ignored when unavailable")
+    })
+  }
+
+  exports.testSkillActivityLogsDescribeSelectionAndLoading = function() {
+    fixture(function(root) {
+      writeSkill(root, "report", "CONFIDENTIAL_BODY {{arg1}}")
+      var agent = agentFor(root, { debug: true }), messages = []
+      agent.fnI = function(kind, message) { messages.push(message) }
+      agent._createBareLlmInstance = function() { return { withInstructions: function() {}, promptJSONWithStats: function() { return { response: { selected: ["local:report"] }, stats: {} } } } }
+      agent._consultSkillsForRun({ useskills: true, skillsautosearch: true, debug: true, goal: "Generate test reports" })
+      ;["roots=[", "localCount=1", "candidates=[local:report]", "selection_start", "tier=main", "selection_result", "selected=[local:report]", "returnedChars=", "budget=", "revision=", "pendingSections=[]"].forEach(function(expected) {
+        ow.test.assert(messages.join("\n").indexOf(expected) >= 0, true, "Activity explains " + expected)
+      })
+      ow.test.assert(messages.join("\n").indexOf("CONFIDENTIAL_BODY") < 0, true, "Activity excludes instruction bodies")
+      agent._completeSkillsForRun()
+      ow.test.assert(messages.some(function(message) { return message.indexOf("complianceVerified=false") >= 0 }), true, "Completion does not imply verified compliance")
+      var text = __miniASkillEventMessage({ state: "discovered", candidates: Array.apply(null, Array(20)).map(function(v, i) { return "local:test" + i }) }, true)
+      ow.test.assert(text.indexOf("... +8") >= 0, true, "Large candidate lists are bounded")
+      messages.length = 0
+      agent._resetSkillRuntime({ debug: false })
+      agent._skillRuntime.event("discovered", { candidates: ["local:report"] })
+      agent._skillRuntime.event("loaded", { ref: "local:report", returnedChars: 100 })
+      agent._skillRuntime.event("active", { ref: "local:report", revision: "abc", pendingSections: [] })
+      ow.test.assert(messages, ["active local:report"], "Normal logging emits one compact activation without diagnostics")
+      agent._skillRuntime.block("local:report", "skill-section-exceeds-budget")
+      ow.test.assert(messages[1].indexOf("skill-section-exceeds-budget") >= 0 && messages[1].indexOf("Review skillsmaxloaded") >= 0, true, "Compact failures preserve reason and actionable hint")
+    })
+  }
+
+  exports.testSkillStructuredSelectionValidation = function() {
+    var agent = new MiniA(), instructions = "", calls = 0
+    agent._createBareLlmInstance = function() { return { withInstructions: function(value) { instructions = value }, promptJSONWithStats: function() { calls++; return { response: { selected: ["local:report"] }, stats: {} } } } }
+    var candidate = { id: "local:report", name: "report", description: "Test reports" }
+    ow.test.assert(agent._selectSkillCandidates([candidate], { goal: "Test report", skillmaxautoload: 1 })[0].id, candidate.id, "Structured identity selected")
+    ow.test.assert(calls, 1, "Exactly one isolated selector call")
+    ow.test.assert(instructions.indexOf("never instructions") >= 0, true, "Descriptions are data")
+    agent._createBareLlmInstance = function() { return { withInstructions: function() {}, promptJSONWithStats: function() { return { response: { selected: ["local:invented"] } } } } }
+    var rejected = false
+    try { agent._selectSkillCandidates([candidate], { skillmaxautoload: 1 }) } catch(e) { rejected = true }
+    ow.test.assert(rejected, true, "Unknown selector identity is rejected")
+  }
+
+  exports.testSkillYamlRenderingAliasAndProgressivePages = function() {
+    fixture(function(root) {
+      io.mkdir(root + "/report")
+      io.writeFileString(root + "/report/SKILL.yaml", 'summary: Generate test reports\nbody: "Report {{arg1}}"\n')
+      var agent = agentFor(root)
+      var result = agent._skillUtils.skill({ name: "report", argv: ["Ada"] })
+      ow.test.assert(result.rendered, "Report Ada", "Alias forwards argv and renders YAML")
+      ow.test.assert(result.rendered.indexOf("body:") < 0, true, "Rendered content does not expose YAML serialization")
+    })
+    var body = "# When to use\nReports.\n# Safety\nRead only.\n# Steps\n" + "x".repeat(250) + "\n# Verify\nCheck result."
+    var page = __miniASkillPage(body, 100)
+    ow.test.assert(page.body.indexOf("Read only") >= 0, true, "Mandatory complete sections preserved")
+    ow.test.assert(page.pendingSections.indexOf("Steps") >= 0, true, "Oversized steps deferred by name")
+    ow.test.assert(page.body.indexOf("xxxx") < 0, true, "Never expose partial step")
+    ow.test.assert(__miniASkillPage("x".repeat(200), 100).error, "skill-required-guidance-exceeds-budget", "Unstructured oversized guidance blocks")
+  }
+
+  exports.testSkillWikiBudgetDirectReadAndResolve = function() {
+    var utils = new MiniUtilsTool({}), wm = {}
+    utils._skillWikiManager = wm
+    utils._skillRuntime = new MiniASkillRuntime({ skillsmaxloaded: 1, skillsmaxchars: 100 })
+    utils._skillRuntime.chars = 50
+    utils._skillProvider = { _wm: wm, open: function() { return {} }, read: function(ref, opts) { return { body: "x".repeat(opts.maxChars), chars: opts.maxChars } }, resolve: function(ref, opts) { return { bodyTemplate: "x".repeat(opts.maxChars) } } }
+    var read = utils.skillwiki({ operation: "read", ref: "wiki:a.md", maxChars: 200 })
+    ow.test.assert(read.chars, 50, "Remaining characters are exact, no 200 character floor")
+    ow.test.assert(utils._skillRuntime.chars, 100, "Shared budget never overshoots")
+    ow.test.assert(utils.skillwiki({ operation: "resolve", ref: "wiki:a.md" }).error, "skills-max-chars-exceeded", "Resolve obeys exhausted character budget")
+    ow.test.assert(utils.skillwiki({ operation: "read", ref: "wiki:b.md" }).error, "skills-max-loaded-exceeded", "Direct read obeys distinct skill slots")
+  }
+
+  exports.testSkillProviderResolvePreservesErrors = function() {
+    var provider = Object.create(MiniAWikiSkillProvider.prototype)
+    provider.open = function() { return { name: "broken" } }
+    provider.read = function() { return { error: "source-unavailable" } }
+    ow.test.assert(provider.resolve("wiki:broken.md", {}).error, "source-unavailable", "Failed reads never become empty complete templates")
+    provider.open = function() { return { error: "not-found" } }
+    ow.test.assert(provider.resolve("wiki:broken.md", {}).error, "not-found", "Open failure preserved")
+  }
+
+  exports.testSkillDeferredSectionsSurvivePartialReads = function() {
+    var agent = new MiniA()
+    agent.fnI = function() {}; agent._trace = function() {}; agent._resetSkillRuntime({})
+    var text = "# Intro\nBrief\n\n## First\n" + repeat(120, "a") + "\n\n## Second\n" + repeat(120, "b")
+    var record = function(page) { page.fingerprint = "stable"; agent._recordSkillContent("local:report", page) }
+    record(__miniASkillPage(text, 60))
+    ow.test.assert(agent._skillRuntime.records["local:report"].pendingSections, ["First", "Second"], "Initial page defers both procedures")
+    record(merge(__miniASkillPage("## Second\nReference content", 200), { reference: "support.md", referenceRevision: "r1" }))
+    ow.test.assert(agent._skillRuntime.records["local:report"].pendingSections, ["First", "Second"], "Supporting reference cannot complete a main section with the same name")
+    record(__miniASkillPage(text, 200, "First"))
+    ow.test.assert(agent._skillRuntime.records["local:report"].pendingSections, ["Second"], "Reading one section retains the other deferred section")
+    ow.test.assert(agent._skillGuidanceContext().indexOf("Pending sections (load before performing their steps): Second") >= 0, true, "Unread procedure remains visible in model guidance")
+    record(__miniASkillPage(text, 200, "Second"))
+    ow.test.assert(agent._skillRuntime.records["local:report"].pendingSections.length, 0, "All deferred sections clear only after both reads")
+  }
+
+  exports.testSkillContextContinuityRevisionAndCompletion = function() {
+    var agent = new MiniA()
+    agent.fnI = function() {}; agent._trace = function() {}
+    agent._resetSkillRuntime({})
+    agent._runtime = { context: ["[SUMMARY] context after overflow"] }
+    agent._recordSkillContent("local:report", { rendered: "Always include evidence", fingerprint: "a", pendingSections: ["Verify"] }, { name: "report", description: "Generate test reports" })
+    agent._runtime.context = ["[SUMMARY] replaced by overflow"]
+    agent._syncSkillContext(agent._runtime)
+    ow.test.assert(agent._runtime.context[0].indexOf("Always include evidence") >= 0, true, "Reconstruct pinned guidance after overflow")
+    agent._recordSkillContent("local:report", { body: "Check evidence", fingerprint: "a", sections: ["Verify"] })
+    ow.test.assert(agent._skillRuntime.records["local:report"].pendingSections.length, 0, "Completed section removed from pending set")
+    ow.test.assert(agent._skillHandoffForGoal("Generate test reports")[0].revision, "a", "Handoff carries source revision")
+    agent._recordSkillContent("local:report", { body: "Changed source", fingerprint: "b" })
+    ow.test.assert(agent._skillRuntime.blocked[0].reason, "skill-source-revision-changed", "Changed source blocks rather than mixing revisions")
+    ow.test.assert(agent._skillHandoffForGoal("Generate test reports").length, 0, "Blocked sources are not delegated")
+    agent._recordSkillContent("local:other", { rendered: "Independent instructions", fingerprint: "c" })
+    agent._completeSkillsForRun()
+    ow.test.assert(agent._skillRuntime.records["local:other"].state, "completed", "Completion does not claim compliance")
+    ow.test.assert(agent._skillRuntime.records["local:report"].state, "blocked", "Blocked records never become completed")
+  }
+
+  exports.testSkillExtraRootsAddToDefaultsAndFileAllow = function() {
+    fixture(function(root) {
+      var oldHome = java.lang.System.getProperty("user.home")
+      try {
+        java.lang.System.setProperty("user.home", root)
+        io.mkdir(root + "/.openaf-mini-a"); io.mkdir(root + "/.openaf-mini-a/skills")
+        writeSkill(root + "/.openaf-mini-a/skills", "default", "Default instruction")
+        io.mkdir(root + "/extras"); writeSkill(root + "/extras", "extra", "Extra instruction")
+        var utils = new MiniUtilsTool({ skillsroots: [root + "/extras"] })
+        ow.test.assert(utils._listSkills({}).map(function(item) { return item.name }).sort().join(","), "default,extra", "Extra directories preserve default inventory")
+        var denied = new MiniUtilsTool({ fileallow: [], skillsroot: root + "/extras" })
+        ow.test.assert(denied._listSkills({}).length, 0, "File allow denial covers skill discovery")
+      } finally { java.lang.System.setProperty("user.home", oldHome) }
+    })
+  }
+
+  exports.testSkillMixedCandidatesAndSourceCollision = function() {
+    fixture(function(root) {
+      writeSkill(root, "report", "Local report")
+      io.mkdir(root + "/wiki")
+      io.writeFileString(root + "/wiki/report.md", "---\ntype: skill\nname: report\ndescription: Generate test reports\n---\n# When to use\nGenerate reports.\n# Steps\nInclude WIKI_REPORT.\n")
+      var agent = agentFor(root)
+      agent._skillWikiManager = new MiniAWikiManager({ root: root + "/wiki", backend: "fs", access: "ro", wikiretrievalv2: false })
+      agent._skillUtils._skillWikiManager = agent._skillWikiManager
+      agent._skillWikiEnabled = true
+      var offered = []
+      agent._selectSkillCandidates = function(candidates) { offered = candidates; return [candidates.filter(function(item) { return item.source === "wiki" })[0]] }
+      var args = { useskills: true, useskillswiki: true, skillsautosearch: true, goal: "Generate test reports", skillsautolimit: 5 }
+      ow.test.assert(agent._consultSkillsForRun(args).length, 0, "Mixed consultation succeeds")
+      ow.test.assert(offered.some(function(item) { return item.id === "local:report" }), true, "Local source represented")
+      ow.test.assert(offered.some(function(item) { return item.id === "wiki:report.md" }), true, "Wiki source represented")
+      ow.test.assert(agent._skillGuidanceContext().indexOf("WIKI_REPORT") >= 0, true, "Selected wiki body is loaded")
+      agent._resetSkillRuntime(args)
+      args.goal = "$report"
+      ow.test.assert(agent._consultSkillsForRun(args)[0].reason, "ambiguous-skill-use-source-qualified-id", "Cross-source ambiguity is explicit")
+    })
+  }
+
+  exports.testSkillWikiProgressiveResolution = function() {
+    fixture(function(root) {
+      io.writeFileString(root + "/long.md", "---\ntype: skill\nname: long\n---\n# When to use\nReports.\n# Safety\nRead only.\n# Steps\n" + "x".repeat(500) + "\n# Verify\nCheck result.\n")
+      var wm = new MiniAWikiManager({ root: root, backend: "fs", access: "ro", wikiretrievalv2: false })
+      var provider = new MiniAWikiSkillProvider(wm, {})
+      var result = provider.resolve("wiki:long.md", { progressive: true, maxChars: 120 })
+      ow.test.assert(isUnDef(result.error), true, "Structured long wiki skill loads progressively")
+      ow.test.assert(result.bodyTemplate.indexOf("Read only") >= 0, true, "Safety section complete")
+      ow.test.assert(result.pendingSections.indexOf("Steps") >= 0, true, "Steps deferred without partial execution")
+      ow.test.assert(result.bodyTemplate.length <= 120, true, "Progressive output respects exact budget")
+    })
+  }
+
+  exports.testSkillSelectorNoneAndFailure = function() {
+    fixture(function(root) {
+      writeSkill(root, "report", "Instructions")
+      var agent = agentFor(root)
+      agent._selectSkillCandidates = function() { return [] }
+      ow.test.assert(agent._consultSkillsForRun({ useskills: true, skillsautosearch: true, goal: "Generate test reports" }).length, 0, "None relevant is valid")
+      ow.test.assert(agent._skillRuntime.chars, 0, "None selection loads no body")
+      agent._resetSkillRuntime({})
+      agent._selectSkillCandidates = function() { throw new Error("invalid-skill-selection") }
+      ow.test.assert(agent._consultSkillsForRun({ useskills: true, skillsautosearch: true, goal: "Generate test reports" })[0].ref, "selection", "Selector failures visibly block dependent work")
+    })
+  }
+
+  exports.testSkillStartLoadsBeforeExecutionAndBlocksMissing = function() {
+    fixture(function(root) {
+      writeSkill(root, "report", "Include VERIFIED_REPORT in your final response.")
+      var agent = new MiniA(), selections = 0, turns = 0
+      agent.fnI = function() {}
+      agent._selectSkillCandidates = function(candidates) { selections++; return [candidates[0]] }
+      // Explicit synthetic model configuration; initialization does not contact it.
+      var args = { model: "(type: openai, model: fixture, key: fixture)", usedecide: false, useskills: true, skillsautosearch: true, extraskills: root, useutils: false, usetools: false, usejsontool: true, usememory: false, useplanning: false, goal: "Generate test reports", raw: true, maxsteps: 3 }
+      try {
+        agent.init(args)
+        agent.llm.promptJSONWithStats = agent.llm.promptWithStats = function(prompt) {
+          turns++
+          ow.test.assert(agent._skillGuidanceContext().indexOf("VERIFIED_REPORT") >= 0, true, "Instructions active before first execution call")
+          ow.test.assert(prompt.indexOf("VERIFIED_REPORT") >= 0 || stringify(agent.llm.getGPT().getConversation()).indexOf("VERIFIED_REPORT") >= 0, true, "Actual model request includes skill guidance")
+          return { response: { action: "final", answer: "VERIFIED_REPORT" }, stats: {} }
+        }
+        ow.test.assert(agent.start(merge({}, args)), "VERIFIED_REPORT", "Actual agent run completes")
+        ow.test.assert(selections, 1, "One selection before execution")
+        ow.test.assert(turns, 1, "One execution turn")
+        var blocked = agent.start(merge(args, { goal: "$missing-report", _skillHandoff: [{ ref: "local:missing-report", required: true }] }))
+        ow.test.assert(blocked.indexOf("blocked") >= 0, true, "Missing required handoff returns actionable blocked result")
+        ow.test.assert(turns, 1, "Blocked run does not call execution model")
+        ow.test.assert(agent.start(merge(args, { goal: "$missing-report", _skillHandoff: [] })), "VERIFIED_REPORT", "Unknown goal mention permits normal task execution")
+        ow.test.assert(turns, 2, "Ignored unknown reference does not prevent execution")
+      } finally { agent._stopAgentResources() }
+    })
+  }
+
+  exports.testSkillSharedLocalWikiBudgetAndSupportingReferences = function() {
+    fixture(function(root) {
+      writeSkill(root, "report", "Read [reference](reference.md).\nReport {{arg1}}.")
+      io.writeFileString(root + "/report/reference.md", "# Details\nReference evidence.")
+      var agent = agentFor(root, { skillsmaxchars: 120, skillsmaxloaded: 1 })
+      var rendered = agent._skillUtils.skills({ operation: "render", name: "report", argv: ["Ada"] })
+      ow.test.assert(rendered.rendered.indexOf("Reference evidence") < 0, true, "Supporting body deferred")
+      var support = agent._skillUtils.skills({ operation: "read", name: "report", reference: "reference.md" })
+      ow.test.assert(support.body.indexOf("Reference evidence") >= 0, true, "Declared supporting file can be loaded under same budget")
+      ow.test.assert(agent._skillUtils.skills({ operation: "read", name: "report", reference: "../arbitrary.md" }).error, "skill-reference-not-declared", "Unrelated file is not a supporting reference")
+      agent._skillUtils._skillWikiManager = {}
+      agent._skillUtils._skillProvider = { _wm: agent._skillUtils._skillWikiManager, open: function() { return {} } }
+      ow.test.assert(agent._skillUtils.skillwiki({ operation: "open", ref: "wiki:other.md" }).error, "skills-max-loaded-exceeded", "Local and wiki share distinct skill slots")
+    })
+  }
+
+  exports.testSkillHandoffRespectsChildPermissionsAndRevision = function() {
+    fixture(function(root) {
+      writeSkill(root, "report", "Generate test reports.")
+      var parent = agentFor(root)
+      parent._consultSkillsForRun({ useskills: true, goal: "$report" })
+      var manager = new SubtaskManager({ useskills: true, fileallow: [root], extraskills: root }, { parentAgent: parent })
+      try {
+        manager.parentAgent = parent
+        var child = manager._buildChildArgs({ goal: "Generate test reports", args: { useskills: false }, depth: 1 })
+        ow.test.assert(child.useskills, false, "Explicit child opt-out is preserved")
+        ow.test.assert(child._skillHandoff[0].ref, "local:report", "Relevant source-qualified ref handed off")
+        ow.test.assert(child.fileallow[0], root, "Parent file ceiling retained")
+        var childAgent = agentFor(root)
+        var blocked = childAgent._consultSkillsForRun({ useskills: false, goal: child.goal, _skillHandoff: child._skillHandoff })
+        ow.test.assert(blocked[0].reason, "requested-skill-unavailable", "Child cannot silently ignore inaccessible required skill")
+        writeSkill(root, "report", "Changed guidance")
+        childAgent = agentFor(root)
+        blocked = childAgent._consultSkillsForRun({ useskills: true, goal: child.goal, _skillHandoff: child._skillHandoff })
+        ow.test.assert(blocked[0].reason, "skill-source-revision-changed", "Child cannot silently use a different source revision")
+      } finally { manager.destroy() }
+    })
+  }
+
+  exports.testSkillSelectorDefaultsAndFallbacks = function() {
+    var agent = new MiniA(), candidate = { id: "local:report", name: "report" }, calls = [], events = []
+    var configuredEnv = function() { return "(type: openai, model: fixture)" }, emptyEnv = function() { return "" }
+    ow.test.assert(agent._resolveSkillsAutoSearch({}, configuredEnv), false, "Decision use must be explicitly enabled")
+    ow.test.assert(agent._resolveSkillsAutoSearch({ usedecide: true }, configuredEnv), true, "Configured decision enables default search")
+    ow.test.assert(agent._resolveSkillsAutoSearch({ usedecide: true, skillsautosearch: false }, configuredEnv), false, "Explicit opt-out wins")
+    ow.test.assert(agent._resolveSkillsAutoSearch({ usedecide: true }, emptyEnv), false, "No decision config defaults off")
+    ow.test.assert(agent._resolveSkillsAutoSearch({ skillsautosearch: true }, emptyEnv), true, "Explicit opt-in works without decision config")
+    agent._resetSkillRuntime({})
+    agent._skillRuntime.eventFn = function(event) { events.push(event) }
+    agent._use_lc = true
+    agent._oaf_lc_model = { model: "lc" }
+    agent._oaf_model = { model: "main" }
+    agent._decision = { isConfigured: function() { return true }, decide: function(state, questions) {
+      calls.push("decide")
+      ow.test.assert(state.candidates[0].id, candidate.id, "Source identity preserved")
+      ow.test.assert(questions.candidate_0.type, "boolean", "Bounded relevance question")
+      return { response: { answers: { candidate_0: { type: "boolean", value: false } } }, stats: { total_tokens: 4 } }
+    } }
+    agent._createBareLlmInstance = function(config) {
+      calls.push(config.model)
+      return { withInstructions: function() {}, promptJSONWithStats: function() {
+        if (config.model === "lc") throw new Error("fixture-lc-failure")
+        return { response: { selected: [candidate.id] }, stats: {} }
+      } }
+    }
+    var usage = [], controls = { beforeCall: function() { usage.push("before") }, afterCall: function(tokens, tier) { usage.push(tier) } }
+    ow.test.assert(agent._selectSkillCandidates([candidate], { usedecide: true }, controls), [], "Valid none stops fallback")
+    ow.test.assert(calls, ["decide"], "No slower calls for irrelevant task")
+    ow.test.assert(usage, ["before", "decide"], "Decision call participates in rate limits")
+    calls = []
+    agent._decision.decide = function() { calls.push("decide"); return { response: { answers: { candidate_0: { type: "boolean", value: true } } } } }
+    ow.test.assert(agent._selectSkillCandidates([candidate], { usedecide: true })[0].id, candidate.id, "Relevant decision loads the original candidate")
+    ow.test.assert(calls, ["decide"], "Successful decision skips chat selectors")
+    calls = []
+    agent._decision.decide = function() { calls.push("decide"); return { response: { answers: { candidate_0: { type: "boolean", value: "invalid" } } } } }
+    ow.test.assert(agent._selectSkillCandidates([candidate], { usedecide: true })[0].id, candidate.id, "Invalid decision and failed LC fall back to main")
+    ow.test.assert(calls, ["decide", "lc", "main"], "Fallback order is decide then LC then main")
+    ow.test.assert(events.filter(function(event) { return event.state === "selection_fallback" }).length, 2, "Fallbacks are visible")
+    calls = []
+    agent._createBareLlmInstance = function(config) { calls.push(config.model); return { withInstructions: function() {}, promptJSONWithStats: function() { return { response: { selected: [] } } } } }
+    ow.test.assert(agent._selectSkillCandidates([candidate], { usedecide: false }), [], "LC can return none")
+    ow.test.assert(calls, ["lc"], "Decision disabled skips decide and valid LC stops main")
+    calls = []
+    var blocked = false
+    try { agent._selectSkillCandidates([candidate], { usedecide: true }, { beforeCall: function() { throw new Error("rate-limit") } }) } catch(e) { blocked = true }
+    ow.test.assert(blocked, true, "Rate-limit failure aborts selection")
+    ow.test.assert(calls, [], "Rate limits do not cause provider fallback")
+    fixture(function(root) {
+      writeSkill(root, "report", "Report")
+      var localAgent = agentFor(root)
+      localAgent._selectSkillCandidates = function() { throw new Error("Default must avoid selection") }
+      localAgent._consultSkillsForRun({ useskills: true, goal: "Generate test reports" })
+      ow.test.assert(localAgent._skillRuntime.metrics.selection_calls, 0, "Default has no selection inference")
+      ow.test.assert(localAgent._skillRuntime.chars, 0, "Default has no automatic load")
+    })
+  }
+
+  exports.testSkillRequirementsGateDiscovery = function() {
+    fixture(function(root) {
+      writeSkill(root, "plain", "Plain")
+      writeSkill(root, "gated", "Gated", "requires:\n  anyTools: [alpha, beta]\n  anyFlags: [usecharts]\n")
+      writeSkill(root, "alltools", "All", "requires:\n  tools: [alpha, beta]\n")
+      var agent = agentFor(root)
+      agent._skillUtils._skillVisibilityFn = function(req) { return agent._skillRequirementsMet(req, agent._gateArgs) }
+      var names = function() { return agent._skillUtils._listSkills({}).map(function(i) { return i.name }).sort().join(",") }
+      var names2 = function() { return agent._skillUtils.skills({ operation: "list" }).skills.map(function(i) { return i.name }).sort().join(",") }
+      agent.mcpToolNames = []; agent._utilsToolNames = []; agent._gateArgs = {}
+      ow.test.assert(names(), "plain", "Unmet requirements hide gated skills; requires-less skills stay")
+      ow.test.assert(names2(), "plain", "Model-callable skills list honors gating")
+      var hidden = agent._skillUtils.skills({ operation: "render", name: "gated" })
+      ow.test.assert(isDef(hidden.error) || (isString(hidden) && hidden.indexOf("[ERROR]") === 0), true, "Render of hidden skill fails")
+      agent._utilsToolNames = ["alpha"]
+      ow.test.assert(names(), "gated,plain", "anyTools satisfied by utils tool")
+      agent._utilsToolNames = []; agent.mcpToolNames = ["beta"]
+      ow.test.assert(names(), "gated,plain", "anyTools satisfied by MCP tool")
+      agent.mcpToolNames = []; agent._gateArgs = { usecharts: true }
+      ow.test.assert(names(), "gated,plain", "anyFlags satisfied by flag")
+      agent._utilsToolNames = ["alpha", "beta"]; agent._gateArgs = {}
+      ow.test.assert(names(), "alltools,gated,plain", "All-of tools satisfied")
+      agent._utilsToolNames = ["alpha"]
+      ow.test.assert(agent._skillRequirementsMet({ tools: ["alpha", "beta"] }, {}), false, "All-of needs every tool")
+      ow.test.assert(agent._skillRequirementsMet({ anyTools: ["shell", "bash"] }, { useshell: true }), true, "shell/bash map to useshell")
+      ow.test.assert(agent._skillRequirementsMet({ anyTools: ["shell", "bash"] }, {}), false, "shell/bash hidden without useshell")
+      ow.test.assert(agent._skillRequirementsMet(__, {}), true, "No requires means available")
+    })
+  }
+
+  exports.testBundledToolSkillsGatedByEnabledTools = function() {
+    var inv = function(options) {
+      var agent = new MiniA()
+      agent.fnI = function() {}; agent._trace = function() {}
+      agent._agentState = {}; agent._runtime = { context: [] }
+      agent._getPluginsDiscovery = function() { return { skillsRoots: [] } }
+      agent._resetSkillRuntime(options)
+      agent.mcpToolNames = []
+      agent._createUtilsMcpConfig(merge({ utilsroot: String(java.lang.System.getProperty("java.io.tmpdir")) }, options))
+      return agent._skillUtils._listSkills({}).map(function(i) { return i.name }).filter(function(n) { return /^mini-a-(files|planning|memory|shell|visual-output)$/.test(n) }).sort().join(",")
+    }
+    ow.test.assert(inv({ useskills: true }), "", "Tool skills hidden when utils tools are off")
+    var legacy = inv({ useskills: true, useutils: true })
+    ow.test.assert(legacy.indexOf("mini-a-files") >= 0 && legacy.indexOf("mini-a-planning") >= 0 && legacy.indexOf("mini-a-memory") >= 0, true, "Files, planning and memory visible with useutils")
+    ow.test.assert(legacy.indexOf("mini-a-shell") < 0, true, "Shell skill hidden without useshell")
+    ow.test.assert(inv({ useskills: true, useutils: true, useshell: true }).indexOf("mini-a-shell") >= 0, true, "Shell skill visible with useshell")
+    var std = inv({ useskills: true, useutils: true, usestdutils: true })
+    ow.test.assert(std.indexOf("mini-a-files") >= 0, true, "Files skill visible under usestdutils aliases")
+    ow.test.assert(inv({ useskills: true, useutils: true, usecharts: true }).indexOf("mini-a-visual-output") >= 0, true, "Visual skill visible via flag")
+    ow.test.assert(inv({ useskills: true, useutils: true, utilsdeny: "memoryStore" }).indexOf("mini-a-memory") < 0, true, "Denied tool hides its skill")
+  }
+
+})()

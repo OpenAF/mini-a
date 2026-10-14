@@ -21,6 +21,16 @@ opack install Mermaid  # For summary.yaml
 
 ---
 
+## Paired skill outcomes (eval-skills-ojob.yaml)
+
+Run `ojob examples/eval-skills-ojob.yaml output=/tmp/skills.json` with `OAF_MODEL`
+configured. The example compares identical ledger and unrelated tasks with the
+target skill unavailable/available in temporary, file-restricted fixtures. Add
+`decide=true` with `OAF_DECIDE_MODEL` for a separate automatic-selection pair;
+`reverse=true` alternates execution order. No judge is enabled automatically.
+See [evaluation comparisons](../USAGE.md#comparing-outcomes-with-and-without-skills)
+for isolation, repeated paired runs and interpretation.
+
 ## OpenAF evaluation tests (eval-ojob.yaml)
 
 Run `ojob examples/eval-ojob.yaml` with `OAF_MODEL` configured to evaluate inline

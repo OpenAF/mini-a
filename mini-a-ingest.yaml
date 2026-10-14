@@ -80,6 +80,10 @@ help:
   - name     : ingestsourceid
     desc     : Stable logical origin identifier, independent of the physical source path
     mandatory: false
+  - name     : ingestlayout
+    desc     : "New-page layout: flat (default) or source folders; existing mappings stay in place"
+    mandatory: false
+    options  : ["flat", "source"]
   - name     : ingestmode
     desc     : Complete-page processing mode (auto, normalize, distill, raw)
     mandatory: false
@@ -128,6 +132,7 @@ jobs:
       ingestallowemptyprune: toBoolean.isBoolean.default(false)
       ingestsourceid   : isString.default(__)
       wikiaccess       : isString.default("rw")
+      ingestlayout     : isString.default("flat")
       ingestmode       : isString.default("auto")
       ingestindependent: toBoolean.isBoolean.default(false)
       ingestforce      : toBoolean.isBoolean.default(false)

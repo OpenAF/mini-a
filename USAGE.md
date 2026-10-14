@@ -8,6 +8,7 @@ Mini-A (Mini Agent) is a goal-oriented autonomous agent that uses Large Language
 
 - **OpenAF**: Mini-A is built for the OpenAF platform
 - **OAF_MODEL Environment Variable**: Must be set to your desired LLM model configuration
+- **OAF_DECIDE_MODEL Environment Variable** (optional): Automatically enables decision-assisted selection in existing dynamic/capability selection modes and ambiguous complexity assessment. `useutils=true usedecide=true` also exposes the bounded `decide` consultation tool. Disable with `usedecide=false`; see [Decision integration and MCP](docs/DECISIONS.md).
 - **OAF_LC_MODEL Environment Variable** (optional): Low-cost model for cost optimization
 - **OAF_VAL_MODEL Environment Variable** (optional): Dedicated model for deep research validation
 - **OAF_MINI_A_CON_HIST_SIZE Environment Variable** (optional): Set the maximum console history size (default is JLine's default)
@@ -108,6 +109,31 @@ consult one. Plain `/skills` still lists local templates. `useskills=true` does
 not enable virtual skills, and a local `skills=0` count says nothing about the
 wiki library. See the [Virtual Skills guide](docs/VIRTUAL-SKILLS.md) for a sample
 page, shared-wiki setup, limits, MCP access and troubleshooting.
+
+### Automatic skill use
+
+Bundled tool-usage skills (`mini-a-files`, `mini-a-planning`, `mini-a-memory`, `mini-a-shell`, `mini-a-visual-output`) declare `requires.tools`/`anyTools`/`anyFlags` in their frontmatter and are hidden unless the matching tools or options (for example `useutils=true`, `useshell=true`, `usecharts=true`) are enabled. Bundled roots come last, so listing caps in the `minimal`/`balanced` profiles drop them first.
+
+With `useskills=true` or `useskillswiki=true`, automatic search defaults to off.
+It defaults to on only when `usedecide=true` and `modeldec` or `OAF_DECIDE_MODEL` is set.
+Explicit `skillsautosearch=true` or `false` overrides that default. When enabled,
+Mini-A discovers compact candidates and tries the decision model (if
+`usedecide=true` and configured), then the configured low-cost model, then the
+main model. Errors or invalid responses advance to the next tier; a valid
+selection of no skills stops there. Exhausting all available tiers reports a
+selection failure. Provider failures can therefore increase selection latency.
+Explicit `$name` requests skip selection. Use `$local:name` or a `$wiki:path.md`
+reference to disambiguate sources. `skillsautosearch=false` keeps model-led or
+explicit loading.
+
+`skillsautolimit=5` bounds combined candidates; `skillmaxautoload=1` bounds automatic
+selection. `skillsmaxloaded=3` and `skillsmaxchars=12000` bound all local/wiki
+consultation in the run. `skillcontextchars=8000` limits the initial local page.
+Long procedures expose pending complete sections and supporting references for
+on-demand loading. Missing explicit skills, incomplete required instructions,
+and changed source revisions block affected work with a reported reason.
+Activity records show discovery, selection, activation and blocking; loading
+alone does not prove compliance. See [Virtual Skills](docs/VIRTUAL-SKILLS.md).
 
 ### Agent Plugins
 
@@ -928,6 +954,7 @@ The `start()` method accepts various configuration options:
 - **`debugtrace`** (boolean, default: true): For `mini-a-con`, capture the most recent goal's full diagnostic trace in a temporary NDJSON file for interactive `/debug` inspection. The file is deleted when the next goal starts or the console exits.
 - **`debugch`** (string, optional): SLON/JSON definition of a debug channel for main LLM debugging (requires `$llm.setDebugCh` support). Example: `"(type: file, options: (file: '/tmp/mini-a-llm-debug.log'))"`.
 - **`debuglcch`** (string, optional): SLON/JSON definition of a debug channel for low-cost LLM debugging. Same format as `debugch`.
+- **`debugdecch`** (string, optional): SLON/JSON debug channel definition or native file path for the decision model (`OAF_DECIDE_MODEL` or `modeldec`). Same format as `debugch`; attached to each fresh decision client (requires `$llm.setDebugCh` support).
 - **`debugvalch`** (string, optional): SLON/JSON definition of a debug channel for the validation LLM. Same format as `debugch`. Example: `"(type: file, options: (file: '/tmp/mini-a-val-llm-debug.log'))"`. When a dedicated `modelval` is configured, the channel is attached to that LLM instance. When using the main LLM for validation (no `modelval`), validation prompts and responses are written directly to this channel.
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
 - **`nologtrunc`** (boolean, default: false): Disable truncation of long log output lines (show full content)
@@ -1035,12 +1062,14 @@ For the Elasticsearch/OpenSearch wiki backend, there is no separate top-level `e
 - **`agent`** (string): Path to a markdown agent profile (or inline markdown text) with YAML frontmatter metadata. Supported keys include `model`, `capabilities` (`useshell`, `readwrite`, `useutils`, `usetools`), `tools` (MCP entries such as `type: ojob`, `type: stdio` + `cmd`, `type: remote`, or `type: sse`), `constraints` (appended to `rules`), `knowledge`, `youare`, and `mini-a` (map of direct Mini-A arg overrides). When the profile uses Markdown front matter, any text after the closing `---` is used as the default `goal=` input unless you pass `goal=` explicitly. (`agentfile` remains a backward-compatible alias.)
 
 #### Dual-Model Controls
+- **`modeldec`** (string): Override `OAF_DECIDE_MODEL` with a SLON/JSON configuration for this run. Select interactively with `/model dec`; `/models` displays the decision slot. See [Decisions](docs/DECISIONS.md).
+
 - **`modellc`** (string): Override the low-cost model configuration at runtime (same format as `OAF_LC_MODEL`). Useful for quick per-run model selection without changing environment variables.
 - **`modelval`** (string): Override the validation model configuration at runtime (same format as `OAF_VAL_MODEL`). Useful when you want a dedicated validation model for one run without changing environment variables.
 - **`deescalate`** (number, default: 3): Number of consecutive successful steps required after an escalation before Mini-A automatically reverts to the low-cost model. Set to a higher value for more conservative de-escalation or `0` to disable de-escalation entirely.
 - **`lccontextlimit`** (number, default: 0 = disabled): Maximum context token count before escalating to the main model. When the estimated context size reaches this threshold, Mini-A switches to the main model for that step. Useful when the low-cost model has a smaller context window than the main model. Set to `0` to disable context-based escalation.
 - **`modellock`** (string, one of `"main"`, `"lc"`, or `"auto"` = default): Select a model tier for normal steps, bypassing score-based escalation and de-escalation. Recovery paths (including invalid-JSON fallback) can still call the main model, so this is not a strict spending or provider-isolation boundary. Use `modellock=main` to select the main model (`OAF_MODEL`), `modellock=lc` to select the low-cost model (`OAF_LC_MODEL`), or leave unset/`auto` for the default adaptive behaviour. A one-time info message is logged at startup when a lock is active.
-- **`modelstrategy`** (string, one of `"default"` or `"advisor"`, default: `"default"`): Select the model orchestration profile. `default` keeps current LC-first behavior with escalation. `advisor` keeps LC as the executor and selectively calls the main model as an internal advisor for difficult steps.
+- **`modelstrategy`** (string, one of `"default"`, `"advisor"`, `"delegate"`, `"supervised"` or `"auto"`, default: `"default"`): Select the model orchestration profile. `auto` resolves once per run (in `init()`, before the system prompt is built) to a concrete strategy: resumed runs keep theirs, contract options pick `supervised`, no LC model or `modellock=main|lc` picks `default`, complex goals with a verification requirement (`test`/`validate`/`verify`/`ensure` words or `outfile`) pick `supervised` when no supervised-conflicting option is set, other complex goals pick `advisor`, medium low-risk goals with `lcbudget>0` pick `delegate`, otherwise `default`. Medium goals are refined by the decision model when configured. `orchestration=auto` uses the same resolver when `modelstrategy` is not set explicitly. Subtasks of an `auto` run resolve for their own goal. `default` keeps current LC-first behavior with escalation. `advisor` keeps LC as the executor and selectively calls the main model as an internal advisor for difficult steps.
 - **`advisormaxuses`** (number, default: `2`): Maximum advisor consultations per run when `modelstrategy=advisor`.
 - **`advisorenable`** (boolean, default: `true`): Master toggle for advisor consultations inside `modelstrategy=advisor` runs.
 - **`advisoronrisk`** (boolean, default: `true`): Allow advisor consults on risk signals.
@@ -1656,6 +1685,8 @@ Mini-A supports **delegation** — the ability to spawn child Mini-A agents to h
 | `delegationstalltimeout` | number | `300000` | Idle time before a running delegated subtask is considered stalled (ms) |
 | `delegationhardtimeout` | number | - | Optional absolute delegated subtask timeout regardless of activity (ms) |
 | `delegationmaxretries` | number | `2` | Maximum execution attempts for confirmed failures, including the initial attempt |
+
+Workers advertising `submission-recovery-v1` allow Mini-A to recover a lost submission response through a same-process receipt, without replaying execution. Recovery stops at worker restarts or receipt expiration (`taskretention`); older workers retain the explicit unknown-outcome behavior. See [submission recovery](docs/DELEGATION.md#submission-recovery) for the wire contract and metrics.
 
 **Worker startup parameters** (used when starting a worker with `workermode=true`):
 
@@ -2893,11 +2924,13 @@ Mini-A writes append-only canonical events and checkpoints under `chat-history.j
 
 Use `historyvmshadow=true` first to capture and estimate savings without changing provider requests or adding retrieval tool schemas. If both flags are supplied, enabled mode takes precedence. The VM is independent of `usememory`; enabling it creates retained conversation data even when history listing is disabled. `/clear` and explicit web conversation deletion remove the owned sidecar. Automatic web expiry preserves stored history when `historykeep=true`; it deletes the sidecar otherwise. `/rewind` records a new branch and default retrieval excludes the abandoned branch rather than deleting its canonical events.
 
-Phase 2 can be enabled explicitly with `historyvm=true contextvirtualization=true`. It extends the same canonical journal with stable typed handles, parent/child metadata, deterministic L0-L4 representations, structural compression, hierarchical summaries, coarse-to-fine retrieval, bounded line/section/JSON-path reads, adaptive utility-per-token assembly, typed provenance/supersession graphs, consumer-specific executor/planner/advisor/validator/delegate views, and per-consumer working-set deltas. At model-call boundaries the active projection preserves system/developer instructions, real user constraints, recent exchanges and unknown content. Older assistant messages and Mini-A's synthetic step scaffolding can be summarized or omitted; completed native tool-call groups are preserved or frozen together. Exact canonical content is restored before conversation persistence and remains retrievable with `context_search`, `context_get`, `context_expand`, `context_children`, and `context_related`.
+Phase 2 can be enabled explicitly with `historyvm=true contextvirtualization=true`. It extends the same canonical journal with stable typed handles, parent/child metadata, deterministic L0-L4 representations, structural compression, hierarchical summaries, coarse-to-fine retrieval, bounded line/section/JSON-path reads, adaptive utility-per-token assembly, typed provenance/supersession graphs, consumer-specific executor/planner/advisor/validator/delegate views, and per-consumer working-set deltas. At model-call boundaries the active projection preserves system/developer instructions, real user constraints, recent exchanges and unknown content. The latest synthetic step prompt stays exact so the current goal remains available across native tool rounds, including emergency paging. Older assistant messages and older synthetic step scaffolding can be summarized or omitted; completed native tool-call groups are preserved or frozen together. Detailed provider-message representations summarize the message body, while exact reads retain the full original envelope. Exact canonical content is restored before conversation persistence and remains retrievable with `context_search`, `context_get`, `context_expand`, `context_children`, and `context_related`.
 
-With active Phase 2 and a positive `maxcontext`, an oversized request automatically gets one emergency projection. Recent completed assistant work and complete tool exchanges may use bounded representations with recovery handles; exact originals remain in the canonical journal. Real user messages, instructions, incomplete tool exchanges, and unknown or multimodal content remain exact. The provider view changes only when the complete request fits. If executor working notes still prevent dispatch, Mini-A attempts isolated chunked summarization and rebuilds the prompt, preserving the supplied goal, explicit constraints, hook instructions, and newly delivered inbox messages. This allows one note-recovery attempt per logical request and at most three per run. Failed, empty, or nonshrinking summaries preserve the original notes and conversation. Recovery never resets provider history, increases the budget, or lowers the output reserve.
+With active Phase 2 and a positive effective context budget (`maxcontext`, or the `contextguardbudget` fallback when enabled), an oversized request automatically gets one emergency projection. Recent completed assistant work and complete tool exchanges may use bounded representations with recovery handles; exact originals remain in the canonical journal. Real user messages, instructions, incomplete tool exchanges, and unknown or multimodal content remain exact. The provider view changes only when the complete request fits. If executor working notes still prevent dispatch, Mini-A attempts isolated chunked summarization and rebuilds the prompt, preserving the supplied goal, explicit constraints, hook instructions, and newly delivered inbox messages. This allows one note-recovery attempt per logical request and at most three per run. Failed, empty, or nonshrinking summaries preserve the original notes and conversation. Recovery never resets provider history, increases the budget, or lowers the output reserve.
 
-Terminal budget errors report mutually exclusive token estimates for protected conversation, the current prompt, tool schemas, separately charged instructions, safety allowance, output reserve, and selected context, along with the recovery outcome. Oversized protected input or unavailable canonical backing cannot be recovered; narrow the input or schemas, or explicitly increase `maxcontext`. Auxiliary models retain independent histories and report budget errors without recursive recovery. Phase 1, shadow mode, legacy mode, and `maxcontext=0` retain their existing behavior.
+Native tool execution also checks this budget between recursive provider rounds, for both streaming and non-streaming adapters. Complete Ollama tool exchanges retain their `tool_name` metadata while their output bodies can be paged. A completed native-tool follow-up report can contain Markdown and JSON examples without those examples becoming new actions. Memory count messages are emitted only when counts change and remain static in the console.
+
+Terminal budget errors report mutually exclusive token estimates for protected conversation, the current prompt, tool schemas, separately charged instructions, safety allowance, output reserve, and selected context, along with the recovery outcome. Oversized protected input or unavailable canonical backing cannot be recovered; narrow the input or schemas, or explicitly increase `maxcontext`. Auxiliary models retain independent histories and report budget errors without recursive recovery. Phase 1, shadow mode, and legacy mode retain their existing behavior.
 
 Use `historyvm=true contextvirtualization=true contextvirtualizationshadow=true` to dry-run the exact same projection while continuing to send the Phase 1 provider context. Diagnostics compare complete provider-context token estimates, object-set changes, and expected differences. Shadow values are projections, not provider-billed savings. Stable-prefix serialization and context deltas avoid local recomputation but do not imply provider prompt caching or delta-only transmission.
 
@@ -3453,6 +3486,7 @@ discard the old recovery first. Do not manually delete journals to dismiss error
 | `ingestsource` | string | - | Folder, git repository (path or clone URL), or page URL — **required** |
 | `ingesttype` | string | auto | `markdown`, `repo` or `url` |
 | `ingestsection` | string | source name | Wiki section ingested pages are written into |
+| `ingestlayout` | string | `flat` | New-page paths: `flat` joins source directories with hyphens; `source` preserves sanitized directories. Existing bindings stay in place. |
 | `ingestinclude` | string | - | Comma-separated path fragments to include |
 | `ingestexclude` | string | - | Comma-separated path fragments to exclude |
 | `ingestchunkchars` | number | `24000` | Maximum characters per distillation chunk |
@@ -3463,14 +3497,26 @@ discard the old recovery first. Do not manually delete journals to dismiss error
 | `ingestforce` | boolean | `false` | Re-ingest sources the ledger reports as unchanged |
 | `ingestledger` | string | `<indexRoot>/.mini-a-wiki-ingest/ledger.json` | Ledger file path |
 
+### Source folders and topic organization
+
+Use `/ingest ./docs reference layout=source dryrun` to preview source folders, then remove `dryrun` to apply. The standalone equivalent is `ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=/tmp/wiki ingestlayout=source`. For example, `Guide/Setup.md` becomes `reference/guide/setup.md`; generated section indexes are kept separate from ingested source index pages. Sanitized path collisions receive a stable source-key suffix.
+
+Layout affects new source mappings only. Existing ingested pages keep their destinations when layout changes. For newly written or refreshed pages, local Markdown page links are resolved against the current ingestion mappings, including pages relocated through wiki moves; anchors and external URLs are preserved. Unresolved page links are reported in `unresolved_links`. Code fences, inline code, and image links are left intact. Web-page URL sources retain their single-page naming. Asset copying and conversion of arbitrary HTML links are not included.
+
+For semantic organization, use `/dream reorg topics`. It retains the approval gate: explicitly set `/set dreamwikiapproval auto` when ready to authorize the pass; `ask` reports that approval is required and `never` denies it. The wiki manager also offers the topic policy with its existing review and backup confirmations. Standalone callers can set `dreamwikimode=reorg dreamwikireorg=true dreamwikiapproval=auto dreamwikiorganize=topics` alongside their normal Dream/wiki configuration. The topic policy prefers existing sections and shallow groups of related pages, records uncertain moves, and accepts additional `dreamwikiinstructions`. It makes model calls only when explicitly invoked; ingestion never starts it automatically.
+
+Wiki moves record verified link repairs and ingestion destinations in a structural journal at `<indexRoot>/.mini-a-wiki-move/journal.json`. Unchanged sources can then be skipped, while changed sources refresh at their organized destinations. Manual edits and Dream content rewrites still produce ownership conflicts; moving a page cannot authorize overwriting those edits. Prefer moves for organization and keep editorial additions in separate pages.
+
+If a move is interrupted, repeat the wiki move or run writable ingestion to replay its journal. Dry-run ingestion reports pending structural recovery without applying it. Other writes are blocked until recovery completes. Replay verifies every affected page and the manifest; conflicting edits leave the journal for investigation. Local writers share the existing lock; separate machines writing a remote backend are not coordinated by that lock.
+
 ### How it works
 
 1. **Resolve** — detect the source type; shallow-clone remote repos to a temp dir and record the commit SHA.
 2. **Discover** — walk for native text, HTML, document and image formats, then passive structured formats advertised by the installed oafp. Skip vendor directories (`.git`, `node_modules`, `target`, `build`, `dist`, `vendor`, `.venv`, `__pycache__`, …). `README*` and `docs/**` come first.
-3. **Ledger** — skip sources whose sha1 is unchanged since the last ingest (`ingestforce=true` overrides).
+3. **Ledger** — skip sources whose content, transformation settings and resolved source links are unchanged (`ingestforce=true` overrides). Adding a previously missing link target refreshes referring pages; unrelated new sources do not. Older ledger records with resolved local links refresh once to establish tracking, under the normal budgets and ownership checks.
 4. **Chunk** — split oversized sources on `##`/`###` boundaries (paragraphs when headingless).
 5. **Distill** — one LLM call per source, in parallel batches, producing `{title, description, tags, type, body}`.
-6. **Write** — one source produces **one page**. Cross-page dedup and reorganisation are left to `/dream wiki apply`.
+6. **Write** — one source produces **one page**. Topic organization is available through explicit `/dream reorg topics`; deterministic maintenance uses `/dream wiki apply`.
 7. **Finalize** — regenerate indexes, rebuild the search index and the knowledge graph, append to `log.md`.
 
 Office and PDF text extraction uses the `readDocument` utility and Tika (installed lazily unless preinstalled). Scanned PDFs need OCR, which is not enabled. PNG/JPEG descriptions use `inspectImage` and require a vision-capable `OAF_MODEL`; image text is treated as untrusted source data. Empty or truncated extraction fails that source without writing a partial page. The input size limit applies to these files too.
@@ -3526,6 +3572,7 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 | `dreammemorymode` | string | `apply` | Memory dream mode: `plan` or `apply` |
 | `dreamwikidryrun` | boolean | `false` | Propose wiki changes without writing (opt-out of `apply`) |
 | `dreamwikiapproval` | string | `ask` | Reorg approval mode: `auto`, `ask`, `never` |
+| `dreamwikiorganize` | string | `none` | Explicit reorg policy: `topics` assesses topic folders even when lint is clean; `none` retains maintenance behavior |
 | `dreamwikiinstructions` | string | _(none)_ | Additional operator guidance appended to the wiki reorg objective |
 | `dreamwikireorg` | boolean | `false` | Allow structural reorg operations |
 | `dreammaxsteps` | number | `40` | Total model-step budget for `auto` or agent-step budget for `reorg` |
@@ -3820,6 +3867,131 @@ explicit. CI-safe tests use an injected deterministic agent;
 the CLI uses the configured model and therefore requires normal model setup.
 Set `llm_judge: { enabled: true }` for an opt-in isolated judge call; tests can
 instead inject `judgeFn` and remain fully deterministic.
+
+## Comparing outcomes with and without skills
+
+Run the isolated paired example explicitly with your configured `OAF_MODEL`:
+
+```bash
+ojob examples/eval-skills-ojob.yaml output=/tmp/skills-pair-01.json
+# Optional second experiment; requires OAF_DECIDE_MODEL:
+ojob examples/eval-skills-ojob.yaml decide=true reverse=true output=/tmp/skills-pair-02.json
+```
+
+The example creates temporary baseline/treatment trees and removes them in
+`finally`. Both variants expose the same skills interface and use the same task,
+model settings and budgets. Only treatment contains the ledger-checking skill;
+all ledger facts and rules are in the shared task. An unrelated `ready` task
+checks unnecessary activation. The baseline uses `useskills=true`: disabling a
+flag alone is not isolation. Canonical per-variant `fileallow` denies the other
+tree, home defaults, bundled skills and plugin contributions. Preflight checks
+actual discovered roots, available skills and utility names. The live agent's
+initialization repeats those checks. General utilities, shell, wiki, external
+MCP configuration, delegation, automatic AGENTS.md, memory and history VM are
+disabled; each scenario uses a fresh agent and no conversation or profile.
+
+`extraskills` adds roots; it does not replace defaults or bundled/plugin roots.
+Likewise, redirecting `homedir` alone does not redirect every home-skill lookup.
+The example verifies both source availability and denial of baseline access to
+the treatment skill. Do not remove its file policy when adapting the example.
+Configured main/low-cost models are shared across variants; record those model
+identities from `metrics.model_usage` when comparing runs.
+
+Normal discovery sets `skillsautosearch=false`, making no additional selector
+calls. `decide=true` adds a separate paired experiment with `usedecide=true` and
+`skillsautosearch=true` in both variants. Existing automatic selection prefers
+Decide, then follows the existing low-cost/main fallback. Compare skill effects
+within each policy pair; comparing treatment across policies measures selection
+policy differences. A baseline with no candidates may make no selector calls.
+`skills.selection_calls` includes fallback attempts; general `decision_calls`
+cannot be attributed entirely to skills. No judge runs in this example.
+
+Task correctness remains in ordinary answer assertions. `skill_diagnostic`
+records expected retrieval and observed loads outside those assertions. Review
+activation separately: relevant treatment should retrieve content, and the
+unrelated task should not. More loads, a skill name in an answer, or a successful
+read do not demonstrate adherence or quality uplift. No combined skill-value
+score is calculated. The existing semantic skill suite (`evals/skills.yaml`)
+also includes explicit invocation diagnostics; these do not substitute for
+normal discovery testing.
+
+Reports retain `raw.skills` and `skill_activity`, and add `metrics.skills`.
+For example (illustrative, not measured):
+
+```json
+{"variant":"with-skill","success":true,"metrics":{"skills":{"telemetry_available":true,"loads":1,"returned_chars":320}}}
+```
+
+See [skill metric definitions](METRICS.md#skill-lifecycle-skills-and-evaluation-deltas)
+for scope, missing values and nested `expected.metrics` assertions. Activation
+assertions may be useful in diagnostic suites, but including them in outcome
+success would conflate retrieval with correctness.
+
+Repeat paired runs using ordinary oJob/OpenAF facilities, not an evaluator
+repetition setting. Use `jobsInclude` to import the example jobs without running
+its standalone `todo`, then call its job from a sequential loop:
+
+```yaml
+jobsInclude:
+- examples/eval-skills-ojob.yaml
+jobs:
+- name: Repeat pairs
+  exec: |
+    for (var i = 0; i < 10; i++) {
+      $job("Paired skill evaluation", {
+        reverse: i % 2 === 1,
+        output: "/tmp/skills-pair-" + i + ".json"
+      })
+    }
+todo:
+- Repeat pairs
+- oJob Test Results
+- Eval exit status
+```
+
+Retain one report per pair, alternate order, and report completed pair counts,
+correctness rates, retrieval diagnostics and token/time/tool differences.
+Separate failed/incomplete samples. One pair establishes that the experiment
+runs; it cannot establish an improvement. Live evaluations are opt-in; the
+regression tests use injected agents and decision clients without providers.
+
+## Structured Decide outcome judge
+
+For an explicit additional outcome check, select Decide through the existing
+judge configuration:
+
+```yaml
+llm_judge:
+  enabled: true
+  backend: decide
+  # Optional args: { modeldec: "(type: ..., model: ...)" }
+```
+
+The judge reuses `MiniADecision` and OpenAF `decideWithStats()`. It batches the
+existing answer expectations (`equals`, `contains`, `notContains`, `matches`,
+including answer assertions) into boolean questions. At least one answer
+expectation is required. Metric assertions remain deterministic. This adds no
+rubric language or score. Deterministic assertions still run and must pass;
+semantic judging does not waive an exact answer mismatch.
+
+Model configuration precedence is `llm_judge.args.modeldec`, scenario/shared
+`modeldec`, then `OAF_DECIDE_MODEL`. Explicit `usedecide=false` on the evaluated
+run or judge args disables Decide judging and yields a failed judge without a
+provider call. Simply setting `usedecide=true` or the environment variable never
+enables an evaluator judge. Omitting `backend` retains the existing isolated
+agent judge. `judgeFn` injection still takes precedence; `decisionClientFactory`
+in evaluator options lets tests exercise the real decision wrapper provider-free.
+
+The judge receives only goal, final answer and answer expectations, excluding
+variant labels, skill activity and metric assertions. Treat its verdict as model
+judgment, not proof. Use identical judge configuration across paired variants
+and report its verdict separately from deterministic checks. Judge calls/tokens
+and duration are under `result.judge`, outside evaluated-agent metrics. There is
+one request with at most 32 checks and 48 KiB of UTF-8 evidence/questions; oversized
+evidence is rejected rather than truncated. Missing configuration, unsupported
+runtime/provider capabilities, incomplete or invalid boolean answers and provider
+errors fail with sanitized codes, without retries or fallback calls. No model
+configuration credentials are included in judge results.
 
 ## Evals in oJob tests
 
@@ -4308,7 +4480,7 @@ The shared dispatcher covers these command families:
 | --- | --- |
 | `/help` | Searchable Help with syntax, examples, aliases, prerequisites, discovered commands and skills; **Insert command** fills the composer without executing |
 | `/show [prefix]`, `/set`, `/unset`, `/toggle`, `/reset` | Settings filtered to the supplied prefix or affected parameter; existing validation, secret masking and server restrictions apply |
-| `/model [main\|lc\|val]`, `/models` | Models with the requested slot selected, or all slots; invalid slots report an error |
+| `/model [main\|lc\|val\|dec]`, `/models` | Models with the requested slot selected, or all slots; invalid slots report an error |
 | `/last [md]`, `/save [file]` | Answer reader with previous goal, Markdown/raw mode, Copy and browser Download; `/save` still writes on the server (default `response.md`) |
 | `/history [n]`, `/restore`, `/clear`, `/rewind [n]` | History with recent goals and Insert/Edit actions; saved-conversation Open picker; shared clear and rewind operations update the transcript |
 | `/context [llm\|analyze\|vm]`, `/compact [n]`, `/summarize [n]` | Context measurements, virtual-memory details and readable generated summaries |
@@ -4435,3 +4607,7 @@ Advanced slash-command browser smoke checklist (separate from fixture tests):
 Node tests exercise presentation fixtures and OpenAF tests exercise the shared
 runtime/journal with fixture subsystems. They do not establish live browser layout,
 provider, remote backend or deployed-server behavior.
+
+## Supervised contracts
+
+Use `modelstrategy=supervised` with both main and LC configured. Optional `contractfile=<path>` selects a readable CONTRACT.md; `contractargs` binds positional inputs. `savecontract=false` and `reusecontract=false` are independent defaults. Explicit `usedecide=true` enables selective decision review; otherwise acceptance requires generative review. See [the complete contract format and compatibility rules](docs/SUPERVISED.md) and [the illustrative contract](examples/CONTRACT.md).

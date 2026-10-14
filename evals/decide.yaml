@@ -1,0 +1,48 @@
+# Live task-outcome comparisons. Requires OAF_MODEL and OAF_DECIDE_MODEL.
+# Run from the Mini-A checkout. The MCP supplies synthetic read-only data.
+scenarios:
+- name: ambiguous-weather-phrasing
+  goal: Use the available data to report tomorrow's predicted peak thermometer reading in Porto. Return the Celsius number.
+  args: &dynamic
+    useshell: false
+    usetools: true
+    useutils: false
+    useplanning: false
+    mcpdynamic: true
+    nosetmcpwd: true
+    mcp: "(cmd: 'ojob evals/fixtures/decision-catalog.yaml', timeout: 10000)"
+    maxsteps: 8
+  expected:
+    contains: "22"
+  variants: &variants
+  - name: baseline
+    args:
+      usedecide: false
+  - name: decide
+    args:
+      usedecide: true
+- name: overlapping-billing-tools
+  goal: Inspect Ada's account ledger to validate whether she paid twice and report the refund due in euros.
+  args:
+    <<: *dynamic
+    mcpdynamic: false
+    capabilityselection: true
+    capabilitylimit: 1
+  expected:
+    contains: "19"
+  variants: *variants
+- name: irrelevant-catalog
+  goal: Reply with only the word ready.
+  args: *dynamic
+  expected:
+    equals: ready
+  variants: *variants
+- name: ambiguous-complexity
+  goal: Look up tomorrow's weather in Porto and the scheduled appointment. If it is outdoors, assess whether the forecast supports attending. Include the maximum Celsius temperature and appointment time.
+  args: *dynamic
+  expected:
+    contains: "22"
+  assertions:
+  - path: answer
+    contains: "14:00"
+  variants: *variants

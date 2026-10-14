@@ -1,0 +1,19 @@
+include:
+- oJobTest.yaml
+ojob:
+  opacks:
+  - oJob-common
+  catch: |
+    logErr(exception)
+    exit(1)
+jobs:
+- name: Supervised tests
+  exec: |
+    var tests = require("tests/supervised.js")
+    Object.keys(tests).forEach(function(name) {
+      ow.loadTest().test("Mini-A supervised::" + name, tests[name])
+    })
+    if (ow.test.getCountFail() > 0) exit(1)
+todo:
+- Supervised tests
+- oJob Test Results

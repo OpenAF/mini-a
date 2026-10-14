@@ -6,6 +6,87 @@
     return new MiniA()
   }
 
+  exports.testNativeReportWithEmbeddedJsonCompletes = function() {
+    var report = '# Impact report\n\n```json\n[{"value":4320,"label":"Branch insertions"}]\n```\n\nReview complete.'
+    var agent = createAgent(), requests = 0
+    agent.fnI = function() {}
+    var args = { goal: "Inspect fixture", raw: true, maxsteps: 2, usememory: false, usetools: true, usejsontool: false, usestream: true }
+    try {
+      agent.init(args)
+      agent._use_lc = false
+      agent._supportsPromptStreamWithStatsCompat = function() { return true }
+      agent._prepareContextInvocation = function(llm, prompt) {
+        if (requests > 0) throw new Error("Completed report must not trigger another preparation")
+        return prompt
+      }
+      agent._promptStreamWithStatsCompat = function() {
+        requests++
+        agent._useToolsActual = true
+        agent._runtime.modelToolCallDetected = true
+        return { response: { content: report, events: [{ message: { tool_calls: [{ function: { name: "lookup", arguments: {} } }] } }] }, stats: {} }
+      }
+      ow.test.assert(agent.start(merge({}, args)), report, "A report containing a chart array completes through the real executor")
+      ow.test.assert(requests, 1, "No retry or historical tool replay follows a complete answer")
+      ;['{"action":"final","answer":"ok"}', '[{"action":"think"}]', '```json\n{"action":"final","answer":"ok"}\n```', '{"action":'].forEach(function(text) {
+        ow.test.assert(isUnDef(agent._nativeToolFinalText(text)), true, "Action envelopes still use action processing and malformed envelopes still recover")
+      })
+    } finally { agent._stopAgentResources() }
+  }
+
+  exports.testMemorySnapshotLoggingOnlyChanges = function() {
+    var agent = createAgent(), logs = [], resolved = { sections: { facts: [{ value: "first" }], artifacts: [] } }
+    agent._memoryConfig = { enabled: true }
+    agent._buildResolvedWorkingMemory = function() { return resolved }
+    agent.fnI = function(type, text) { logs.push(text) }
+    agent._syncWorkingMemoryState()
+    agent._syncWorkingMemoryState()
+    resolved.sections.facts[0].value = "updated"
+    agent._syncWorkingMemoryState()
+    ow.test.assert(logs.length, 1, "Repeated syncs and content-only changes do not repeat counts")
+    ow.test.assert(agent._agentState.workingMemory.sections.facts[0].value, "updated", "Silent sync still refreshes memory state")
+    resolved.sections.artifacts.push({ value: "new" })
+    agent._syncWorkingMemoryState()
+    ow.test.assert(logs.length, 2, "Changed counts produce one update")
+    agent._memoryConfig.enabled = false
+    agent._syncWorkingMemoryState()
+    agent._memoryConfig.enabled = true
+    agent._syncWorkingMemoryState()
+    ow.test.assert(logs.length, 3, "Re-enabling memory emits the initial snapshot")
+  }
+
+  exports.testNativeBudgetGuardPreservesAuxiliaryAndShadow = function() {
+    var agent = createAgent(), checks = 0, dispatches = 0
+    agent._useToolsActual = true
+    agent._historyVm = { contextVirtualization: true, contextVirtualizationShadow: false }
+    var model = { rawPrompt: function(prompt, modelName) {
+      dispatches++
+      ow.test.assert(this === model, true, "Guard preserves adapter receiver")
+      ow.test.assert(modelName, "fixture", "Guard preserves dispatch arguments")
+      return prompt
+    } }
+    var llm = { getGPT: function() { return { model: model } } }
+    agent._projectContextInvocation = function(instance, prompt, consumer) {
+      checks++
+      ow.test.assert(instance === llm && consumer === "executor", true, "Only executor history is rebound")
+      return prompt
+    }
+    agent._guardNativeToolRounds(llm, "executor")
+    ow.test.assert(model.rawPrompt("executor", "fixture"), "executor", "Executor return value stays exact")
+    agent._guardNativeToolRounds(llm, "advisor")
+    model.rawPrompt("auxiliary", "fixture")
+    agent._guardNativeToolRounds(llm, "executor")
+    agent._historyVm.contextVirtualizationShadow = true
+    model.rawPrompt("shadow", "fixture")
+    agent._historyVm.contextVirtualizationShadow = false
+    agent._historyVm.contextVirtualization = false
+    model.rawPrompt("disabled", "fixture")
+    agent._historyVm.contextVirtualization = true
+    agent._useToolsActual = false
+    model.rawPrompt("action mode", "fixture")
+    ow.test.assert(checks, 1, "Auxiliary, shadow, disabled, and non-native calls bypass executor projection")
+    ow.test.assert(dispatches, 5, "All modes still dispatch exactly once")
+  }
+
   exports.testJsonDispatchSessionMode = function() {
     var agent = createAgent()
     agent.fnI = function() {}
@@ -1502,6 +1583,12 @@
       { name: "nuno-function", description: "Describes the nuno function" }
     ]
 
+    var unrelated = agent._scoreInitialSkillActivation({ name: "agent-plugin-builder", description: "Build plugins" }, "list available tools", "")
+    ow.test.assert(unrelated.reason === "name", false, "Failed suffix lookup must not count as a name match")
+    ;["agent-plugin-builder", "use agent-plugin-builder", "agent-plugin-builder please"].forEach(function(goal) {
+      ow.test.assert(agent._scoreInitialSkillActivation({ name: "agent-plugin-builder" }, goal, "").reason, "name", "Real name matches should remain supported")
+    })
+
     var selected = agent._selectInitialSkillActivations("produce a table using the nuno function", "", { maxSkills: 2 })
     ow.test.assert(isArray(selected) && selected.length === 1, true, "Phrase-normalized skill names should auto-select one skill")
     ow.test.assert(selected[0].skill.name === "nuno-function", true, "nuno function should match nuno-function")
@@ -1539,12 +1626,20 @@
         knowledge: ""
       }
       var loaded = agent._activateInitialSkills(args)
+      agent._initialSkillActivationArgs = args
+      agent._prepareInitialSkillsForRun(args)
+      var secondLoad = agent._activateInitialSkills(args)
+      ow.test.assert(secondLoad.length, 0, "Repeated activation must not reload the skill")
+      ow.test.assert(events.length, 1, "Repeated activation must log only once")
       var runtimeContext = agent._buildInitialSkillsRuntimeContext(agent._initialSkillActivations)
       ow.test.assert(isArray(loaded) && loaded.length === 1, true, "Initial skill activation should load the matching skill")
       ow.test.assert(args.knowledge === "", true, "Skill activation should not inject full skill content into system knowledge")
       ow.test.assert(args.knowledgeUpdated !== true, true, "Skill activation should not force system prompt rebuild through knowledge")
       ow.test.assert(runtimeContext.indexOf("[SKILLS]") === 0, true, "Loaded skill content should be prepared as runtime context")
       ow.test.assert(runtimeContext.indexOf("If odd, multiply by 3 and add 1") >= 0, true, "Runtime context should contain skill body")
+      agent._prepareInitialSkillsForRun(args)
+      ow.test.assert(agent._initialSkillActivations.length, 0, "The next run must clear prior skill guidance")
+      ow.test.assert(agent._activateInitialSkills(args).length, 1, "The next run must be able to activate the skill again")
       ow.test.assert(events.some(function(e) { return e.event === "skill" && e.message.indexOf("auto-loaded") >= 0 }), true, "Skill activation should be logged")
     } finally {
       io.rm(skillsDir)
@@ -1982,6 +2077,10 @@
       }
       var unrelated = merge({}, meta)
       unrelated.name = "unrelated"
+      unrelated.inputSchema = merge({}, meta.inputSchema)
+      unrelated.inputSchema.properties = merge({}, meta.inputSchema.properties)
+      delete unrelated.inputSchema.properties.args
+      delete unrelated.inputSchema.properties.argv
       var other = agent._getToolSchemaSummary(unrelated, { profile: profile, toolCount: 1 })
       if (profile !== "verbose") ow.test.assert(other.compactParamsText, profile === "minimal" ? "appliesTo, capabilities, ..." : "appliesTo, capabilities, compatibility, ...", "Other tool ordering is unchanged")
       var rendered = renderAgentPrompt(agent, { promptProfile: profile, actionsdesc: [summary], actionsList: "skillwiki", actionFieldValues: "think | skillwiki | final", toolCount: 1 })
@@ -2049,6 +2148,7 @@
       var cfg = agent._createUtilsMcpConfig({
         useutils: true,
         useskills: true,
+        debug: true,
         utilsroot: rootDir,
         extraskills: skillsDir
       })
@@ -2928,6 +3028,41 @@
       ow.test.assert(calls[0].payload.taskId, "task-1", "Remote cancellation must target the submitted task")
       ow.test.assert(calls[0].timeoutMs, 5000, "Remote cancellation must remain bounded during shutdown")
     } finally { manager.destroy() }
+  }
+
+  exports.testSubtaskForkUtf8Budget = function() {
+    var manager = new SubtaskManager({ forkstatemaxbytes: 100 }, {})
+    try {
+      var original = { forkedContext: [repeat(50, "界")], workingMemory: { facts: [] } }
+      var task = { goal: "fixture", args: {}, depth: 1, fork: true, forkState: original }
+      var state = manager._buildChildArgs(task).state
+      ow.test.assert(af.fromString2Bytes(state).length <= 100, true, "Serialized UTF-8 bytes fit the configured ceiling")
+      ow.test.assert(original.forkedContext.length, 1, "Trimming never changes the parent's snapshot")
+      task.forkState = { workingMemory: { facts: [{ value: repeat(100, "界") }] } }
+      var error = ""
+      try { manager._buildChildArgs(task) } catch(e) { error = String(e) }
+      ow.test.assert(error.indexOf("forkstatemaxbytes") >= 0, true, "Oversized remaining memory fails before execution")
+    } finally { manager.destroy() }
+  }
+
+  exports.testSubtaskWatchdogCancelBoundAndMetric = function() {
+    ;[false, true].forEach(function(useA2A) {
+      var manager = new SubtaskManager({}, {})
+      manager.remoteDelegation = true
+      manager.useA2A = useA2A
+      var calls = [], now = Date.now()
+      manager._remoteRequest = function(url, path, data, timeout) { calls.push({ path: path, timeout: timeout }); throw new Error("fixture unreachable") }
+      manager.subtasks.fixture = { id: "fixture", status: "running", startedAt: now - 1000, hardTimeoutMs: 1, workerUrl: "http://fixture", remoteTaskId: "task" }
+      manager.runningCount = manager.metrics.running = 1
+      try {
+        manager._startWatchdog()
+        var until = Date.now() + 3000
+        while (manager.metrics.remoteCancelFailures < 1 && Date.now() < until) sleep(10, true)
+        ow.test.assert(calls, [{ path: useA2A ? "/tasks:cancel" : "/cancel", timeout: 5000 }], "Watchdog uses bounded cancellation for both transports")
+        ow.test.assert(manager.metrics.remoteCancelFailures, 1, "Failed timeout cancellation is counted")
+        ow.test.assert(manager.metrics.timedout, 1, "Only one terminal timeout is claimed")
+      } finally { manager.destroy() }
+    })
   }
 
   exports.testSubtaskRemoteOutcomeUnknownDoesNotRetry = function() {

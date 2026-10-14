@@ -75,6 +75,78 @@
     ow.test.assert(args.evidencegate, false, "A mode-provided evidence-gate setting must remain unchanged")
   }
 
+  var resolveStrategy = function(assessment, args, ctx) {
+    return new MiniAOrchestrator({ mode: "auto" }).resolveModelStrategy(assessment, args, ctx)
+  }
+
+  exports.testModelStrategyAutoRules = function() {
+    var lc = { lowCostModel: true, supervisedEligible: true }
+    var complex = { level: "complex", score: 6, signals: [] }
+    var medium = { level: "medium", score: 2, signals: [] }
+    var pick = function(assessment, args, ctx) { return resolveStrategy(assessment, args, ctx).selected }
+    ow.test.assert(pick({ level: "simple", score: 0, signals: [] }, { goal: "List two colors" }, lc), "default", "Simple goals use default")
+    ow.test.assert(pick(complex, { goal: "Migrate the services" }, lc), "advisor", "Complex goals use advisor")
+    ow.test.assert(pick(complex, { goal: "Migrate the services and verify the result" }, lc), "supervised", "Complex goals with verification use supervised")
+    ow.test.assert(pick(complex, { goal: "Migrate the services", outfile: "out.json" }, lc), "supervised", "An outfile counts as a verification requirement")
+    ow.test.assert(pick(complex, { goal: "Migrate the services and verify the result" }, { lowCostModel: true, supervisedEligible: false }), "advisor", "Conflicting options keep advisor")
+    ow.test.assert(pick(complex, { goal: "Migrate the services", modellock: "main" }, lc), "default", "A model lock keeps default")
+    ow.test.assert(pick(complex, { goal: "Migrate the services" }, { lowCostModel: false }), "default", "No LC model keeps default")
+    ow.test.assert(pick(medium, { goal: "Summarize these notes", lcbudget: 50000 }, lc), "delegate", "Budgeted medium goals use delegate")
+    ow.test.assert(pick(medium, { goal: "Summarize these notes" }, lc), "default", "Medium goals without a budget use default")
+    ow.test.assert(pick({ level: "medium", score: 3, signals: ["lookup"] }, { goal: "Look up the latest news", lcbudget: 50000 }, lc), "default", "Risk signals block delegate")
+    ow.test.assert(pick(medium, { goal: "Summarize these notes", contractargs: "report.json" }, { lowCostModel: false }), "supervised", "Contract options select supervised")
+    ow.test.assert(pick(medium, { goal: "x" }, { lowCostModel: true, resumeState: { supervised: {} } }), "supervised", "Supervised resume stays supervised")
+    ow.test.assert(pick(complex, { goal: "x" }, { lowCostModel: true, resumeState: { model_strategy: "delegate" } }), "delegate", "Resume keeps the recorded strategy")
+    var record = resolveStrategy(complex, { goal: "Migrate the services" }, lc)
+    ow.test.assert(record.decision, "model_strategy", "Decision record is named model_strategy")
+    ow.test.assert(isNumber(record.signals.rule), true, "Decision record carries the matched rule")
+  }
+
+  exports.testModelStrategyAutoVerificationUsesWordBoundaries = function() {
+    var complex = { level: "complex", score: 6, signals: ["domain:test"] }
+    var picked = resolveStrategy(complex, { goal: "Find the latest and greatest contest results across 20 services" }, { lowCostModel: true, supervisedEligible: true }).selected
+    ow.test.assert(picked, "advisor", "Words merely containing 'test' must not select supervised")
+  }
+
+  exports.testModelStrategyAutoResolvesDuringInit = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    agent._use_lc = true
+    var args = { goal: "Refactor and migrate the security pipeline across 20 services, then deploy", modelstrategy: "auto", usedecide: false }
+    agent._resolveModelStrategy(args, { goal: args.goal, modelstrategy: "auto" })
+    ow.test.assert(args.modelstrategy, "advisor", "Auto should resolve to a concrete strategy")
+    ow.test.assert(args.__modelstrategyrequested, "auto", "Auto resolution should be remembered for subtasks")
+    ow.test.assert(agent._modelStrategyDecision.selected, "advisor", "The decision record should be kept for tracing")
+
+    var supervisedArgs = { goal: "Refactor and validate the security pipeline across 20 services", modelstrategy: "auto", usedecide: false }
+    agent._resolveModelStrategy(supervisedArgs, { goal: supervisedArgs.goal, modelstrategy: "auto" })
+    ow.test.assert(supervisedArgs.modelstrategy, "supervised", "Verification goals should resolve to supervised")
+    ow.test.assert(supervisedArgs.useplanning, true, "Supervised resolution should force planning")
+    ow.test.assert(agent._enablePlanning, true, "Supervised resolution should refresh the init planning flag")
+
+    var concrete = { goal: args.goal, modelstrategy: "default" }
+    agent._resolveModelStrategy(concrete, { goal: args.goal, modelstrategy: "default" })
+    ow.test.assert(concrete.modelstrategy, "default", "A concrete strategy must not be re-resolved")
+  }
+
+  exports.testModelStrategyAutoViaOrchestrationAuto = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    agent._use_lc = true
+    var goal = "Refactor and migrate the security pipeline across 20 services, then deploy"
+    var args = { goal: goal, orchestration: "auto", usedecide: false, useplanning: false, evidencegate: false, chatbotmode: false }
+    agent._resolveModelStrategy(args, { goal: goal, orchestration: "auto" })
+    ow.test.assert(args.modelstrategy, "advisor", "Implicit modelstrategy under orchestration=auto should use the resolver")
+    agent._applyOrchestration(args, { goal: goal, orchestration: "auto" })
+    ow.test.assert(args.modelstrategy, "advisor", "The orchestrator must not overwrite the resolved strategy")
+    ow.test.assert(agent._orchestrationDecisions.some(function(d) { return d.decision === "model_strategy" }), true, "The strategy decision should join the orchestration decisions")
+
+    var explicit = { goal: goal, orchestration: "auto", modelstrategy: "default", usedecide: false }
+    agent._modelStrategyDecision = __
+    agent._resolveModelStrategy(explicit, { goal: goal, orchestration: "auto", modelstrategy: "default" })
+    ow.test.assert(explicit.modelstrategy, "default", "An explicit strategy must win over orchestration=auto")
+  }
+
   exports.testPlanningWithoutExternalPlanIsNotInvalid = function() {
     var agent = createAgent()
     var messages = []

@@ -1,0 +1,18 @@
+include:
+- oJobTest.yaml
+
+jobs:
+- name: Worker submissions::receipts and cleanup
+  to: oJob Test
+  exec: args.func = require("tests/workerSubmission.js").testWorkerReceiptsAndUnpolledCleanup
+- name: Worker submissions::concurrent duplicates
+  to: oJob Test
+  exec: args.func = require("tests/workerSubmission.js").testWorkerConcurrentDuplicateSubmissions
+- name: Worker submissions::HTTP recovery
+  to: oJob Test
+  exec: args.func = require("tests/workerSubmission.js").testRemoteSubmissionRecoveryTransport
+
+todo:
+- Worker submissions::receipts and cleanup
+- Worker submissions::concurrent duplicates
+- Worker submissions::HTTP recovery

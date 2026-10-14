@@ -307,3 +307,35 @@ assert.match(attachmentResult.history[0].message,/Tika extracted/);
 const rebuilt = context.upgradeActivityTranscript('',attachmentEvents);
 assert.match(rebuilt,/report.pdf/);assert.doesNotMatch(rebuilt,/Tika extracted/);
 console.log('Attachment live and rebuilt answer-view checks passed.');
+
+const idleSkillEvents = [
+  'consultation_start: localEnabled=false; wikiEnabled=true; automatic=false',
+  'requests: origin=goal-or-handoff; requests=[]',
+  'discovered: candidateCount=0; candidates=[]',
+  'selection_skipped: reason=automatic-search-disabled',
+  'selection_start: candidateCount=3',
+  'selection_result: selected=[]; reason=none-relevant',
+  'consultation_reused: selected=[]'
+].map(message => ({ event: '🧩', message }));
+const usedSkillEvents = [
+  'requests: origin=goal-or-handoff; requests=[wiki:example]',
+  'selected wiki:example: explicit=true',
+  'loading wiki:example: source=wiki',
+  'loaded wiki:example: returnedChars=100',
+  'active wiki:example: partial=false',
+  'completed wiki:example: complianceVerified=false',
+  'blocked wiki:example: reason=skill-required-tools-unavailable',
+  'ignored missing: reason=requested-skill-unavailable'
+].map(message => ({ event: '🧩', message }));
+for (const render of [items => result(items).content, items => context.upgradeActivityTranscript('', [...items, { event: 'final', message: 'Answer' }])]) {
+  assert.doesNotMatch(render(idleSkillEvents), /activity-event|answer-activity/,
+    'Idle skill consultation does not create an activity pane');
+  const rendered = render([...idleSkillEvents, ...usedSkillEvents]);
+  assert.equal((rendered.match(/class="activity-event"/g) || []).length, usedSkillEvents.length,
+    'Only explicit requests and skill lifecycle events are visible');
+  assert.match(rendered, /requested-skill-unavailable/);
+  assert.match(rendered, /skill-required-tools-unavailable/);
+}
+assert.equal(result(idleSkillEvents).history.length, idleSkillEvents.length,
+  'Full history retains skill diagnostics');
+console.log('Standard web skill activity checks passed (live route and rebuilt history).');

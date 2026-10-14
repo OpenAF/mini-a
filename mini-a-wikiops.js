@@ -117,9 +117,9 @@ MiniAWikiOps.catalog = (function() {
   add("graph.html", "Graph", "Export offline HTML constellation", true, [["output", "Output HTML file"], ["title", "Title", "Wiki constellation"]])
   add("dream.auto", "Dream", "auto (preview by default)", true, [], { dryrun: true }, "Diagnose and repair identified issues, with recoverable backups and fresh-reader verification.")
   ;["plan", "apply", "repair", "reindex", "graph", "indexes", "reorg"].forEach(function(op) {
-    add("dream." + op, "Dream", op, op !== "plan", op === "reorg" ? [["instructions", "Additional reorg guidance (optional)", ""]] : [], {}, op === "reorg" ? "Live agent changes; no automatic rollback. A rerun may produce different edits." : "")
+    add("dream." + op, "Dream", op, op !== "plan", op === "reorg" ? [["instructions", "Additional reorg guidance (optional)", ""], ["organize", "Organization: none or topics", "none"]] : [], {}, op === "reorg" ? "Live agent changes; no automatic rollback. A rerun may produce different edits." : "")
   })
-  add("ingest.run", "Ingestion & absorption", "Ingest sources (preview by default)", true, [["source", "Folder, repository URL or page URL"], ["section", "Destination section", ""]], { dryrun: true })
+  add("ingest.run", "Ingestion & absorption", "Ingest sources (preview by default)", true, [["source", "Folder, repository URL or page URL"], ["section", "Destination section", ""], ["layout", "New-page layout: flat or source", "flat"]], { dryrun: true })
   add("ingest.recovery", "Ingestion & absorption", "List ingestion recovery", false)
   add("ingest.resume", "Ingestion & absorption", "Resume ingestion", true, [["id", "Recovery ID"]])
   add("ingest.discard", "Ingestion & absorption", "Discard ingestion recovery", true, [["id", "Recovery ID"]], {}, "Archives recovery; already-written pages are retained. This is not rollback.")
@@ -283,7 +283,10 @@ MiniAWikiOps.prototype._execute = function(spec, gates) {
       }
       dream._args.dreamwikimode = action; dream._args.dreammode = "wiki"
       dream._args.dreamwikidryrun = action === "plan" || action === "auto" && p.dryrun === true
-      if (action === "reorg") dream._args.dreamwikiinstructions = String(p.instructions || a.dreamwikiinstructions || "")
+      if (action === "reorg") {
+        dream._args.dreamwikiinstructions = String(p.instructions || a.dreamwikiinstructions || "")
+        dream._args.dreamwikiorganize = String(p.organize || a.dreamwikiorganize || "none")
+      }
       return dream.dreamWiki()
     }
     if (group === "absorb") {

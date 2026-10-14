@@ -129,6 +129,18 @@ todo:
 
 
 - (httpdService): "${onport:-8888}"
+  ((uri       )): /submission/status
+  ((execPre   )): *authCheck
+  ((execURI   )): | #js
+    var postData;
+    try { postData = jsonParse(request.files.postData); } catch(jsonErr) {
+      return ow.server.httpd.reply(stringify({ error: "Invalid JSON in request body" }, __, ""), 400, ow.server.httpd.mimes.JSON);
+    }
+    var receipt = global.__worker_submissionStatus(postData);
+    return ow.server.httpd.reply(stringify(receipt.body, __, ""), receipt.code, ow.server.httpd.mimes.JSON);
+  ((error    )): true
+
+- (httpdService): "${onport:-8888}"
   ((uri       )): /message:send
   ((execPre   )): *authCheck
   ((execURI   )): | #js
@@ -152,6 +164,8 @@ todo:
 
       var taskPayload = {
         goal: goal,
+        submissionId: isMap(postData.metadata) ? postData.metadata.submissionId : __,
+        workerInstanceId: isMap(postData.metadata) ? postData.metadata.workerInstanceId : __,
         communication: isMap(postData.metadata) ? postData.metadata.communication : __,
         args: isMap(postData.metadata) ? postData.metadata.args : {},
         timeout: isMap(postData.configuration) ? postData.configuration.timeoutSeconds : __,
@@ -485,6 +499,9 @@ jobs:
     // Initialize global state
     global.__worker_args = args
     global.__worker_tasks = {}
+    global.__worker_instanceId = genUUID()
+    global.__worker_submissions = Object.create(null)
+    global.__worker_submissionLock = "mini_a_worker_submissions_" + global.__worker_instanceId
     global.__worker_startTime = java.lang.System.currentTimeMillis()
     global.__worker_subtaskToTaskId = {}
     global.__worker_subtaskShortToTaskId = {}
@@ -773,6 +790,7 @@ jobs:
     }
 
     global.__worker_getAgentCard = function(includeExtendedData) {
+      ow.loadNet()
       var wargs = global.__worker_args
       var baseUrl = "http://" + ow.net.getHostAddress() + ":" + wargs.onport
       var card = {
@@ -781,7 +799,8 @@ jobs:
         description: isString(wargs.workerdesc) ? wargs.workerdesc : "Mini-A worker API",
         url: baseUrl,
         preferredTransport: "HTTP+JSON",
-        additionalInterfaces: ["mini-a-worker-v1"].concat(isDef(wargs.agentcomms) && MiniAComms.enabled(MiniAComms.normalize(wargs.agentcomms)) && isString(wargs.apitoken) && wargs.apitoken.length > 0 ? ["agent-comms-v1"] : []),
+        workerInstanceId: global.__worker_instanceId,
+        additionalInterfaces: ["mini-a-worker-v1", "submission-recovery-v1"].concat(isDef(wargs.agentcomms) && MiniAComms.enabled(MiniAComms.normalize(wargs.agentcomms)) && isString(wargs.apitoken) && wargs.apitoken.length > 0 ? ["agent-comms-v1"] : []),
         capabilities: {
           streaming: false,
           pushNotifications: false,
@@ -819,7 +838,8 @@ jobs:
         name: isString(wargs.workername) ? wargs.workername : "mini-a-worker",
         description: isString(wargs.workerdesc) ? wargs.workerdesc : "Mini-A worker API",
         version: "1.0.0",
-        capabilities: ["run-goal", "delegation", "planning", "a2a-http-json-rest"].concat(isDef(wargs.agentcomms) && MiniAComms.enabled(MiniAComms.normalize(wargs.agentcomms)) && isString(wargs.apitoken) && wargs.apitoken.length > 0 ? ["agent-comms-v1"] : []),
+        workerInstanceId: global.__worker_instanceId,
+        capabilities: ["run-goal", "delegation", "planning", "a2a-http-json-rest", "submission-recovery-v1"].concat(isDef(wargs.agentcomms) && MiniAComms.enabled(MiniAComms.normalize(wargs.agentcomms)) && isString(wargs.apitoken) && wargs.apitoken.length > 0 ? ["agent-comms-v1"] : []),
         skills: global.__worker_getSkills().map(function(skill) {
           return {
             id: skill.id,
@@ -840,7 +860,89 @@ jobs:
       }
     }
 
+    // A receipt is bound to this process and retained with its task. Hash only
+    // canonical request data; never retain an additional copy of credentials.
+    global.__worker_submissionFingerprint = function(postData) {
+      var canonical = function(value) {
+        if (isArray(value)) return value.map(canonical)
+        if (!isMap(value)) return value
+        var result = Object.create(null)
+        Object.keys(value).sort().forEach(function(key) { result[key] = canonical(value[key]) })
+        return result
+      }
+      var payload = Object.create(null)
+      Object.keys(postData).forEach(function(key) {
+        if (key !== "submissionId" && key !== "workerInstanceId") payload[key] = postData[key]
+      })
+      return sha256(stringify(canonical(payload), __, ""))
+    }
+
+    global.__worker_submissionStatus = function(postData) {
+      if (!isMap(postData) || !isString(postData.submissionId) || !/^[a-zA-Z0-9_-]{1,128}$/.test(postData.submissionId) || !isString(postData.workerInstanceId)) {
+        return { code: 400, body: { error: "Invalid submission identity" } }
+      }
+      var result
+      sync(function() {
+        if (postData.workerInstanceId !== global.__worker_instanceId) {
+          result = { code: 409, body: { error: "Worker instance changed" } }
+          return
+        }
+        var receipt = global.__worker_submissions[postData.submissionId]
+        result = !receipt ? { code: 404, body: { error: "Submission receipt unavailable" } }
+          : receipt.error ? { code: receipt.code, body: receipt.error }
+          : { code: 200, body: { taskId: receipt.taskId, workerInstanceId: global.__worker_instanceId } }
+      }, global.__worker_submissionLock)
+      return result
+    }
+
     global.__worker_submitTask = function(postData, wargs) {
+      if (!isMap(postData)) return { error: { error: "Invalid task request" }, code: 400 }
+      var keyed = isDef(postData.submissionId) || isDef(postData.workerInstanceId)
+      if (keyed && (!isString(postData.submissionId) || !/^[a-zA-Z0-9_-]{1,128}$/.test(postData.submissionId) || !isString(postData.workerInstanceId))) {
+        return { error: { error: "Invalid submission identity" }, code: 400 }
+      }
+      var result, created = false
+      sync(function() {
+        if (keyed && postData.workerInstanceId !== global.__worker_instanceId) {
+          result = { error: { error: "Worker instance changed" }, code: 409 }
+          return
+        }
+        var fingerprint = keyed ? global.__worker_submissionFingerprint(postData) : __
+        var receipt = keyed ? global.__worker_submissions[postData.submissionId] : __
+        if (receipt) {
+          result = receipt.fingerprint !== fingerprint ? { error: { error: "Submission payload conflicts with existing receipt" }, code: 409 }
+            : receipt.error ? { error: receipt.error, code: receipt.code }
+            : { taskId: receipt.taskId, createdAt: receipt.createdAt }
+          return
+        }
+        if (keyed) {
+          receipt = { fingerprint: fingerprint, createdAt: Date.now() }
+          global.__worker_submissions[postData.submissionId] = receipt
+        }
+        try { result = global.__worker_createTask(postData, wargs) }
+        catch(e) { result = { error: { error: "Task admission failed" }, code: 500 } }
+        if (receipt) {
+          receipt.error = result.error
+          receipt.code = result.code
+          receipt.taskId = result.taskId
+          if (result.taskId) global.__worker_tasks[result.taskId].submissionId = postData.submissionId
+        }
+        created = !result.error
+      }, global.__worker_submissionLock)
+      // Start outside the receipt lock: model execution and callbacks must not hold it.
+      if (created) {
+        var task = global.__worker_tasks[result.taskId]
+        try { global.__worker_taskManager.start(task.subtaskId) }
+        catch(startError) { global.__worker_taskManager.cancel(task.subtaskId, "Task failed to start") }
+        var status = global.__worker_taskManager.status(task.subtaskId)
+        task.status = status.status
+        task.startedAt = status.startedAt
+        task.completedAt = status.completedAt
+      }
+      return result
+    }
+
+    global.__worker_createTask = function(postData, wargs) {
       var goalTrimmed = isString(postData.goal) ? postData.goal.trim() : ""
       if (goalTrimmed.length === 0) {
         return { error: { error: "Missing required field: goal" }, code: 400 }
@@ -861,11 +963,14 @@ jobs:
       var allowedRemoteKeys = {
         goal: true, format: true, raw: true, chatbotmode: true, useplanning: true,
         updatefreq: true, updateinterval: true, forceupdates: true, planlog: true,
-        planmode: true, planformat: true, convertplan: true, maxsteps: true
+        planmode: true, planformat: true, convertplan: true, maxsteps: true,
+        usedecide: true, llmcomplexity: true
       }
       var mergedArgs = merge({}, wargs)
       delete mergedArgs.agentcomms
       Object.keys(taskArgs).forEach(function(key) {
+        // Remote tasks may opt out, but cannot undo an operator decision opt-out.
+        if (["usedecide", "llmcomplexity"].indexOf(key) >= 0 && isDef(wargs[key]) && toBoolean(wargs[key]) === false && toBoolean(taskArgs[key]) === true) return
         if (allowedRemoteKeys[key] === true) { mergedArgs[key] = taskArgs[key] }
       })
       // Pass fork state to child agent via existing args.state deserialization path
@@ -873,6 +978,11 @@ jobs:
       if (isString(forkStatePayload) && forkStatePayload.length > 0) {
         mergedArgs.state = forkStatePayload
         mergedArgs._autoDelegate = false
+      }
+      if (isArray(taskArgs._skillHandoff)) {
+        mergedArgs._skillHandoff = taskArgs._skillHandoff.slice(0, 3).filter(function(item) {
+          return isMap(item) && isString(item.ref) && item.ref.length <= 512 && /^(local:|wiki:)/.test(item.ref)
+        }).map(function(item) { return { ref: item.ref, revision: isString(item.revision) ? item.revision : "", args: isString(item.args) ? item.args : "", required: true } })
       }
       mergedArgs.goal = goalTrimmed
       var timeout = wargs.defaulttimeout
@@ -906,10 +1016,36 @@ jobs:
       global.__worker_subtaskToTaskId[subtaskId] = taskId
       global.__worker_subtaskShortToTaskId[subtaskId.substring(0, 8)] = taskId
       global.__worker_logTaskEvent(taskId, "info", "[subtask:" + subtaskId.substring(0, 8) + "] Task accepted by worker")
-      global.__worker_taskManager.start(subtaskId)
-      global.__worker_tasks[taskId].status = "running"
-      global.__worker_tasks[taskId].startedAt = new Date().getTime()
       return { taskId: taskId, createdAt: now }
+    }
+
+    global.__worker_cleanupTasks = function(now) {
+      var retention = global.__worker_args.taskretention * 1000
+      sync(function() {
+        Object.keys(global.__worker_tasks).forEach(function(taskId) {
+          var task = global.__worker_tasks[taskId]
+          try {
+            var status = global.__worker_taskManager.status(task.subtaskId)
+            task.status = status.status
+            task.startedAt = status.startedAt
+            task.completedAt = status.completedAt
+          } catch(statusError) { return }
+          if (!isNumber(task.completedAt) || now - task.completedAt <= retention) return
+          if (!__isTerminalSubtaskState(task.status)) return
+          try {
+            if (task.comms) task.comms.close()
+            global.__worker_taskManager.cleanup(task.subtaskId)
+          } catch(cleanupError) { logErr(cleanupError); return }
+          delete global.__worker_subtaskToTaskId[task.subtaskId]
+          delete global.__worker_subtaskShortToTaskId[task.subtaskId.substring(0, 8)]
+          if (task.submissionId) delete global.__worker_submissions[task.submissionId]
+          delete global.__worker_tasks[taskId]
+        })
+        Object.keys(global.__worker_submissions).forEach(function(id) {
+          var receipt = global.__worker_submissions[id]
+          if (receipt.error && now - receipt.createdAt > retention) delete global.__worker_submissions[id]
+        })
+      }, global.__worker_submissionLock)
     }
 
     global.__worker_taskManager = new SubtaskManager(args, {
@@ -936,36 +1072,10 @@ jobs:
 - name : Cleanup Loop
   deps : Init
   exec : | #js
-    var retention = global.__worker_args.taskretention * 1000
-
-    // Cleanup old completed tasks periodically
     setInterval(function() {
-      try {
-        var now = new Date().getTime()
-        var taskIds = Object.keys(global.__worker_tasks)
-
-        taskIds.forEach(function(taskId) {
-          var task = global.__worker_tasks[taskId]
-          if (isDef(task.completedAt)) {
-            var age = now - task.completedAt
-            if (age > retention) {
-              try {
-                if (task.comms) task.comms.close()
-                global.__worker_taskManager.cleanup(task.subtaskId)
-              } catch(ignoreCleanup) {}
-              if (isString(task.subtaskId) && task.subtaskId.length > 0) {
-                delete global.__worker_subtaskToTaskId[task.subtaskId]
-                delete global.__worker_subtaskShortToTaskId[task.subtaskId.substring(0, 8)]
-              }
-              delete global.__worker_tasks[taskId]
-              log("Cleaned up task " + taskId + " (age: " + Math.round(age / 1000) + "s)")
-            }
-          }
-        })
-      } catch(cleanupErr) {
-        logErr(cleanupErr)
-      }
-    }, 60000) // Run every minute
+      try { global.__worker_cleanupTasks(Date.now()) }
+      catch(cleanupErr) { logErr(cleanupErr) }
+    }, 60000)
 
 # ---------------
 - name : Register With Parents

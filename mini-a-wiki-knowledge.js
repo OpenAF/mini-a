@@ -41,7 +41,7 @@ MiniAWikiManager.prototype.knowledgeLoadState = function() {
   } catch(e) { this._logFn("warn", "[wiki] manifest unreadable; starting with safe empty state: " + __miniAErrMsg(e)); var empty = this._knowledgeEmptyState(); empty._corrupt = true; return empty }
 }
 MiniAWikiManager.prototype.knowledgeSaveState = function(state) {
-  if (this._access !== "rw" || state._corrupt) return false
+  if (this._access !== "rw" || state._corrupt || this._knowledgeRecoveringMove !== true && this.knowledgeMovePending()) return false
   var p = this._knowledgeStatePath(), dir = p.substring(0, p.lastIndexOf("/")), tmp = p + ".tmp-" + java.util.UUID.randomUUID()
   try {
     if (!io.fileExists(dir)) io.mkdir(dir)
@@ -55,6 +55,172 @@ MiniAWikiManager.prototype.knowledgeSaveState = function(state) {
     return false
   }
 }
+// Structural moves preserve ingestion ownership only across verified link-only changes.
+MiniAWikiManager.prototype.knowledgePageSignature = function(page) {
+  if (!isMap(page)) return ""
+  var stable = {}, meta = page.meta || {}
+  Object.keys(meta).sort().forEach(function(k) {
+    if (["created", "updated", "timestamp", "ingested"].indexOf(k) < 0) stable[k] = meta[k]
+  })
+  return sha1(stringify(stable, __, "") + "\n" + String(page.body || "").trim())
+}
+MiniAWikiManager.prototype.knowledgeMovePending = function() {
+  return io.fileExists(this._getIndexRoot() + "/.mini-a-wiki-move/journal.json")
+}
+MiniAWikiManager.prototype._knowledgeMoveAtomic = function(path, value) {
+  var dir = new java.io.File(path).getParentFile(), tmp = path + ".tmp-" + java.util.UUID.randomUUID()
+  if (!dir.exists() && !dir.mkdirs()) throw new Error("cannot create structural journal directory")
+  try {
+    io.writeFileString(tmp, stringify(value, __, ""))
+    java.nio.file.Files.move(new java.io.File(tmp).toPath(), new java.io.File(path).toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+  } finally { if (io.fileExists(tmp)) io.rm(tmp) }
+}
+MiniAWikiManager.prototype.knowledgeRecoverMove = function() {
+  if (!this.knowledgeMovePending()) return { ok: true, recovered: false }
+  if (this._access !== "rw") throw new Error("structural move recovery requires writable wiki")
+  var self = this, lock = __miniAWikiWriterLock(this._getIndexRoot()), journalPath = this._getIndexRoot() + "/.mini-a-wiki-move/journal.json"
+  try {
+    var j = af.fromJson(io.readFileString(journalPath))
+    if (j.version !== 1 || j.destination !== this._getBackendIdentity() || !isArray(j.operations) || !isMap(j.state)) throw new Error("invalid structural move journal")
+    var stateHash = function(state) { var copy = af.fromJson(stringify(state, __, "")); delete copy.updated; return sha1(stringify(copy, __, "")) }
+    var state = this.knowledgeLoadState()
+    if (state._corrupt || [j.beforeState, stateHash(j.state)].indexOf(stateHash(state)) < 0) throw new Error("structural move manifest conflict")
+    // Preflight the whole operation before replaying any page.
+    j.operations.forEach(function(op) {
+      if (!isString(op.path) || op.path !== __miniAWikiNormalizePath(op.path, { requireMarkdown: true }) || /(^|\/)(\.|@)/.test(op.path) || /(^|\/)(AGENTS|log)\.md$/i.test(op.path)) throw new Error("unsafe structural move path")
+      if (op.raw !== null && !isString(op.raw) || (op.raw === null ? "" : self.knowledgePageSignature(self.parseFrontmatter(op.raw))) !== op.after) throw new Error("invalid structural move payload")
+      var raw = self._backend.read(op.path), signature = isString(raw) ? self.knowledgePageSignature(self.parseFrontmatter(raw)) : ""
+      if (signature !== op.before && signature !== op.after) throw new Error("structural move page conflict: " + op.path)
+    })
+    this._knowledgeRecoveringMove = true
+    j.operations.forEach(function(op) {
+      var raw = self._backend.read(op.path), signature = isString(raw) ? self.knowledgePageSignature(self.parseFrontmatter(raw)) : ""
+      if (signature === op.after) return
+      if (signature !== op.before) throw new Error("structural move page changed during replay: " + op.path)
+      var result = op.raw === null ? self.delete(op.path) : self.write(op.path, op.raw)
+      if (!result || !result.ok) throw new Error("structural move page write failed: " + op.path)
+      var actual = self._backend.read(op.path)
+      if ((isString(actual) ? self.knowledgePageSignature(self.parseFrontmatter(actual)) : "") !== op.after) throw new Error("structural move page verification failed: " + op.path)
+    })
+    var latest = this.knowledgeLoadState()
+    if (latest._corrupt || stateHash(latest) !== stateHash(state)) throw new Error("structural move manifest changed during replay")
+    if (stateHash(state) !== stateHash(j.state) && !this.knowledgeSaveState(j.state)) throw new Error("structural move manifest save failed")
+    // Normal V2 moves publish once in move(); a restarted replay rebuilds before completion.
+    if (isMap(this._servingBatchChanges)) return merge(j.result, { recovery_pending: true })
+    var priorOrigins = this._servingMoveOrigins, indexed
+    try {
+      this._servingMoveOrigins = {}; this._servingMoveOrigins[j.to] = j.from
+      indexed = this._config.maintenanceSourceOnly === true ? null : this.reindex()
+    } finally { this._servingMoveOrigins = priorOrigins }
+    if (this._config.maintenanceSourceOnly !== true && (!indexed || indexed.ok !== true)) throw new Error("structural move publication failed")
+    this._knowledgeFinishMove(j)
+    return merge(j.result, { recovered: true })
+  } finally { this._knowledgeRecoveringMove = false; lock.release() }
+}
+MiniAWikiManager.prototype._knowledgeFinishMove = function(j) {
+  var path = this._getIndexRoot() + "/.mini-a-wiki-move/journal.json"
+  if (!j) j = af.fromJson(io.readFileString(path))
+  this._knowledgeRecoveringMove = true
+  try {
+    this.appendLog("move", j.from + " → " + j.to, j.to)
+    io.rm(path)
+    if (io.fileExists(path)) throw new Error("structural move journal cleanup failed")
+  } finally { this._knowledgeRecoveringMove = false }
+}
+MiniAWikiManager.prototype.knowledgeMove = function(fromPath, toPath, opts) {
+  var lock = __miniAWikiWriterLock(this._getIndexRoot())
+  try {
+    var self = this
+    if (this._ingestJournalPaths().length) return { ok: false, error: "move-during-ingestion-recovery-not-supported" }
+    if (io.fileExists(this._getIndexRoot() + "/.mini-a-wiki-absorb/journal.json")) return { ok: false, error: "move-during-absorption-recovery-not-supported" }
+    if (/(^|\/)(AGENTS|index|log)\.md$/i.test(fromPath) || /(^|\/)(AGENTS|index|log)\.md$/i.test(toPath)) return { ok: false, error: "cannot move structural wiki pages" }
+    var state = this.knowledgeLoadState()
+    if (state._corrupt) return { ok: false, error: "corrupt manifest: move ownership cannot be verified" }
+    if (Object.keys(state.sources).filter(function(key) { return state.sources[key].page === fromPath }).length > 1) return { ok: false, error: "ambiguous-ingestion-move-owner" }
+    if (Object.keys(state.sources).some(function(key) { return state.sources[key].page === toPath })) return { ok: false, error: "move-target-owned-by-ingestion" }
+    var baseline = af.fromJson(stringify(state, __, "")); delete baseline.updated
+    var operations = [], changed = [], raw = this._backend.read(fromPath)
+    var add = function(path, beforeRaw, afterRaw) {
+      if (isString(afterRaw)) {
+        var parsed = self.parseFrontmatter(afterRaw)
+        if (!isString(parsed.meta.type) || !parsed.meta.type.trim()) parsed.meta.type = "concept"
+        if (!isString(parsed.meta.title) || !parsed.meta.title.trim()) parsed.meta.title = path.replace(/\.md$/, "").replace(/[-_/]/g, " ")
+        afterRaw = self._serializeFrontmatter(parsed.meta, parsed.body)
+      }
+      operations.push({ path: path, raw: afterRaw, before: isString(beforeRaw) ? self.knowledgePageSignature(self.parseFrontmatter(beforeRaw)) : "", after: isString(afterRaw) ? self.knowledgePageSignature(self.parseFrontmatter(afterRaw)) : "" })
+    }
+    var movedRaw = this._rewriteLinksForMove(raw, fromPath, fromPath, toPath, true)
+    add(toPath, this._backend.read(toPath), movedRaw)
+    var candidates = this.list(""), linkDiscovery = "legacy-full-scan"
+    if (this._servingMoveSnapshot && isMap(this._servingMoveSnapshot.catalog.moveReverse)) {
+      var catalog = this._servingMoveSnapshot.catalog, incoming = catalog.moveReverse[fromPath] || [], pending = this._retrievalV2._pending()
+      candidates = this._safeListPages("").filter(function(path) {
+        return incoming.indexOf(path) >= 0 || !catalog.pages[path] || !self._retrievalV2._active(catalog.pages[path], pending, __, __, __, __, self._servingMoveSnapshot)
+      })
+      linkDiscovery = "derived-with-changed-page-validation"
+    }
+    candidates.forEach(function(path) {
+      if (path === fromPath || path === toPath || /(^|\/)(AGENTS|log)\.md$/i.test(path)) return
+      var before = self._backend.read(path)
+      if (!isString(before)) return
+      var after = self._rewriteLinksForMove(before, path, fromPath, toPath, false)
+      if (after !== before) { add(path, before, after); changed.push(path) }
+    })
+    var redirect = opts.leaveRedirect === true || opts.redirect === true || opts.stub === true
+    if (redirect) {
+      var page = this.parseFrontmatter(raw), meta = page.meta || {}; meta.superseded_by = toPath
+      // Match the normal writer's frontmatter serialization without mutating the page.
+      var stub = "---\n" + af.toYAML(meta) + "---\n\n> Superseded - this page moved to [" + toPath + "](" + this._relativePath(fromPath, toPath) + ").\n"
+      add(fromPath, raw, stub)
+    } else add(fromPath, raw, null)
+    Object.keys(state.sources).forEach(function(key) {
+      var source = state.sources[key], oldPath = source.page
+      var op = operations.filter(function(x) { return x.path === (oldPath === fromPath ? toPath : oldPath) })[0]
+      if (!op || oldPath === toPath && oldPath !== fromPath) return
+      var before = oldPath === fromPath ? self.knowledgePageSignature(self.parseFrontmatter(raw)) : op.before
+      source.page = op.path
+      if (source.signature && source.signature === before) source.signature = op.after
+      ;(source.chunks || []).forEach(function(chunk) { chunk.page = op.path })
+      Object.keys(state.chunks || {}).forEach(function(id) { if (state.chunks[id].sourceKey === key) state.chunks[id].page = op.path })
+    })
+    // Structural changes invalidate summaries and derived page support; source chunks stay original.
+    var affected = [fromPath, toPath].concat(changed)
+    affected.forEach(function(path) { delete state.pages[path] })
+    var dirty = {}
+    affected.forEach(function(path) {
+      ;(state.dependencies[path] || []).forEach(function(key) { dirty[key] = true })
+      ;(state.derivativeRegistry && state.derivativeRegistry.byPage[path] || []).forEach(function(key) { dirty[key] = true })
+    })
+    var ancestors = { "": true, "index.md": true }
+    affected.forEach(function(path) {
+      var parts = path.split("/"); parts.pop()
+      while (parts.length) { var dir = parts.join("/"); ancestors[dir] = true; ancestors[dir + "/"] = true; ancestors[dir + "/index.md"] = true; parts.pop() }
+    })
+    ;[{ map: state.summaries.pages, kind: "page-summary" }, { map: state.summaries.sections, kind: "section-summary" }].forEach(function(summary) {
+      Object.keys(summary.map || {}).forEach(function(id) {
+        var record = summary.map[id], typed = summary.kind + ":" + id
+        if (!dirty[typed] && affected.indexOf(id) < 0 && !(summary.kind === "section-summary" && ancestors[id]) &&
+            !(isMap(record) && (record.passageSupports || []).some(function(ref) { return affected.indexOf(ref.page) >= 0 }))) return
+        ;(isMap(record) && record.passageSupports || []).forEach(function(ref) {
+          if (state.derivativeRegistry && state.derivativeRegistry.byPage[ref.page]) state.derivativeRegistry.byPage[ref.page] = state.derivativeRegistry.byPage[ref.page].filter(function(key) { return key !== typed })
+          if (state.dependencies[ref.page]) state.dependencies[ref.page] = state.dependencies[ref.page].filter(function(key) { return key !== typed })
+        })
+        delete summary.map[id]
+      })
+    })
+    ;["facts", "concepts"].forEach(function(kind) {
+      Object.keys(state[kind] || {}).forEach(function(key) {
+        var item = state[kind][key]
+        if (isMap(item) && (dirty[(kind === "facts" ? "fact:" : "concept:") + key] ||
+            (item.passageSupports || []).some(function(ref) { return affected.indexOf(ref.page) >= 0 }))) item.invalidated = true
+      })
+    })
+    var result = { ok: true, from: fromPath, to: toPath, pages_moved: 1, pages_changed: changed.length, changed_pages: changed, link_discovery: linkDiscovery, redirect_created: redirect }
+    this._knowledgeMoveAtomic(this._getIndexRoot() + "/.mini-a-wiki-move/journal.json", { version: 1, destination: this._getBackendIdentity(), from: fromPath, to: toPath, beforeState: sha1(stringify(baseline, __, "")), state: state, operations: operations, result: result })
+    return this.knowledgeRecoverMove()
+  } finally { lock.release() }
+}
+
 MiniAWikiManager.prototype.knowledgeEstimateTokens = function(text) { return Math.max(1, Math.ceil(String(text || "").length / 4)) }
 MiniAWikiManager.prototype.knowledgeNormalize = function(text) {
   var s = String(text || "").replace(/\r\n/g, "\n").replace(/^---\n[\s\S]*?\n---\n/, "")

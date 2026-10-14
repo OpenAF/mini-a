@@ -88,6 +88,9 @@ function MiniAWebPrompt(request) {
         goal        : __miniAPrefixGoal(postData.prompt, effectiveArgs.goalprefix),
         raw         : true
       })
+      if (isMap(postData.skillUsage) && isString(postData.skillUsage.name) && /^[a-z0-9][a-z0-9_-]*$/.test(postData.skillUsage.name)) {
+        startArgs._skillHandoff = [{ ref: "local:" + postData.skillUsage.name, args: isString(postData.skillUsage.args) ? postData.skillUsage.args.substring(0, 4000) : "", required: true }]
+      }
       if (toBoolean(startArgs.usememory) && isString(global.__memorysessionheader) && global.__memorysessionheader.length > 0 && isMap(request.header)) {
         var headerMemorySessionId = request.header[global.__memorysessionheader]
         if (isDef(headerMemorySessionId)) {
@@ -190,6 +193,7 @@ function MiniAWebPrompt(request) {
             case "libs"     : _e = "📚"; break
             case "info"     : _e = "ℹ️"; break
             case "skill"    : _e = "🧩"; break
+            case "skill_state": _e = "🧩"; break
             case "load"     : _e = "📂"; break
             case "warn"     : _e = "⚠️"; break
             case "stop"     : _e = "🛑"; break

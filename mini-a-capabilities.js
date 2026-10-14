@@ -71,7 +71,9 @@ MiniA.prototype.getCapabilities = function() {
 
 MiniA.prototype._selectCapabilities = function(goal, args) {
   var registry = this._refreshCapabilityRegistry()
-  var selected = registry.select(goal, { limit: isNumber(args.capabilitylimit) ? args.capabilitylimit : 8 })
+  var limit = isNumber(args.capabilitylimit) ? args.capabilitylimit : 8
+  var decisionSelected = this._selectByDecision(goal, registry.list(), limit)
+  var selected = isDef(decisionSelected) ? { selected: decisionSelected, total: registry.list().length } : registry.select(goal, { limit: limit })
   if (isFunction(this._policyDecision)) {
     selected.selected = selected.selected.filter(function(item) {
       var decision = this._policyDecision({ type: "capability", name: item.name })

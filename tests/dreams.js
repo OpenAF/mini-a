@@ -337,6 +337,43 @@
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 
+  exports.testDreamWikiTopicOrganization = function() {
+    var dir = String(io.createTempDir('dream_topics_'))
+    try {
+      var wm = new MiniAWikiManager({ backend: 'fs', root: dir, access: 'rw' }, function() {})
+      wm.write('setup.md', { title: 'Setup', description: 'Installation', type: 'reference' }, '# Setup\n\nInstallation instructions.')
+      wm.write('upgrade.md', { title: 'Upgrade', description: 'Upgrade', type: 'reference' }, '# Upgrade\n\nUpgrade instructions.')
+      wm.regenerateIndexes(); wm.reindex(); wm.close()
+      var captured, run = function(policy) {
+        var runner = new MiniADreams({ usewiki: true, wikiroot: dir, wikiaccess: 'rw', dreamwikimode: 'reorg', dreamwikireorg: true, dreamwikiapproval: 'auto', dreamwikiorganize: policy, dreamwikiinstructions: 'Prefer installation topics.' }, function() {})
+        runner._createWikiAgent = function() { return {
+          setInteractionFn: function() {}, init: function(a) { captured = a; this._wikiManager = new MiniAWikiManager({ backend: 'fs', root: dir, access: 'rw' }, function() {}) },
+          start: function(a) {
+            if (policy === 'topics') {
+              var manager = this._wikiManager
+              try { ow.test.assert(manager.move('setup.md', 'installation/setup.md').ok, true, 'fake agent relocates page through wiki move') } finally { manager.close() }
+            }
+            this._wikiManager.close()
+            return 'pages_moved: 1; created_sections: installation; skipped_uncertain_moves: []'
+          }
+        } }
+        return runner.dreamWiki()
+      }
+      var result = run('topics')
+      ow.test.assert(result.ok, true, stringify(result))
+      ow.test.assert(result.pages_moved, 1, 'structured report counts observed moves')
+      ow.test.assert(result.created_sections.indexOf('installation') >= 0, true, 'structured report lists created sections')
+      ow.test.assert(captured.goal.indexOf('Even when lint is clean') >= 0, true, 'topic policy examines clean wikis')
+      ow.test.assert(captured.goal.indexOf('normally at most two topic levels') >= 0, true, 'topic policy bounds depth')
+      ow.test.assert(captured.goal.indexOf('Prefer installation topics.') >= 0, true, 'operator guidance retained')
+      ow.test.assert(captured.useshell, false, 'topic pass keeps constrained tools')
+      ow.test.assert(io.fileExists(dir + '/installation/index.md'), true, 'finalization creates section index')
+      ow.test.assert(run('none').ok, true, 'ordinary reorg still finalizes')
+      ow.test.assert(captured.goal.indexOf('Topic organization is explicitly requested') < 0, true, 'topic policy is opt in')
+      ow.test.assert(new MiniADreams({ dreamwikiorganize: 'invalid' }, function() {}).dreamWiki().reason, 'invalid-dreamwikiorganize', 'invalid policy rejected')
+    } finally { io.rm(dir) }
+  }
+
   exports.testDreamWikiReorgApprovalGate = function() {
     var runner = new MiniADreams({
       usewiki: "true",

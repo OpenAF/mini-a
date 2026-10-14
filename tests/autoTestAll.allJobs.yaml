@@ -15,6 +15,7 @@ include:
 - tests/outerLoop.yaml
 - tests/progToolCall.yaml
 - tests/skills.yaml
+- tests/workerSubmission.yaml
 - tests/wiki.yaml
 - tests/wikiCross.yaml
 - tests/wikiIngest.yaml

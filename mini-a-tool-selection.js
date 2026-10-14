@@ -370,6 +370,9 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
   this.fnI("mcp", "Analyzing goal to dynamically select relevant tools from " + allTools.length + " available...")
   if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_dynamic_used)) global.__mini_a_metrics.tool_selection_dynamic_used.inc()
 
+  var decisionSelected = this._selectByDecision(goal, allTools)
+  if (isDef(decisionSelected)) return decisionSelected.map(function(entry) { return entry.name })
+
   var keywordSelected = this._selectToolsByKeywordMatch(goal, allTools)
   if (keywordSelected.length > 0) {
     if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_keyword)) global.__mini_a_metrics.tool_selection_keyword.inc()

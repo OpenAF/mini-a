@@ -7,6 +7,7 @@ const job = fs.readFileSync('mini-a.yaml', 'utf8');
 const con = fs.readFileSync('mini-a-session.js', 'utf8');
 const output = [], warnings = [], executed = [];
 const c = vm.createContext({
+  adapter: undefined,
   __: undefined, isString: x => typeof x === 'string', isDef: x => x != null,
   isUnDef: x => x == null, isArray: Array.isArray, isNumber: x => typeof x === 'number',
   isObject: x => x !== null && typeof x === 'object', isFunction: x => typeof x === 'function',

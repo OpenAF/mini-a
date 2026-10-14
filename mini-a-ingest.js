@@ -393,17 +393,49 @@ MiniAIngest.prototype._validatePage = function(page) {
 
 // _wikiPathFor: <section>/<slug>.md, derived from the source's relative path so that
 // re-ingesting the same source targets the same page.
-MiniAIngest.prototype._wikiPathFor = function(section, source) {
+MiniAIngest.prototype._wikiPathFor = function(section, source, layout) {
   var rel = String(source.rel || source.id || "page")
+  var sourceLayout = String(layout || this._args.ingestlayout || "flat").toLowerCase() === "source" && !source.url
   var slug = rel.replace(/\.[^./]+$/, "")
              .replace(/[^A-Za-z0-9/_-]+/g, "-")
-             .replace(/\/+/g, "-")
+             .replace(/\/+/g, sourceLayout ? "/" : "-")
              .replace(/-+/g, "-")
              .replace(/^-|-$/g, "")
              .toLowerCase()
+  if (sourceLayout) slug = slug.split("/").map(function(part) { return part.replace(/^-|-$/g, "") || "page" }).join("/")
   if (slug.length === 0) slug = "page"
   var sect = isString(section) && section.trim().length > 0 ? section.trim().replace(/^\/+|\/+$/g, "") + "/" : ""
   return sect + slug + ".md"
+}
+
+// Resolve source-relative page links against this ingestion's actual destinations.
+MiniAIngest.prototype._rewriteSourceLinks = function(wm, src, destination, body, mapping, result) {
+  if (src.url) return body
+  var missing = result.unresolved_links || (result.unresolved_links = [])
+  var resolve = function(url) {
+    if (/^(?:[a-z][a-z0-9+.-]*:|#|\/)/i.test(url)) return url
+    var split = url.match(/^([^?#]+)([?#].*)?$/)
+    if (!split) return url
+    var path
+    try { path = decodeURIComponent(split[1]) } catch(ignore) { return url }
+    var parts = String(src.rel).split("/"), escaped = false; parts.pop()
+    path.split("/").forEach(function(p) { if (p === "..") { if (!parts.length) escaped = true; else parts.pop() } else if (p && p !== ".") parts.push(p) })
+    var target = escaped ? null : mapping[parts.join("/")]
+    if (!target) {
+      if (/\.(md|markdown|html?|txt|rst|adoc)$/i.test(path)) missing.push({ source: src.rel, link: url })
+      return url
+    }
+    return wm._relativePath(destination, target) + (split[2] || "")
+  }
+  var fenced = false
+  return String(body).split("\n").map(function(line) {
+    if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; return line }
+    if (fenced) return line
+    var link = function(url) { return url.charAt(0) === "<" ? "<" + resolve(url.substring(1, url.length - 1)) + ">" : resolve(url) }
+    return line.replace(/(`+[^`]*`+)|(!?\[[^\]]*\]\()(<[^>\n]+>|[^\s)]+)([^)]*\))/g, function(all, code, start, url, end) {
+      return code || start.charAt(0) === "!" ? all : start + link(url) + end
+    }).replace(/^(\s*\[[^\]]+\]:\s*)(<[^>\n]+>|\S+)(.*)$/, function(all, start, url, end) { return start + link(url) + end })
+  }).join("\n")
 }
 
 // _defaultSection: a stable section name derived from the source root or URL host.
@@ -552,6 +584,7 @@ MiniAIngest.prototype.manageRecovery = function(action, id, confirmed) {
     }
     if (!isObject(a.wikimanager)) { wm = new MiniAWikiManager(cfg, function(level, msg) { self._log(msg) }); owns = true }
     global.__miniAWikiKnowledge.install(wm)
+    if (wm.knowledgeMovePending()) wm.knowledgeRecoverMove()
     self._rebaseRecovery(wm, entry.record, entry.journal)
     self._applyJournal(wm, entry.record, entry.journal, result)
     result.ok = true; result.status = "recovered"; result.recovered = true
@@ -708,6 +741,7 @@ MiniAIngest.prototype.run = function() {
     if (io.fileExists(indexRoot + "/.mini-a-wiki-absorb/journal.json")) throw new Error("unfinished absorption journal; use /absorb resume")
   }
   try {
+    if (["flat", "source"].indexOf(String(a.ingestlayout || "flat").toLowerCase()) < 0) throw new Error("invalid ingestlayout")
     if (isDef(a.ingestmode) && ["auto", "normalize", "distill", "raw"].indexOf(String(a.ingestmode).trim().toLowerCase()) < 0) throw new Error("invalid ingestmode")
     if (!source) { result.reason = "no-source"; return result }
     if (toBoolean(a.usewiki) !== true) { result.reason = "usewiki-not-set"; return result }
@@ -740,6 +774,11 @@ MiniAIngest.prototype.run = function() {
       acquireWriter(descriptor._getIndexRoot())
       wm = new MiniAWikiManager(cfg, function(level, msg) { self._log(msg) }); owns = true }
     global.__miniAWikiKnowledge.install(wm)
+    if (wm.knowledgeMovePending()) {
+      if (dry) throw new Error("pending structural move; resume with wiki move or writable ingestion")
+      result.structural_recovered = wm.knowledgeRecoverMove()
+      result.recovered = true
+    }
     if (!dry && wm._access !== "rw") { result.reason = "wiki-read-only"; return result }
     var journalPath = wm._getIndexRoot() + "/.mini-a-wiki-ingest/journal.json"
     if (!dry && !lock) acquireWriter(wm._getIndexRoot())
@@ -808,8 +847,12 @@ MiniAIngest.prototype.run = function() {
     try { model = modelRaw.charAt(0) === "{" ? af.fromJson(modelRaw) : af.fromSLON(modelRaw) } catch(ignoreModel) {}
     var publicModel = {}; ["type", "model", "temperature", "url", "maxTokens"].forEach(function(k) { if (isDef(model[k])) publicModel[k] = model[k] })
     var fingerprint = sha1(mode + "|" + this._num("ingestchunkchars", 24000) + "|" + stringify(global.__miniAWikiKnowledge.versions, __, "") + "|" + stringify(publicModel, __, "") + "|" + this._distillPrompt({ id: "" }, [], []))
-    var legacy = this._loadLedger(wm), paths = {}, pending = [], deletions = [], observed = {}, oldIds = [], migration = false
-    Object.keys(manifest.sources).forEach(function(k) { var p = manifest.sources[k].page; if (p) paths[p] = k })
+    var sourcePaths = {}, legacy = this._loadLedger(wm), paths = {}, pending = [], unchanged = [], deletions = [], observed = {}, oldIds = [], migration = false
+    Object.keys(manifest.sources).forEach(function(k) {
+      var record = manifest.sources[k], p = record.page
+      if (p) paths[p] = k
+      if (p && record.scopeId === scope) sourcePaths[record.source] = p
+    })
     found.sources.forEach(function(src, sourceIndex) {
       if (sourceIndex > 0 && sourceIndex % 25 === 0) self._log("[ingest] Planned " + sourceIndex + "/" + found.sources.length + " source(s).")
       if (/\.(docx?|xlsx?|pptx?|pdf|png|jpe?g)$/i.test(String(src.rel || ""))) self._log("[ingest] Extracting " + src.rel + " (" + (sourceIndex + 1) + "/" + found.sources.length + ")...")
@@ -820,7 +863,7 @@ MiniAIngest.prototype.run = function() {
       var prev = manifest.sources[key], old = manifest.sources[oldKey] || legacy[oldKey]
       if (!prev && isMap(old) && !old.scopeId) {
         var oldPath = old.page || old.wikiPath, oldPage = oldPath ? self._page(wm, oldPath) : __
-        if (oldPath === self._wikiPathFor(section, src) && oldPage && oldPage.meta.source === src.rel && oldPage.meta.source_hash === (old.sourceHash || old.sha1)) {
+        if ((oldPath === self._wikiPathFor(section, src) || oldPath === self._wikiPathFor(section, src, "flat")) && oldPage && oldPage.meta.source === src.rel && oldPage.meta.source_hash === (old.sourceHash || old.sha1)) {
           var knownSignature = old.signature || ""
           if (!knownSignature && isString(sourceText) && sha1(sourceText) === (old.sourceHash || old.sha1)) {
             var normalized = self._normalizedPage(wm, src, sourceText, "normalize"), rawPage = self._normalizedPage(wm, src, sourceText, "raw")
@@ -857,6 +900,7 @@ MiniAIngest.prototype.run = function() {
         result.conflicts.push({ source: src.id, page: pagePath, reason: "page ownership or local edit conflict" }); return
       }
       paths[pagePath] = key
+      sourcePaths[src.rel] = pagePath
       var legacyRetiredIds = []
       if (prev && prev.legacyRepair) Object.keys(manifest.chunks).forEach(function(id) {
         var c = manifest.chunks[id]
@@ -867,11 +911,13 @@ MiniAIngest.prototype.run = function() {
       chunks.forEach(function(c) { if (byId[c.id] && byId[c.id].hash === c.hash) result.chunks_reused++; else if (byId[c.id]) result.chunks_changed++; else result.chunks_added++ })
       oldChunks.forEach(function(c) { if (!chunks.some(function(n) { return c.id === n.id })) result.planned_chunks_removed++ })
       var intact = prev && oldChunks.length === chunks.length && chunks.every(function(c) { return byId[c.id] && byId[c.id].hash === c.hash && manifest.chunks[c.id] && manifest.chunks[c.id].generation === prev.generation && manifest.chunks[c.id].page === pagePath && manifest.chunks[c.id].sourceKey === key && manifest.chunks[c.id].hash === c.hash && sha1(String(manifest.chunks[c.id].text || "")) === c.hash })
-      if (toBoolean(a.ingestforce) !== true && prev && prev.sourceHash === hash && prev.fingerprint === fingerprint && !prev.legacyRepair && !prev.bindingRepair && page && intact) { result.skipped_unchanged++; return }
+      var candidate = { src: src, key: key, hash: hash, content: content, chunks: chunks, path: pagePath, before: self._signature(page), legacyRetiredIds: legacyRetiredIds }
+      if (toBoolean(a.ingestforce) !== true && prev && prev.sourceHash === hash && prev.fingerprint === fingerprint && !prev.legacyRepair && !prev.bindingRepair && page && intact) { unchanged.push(candidate); return }
       result.sources_changed++
       if (prev && (!page || prev.legacyRepair || prev.bindingRepair || !intact)) result.planned_repairs.push(pagePath)
       var needs = mode === "distill" || mode === "auto" && chunks.some(function(c) { return wm.knowledgeNeedsDistillation(c).needs })
-      pending.push({ src: src, key: key, hash: hash, content: content, chunks: chunks, path: pagePath, before: self._signature(page), needs: needs, legacyRetiredIds: legacyRetiredIds })
+      candidate.needs = needs
+      pending.push(candidate)
       result.planned_writes.push(pagePath)
     })
     Object.keys(manifest.sources).forEach(function(k) {
@@ -889,6 +935,21 @@ MiniAIngest.prototype.run = function() {
       if (!prev.signature || page && self._signature(page) !== prev.signature) { result.conflicts.push({ source: rel, page: prev.page, reason: "prune ownership or local edit conflict" }); reason = "ownership conflict" }
       if (reason) result.prune_blocked.push({ source: rel, reason: reason })
       else { deletions.push({ key: k, kind: "delete", path: prev.page, before: self._signature(page), sourceRoot: resolved.root, sourceRel: rel }); result.planned_removals.push(prev.page) }
+    })
+    // Check resolved source identities after discovery. Structural wiki moves already repair
+    // links, so changing a destination path alone must not regenerate distilled content.
+    var linkTargets = {}
+    Object.keys(sourcePaths).forEach(function(rel) { linkTargets[rel] = "source:" + rel })
+    var linkIdentityWriter = { _relativePath: function(from, target) { return target } }
+    var linksHash = function(p) { return sha1(self._rewriteSourceLinks(linkIdentityWriter, p.src, p.path, p.content, linkTargets, {})) }
+    pending.forEach(function(p) { p.sourceLinksHash = linksHash(p) })
+    unchanged.forEach(function(p) {
+      p.sourceLinksHash = linksHash(p)
+      // Old records with no resolved local links already match their original source hash.
+      var previousLinksHash = manifest.sources[p.key].sourceLinksHash || p.hash
+      if (previousLinksHash === p.sourceLinksHash) { result.skipped_unchanged++; return }
+      p.needs = mode === "distill" || mode === "auto" && p.chunks.some(function(c) { return wm.knowledgeNeedsDistillation(c).needs })
+      pending.push(p); result.sources_changed++; result.planned_writes.push(p.path)
     })
     if (!found.complete) result.failed.push({ source: "discovery", error: "incomplete source inventory" })
     this._log("[ingest] Planned " + found.sources.length + " source(s): " + pending.length + " changed, " + result.skipped_unchanged + " unchanged, " + result.failed.length + " failed.")
@@ -927,13 +988,14 @@ MiniAIngest.prototype.run = function() {
       if (!d.ok) { result.failed.push({ source: p.src.rel, error: d.error }); continue }
       var meta = { title: d.page.title, description: d.page.description || "", type: d.page.type || "reference", tags: d.page.tags || [], source: p.src.rel,
         source_ref: resolved.ref || resolved.origin || "", source_hash: p.hash, ingest_scope: scope, ingest_source_key: p.key, ingested: new Date().toISOString() }
+      d.page.body = self._rewriteSourceLinks(wm, p.src, p.path, d.page.body, sourcePaths, result)
       var after = self._signature({ meta: meta, body: d.page.body })
       self._invalidate(manifest, p.key, result)
       oldIds = oldIds.concat(p.legacyRetiredIds || [])
       ;(manifest.sources[p.key] && manifest.sources[p.key].chunks || []).forEach(function(c) { oldIds.push(c.id) })
       p.chunks.forEach(function(c) { c.page = p.path; c.sourceKey = p.key; c.generation = generation; manifest.chunks[c.id] = c })
       manifest.sources[p.key] = { scopeId: scope, sourceKey: p.key, source: p.src.rel, sourceId: p.src.id, sourceHash: p.hash, normalizedHash: sha1(wm.knowledgeNormalize(p.content)),
-        fingerprint: fingerprint, discoveryConfig: discoveryConfig, page: p.path, chunks: p.chunks, generation: generation, signature: after, active: true }
+        fingerprint: fingerprint, sourceLinksHash: p.sourceLinksHash, discoveryConfig: discoveryConfig, page: p.path, chunks: p.chunks, generation: generation, signature: after, active: true }
       operations.push({ kind: "write", path: p.path, before: p.before, after: after, meta: meta, body: d.page.body })
     }
     // No destructive operations after failed/deferred writes or conflicts.
@@ -982,7 +1044,8 @@ MiniAIngest.prototype.run = function() {
     try {
       if (wm) {
         result.recoveries = self._recoveryEntries(wm).map(function(e) { return self._recoverySummary(e) })
-        result.recovery_pending = result.recoveries.length > 0
+        result.recovery_pending = result.recoveries.length > 0 || wm.knowledgeMovePending()
+        if (wm.knowledgeMovePending()) result.structural_recovery = "wiki move or writable ingestion"
       }
     } catch(ignoreRecoveryListing) {}
     result.status = result.written.length || result.removed.length ? "partial" : "failed"

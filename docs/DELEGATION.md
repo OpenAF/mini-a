@@ -327,6 +327,7 @@ curl -X POST http://localhost:8080/task \
 - `args` (optional): Agent configuration overrides (validated against allowlist)
 - `timeout` (optional): Deadline in seconds (clamped to `maxtimeout`)
 - `metadata` (optional): Custom metadata for tracking
+- `submissionId`, `workerInstanceId` (optional, supplied together): Same-process submission receipt identity; see recovery below.
 
 **Allowed `args` keys:**
 
@@ -341,6 +342,18 @@ curl -X POST http://localhost:8080/task \
   "createdAt": "2026-02-06T17:00:00.000Z"
 }
 ```
+
+#### Submission recovery
+
+Workers advertise `submission-recovery-v1` and a `workerInstanceId` through `/info` and `/.well-known/agent.json`. Mini-A negotiates recovery automatically when both are present. Each execution attempt gets a fresh submission ID. Legacy `/task` requests carry `submissionId` and `workerInstanceId` at the top level; A2A `/message:send` carries them in `metadata`.
+
+During receipt retention, identical submissions with the same ID return the same task ID, including concurrent requests. A changed payload or worker instance returns HTTP 409. Submission IDs use 1–128 ASCII letters, digits, underscores, or hyphens. Receipts share the worker's `taskretention` lifecycle; cleanup observes completed tasks even if their client disconnected.
+
+`POST /submission/status` accepts `{ "submissionId": "...", "workerInstanceId": "..." }` using the same bearer/IP checks as task submission. A retained receipt returns `{ "taskId": "...", "workerInstanceId": "..." }`; unavailable receipts return 404, changed worker instances return 409, and rejected admissions retain their error response.
+
+After an ambiguous submission response, Mini-A makes up to three bounded receipt lookups against the selected worker, then resumes status/result observation if it recovers the task ID. Cancellation still wins and cancels late-recovered work. Missing or expired receipts, worker restarts, and older workers retain the explicit `Remote outcome unknown` outcome. An ambiguous execution is never automatically resubmitted or sent to another worker. Receipt deduplication applies only while the receipt is retained; external callers must not replay expired IDs as recovery.
+
+Manager counters `remoteSubmissionRecoveries` and `remoteSubmissionRecoveryFailures` appear in agent metrics as `delegation.remote_submission_recoveries` and `delegation.remote_submission_recovery_failures`. Remote cancellation requests, including watchdog cancellation, use a five-second timeout and count failures in `remoteCancelFailures`.
 
 #### `POST /status`
 
@@ -688,6 +701,8 @@ For remote workers the fork state is transmitted as JSON. Large payloads are aut
 - Oldest conversation history entries (`forkedContext`) are dropped first
 - If still oversized, `workingMemorySession` is dropped
 - Controlled by `forkstatemaxbytes` (default 64 KB)
+
+The limit counts serialized UTF-8 bytes. Trimming preserves the parent's snapshot. If the remaining state still exceeds the limit, the child fails before execution with an explicit `forkstatemaxbytes` error.
 
 ### Requesting a fork
 

@@ -81,10 +81,10 @@ MiniAAdvanced.prototype.safe = function(value, key, preserveText) {
 MiniAAdvanced.prototype.mergeOptions = function(base, override) {
   var out = merge(base, override)
   Object.keys(override).forEach(function(key) { if (override[key] === null) delete out[key] })
-  ;["model", "modellc", "modelval"].forEach(function(key) {
+  ;["model", "modellc", "modelval", "modeldec"].forEach(function(key) {
     if (!isDef(override[key])) return
     try {
-      var modelEnv = { model: "OAF_MODEL", modellc: "OAF_LC_MODEL", modelval: "OAF_VAL_MODEL" }
+      var modelEnv = { model: "OAF_MODEL", modellc: "OAF_LC_MODEL", modelval: "OAF_VAL_MODEL", modeldec: "OAF_DECIDE_MODEL" }
       var previousConfig = isDef(base[key]) ? base[key] : getEnv(modelEnv[key])
       var previous = isString(previousConfig) ? af.fromJSSLON(previousConfig) : previousConfig
       var next = isString(override[key]) ? af.fromJSSLON(override[key]) : override[key]
@@ -315,7 +315,7 @@ MiniAAdvanced.prototype.persist = function(state, full) {
     if (/^key$|^token$|api.?key|access.?key|secret|pass(?:word)?$|authorization|credential|webtoken|workerregtoken/i.test(key)) return
     var safe = self.safe(options[key], key)
     if (String(stringify(safe, __, "")).indexOf("[redacted]") >= 0) {
-      if (["model", "modellc", "modelval"].indexOf(key) < 0 || !isMap(safe)) return
+      if (["model", "modellc", "modelval", "modeldec"].indexOf(key) < 0 || !isMap(safe)) return
       function strip(value) {
         if (!isMap(value)) return value
         var out = {}
@@ -370,7 +370,7 @@ MiniAAdvanced.prototype.snapshot = function(state, after) {
     settings: Object.keys(definitions).sort().map(function(key) {
       var def = definitions[key]
       var value = options[key]
-      var modelEnv = { model: "OAF_MODEL", modellc: "OAF_LC_MODEL", modelval: "OAF_VAL_MODEL" }
+      var modelEnv = { model: "OAF_MODEL", modellc: "OAF_LC_MODEL", modelval: "OAF_VAL_MODEL", modeldec: "OAF_DECIDE_MODEL" }
       if (isUnDef(value) && modelEnv[key]) value = getEnv(modelEnv[key])
       return { name: key, type: def.type, dataEditor: def.dataEditor, description: def.description, value: self.safe(value, key, self.isPromptOption(key)), defaultValue: self.safe(def.default, key), inheritedValue: self.safe(isDef(inherited[key]) ? inherited[key] : defaults[key], key, self.isPromptOption(key)), source: Object.prototype.hasOwnProperty.call(state.overrides, key) ? "session" : isUnDef(options[key]) && modelEnv[key] && isDef(value) ? modelEnv[key] : "server",
         readOnly: self.isServerOption(key) }
@@ -493,7 +493,7 @@ MiniAAdvanced.prototype.request = function(data) {
           if (isString(values[key]) && values[key].indexOf("[redacted]") >= 0) {
             if (values[key] === "[redacted]") { delete values[key]; return }
             var rawPrevious = current[key]
-            var modelEnv = { model: "OAF_MODEL", modellc: "OAF_LC_MODEL", modelval: "OAF_VAL_MODEL" }
+            var modelEnv = { model: "OAF_MODEL", modellc: "OAF_LC_MODEL", modelval: "OAF_VAL_MODEL", modeldec: "OAF_DECIDE_MODEL" }
             if (isUnDef(rawPrevious) && modelEnv[key]) rawPrevious = getEnv(modelEnv[key])
             var previous = isString(rawPrevious) ? af.fromJSSLON(rawPrevious) : rawPrevious
             values[key] = stringify(retainMasked(af.fromJSSLON(values[key]), previous), __, "")

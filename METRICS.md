@@ -1,6 +1,6 @@
 # mini-a Metrics Reference
 
-All metrics live on the global `__mini_a_metrics` object as `$atomic(0, "long")` counters.  
+Most metrics live on the global `__mini_a_metrics` object as `$atomic(0, "long")` counters. Decision metrics accumulate separately on each agent instance.
 They accumulate across goals within a session and reset only when `/clear` is run.  
 `getMetrics()` on a `MiniA` instance returns them grouped into sections; `/stats` in the console displays them.
 
@@ -9,13 +9,20 @@ They accumulate across goals within a session and reset only when `/clear` is ru
 ## 1. LLM Calls (`llm_calls`)
 
 | Key | Internal counter | Description |
-|-----|-----------------|-------------|
+|### Decision usage (`decisions`)
+
+The instance records `calls`, `failures`, `fallbacks`, `empty_selections`, `duration_ms`, and fallback `reasons`. Eligibility/configuration failures can occur before an API invocation, so `failures` need not be bounded by `calls`. `input_tokens`, `output_tokens`, and `total_tokens` sum only available reported usage; `usage_reports` distinguishes absent usage from reported zero. No usage is inferred for failed requests. These counters survive decision-client reinitialization and reset with a new agent instance.
+
+MiniAEval includes decision usage in total input/output tokens, adds separate `decision_*` metrics, and compares them across enabled/disabled variants. Missing provider usage remains missing in the OpenAF response; normalized aggregate counters start at zero.
+
+-----|-----------------|-------------|
 | `normal` | `llm_normal_calls` | Calls made to the main LLM (full-cost model). |
 | `low_cost` | `llm_lc_calls` | Calls made to the low-cost LLM (`lc_llm`). Includes complexity-screening calls and steps where the budget favours the cheaper model. |
-| `total` | computed | `normal + low_cost + advisor_calls`. Advisor calls are included here but not in either per-tier counter. |
+| `decision` | instance `decisions.calls` | Invocations of the dedicated decision API; includes failures during execution. |
+| `total` | computed | `normal + low_cost + validation + advisor_calls + decision`. |
 | `fallback_to_main` | `fallback_to_main_llm` | Times a low-cost LLM response failed JSON parsing and the agent retried with the main LLM instead. High values indicate the lc model is struggling to produce valid JSON. |
 
-**Nuance:** `advisor_calls` is counted separately (see §7) and is folded into `total` at read-time. Neither `normal` nor `low_cost` includes advisor calls, so `normal + low_cost ≠ total` when the advisor has been used.
+**Nuance:** `advisor_calls` is counted separately (see §7) and is folded into `total` at read-time. Neither `normal` nor `low_cost` includes advisor, validation, or decision calls; those are folded into `total` at read-time.
 
 ---
 
@@ -359,6 +366,11 @@ Delegation metrics mirror the `SubtaskManager` internal counters, synced at `get
 | `cancelled` | Subtasks explicitly cancelled (e.g. because the parent goal was stopped). |
 | `timedout` | Subtasks that exceeded their deadline. |
 | `retried` | Subtasks retried after a transient failure. |
+| `remote_poll_retries` | Failed remote status observations, including the final failed observation. |
+| `remote_outcome_unknown` | Remote attempts whose execution or result could not be confirmed; these are never automatically resubmitted. |
+| `remote_cancel_failures` | Failed bounded remote cancellation requests, including watchdog timeouts. |
+| `remote_submission_recoveries` | Ambiguous submissions recovered through a same-process worker receipt. |
+| `remote_submission_recovery_failures` | Negotiated receipt lookups that exhausted their bounded recovery attempt. |
 | `worker_hint_used` | Subtask dispatches that carried a preferred-worker hint. |
 | `worker_hint_matched` | Hint-carrying dispatches where the hinted worker was available and used. |
 | `worker_hint_fallthrough` | Hint-carrying dispatches where the hinted worker was unavailable; fell back to normal selection. |
@@ -439,3 +451,70 @@ These counters are tracked directly on `__mini_a_metrics` (not via SubtaskManage
 ## Metrics Channel (`metricsch`)
 
 Beyond the in-memory counters, mini-a supports publishing metrics to an OpenAF channel via the `metricsch` startup argument. This uses `ow.metrics.startCollecting(channelName, period, some, noDate)` to periodically snapshot OpenAF system metrics (CPU, memory, GC, etc.) into a named channel. The channel is reference-counted — multiple `MiniA` instances sharing a channel name will not double-register it, and the channel is torn down only when the last instance releases it. This is orthogonal to the `__mini_a_metrics` counters above; it covers host-level observability rather than agent behaviour.
+
+## Skill lifecycle (`skills`) and evaluation deltas
+
+`getMetrics().skills` is the existing `MiniASkillRuntime.snapshot()`. Unlike the
+session-wide atomic counters, this runtime is replaced for a new skill run.
+MiniAEval exposes a compact `metrics.skills` section without adding runtime counters:
+
+| Eval field | Snapshot source | Meaning |
+|---|---|---|
+| `telemetry_available` | Counter snapshot availability | All listed counters have measurable run deltas. |
+| `discoveries` | `discoveries` | Consultation discovery passes, not individual search/list operations or candidate counts. |
+| `selection_calls` | `selection_calls` | Selector attempts, including Decide/low-cost/main fallback attempts. |
+| `selections` | `selections` | Selected candidates, not verified adherence. |
+| `loads` | `loads` | Successful content consumptions, including sections and supporting references. Repeated reads count again. |
+| `blocks` | `blocks` | Runtime block events, not a count of every tool failure. |
+| `selection_duration_ms` | `selection_duration_ms` | Cumulative selector duration during the scenario. |
+| `returned_chars` | `chars` | Charged content characters (JavaScript string length), including repeated reads; not bytes or tokens. |
+
+Counter deltas use snapshots around the scenario; a replaced skill runtime has
+its own zero origin. Session metrics are never reset. Missing snapshots/fields
+or unexplained counter decreases produce `null`, not measured zero. Disabled
+skills with a valid runtime can report zero. Limits and identity/state collections
+remain final snapshots under `metrics.raw.skills` and `result.skill_activity`;
+they are not counter deltas. Raw skill field names are retained, including `chars`.
+
+Wiki metadata `open` can add a consulted reference without retrieving a body.
+Local discovery returns metadata too. Neither has a separate operation counter.
+`loads` covers the shared built-in local/wiki consumption boundary; aliases and
+native/JSON dispatch do not add counts. Local reads can render templates, so
+loads cannot distinguish explicit invocation from automatic activation or reading.
+External MCPs, arbitrary file reads and provider-internal skill usage are not
+covered: their absent telemetry must not be interpreted as measured inactivity.
+No skill bodies or credentials are added to these metrics.
+
+Nested assertions work through `expected.metrics`, for example
+`"skills.loads": { min: 1 }`. Baseline and variant comparisons include a nested
+`metrics.skills` object of scalar differences, with `null` when either measurement
+is unavailable. Increased activity is neither an automatic benefit nor a regression.
+Retrieval demonstrates access, not instruction adherence or answer quality.
+
+Opt-in Decide judge usage is separate under `result.judge.usage`, with calls,
+usage reports, input/output/total tokens and judge-only `elapsed_ms` beside it.
+Unavailable judge token usage is `null`; judge usage is excluded from evaluated-agent
+metrics and their comparisons. The existing `decision_*` eval metrics measure
+agent decision activity, which may include more than skill selection.
+
+
+`result.skill_activity` retains the final lifecycle snapshot, including consulted
+source-qualified references and revision/pending-section state. Its
+`compliance_verified=false` distinguishes loading/completion from verified
+adherence. Selection uses Decide, low-cost or main according to existing
+configuration, and contributes to the corresponding agent usage metrics.
+
+Skill activity logs describe enabled sources and local discovery roots, discovered
+and eligible counts, bounded candidate lists, explicit requests and ignored unknown
+references, selector tier/start/result/duration, and reasons for skipping
+selection. Loading reports returned characters and shared count/character budgets;
+activation reports source revision, loaded and pending sections, and supporting
+reference names. Blocked requests include available references and corrective hints.
+Activity omits goal text, invocation arguments, and instruction bodies. Lists show
+at most twelve entries; full event metadata remains in the `skill_state` audit trace.
+
+## Supervised execution
+
+`getMetrics().supervised` / `getSupervisedStats()` exposes actual planning, review, question, revision, takeover, LC execution/repair, reconnaissance and decision dispatches; decision fallbacks; save/load/hit/miss/rejection/invalidation counts and reasons; `initial_generation_skipped`; and per-role usage/duration reports. Criterion outcomes and exact content hashes appear in `supervised_*` trace events. Rejected final proposals are not repair dispatches.
+
+MiniAEval adds current artifact assertions, independent success, incorrect automatic completion, audit selection, optional per-role estimated cost, and separate/combined warmup metrics. Unknown usage/pricing remains unknown. Cost per independently successful task includes failed attempts and warmup; skipping planning alone does not establish monetary savings. See [supervised evaluation](docs/SUPERVISED.md#tests-and-evaluation).

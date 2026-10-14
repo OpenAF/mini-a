@@ -91,6 +91,7 @@ jobs:
 
     # Model configuration
     #model          : ""
+    #modeldec      : ""
     #modellc        : ""
 
     # Agent persona
