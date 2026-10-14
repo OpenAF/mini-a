@@ -7,6 +7,11 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/historyVM.js").testConcurrentAppends
 
+- name: MiniA History VM Tests::SystemInstructionsReplace
+  from: MiniA History VM Tests::Init
+  to: oJob Test
+  exec: args.func = require("tests/historyVM.js").testSystemInstructionsReplacedAcrossInstances
+
 - name: MiniA History VM Tests::GoalAndEvidencePaging
   from: MiniA History VM Tests::Init
   to: oJob Test
@@ -282,3 +287,4 @@ todo:
 - MiniA History VM Tests::UnknownContent
 - MiniA History VM Tests::RewindBranch
 - MiniA History VM Tests::BackingFailure
+- MiniA History VM Tests::SystemInstructionsReplace

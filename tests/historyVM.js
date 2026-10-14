@@ -236,6 +236,49 @@
     }, { contextVirtualization: true })
   }
 
+  exports.testSystemInstructionsReplacedAcrossInstances = function() {
+    load("mini-a.js")
+    var makeLlm = function(conversation) {
+      var llm = { getGPT: function() { return { getConversation: function() { return conversation }, setConversation: function(value) { conversation = value } } } }
+      llm.withInstructions = function(text) { conversation.push({ role: "system", content: text }); return llm }
+      llm.conv = function() { return conversation }
+      return llm
+    }
+    var apply = function(llm, text) {
+      var agent = new MiniA()
+      agent.fnI = function() {}
+      agent.llm = llm
+      agent._systemInst = text
+      agent._applySystemInstructions({})
+    }
+    var prompt1 = "SYSTEM A " + new Array(2000).join("skill ")
+    var prompt2 = "SYSTEM B " + new Array(2000).join("skill ")
+    var llm = makeLlm([])
+    apply(llm, prompt1)
+    llm.conv().push({ role: "user", content: "goal" }, { role: "assistant", content: "answer" })
+    var resumed = makeLlm(llm.conv().slice())
+    apply(resumed, prompt2)
+    var systems = resumed.conv().filter(function(entry) { return entry.role === "system" })
+    ow.test.assert(resumed.conv().length, 3, "New instance reuses the system slot instead of appending")
+    ow.test.assert(systems.length, 1, "Exactly one system entry")
+    ow.test.assert(resumed.conv()[0].content === prompt2, true, "System entry stays at index 0 with the current prompt")
+    ow.test.assert(resumed.conv()[1].content, "goal", "User entry untouched")
+
+    var legacy = makeLlm([{ role: "system", content: prompt1 }, { role: "user", content: "a" }, { role: "system", content: prompt1 + "x" },
+      { role: "assistant", content: "b" }, { role: "system", content: prompt1 + "y" }])
+    var before = JSON.stringify(legacy.conv()).length
+    apply(legacy, prompt2)
+    ow.test.assert(legacy.conv().length, 5, "Legacy cleanup keeps indexes stable")
+    ow.test.assert(legacy.conv()[0].content === prompt2, true, "First system entry holds the current prompt")
+    ow.test.assert(legacy.conv()[2].content.indexOf("superseded") >= 0 && legacy.conv()[4].content.indexOf("superseded") >= 0, true, "Later copies become stubs")
+    ow.test.assert(JSON.stringify(legacy.conv()).length < before - prompt1.length, true, "Bloated conversation shrinks")
+
+    var gemini = makeLlm([{ role: "system", parts: [{ text: prompt1 }] }, { role: "user", content: "a" }])
+    apply(gemini, prompt2)
+    ow.test.assert(gemini.conv().length, 2, "Gemini-shaped entry replaced in place")
+    ow.test.assert(gemini.conv()[0].parts[0].text === prompt2, true, "Gemini parts shape preserved")
+  }
+
   exports.testNativeRoundBudgetGuard = function() {
     load("mini-a.js")
     ;[false, true].forEach(function(streaming) {

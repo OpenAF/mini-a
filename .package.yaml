@@ -57,6 +57,7 @@ dependencies:
   openaf: '>=20250915'
 files:
 - .gitignore
+- .mini-a-wiki-ingest/writer.lock
 - .odoc.db
 - .package.yaml
 - AGENT-CHEATSHEET.md
@@ -66,12 +67,26 @@ files:
 - CONTRIBUTING.md
 - LICENSE
 - METRICS.md
+- PLAN-BUNDLED-SKILLS.md
 - README.md
 - USAGE.md
+- WIKI-FEDERATION-ASSESSMENT.md
+- WIKI-RETRIEVE-PLAN-2.md
+- WIKI-RETRIEVE-PLAN.md
+- autoTestAll.results.json
+- development/README.md
+- development/docs/TESTS_MODELS.md
+- development/docs/VM-IMPLEMENTATION-REVIEW.md
+- development/docs/WIKI-INGEST-IMPLEMENTATION-PLAN.md
+- development/docs/WIKI-INGEST-VALIDATION.md
+- development/docs/WIKI-RETRIEVAL-V2-BASELINE.md
+- development/docs/WIKI-RETRIEVAL-V2-VALIDATION.md
+- development/docs/historyvm-live-2026-09-17.json
 - docs/ABSORB.md
 - docs/ADAPTIVE-ROUTER.md
 - docs/AGENT-PLUGINS.md
 - docs/BACKEND-ENDPOINTS.md
+- docs/DECISIONS.md
 - docs/DELEGATION.md
 - docs/ENTRY-POINT-PARITY.md
 - docs/LEARN.md
@@ -80,6 +95,7 @@ files:
 - docs/PATH-INPUT-AUDIT.md
 - docs/REPLY-JSON.md
 - docs/SKILLS-YAML-FORMAT.md
+- docs/SUPERVISED.md
 - docs/VIRTUAL-SKILLS.md
 - docs/WHATS-NEW.md
 - docs/WIKI-RETRIEVAL-V2.md
@@ -87,6 +103,14 @@ files:
 - docs/WORKIQ.md
 - evals/context-virtualization.yaml
 - evals/core.yaml
+- evals/decide.yaml
+- evals/fixtures/bundled-skills/recovery.md
+- evals/fixtures/decision-catalog.yaml
+- evals/fixtures/skill-runtime/local/ledger-report/SKILL.md
+- evals/fixtures/skill-runtime/wiki/incident-review.md
+- evals/skills.yaml
+- evals/supervised.yaml
+- examples/CONTRACT.md
 - examples/README.md
 - examples/agent-template-v2.agent.md
 - examples/agent-template-v2.yaml
@@ -99,6 +123,8 @@ files:
 - examples/email-report.agent.md
 - examples/email-report.yaml
 - examples/eval-ojob.yaml
+- examples/eval-skills-ojob.yaml
+- examples/eval-skills.js
 - examples/learn-from-chat.agent.md
 - examples/learn-from-chat.yaml
 - examples/planning-demo.sh
@@ -111,6 +137,7 @@ files:
 - mcps/mcp-aws-athena.yaml
 - mcps/mcp-ch.yaml
 - mcps/mcp-db.yaml
+- mcps/mcp-decide.yaml
 - mcps/mcp-email.yaml
 - mcps/mcp-es-search.yaml
 - mcps/mcp-file.yaml
@@ -147,6 +174,7 @@ files:
 - mini-a-capabilities.js
 - mini-a-common.js
 - mini-a-con.js
+- mini-a-decision.js
 - mini-a-dreams.js
 - mini-a-eval.js
 - mini-a-eval.yaml
@@ -169,8 +197,10 @@ files:
 - mini-a-router.js
 - mini-a-sandbox.js
 - mini-a-session.js
+- mini-a-skill-runtime.js
 - mini-a-skills.js
 - mini-a-subtask.js
+- mini-a-supervised.js
 - mini-a-tool-selection.js
 - mini-a-utils.js
 - mini-a-web-attachments.js
@@ -194,6 +224,21 @@ files:
 - public/favicon.ico
 - public/index.md
 - public/showdown.min.js
+- skills/mini-a-contract-authoring/SKILL.md
+- skills/mini-a-contract-authoring/references/CONTRACT.md
+- skills/mini-a-files/SKILL.md
+- skills/mini-a-files/references/names.md
+- skills/mini-a-memory/SKILL.md
+- skills/mini-a-planning/SKILL.md
+- skills/mini-a-runtime-diagnostics/SKILL.md
+- skills/mini-a-runtime-diagnostics/references/diagnostics.md
+- skills/mini-a-shell/SKILL.md
+- skills/mini-a-shell/references/spill.md
+- skills/mini-a-skill-authoring/SKILL.md
+- skills/mini-a-skill-authoring/references/formats.md
+- skills/mini-a-visual-output/SKILL.md
+- skills/mini-a-wiki-retrieval/SKILL.md
+- skills/mini-a-wiki-retrieval/references/retrieval.md
 - utils/graphStats.yaml
 - utils/indexStats.yaml
 - utils/wikiCompact.yaml
@@ -201,21 +246,36 @@ files:
 - utils/wikiOps.yaml
 filesHash:
   .gitignore: b2f52bb5498ed71251fa0d2e76d32a9b9a1a0019
+  .mini-a-wiki-ingest/writer.lock: da39a3ee5e6b4b0d3255bfef95601890afd80709
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENT-CHEATSHEET.md: 38a09d995d38b824a4c68397162040b15c425996
   AGENTS.md: 108ea2ac09a8fa0f5b1f72bf9511082f619c2a43
-  CHEATSHEET.md: 4f20e6e5bfde63fc37ccbe2f43b4bd3cf033b826
+  CHEATSHEET.md: efad526b7a67d6a73fa60d31ee8b5a4d3fe8577d
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  METRICS.md: d69659b54963e9437929d15bdd2038ef48e50ae4
-  README.md: 1fcbbcf20c084f9ff546b31f977415809f01a14c
-  USAGE.md: 0ac8d35b9f1eb50565efed1d9eb8f128240bd99a
+  METRICS.md: 6f60aa0782e9cc93f41852cefd86f828c47f90b5
+  PLAN-BUNDLED-SKILLS.md: 155193073547ed64469a14879a0b4ce1b9b95761
+  README.md: 205f55dffb75d8b5d2404e5f30800da30ef75c37
+  USAGE.md: d494990bde5ea94d8856eaf867f89361817aeee6
+  WIKI-FEDERATION-ASSESSMENT.md: 352a57a7d4804bea9443b2b7d6e18f875af025af
+  WIKI-RETRIEVE-PLAN-2.md: abdee2952a3fcf225b3f9416bc1b9cc9ea9f5785
+  WIKI-RETRIEVE-PLAN.md: f09b337e1e9e9b329bd416f9b2af8862c8437e05
+  autoTestAll.results.json: f6cc336807cfb8978232c78d655eab1f6d6f1630
+  development/README.md: 1a1b8984b727d7cc5d8daddb50f8bf12a095b64d
+  development/docs/TESTS_MODELS.md: 29800ca499350bc0eae8ced2bf0b8cf53256f546
+  development/docs/VM-IMPLEMENTATION-REVIEW.md: 1093df6350c96c8b0ba3c184ddac649b08532036
+  development/docs/WIKI-INGEST-IMPLEMENTATION-PLAN.md: f6e628a89e4895be4ee519e7341e3e892479c8e9
+  development/docs/WIKI-INGEST-VALIDATION.md: c31d585c579bd5d1d057c54dcbad64388e6e7d80
+  development/docs/WIKI-RETRIEVAL-V2-BASELINE.md: ef33caae49c903aefefcb8d113852dc2980cfd2a
+  development/docs/WIKI-RETRIEVAL-V2-VALIDATION.md: 14e0391f5a0675e6f741ca0f302b33eb87eefdbe
+  development/docs/historyvm-live-2026-09-17.json: da68b8d3f82cace87cdf91be7c0070963ba8b446
   docs/ABSORB.md: 31bbe919b680e78b369772608d10dda78d1e015e
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/AGENT-PLUGINS.md: af8f692ac4bc690ac9df180e86bb1a1307a5aae5
   docs/BACKEND-ENDPOINTS.md: 6e8e9693f28e24e8d8def4136901805e8bc864a8
-  docs/DELEGATION.md: 068197e1212cdb9dffcdae6ca4cb9e15cd2c35fb
+  docs/DECISIONS.md: 016da132d47c396261c24869ba85c2fe0b3aa99c
+  docs/DELEGATION.md: 535f94b7aed8664f7ad74f5f45ade9dd09bee417
   docs/ENTRY-POINT-PARITY.md: f7930f9f07ce49dededd30280dcc5eccf4397917
   docs/LEARN.md: d61c674318b0655a2cdade7a2102339ac5fa4d75
   docs/MCPPROXY-FEATURE.md: 95dccab604c97f07a561f193e4727dd7796d0e0a
@@ -223,18 +283,27 @@ filesHash:
   docs/PATH-INPUT-AUDIT.md: 3a874f9300b85f41beccd20332a3d4c04b16fcc3
   docs/REPLY-JSON.md: 9dd6747356eb044924928dd08737a01e162e5f5c
   docs/SKILLS-YAML-FORMAT.md: 7457c1d133dea0e6ba860826339b2e8f7a23db94
-  docs/VIRTUAL-SKILLS.md: ebf58cb9f9b61d2551618caf33a6937226ec01e2
+  docs/SUPERVISED.md: 30d6a276f66d4319d3c66f7ad066a2df54c088a8
+  docs/VIRTUAL-SKILLS.md: 7c6216a6a2242ec5deeab1fdcdd51916915ccc8b
   docs/WHATS-NEW.md: 651a11a3d9c22dfefd2bc1bfb7df6e7cc6d08ece
   docs/WIKI-RETRIEVAL-V2.md: 4fe8883850461e4dd8ea717ef95f3281ccb36c77
-  docs/WIKI.md: 068dba6134ccdeac28ac031772038d7629d26396
+  docs/WIKI.md: e102b953c4b099b18647f8e335d51e0d98f4de13
   docs/WORKIQ.md: 9d2a64d6e06e148775a77b8c4df40427ffb16524
   evals/context-virtualization.yaml: 3a58466efa06dbf3dfc028d6a4b59bfc3dcb80a6
   evals/core.yaml: 5bd4c7f5b1fc650e1b656a09f169fbaf2610a9ad
-  examples/README.md: cd552b12357673bc55959b75570eada4853af74b
+  evals/decide.yaml: 5f9bdaf59823d1eb7fa1cd7281efd237c92ba3e5
+  evals/fixtures/bundled-skills/recovery.md: 93134726f2686939d24672c5ad78f4d44d2b225b
+  evals/fixtures/decision-catalog.yaml: 0759cf787a5d91c2ac79ca4cd53e96a616feb659
+  evals/fixtures/skill-runtime/local/ledger-report/SKILL.md: 2a37d73279b1f213108db6046bc089ad4b0329ca
+  evals/fixtures/skill-runtime/wiki/incident-review.md: 1882292831ca2bad77bfd1ad3d18de05fb607049
+  evals/skills.yaml: 719498fb101f605b62ffadcad6addd0639e51cbc
+  evals/supervised.yaml: ba2e894c201ebb64dbfa6f320d45b88c492339e7
+  examples/CONTRACT.md: 58d482c7a033e0c03e7b0fe40d037bcd99e663c9
+  examples/README.md: 3ac0acf9344c465c8664bec015952e662c7cc21a
   examples/agent-template-v2.agent.md: 30d094c72042f21c0ddd0f4df8012a7b7e2f215d
   examples/agent-template-v2.yaml: 80e3c3717e77813d81307461056f412be35931e7
   examples/agent-template.agent.md: 2115a27261ae3706c7ac8fd634c14d45562b80d9
-  examples/agent-template.yaml: 6265fd20ff130a8df81e421297e4beda06cf89e3
+  examples/agent-template.yaml: d0496f7b9c34f9f15fc66d665ad0bbdd8536f0ba
   examples/changelog-gen.agent.md: 3ef6e70f83b7c19626b99e94453163b530ecb8f3
   examples/changelog-gen.yaml: b480c56337e98e177fc898cfae408603c93e295d
   examples/document.agent.md: 833c961dedf1088662d2ee818c5ca443063b7fc7
@@ -242,6 +311,8 @@ filesHash:
   examples/email-report.agent.md: 236593e3de7f13dd1d19cc36c0b5e29cdf8bfe16
   examples/email-report.yaml: 87b17db1782367ef2f0579f4e7af69ad11b5321b
   examples/eval-ojob.yaml: cb34a71ce824ea3a7a016fb324dbf88a58875af7
+  examples/eval-skills-ojob.yaml: 48e951278cfdbc2be9960e21feafd84be541d2c8
+  examples/eval-skills.js: f9f004ee9606534af82a57cbfbf909114cbbdd23
   examples/learn-from-chat.agent.md: a028399761c291c9525e778b23136d9947243503
   examples/learn-from-chat.yaml: 37d0b1e07559c4853d0ea6c144d462269068a20d
   examples/planning-demo.sh: 05c0ef0a5f2452466a01e80158434de0ed29a9a3
@@ -249,18 +320,19 @@ filesHash:
   examples/summary.yaml: 335a9a581b5bb0561b2d5db19d39f04830f31209
   mcps/CREATING.md: 96bae262502f3fc47b4431a4234253f03cc3366a
   mcps/EXTERNAL-MCPS.md: 152d0db701bc3ee259d4184f08fdce3ca2b0d332
-  mcps/README.md: 9d5ee5eebde4e3cdbdf67fa58888116919e815d0
+  mcps/README.md: 39347c524f462d03a23f8608cf439c89cef07f84
   mcps/mcp-a2a.yaml: 9601fe0562cf9b0ead111d9e2d2c00764192e86a
   mcps/mcp-aws-athena.yaml: 93d863b3c49f58194610367c2b73d6a2fe73e6b1
   mcps/mcp-ch.yaml: 4f9c7c4529904a68cfe59bdc402b418d5b43ff0c
   mcps/mcp-db.yaml: aae81e65ae3543e5d54ee37cd55d0c13dc6e4c14
+  mcps/mcp-decide.yaml: e1d47a8b77cd3f2cdedc6b47d47b7f03ef46b4ae
   mcps/mcp-email.yaml: b9636f74c162f4fcb170067576c4a362e329525c
   mcps/mcp-es-search.yaml: 389c99cbc70b1da2ab37ea555f9f7297eb70febc
   mcps/mcp-file.yaml: 995249f68f27578648a6ced34957b872b62cd6e7
   mcps/mcp-fin.yaml: 919e509a174ba2fec50a1f6066ce57654d179244
   mcps/mcp-kube.yaml: 3f80e75010d3340f2f78315548e4039e288346c6
   mcps/mcp-math.yaml: 60944a11b129d9eca27888ef0ef189b33023a432
-  mcps/mcp-mini-a.yaml: e10911358ef7ca0a5ade1592185a3d676551c686
+  mcps/mcp-mini-a.yaml: 31105643b6677b76f436a0ca95fcfd20c2f54a30
   mcps/mcp-net.yaml: dff5115d164807f71c61f9ff153e96553144e6a9
   mcps/mcp-oaf-browse.yaml: 79bf1ca192fe3c371af9f2b16d098e6c8425273d
   mcps/mcp-oaf.yaml: 5495533600957931871ef9549e3a9cf16609c959
@@ -286,17 +358,18 @@ filesHash:
   mcps/mcp-workiq.yaml: 10709d2dccf1032ac4826e8cb512cfb88bf4d14a
   mini-a-absorb.js: 45f96e83a8053171f1ae7abd4ac3fbc4a9c6728f
   mini-a-absorb.yaml: af9f87b3ddb0d4f13c7ed23cd6ab57fd258c2309
-  mini-a-advanced.js: 03bb5c9585e891cfb0bda132c6961d35ad5e60a8
-  mini-a-capabilities.js: 04d7a4564d782981bf0b97a65fbfc563a4b4d60c
-  mini-a-common.js: 36975abac19e292b208c71943a8a96207607a5e9
+  mini-a-advanced.js: 678b020cb5a19f56f5c283afe3e748979340fda9
+  mini-a-capabilities.js: 7627dbcf9cceb6cbc52178078ae54dec0cdd9665
+  mini-a-common.js: eeb04dc3fa8083ec9a03851b9a93a7165dab0d1d
   mini-a-con.js: 8953d1720b12352191542c1a002b7fece0f4e0da
-  mini-a-dreams.js: b3819d3ebd88b271594f485b801aac1782f180f4
-  mini-a-eval.js: 1ab12b5f979f8eaa306049b45abaa0be372b7078
+  mini-a-decision.js: c835fc5123c865e1e951a8aef13c23d87f205370
+  mini-a-dreams.js: 11f73e024df7a15bff9835cfe6789eadbc34a43c
+  mini-a-eval.js: e5c91c55255ab5e6693632dfebc38ea6a18b6d81
   mini-a-eval.yaml: 03938780f7fdb9f3a1ed0d3e5fbdfd58f76fe853
   mini-a-graph.js: 4e93499f09dd85057a74094c6d605f1d74777f8c
-  mini-a-history-vm.js: 1c19addef5b5804d75df562db836b676536d6316
-  mini-a-ingest.js: d5d7fffc7482c0811f3d17d8648287293eef46e2
-  mini-a-ingest.yaml: 7d9243709879a1c951d1548c5941503faff000f4
+  mini-a-history-vm.js: b3e68d304d9dd3afae5ac239b6ab10c3b6b61a4c
+  mini-a-ingest.js: b3d874e5d094a2902249b090f04215de52ecbe50
+  mini-a-ingest.yaml: a668d884dbda2cba3623959a3c1851833631d1f8
   mini-a-mcp-skills.js: 6835e75f88fd3791444cca547eea943faf08a48f
   mini-a-mcp-wiki.js: 89e61853ca08183b5c5a70f3095d503356f5d694
   mini-a-mcptest.js: dc9ca2dbb5c070eac462c8efc0a83c408712d489
@@ -304,39 +377,56 @@ filesHash:
   mini-a-memoryman.js: a943c4a3f946140f3585940d53eda148fc47e4ab
   mini-a-modelman.js: 893127cfdbd0c007a090e4aa193129155828bc95
   mini-a-modes.yaml: 7651d1f85af5c92a80189c41d786aae115619409
-  mini-a-orchestration.js: 89cf3571fe3d5cfdff7f53b7b840ce036e38685f
+  mini-a-orchestration.js: f1df95d9b04df9862a74421f9048534eb1c4b097
   mini-a-plugins.js: db97218e8b99efdf940d1d309ca99d1a6aec8b2c
   mini-a-policy.js: 39767cc38f00de6725344b1e1eca1000dedaee54
   mini-a-progcall.js: 2bf756b84b4e955ea0cf4c1e77d2e8dd71164a42
   mini-a-response.js: 14d6bbe7dfd7cb9438624954638c8b5148b5b954
   mini-a-router.js: 381d0f2d34864fdca03d5d4f528fa0f827bbed48
   mini-a-sandbox.js: 2844520cfb6595675d7773b29af0943fcc6ed6dd
-  mini-a-session.js: 06cccb992171d65dafd7ada731e5b7f8c9f1fb57
-  mini-a-skills.js: 23629e37fbd10e8ca7377c911c60974a8d256b85
-  mini-a-subtask.js: ea7f3e6d60217d58e0c282dee6bec2b1c9af9e40
-  mini-a-tool-selection.js: 0e3d8ecf2182833daef108c5e8fed7cf2271590c
-  mini-a-utils.js: 500c136e5903e240815005f90939d282902325cd
+  mini-a-session.js: 3b77c8521633a3c25bff443cc545688fd35ba01f
+  mini-a-skill-runtime.js: fe1ac2f5b83eb42e97d107b1a93a9fb7b2c6fcdb
+  mini-a-skills.js: dc872bc2ab80de9cd48375768b642fab514bf826
+  mini-a-subtask.js: 084c2ce3c1bf3521671c55b9cd86441649430bae
+  mini-a-supervised.js: e9a0496adc01ef23336b3ed2d2770595e1e49dda
+  mini-a-tool-selection.js: b04e0f5b6f69e0e54b5aeb4d8ea444c12c1e0cfb
+  mini-a-utils.js: 1a10908d089137274d0da65264e70791512f8302
   mini-a-web-attachments.js: c79a0e7f7dedec4539cb62a9c63d29303303f54a
-  mini-a-web-session.js: dd86f3b389ee6ad59dcb6306a8db193c0e01b826
+  mini-a-web-session.js: 26f627f63436d7d5c3e293ccdbc616ace378c36c
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: efb6f4c21739bc1bb6f77575e845adf23827c8b7
-  mini-a-wiki-knowledge.js: 87754db94e4678b84e27adf9666c7c4975e1d9a9
+  mini-a-web.yaml: da6e3104b26431ca0bf18c5ccf0e4886864c7c9b
+  mini-a-wiki-knowledge.js: 761d3b090b377937284a809d251d720020e0f786
   mini-a-wiki-maintenance.js: c4eb53388a3674092c0a722e7631de09df759c8a
   mini-a-wiki-retrieval.js: 80e497a5fa680e4dc1f62e36585d9bf3c73b2ff1
-  mini-a-wiki.js: 83e36cd22c9c49bc92d3edfd0b3833334095515a
+  mini-a-wiki.js: 3ddb49a22a0f9a84bc1540482be8401d0588f570
   mini-a-wikiman.js: 2a560857c981d8e52d6b0ada580aa882861ccdef
-  mini-a-wikiops.js: 6e2cddddc0a7aec7d0504e29e36b5d35cb15a468
-  mini-a-worker.yaml: e133c9b10c1d2eb10919b8aa9743a5291b6535ef
-  mini-a.js: bedd28a1096a04dbe6979bc0030c9ee59348f93b
+  mini-a-wikiops.js: e6eef5ceda538515094ded01d1a26f8af90efd52
+  mini-a-worker.yaml: d85eeb497518492cbd51b2cff53f92b0b1a62a45
+  mini-a.js: 21b6ec6bdca661cde60c3b0f78b2818212675e53
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
-  mini-a.yaml: fddc9b6b545cf9a4a7c5997bfb782c45ae8c39d9
+  mini-a.yaml: cec776277aaa01c240c366a01b579b16726c781c
   public/advanced.css: 0944b9646bd04393565444572053935285048543
-  public/advanced.js: 051253b3793fba77a5587e06f30e9afd8115e09d
+  public/advanced.js: b1b46441861990d25286babb510fd0c071ca5cff
   public/apple-touch-icon.png: 5e22ed6b303b377787779423b97c22f7b20b56ed
   public/data-editor.js: 1433293e0ed9f6486f14b6a91ed88684525a79b3
   public/favicon.ico: 7d62af53ff8c43ba32d022107153e6877567ba75
-  public/index.md: 40cf66fef931f0bb1d3510a88b3c76cea12bd79d
+  public/index.md: 5891fc5105ebd0c290e40024d886dc77485228d2
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
+  skills/mini-a-contract-authoring/SKILL.md: a1bcb7ea1d721631714ad774a145ea9c08199315
+  skills/mini-a-contract-authoring/references/CONTRACT.md: 58d482c7a033e0c03e7b0fe40d037bcd99e663c9
+  skills/mini-a-files/SKILL.md: afe4456cc731d4cc8e16726f983658fdfe3cb7e5
+  skills/mini-a-files/references/names.md: b3d0b8ba197b888448a5fb35f0389bfd3fd9cdfa
+  skills/mini-a-memory/SKILL.md: 55f7a125141098343f41da4c77e9d699724a4b02
+  skills/mini-a-planning/SKILL.md: 1a87441e87c33c553d717dcf8c25984e615a6f53
+  skills/mini-a-runtime-diagnostics/SKILL.md: 85d729d84045575d2e400dc73787fa17d448ec43
+  skills/mini-a-runtime-diagnostics/references/diagnostics.md: 9920130873f9bc3c296f27049fb48609d4aa2a1c
+  skills/mini-a-shell/SKILL.md: d52f58f7fb6d11c5e680464ab270422c1f485b8e
+  skills/mini-a-shell/references/spill.md: c82a6f931cefa2aeca6769215385765662e3ef82
+  skills/mini-a-skill-authoring/SKILL.md: 981ef8d1339c08a259d8c8390274c237028c6f59
+  skills/mini-a-skill-authoring/references/formats.md: 1598f2b6c244334d305bcd9b57e87f5627260403
+  skills/mini-a-visual-output/SKILL.md: bb71e2b5c9c24d9dd2d4dd33f17024b33584b402
+  skills/mini-a-wiki-retrieval/SKILL.md: b3492e2955cb4cd2aa45189be57e9ed940e697c9
+  skills/mini-a-wiki-retrieval/references/retrieval.md: 5a89fd51b99ceaa598ac9116479f7f9d0a86c2b3
   utils/graphStats.yaml: ce32169c30db09d0e74dfffdbba7d70c27db24bc
   utils/indexStats.yaml: 7fc4b114655146b3b3f94813949867485917bacd
   utils/wikiCompact.yaml: 9ed9b7842cd43d045c7b556539e15ed7ba392b06
