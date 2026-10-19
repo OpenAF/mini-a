@@ -184,3 +184,11 @@ ojob mini-a.yaml eval=true evalfile=evals/decide.yaml evalout=/tmp/mini-a-decide
 ```sh
 mini-a modeldec="(type: openai, model: gpt-5-mini, key: '...')" usedecide=true goal="Review the available tools"
 ```
+
+## Automatic fork inheritance
+
+Outgoing delegation now defaults to `forkpolicy=auto`. For ambiguous inheritance only, a configured `modeldec` or `OAF_DECIDE_MODEL` may answer one bounded choice question without requiring `usedecide=true`. This follows the existing internal configured-decision path; other verdict gates retain their explicit opt-in behavior and the public utility still requires its own enabling flags.
+
+Set `forkdecide=false` to retain deterministic automatic inheritance without this classifier. `usedecide=false` also disables it. No configuration, unsupported capability, invalid configuration/output, abstention/refusal, timeout, exhausted allowance, or rate pressure uses the precomputed deterministic fallback. No main or low-cost generation call is substituted.
+
+The classifier accepts only a normalized named `choice` answer for `inheritance`, drawn from the feasible scopes or `abstain`. Probability fields are not required. Input is at most 8 KiB serialized UTF-8 and respects lower applicable limits. It has eight run-local allowance reservations, no provider retries, a maximum 2-second real transport timeout, non-waiting RPM/TPM admission, and a 64-entry validated-choice cache. It skips custom adapters whose real transport bound cannot be established. Failures disable only the fork-policy path where appropriate. Existing decision observation accounts for actual reported usage once; inherited-token estimates remain separate. See [Delegation](DELEGATION.md#automatic-inheritance-and-migration) for precedence, worker behavior, budgets, and migration.

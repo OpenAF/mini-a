@@ -2,6 +2,46 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA Wiki Ingest Tests::ExportRepairsCorruptPredecessor
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testExportRepairsCorruptPredecessor
+
+- name: MiniA Wiki Ingest Tests::UnchangedIngestRepairsServingAndPreservesExport
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testUnchangedIngestRepairsServingAndPreservesExport
+
+- name: MiniA Wiki Ingest Tests::JournalIntegrityBlocksPayloadCorruption
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testJournalIntegrityBlocksPayloadCorruption
+
+- name: MiniA Wiki Ingest Tests::DurableRecoveryBoundaries
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testDurableRecoveryBoundaries
+
+- name: MiniA Wiki Ingest Tests::RecoveryBeforeUnavailableSource
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testRecoveryBeforeUnavailableSource
+
+- name: MiniA Wiki Ingest Tests::TransformationCheckpointReuse
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testTransformationCheckpointReuse
+
+- name: MiniA Wiki Ingest Tests::ParallelFailureDoesNotRepeatCompletedItems
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testParallelFailureDoesNotRepeatCompletedItems
+
+- name: MiniA Wiki Ingest Tests::CorruptRecoveryListingPreservesValidEntries
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testCorruptRecoveryListingPreservesValidEntries
+
+- name: MiniA Wiki Ingest Tests::ServingProofRejectsFallbackAndStaleRecords
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testServingProofRejectsFallbackAndStaleRecords
+
+- name: MiniA Wiki Ingest Tests::ExportPreflightPreservesAcceptedBundle
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testExportPreflightPreservesAcceptedBundle
+
 - name: MiniA Wiki Ingest Tests::IncrementalSourceLinkResolution
   to: oJob Test
   exec: args.func = require("tests/wikiIngestReconcile.js").testIncrementalSourceLinkResolution
@@ -308,6 +348,16 @@ jobs:
   exec: args.func = require("tests/wikiIngestReconcile.js").testPreparedRecoveryWithIncompleteOrigin
 
 todo:
+- MiniA Wiki Ingest Tests::ExportRepairsCorruptPredecessor
+- MiniA Wiki Ingest Tests::UnchangedIngestRepairsServingAndPreservesExport
+- MiniA Wiki Ingest Tests::JournalIntegrityBlocksPayloadCorruption
+- MiniA Wiki Ingest Tests::DurableRecoveryBoundaries
+- MiniA Wiki Ingest Tests::RecoveryBeforeUnavailableSource
+- MiniA Wiki Ingest Tests::TransformationCheckpointReuse
+- MiniA Wiki Ingest Tests::ParallelFailureDoesNotRepeatCompletedItems
+- MiniA Wiki Ingest Tests::CorruptRecoveryListingPreservesValidEntries
+- MiniA Wiki Ingest Tests::ServingProofRejectsFallbackAndStaleRecords
+- MiniA Wiki Ingest Tests::ExportPreflightPreservesAcceptedBundle
 - MiniA Wiki Ingest Tests::IncrementalSourceLinkResolution
 - MiniA Wiki Ingest Tests::SourceLayoutCollisionsAndLinkForms
 - MiniA Wiki Ingest Tests::StructuralMoveInterruptedWritesAndPublication

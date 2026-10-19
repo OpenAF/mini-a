@@ -124,6 +124,7 @@ loadLib("mini-a-common.js")
     var decisions = delta.decisions || {}
     var actions = delta.actions || {}
     var delegation = delta.delegation || {}
+    var fork = delta.fork_policy || delegation.fork_policy || {}
     var wiki = delta.wiki || {}
     var historyVmDelta = isMap(delta.history_vm) && isMap(delta.history_vm.metrics) ? delta.history_vm.metrics : {}
     var historyVmAfter = isMap(after) && isMap(after.history_vm) ? after.history_vm : {}
@@ -134,6 +135,18 @@ loadLib("mini-a-common.js")
       total_steps: perf.steps_taken,
       llm_calls: llm.total,
       model_calls: { main: llm.normal, low_cost: llm.low_cost, validation: llm.validation, decision: llm.decision || 0 },
+      fork_resolutions: fork.resolutions || 0,
+      fork_classifier_attempts: fork.classifier_attempts || 0,
+      fork_classifier_fallbacks: fork.classifier_fallbacks || 0,
+      fork_cache_hits: fork.cache_hits || 0,
+      fork_latency_ms: fork.latency_ms || 0,
+      fork_classifier_latency_ms: fork.classifier_latency_ms || 0,
+      fork_inherited_bytes: fork.inherited_bytes || 0,
+      fork_estimated_tokens: fork.estimated_tokens || 0,
+      fork_end_to_end_ms: fork.end_to_end_ms || 0,
+      // Local core counters can include concurrent children; never add child snapshots
+      // to these totals or claim independent parent/child usage from shared counters.
+      delegation_usage_scope: "existing_process_counters",
       decision_calls: decisions.calls || 0,
       decision_failures: decisions.failures || 0,
       decision_fallbacks: decisions.fallbacks || 0,
@@ -569,7 +582,7 @@ loadLib("mini-a-common.js")
       var base = byName[item.name]
       if (!base) return
       var comparison = { name: item.name, success_changed: item.success !== base.success, metrics: {} }
-      ;["elapsed_ms", "total_steps", "llm_calls", "tool_calls", "failed_tool_calls", "input_tokens", "output_tokens", "decision_calls", "decision_failures", "decision_fallbacks", "decision_elapsed_ms", "decision_total_tokens", "context_candidate_tokens", "context_materialized_tokens", "effective_context_ratio", "history_vm_rehydrations", "shadow_actual_tokens", "shadow_projected_tokens", "shadow_expected_savings", "active_context_input_tokens", "active_context_output_tokens", "active_context_tokens_saved"].forEach(function(key) {
+      ;["elapsed_ms", "total_steps", "llm_calls", "tool_calls", "failed_tool_calls", "input_tokens", "output_tokens", "fork_resolutions", "fork_classifier_attempts", "fork_classifier_fallbacks", "fork_cache_hits", "fork_latency_ms", "fork_classifier_latency_ms", "fork_inherited_bytes", "fork_estimated_tokens", "fork_end_to_end_ms", "decision_calls", "decision_failures", "decision_fallbacks", "decision_elapsed_ms", "decision_total_tokens", "context_candidate_tokens", "context_materialized_tokens", "effective_context_ratio", "history_vm_rehydrations", "shadow_actual_tokens", "shadow_projected_tokens", "shadow_expected_savings", "active_context_input_tokens", "active_context_output_tokens", "active_context_tokens_saved"].forEach(function(key) {
         comparison.metrics[key] = (item.metrics[key] || 0) - (base.metrics[key] || 0)
       })
       comparison.metrics.skills = this._compareSkills(item.metrics.skills, base.metrics.skills)
@@ -598,7 +611,7 @@ loadLib("mini-a-common.js")
       if (!isArray(groups[key])) groups[key] = []
       groups[key].push(item)
     })
-    var metricKeys = ["elapsed_ms", "total_steps", "llm_calls", "tool_calls", "failed_tool_calls", "input_tokens", "output_tokens", "decision_calls", "decision_failures", "decision_fallbacks", "decision_elapsed_ms", "decision_total_tokens", "context_materialized_tokens", "effective_context_ratio", "history_vm_rehydrations", "shadow_projected_tokens", "active_context_output_tokens", "active_context_tokens_saved"]
+    var metricKeys = ["elapsed_ms", "total_steps", "llm_calls", "tool_calls", "failed_tool_calls", "input_tokens", "output_tokens", "fork_resolutions", "fork_classifier_attempts", "fork_classifier_fallbacks", "fork_cache_hits", "fork_latency_ms", "fork_classifier_latency_ms", "fork_inherited_bytes", "fork_estimated_tokens", "fork_end_to_end_ms", "decision_calls", "decision_failures", "decision_fallbacks", "decision_elapsed_ms", "decision_total_tokens", "context_materialized_tokens", "effective_context_ratio", "history_vm_rehydrations", "shadow_projected_tokens", "active_context_output_tokens", "active_context_tokens_saved"]
     var comparisons = [], self = this
     Object.keys(groups).sort().forEach(function(key) {
       var items = groups[key]

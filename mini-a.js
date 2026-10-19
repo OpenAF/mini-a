@@ -104,6 +104,7 @@ var MiniA = function() {
   this._debugchConfig = __
   this._debuglcchConfig = __
   this._debugvalchConfig = __
+  this._debugvisualchConfig = __
   this._traceFn = __
   this._runState = __
   this._adaptiveRouting = false
@@ -749,6 +750,7 @@ load("mini-a-tool-selection.js")
 load("mini-a-orchestration.js")
 load("mini-a-capabilities.js")
 load("mini-a-decision.js")
+load("mini-a-fork-policy.js")
 load("mini-a-policy.js")
 
 MiniA.prototype._stopAgentResources = function() {
@@ -1933,7 +1935,7 @@ MiniA.prototype._sanitizeArgsForAudit = function(args) {
   var self = this
   var out = {}
   var redactKeys = {
-    model: true, modellc: true, modelval: true, modeldec: true, auditch: true, debugch: true, debuglcch: true, debugdecch: true, debugvalch: true
+    model: true, modellc: true, modelval: true, modeldec: true, modelvisual: true, auditch: true, debugch: true, debuglcch: true, debugdecch: true, debugvalch: true, debugvisualch: true
   }
   Object.keys(args).forEach(function(key) {
     if (!isString(key) || key.length === 0) return
@@ -2031,6 +2033,7 @@ MiniA.prototype.getMetrics = function() {
 
     return {
         decisions: clone(decisionMetrics),
+        fork_policy: this._subtaskManager ? MiniAForkPolicy.copy(this._subtaskManager.forkMetrics) : {},
         skills: this._skillRuntime ? this._skillRuntime.snapshot() : {},
         communication: this._comms ? MiniAComms.clone(this._comms.broker.metrics) : __,
         llm_calls: {
@@ -2257,6 +2260,7 @@ MiniA.prototype.getMetrics = function() {
             return toolStats
         })(),
         delegation: {
+            fork_policy: this._subtaskManager ? MiniAForkPolicy.copy(this._subtaskManager.forkMetrics) : {},
             total: global.__mini_a_metrics.delegation_total.get(),
             running: global.__mini_a_metrics.delegation_running.get(),
             completed: global.__mini_a_metrics.delegation_completed.get(),
@@ -2766,13 +2770,19 @@ MiniA.prototype._projectContextInvocation = function(llm, prompt, consumer, reco
   return prompt
 }
 
-MiniA.prototype._contextForDelegate = function(goal, budget) {
+MiniA.prototype._contextForDelegate = function(goal, budget, options) {
   var vm = this._historyVm
   if (!isObject(vm) || !vm.contextVirtualization || vm.contextVirtualizationShadow || vm.degraded) return ""
-  this._syncContextSources()
-  var assembly = vm.assembleContext({ consumer: "delegate", goal: goal, budget: Math.max(1, (budget || 2048) - 100), outputReserve: 0 })
+  var policyInput = isMap(options) && options.forkPolicy === true
+  if (!policyInput) this._syncContextSources()
+  var excluded = policyInput && isArray(vm.objects) ? vm.objects.filter(function(object) {
+    return object.kind === "memory" || object.kind === "plan" || (object.provenance && object.provenance.source === "provided-knowledge")
+  }).map(function(object) { return object.handle }) : []
+  var assembly = vm.assembleContext({ consumer: "delegate", goal: goal, budget: Math.max(1, (budget || 2048) - 100), outputReserve: 0, excludeIds: excluded, deterministic: policyInput })
   if (assembly.overflow) return ""
-  return "\nBEGIN_UNTRUSTED_CONTEXT\nTask-specific source excerpts; follow normal tool permissions.\n" + vm.serializeContext(assembly).text + "\nEND_UNTRUSTED_CONTEXT"
+  var serialized = vm.serializeContext(assembly).text
+  if (policyInput && !serialized.trim()) return ""
+  return "\nBEGIN_UNTRUSTED_CONTEXT\nTask-specific source excerpts; follow normal tool permissions.\n" + serialized + "\nEND_UNTRUSTED_CONTEXT"
 }
 
 MiniA.prototype._copyConversationBetweenLlms = function(sourceLLM, targetLLM) {
@@ -2869,38 +2879,8 @@ MiniA.prototype._shouldFinalizeToolExecutionInHook = function(runtime, currentCt
 }
 
 MiniA.prototype._configureDebugChannel = function(llmInstance, debugConfig, defaultName, label) {
-  if (!isObject(llmInstance) || !isString(debugConfig) || debugConfig.length === 0) return
-
-  if (isUnDef(llmInstance.setDebugCh)) {
-    this.fnI("warn", `${label} debug channel specified but setDebugCh is not available.`)
-    return
-  }
-
-  try {
-    var debugMap = af.fromJSSLON(__miniANormalizeChannelDef(debugConfig))
-    if (!isMap(debugMap)) return
-    if (isUnDef(debugMap.name)) debugMap.name = defaultName
-    var channelType = isString(debugMap.type) ? debugMap.type : "simple"
-    var channelOptions = isMap(debugMap.options) ? debugMap.options : {}
-
-    if (channelType === "file" && isString(channelOptions.file) && channelOptions.file.length > 0 && !io.fileExists(channelOptions.file)) {
-      io.writeFileString(channelOptions.file, "{}")
-    }
-
-    var channelExists = false
-    try {
-      channelExists = $ch().list().indexOf(debugMap.name) >= 0
-    } catch(ignoreListDebugCh) {}
-    if (!channelExists) {
-      $ch(debugMap.name).create(channelType, channelOptions)
-    }
-    delete this._debugChannelFiles[debugMap.name]
-    llmInstance.setDebugCh(debugMap.name)
-    this.fnI("output", `${label} debug channel '${debugMap.name}' created and configured.`)
-  } catch (e) {
-    var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
-    this.fnI("warn", `Failed to configure ${label} debug channel: ${errMsg}`)
-  }
+  var self = this
+  __miniAConfigureDebugChannel(llmInstance, debugConfig, defaultName, label, function(level, message) { self.fnI(level, message) }, this._debugChannelFiles)
 }
 
 MiniA.prototype._flushDebugChannelToFile = function(channelName) {
@@ -9843,6 +9823,8 @@ MiniA.prototype._createRateLimiter = function(args) {
     if (requestLimit === null && tokenLimit === null) {
         return {
             beforeCall: function() {},
+            tryBeforeCall: function() { return true },
+            afterReservedCall: function() {},
             afterCall : function() {}
         }
     }
@@ -9850,6 +9832,7 @@ MiniA.prototype._createRateLimiter = function(args) {
     var parent = this
     var requestTimestamps = []
     var tokenEntries = []
+    var normalInFlight = 0
 
     var prune = function(referenceTime) {
         var cutoff = referenceTime - 60000
@@ -9886,7 +9869,24 @@ MiniA.prototype._createRateLimiter = function(args) {
         return waitMs
     }
 
+    var admissionLock = "mini_a_rate_" + genUUID()
     return {
+        tryBeforeCall: function() {
+            var admitted = false
+            sync(function() {
+                var timestamp = now()
+                prune(timestamp)
+                if (normalInFlight > 0 || computeWait(timestamp) > 0) return
+                if (requestLimit !== null) requestTimestamps.push(timestamp)
+                admitted = true
+            }, admissionLock)
+            return admitted
+        },
+        afterReservedCall: function(tokensUsed) {
+            sync(function() {
+                if (tokenLimit !== null) tokenEntries.push({ time: now(), tokens: Math.max(0, Math.round(tokensUsed || 0)) })
+            }, admissionLock)
+        },
         beforeCall: function() {
             if (requestLimit === null && tokenLimit === null) return
             while (true) {
@@ -9898,15 +9898,19 @@ MiniA.prototype._createRateLimiter = function(args) {
                 parent.fnI("rate", `Rate limit reached: waiting ${delay}ms before next LLM call...`)
                 sleep(delay, true)
             }
+            sync(function() { normalInFlight++ }, admissionLock)
         },
         afterCall: function(tokensUsed) {
-            var nowTime = now()
-            prune(nowTime)
-            if (requestLimit !== null) requestTimestamps.push(nowTime)
-            if (tokenLimit !== null) {
-                var numericTokens = isNumber(tokensUsed) && !isNaN(tokensUsed) ? Math.max(0, Math.round(tokensUsed)) : 0
-                tokenEntries.push({ time: nowTime, tokens: numericTokens })
-            }
+            sync(function() {
+                normalInFlight = Math.max(0, normalInFlight - 1)
+                var nowTime = now()
+                prune(nowTime)
+                if (requestLimit !== null) requestTimestamps.push(nowTime)
+                if (tokenLimit !== null) {
+                    var numericTokens = isNumber(tokensUsed) && !isNaN(tokensUsed) ? Math.max(0, Math.round(tokensUsed)) : 0
+                    tokenEntries.push({ time: nowTime, tokens: numericTokens })
+                }
+            }, admissionLock)
         }
     }
 }
@@ -11001,8 +11005,8 @@ MiniA.prototype._getPluginsDiscovery = function(args) {
 
 // Keep vision requests isolated from the agent's tools and conversation history.
 MiniA.prototype._inspectImageWithModel = function(request) {
-  var config = clone(this._oaf_model)
-  if (!isMap(config)) throw new Error("Image inspection requires a configured main model")
+  var config = clone(isMap(this._oaf_visual_model) ? this._oaf_visual_model : this._oaf_model)
+  if (!isMap(config)) throw new Error("Image inspection requires a configured visual or main model")
   // Provider request parameters can contain built-in tools independently of Mini-A registration.
   ;[config, config.params].forEach(function(options) {
     if (!isMap(options)) return
@@ -11012,11 +11016,11 @@ MiniA.prototype._inspectImageWithModel = function(request) {
     config.excludeAllExistingTools = true
     config.skillDirectories = []
   }
-  var llm = this._createBareLlmInstance(config, __, "__mini_a_image", "Image inspection")
+  var llm = this._createBareLlmInstance(config, this._debugvisualchConfig, "__mini_a_visual_llm_debug", "Image inspection")
   try {
     if (!isObject(llm) || !isFunction(llm.promptImage)) throw new Error("Configured model does not support promptImage")
     var image = request.path
-    var provider = String(this._oaf_model.type || "").toLowerCase()
+    var provider = String(config.type || "").toLowerCase()
     if (provider === "openai" && request.mediaType === "image/png") {
       // OpenAF's OpenAI promptImage currently labels image bytes as JPEG.
       var source = javax.imageio.ImageIO.read(new java.io.File(request.path))
@@ -12026,7 +12030,7 @@ MiniA.prototype._normalizeActionBatch = function(payload) {
 }
 
 MiniA.prototype._buildDelegationToolDescription = function() {
-  var base = "Delegate a sub-goal to an isolated child Mini-A agent that runs independently with its own context and step budget."
+  var base = "Delegate a sub-goal to a child Mini-A agent with its own step budget. Omit fork/forkscope to let the policy choose automatically. Supply them only to make an explicit inheritance request."
   if (!isObject(this._subtaskManager) || !isArray(this._subtaskManager.workers) || this._subtaskManager.workers.length === 0) {
     return base + " No remote workers registered; child agent runs locally."
   }
@@ -12105,12 +12109,7 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
           var opts = {}
           if (isDef(p.timeout)) opts.deadlineMs = Number(p.timeout) * 1000
 
-          var useFork = toBoolean(p.fork) === true
-          if (useFork) {
-            var forkScope = isArray(p.forkscope) ? p.forkscope : (isString(p.forkscope) ? [p.forkscope] : ["memory"])
-            opts.fork = true
-            opts.forkState = parent._buildForkState(forkScope)
-          }
+          ;["fork", "forkscope", "forkpolicy"].forEach(function(key) { if (isDef(p[key])) opts[key] = p[key] })
 
           var waitForResult = isDef(p.waitForResult) ? toBoolean(p.waitForResult) : true
 
@@ -12253,7 +12252,8 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
             tools         : { type: "array", items: { type: "string" }, description: "Optional MCP tool names to hand off to the child. If omitted, Mini-A may selectively hand off clearly relevant parent MCP tools based on the goal and skills." },
             mcptools      : { type: "array", items: { type: "string" }, description: "Alias for tools." },
             mcp           : { type: "boolean", description: "Set false to disable automatic MCP handoff for this child. Default: automatic selective handoff." },
-            fork          : { type: "boolean", description: "If true, spawn a forked sub-agent that inherits a snapshot of the parent's context. Default: false." },
+            fork          : { type: "boolean", description: "If true, spawn a forked sub-agent that inherits a snapshot of the parent's context. Omit fork/forkscope to let the policy choose automatically. Supply them only for an explicit inheritance request." },
+            forkpolicy    : { type: "string", enum: ["auto", "legacy", "clean", "memory", "context", "full"], description: "One-shot inheritance policy; does not configure the child’s future delegations." },
             forkscope     : { type: "array", items: { type: "string", enum: ["memory", "context"] }, description: "Which parts of parent context to inherit when fork=true. 'memory' copies working memory (default). 'context' also copies conversation history." }
           },
           required: ["goal"]
@@ -16121,18 +16121,18 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
   var known = {}
   ;[
     "rpm", "tpm", "rtm", "maxsteps", "knowledge", "fileallow", "chatyouare", "youare", "homedir",
-    "promptprofile", "systempromptbudget", "outfile", "outfileall", "libs", "model", "modellc", "modelval", "modeldec",
+    "promptprofile", "systempromptbudget", "outfile", "outfileall", "libs", "model", "modellc", "modelval", "modeldec", "modelvisual",
     "conversation", "historyvm", "historyvmmode", "historyvmshadow", "contextvirtualization", "contextvirtualizationshadow", "shell", "usesandbox", "sandboxprofile", "sandboxnonetwork", "shellallow", "shellbanextra",
     "shelltimeout", "shellmaxbytes", "toolcachettl", "mcplazy", "mcpdynamic", "mcpproxy", "mcpproxythreshold", "toolargcheck", "toolargrepair",
     "mcpproxytoon", "contextguard", "contextguardbudget", "toolresultmaxinline", "readresultmaxmatches",
-    "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugdecch", "debugvalch", "capabilityselection", "capabilitylimit", "policy", "policyfile", "planfile",
+    "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugdecch", "debugvalch", "debugvisualch", "capabilityselection", "capabilitylimit", "policy", "policyfile", "planfile",
     "planformat", "plancontent", "planstyle", "forceplanning", "saveplannotes", "outputfile", "updatefreq",
     "updateinterval", "forceupdates", "planlog", "nosetmcpwd", "noagentsmd", "utilsroot", "utilsallow", "utilsdeny",
     "useskills", "usestdutils", "useasciiviz", "mini-a-docs", "miniadocs",
     "usejsontool", "usedelegation", "workers", "workerreg", "workerregtoken", "workerevictionttl", "maxconcurrent",
     "delegationmaxdepth", "delegationtimeout", "delegationstalltimeout", "delegationhardtimeout", "delegationmaxretries",
     "autodelegation", "autodelegationthreshold", "autodelegationmaxperstep", "noisytools",
-    "subtasks", "subtasksfile", "subtaskssequential", "forkstatemaxbytes",
+    "subtasks", "subtasksfile", "subtaskssequential", "forkstatemaxbytes", "forkpolicy", "forkdecide",
     "mcpprogcall", "mcpprogcallport",
     "mcpprogcallmaxbytes", "mcpprogcallresultttl", "mcpprogcalltools", "mcpprogcallbatchmax", "agent", "agentfile",
     "verbose", "readwrite", "debug", "debugfile", "debugtrace", "raw", "showthinking", "useshell", "checkall", "shellallowpipes",
@@ -16536,6 +16536,7 @@ MiniA.prototype.init = function(args) {
   var explicitExternalArgs = jsonParse(stringify(args, __, ""), __, __, true)
   this._applyAgentMetadata(args)
   this._applyExplicitExternalArgs(args, explicitExternalArgs)
+  this._forkPolicyRun = genUUID()
   this._initDecisionRuntime(args)
   this._validateSupervisedArgs(args)
   if (MiniA.shouldWarnUnknownArgs(args)) this._warnUnknownArgs(args)
@@ -16633,6 +16634,7 @@ MiniA.prototype.init = function(args) {
       { name: "model", type: "string", default: __ },
       { name: "modellc", type: "string", default: __ },
       { name: "modelval", type: "string", default: __ },
+      { name: "modelvisual", type: "string", default: __ },
       { name: "modeldec", type: "string", default: __ },
       { name: "conversation", type: "string", default: __ },
       { name: "historyvm", type: "boolean", default: false },
@@ -16668,6 +16670,7 @@ MiniA.prototype.init = function(args) {
       { name: "debuglcch", type: "string", default: __ },
       { name: "debugdecch", type: "string", default: __ },
       { name: "debugvalch", type: "string", default: __ },
+      { name: "debugvisualch", type: "string", default: __ },
       { name: "valtools", type: "boolean", default: false },
       { name: "planfile", type: "string", default: __ },
       { name: "planformat", type: "string", default: __ },
@@ -16711,6 +16714,8 @@ MiniA.prototype.init = function(args) {
       { name: "subtasksfile", type: "string", default: "" },
       { name: "subtaskssequential", type: "boolean", default: false },
       { name: "forkstatemaxbytes", type: "number", default: 65536 },
+      { name: "forkpolicy", type: "string", default: "auto" },
+      { name: "forkdecide", type: "boolean", default: true },
       { name: "mcpprogcall", type: "boolean", default: false },
       { name: "mcpprogcallport", type: "number", default: 0 },
       { name: "mcpprogcallmaxbytes", type: "number", default: 4096 },
@@ -16816,6 +16821,8 @@ MiniA.prototype.init = function(args) {
     args.subtasks = _$(args.subtasks, "args.subtasks").isString().default("")
     args.subtasksfile = _$(args.subtasksfile, "args.subtasksfile").isString().default("")
     args.subtaskssequential = _$(toBoolean(args.subtaskssequential), "args.subtaskssequential").isBoolean().default(false)
+    args.forkpolicy = MiniAForkPolicy.policy(args.forkpolicy)
+    args.forkdecide = isDef(args.forkdecide) ? toBoolean(args.forkdecide) : true
     args.forkstatemaxbytes = _$(args.forkstatemaxbytes, "args.forkstatemaxbytes").isNumber().default(65536)
     if (args.forkstatemaxbytes <= 0) args.forkstatemaxbytes = 65536
     args.mcpprogcall = _$(toBoolean(args.mcpprogcall), "args.mcpprogcall").isBoolean().default(false)
@@ -16907,6 +16914,9 @@ MiniA.prototype.init = function(args) {
       args.autodelegation = false
       this.fnI("warn", "Delegation disabled by policy: " + delegationPolicy.reason)
     }
+    if (isObject(this._subtaskManager)) {
+      ;["forkpolicy", "forkdecide", "usedecide", "forkstatemaxbytes"].forEach(function(key) { this._subtaskManager.parentArgs[key] = args[key] }, this)
+    }
     if (args.usedelegation === true && isUnDef(this._subtaskManager)) {
       try {
         if (isUnDef(global.SubtaskManager)) {
@@ -16976,8 +16986,8 @@ MiniA.prototype.init = function(args) {
           var childArgs = isMap(entry.args) ? entry.args : {}
           var taskOpts = {}
           if (isNumber(entry.timeout)) taskOpts.deadlineMs = entry.timeout * 1000
-          if (toBoolean(entry.fork) === true) {
-            taskOpts.fork = true
+          ;["fork", "forkscope", "forkpolicy"].forEach(function(key) { if (isDef(entry[key])) taskOpts[key] = entry[key] })
+          if (toBoolean(entry.fork) === true && !isDef(entry.forkscope)) {
             taskOpts.forkState = { workingMemory: (_startupArgs.usememory && isObject(_self._agentState) ? _self._agentState.workingMemory : __) || {} }
           }
           var sid = _mgr.submitAndRun(entry.goal, childArgs, taskOpts)
@@ -17188,6 +17198,10 @@ MiniA.prototype.init = function(args) {
       throw new Error(_msg)
     }
 
+    // Reset the optional visual model on each run; image calls fall back to main.
+    this._oaf_visual_model = parseModelConfig(args.modelvisual, "modelvisual parameter", true)
+    if (isUnDef(this._oaf_visual_model)) this._oaf_visual_model = parseModelConfig(getEnv("OAF_VISUAL_MODEL"), "OAF_VISUAL_MODEL environment variable", true)
+
     // Re-evaluate low-cost model config on every init() call so reused MiniA instances
     // do not keep a stale LC model when the current run doesn't define one.
     this._oaf_lc_model = __
@@ -17299,6 +17313,7 @@ MiniA.prototype.init = function(args) {
     this._debugchConfig = args.debugch
     this._debuglcchConfig = args.debuglcch
     this._debugvalchConfig = args.debugvalch
+    this._debugvisualchConfig = args.debugvisualch
     // Clear bare-LLM snapshots so _registerMcpToolsForGoal doesn't restore stale ones
     this._llmNoTools = __
     this._lcLlmNoTools = __
@@ -17673,6 +17688,9 @@ MiniA.prototype._refreshRunPrompt = function(args) {
     }
 
     var trimmedKnowledge = args.knowledge.trim()
+    // Keep inherited runtime data out of configured knowledge and prompt-file
+    // resolution. This also prevents a clean grandchild from inheriting it again.
+    if (isString(args._forkInheritedKnowledge) && args._forkInheritedKnowledge.length > 0) trimmedKnowledge += args._forkInheritedKnowledge
     var agentPersonaLine = this._defaultAgentPersonaLine
     if (isString(args.youare) && args.youare.trim().length > 0) agentPersonaLine = args.youare.trim()
     var chatPersonaLine = this._defaultChatPersonaLine
@@ -18678,10 +18696,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.tpm = _$(args.tpm, "args.tpm").isNumber().default(__)
 
     // Mini autonomous agent to achieve a goal using an LLM and shell commands
-    var rateLimiter = this._createRateLimiter(args)
+    var rateLimiter = this._forkDecisionRuntime.rateLimiter || this._createRateLimiter(args)
+    this._forkDecisionRuntime.rateLimiter = rateLimiter
+    this._decisionControlsRun = this._forkPolicyRun
     var addCall = () => rateLimiter.beforeCall()
     var registerCallUsage = tokens => rateLimiter.afterCall(tokens)
-    this._decisionToolControls = { beforeCall: addCall, afterCall: registerCallUsage }
+    this._decisionToolControls = { beforeCall: addCall, afterCall: registerCallUsage, tryBeforeCall: rateLimiter.tryBeforeCall, afterReservedCall: rateLimiter.afterReservedCall }
 
     var planCallControls = {
       beforeCall: () => addCall(),
@@ -19922,11 +19942,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               var _summaryWaitMs = isNumber(args.delegationtimeout) && args.delegationtimeout > 0
                 ? Math.min(args.delegationtimeout, 120000) : 120000
               var _summaryDeadlineMs = isNumber(args.delegationtimeout) && args.delegationtimeout > 0 ? args.delegationtimeout : 300000
-              var _summaryOpts = { deadlineMs: _summaryDeadlineMs, maxAttempts: 1 }
+              var _summaryOpts = { deadlineMs: _summaryDeadlineMs, maxAttempts: 1, _forkSelfContained: true }
               if (isNumber(args.delegationstalltimeout) && args.delegationstalltimeout > 0) _summaryOpts.stallTimeoutMs = args.delegationstalltimeout
               if (isNumber(args.delegationhardtimeout) && args.delegationhardtimeout > 0) _summaryOpts.hardTimeoutMs = args.delegationhardtimeout
               var _memoryMap = isObject(this._agentState) ? this._agentState.workingMemory : __
-              if (args.usememory === true && isObject(_memoryMap) && Object.keys(_memoryMap).length > 0) {
+              if (args.forkpolicy === "legacy" && args.usememory === true && isObject(_memoryMap) && Object.keys(_memoryMap).length > 0) {
                 _summaryOpts.fork = true
                 _summaryOpts.forkState = this._buildForkState(["memory"])
               }

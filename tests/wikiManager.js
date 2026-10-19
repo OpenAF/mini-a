@@ -273,17 +273,21 @@
       choose:function(prompt, labels) {
         step++
         if (step === 1) return 2
-        if (step === 2) { assert(labels[0].indexOf("List pages [last used]") >= 0,true,"Last operation retained first"); return labels.length - 3 }
+        if (step === 2) { assert(labels[0].indexOf("List pages [last used]") >= 0,true,"Last operation retained first"); return labels.length - 4 }
         if (step === 3) return 0
-        if (step === 4) return labels.length - 2
+        if (step === 4) return labels.length - 3
+        if (step === 5) return labels.length - 2
         return labels.length - 1
       }
     })
     man.showCurrentWiki = function() {}
+    var commandsShown = 0
+    man.showLastCommand = function() { commandsShown++ }
     man.runOperation = function(id, advanced) { calls.push([id,advanced]); man.history.push({result:full}) }
     man.category("Inspect")
     assert(calls,[["wiki.list",false],["wiki.list",true]],"Persistent submenu and opt-in advanced settings")
     assert(printed[0],full,"Details retain full output")
+    assert(commandsShown,1,"Last command is available from the category menu")
     var summary = MiniAWikiMan.summary(full)
     assert(summary.rows.count,5,"Summary retains collection count")
     assert(summary.rows.preview.length,3,"Preview bounded")
@@ -300,5 +304,26 @@
     assert(replay.displayCommand.indexOf("cd "),0,"Displayed command has no subshell wrapper")
     assert(formatted.indexOf("DO_NOT_DISPLAY"),-1,"Formatting retains secret redaction")
     assert(replay.command,original,"History/export command remains plain and unchanged")
+    var printed = [], man = new MiniAWikiMan(runner.args, {print:function(v) { printed.push(v) }})
+    man.showLastCommand()
+    assert(printed[0],"No operations have run yet.","Command menu handles an empty session")
+    printed = []
+    var executions = 0
+    runner.execute = function() { executions++; return {ok:true} }
+    man.record(runner, runner.spec("wiki.read",{path:"a.md"}), {})
+    assert(printed.join("\n").indexOf("Run the same operation from the command line:"),-1,"Running an operation does not print its command")
+    printed = []
+    man.showLastCommand()
+    assert(printed.indexOf(formatted)>=0,true,"Menu displays the original command and prerequisites")
+    var latest = runner.spec("wiki.delete",{path:"b.md"})
+    var latestReplay = runner.command(latest,{confirm:true})
+    man.record(runner,latest,{confirm:true})
+    runner.args.wikiroot = "/tmp/changed-session-target"
+    printed = []
+    man.showLastCommand()
+    assert(printed.indexOf(MiniAWikiOps.formatReplay(latestReplay))>=0,true,"Menu retains the latest run command after settings change")
+    assert(printed.join("\n").indexOf("Re-running this command authorizes")>=0,true,"Mutation warning accompanies the requested command")
+    assert(executions,2,"Viewing a command does not execute it")
+    assert(man.history[1].command,latestReplay.command,"History retains the executable command")
   }
 })()

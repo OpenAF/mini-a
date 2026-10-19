@@ -614,4 +614,202 @@
     runner = f.runner({ ingestprune: true }); var discover = runner._discover; runner._discover = function(r) { var v = discover.call(this, r); v.complete = false; return v }
     var r = runner.run(); assert(r.ok, false, 'incomplete recovery inventory blocked'); assert(io.fileExists(f.wiki + '/docs/b.md'), true, 'recovery never deletes on inaccessible inventory')
   }) }
+  exports.testDurableRecoveryBoundaries = function() {
+    ['prepared', 'pages-applied', 'finalization-pending', 'finalized', 'verified', 'exported'].forEach(function(boundary) { fixture(function(f) {
+      f.write('a.md', '# A\n\ncheckpointneedle')
+      var options = { ingestmode: 'distill', wikiretrievalv2: true, wikiretrievalconfig: { bundlePath: f.wiki + '/serving.zip' } }
+      var runner = f.runner(options), atomic = runner._atomicJson, injected = false
+      runner._atomicJson = function(path, value) {
+        atomic.call(this, path, value)
+        var c = value.checkpoints || {}
+        var at = boundary === 'finalized' ? c.finalized && !c.serving : boundary === 'verified' ? c.serving && !c.export : boundary === 'exported' ? c.export : value.phase === boundary
+        if (!injected && /\/journal\.json$/.test(path) && at) { injected = true; throw new Error('injected crash at ' + boundary) }
+      }
+      var first = runner.run()
+      assert(injected, true, 'injected ' + boundary)
+      assert(first.ok, false, 'interruption is reported at ' + boundary)
+      assert(f.prompts.length, 1, 'one durable transformation before ' + boundary)
+      var second = f.run(options)
+      assert(second.ok, true, 'fresh runner resumes ' + boundary + ': ' + stringify(second))
+      assert(second.verification.current_only, true, 'current generation is proved at ' + boundary)
+      assert(second.progress.bundle_exported, true, 'export completed at ' + boundary)
+      assert(f.prompts.length, 1, 'resume does not repeat model calls at ' + boundary)
+      assert(f.runner(options).manageRecovery('list').recoveries.length, 0, 'journal cleared at ' + boundary)
+      assert(f.run(options).status, 'noop', 'repeat is idempotent at ' + boundary)
+    }) })
+  }
+  exports.testRecoveryBeforeUnavailableSource = function() { fixture(function(f) {
+    f.write('a.md', '# A\n\nmissingoriginneedle')
+    var runner = f.runner(), apply = runner._applyJournal
+    runner._applyJournal = function() { throw new Error('injected before application') }
+    assert(runner.run().ok, false, 'journal prepared')
+    io.rm(f.src)
+    var resumed = f.run()
+    assert(resumed.ok, true, stringify(resumed))
+    assert(resumed.recovery_only, true, 'unavailable source does not prevent recovery')
+    assert(resumed.sync_complete, false, 'recovery alone does not claim fresh source synchronization')
+    assert(resumed.verification.current_only, true, 'new publication verified')
+    assert(f.body('docs/a.md').indexOf('missingoriginneedle') >= 0, true, 'stored page recovered')
+  }) }
+  exports.testTransformationCheckpointReuse = function() { fixture(function(f) {
+    f.write('a.md', '# A\n\ntransformneedle')
+    var runner = f.runner({ ingestmode: 'distill' }), atomic = runner._atomicJson
+    runner._atomicJson = function(path, value) { if (/\/journal\.json$/.test(path)) throw new Error('injected journal failure'); return atomic.call(this, path, value) }
+    assert(runner.run().ok, false, 'transformation completes before journal failure')
+    assert(f.prompts.length, 1, 'model called once')
+    var resumed = f.run({ ingestmode: 'distill' })
+    assert(resumed.ok, true, stringify(resumed))
+    assert(resumed.llm_calls, 0, 'exact cached transformation reused')
+    assert(f.prompts.length, 1, 'no repeated model call')
+    f.write('a.md', '# A\n\nchangedtransformneedle')
+    assert(f.run({ ingestmode: 'distill' }).llm_calls, 1, 'changed source invalidates reuse')
+  }) }
+  exports.testParallelFailureDoesNotRepeatCompletedItems = function() { fixture(function(f) {
+    f.write('a.md', '# A\n\nFirst'); f.write('b.md', '# B\n\nSecond')
+    var parallel = parallel4Array
+    try {
+      parallel4Array = function(batch, fn) { fn(batch[0]); throw new Error('injected scheduling failure') }
+      var result = f.run({ ingestmode: 'distill', ingestconcurrency: 2 })
+      assert(result.ok, true, stringify(result))
+      assert(f.prompts.length, 2, 'each source transformed exactly once after batch failure')
+      assert(result.llm_calls, 2, 'calls report excludes serial duplicates')
+    } finally { parallel4Array = parallel }
+  })
+    fixture(function(f) {
+      f.write('a.md', '# A\n\nFirst'); f.write('b.md', '# B\n\nSecond')
+      var parallel = parallel4Array, runner = f.runner({ ingestmode: 'distill', ingestconcurrency: 2 })
+      var distill = runner._distill, entered = new java.util.concurrent.CountDownLatch(1), calls = new java.util.concurrent.atomic.AtomicInteger(0), worker
+      runner._distill = function() { calls.incrementAndGet(); entered.countDown(); java.lang.Thread.sleep(100); return distill.apply(this, arguments) }
+      try {
+        parallel4Array = function(batch, fn) {
+          worker = new java.lang.Thread(function() { fn(batch[0]) }); worker.start()
+          assert(entered.await(5, java.util.concurrent.TimeUnit.SECONDS), true, 'parallel item is in flight')
+          throw new Error('injected scheduler failure with active worker')
+        }
+        var result = runner.run()
+        assert(result.ok, true, stringify(result))
+        assert(Number(calls.get()), 2, 'serial fallback waits for in-flight item instead of repeating it')
+        assert(result.llm_calls, 2, 'in-flight calls counted once')
+      } finally { parallel4Array = parallel; if (worker) worker.join(5000) }
+    })
+  }
+  exports.testCorruptRecoveryListingPreservesValidEntries = function() { fixture(function(f) {
+    f.write('a.md', '# A\n\nOriginal')
+    var runner = f.runner(); runner._applyJournal = function() { throw new Error('prepared') }; runner.run()
+    io.mkdir(f.wiki + '/.mini-a-wiki-ingest/journals')
+    var broken = f.wiki + '/.mini-a-wiki-ingest/journals/broken.json'
+    io.writeFileString(broken, 'not json')
+    var listing = f.runner().manageRecovery('list')
+    assert(listing.ok, false, 'unknown scope blocks recovery')
+    assert(listing.recoveries.length, 2, 'valid journal remains discoverable')
+    assert(listing.recoveries.filter(function(e) { return e.invalid }).length, 1, 'corrupt entry identified individually')
+    var result = f.run()
+    assert(result.diagnostic.code, 'ingest-journal-corrupt', 'stable diagnosis')
+    assert(io.readFileString(broken), 'not json', 'corrupt authority preserved')
+    assert(io.fileExists(f.wiki + '/docs/a.md'), false, 'no partial replay behind unknown scope')
+  }) }
+  exports.testServingProofRejectsFallbackAndStaleRecords = function() { fixture(function(f) {
+    assert(f.initial().ok, true, 'initial ingest')
+    var wm = new MiniAWikiManager({ root: f.wiki, access: 'rw', wikiretrievalv2: true }, function() {})
+    try {
+      assert(wm.reindex().ok, true, 'create healthy identical predecessor')
+      var engine = wm._retrievalV2, current = engine.root + '/current.json'
+      io.writeFileString(current, '{broken')
+      assert(wm.verifyServing().code, 'invalid-generation-pointer', 'strict proof rejects fallback')
+      var pin = engine.acquire()
+      try { assert(pin.recoveredPointer, true, 'ordinary reader can serve predecessor') } finally { engine.release(pin) }
+      assert(wm.recoverServing().ok, true, 'authoritative rebuild repairs malformed activation')
+      io.rm(current)
+      pin = engine.acquire()
+      try { assert(pin.recoveredPointer, true, 'missing current still permits predecessor') } finally { engine.release(pin) }
+      assert(wm.verifyServing().ok, false, 'missing current cannot satisfy maintenance')
+      assert(wm.recoverServing().ok, true, 'missing current rebuilt')
+      io.writeFileString(f.wiki + '/extra.md', '# Unexpected\nnew source')
+      assert(wm.verifyServing().code, 'source-catalogue-count-mismatch', 'complete source inventory detects missing indexed page')
+      assert(wm.recoverServing().ok, true, 'trusted sources repair stale catalogue')
+      io.rm(f.wiki + '/extra.md')
+      assert(wm.verifyServing().ok, false, 'unexpected stale live record detected')
+      assert(wm.recoverServing().ok, true, 'restore fixture before unsupported schema test')
+      var pointer = io.readFileJSON(current), manifestPath = engine.root + '/' + pointer.generation + '/manifest.json'
+      var manifest = io.readFileJSON(manifestPath); manifest.schema = 99; manifest.merkle = MiniAWikiRetrievalV2.manifestMerkle(manifest)
+      io.writeFileString(manifestPath, stringify(manifest, __, ''))
+      pointer.checksum = MiniAWikiRetrievalV2.digest(manifestPath); io.writeFileString(current, stringify(pointer))
+      var before = io.readFileString(current)
+      assert(wm.verifyServing().code, 'unsupported-serving-schema', 'future checksummed schema is not corruption')
+      assert(wm.recoverServing().ok, false, 'future schema requires migration')
+      assert(io.readFileString(current), before, 'automatic repair never downgrades future contract')
+    } finally { wm.close() }
+  }) }
+  exports.testExportPreflightPreservesAcceptedBundle = function() { fixture(function(f) {
+    assert(f.initial().ok, true, 'initial ingest')
+    var wm = new MiniAWikiManager({ root: f.wiki, access: 'rw', wikiretrievalv2: true }, function() {})
+    try {
+      var engine = wm._retrievalV2, destination = f.wiki + '/bundle.zip'
+      assert(engine.exportBundle(destination).ok, true, 'accepted export')
+      var digest = MiniAWikiRetrievalV2.digest(destination), verify = engine._verifyBundleFile
+      engine._verifyBundleFile = function(path, expected) {
+        var accepted = verify.call(this, path, expected)
+        assert(accepted.ok, true, 'staged export has matching checksums')
+        var zip = new java.util.zip.ZipFile(path), entries = zip.entries(), bytes = 0
+        try { while (entries.hasMoreElements()) bytes += Number(entries.nextElement().getSize()) } finally { zip.close() }
+        var budget = this.config.maxArtifactBytes
+        try { this.config.maxArtifactBytes = bytes - 1; return verify.call(this, path, expected) } finally { this.config.maxArtifactBytes = budget }
+      }
+      var failed = engine.exportBundle(destination)
+      assert(failed.code, 'bundle-artifact-budget', 'expanded byte budget preflight fails')
+      assert(failed.expandedBytes > failed.limits.maxArtifactBytes, true, 'required and configured bytes reported')
+      assert(MiniAWikiRetrievalV2.digest(destination), digest, 'last accepted bundle untouched')
+    } finally { wm.close() }
+  }) }
+  exports.testUnchangedIngestRepairsServingAndPreservesExport = function() { fixture(function(f) {
+    var options = { wikiretrievalv2: true, wikiretrievalconfig: { bundlePath: f.wiki + '/bundle.zip' } }
+    f.write('a.md', '# A\n\nunchangedrepairneedle')
+    assert(f.run(options).ok, true, 'initial publication')
+    var current = f.wiki + '/.mini-a-wiki-serving/current.json', healthyPointer = io.readFileString(current)
+    var bundle = f.wiki + '/bundle.zip', stamp = String(java.nio.file.Files.getLastModifiedTime(new java.io.File(bundle).toPath()))
+    var healthy = f.run(options)
+    assert(healthy.status, 'noop', 'unchanged source and healthy publication remain noop')
+    assert(io.readFileString(current), healthyPointer, 'healthy publication not rebuilt')
+    assert(String(java.nio.file.Files.getLastModifiedTime(new java.io.File(bundle).toPath())), stamp, 'accepted export not rewritten')
+    io.writeFileString(current, '{broken')
+    var repaired = f.run(options)
+    assert(repaired.ok, true, stringify(repaired))
+    assert(repaired.serving_recovered, true, 'unchanged sources still repair serving corruption')
+    assert(repaired.written.length, 0, 'source pages not rewritten')
+    assert(repaired.progress.bundle_exported, true, 'repaired generation exported')
+    assert(repaired.verification.current_only, true, 'exact active publication verified')
+  }) }
+  exports.testJournalIntegrityBlocksPayloadCorruption = function() { fixture(function(f) {
+    f.write('a.md', '# A\n\nOriginal')
+    var runner = f.runner(); runner._applyJournal = function() { throw new Error('prepared') }; runner.run()
+    var path = f.wiki + '/.mini-a-wiki-ingest/journal.json', journal = io.readFileJSON(path)
+    journal.operations[0].body = '# Corrupted replacement'
+    io.writeFileString(path, stringify(journal))
+    var result = f.run()
+    assert(result.diagnostic.code, 'ingest-journal-corrupt', 'new journal integrity failure classified')
+    assert(io.fileExists(f.wiki + '/docs/a.md'), false, 'corrupt payload never applied')
+    // Version-2 journals still receive payload validation before any page writes.
+    journal.version = 2; delete journal.integrity
+    io.writeFileString(path, stringify(journal))
+    result = f.runner().manageRecovery('resume', f.runner().manageRecovery('list').recoveries[0].id)
+    assert(result.ok, false, 'legacy corrupted replacement rejected')
+    assert(io.fileExists(f.wiki + '/docs/a.md'), false, 'legacy corruption preserves destination')
+  }) }
+  exports.testExportRepairsCorruptPredecessor = function() { fixture(function(f) {
+    assert(f.initial().ok, true, 'initial serving')
+    assert(f.run({ ingestmode: 'distill' }).ok, true, 'establish distillation fingerprint')
+    f.write('a.md', '# A\n\nnewexportneedle')
+    var runner = f.runner({ ingestmode: 'distill', wikiretrievalconfig: { bundlePath: f.wiki + '/bundle.zip' } })
+    var original = runner._exportCompletedServing, injected = false
+    runner._exportCompletedServing = function(wm, result) {
+      if (!injected) { injected = true; io.writeFileString(wm._retrievalV2.root + '/previous.json', '{broken') }
+      return original.call(this, wm, result)
+    }
+    var result = runner.run()
+    assert(result.ok, true, stringify(result))
+    assert(result.verification.predecessor_rebuilt, true, 'one fresh base repairs fallback before export')
+    assert(result.progress.bundle_exported, true, 'validated replacement exported')
+    assert(result.llm_calls, 1, 'fallback repair does not repeat distillation')
+    assert(result.written.length, 1, 'fallback repair does not replay page writes')
+  }) }
 })()

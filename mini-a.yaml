@@ -334,6 +334,9 @@ help:
     desc     : Override OAF_DECIDE_MODEL configuration for this run
     example  : "(type: openai, model: gpt-4o-mini, key: '...')"
     mandatory: false
+  - name     : modelvisual
+    desc     : Image-analysis model override (defaults to OAF_VISUAL_MODEL, then main model)
+    mandatory: false
   - name     : modelval
     desc     : Override OAF_VAL_MODEL configuration for this run
     example  : "(type: openai, model: gpt-4o-mini, key: '...')"
@@ -713,6 +716,16 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : forkpolicy
+    desc     : Outgoing context inheritance policy (default auto; legacy restores previous behavior)
+    example  : "auto"
+    mandatory: false
+    options  : ["auto", "legacy", "clean", "memory", "context", "full"]
+  - name     : forkdecide
+    desc     : Allow bounded configured decision assistance for automatic inheritance (default true)
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : forkstatemaxbytes
     desc     : Maximum bytes of parent context snapshot passed to a forked sub-agent
     example  : "65536"
@@ -836,6 +849,10 @@ help:
   - name     : debugvalch
     desc     : SLON/JSON definition or native file path for a debug channel for validation LLM debugging (requires $llm.setDebugCh support)
     example  : "(type: file, options: (file: '/tmp/mini-a-val-llm-debug.log'))"
+    mandatory: false
+  - name     : debugvisualch
+    desc     : SLON/JSON definition or native file path for a debug channel for visual LLM debugging (requires $llm.setDebugCh support)
+    example  : "(type: file, options: (file: '/tmp/mini-a-visual-llm-debug.log'))"
     mandatory: false
   - name     : nosetmcpwd
     desc     : Do not set __flags.JSONRPC.cmd.defaultDir to mini-a oPack location
@@ -1424,6 +1441,7 @@ jobs:
         libs           : libs
         model          : model
         modellc        : modellc
+        modelvisual    : modelvisual
         modelval       : modelval
         modeldec       : modeldec
         conversation   : conversation
@@ -1543,6 +1561,8 @@ jobs:
         subtasks       : subtasks
         subtasksfile   : subtasksfile
         subtaskssequential: subtaskssequential
+        forkpolicy    : forkpolicy
+        forkdecide    : forkdecide
         forkstatemaxbytes: forkstatemaxbytes
         workerregurl   : workerregurl
         workerreginterval: workerreginterval
@@ -1555,6 +1575,7 @@ jobs:
         debuglcch      : debuglcch
         debugdecch     : debugdecch
         debugvalch     : debugvalch
+        debugvisualch  : debugvisualch
         nosetmcpwd     : nosetmcpwd
         miniadocs      : miniadocs
         "mini-a-docs"  : mini-a-docs
@@ -1728,6 +1749,7 @@ jobs:
       libs           : isString.default(__)
       model          : default(__)
       modellc        : default(__)
+      modelvisual    : default(__)
       modelval       : default(__)
       modeldec       : default(__)
       conversation   : isString.default(__)
@@ -1847,6 +1869,8 @@ jobs:
       subtasks       : isString.default(__)
       subtasksfile   : isString.default(__)
       subtaskssequential: toBoolean.isBoolean.default(false)
+      forkpolicy    : isString.default(auto)
+      forkdecide    : toBoolean.isBoolean.default(true)
       forkstatemaxbytes: toNumber.isNumber.default(__)
       workerregurl   : isString.default(__)
       workerreginterval: toNumber.isNumber.default(__)
@@ -1859,6 +1883,7 @@ jobs:
       debuglcch      : default(__)
       debugdecch     : default(__)
       debugvalch     : default(__)
+      debugvisualch  : default(__)
       nosetmcpwd     : toBoolean.isBoolean.default(false)
       miniadocs      : toBoolean.isBoolean.default(false)
       "mini-a-docs"  : toBoolean.isBoolean.default(false)

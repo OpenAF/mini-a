@@ -10,7 +10,7 @@ var MiniAWikiOps = function(args, logFn) {
 MiniAWikiOps.settings = function(args) {
   var out = {}
   Object.keys(args).forEach(function(k) {
-    if (/^(wiki|dream|ingest|absorb)/.test(k) || ["fileallow", "usewiki", "usewikigraph", "s3artifactbundle", "model", "secpass", "libs", "maxcontext", "contextguard", "toolresultmaxinline", "readresultmaxmatches", "editor"].indexOf(k) >= 0) out[k] = args[k]
+    if (/^(wiki|dream|ingest|absorb)/.test(k) || ["fileallow", "usewiki", "usewikigraph", "s3artifactbundle", "model", "modeldec", "usedecide", "secpass", "libs", "maxcontext", "contextguard", "toolresultmaxinline", "readresultmaxmatches", "editor"].indexOf(k) >= 0) out[k] = args[k]
   })
   delete out.wikiman
   delete out.wikimanager
@@ -50,7 +50,7 @@ MiniAWikiOps.quote = function(value) { return "'" + String(value).replace(/'/g, 
 MiniAWikiOps.secretKey = function(key) { return /secret|password|credential|authorization|accesskey|apikey|api_key|(^|_)token$|^key$|^pass$|secpass|falkorpass|espass/i.test(key) }
 MiniAWikiOps.sensitive = function(key, value) {
   if (MiniAWikiOps.secretKey(key)) return true
-  if (key === "model" && (isMap(value) || /^[({]/.test(String(value)))) return true
+  if (["model", "modeldec"].indexOf(key) >= 0 && (isMap(value) || /^[({]/.test(String(value)))) return true
   if (isObject(value)) return Object.keys(value).some(function(k) { return MiniAWikiOps.sensitive(k, value[k]) })
   return isString(value) && (/:\/\/[^/\s]+@/.test(value) || /(?:[?&]|["'\s({,])(?:[^\s=]*token|secret|password|accesskey|key)["']?\s*[:=]/i.test(value))
 }
@@ -144,7 +144,7 @@ MiniAWikiOps.prototype.spec = function(id, params) {
   })
   // Parameters are operation data, never a second route to connection/access/gate overrides.
   Object.keys(p).forEach(function(k) {
-    if (/^(wiki|dream|ingest|absorb|__)/.test(k) || ["confirm", "backupconfirmed", "model", "libs", "usewiki", "usewikigraph"].indexOf(k) >= 0) throw new Error("Use configuration arguments, not params, for " + k)
+    if (/^(wiki|dream|ingest|absorb|__)/.test(k) || ["confirm", "backupconfirmed", "model", "modeldec", "usedecide", "libs", "usewiki", "usewikigraph"].indexOf(k) >= 0) throw new Error("Use configuration arguments, not params, for " + k)
   })
   ;["dryRun", "dryrun", "offline", "semantic", "withMeta", "force", "prune", "allowemptyprune", "independent"].forEach(function(k) {
     if (isDef(p[k])) {

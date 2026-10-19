@@ -1047,6 +1047,7 @@ MiniAHistoryVM.prototype.getRepresentation = function(id, level, options) {
   var normalized = this._representationLevel(level)
   this.metrics["representation_" + normalized.toLowerCase()]++
   if (!isMap(options) || options.touch !== false) this._touchObject(object, 1, 2)
+  if (isMap(options) && options.deterministic === true && normalized !== "L4") return this._buildRepresentation(object, normalized)
   if (normalized === "L4") return { id: object.id, handle: object.handle, level: normalized, content: object.content, estimatedTokens: object.estimatedOriginalTokens, exact: true, canonicalRef: object.canonicalRef }
   var key = this._representationCacheKey(object, normalized)
   var representation = this.representationCache[key]
@@ -1452,8 +1453,9 @@ MiniAHistoryVM.prototype._contextUtility = function(object, relevance, mandatory
   return (mandatory ? 10 : 0) + Math.max(0.001, relevance * importance * probability * confidence)
 }
 
-MiniAHistoryVM.prototype._contextRepresentationCost = function(object, level) {
+MiniAHistoryVM.prototype._contextRepresentationCost = function(object, level, options) {
   if (level === "L4") return object.estimatedOriginalTokens
+  if (isMap(options) && options.deterministic === true) return this._buildRepresentation(object, level).estimatedTokens
   var cached = this.representationCache[this._representationCacheKey(object, level)]
   if (isMap(cached)) return cached.estimatedTokens
   return this._buildRepresentation(object, level).estimatedTokens
@@ -1986,7 +1988,7 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
     var forced = candidates[m]
     if (!forced.mandatory) continue
     var minimumLevel = forced.object.kind === "constraint" ? "L4" : "L2"
-    var forcedCost = this._contextRepresentationCost(forced.object, minimumLevel)
+    var forcedCost = this._contextRepresentationCost(forced.object, minimumLevel, opts)
     selected[forced.object.handle] = merge({}, forced, true)
     selected[forced.object.handle].level = minimumLevel
     selected[forced.object.handle].tokenCost = forcedCost
@@ -1998,7 +2000,7 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
   for (var b = 0; b < candidates.length; b++) {
     var base = candidates[b]
     if (isMap(selected[base.object.handle])) continue
-    var baseCost = this._contextRepresentationCost(base.object, "L0")
+    var baseCost = this._contextRepresentationCost(base.object, "L0", opts)
     baseOffers.push({ candidate: base, cost: baseCost, efficiency: base.utility * levelValue.L0 / Math.max(1, baseCost) })
   }
   baseOffers.sort(function(a, b) { return b.efficiency - a.efficiency || a.candidate.object.handle.localeCompare(b.candidate.object.handle) })
@@ -2025,7 +2027,7 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
       var nextLevel = levels[currentIndex + 1]
       var ceiling = consumerPolicy.levelCeilings[item.object.kind]
       if (isString(ceiling) && levels.indexOf(nextLevel) > levels.indexOf(ceiling)) return
-      var nextCost = this._contextRepresentationCost(item.object, nextLevel)
+      var nextCost = this._contextRepresentationCost(item.object, nextLevel, opts)
       var deltaCost = nextCost - item.tokenCost
       var deltaUtility = item.utility * (levelValue[nextLevel] - levelValue[item.level])
       upgradeOffers.push({ item: item, level: nextLevel, cost: nextCost, deltaCost: deltaCost, efficiency: deltaUtility / Math.max(1, deltaCost) })
@@ -2047,7 +2049,7 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
   for (var si = 0; si < selectedItems.length; si++) {
     var item = selectedItems[si]
     // Scheduling and shadow inspection must not manufacture access heat.
-    var representation = this.getRepresentation(item.object.handle, item.level, { touch: false })
+    var representation = this.getRepresentation(item.object.handle, item.level, { touch: false, deterministic: opts.deterministic === true })
     materialized.push({
       id: item.object.id,
       handle: item.object.handle,
@@ -2103,7 +2105,7 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
     overflow: overflow,
     delta: delta,
     stablePrefixTokens: stablePrefixTokens,
-    stablePrefixSignature: stablePrefixKeys.join("|"),
+    stablePrefixSignature: (opts.deterministic === true ? "deterministic:" : "") + stablePrefixKeys.join("|"),
     objectsConsidered: candidates.length,
     objectsSelected: materialized.length,
     objects: materialized

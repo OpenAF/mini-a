@@ -1086,6 +1086,41 @@ function __miniANormalizeChannelDef(value) {
   }
 }
 
+function __miniAConfigureDebugChannel(llmInstance, debugConfig, defaultName, label, logFn, debugChannelFiles) {
+  if (!isObject(llmInstance) || !isString(debugConfig) || debugConfig.length === 0) return
+
+  if (isUnDef(llmInstance.setDebugCh)) {
+    logFn("warn", `${label} debug channel specified but setDebugCh is not available.`)
+    return
+  }
+
+  try {
+    var debugMap = af.fromJSSLON(__miniANormalizeChannelDef(debugConfig))
+    if (!isMap(debugMap)) return
+    if (isUnDef(debugMap.name)) debugMap.name = defaultName
+    var channelType = isString(debugMap.type) ? debugMap.type : "simple"
+    var channelOptions = isMap(debugMap.options) ? debugMap.options : {}
+
+    if (channelType === "file" && isString(channelOptions.file) && channelOptions.file.length > 0 && !io.fileExists(channelOptions.file)) {
+      io.writeFileString(channelOptions.file, "{}")
+    }
+
+    var channelExists = false
+    try {
+      channelExists = $ch().list().indexOf(debugMap.name) >= 0
+    } catch(ignoreListDebugCh) {}
+    if (!channelExists) {
+      $ch(debugMap.name).create(channelType, channelOptions)
+    }
+    if (isMap(debugChannelFiles)) delete debugChannelFiles[debugMap.name]
+    llmInstance.setDebugCh(debugMap.name)
+    logFn("output", `${label} debug channel '${debugMap.name}' created and configured.`)
+  } catch (e) {
+    var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
+    logFn("warn", `Failed to configure ${label} debug channel: ${errMsg}`)
+  }
+}
+
 function __miniANormalizePromptProfile(profile, fallbackProfile) {
   var normalized = isString(profile) ? profile.trim().toLowerCase() : ""
   if (normalized === "minimal" || normalized === "balanced" || normalized === "verbose") return normalized
@@ -1259,4 +1294,17 @@ function __miniARunHooks(loadedHooks, event, contextVars) {
   })
 
   return { outputs: outputs, blocked: blocked }
+}
+
+// Shared console/browser-console parsing; -- escapes goals starting with a modifier.
+function __miniAParseDelegate(text) {
+  var goal = String(text || "").trim(), options = {}
+  if (/^--(?:\s|$)/.test(goal)) return { goal: goal.substring(2).trim(), options: options }
+  var match = /^(fork|clean|auto)(?:\s+|$)/i.exec(goal)
+  if (match) {
+    goal = goal.substring(match[0].length).trim()
+    if (match[1].toLowerCase() === "fork") { options.fork = true; options.forkscope = ["memory", "context"] }
+    else options.forkpolicy = match[1].toLowerCase()
+  }
+  return { goal: goal, options: options }
 }

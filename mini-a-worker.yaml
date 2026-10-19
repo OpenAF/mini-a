@@ -20,6 +20,17 @@ help:
     desc     : Comma-separated IP allowlist
     example  : "127.0.0.1,192.168.1.0/24"
     mandatory: false
+  - name     : forkpolicy
+    desc     : Outgoing child inheritance policy (default auto; legacy restores previous behavior)
+    mandatory: false
+    options  : ["auto", "legacy", "clean", "memory", "context", "full"]
+  - name     : forkdecide
+    desc     : Allow configured decision assistance for outgoing inheritance; false is an operator opt-out
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : forkstatemaxbytes
+    desc     : Maximum UTF-8 bytes in prepared incoming automatic context (default 65536)
+    mandatory: false
   - name     : maxconcurrent
     desc     : Maximum concurrent tasks
     example  : "4"
@@ -173,6 +184,7 @@ todo:
           a2aMessageId: isString(message.messageId) ? message.messageId : __,
           a2aContextId: isString(postData.contextId) ? postData.contextId : __
         },
+        forkContext: isMap(postData.metadata) ? postData.metadata.forkContext : __,
         forkState: isMap(postData.metadata) && isString(postData.metadata.forkState) ? postData.metadata.forkState : __
       };
 
@@ -799,8 +811,9 @@ jobs:
         description: isString(wargs.workerdesc) ? wargs.workerdesc : "Mini-A worker API",
         url: baseUrl,
         preferredTransport: "HTTP+JSON",
+        limits: { forkMemory: toBoolean(wargs.usememory) === true, forkStateMaxBytes: wargs.forkstatemaxbytes || 65536, maxContextTokens: wargs.maxcontext || 0 },
         workerInstanceId: global.__worker_instanceId,
-        additionalInterfaces: ["mini-a-worker-v1", "submission-recovery-v1"].concat(isDef(wargs.agentcomms) && MiniAComms.enabled(MiniAComms.normalize(wargs.agentcomms)) && isString(wargs.apitoken) && wargs.apitoken.length > 0 ? ["agent-comms-v1"] : []),
+        additionalInterfaces: ["mini-a-worker-v1", "submission-recovery-v1", "prepared-context-v1"].concat(isDef(wargs.agentcomms) && MiniAComms.enabled(MiniAComms.normalize(wargs.agentcomms)) && isString(wargs.apitoken) && wargs.apitoken.length > 0 ? ["agent-comms-v1"] : []),
         capabilities: {
           streaming: false,
           pushNotifications: false,
@@ -839,7 +852,7 @@ jobs:
         description: isString(wargs.workerdesc) ? wargs.workerdesc : "Mini-A worker API",
         version: "1.0.0",
         workerInstanceId: global.__worker_instanceId,
-        capabilities: ["run-goal", "delegation", "planning", "a2a-http-json-rest", "submission-recovery-v1"].concat(isDef(wargs.agentcomms) && MiniAComms.enabled(MiniAComms.normalize(wargs.agentcomms)) && isString(wargs.apitoken) && wargs.apitoken.length > 0 ? ["agent-comms-v1"] : []),
+        capabilities: ["run-goal", "delegation", "planning", "a2a-http-json-rest", "submission-recovery-v1", "prepared-context-v1"].concat(isDef(wargs.agentcomms) && MiniAComms.enabled(MiniAComms.normalize(wargs.agentcomms)) && isString(wargs.apitoken) && wargs.apitoken.length > 0 ? ["agent-comms-v1"] : []),
         skills: global.__worker_getSkills().map(function(skill) {
           return {
             id: skill.id,
@@ -853,6 +866,9 @@ jobs:
           maxConcurrent: wargs.maxconcurrent,
           defaultTimeoutMs: wargs.defaulttimeout,
           maxTimeoutMs: wargs.maxtimeout,
+          forkMemory: toBoolean(wargs.usememory) === true,
+          forkStateMaxBytes: wargs.forkstatemaxbytes || 65536,
+          maxContextTokens: wargs.maxcontext || 0,
           maxSteps: wargs.maxsteps || 15
           // useshell removed in protocol 0.4.0 — shell capability is declared via the 'shell' A2A skill
         },
@@ -964,18 +980,38 @@ jobs:
         goal: true, format: true, raw: true, chatbotmode: true, useplanning: true,
         updatefreq: true, updateinterval: true, forceupdates: true, planlog: true,
         planmode: true, planformat: true, convertplan: true, maxsteps: true,
-        usedecide: true, llmcomplexity: true
+        usedecide: true, llmcomplexity: true, forkpolicy: true, forkdecide: true
       }
       var mergedArgs = merge({}, wargs)
       delete mergedArgs.agentcomms
       Object.keys(taskArgs).forEach(function(key) {
         // Remote tasks may opt out, but cannot undo an operator decision opt-out.
-        if (["usedecide", "llmcomplexity"].indexOf(key) >= 0 && isDef(wargs[key]) && toBoolean(wargs[key]) === false && toBoolean(taskArgs[key]) === true) return
+        if (["usedecide", "llmcomplexity", "forkdecide"].indexOf(key) >= 0 && isDef(wargs[key]) && toBoolean(wargs[key]) === false && toBoolean(taskArgs[key]) === true) return
         if (allowedRemoteKeys[key] === true) { mergedArgs[key] = taskArgs[key] }
       })
+      // A prepared incoming handoff is data, independent of the child's outgoing policy.
+      var incoming = postData.forkContext
+      if (isDef(incoming)) {
+        var maxForkBytes = isNumber(wargs.forkstatemaxbytes) && wargs.forkstatemaxbytes > 0 ? wargs.forkstatemaxbytes : 65536
+        if (!isMap(incoming) || incoming.version !== 1 || (isDef(incoming.state) && !isString(incoming.state)) ||
+            (isDef(incoming.knowledge) && !isString(incoming.knowledge)) ||
+            af.fromString2Bytes((incoming.state || "") + (incoming.knowledge || "")).length > maxForkBytes) {
+          return { error: { error: "Invalid or oversized prepared fork context" }, code: 400 }
+        }
+        try {
+          var incomingState = incoming.state ? jsonParse(incoming.state) : {}
+          if (!isMap(incomingState) || (MiniAForkPolicy.hasMemory(incomingState) && toBoolean(wargs.usememory) !== true)) throw "Unavailable state"
+        }
+        catch(invalidForkState) { return { error: { error: "Invalid prepared fork state" }, code: 400 } }
+        if (incoming.state) mergedArgs.state = incoming.state
+        if (incoming.knowledge) mergedArgs._forkInheritedKnowledge = incoming.knowledge
+        // Remote supplied knowledge is literal data, never a worker-local prompt file.
+        if (isString(taskArgs.knowledge)) mergedArgs.knowledge = "\n" + taskArgs.knowledge
+        mergedArgs._autoDelegate = false
+      }
       // Pass fork state to child agent via existing args.state deserialization path
       var forkStatePayload = postData.forkState || (isMap(postData.metadata) ? postData.metadata.forkState : __)
-      if (isString(forkStatePayload) && forkStatePayload.length > 0) {
+      if (!incoming && isString(forkStatePayload) && forkStatePayload.length > 0) {
         mergedArgs.state = forkStatePayload
         mergedArgs._autoDelegate = false
       }
@@ -997,6 +1033,8 @@ jobs:
         deadlineMs: timeout,
         totalTimeoutMs: timeout,
         maxAttempts: communication ? 1 : __,
+        forkpolicy: "clean", // Incoming context is already prepared; args.forkpolicy controls future delegation.
+        _forkSelfContained: true,
         metadata: postData.metadata || {}
       })
       global.__worker_tasks[taskId] = {

@@ -27,4 +27,28 @@ vm.runInContext("statsMetrics = null; renderStats(container)", context);
 assert.match(context.container.children[0].text, /Run a goal/);
 vm.runInContext("statsMetrics = {}; statsMode = 'wiki'; renderStats(container)", context);
 assert.match(context.container.children[0].text, /No wiki/);
+const decision = {model: 'decision-test', provider: 'openai', source: 'modeldec', calls: 3,
+  input_tokens: 10, output_tokens: 2, total_tokens: 12, usage_reports: 2, duration_ms: 45, failures: 1, fallbacks: 1};
+context.decisionFixture = decision;
+vm.runInContext(`statsMode = 'summary'; statsMetrics = {performance: {llm_normal_tokens: 42}, decisions: decisionFixture}; renderStats(container);`, context);
+const decisionCard = () => context.container.children.find(card => card.children[0]?.text === 'Decision model');
+const decisionValues = () => JSON.parse(decisionCard().children[1].children[0].text);
+assert.deepEqual(decisionValues(), {Model: 'decision-test', Provider: 'openai', 'Configuration source': 'modeldec', Calls: 3,
+  'Input tokens': 10, 'Output tokens': 2, 'Total tokens': 12, 'Usage reports': 2, 'Elapsed (ms)': 45, Failures: 1, Fallbacks: 1});
+assert.ok(decisionCard(), 'decision values remain visible without Chart.js');
+vm.runInContext(`window.Chart = function(canvas, config) { this.destroy = () => {}; chartConfigs.push(config); };`, Object.assign(context, {chartConfigs: configs}));
+vm.runInContext('renderStats(container)', context);
+assert.deepEqual(Array.from(configs.at(-1).data.labels), ['Main', 'Decision']);
+assert.deepEqual(Array.from(configs.at(-1).data.datasets[0].data), [42, 12]);
+decision.usage_reports = 0;
+vm.runInContext('renderStats(container)', context);
+assert.equal(decisionValues()['Total tokens'], 'Unavailable');
+assert.deepEqual(Array.from(configs.at(-1).data.labels), ['Main']);
+decision.usage_reports = 1; decision.total_tokens = 0;
+vm.runInContext('renderStats(container)', context);
+assert.equal(decisionValues()['Total tokens'], 0, 'reported zero remains numeric');
+vm.runInContext('statsMetrics.decisions = {}; renderStats(container)', context);
+assert.equal(decisionValues().Model, 'Not configured');
+vm.runInContext('delete statsMetrics.decisions; renderStats(container)', context);
+assert.equal(decisionCard(), undefined, 'older sessions need no decision metrics');
 console.log('Advanced statistics charts: data, palette, cleanup, tables and empty states passed.');

@@ -4,7 +4,7 @@ help:
     Ingest knowledge into a Mini-A wiki from a documentation folder, a git repository
     (local checkout or clone URL) or a web page. Local sources may include text,
     Office documents, PDFs and PNG/JPEG images. Documents use Tika; images require
-    a vision-capable OAF_MODEL. Other passive structured formats advertised by
+    a vision-capable modelvisual/OAF_VISUAL_MODEL (falling back to OAF_MODEL). Other passive structured formats advertised by
     the installed oafp are converted to Markdown before wiki ingestion.
 
     Discovery, filtering, chunking, the versioned manifest, writing and finalization are
@@ -94,6 +94,13 @@ help:
     options  : ["ro", "rw"]
   - name     : ingestledger
     desc     : Override the ingest ledger file path
+    mandatory: false
+  - name     : debugvisualch
+    desc     : SLON/JSON channel definition or native file path for image-analysis debugging
+    example  : "/tmp/mini-a-visual-debug.log"
+    mandatory: false
+  - name     : modelvisual
+    desc     : Image-analysis model override (defaults to OAF_VISUAL_MODEL, then main model)
     mandatory: false
   - name     : model
     desc     : SLON/JSON model config used for distillation (defaults to OAF_MODEL)

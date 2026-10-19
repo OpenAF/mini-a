@@ -36,6 +36,10 @@ help:
     desc     : SLON/JSON definition or native file path for a debug channel for the validation LLM
     example  : "(type: file, options: (file: '/tmp/mini-a-val-debug.ndjson'))"
     mandatory: false
+  - name     : debugvisualch
+    desc     : SLON/JSON definition or native file path for a debug channel for the visual LLM
+    example  : "(type: file, options: (file: '/tmp/mini-a-visual-debug.ndjson'))"
+    mandatory: false
   - name     : showexecs
     desc     : Show executed commands in the interaction
     example  : "false"
@@ -328,6 +332,9 @@ help:
   - name     : modeldec
     desc     : Override OAF_DECIDE_MODEL for this web server session
     example  : "(type: openai, model: gpt-5-mini, key: '...')"
+    mandatory: false
+  - name     : modelvisual
+    desc     : Image-analysis model override (defaults to OAF_VISUAL_MODEL, then main model)
     mandatory: false
   - name     : modelval
     desc     : Override OAF_VAL_MODEL for this web server session
@@ -1013,6 +1020,16 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : forkpolicy
+    desc     : Outgoing context inheritance policy (default auto; legacy restores previous behavior)
+    example  : "auto"
+    mandatory: false
+    options  : ["auto", "legacy", "clean", "memory", "context", "full"]
+  - name     : forkdecide
+    desc     : Allow bounded configured decision assistance for automatic inheritance (default true)
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : forkstatemaxbytes
     desc     : Maximum bytes of parent context snapshot passed to a forked sub-agent
     example  : "65536"
@@ -1656,6 +1673,7 @@ jobs:
       debuglcch       : isString().default(__)
       debugdecch      : isString().default(__)
       debugvalch      : isString().default(__)
+      debugvisualch   : isString().default(__)
       usestream       : toBoolean().isBoolean().default(false)
       showthinking    : toBoolean().isBoolean().default(false)
       logpromptheaders: isString().default("")
@@ -1684,6 +1702,7 @@ jobs:
       libs            : isString().default(__)
       model           : isString().default(__)
       modellc         : isString().default(__)
+      modelvisual     : isString().default(__)
       modelval        : isString().default(__)
       modeldec        : isString().default(__)
       skillsautosearch: toBoolean().isBoolean().default(__)
@@ -1883,6 +1902,8 @@ jobs:
       subtasks       : isString().default(__)
       subtasksfile   : isString().default(__)
       subtaskssequential: toBoolean().isBoolean().default(false)
+      forkpolicy    : isString().default("auto")
+      forkdecide    : toBoolean().isBoolean().default(true)
       forkstatemaxbytes: toNumber().isNumber().default(65536)
       autodelegation : toBoolean().isBoolean().default(false)
       autodelegationthreshold: toNumber().isNumber().default(8192)

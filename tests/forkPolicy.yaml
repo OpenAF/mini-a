@@ -1,0 +1,24 @@
+include:
+- oJobTest.yaml
+
+ojob:
+  opacks:
+  - oJob-common
+  catch: |
+    logErr(exception)
+    exit(1)
+
+jobs:
+- name: Fork policy tests
+  exec: |
+    var tests = require("tests/forkPolicy.js")
+    var failed = 0
+    Object.keys(tests).forEach(function(name) {
+      ow.loadTest().test("Mini-A fork policy::" + name, function() {
+        try { tests[name]() } catch(e) { failed++; throw e }
+      })
+    })
+    if (failed > 0) exit(1)
+
+todo:
+- Fork policy tests

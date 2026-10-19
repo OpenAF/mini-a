@@ -1046,10 +1046,29 @@ window.MiniAAdvancedUI = function(bridge) {
     }
     if (statsMode === 'summary') {
       const p = metrics.performance || {};
-      chart('Token usage by model', [['Main', p.llm_normal_tokens], ['Low cost', p.llm_lc_tokens], ['Validation', p.llm_val_tokens]], 'Tokens');
+      const decision = metrics.decisions;
+      const hasDecisionUsage = decision?.usage_reports > 0;
+      chart('Token usage by model', [['Main', p.llm_normal_tokens], ['Low cost', p.llm_lc_tokens], ['Validation', p.llm_val_tokens], ['Decision', hasDecisionUsage ? decision.total_tokens : undefined]], 'Tokens');
       chart('Token accounting', [['Actual', p.llm_actual_tokens], ['Estimated', p.llm_estimated_tokens]], 'Tokens');
       group('Goals', metrics.goals);
       chart('LLM calls', ['normal', 'low_cost', 'validation', 'decision'].map(key => [key, metrics.llm_calls?.[key]]).concat([['Advisor', metrics.advisor?.calls]]));
+      if (decision && typeof decision === 'object') {
+        const card = el('section', undefined, 'advanced-stat-card');
+        card.append(el('h4', 'Decision model'), structuredMap({
+          Model: decision.model || 'Not configured',
+          Provider: decision.provider || 'Unavailable',
+          'Configuration source': decision.source || 'Unavailable',
+          Calls: decision.calls || 0,
+          'Input tokens': hasDecisionUsage ? decision.input_tokens || 0 : 'Unavailable',
+          'Output tokens': hasDecisionUsage ? decision.output_tokens || 0 : 'Unavailable',
+          'Total tokens': hasDecisionUsage ? decision.total_tokens || 0 : 'Unavailable',
+          'Usage reports': decision.usage_reports || 0,
+          'Elapsed (ms)': decision.duration_ms || 0,
+          Failures: decision.failures || 0,
+          Fallbacks: decision.fallbacks || 0
+        }));
+        container.append(card);
+      }
       group('Actions', metrics.actions);
       chart('Time spent', ['step_prompt_build_ms_total', 'step_llm_wait_ms_total', 'step_tool_exec_ms_total', 'step_context_maintenance_ms_total'].map(key => [key.replace('step_', '').replace('_ms_total', ''), p[key]]), 'Milliseconds');
     } else if (statsMode === 'tools') {
@@ -1224,7 +1243,7 @@ window.MiniAAdvancedUI = function(bridge) {
       const render=()=>{
         fieldRefreshers = [];
         list.replaceChildren();
-        snapshot.settings.filter(s=>(activeScreen!=='models'||(viewParams.slot ? s.name === viewParams.slot : ['model','modellc','modelval','modeldec'].includes(s.name))) && (commandFilter === 'show' ? s.name.startsWith(search.value.toLowerCase()) : ['set','toggle','unset'].includes(commandFilter) ? s.name === search.value.toLowerCase() : `${s.name} ${s.description}`.toLowerCase().includes(search.value.toLowerCase()))).forEach(s=>{
+        snapshot.settings.filter(s=>(activeScreen!=='models'||(viewParams.slot ? s.name === viewParams.slot : ['model','modellc','modelval','modeldec','modelvisual'].includes(s.name))) && (commandFilter === 'show' ? s.name.startsWith(search.value.toLowerCase()) : ['set','toggle','unset'].includes(commandFilter) ? s.name === search.value.toLowerCase() : `${s.name} ${s.description}`.toLowerCase().includes(search.value.toLowerCase()))).forEach(s=>{
           const row=el('div'); const label=el('label', s.name); const description=el('small',`${s.description || ''} · ${s.source === 'session' ? 'Session override' : s.source === 'server' ? 'Server default' : s.source} · Default: ${asText(s.defaultValue) ?? '(unset)'}${s.readOnly?' · Server-controlled':''}`);
           const field=input('',s.value === undefined ? '' : asText(s.value)); field.disabled=s.readOnly; field.setAttribute('aria-label',s.name);
           if (s.type==='boolean') {field.type='checkbox';field.checked=s.value===true;label.className='advanced-boolean-setting';}

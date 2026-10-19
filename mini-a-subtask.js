@@ -2,6 +2,8 @@
 // License: Apache 2.0
 // Description: SubtaskManager for Mini-A delegation - enables parent agents to spawn child agents for sub-goals
 
+if (typeof MiniAForkPolicy === "undefined") load("mini-a-fork-policy.js")
+
 var __SUBTASK_TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "timeout"])
 function __isTerminalSubtaskState(status) { return __SUBTASK_TERMINAL_STATES.has(status) }
 
@@ -15,7 +17,12 @@ function __isTerminalSubtaskState(status) { return __SUBTASK_TERMINAL_STATES.has
 var SubtaskManager = function(parentArgs, opts) {
   opts = _$(opts, "opts").isMap().default({})
   
-  this.parentArgs = parentArgs || {}
+  this.parentArgs = merge({}, parentArgs || {})
+  this.parentArgs.forkpolicy = MiniAForkPolicy.policy(isDef(opts.forkpolicy) ? opts.forkpolicy : this.parentArgs.forkpolicy)
+  this._forkInputs = {}
+  this._forkPrepared = {}
+  this._forkErrors = {}
+  this.forkMetrics = { resolutions: 0, scopes: {}, sources: {}, classifier_attempts: 0, classifier_fallbacks: 0, cache_hits: 0, latency_ms: 0, classifier_latency_ms: 0, inherited_bytes: 0, estimated_tokens: 0, end_to_end_ms: 0 }
   this.maxConcurrent = _$(opts.maxConcurrent, "opts.maxConcurrent").isNumber().default(4)
   this.defaultDeadlineMs = _$(opts.defaultDeadlineMs, "opts.defaultDeadlineMs").isNumber().default(300000)
   this.defaultStallTimeoutMs = _$(opts.defaultStallTimeoutMs, "opts.defaultStallTimeoutMs").isNumber().default(this.defaultDeadlineMs)
@@ -109,6 +116,7 @@ SubtaskManager.prototype._claimTerminal = function(subtask, newStatus, nowValue,
     } else if (isDef(errorValue)) {
       subtask.error = errorValue
     }
+    parent.forkMetrics.end_to_end_ms += Math.max(0, subtask.completedAt - (isNumber(subtask.createdAt) ? subtask.createdAt : subtask.completedAt))
     parent.metrics.running--
     parent.runningCount--
     // Polling parents must never see a terminal state before its result.
@@ -227,7 +235,7 @@ SubtaskManager.prototype._normalizeWorkers = function(workers) {
 SubtaskManager._PARENT_ONLY_CHILD_ARG_NAMES = [
   "validationgoal", "valgoal", "deepresearch", "maxcycles", "validationthreshold", "persistlearnings",
   "subtasks", "subtasksfile",
-  "state", "conversation", "historyvm", "historyvmmode", "historyvmshadow", "contextvirtualization", "contextvirtualizationshadow", "resume", "resumefailed", "durable", "runid", "resumerun", "runstatus", "runroot", "parentrunid",
+  "_forkInheritedKnowledge", "state", "conversation", "historyvm", "historyvmmode", "historyvmshadow", "contextvirtualization", "contextvirtualizationshadow", "resume", "resumefailed", "durable", "runid", "resumerun", "runstatus", "runroot", "parentrunid",
   "usehistory", "historypath", "historykeep", "historykeepperiod", "historykeepcount", "historyretention",
   "historys3bucket", "historys3prefix", "historys3url", "historys3accesskey", "historys3secret",
   "historys3region", "historys3useversion1", "historys3ignorecertcheck",
@@ -254,8 +262,86 @@ SubtaskManager.prototype._stripInheritedParentOnlyArgs = function(mergedArgs, ex
   return mergedArgs
 }
 
+SubtaskManager.prototype._serializeForkState = function(forkState, maxBytes) {
+  var forkStateStr = stringify(forkState, __, "")
+  maxBytes = isNumber(maxBytes) ? maxBytes : (isNumber(this.parentArgs.forkstatemaxbytes) ? this.parentArgs.forkstatemaxbytes : 65536)
+  var forkBytes = function(value) { return af.fromString2Bytes(value).length }
+  if (forkBytes(forkStateStr) > maxBytes) {
+    // Truncate oldest forkedContext entries first, then workingMemorySession if still oversized
+    var trimmed = jsonParse(forkStateStr)
+    if (isArray(trimmed.forkedContext) && trimmed.forkedContext.length > 0) {
+      while (trimmed.forkedContext.length > 0) {
+        trimmed.forkedContext.shift()
+        forkStateStr = stringify(trimmed, __, "")
+        if (forkBytes(forkStateStr) <= maxBytes) break
+      }
+    }
+    if (forkBytes(forkStateStr) > maxBytes && isObject(trimmed.workingMemorySession)) {
+      delete trimmed.workingMemorySession
+      forkStateStr = stringify(trimmed, __, "")
+    }
+    if (forkBytes(forkStateStr) > maxBytes) throw new Error("Fork state exceeds forkstatemaxbytes (" + maxBytes + " UTF-8 bytes) after trimming")
+  }
+  return forkStateStr
+}
+
+SubtaskManager.prototype._ensureForkPolicy = function(subtask) {
+  var input = this._forkInputs[subtask.id]
+  if (!input) return __ // Compatibility for existing callers constructing descriptors directly.
+  if (this._forkErrors[subtask.id]) throw new Error(this._forkErrors[subtask.id])
+  if (!this._forkPrepared[subtask.id]) {
+    try {
+      var prepared = MiniAForkPolicy.prepare(input, this, subtask)
+      var finalizingAt = now()
+      if (isMap(prepared.explicit_state)) {
+        var originalState = stringify(prepared.explicit_state, __, "")
+        prepared.state = this._serializeForkState(prepared.explicit_state, input.explicitMaxBytes)
+        prepared.explicit_state = __
+        prepared.truncated = prepared.state !== originalState
+      }
+      if (prepared.legacy) prepared.knowledge = prepared.suppressProjection ? "" : (input.projected || "")
+      prepared.inherited_bytes = (prepared.state ? MiniAForkPolicy.bytes(prepared.state) : 0) + MiniAForkPolicy.bytes(prepared.knowledge || "")
+      if (prepared.state) {
+        var actualScope = MiniAForkPolicy.scope(jsonParse(prepared.state))
+        if (prepared.knowledge) actualScope = actualScope === "memory" || actualScope === "full" ? "full" : "context"
+        prepared.omitted = ["memory", "context"].filter(function(category) {
+          return (prepared.scope === category || prepared.scope === "full") && actualScope !== category && actualScope !== "full"
+        })
+        prepared.scope = actualScope
+      } else if (prepared.legacy && prepared.knowledge) prepared.scope = "context"
+      prepared.estimated_tokens = Math.ceil(((prepared.state || "").length + (prepared.knowledge || "").length) / 4)
+      prepared.latency_ms += now() - finalizingAt
+      this._forkPrepared[subtask.id] = prepared
+      subtask.forkPolicy = MiniAForkPolicy.diagnostics(prepared)
+      if (!prepared.legacy) subtask.fork = prepared.scope !== "clean"
+      subtask.forkState = __
+      var metrics = this.forkMetrics
+      sync(function() {
+        metrics.resolutions++
+        metrics.scopes[prepared.scope] = (metrics.scopes[prepared.scope] || 0) + 1
+        metrics.sources[prepared.source] = (metrics.sources[prepared.source] || 0) + 1
+        if (prepared.classifier_attempted) metrics.classifier_attempts++
+        if (prepared.source === "fallback") metrics.classifier_fallbacks++
+        if (prepared.cache_hit) metrics.cache_hits++
+        metrics.latency_ms += prepared.latency_ms || 0
+        metrics.classifier_latency_ms += prepared.classifier_latency_ms || 0
+        metrics.inherited_bytes += prepared.inherited_bytes || 0
+        metrics.estimated_tokens += prepared.estimated_tokens || 0
+      }, this._transitionLock)
+      if (this.parentAgent && isFunction(this.parentAgent._trace)) this.parentAgent._trace("fork_policy", subtask.forkPolicy)
+    } catch(e) {
+      this._forkErrors[subtask.id] = String(e)
+      throw e
+    }
+  }
+  return this._forkPrepared[subtask.id]
+}
+
 SubtaskManager.prototype._buildChildArgs = function(subtask) {
+  var prepared = this._ensureForkPolicy(subtask)
   var mergedArgs = merge({}, this.parentArgs)
+  var capturedInput = this._forkInputs[subtask.id]
+  if (capturedInput) mergedArgs.knowledge = capturedInput.parentKnowledge
   var explicitArgs = isMap(subtask.args) ? subtask.args : {}
 
   Object.keys(explicitArgs).forEach(function(key) {
@@ -279,37 +365,23 @@ SubtaskManager.prototype._buildChildArgs = function(subtask) {
   mergedArgs._parentSubtaskId = subtask.parentId
   // Prevent auto-delegation cascades in child agents
   mergedArgs._autoDelegate = false
-  if (isObject(this.parentAgent) && isFunction(this.parentAgent._contextForDelegate)) {
-    var projectedContext = this.parentAgent._contextForDelegate(subtask.goal, 2048)
-    var contextVm = this.parentAgent._historyVm
-    if (projectedContext.length > 0 || isObject(contextVm) && contextVm.contextVirtualization && !contextVm.contextVirtualizationShadow && !contextVm.degraded) {
-      // Do not inherit the parent's full knowledge field along with the view.
-      mergedArgs.knowledge = (isString(explicitArgs.knowledge) ? explicitArgs.knowledge : "") + projectedContext
+  if (!prepared || prepared.legacy) {
+    var input = this._forkInputs[subtask.id]
+    var projectedContext = input ? input.projected : (this.parentAgent && isFunction(this.parentAgent._contextForDelegate) ? this.parentAgent._contextForDelegate(subtask.goal, 2048) : "")
+    var contextVm = this.parentAgent ? this.parentAgent._historyVm : __
+    if ((!prepared || !prepared.suppressProjection) && (projectedContext.length > 0 || (input ? input.activeProjection : isObject(contextVm) && contextVm.contextVirtualization && !contextVm.contextVirtualizationShadow && !contextVm.degraded))) {
+      mergedArgs.knowledge = (isString(explicitArgs.knowledge) ? explicitArgs.knowledge : "") + (!prepared ? projectedContext : "")
+      if (prepared) mergedArgs._forkInheritedKnowledge = projectedContext
     }
+  } else {
+    if (prepared.knowledge) {
+      mergedArgs._forkInheritedKnowledge = prepared.knowledge
+    }
+    if (prepared.state) mergedArgs.state = prepared.state
   }
 
-  if (subtask.fork === true && isMap(subtask.forkState)) {
-    var forkStateStr = stringify(subtask.forkState, __, "")
-    var maxBytes = isNumber(this.parentArgs.forkstatemaxbytes) ? this.parentArgs.forkstatemaxbytes : 65536
-    var forkBytes = function(value) { return af.fromString2Bytes(value).length }
-    if (forkBytes(forkStateStr) > maxBytes) {
-      // Truncate oldest forkedContext entries first, then workingMemorySession if still oversized
-      var trimmed = jsonParse(forkStateStr)
-      if (isArray(trimmed.forkedContext) && trimmed.forkedContext.length > 0) {
-        while (trimmed.forkedContext.length > 0) {
-          trimmed.forkedContext.shift()
-          forkStateStr = stringify(trimmed, __, "")
-          if (forkBytes(forkStateStr) <= maxBytes) break
-        }
-      }
-      if (forkBytes(forkStateStr) > maxBytes && isObject(trimmed.workingMemorySession)) {
-        delete trimmed.workingMemorySession
-        forkStateStr = stringify(trimmed, __, "")
-      }
-      if (forkBytes(forkStateStr) > maxBytes) throw new Error("Fork state exceeds forkstatemaxbytes (" + maxBytes + " UTF-8 bytes) after trimming")
-    }
-    mergedArgs.state = forkStateStr
-  }
+  if (prepared && prepared.state) mergedArgs.state = prepared.state
+  if (!prepared && subtask.fork === true && isMap(subtask.forkState)) mergedArgs.state = this._serializeForkState(subtask.forkState)
 
   return mergedArgs
 }
@@ -471,7 +543,7 @@ SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl, inlineCard) {
       name: inlineCard.name,
       description: inlineCard.description || "",
       workerInstanceId: inlineCard.workerInstanceId,
-      capabilities: ["run-goal", "delegation", "planning"].concat(isArray(inlineCard.additionalInterfaces) && inlineCard.additionalInterfaces.indexOf("submission-recovery-v1") >= 0 ? ["submission-recovery-v1"] : []).concat(isArray(inlineCard.additionalInterfaces) && inlineCard.additionalInterfaces.indexOf("agent-comms-v1") >= 0 ? ["agent-comms-v1"] : []),
+      capabilities: (isArray(inlineCard.additionalInterfaces) && inlineCard.additionalInterfaces.indexOf("prepared-context-v1") >= 0 ? ["prepared-context-v1"] : []).concat(["run-goal", "delegation", "planning"]).concat(isArray(inlineCard.additionalInterfaces) && inlineCard.additionalInterfaces.indexOf("submission-recovery-v1") >= 0 ? ["submission-recovery-v1"] : []).concat(isArray(inlineCard.additionalInterfaces) && inlineCard.additionalInterfaces.indexOf("agent-comms-v1") >= 0 ? ["agent-comms-v1"] : []),
       skills: isArray(inlineCard.skills) ? inlineCard.skills : [],
       limits: isMap(inlineCard.limits) ? inlineCard.limits : {}
     }
@@ -484,7 +556,7 @@ SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl, inlineCard) {
           name: cardResp.name,
           description: cardResp.description || "",
           workerInstanceId: cardResp.workerInstanceId,
-          capabilities: ["run-goal", "delegation", "planning", "a2a-http-json-rest"].concat(isArray(cardResp.additionalInterfaces) && cardResp.additionalInterfaces.indexOf("submission-recovery-v1") >= 0 ? ["submission-recovery-v1"] : []).concat(isArray(cardResp.additionalInterfaces) && cardResp.additionalInterfaces.indexOf("agent-comms-v1") >= 0 ? ["agent-comms-v1"] : []),
+          capabilities: (isArray(cardResp.additionalInterfaces) && cardResp.additionalInterfaces.indexOf("prepared-context-v1") >= 0 ? ["prepared-context-v1"] : []).concat(["run-goal", "delegation", "planning", "a2a-http-json-rest"]).concat(isArray(cardResp.additionalInterfaces) && cardResp.additionalInterfaces.indexOf("submission-recovery-v1") >= 0 ? ["submission-recovery-v1"] : []).concat(isArray(cardResp.additionalInterfaces) && cardResp.additionalInterfaces.indexOf("agent-comms-v1") >= 0 ? ["agent-comms-v1"] : []),
           skills: isArray(cardResp.skills) ? cardResp.skills : [],
           limits: isMap(cardResp.limits) ? cardResp.limits : {}
         }
@@ -530,6 +602,9 @@ SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl, inlineCard) {
 
     var limits = isMap(response.limits) ? response.limits : {}
     var normalizedLimits = {
+      forkMemory: isDef(limits.forkMemory) ? toBoolean(limits.forkMemory) : __,
+      forkStateMaxBytes: isDef(limits.forkStateMaxBytes) ? Number(limits.forkStateMaxBytes) : __,
+      maxContextTokens: isDef(limits.maxContextTokens) ? Number(limits.maxContextTokens) : __,
       maxConcurrent: isDef(limits.maxConcurrent) ? Number(limits.maxConcurrent) : __,
       defaultTimeoutMs: isDef(limits.defaultTimeoutMs) ? Number(limits.defaultTimeoutMs) : __,
       maxTimeoutMs: isDef(limits.maxTimeoutMs) ? Number(limits.maxTimeoutMs) : __,
@@ -1168,6 +1243,7 @@ SubtaskManager.prototype._failOrRetrySubtask = function(subtask, prefix, error) 
 
     subtask.status = "failed"
     subtask.completedAt = new Date().getTime()
+    parent.forkMetrics.end_to_end_ms += Math.max(0, subtask.completedAt - (subtask.createdAt || subtask.completedAt))
     parent.metrics.failed++
     parent.metrics.running--
     parent.runningCount--
@@ -1188,6 +1264,15 @@ SubtaskManager.prototype._failOrRetrySubtask = function(subtask, prefix, error) 
   return outcome
 }
 
+SubtaskManager.prototype._canHandoff = function(subtask) {
+  if (subtask.status !== "running") return false
+  var timestamp = now(), timeout = this._getSubtaskTimeoutReason(subtask, timestamp)
+  if (!timeout) return true
+  if (this._claimTerminal(subtask, "timeout", timestamp, timeout.message)) this.metrics.timedout++
+  this._processQueue()
+  return false
+}
+
 SubtaskManager.prototype._startLocalSubtask = function(subtask, prefix) {
   var parent = this
 
@@ -1204,6 +1289,7 @@ SubtaskManager.prototype._startLocalSubtask = function(subtask, prefix) {
       if (subtask.comms) childAgent._comms = subtask.comms
 
       var mergedArgs = parent._buildChildArgs(subtask)
+      if (!parent._canHandoff(subtask)) return
 
       if (isObject(parent.parentAgent) && isFunction(parent.parentAgent._prepareChildMcpHandoff)) {
         parent.parentAgent._prepareChildMcpHandoff(childAgent, mergedArgs, subtask)
@@ -1267,6 +1353,7 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
     try {
       if (subtask.status !== "running") return
       var mergedArgs = parent._buildChildArgs(subtask)
+      if (!parent._canHandoff(subtask)) return
       var workerUrl = parent._nextWorkerForSubtask(subtask, mergedArgs)
       if (subtask.status !== "running") return
       if (!isString(workerUrl) || workerUrl.length === 0) {
@@ -1277,6 +1364,20 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
       subtask.remoteEventIndex = 0
       parent._touchSubtask(subtask, "remote worker selected")
 
+      if (isMap(subtask.args) && isDef(subtask.args.conversation)) throw new Error("Remote delegation does not transport conversation files; supply explicit state instead")
+      var preparedContext = parent._forkPrepared[subtask.id]
+      var profile = parent._workerProfiles[workerUrl]
+      var supportsPrepared = profile && isArray(profile.capabilities) && profile.capabilities.indexOf("prepared-context-v1") >= 0
+      var forkContext = preparedContext && !preparedContext.legacy && supportsPrepared ? {
+        version: 1, state: mergedArgs.state, knowledge: preparedContext.knowledge || "", diagnostics: subtask.forkPolicy
+      } : __
+      var transportState = !forkContext && isString(mergedArgs.state) ? mergedArgs.state : __
+      var wireArgs = merge({}, mergedArgs)
+      delete wireArgs.state
+      delete wireArgs._forkInheritedKnowledge
+      // Workers use their own configured decision client; never forward parent credentials.
+      delete wireArgs.modeldec
+      delete wireArgs.debugdecch
       var timeoutSec = Math.max(1, Math.ceil(subtask.deadlineMs / 1000))
       var metadata = merge({}, subtask.metadata || {})
       metadata.parentSubtaskId = subtask.parentId
@@ -1287,7 +1388,6 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
         subtask.commsToken = genUUID()
         commsWire = { version: 1, token: subtask.commsToken, id: subtask.comms.id, config: subtask.comms.config }
       }
-      var profile = parent._workerProfiles[workerUrl]
       if (isMap(profile) && isArray(profile.capabilities) && profile.capabilities.indexOf("submission-recovery-v1") >= 0 && isString(profile.workerInstanceId) && profile.workerInstanceId.length > 0) {
         subtask.remoteSubmissionId = genUUID()
         subtask.workerInstanceId = profile.workerInstanceId
@@ -1310,11 +1410,12 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
             },
             contextId: isString(subtask.parentId) ? subtask.parentId : subtask.id,
             metadata: {
-              args: mergedArgs,
+              args: wireArgs,
+              forkContext: forkContext,
               submissionId: subtask.remoteSubmissionId,
               workerInstanceId: subtask.workerInstanceId,
               communication: commsWire,
-              forkState: (subtask.fork === true && isString(mergedArgs.state) && mergedArgs.state.length > 0) ? mergedArgs.state : __
+              forkState: transportState
             },
             configuration: {
               timeoutSeconds: timeoutSec
@@ -1325,13 +1426,14 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
             goal: subtask.goal,
             submissionId: subtask.remoteSubmissionId,
             workerInstanceId: subtask.workerInstanceId,
-            args: mergedArgs,
+            args: wireArgs,
+            forkContext: forkContext,
             timeout: timeoutSec,
             metadata: metadata,
             communication: commsWire
           }
-          if (subtask.fork === true && isString(mergedArgs.state) && mergedArgs.state.length > 0) {
-            legacyPayload.forkState = mergedArgs.state
+          if (isString(transportState) && transportState.length > 0) {
+            legacyPayload.forkState = transportState
           }
           submissionAttempted = true
           taskResponse = parent._remoteRequest(workerUrl, "/task", legacyPayload)
@@ -1536,8 +1638,6 @@ SubtaskManager.prototype.submit = function(goal, childArgs, opts) {
       if (!MiniAComms.subset(declaration, ceiling) || (declaration.delegate && !MiniAComms.subset(MiniAComms.normalize(declaration.delegate), ceiling))) throw new Error("Communication declaration exceeds delegation allowance")
     }
   }
-  this._startWatchdog()
-  
   var depth = this.currentDepth + 1
   if (depth > this.maxDepth) {
     throw new Error("Maximum delegation depth (" + this.maxDepth + ") exceeded")
@@ -1575,6 +1675,13 @@ SubtaskManager.prototype.submit = function(goal, childArgs, opts) {
     _executionPromise: __
   }
   
+  // Capture before enqueueing. No provider request occurs during submission.
+  var input = MiniAForkPolicy.capture(this, goal, childArgs, opts)
+  if (this._running !== true) throw new Error("Subtask manager stopped")
+  subtask.args = MiniAForkPolicy.copy(childArgs)
+  if (isMap(subtask.forkState)) subtask.forkState = MiniAForkPolicy.copy(subtask.forkState)
+  this._forkInputs[subtaskId] = input
+  this._startWatchdog()
   this.subtasks[subtaskId] = subtask
   this.pendingQueue.push(subtaskId)
   this.metrics.total++
@@ -1742,6 +1849,7 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
       subtask.completedAt = new Date().getTime()
       subtask.error = cancelReason
       subtask.status = "cancelled"
+      parent.forkMetrics.end_to_end_ms += Math.max(0, subtask.completedAt - (subtask.createdAt || subtask.completedAt))
       cancelled = true
     }
     if (!cancelled) return
@@ -1920,6 +2028,9 @@ SubtaskManager.prototype.cleanup = function(subtaskId) {
     throw new Error("Cannot cleanup subtask " + subtaskId + " in non-terminal state: " + subtask.status)
   }
   
+  delete this._forkInputs[subtaskId]
+  delete this._forkPrepared[subtaskId]
+  delete this._forkErrors[subtaskId]
   delete this.subtasks[subtaskId]
 }
 
@@ -1941,6 +2052,7 @@ SubtaskManager.prototype.getMetrics = function() {
   }).length
   
   return {
+    fork_policy: MiniAForkPolicy.copy(this.forkMetrics),
     communication: this.comms ? MiniAComms.clone(this.comms.broker.metrics) : __,
     total: this.metrics.total,
     running: this.metrics.running,

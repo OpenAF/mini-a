@@ -2,6 +2,50 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA Dreams Tests::AutoDecisionBoundsAndRepeat
+  to: oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoDecisionBoundsAndRepeat
+
+- name: MiniA Dreams Tests::DeterministicSemanticLogs
+  to: oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testDeterministicSemanticLogs
+
+- name: MiniA Dreams Tests::AutoDecisionAnchorAndFreshFallback
+  to: oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoDecisionAnchorAndFreshFallback
+
+- name: MiniA Dreams Tests::AutoDecisionFailuresFallback
+  to: oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoDecisionFailuresFallback
+
+- name: MiniA Dreams Tests::AutoDecisionOptOutAndBudget
+  to: oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoDecisionOptOutAndBudget
+
+- name: MiniA Dreams Tests::AutoDecisionAmbiguousLink
+  to: oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoDecisionAmbiguousLink
+
+- name: MiniA Dreams Tests::AutoDecisionConflictsAndOwnership
+  to: oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoDecisionConflictsAndOwnership
+
+- name: MiniA Dreams Tests::AutoDecisionConfiguration
+  to: oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoDecisionConfiguration
+
+- name: MiniA Dreams Tests::AutoCurrentGenerationProof
+  to: oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoCurrentGenerationProof
+
+- name: MiniA Dreams Tests::AutoMoveOnlyRecovery
+  to: oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoMoveOnlyRecovery
+
+- name: MiniA Dreams Tests::AutoAbsorptionRecovery
+  to: oJob Test
+  exec: args.func = require("tests/dreamAuto.js").testAutoAbsorptionRecovery
+
 - name: MiniA Dreams Tests::DreamWikiTopicOrganization
   to: oJob Test
   exec: args.func = require("tests/dreams.js").testDreamWikiTopicOrganization
@@ -260,6 +304,17 @@ jobs:
   exec: args.func = require("tests/dreams.js").testDreamWikiPlanPreviewsGraphWithoutPersisting
 
 todo:
+- MiniA Dreams Tests::AutoDecisionBoundsAndRepeat
+- MiniA Dreams Tests::DeterministicSemanticLogs
+- MiniA Dreams Tests::AutoDecisionAnchorAndFreshFallback
+- MiniA Dreams Tests::AutoDecisionFailuresFallback
+- MiniA Dreams Tests::AutoDecisionOptOutAndBudget
+- MiniA Dreams Tests::AutoDecisionAmbiguousLink
+- MiniA Dreams Tests::AutoDecisionConflictsAndOwnership
+- MiniA Dreams Tests::AutoDecisionConfiguration
+- MiniA Dreams Tests::AutoCurrentGenerationProof
+- MiniA Dreams Tests::AutoMoveOnlyRecovery
+- MiniA Dreams Tests::AutoAbsorptionRecovery
 - MiniA Dreams Tests::DreamWikiTopicOrganization
 - MiniA Dreams Tests::AutoBoundedSearchCoverage
 - MiniA Dreams Tests::AutoMalformedMetadataIsPreserved

@@ -10,6 +10,7 @@ Mini-A (Mini Agent) is a goal-oriented autonomous agent that uses Large Language
 - **OAF_MODEL Environment Variable**: Must be set to your desired LLM model configuration
 - **OAF_DECIDE_MODEL Environment Variable** (optional): Automatically enables decision-assisted selection in existing dynamic/capability selection modes and ambiguous complexity assessment. `useutils=true usedecide=true` also exposes the bounded `decide` consultation tool. Disable with `usedecide=false`; see [Decision integration and MCP](docs/DECISIONS.md).
 - **OAF_LC_MODEL Environment Variable** (optional): Low-cost model for cost optimization
+- **OAF_VISUAL_MODEL Environment Variable** (optional): Dedicated vision model for image inspection and wiki image ingestion; falls back to the main model.
 - **OAF_VAL_MODEL Environment Variable** (optional): Dedicated model for deep research validation
 - **OAF_MINI_A_CON_HIST_SIZE Environment Variable** (optional): Set the maximum console history size (default is JLine's default)
 - **OAF_MINI_A_LIBS Environment Variable** (optional): Comma-separated list of libraries to load automatically
@@ -901,7 +902,7 @@ Adapt the examples above by changing the `OAF_MODEL` tuple to match your provide
 - When you submit the prompt, Mini-A automatically appends the file name and contents as Markdown code blocks. In the conversation stream the files show up as collapsible buttons—click one to open a preview modal with syntax highlighting.
 - Both Simple and Advanced modes also accept PNG/JPEG images, Word (`.doc`, `.docx`), Excel (`.xls`, `.xlsx`), PowerPoint (`.ppt`, `.pptx`) and PDF files. Enter a question or instruction before submitting binary files; Advanced slash and skill commands do not accept them.
 - Binary attachments allow **four files**, **10 MiB per image**, **20 MiB per document**, and **20 MiB combined**. Unsupported or oversized files are skipped with a warning. Images retain the existing 25-megapixel limit.
-- `useattach=true` enables isolated, read-only processing without requiring `useutils=true`, `useshell=true` or `readwrite=true`. Office/PDF files use the existing Tika `readDocument` reader (30,000 extracted characters per document); images use `inspectImage` with your question and the active main model. A vision-capable provider/model is required for images. See [Reading documents and images](#reading-documents-and-images) for Tika installation and runtime requirements; preinstall Tika for offline use.
+- `useattach=true` enables isolated, read-only processing without requiring `useutils=true`, `useshell=true` or `readwrite=true`. Office/PDF files use the existing Tika `readDocument` reader (30,000 extracted characters per document); images use `inspectImage` with your question and `modelvisual` / `OAF_VISUAL_MODEL` (falling back to the main model). A vision-capable provider/model is required for images. See [Reading documents and images](#reading-documents-and-images) for Tika installation and runtime requirements; preinstall Tika for offline use.
 - The answer pane shows your original query and the attached file names. Extracted document text and image analysis remain in model context for follow-up questions.
 - Processing progress and errors identify the file. If any file fails, no agent goal runs from partial results. Truncated extraction is marked; the combined expanded prompt must fit `maxpromptchars`.
 - Temporary originals are deleted after processing. Only extracted text/image analysis enters normal conversation history, so follow-ups use those results and cannot reprocess the original file. Scanned PDFs need OCR, which is not enabled; embedded document images, layout rendering and spreadsheet formula evaluation are not included.
@@ -955,6 +956,7 @@ The `start()` method accepts various configuration options:
 - **`debugch`** (string, optional): SLON/JSON definition of a debug channel for main LLM debugging (requires `$llm.setDebugCh` support). Example: `"(type: file, options: (file: '/tmp/mini-a-llm-debug.log'))"`.
 - **`debuglcch`** (string, optional): SLON/JSON definition of a debug channel for low-cost LLM debugging. Same format as `debugch`.
 - **`debugdecch`** (string, optional): SLON/JSON debug channel definition or native file path for the decision model (`OAF_DECIDE_MODEL` or `modeldec`). Same format as `debugch`; attached to each fresh decision client (requires `$llm.setDebugCh` support).
+- **`debugvisualch`** (string, optional): SLON/JSON channel definition or native file path for image-analysis debugging, including wiki ingestion. Attached to each image client, including when using the main-model fallback; requires `$llm.setDebugCh` support. Example: `debugvisualch=/tmp/mini-a-visual-debug.log`.
 - **`debugvalch`** (string, optional): SLON/JSON definition of a debug channel for the validation LLM. Same format as `debugch`. Example: `"(type: file, options: (file: '/tmp/mini-a-val-llm-debug.log'))"`. When a dedicated `modelval` is configured, the channel is attached to that LLM instance. When using the main LLM for validation (no `modelval`), validation prompts and responses are written directly to this channel.
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
 - **`nologtrunc`** (boolean, default: false): Disable truncation of long log output lines (show full content)
@@ -1065,6 +1067,7 @@ For the Elasticsearch/OpenSearch wiki backend, there is no separate top-level `e
 - **`modeldec`** (string): Override `OAF_DECIDE_MODEL` with a SLON/JSON configuration for this run. Select interactively with `/model dec`; `/models` displays the decision slot. See [Decisions](docs/DECISIONS.md).
 
 - **`modellc`** (string): Override the low-cost model configuration at runtime (same format as `OAF_LC_MODEL`). Useful for quick per-run model selection without changing environment variables.
+- **`modelvisual`** (string): SLON/JSON vision-model configuration for all image analysis, including wiki ingestion. Precedence: `modelvisual`, `OAF_VISUAL_MODEL`, then the existing main model. Select with `/model visual`; `/models` shows the visual slot.
 - **`modelval`** (string): Override the validation model configuration at runtime (same format as `OAF_VAL_MODEL`). Useful when you want a dedicated validation model for one run without changing environment variables.
 - **`deescalate`** (number, default: 3): Number of consecutive successful steps required after an escalation before Mini-A automatically reverts to the low-cost model. Set to a higher value for more conservative de-escalation or `0` to disable de-escalation entirely.
 - **`lccontextlimit`** (number, default: 0 = disabled): Maximum context token count before escalating to the main model. When the estimated context size reaches this threshold, Mini-A switches to the main model for that step. Useful when the low-cost model has a smaller context window than the main model. Set to `0` to disable context-based escalation.
@@ -2943,7 +2946,7 @@ and authorized wiki/skill/tool results. Source snapshots are versioned and old
 versions remain retrievable. Auxiliary planner/advisor/validator/summarizer calls
 receive bounded consumer-specific excerpts without rebinding their independent
 provider histories. Delegates receive task-specific knowledge instead of the
-parent's full knowledge field; explicitly requested fork state remains explicit.
+parent's full knowledge field under legacy behavior. Automatic inheritance now gates both projections and snapshots; a clean outcome suppresses automatic runtime context. Explicitly requested fork state retains its established behavior.
 Completed delegation results and session/period/project rollups retain provenance.
 These rollups are conversation-scoped, not a merged semantic-memory/wiki store.
 
@@ -3398,7 +3401,7 @@ Inspection works without a model. Access defaults to `ro`; the manager requires 
 
 Menus cover inspection and bounded reads/lint, managed page editing/moves/deletion, search and directory indexes, compaction, graph exploration/builds/exports, wiki Dream modes, ingestion and absorption/recovery. With only a primary wiki configured, the manager opens the operations menu directly. **Graph statistics (/graph stats)** uses the console statistics operation; stored graph file diagnostics are listed separately. Session settings and mount attachments are temporary. Unavailable actions explain their backend/access requirements. Within each category, toggle **Advanced options** for operation options or **Session → Adjust session settings** for connection and graph settings. Enter `/back` at text prompts to cancel; menus include Back/Exit.
 
-Menu options use emoji labels and the standard Mini-A green/pink branding. Categories stay open after an operation, with the last operation first for quick repeats. Advanced options are off by default and can be toggled within the category. Unavailable actions show their reason when selected. Running/completed/failed headings and elapsed time accompany compact result previews; **Show last result details** and session history retain full output. Compaction retains its complete preview before approval. Terminal-width dashed separators distinguish results, replay commands, and the current-wiki summary; the summary uses compact SLON with yellow double side lines, a pale cream background, and black text. Before execution begins, each operation prints a dark-gray, italic command without side lines or surrounding parentheses, with shell continuations between arguments for easy copying. History/export retains the plain command. The command uses the same dispatcher. The printed command changes to the package directory with `cd`, so it can be pasted from another working directory. From the checkout/package directory, the equivalent direct invocations are:
+Menu options use emoji labels and the standard Mini-A green/pink branding. Categories stay open after an operation, with the last operation first for quick repeats. Advanced options are off by default and can be toggled within the category. Unavailable actions show their reason when selected. Running/completed/failed headings and elapsed time accompany compact result previews; **Show last result details** and session history retain full output. Compaction retains its complete preview before approval. Terminal-width dashed separators distinguish results, replay commands, and the current-wiki summary; the summary uses compact SLON with yellow double side lines, a pale cream background, and black text. **Show last command line** displays the command for the latest operation on demand, in dark-gray italic text without side lines or surrounding parentheses, with shell continuations between arguments for easy copying. History/export retains the plain command. The command uses the same dispatcher. The printed command changes to the package directory with `cd`, so it can be pasted from another working directory. From the checkout/package directory, the equivalent direct invocations are:
 
 ```sh
 ojob utils/wikiOps.yaml operation=wiki.lint wikiroot="/path/My Wiki"
@@ -3455,7 +3458,41 @@ their saved operations can still be resumed using the displayed recovery ID.
 With retrieval V2 enabled, finalization normally updates the existing serving
 generation incrementally. If its parser or lexical contract is incompatible,
 finalization rebuilds the search index from the current wiki Markdown. Other
-publication failures remain reported and keep recovery pending.
+publication failures remain reported and keep recovery pending. Recoverable derived corruption
+can trigger one authoritative rebuild from intact Markdown and ownership state.
+
+Ingestion now retains durable checkpoints through page application, manifest commit,
+current-generation verification, bundle export and cleanup. V2 verification opens a
+fresh reader, validates the complete artifact closure and Lucene records/postings,
+and compares the catalogue with authoritative pages. A healthy predecessor cannot
+satisfy that check. Unchanged ingestion also verifies serving health before reporting
+success. Ordinary readers can still use a validated predecessor when the current
+pointer is damaged or missing; that fallback does not repair activation state.
+
+Matching recovery is discovered before resolving or cloning the original source.
+Saved writes can therefore finish when that source is unavailable; the result then
+sets `recovery_only=true` and `sync_complete=false`. Source-dependent prune operations
+retain their inventory and reappearance checks. Successful transformations are
+checkpointed under `.mini-a-wiki-ingest/transforms/`; exact source, prompt and model
+configuration matches can reuse them after interruption. A crash before the provider
+response is saved can still require another model call.
+
+Results expose `verification` and `progress`: `pages_committed`, `manifest_committed`,
+`local_serving_verified`, `bundle_exported`, and `remote_delivery` (`unverified`).
+Failures include a `diagnostic` with stage, stable code, retryability and next action.
+New version-3 journals carry integrity and destination bindings; version-1/2 recovery
+remains supported. Corrupt entries are individually listed and their unknown scope
+blocks replay. No journal corruption, ownership conflict or external edit is silently
+discarded to force recovery.
+
+Configured exports are read back and checked against their checksums and hydration
+limits before replacing the last accepted bundle. Preflight reports compressed and
+expanded bytes, file count and configured limits. Export-only retries reuse a verified
+generation; completion receipts avoid rewriting an unchanged accepted export. Export
+does not establish that another service uploaded the file or that remote readers
+received it. HTTP/S3 bundle refresh validates the cached closure before trusting
+unchanged remote metadata and refetches damaged caches once per refresh attempt.
+Retrieval source reports include artifact refresh status and cached timestamps.
 
 Resume replays saved work and completes manifest/index finalization without
 starting another ingestion or repeating source distillation. Configured graph
@@ -3511,15 +3548,15 @@ If a move is interrupted, repeat the wiki move or run writable ingestion to repl
 
 ### How it works
 
-1. **Resolve** — detect the source type; shallow-clone remote repos to a temp dir and record the commit SHA.
+1. **Recover and resolve** — resume unambiguously matching saved work, then detect the source type; shallow-clone remote repos to a temp dir and record the commit SHA.
 2. **Discover** — walk for native text, HTML, document and image formats, then passive structured formats advertised by the installed oafp. Skip vendor directories (`.git`, `node_modules`, `target`, `build`, `dist`, `vendor`, `.venv`, `__pycache__`, …). `README*` and `docs/**` come first.
 3. **Ledger** — skip sources whose content, transformation settings and resolved source links are unchanged (`ingestforce=true` overrides). Adding a previously missing link target refreshes referring pages; unrelated new sources do not. Older ledger records with resolved local links refresh once to establish tracking, under the normal budgets and ownership checks.
 4. **Chunk** — split oversized sources on `##`/`###` boundaries (paragraphs when headingless).
-5. **Distill** — one LLM call per source, in parallel batches, producing `{title, description, tags, type, body}`.
+5. **Distill** — one LLM call per source needing a fresh transformation, in parallel batches, producing `{title, description, tags, type, body}`. Persist successful responses for recovery; a failed batch does not repeat completed items.
 6. **Write** — one source produces **one page**. Topic organization is available through explicit `/dream reorg topics`; deterministic maintenance uses `/dream wiki apply`.
-7. **Finalize** — regenerate indexes, rebuild the search index and the knowledge graph, append to `log.md`.
+7. **Finalize and verify** — regenerate indexes, publish search and graph updates, append to `log.md`, verify the active V2 generation, then validate and export any configured bundle before clearing recovery.
 
-Office and PDF text extraction uses the `readDocument` utility and Tika (installed lazily unless preinstalled). Scanned PDFs need OCR, which is not enabled. PNG/JPEG descriptions use `inspectImage` and require a vision-capable `OAF_MODEL`; image text is treated as untrusted source data. Empty or truncated extraction fails that source without writing a partial page. The input size limit applies to these files too.
+Office and PDF text extraction uses the `readDocument` utility and Tika (installed lazily unless preinstalled). Scanned PDFs need OCR, which is not enabled. PNG/JPEG descriptions use `inspectImage` and require a vision-capable `modelvisual` / `OAF_VISUAL_MODEL` (falling back to `OAF_MODEL`); image text is treated as untrusted source data. Empty or truncated extraction fails that source without writing a partial page. The input size limit applies to these files too.
 For other passive structured formats, oafp parses the source into JSON shown in a fenced wiki page. NDJSON and NDSLON retain every record. Inputs that execute commands, query services or inspect the host are excluded from file ingestion even when oafp advertises them.
 
 Ingested pages carry provenance front-matter: `source`, `source_ref` (commit SHA or origin), `source_hash` (sha1 of the ingested content) and `ingested`. A later ingest of a changed source overwrites the page, so record durable additions elsewhere.
@@ -3576,7 +3613,7 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 | `dreamwikiinstructions` | string | _(none)_ | Additional operator guidance appended to the wiki reorg objective |
 | `dreamwikireorg` | boolean | `false` | Allow structural reorg operations |
 | `dreammaxsteps` | number | `40` | Total model-step budget for `auto` or agent-step budget for `reorg` |
-| `dreamwikillm` | boolean | `true` | Allow model proposals for unresolved issues in `auto`; `false` runs deterministic repairs only |
+| `dreamwikillm` | boolean | `true` | Allow semantic repairs in `auto`: configured decide handles bounded link choices, then the main model proposes remaining repairs; `false` runs deterministic repairs only |
 | `dreamreport` | string | - | Optional file path to write JSON run report |
 | `libs` | string | - | Extra comma-separated libraries to load |
 
@@ -3606,13 +3643,17 @@ mini-a dream=true dreammode=wiki dreamwikimode=auto \
   dreamwikillm=false dreamreport=/tmp/wiki-auto.json
 ```
 
+When `modeldec` or `OAF_DECIDE_MODEL` is configured, auto first uses the decide API to choose among existing targets for ambiguous links and existing headings for invalid anchors. `modeldec` takes precedence; `usedecide=false` disables this acceleration. Decisions may defer, and invalid responses or provider errors fall back to the existing main-model proposals. Descriptions, merges, and broader organization still use their existing model paths. `dreamwikillm=false` disables both decide and generative repairs. Dry-run remains model-free.
+
+Decision calls share `dreammaxsteps` with generative proposals and reserve one step for fallback; a one-step budget skips decide. Identical deferred requests are not retried within a run. Reports include `decision` counts (`calls`, `selected`, `fallbacks`), `duration_ms`, and sanitized fallback `reasons`. A selected repair is verified through fresh lint and retrieval checks before it counts as fixed. Logs name `dreamwikimode=auto dreamwikillm=true wikiaccess=rw` (console: `/dream wiki auto`) when semantic work remains, and name the existing reorg options for broader changes.
+
 Wiki Manager previews by default and offers to apply automatic repairs; its advanced model/limits overrides accept `dreamwikillm=false`. Use `/dream wiki auto dryrun` or `dryrun=true` to inspect issues and repair candidates. Dry-run does not call a model, resume journals, back up files, publish indexes, or repair pages. Execution requires an explicitly configured `wikiaccess=rw`; invoking auto authorizes its supported repairs without further per-action prompts. Other dream modes keep their existing approval behavior.
 
 Auto performs at most three repair/verification cycles and stops when no progress occurs. `dreammaxsteps` defaults to 40 total model requests; the three-cycle bound can stop it sooner. Each proposal receives at most 25 issues and 12 complete pages, with a 64,000-character page budget. The model has no tools: its proposed wiki writes, moves, duplicate merges and deletions are validated and applied by the coordinator. Missing models leave semantic issues unresolved after deterministic repairs. Healthy pages receive no speculative reorganisation.
 
 Authoritative Markdown is inspected independently of retrieval. Corrupt metadata bindings and manifests trigger an explicit rebuild from those pages, without repairing hashes or using an older retrieval contract. Verification opens a new strict reader, opens content pages, probes search, reruns lint, and checks the enabled structural graph. Graph maintenance in auto does not make semantic extraction calls. Unsupported schemas/runtime capabilities, malformed frontmatter whose ownership cannot be established, unavailable pages, and persistent failures remain unresolved.
 
-Auto preserves provenance and ingestion ownership by protecting owned pages from generic edits and structural changes. Ingestion recovery uses the journal's existing signature and manifest conflict checks; it does not rediscover or reprocess original sources. Corrupt/conflicting journals stay in place. Pending absorption blocks auto and reports the existing `/absorb status` and `/absorb resume <plan-id>` recovery flow.
+Auto preserves ingestion and absorption ownership by protecting owned pages from generic edits and structural changes. Ingestion recovery uses the journal's existing signature and manifest conflict checks. Auto also resumes a move-only journal or valid saved absorption plan through its owning recovery implementation, after backing up their state. Corrupt/conflicting journals stay in place. Multiple pending workflow types block auto when ordering cannot be proved and report explicit recovery actions.
 
 Local writes share a reentrant `.mini-a-wiki-ingest/writer.lock` across manager mutations, ingestion, absorption, dreams and publication. Competing writers report busy. Before repairs, auto persists `backup.json` (original page/state contents and hashes) and `journal.json` under `.mini-a-wiki-maintenance/<run-id>/`, excluded from navigation and retrieval. Backup failure blocks repairs. Every page mutation records its expected before/after hashes and intended content, including link rewrites and originals involved in moves, merges and deletions. Derived serving artifacts are rebuilt from the backed-up authoritative data.
 
@@ -3620,7 +3661,15 @@ Stop in Advanced mode, or Escape at terminal operation/stream boundaries, reques
 
 The structured report includes `run_id`, `status`, `diagnosed_issues`, `attempted_actions`, `verified_fixes`, `unresolved_issues`, `backup_location`, and `verification` coverage. Search probes record `found` for ranked results. When bounded results omit a page, V2 verification checks its actual Lucene passage count and records `indexed` and `indexed_passages`; repeated titles alone do not trigger a rebuild. Status can be `noop`, `complete`, `partial`, `planned`, `blocked`, `cancelled`, or `interrupted`. `dreamreport` saves the report for CLI and console auto runs. A successful rebuild or model response alone does not count as a verified fix.
 
-Auto is on-demand and local-directory-only. It does not mutate mounted/remote wikis or remote graphs, export artifact bundles, schedule work, or start automatically after ordinary operation failures.
+Auto is on-demand and local-directory-only. It does not mutate mounted/remote wikis or remote graphs, schedule work, or start automatically after ordinary operation failures. General maintenance disables bundle export; resuming ingestion can finish its configured export.
+
+Recovery regression commands are `ojob tests/wikiIngest.yaml`, `ojob tests/dreams.yaml`,
+`ojob tests/wikiAbsorb.yaml`, `ojob tests/wikiManager.yaml`, and `ojob tests/wiki.yaml`.
+`python3 tests/wikiIngestRecoveryProcess.py` additionally tests nine abrupt JVM
+termination boundaries and five checks against a disposable localhost HTTP server.
+Use `--process-only` or `--http-only` to run either group explicitly; HTTP requires
+permission to bind a local socket. These tests inject model responses and need no
+provider credentials.
 
 ### Wiki dream internals
 
@@ -4611,3 +4660,19 @@ provider, remote backend or deployed-server behavior.
 ## Supervised contracts
 
 Use `modelstrategy=supervised` with both main and LC configured. Optional `contractfile=<path>` selects a readable CONTRACT.md; `contractargs` binds positional inputs. `savecontract=false` and `reusecontract=false` are independent defaults. Explicit `usedecide=true` enables selective decision review; otherwise acceptance requires generative review. See [the complete contract format and compatibility rules](docs/SUPERVISED.md) and [the illustrative contract](examples/CONTRACT.md).
+
+## Automatic context inheritance for delegation
+
+Delegation now uses `forkpolicy=auto` by default. Existing delegation, tool, shell, and memory enabling flags still apply. The resolver chooses `clean`, `memory`, `context`, or bounded `full` inheritance. A configured `modeldec` / `OAF_DECIDE_MODEL` may assist ambiguous choices; no decision model is required.
+
+```bash
+mini-a usedelegation=true forkdecide=false goal="Coordinate subtasks"
+mini-a usedelegation=true usedecide=false goal="Use deterministic inheritance"
+mini-a usedelegation=true forkpolicy=legacy goal="Keep previous inheritance behavior"
+```
+
+`forkdecide=false` disables only inheritance classification. Explicit task `fork=false` suppresses automatic state and projected runtime context outside `legacy`; `fork=true` retains its memory default, and `forkscope=[memory,context]` requests both categories. A per-task `forkpolicy` overrides the run default without changing the child's outgoing policy. Forced categories fail clearly if unavailable or oversized. Explicit child state/conversation is preserved exclusively and cannot be combined with an additional explicit inheritance request.
+
+Console forms: `/delegate <goal>` follows the session policy; `/delegate fork <goal>` explicitly inherits memory and history; `/delegate clean <goal>` and `/delegate auto <goal>` override one task. `/delegate -- clean the workspace` preserves a literal modifier at the start of the goal.
+
+Clean inheritance leaves independently configured knowledge and shared memory/wiki access subject to existing permissions. It is not security isolation. Automatic views/snapshots are frozen at submission and reused across retries. See [delegation policy details](docs/DELEGATION.md#automatic-inheritance-and-migration) for budgets, fallback rules, worker compatibility, and offline evaluation limits.

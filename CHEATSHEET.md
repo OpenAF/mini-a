@@ -1467,20 +1467,22 @@ mini-a mode=mypreset goal="your goal here"
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `autodelegation` | boolean | `false` | Automatically delegate to a summarization sub-agent when a tool result exceeds `autodelegationthreshold`. Requires `usedelegation=true`. The sub-agent is forked (inherits working memory) only when `usememory=true` and memory is non-empty; otherwise it runs with a clean context. |
+| `autodelegation` | boolean | `false` | Automatically delegate to a summarization sub-agent when a tool result exceeds `autodelegationthreshold`. Requires `usedelegation=true`. The sub-agent is resolved by forkpolicy; auto uses clean for the supplied summary input. Legacy retains the previous nonempty-memory fork rule. |
 | `autodelegationthreshold` | number | `8192` | Byte size of a tool result that triggers auto-delegation (ignored when `autodelegation=false`). |
 | `autodelegationmaxperstep` | number | `2` | Maximum auto-delegations per agent step; prevents runaway delegation on large result sets. |
 | `noisytools` | string | `""` | Comma-separated tool names always treated as noisy regardless of result size (e.g. `noisytools=shell,web-search`). Always triggers auto-delegation when `autodelegation=true`. |
 | `subtasks` | string | `""` | Pipe-separated (`\|`) goals for sub-agents launched at startup before the main loop. Results are fed into working memory as `artifacts`. Parallel by default. |
-| `subtasksfile` | string | `""` | Path to a YAML/JSON file containing an array of `{goal, fork, args, timeout}` task objects — alternative to inline `subtasks=`. |
+| `subtasksfile` | string | `""` | Path to a YAML/JSON file containing an array of `{goal, fork, forkscope, forkpolicy, args, timeout}` task objects — alternative to inline `subtasks=`. |
 | `subtaskssequential` | boolean | `false` | When `true`, run startup sub-agents (and all delegated subtasks) one at a time instead of in parallel. Sets `maxConcurrent=1` on the SubtaskManager. |
-| `forkstatemaxbytes` | number | `65536` | Maximum bytes of serialized fork state transmitted to a remote worker. Oldest context entries are dropped first if the payload exceeds this limit. |
+| `forkpolicy` | string | `auto` | Outgoing inheritance: auto, legacy, clean, memory, context, full. Legacy restores previous behavior. |
+| `forkdecide` | boolean | `true` | Allow bounded configured decision assistance for ambiguous auto inheritance; usedecide=false also disables it. |
+| `forkstatemaxbytes` | number | `65536` | UTF-8 limit on automatic state plus projected context, locally and remotely. Explicit forks retain previous state trimming/errors. |
 
 **Sub-agent vs. Forked sub-agent:**
 
 | Type | Context inherited | When to use |
 |------|-------------------|-------------|
-| **Sub-agent** (default) | Config args only — fresh context | Independent parallel tasks, research scouts |
+| **Sub-agent** (default auto policy) | Automatically selected clean, memory, context, or bounded full inheritance | Independent parallel tasks, research scouts |
 | **Forked sub-agent** (`fork=true`) | Working memory + optionally conversation history | Tasks that need parent knowledge to avoid re-doing work |
 
 **Examples:**
@@ -1535,7 +1537,10 @@ mini-a workermode=true onport=8081 apitoken=secret shellworker=true
 
 | Command | Description |
 |---------|-------------|
-| `/delegate <goal>` | Manually delegate a sub-goal to a child agent |
+| `/delegate <goal>` | Delegate using the effective forkpolicy |
+| `/delegate clean <goal>` | Suppress automatic runtime snapshots and projections |
+| `/delegate auto <goal>` | Follow auto for this task |
+| `/delegate -- <goal>` | Preserve a literal goal starting with fork, clean, or auto |
 | `/delegate fork <goal>` | Delegate a forked sub-goal — child inherits parent working memory and conversation history |
 | `/subtasks` | List all subtasks with status (shows `[fork]` badge for forked subtasks) |
 | `/subtask <id>` | Show subtask details |

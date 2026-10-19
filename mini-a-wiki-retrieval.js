@@ -992,45 +992,49 @@ MiniAWikiRetrievalV2.prototype._closeSnapshot = function(snapshot) {
 MiniAWikiRetrievalV2.prototype._retainValidatedSnapshot = function(snapshot) {
   var self = this
   return this._guard(function() {
-    if (self.closed || snapshot._closePending || self.serving.some(function(existing) { return existing.generation === snapshot.generation })) return false
+    if (self.closed || snapshot._closePending || self.serving.some(function(existing) { return existing.generation === snapshot.generation && existing.dir === snapshot.dir })) return false
     for (var i=self.serving.length-1;i>=0;i--) if (!self.serving[i].refs && self.serving.length>=2) { self._closeSnapshot(self.serving[i]); self.serving.splice(i,1) }
     if(self.serving.length>=2)return false
     snapshot._managed=true;self.serving.push(snapshot); return true
   })
 }
-MiniAWikiRetrievalV2.prototype.acquire = function(deadline, preferPrevious) {
+MiniAWikiRetrievalV2.prototype.acquire = function(deadline, preferPrevious, options) {
   var self = this
   return this._guard(function() {
     if (self.closed) throw new Error("retrieval-closed")
     if (isFunction(self.manager._maybeRefreshArtifactBundle)) self.manager._maybeRefreshArtifactBundle()
     if (self.manager._access !== "rw" && isFunction(self.manager._activeBundleRoot)) self.root = self.manager._activeBundleRoot() + "/.mini-a-wiki-serving"
     var currentPath = self.root + "/current.json", previousPath = self.root + "/previous.json"
-    if (!io.fileExists(currentPath)) throw new Error("v2-build-required")
+    var currentOnly = options && options.currentOnly === true || self.currentOnly === true
+    if (!io.fileExists(currentPath) && (currentOnly || !io.fileExists(previousPath))) throw new Error("v2-build-required")
     // `previous.json` is a validated rollback candidate written before a new
     // pointer becomes active. It is only a read fallback: corruption must not
     // silently rewrite activation state or bypass normal writer recovery.
-    var candidates = [{ path: currentPath, fallback: false }]
-    if (io.fileExists(previousPath)) candidates.push({ path: previousPath, fallback: true })
+    var candidates = io.fileExists(currentPath) ? [{ path: currentPath, fallback: false }] : []
+    if (!currentOnly && io.fileExists(previousPath)) candidates.push({ path: previousPath, fallback: true })
     if (preferPrevious === true && candidates.length === 2) candidates.reverse()
     var primaryFailure
     for (var candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
       var candidate = candidates[candidateIndex]
       try {
         if (java.nio.file.Files.isSymbolicLink(new java.io.File(candidate.path).toPath())) throw new Error("unsafe-generation-pointer")
-        var pointer = af.fromJson(io.readFileString(candidate.path))
+        var pointer
+        try { pointer = af.fromJson(io.readFileString(candidate.path)) } catch(pointerError) { throw new Error("invalid-generation-pointer") }
         if (!pointer || pointer.schema !== 1 || !/^[a-f0-9-]{36}$/.test(pointer.generation)) throw new Error("invalid-generation-pointer")
-        var cached = self.serving.filter(function(s) { return s.generation === pointer.generation && !s._closePending })[0]
+        var generationDir = self.root + "/" + pointer.generation
+        var cached = self.serving.filter(function(s) { return s.generation === pointer.generation && s.dir === generationDir && !s._closePending })[0]
         if (cached && cached.manifestChecksum !== pointer.checksum) throw new Error("generation-checksum-mismatch")
         if (!cached) {
           // Never evict a pinned reader. Retain at most two open generations.
           for (var i = self.serving.length - 1; i >= 0; i--) if (!self.serving[i].refs && self.serving.length >= 2) { self._closeSnapshot(self.serving[i]); self.serving.splice(i, 1) }
           if (self.serving.length >= 2) throw new Error("generation-reader-budget")
-          var dir = self.root + "/" + pointer.generation, manifestPath = dir + "/manifest.json"
+          var dir = generationDir, manifestPath = dir + "/manifest.json"
           if (java.nio.file.Files.isSymbolicLink(new java.io.File(dir).toPath()) || java.nio.file.Files.isSymbolicLink(new java.io.File(manifestPath).toPath()) || String(new java.io.File(dir).getCanonicalPath()).indexOf(String(new java.io.File(self.root).getCanonicalPath()) + "/") !== 0) throw new Error("unsafe-generation-path")
-          if (MiniAWikiRetrievalV2.digest(manifestPath) !== pointer.checksum) throw new Error("generation-integrity-failure")
+          if (!io.fileExists(manifestPath) || MiniAWikiRetrievalV2.digest(manifestPath) !== pointer.checksum) throw new Error("generation-integrity-failure")
           var manifest = af.fromJson(io.readFileString(manifestPath)), analysis = self._resolveAnalysis(manifest), catalog = self._validateStructural(dir, manifest, analysis)
           cached = self._openSnapshot(dir, manifest, catalog, analysis); cached._managed = true; cached.recoveredPointer = candidate.fallback === true; self.serving.push(cached)
         }
+        cached.recoveredPointer = candidate.fallback === true
         cached.refs++; return cached
       } catch(e) {
         if (!candidate.fallback) primaryFailure = e
@@ -1721,9 +1725,21 @@ MiniAWikiRetrievalV2.prototype.build = function(changes, options) {
     // The backup is durable before activation; it never changes source content.
     if (io.fileExists(pointerPath)) {
       if (java.nio.file.Files.isSymbolicLink(new java.io.File(pointerPath).toPath())) throw new Error("unsafe-generation-pointer")
-      var priorPointer = af.fromJson(io.readFileString(pointerPath))
-      if (!priorPointer || priorPointer.schema !== 1 || !/^[a-f0-9-]{36}$/.test(priorPointer.generation)) throw new Error("invalid-generation-pointer")
-      this._atomic(this.root + "/previous.json", priorPointer, true, true)
+      var priorPointer, priorValid = false
+      try {
+        try { priorPointer = af.fromJson(io.readFileString(pointerPath)) } catch(priorParseError) { throw new Error("invalid-generation-pointer") }
+        if (!priorPointer || priorPointer.schema !== 1 || !/^[a-f0-9-]{36}$/.test(priorPointer.generation)) throw new Error("invalid-generation-pointer")
+        var priorDir = this.root + "/" + priorPointer.generation
+        if (java.nio.file.Files.isSymbolicLink(new java.io.File(priorDir).toPath())) throw new Error("unsafe-generation-path")
+        if (MiniAWikiRetrievalV2.digest(priorDir + "/manifest.json") !== priorPointer.checksum) throw new Error("generation-integrity-failure")
+        // Explicit source recovery must not replace a healthy predecessor with
+        // an invalid current publication.
+        if (options && options.authoritative === true) this._validate(priorDir, af.fromJson(io.readFileString(priorDir + "/manifest.json")))
+        priorValid = true
+      } catch(priorError) {
+        if (isArray(changes) || !(options && options.authoritative === true) || /unsafe-/.test(__miniAErrMsg(priorError))) throw priorError
+      }
+      if (priorValid) this._atomic(this.root + "/previous.json", priorPointer, true, true)
     }
     this._atomic(pointerPath, { schema: 1, generation: generation, checksum: MiniAWikiRetrievalV2.digest(dir + "/manifest.json") }, true)
     activated = true
@@ -1733,11 +1749,11 @@ MiniAWikiRetrievalV2.prototype.build = function(changes, options) {
     if(old){this.release(old);old=null}
     try { if (this._retainValidatedSnapshot(snapshot)) snapshot = null } catch(retentionBusy) { try { this.manager._logFn("warn", "[wiki] validated searcher retention deferred") } catch(ignoreLog) {} }
     if(snapshot){this._closeSnapshot(snapshot);snapshot=null}
-    var pendingExport = this.manager._knowledgeJournalPending && this.manager._knowledgeJournalPending()
+    var pendingExport = this.manager._deferServingExport === true || this.manager._knowledgeJournalPending && this.manager._knowledgeJournalPending()
     var exported = this.config.bundlePath ? (pendingExport ? { ok: false, deferred: true, error: "ingest-pending" } : this.exportBundle(this.config.bundlePath)) : __
     finishStage("readerRetentionExport")
     return { ok: !exported || exported.ok || exported.deferred === true, activationSucceeded: true, localPublished: true, bundle: exported, generation: generation, pages: Number(manifest.catalogue.stats.pageCount), passages: Number(manifest.catalogue.stats.passageCount), updatedPages: paths.length, updateWork: work }
-  } catch(e) { activated = activated || e._pointerActivated === true; return { ok: false, error: __miniAErrMsg(e), bindingFailure: e.bindingFailure, previousGenerationPreserved: true, activationSucceeded: activated, localPublished: activated, generation: activated ? generation : __, updateWork: work } }
+  } catch(e) { activated = activated || e._pointerActivated === true; return { ok: false, error: __miniAErrMsg(e), code: __miniAErrMsg(e).split(":")[0], bindingFailure: e.bindingFailure, previousGenerationPreserved: true, activationSucceeded: activated, localPublished: activated, generation: activated ? generation : __, updateWork: work } }
   finally {
     try { if (snapshot) this._closeSnapshot(snapshot) } catch(ignoreS) {}
     try { if (writer) writer.rollback() } catch(ignoreW) {}
@@ -2096,6 +2112,8 @@ MiniAWikiRetrievalV2.prototype._collect = function(query, options, materialize, 
       try {
         if (stages.indexOf("pin") < 0) stages.push("pin")
         pin = measure("pin", function() { return engine.acquire(deadline) }); pins.push({ engine: engine, snapshot: pin }); vector[target.name] = pin.generation
+        if (pin.recoveredPointer) source.recoveredPointer = true
+        if (target.manager._artifactStatus) source.artifact = clone(target.manager._artifactStatus)
         var allocation = Math.max(1, Math.floor(remaining / (selection.targets.length - i)))
         if (selection.targets.length > 1) allocation = Math.min(allocation, Math.max(2, Math.floor(budget.maxCandidates / (selection.targets.length * 2))))
         var pending = engine._pending(), permissions = {}
@@ -2720,42 +2738,50 @@ MiniAWikiRetrievalV2.prototype._bundleBase = function(manifest, catalog) {
   return { manifest:base, texts:texts }
 }
 MiniAWikiRetrievalV2.prototype.exportBundle = function(destination) {
-  var snapshot, zip, output, temporary = String(destination) + ".tmp-" + java.util.UUID.randomUUID(), self = this
+  var snapshot, zip, output, temporary = String(destination) + ".tmp-" + java.util.UUID.randomUUID(), self = this, exportStage = "current"
   try {
     if (this.manager._knowledgeJournalPending && this.manager._knowledgeJournalPending()) throw new Error("ingest-pending")
     if (!isString(destination) || !destination.trim().length || destination.length > 4096) throw new Error("invalid-bundle-destination")
-    snapshot = this.acquire()
+    snapshot = this.acquire(__, false, { currentOnly: true })
+    this._validate(snapshot.dir, snapshot.manifest)
     var target = new java.io.File(destination).getCanonicalFile()
     if (target.exists() && !target.isFile()) throw new Error("invalid-bundle-destination")
     output = new java.io.FileOutputStream(temporary); zip = new java.util.zip.ZipOutputStream(output)
-    var prefix = ".mini-a-wiki-serving/", buffer = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 65536), activeBundle = this._bundleBase(snapshot.manifest, snapshot.catalog)
+    var prefix = ".mini-a-wiki-serving/", buffer = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 65536), activeBundle = this._bundleBase(snapshot.manifest, snapshot.catalog), expectedFiles = {}
     var pointer = stringify({ schema: 1, generation: snapshot.generation, checksum: MiniAWikiRetrievalV2.digestText(stringify(activeBundle.manifest, __, "")) }, __, "")
+    expectedFiles[prefix + "current.json"] = MiniAWikiRetrievalV2.digestText(pointer)
     zip.putNextEntry(new java.util.zip.ZipEntry(prefix + "current.json")); zip.write(new java.lang.String(pointer).getBytes("UTF-8")); zip.closeEntry()
     var generations = [{ generation: snapshot.generation, dir: snapshot.dir, manifest: snapshot.manifest, bundle:activeBundle }], previousPath = this.root + "/previous.json"
     // A published bundle must retain the same bounded read-recovery contract as
     // its local source. Validate the predecessor before exposing it remotely.
     if (io.fileExists(previousPath)) {
+      exportStage = "predecessor"
       if (java.nio.file.Files.isSymbolicLink(new java.io.File(previousPath).toPath())) throw new Error("unsafe-generation-pointer")
-      var previousPointer = af.fromJson(io.readFileString(previousPath))
+      var previousPointer
+      try { previousPointer = af.fromJson(io.readFileString(previousPath)) } catch(previousParseError) { throw new Error("invalid-generation-pointer") }
       if (!previousPointer || previousPointer.schema !== 1 || !/^[a-f0-9-]{36}$/.test(previousPointer.generation)) throw new Error("invalid-generation-pointer")
       if (previousPointer.generation !== snapshot.generation) {
         var previousDir = this.root + "/" + previousPointer.generation, previousManifestPath = previousDir + "/manifest.json"
         if (java.nio.file.Files.isSymbolicLink(new java.io.File(previousDir).toPath()) || java.nio.file.Files.isSymbolicLink(new java.io.File(previousManifestPath).toPath()) || String(new java.io.File(previousDir).getCanonicalPath()).indexOf(String(new java.io.File(this.root).getCanonicalPath()) + "/") !== 0) throw new Error("unsafe-generation-path")
-        if (MiniAWikiRetrievalV2.digest(previousManifestPath) !== previousPointer.checksum) throw new Error("generation-integrity-failure")
+        if (!io.fileExists(previousManifestPath) || MiniAWikiRetrievalV2.digest(previousManifestPath) !== previousPointer.checksum) throw new Error("generation-integrity-failure")
         var previousManifest = af.fromJson(io.readFileString(previousManifestPath))
         this._validate(previousDir, previousManifest)
         var previousCatalog = this._resolveCatalogue(previousDir, previousManifest)
         var previousBundle = this._bundleBase(previousManifest, previousCatalog)
         generations.push({ generation: previousPointer.generation, dir: previousDir, manifest: previousManifest, bundle:previousBundle })
         previousPointer.checksum = MiniAWikiRetrievalV2.digestText(stringify(previousBundle.manifest, __, ""))
+        expectedFiles[prefix + "previous.json"] = MiniAWikiRetrievalV2.digestText(stringify(previousPointer, __, ""))
         zip.putNextEntry(new java.util.zip.ZipEntry(prefix + "previous.json")); zip.write(new java.lang.String(stringify(previousPointer, __, "")).getBytes("UTF-8")); zip.closeEntry()
       }
     }
+    exportStage = "archive"
     var fileCount = 1
     generations.forEach(function(generation) {
       var records = generation.bundle.manifest.files
+      expectedFiles[prefix + generation.generation + "/manifest.json"] = MiniAWikiRetrievalV2.digestText(stringify(generation.bundle.manifest, __, ""))
       zip.putNextEntry(new java.util.zip.ZipEntry(prefix + generation.generation + "/manifest.json")); zip.write(new java.lang.String(stringify(generation.bundle.manifest, __, "")).getBytes("UTF-8")); zip.closeEntry(); fileCount++
       records.forEach(function(record) {
+        expectedFiles[prefix + generation.generation + "/" + record.path] = record.checksum
         if (generation.bundle.texts[record.path]) { zip.putNextEntry(new java.util.zip.ZipEntry(prefix + generation.generation + "/" + record.path)); zip.write(new java.lang.String(generation.bundle.texts[record.path]).getBytes("UTF-8")); zip.closeEntry(); fileCount++; return }
         var path = /^blocks\//.test(record.path) ? self._blockFile(generation.dir, generation.manifest, record.path) : self._path(generation.dir, record.path)
         zip.putNextEntry(new java.util.zip.ZipEntry(prefix + generation.generation + "/" + record.path))
@@ -2765,10 +2791,36 @@ MiniAWikiRetrievalV2.prototype.exportBundle = function(destination) {
       })
     })
     zip.close(); zip = null; output = null
+    var preflight = this._verifyBundleFile(temporary, expectedFiles)
+    if (!preflight.ok) return preflight
     java.nio.file.Files.move(new java.io.File(temporary).toPath(), target.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-    return { ok: true, generation: snapshot.generation, fallbackGeneration: generations.length > 1 ? generations[1].generation : __, files: fileCount + (generations.length > 1 ? 1 : 0), bytes: Number(target.length()) }
-  } catch(e) { return { ok: false, error: __miniAErrMsg(e) } }
+    return { ok: true, generation: snapshot.generation, fallbackGeneration: generations.length > 1 ? generations[1].generation : __, files: fileCount + (generations.length > 1 ? 1 : 0), bytes: Number(target.length()), preflight: preflight, delivery: "unverified" }
+  } catch(e) { return { ok: false, error: __miniAErrMsg(e), code: __miniAErrMsg(e).split(":")[0], stage: exportStage } }
   finally { try { if (zip) zip.close(); else if (output) output.close() } catch(ignoreZip) {}; try { java.nio.file.Files.deleteIfExists(new java.io.File(temporary).toPath()) } catch(ignoreFile) {}; if (snapshot) this.release(snapshot) }
+}
+
+// Read back every staged ZIP entry against its source checksum before replacing
+// the last accepted export. Limits match hydration, including pointer overhead.
+MiniAWikiRetrievalV2.prototype._verifyBundleFile = function(path, expected) {
+  var zip, report = { ok: false, compressedBytes: Number(new java.io.File(path).length()), expandedBytes: 0, files: 0,
+    limits: { maxArtifactBytes: this.config.maxArtifactBytes, maxArtifactFiles: this.config.maxArtifactFiles } }, seen = {}
+  try {
+    zip = new java.util.zip.ZipFile(path)
+    var entries = zip.entries()
+    while (entries.hasMoreElements()) {
+      var entry = entries.nextElement(), name = String(entry.getName())
+      report.files++; report.expandedBytes += Math.max(0, Number(entry.getSize()))
+      if (seen[name] || !expected[name]) throw new Error("bundle-entry-mismatch")
+      seen[name] = true
+      var stream = zip.getInputStream(entry)
+      try { if (String(sha256(stream)) !== expected[name]) throw new Error("bundle-checksum-failure") } finally { stream.close() }
+    }
+    if (Object.keys(seen).length !== Object.keys(expected).length) throw new Error("bundle-entry-mismatch")
+    if (report.compressedBytes > this.config.maxArtifactBytes || report.expandedBytes > this.config.maxArtifactBytes || report.files > this.config.maxArtifactFiles) throw new Error("bundle-artifact-budget")
+    report.ok = true
+  } catch(e) { report.error = __miniAErrMsg(e); report.code = report.error.split(":")[0] }
+  finally { if (zip) zip.close() }
+  return report
 }
 
 // Direct publishers participate in the same writer coordination as manager APIs.

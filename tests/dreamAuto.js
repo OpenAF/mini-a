@@ -276,4 +276,223 @@
       ow.test.assert(io.readFileString(root + "/alpha.md"), malformed, "unknown provenance remains byte-for-byte intact")
     })
   }
+  exports.testAutoCurrentGenerationProof = function() { fixture(function(root) {
+    var wm = new MiniAWikiManager({ root: root, access: 'rw', wikiretrievalv2: true }, function() {})
+    try { wm.reindex(); io.writeFileString(wm._retrievalV2.root + '/current.json', '{broken') } finally { wm.close() }
+    var preview = runner(root, { dryrun: true }).dreamWiki()
+    ow.test.assert(preview.diagnosed_issues.some(function(i) { return i.type === 'derived_index_failure' }), true, 'healthy predecessor cannot mask corrupt current')
+    var result = runner(root).dreamWiki()
+    ow.test.assert(result.verification.ok, true, JSON.stringify(result))
+    ow.test.assert(result.verification.serving.current_only, true, 'repaired current publication verified')
+  }) }
+  exports.testAutoMoveOnlyRecovery = function() { fixture(function(root) {
+    var wm = new MiniAWikiManager({ root: root, access: 'rw', wikiretrievalv2: true }, function() {})
+    try {
+      wm._retrievalV2.build = function() { return { ok: false, error: 'injected publication failure' } }
+      ow.test.assert(wm.move('alpha.md', 'topics/alpha.md').ok, false, 'move leaves recovery authority')
+    } finally { wm.close() }
+    var result = runner(root).dreamWiki()
+    ow.test.assert(result.attempted_actions.some(function(a) { return a.action === 'move-resume' && a.status === 'applied' }), true, JSON.stringify(result))
+    ow.test.assert(result.verification.ok, true, 'move-only recovery verified')
+    ow.test.assert(io.fileExists(root + '/.mini-a-wiki-move/journal.json'), false, 'move journal completed')
+    var backup = io.readFileJSON(result.backup_location + '/backup.json')
+    ow.test.assert(isString(backup.files['.mini-a-wiki-move/journal.json']), true, 'move authority included in backup')
+  }) }
+  exports.testAutoAbsorptionRecovery = function() { fixture(function(root) {
+    load('mini-a-absorb.js')
+    var src = String(new java.io.File(io.createTempDir('auto_absorb_source_')).getCanonicalPath())
+    try {
+      io.writeFileString(src + '/new.md', '# New\n\nAbsorbed recovery evidence.')
+      var absorber = new MiniAAbsorb({ wikiroot: root, wikiaccess: 'rw', absorbspec: { sources: [{ id: 'origin', root: src, all: true }] }, absorbop: 'plan' })
+      absorber._setLlm({ promptJSONWithStats: function() { return { response: { proposals: [{ path: 'new.md', classification: 'enrichment', edits: [{ before: '', after: '# New\n\nAbsorbed recovery evidence.', evidence: ['origin:new.md'] }], evidence: ['origin:new.md'], mappings: [{ evidence: 'origin:new.md', anchor: '' }], dependencies: [] }], findings: [], irrelevant: [] } } } })
+      var plan = absorber.run()
+      ow.test.assert(plan.ok, true, JSON.stringify(plan))
+      absorber._args.absorbop = 'apply'; absorber._args.absorbplan = plan.id
+      absorber._afterWrite = function() { throw new Error('injected absorption interruption') }
+      ow.test.assert(absorber.run().status, 'recovery-required', 'absorption leaves a valid journal')
+      var result = runner(root).dreamWiki()
+      ow.test.assert(result.attempted_actions.some(function(a) { return a.action === 'absorption-resume:' + plan.id && a.status === 'applied' }), true, JSON.stringify(result))
+      ow.test.assert(result.verification.ok, true, 'absorption publication verified')
+      ow.test.assert(io.fileExists(root + '/.mini-a-wiki-absorb/journal.json'), false, 'absorption journal cleared')
+      ow.test.assert(io.readFileString(root + '/new.md').indexOf('Absorbed recovery evidence.') >= 0, true, 'saved operation preserved')
+    } finally { io.rm(src) }
+  }) }
+  function breakAnchor(root) {
+    var path = root + "/alpha.md"
+    io.writeFileString(path, io.readFileString(path).replace("(beta.md)", "(beta.md#obsolete-route)"))
+  }
+  function fakeDecision(r, fn) {
+    r._createWikiDecision = function() { return { isConfigured: function() { return true }, decide: fn } }
+  }
+  function choice(value) { return { response: { answers: { repair: { type: "choice", value: value } } } } }
+  exports.testAutoDecisionAnchorAndFreshFallback = function() {
+    fixture(function(root) {
+      breakAnchor(root); breakDescription(root)
+      var logs = [], r = runner(root, { dreamwikillm: true, dreammaxsteps: 2 }, function(v) { logs.push(String(v)) }), calls = 0
+      fakeDecision(r, function(state, questions) {
+        calls++
+        ow.test.assert(questions.repair.criteria.candidate_0, "beta.md#beta-networking", "only existing heading supplied")
+        return choice("candidate_0")
+      })
+      r._setLlm({ prompt: function(prompt) {
+        var e = evidence(prompt)
+        ow.test.assert(e.pages["alpha.md"].raw.indexOf("beta.md#beta-networking") >= 0, true, "fallback uses repaired source")
+        return { actions: [] }
+      } })
+      var res = r.dreamWiki()
+      ow.test.assert(calls, 1, "one decision call")
+      ow.test.assert(res.llm_steps, 2, "decision and fallback share budget")
+      ow.test.assert(res.decision.selected, 1, "selected counted")
+      ow.test.assert(res.verified_fixes.some(function(i) { return i.type === "invalid_anchor" }), true, "fresh lint verifies anchor")
+      ow.test.assert(res.verification.ok, true, "fresh retrieval verifies changes")
+      ow.test.assert(logs.some(function(v) { return v.indexOf("dreamwikimode=auto dreamwikillm=true wikiaccess=rw") >= 0 }), true, "semantic hint names options")
+    })
+  }
+  exports.testAutoDecisionFailuresFallback = function() {
+    ["defer", "invalid", "provider"].forEach(function(mode) {
+      fixture(function(root) {
+        breakAnchor(root)
+        var r = runner(root, { dreamwikillm: true, dreammaxsteps: 2 }), calls = 0
+        fakeDecision(r, function() {
+          if (mode === "provider") throw new Error("secret provider message")
+          return choice(mode === "invalid" ? "invented-target" : "defer")
+        })
+        r._setLlm({ prompt: function(prompt) {
+          calls++
+          ow.test.assert(evidence(prompt).pages["alpha.md"].raw.indexOf("obsolete-route") >= 0, true, "fallback retains unresolved link")
+          return { actions: [] }
+        } })
+        var res = r.dreamWiki()
+        ow.test.assert(calls, 1, mode + " falls back once")
+        ow.test.assert(res.decision.fallbacks, 1, "fallback counted")
+        ow.test.assert(JSON.stringify(res.decision).indexOf("secret provider") < 0, true, "errors sanitized")
+        ow.test.assert(res.verified_fixes.some(function(i) { return i.type === "invalid_anchor" }), false, "unresolved selection never fixed")
+      })
+    })
+  }
+  exports.testAutoDecisionOptOutAndBudget = function() {
+    [{ usedecide: false }, { dreamwikillm: false }, { dryrun: true }, { dreammaxsteps: 1 }].forEach(function(opts) {
+      fixture(function(root) {
+        breakAnchor(root)
+        var r = runner(root, merge({ dreamwikillm: true, dreammaxsteps: 3 }, opts))
+        r._createWikiDecision = function() { throw new Error("decision must not initialize") }
+        r._setLlm({ prompt: function() { return { actions: [] } } })
+        var res = r.dreamWiki()
+        ow.test.assert(res.decision.calls, 0, "opt-out/dry-run/budget skips decide: " + JSON.stringify(opts))
+        ow.test.assert(isUnDef(res.reason), true, "no unexpected failure: " + JSON.stringify(res))
+      })
+    })
+  }
+  exports.testAutoDecisionAmbiguousLink = function() {
+    fixture(function(root) {
+      var wm = new MiniAWikiManager({ root: root, backend: "fs", access: "rw", wikiretrievalv2: true }, function() {})
+      try {
+        wm.write("install/topic.md", { title: "Package setup", description: "Installation reference", type: "concept" }, "# Package setup\n\nUnpack archives and verify installed checksums.\n")
+        wm.write("network/topic.md", { title: "Network routing", description: "Router reference", type: "concept" }, "# Network routing\n\nRoute packets through the configured gateway.\n")
+        var pg = wm.read("alpha.md")
+        wm.write("alpha.md", pg.meta, pg.body.replace("(beta.md)", "(topic.md)"))
+        wm.regenerateIndexes(); wm.reindex()
+      } finally { wm.close() }
+      var r = runner(root, { dreamwikillm: true, dreammaxsteps: 2 })
+      fakeDecision(r, function(state, questions) {
+        var id = Object.keys(questions.repair.criteria).filter(function(k) { return questions.repair.criteria[k] === "install/topic.md" })[0]
+        ow.test.assert(isString(id), true, "existing alternatives supplied")
+        return choice(id)
+      })
+      r._setLlm({ prompt: function() { return { actions: [] } } })
+      var res = r.dreamWiki()
+      ow.test.assert(res.decision.selected, 1, "ambiguous link selected")
+      ow.test.assert(io.readFileString(root + "/alpha.md").indexOf("(install/topic.md)") >= 0, true, "canonical selected path written")
+      ow.test.assert(res.verification.ok, true, "publication verified")
+    })
+  }
+  exports.testAutoDecisionConflictsAndOwnership = function() {
+    fixture(function(root) {
+      breakAnchor(root)
+      var r = runner(root, { dreamwikillm: true, dreammaxsteps: 2 }), calls = 0
+      fakeDecision(r, function() {
+        io.writeFileString(root + "/beta.md", io.readFileString(root + "/beta.md") + "\nConcurrent edit\n")
+        return choice("candidate_0")
+      })
+      r._setLlm({ prompt: function() { calls++; return { actions: [] } } })
+      var res = r.dreamWiki()
+      ow.test.assert(res.reason.indexOf("external-change-conflict") >= 0, true, "changed target blocks repair")
+      ow.test.assert(calls, 0, "conflict never falls back to writes")
+      ow.test.assert(io.readFileString(root + "/alpha.md").indexOf("obsolete-route") >= 0, true, "source untouched")
+    })
+    fixture(function(root) {
+      breakAnchor(root)
+      var path = root + "/alpha.md"
+      io.writeFileString(path, io.readFileString(path).replace("\n---\n", "\nsource: owned-source\n---\n"))
+      var r = runner(root, { dreamwikillm: true }), before = io.readFileString(path)
+      r._createWikiDecision = function() { throw new Error("owned source must not be judged") }
+      r._setLlm({ prompt: function() { return { actions: [] } } })
+      var res = r.dreamWiki()
+      ow.test.assert(res.decision.calls, 0, "owned source skipped")
+      ow.test.assert(io.readFileString(path), before, "owned source preserved")
+    })
+  }
+  exports.testAutoDecisionConfiguration = function() {
+    var cfg = { type: "openai", model: "fixture-decision" }, r = new MiniADreams({ modeldec: cfg })
+    ow.test.assert(r._createWikiDecision()._config.model, cfg.model, "modeldec takes precedence over environment")
+    r = new MiniADreams({ modeldec: cfg, usedecide: false })
+    ow.test.assert(r._createWikiDecision().isConfigured(), false, "explicit opt-out overrides configuration")
+    var dec = new MiniADecision({ env: function() { return "" } })
+    ow.test.assert(dec.isConfigured(), false, "no configuration remains disabled")
+    loadLib("mini-a-wikiops.js")
+    var settings = MiniAWikiOps.settings({ modeldec: cfg, usedecide: false })
+    ow.test.assert(settings.modeldec.model, cfg.model, "Wiki Manager forwards decision configuration")
+    ow.test.assert(settings.usedecide, false, "Wiki Manager forwards opt-out")
+    ow.test.assert(MiniAWikiOps.sensitive("modeldec", cfg), true, "decision configuration is redacted")
+    var rejected = false
+    try { new MiniAWikiOps({}).spec("dream.auto", { modeldec: cfg }) } catch(e) { rejected = String(e).indexOf("Use configuration arguments") >= 0 }
+    ow.test.assert(rejected, true, "decision model remains configuration, not operation data")
+  }
+  exports.testAutoDecisionBoundsAndRepeat = function() {
+    var r = runner("/tmp", { dreamwikillm: true }), calls = 0
+    fakeDecision(r, function() { calls++; return choice("defer") })
+    r._wikiDecisionTried = {}
+    var report = { llm_steps: 0, decision: { calls: 0, selected: 0, fallbacks: 0, duration_ms: 0, reasons: {} } }
+    var issue = { type: "broken_link", page: "source.md", target: "topic.md" }
+    var pages = { "source.md": { raw: "Source context" }, "one.md": { raw: "First target" }, "two.md": { raw: "Second target" } }
+    var wm = { read: function(p) { return pages[p] }, _backend: { read: function(p) { return pages[p].raw } } }
+    var choices = [{ candidate: { path: "one.md" }, anchor: "" }, { candidate: { path: "two.md" }, anchor: "" }]
+    r._autoDecideLink(wm, issue, choices, {}, report, 10)
+    r._autoDecideLink(wm, issue, choices, {}, report, 10)
+    ow.test.assert(calls, 1, "identical deferred evidence not retried")
+    r._autoDecideLink(wm, issue, choices, { "one.md": true }, report, 10)
+    ow.test.assert(calls, 1, "owned candidate never judged")
+    pages["source.md"].raw = "x".repeat(18000)
+    pages["one.md"].raw = "y".repeat(18000)
+    pages["two.md"].raw = "z".repeat(18000)
+    r._autoDecideLink(wm, issue, choices, {}, report, 10)
+    ow.test.assert(calls, 1, "oversized request bypasses decide without truncation")
+    r._autoDecideLink(wm, issue, Array(65).fill(choices[0]), {}, report, 10)
+    ow.test.assert(calls, 1, "oversized candidate catalogue bypasses decide")
+    delete pages["one.md"]
+    r._autoDecideLink(wm, issue, choices, {}, report, 10)
+    ow.test.assert(calls, 1, "missing candidate evidence bypasses decide")
+    r._wikiDecision = { isConfigured: function() { return false }, decide: function() { throw new Error("must not call") } }
+    r._autoDecideLink(wm, issue, choices, {}, report, 10)
+    ow.test.assert(report.llm_steps, 1, "skips and repeat do not consume steps")
+    pages["one.md"] = { raw: "First target" }
+    pages["source.md"].raw = "Source context"; pages["two.md"].raw = "Second target"
+    r._wikiDecisionTried = {}
+    r._wikiDecision = { isConfigured: function() { return true }, decide: function() { r._autoCancelled = true; return choice("candidate_0") } }
+    var cancelled = false
+    try { r._autoDecideLink(wm, issue, choices, {}, report, 10) } catch(e) { cancelled = String(e).indexOf("auto-cancelled") >= 0 }
+    ow.test.assert(cancelled, true, "cancellation after decide stops before any repair")
+  }
+  exports.testDeterministicSemanticLogs = function() {
+    fixture(function(root) {
+      breakAnchor(root)
+      var logs = [], r = runner(root), wm = new MiniAWikiManager({ root: root, backend: "fs", access: "rw" }, function() {})
+      r._logFn = function(v) { logs.push(String(v)) }
+      r._createWikiDecision = function() { throw new Error("deterministic repair must not initialize model") }
+      try { r._repairWikiLint(wm, wm.lint()) } finally { wm.close() }
+      ow.test.assert(logs.some(function(v) { return v.indexOf("dreamwikimode=auto dreamwikillm=true wikiaccess=rw") >= 0 }), true, "invalid anchor discovered during repair has semantic option hint")
+      ow.test.assert(logs.some(function(v) { return v.indexOf("dreamwikireorg=true dreamwikiapproval=auto") >= 0 }), true, "broader reorg gates named")
+      ow.test.assert(logs.some(function(v) { return v.indexOf("disabled by dreamwikillm=false") >= 0 }), true, "disabled semantic repair explained")
+    })
+  }
 })()

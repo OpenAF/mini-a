@@ -2588,6 +2588,15 @@
       ow.test.assert(downloadCalls,1,"unchanged S3 bundle performs exactly one download")
       var metadataAudit=audits.filter(function(event){return event.backend==="s3-artifact"&&event.operation==="metadata"})[0]
       ow.test.assert(metadataAudit.ok&&metadataAudit.bytes===0&&metadataAudit.metadataMillis>=0,true,"unchanged S3 metadata probe is measured without invented download bytes")
+      var cachedRoot = reader._activeBundleRoot() + "/.mini-a-wiki-serving", cachedPointer = io.readFileJSON(cachedRoot + "/current.json")
+      io.writeFileString(cachedRoot + "/" + cachedPointer.generation + "/manifest.json", "corrupt local cache")
+      ow.test.assert(reader._hydrateS3Artifacts(), true, "same ETag still refetches corrupt local artifacts")
+      ow.test.assert(downloadCalls, 2, "cache repair performs one replacement download")
+      ow.test.assert(reader._artifactStatus.status, "cache-repaired", "repair is reported distinctly from metadata no-op")
+      var repairedPin = reader._retrievalV2.acquire()
+      try { ow.test.assert(repairedPin.dir.indexOf(reader._activeBundleRoot() + "/") === 0, true, "same-generation repair opens the replacement cache directory") } finally { reader._retrievalV2.release(repairedPin) }
+      ow.test.assert(reader.retrieve("s3bundleparameter", {chunks:1}).evidence.length, 1, "replacement cache serves verified evidence")
+      pointer = io.readFileString(dir+"/cache/.mini-a-wiki-bundles/current.json")
       etag="two";denied=true
       ow.test.assert(reader._hydrateS3Artifacts(),false,"denied S3 refresh remains explicit")
       ow.test.assert(io.readFileString(dir+"/cache/.mini-a-wiki-bundles/current.json"),pointer,"denied S3 refresh retains the prior hydrated generation")

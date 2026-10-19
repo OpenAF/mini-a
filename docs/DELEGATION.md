@@ -19,7 +19,7 @@ There are four delegation modes / features:
 
 - You want the LLM to autonomously decide when to delegate sub-goals
 - You need concurrent execution of independent subtasks within a single session
-- You want to isolate child agent context from the parent (each child starts with a clean slate)
+- You want to control inherited context independently of delegation permissions (`forkpolicy=clean` requests no automatic parent context)
 
 ### Enabling Local Delegation
 
@@ -41,6 +41,9 @@ mini-a
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
+| `forkpolicy` | string | `auto` | Outgoing inheritance: `auto`, `legacy`, `clean`, `memory`, `context`, `full` |
+| `forkdecide` | boolean | `true` | Allow bounded configured decision assistance for ambiguous automatic inheritance |
+| `forkstatemaxbytes` | number | `65536` | UTF-8 limit on automatic state plus projected context; explicit forks retain established state trimming |
 | `usedelegation` | boolean | `false` | Enable subtask delegation |
 | `workers` | string | (none) | Comma-separated list of worker URLs. If provided, delegation routes to remote workers instead of local child agents |
 | `usea2a` | boolean | `false` | Use A2A HTTP+JSON/REST binding (`/message:send`, `/tasks`, `/tasks:cancel`) for remote worker transport |
@@ -74,9 +77,7 @@ When `usedelegation=true` and `usetools=true`:
   "timeout": 300,
   "waitForResult": true,
   "worker": "data-east",
-  "skills": ["data-analysis"],
-  "fork": false,
-  "forkscope": ["memory"]
+  "skills": ["data-analysis"]
 }
 ```
 
@@ -86,7 +87,8 @@ When `usedelegation=true` and `usetools=true`:
 - `waitForResult` (optional): Block until child completes (default: true)
 - `worker` (optional): Partial name hint to prefer a specific remote worker (matched against name, description, URL)
 - `skills` (optional): Array of required skill IDs or tags — only workers with **all** listed skills are considered (e.g. `["shell"]`, `["time"]`, `["network","tls"]`)
-- `fork` (optional, default `false`): When `true`, the child agent starts with a snapshot of the parent's context (see **Forked Sub-agents** below)
+- `fork` (optional): Omit it to follow the effective policy. Explicit `false` suppresses automatic inheritance outside `legacy`; explicit `true` requests the established snapshot behavior. Omit `fork`/`forkscope` unless making an explicit request.
+- `forkpolicy` (optional): One-shot incoming inheritance override; independent of `args.forkpolicy`, which controls the child's future delegations.
 - `forkscope` (optional, default `["memory"]`): Array controlling what parent state is passed to the fork. Values: `"memory"` (working memory + session memory), `"context"` (last 50 conversation history entries)
 
 > **Shell tasks**: use `skills: ["shell"]` to route to a shell-capable worker. Shell capability is declared by the worker via the `shell` A2A skill (set `shellworker=true` when starting the worker).
@@ -132,11 +134,20 @@ The tool description is dynamic — when remote workers are registered their nam
 When delegation is enabled, you can manually delegate tasks from the interactive console:
 
 ```bash
-# Delegate a sub-goal (fresh context)
+# Delegate a sub-goal using the effective forkpolicy
 /delegate Summarize the README.md file
 
 # Delegate a forked sub-goal (inherits parent memory + conversation history)
 /delegate fork Summarize the README.md using what you already know about this project
+
+# Explicitly suppress parent runtime inheritance
+/delegate clean Summarize this supplied text
+
+# Request auto for this task, even when the session uses a forced policy
+/delegate auto Continue the analysis
+
+# A literal goal beginning with a modifier
+/delegate -- clean the workspace
 
 # List all subtasks (forked subtasks show a [fork] badge)
 /subtasks
@@ -678,6 +689,39 @@ mini-a workermode=true onport=8080 apitoken=secret \
 
 A **forked sub-agent** is a child agent that starts with a snapshot of the parent's context rather than a clean slate. This avoids re-doing research or re-establishing facts the parent has already gathered.
 
+### Automatic inheritance and migration
+
+`forkpolicy=auto` is now the default for outgoing tasks. It does **not** enable delegation, noisy-tool delegation, tools, shell, memory, or shared stores. Opt into those capabilities separately as before. `forkpolicy=legacy` restores the previous inheritance behavior, including trigger-specific forks and virtualization projections. Legacy `fork=false` historically suppresses snapshots but can still receive a projected view; use a per-task `forkpolicy=clean` to suppress both.
+
+Policies choose `clean` (neither runtime source), `memory` (working/session memory), `context` (recent runtime history or a bounded active virtualization view), or `full` (both categories within budgets). `full` does not promise the complete transcript. Independently configured knowledge, persistent memory, and wiki access retain their normal permissions: a clean handoff is not a security sandbox.
+
+Precedence is existing hard controls, explicit per-task `fork`, per-task `forkpolicy`, then run/session policy (default `auto`). `forkscope` alone never enables a fork. Conflicting explicit `fork` and forced per-task policies fail validation; a run default never defeats an explicit task request. Explicit `fork=true` keeps the memory default and existing overflow behavior; adding a compatible forced per-task `forkpolicy` applies that policy's stricter feasibility requirement. `/delegate fork` explicitly requests memory plus context.
+
+Explicit child `state` or `conversation` is preserved exclusively and suppresses automatic inheritance. Combining either with an explicit inheritance request is an error. Remote conversation files are not transported; provide serialized state for a remote child. Top-level submission options select incoming context, while child arguments configure its later delegations:
+
+```javascript
+manager.submitAndRun("Continue the analysis", { forkpolicy: "clean" }, { forkpolicy: "context" })
+// This child receives parent history; its own outgoing delegations default to clean.
+manager.submitAndRun("Independent task", {}, { fork: false })
+manager.submitAndRun("Use both sources", {}, { fork: true, forkscope: ["memory", "context"] })
+```
+
+The resolver first removes unavailable sources and facts already supplied verbatim. Nonempty storage, complexity, repository names, and a single matching keyword are insufficient dependency evidence. The initial deterministic evidence rule requires at least two distinct lexical tokens and coverage of at least half the nontrivial goal tokens in one source record. It supports Unicode text without interpreting English scope words as commands. This is a relevance heuristic, not proof of semantic necessity. No available sources and known self-contained noisy-tool summaries resolve immediately. Evidence in the sole feasible source, or at least two nonshared goal tokens supported by each of the two source categories, can also resolve without a model; other cases retain an evidence-based deterministic fallback.
+
+Ambiguous tasks may consult the existing `modeldec` / `OAF_DECIDE_MODEL` abstraction. `forkdecide=false` disables only this classifier; `usedecide=false` disables it together with other decision integrations. Neither omission nor `forkdecide=true` enables the public `decide` utility or unrelated opt-in gates. There is no main/low-cost model fallback.
+
+The optional classifier asks one choice question with feasible scopes plus abstention. Its serialized UTF-8 input is at most 8 KiB, subject to lower inheritance/context limits. It uses at most one attempt per submission snapshot, eight allowance reservations per run, a maximum 2,000 ms transport timeout (or a lower configured timeout/remaining deadline), and non-waiting rate admission. Unsupported capabilities, unfamiliar transports, invalid configuration/output, abstention, failure, and rate pressure keep the deterministic fallback. Current OpenAF adapters using the shared decision HTTP transport can enforce the configured timeout; custom transports without that recognizable contract are skipped. No background request is abandoned to simulate a timeout.
+
+Source material is cloned at submission. Resolution runs outside transition/communication locks inside the existing child execution path; retries and argument rebuilding reuse the prepared result. Validated choices alone enter a bounded run-local cache keyed by content, goal, constraints, budgets, model identity, and policy version. Cache keys and raw context are not logged.
+
+Automatic state and projected knowledge share `forkstatemaxbytes`; token ceilings use the existing token estimate independently. Trimming preserves valid state and untrusted-context delimiters. Automatic policy uses feasible alternatives when optional context cannot fit. Forced `memory|context|full` fails if a requested category cannot survive within limits. Explicit/legacy snapshots retain their previous oldest-history/session-memory trimming and overflow error. The selected scope and omitted/truncated sources appear in task `forkPolicy` diagnostics.
+
+Active virtualization projection excludes duplicate memory/configured-knowledge sources and uses deterministic representations. Shadow/degraded modes use runtime history. Automatic projected knowledge is tracked separately so a later clean grandchild cannot recover it through ordinary knowledge merging.
+
+Remote parents resolve once and send prepared state/views through `/task` or A2A metadata. Workers do not classify an incoming handoff; their decision configuration governs future outgoing tasks. Supplied remote knowledge is literal text and never an implicit request to read a worker-local prompt file. Updated workers advertise `prepared-context-v1`, memory availability, and byte/token ceilings. The parent conservatively intersects advertised limits across registered workers without changing routing. Unknown memory availability excludes automatic memory inheritance. Older workers retain snapshot transport; virtualization views require the updated transport. Worker decision opt-outs remain authoritative, and parent decision credentials are removed from outgoing worker arguments.
+
+Offline verification: `ojob tests/forkPolicy.yaml` covers child inputs, precedence, provider mocks, snapshot/retry behavior, both transports, and matched `legacy` / deterministic / assisted MiniAEval fixtures. These tests establish contracts rather than real-world quality gains. Shared process counters do not provide independent parent/child token attribution; do not add child snapshots to parent totals. Live success, tool repetition, total billed usage, latency, and cost comparisons require separate measured runs and known pricing.
+
 ### What is inherited
 
 | `forkscope` value | What is passed to the child |
@@ -730,7 +774,9 @@ The limit counts serialized UTF-8 bytes. Trimming preserves the parent's snapsho
 mini-a usedelegation=true subtasksfile=scouts.yaml goal="Security audit"
 ```
 
-### Fork scope defaults per trigger
+Startup `fork=true` without `forkscope` retains its historical working-memory-only snapshot (no session-memory copy). Supplying `forkscope` explicitly uses the general category definitions above.
+
+### Explicit and legacy fork scope defaults per trigger
 
 | Trigger | Default `forkscope` | Rationale |
 |---------|---------------------|-----------|
@@ -749,9 +795,7 @@ Auto-delegation automatically intercepts tool results that are too large or verb
 
 1. A tool executes normally in the parent agent
 2. After execution, if the result size ≥ `autodelegationthreshold` **or** the tool name is in `noisytools`, a summarization sub-agent is spawned
-3. Whether the sub-agent is **forked** is decided automatically:
-   - **Forked** (`fork=true`, `["memory"]` scope) when `usememory=true` **and** the parent's working memory is non-empty — the sub-agent inherits what the parent has already learned so it can focus its summary on what is relevant
-   - **Clean slate** otherwise — no overhead from serializing empty state
+3. The common `forkpolicy` resolver selects inheritance. `auto` uses `clean` because the summary task includes the input. `legacy` retains the prior memory-enabled/nonempty-memory fork rule; forced policies apply normally.
 4. The sub-agent receives the raw tool output (up to 32 KB) and the parent goal; it answers in 2–5 sentences
 5. The parent's context records `[OBS …] [auto-delegated summary] …` instead of the raw output
 
@@ -770,7 +814,7 @@ Auto-delegation automatically intercepts tool results that are too large or verb
 - **Per-step cap**: `autodelegationmaxperstep` prevents a single step with many large tool calls from spawning too many sub-agents.
 - **Error skip**: Auto-delegation is skipped when the tool returned an error.
 - **Short deadline**: Summarization sub-agents get a 30-second deadline (`maxsteps=5`).
-- **Automatic fork decision**: The sub-agent is forked only when `usememory=true` and the parent's working memory is non-empty. When memory is disabled or empty, the sub-agent runs with a clean slate — no serialization overhead for zero benefit.
+- **Inheritance policy**: Under `auto`, the summary goal already includes the tool output, so the common resolver selects `clean` without a classification call. Forced policies still apply. Under `legacy`, preserve the previous `usememory=true` plus nonempty-memory fork rule.
 
 ### Example
 
@@ -985,7 +1029,7 @@ Mini-A delegation enables:
 
 ✅ **Hierarchical problem decomposition** — Break complex goals into manageable subtasks  
 ✅ **Parallel execution** — Run independent subtasks concurrently  
-✅ **Context isolation** — Each child starts with a clean slate (default)  
+✅ **Context control** — Automatic inheritance by default; explicit clean requests suppress runtime inheritance<br>
 ✅ **Context inheritance** — Forked sub-agents start with a snapshot of parent memory and/or conversation history  
 ✅ **Auto-delegation** — Noisy tool results are automatically summarized by a sub-agent before entering the parent context  
 ✅ **Startup scouts** — Pre-specified tasks run in parallel with the main loop; results fed into working memory  

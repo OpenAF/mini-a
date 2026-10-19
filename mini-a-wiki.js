@@ -1315,7 +1315,27 @@ MiniAWikiManager.prototype._hydrateArtifactBundle = function(remoteMetaFn, downl
     var metadataStarted = Number(java.lang.System.nanoTime()), remote = remoteMetaFn(), local
     metadataMillis = (Number(java.lang.System.nanoTime()) - metadataStarted) / 1000000
     try { local = af.fromJson(io.readFileString(pointer)) } catch(ignoreMeta) {}
-    if (!__miniAWikiBundleChanged(remote, local) && local.source === source && local.key === key) {
+    var unchanged = !__miniAWikiBundleChanged(remote, local) && local.source === source && local.key === key, cacheHealthy = true
+    if (unchanged) {
+      // An ETag proves remote identity, not the health of local cache files.
+      var healthEngine, healthSnapshot
+      try {
+        var cacheRoot = this._activeBundleRoot(), servingRoot = cacheRoot + "/.mini-a-wiki-serving"
+        if (io.fileExists(servingRoot + "/current.json")) {
+          var healthPointer = af.fromJson(io.readFileString(servingRoot + "/current.json"))
+          if (!healthPointer || healthPointer.schema !== 1 || !/^[a-f0-9-]{36}$/.test(healthPointer.generation)) throw new Error("invalid-generation-pointer")
+          var healthDir = servingRoot + "/" + healthPointer.generation, healthManifestPath = healthDir + "/manifest.json"
+          if (java.nio.file.Files.isSymbolicLink(new java.io.File(healthDir).toPath()) || java.nio.file.Files.isSymbolicLink(new java.io.File(healthManifestPath).toPath())) throw new Error("unsafe-generation-path")
+          if (global.MiniAWikiRetrievalV2.digest(healthManifestPath) !== healthPointer.checksum) throw new Error("generation-integrity-failure")
+          var healthManifest = af.fromJson(io.readFileString(healthManifestPath))
+          healthEngine = new global.MiniAWikiRetrievalV2(this, config)
+          healthSnapshot = healthEngine._openSnapshot(healthDir, healthManifest, healthEngine._validate(healthDir, healthManifest))
+        } else if (!io.fileExists(cacheRoot + "/.mini-a-wiki-lucene")) throw new Error("bundle-cache-missing")
+      } catch(healthError) { cacheHealthy = false; this._bundlePointer = __ }
+      finally { if (healthSnapshot) healthEngine._closeSnapshot(healthSnapshot); if (healthEngine) healthEngine.close() }
+    }
+    if (unchanged && cacheHealthy) {
+      this._artifactStatus = { ok: true, status: "unchanged", source: source, key: key, checkedAt: new Date().toISOString(), cachedAt: local.fetchedAt }
       this._auditRetrieval(source + "-artifact", key, key, true, 0, { operation: "metadata", metadataMillis: metadataMillis, totalMillis: (Number(java.lang.System.nanoTime()) - started) / 1000000 })
       return false
     }
@@ -1388,10 +1408,11 @@ MiniAWikiManager.prototype._hydrateArtifactBundle = function(remoteMetaFn, downl
     var activation = merge(remote, { schema: 1, generation: generation, source: source, key: key, fetchedAt: new Date().toISOString(), files: files, bytes: expanded })
     global.MiniAWikiRetrievalV2.prototype._atomic(pointer, activation)
     this._bundlePointer = __
+    this._artifactStatus = { ok: true, status: unchanged && !cacheHealthy ? "cache-repaired" : "activated", source: source, key: key, checkedAt: new Date().toISOString(), cachedAt: activation.fetchedAt, generation: generation }
     this._auditRetrieval(source + "-artifact", key, key, true, compressedBytes, { operation: "hydrate", metadataMillis: metadataMillis, downloadMillis: downloadMillis, totalMillis: (Number(java.lang.System.nanoTime()) - started) / 1000000, expandedBytes: expanded })
     this._logFn("info", "Hydrated validated wiki artifact generation from " + source)
     return true
-  } catch(e) { this._auditRetrieval(source + "-artifact", key, key, false, compressedBytes, { operation: "hydrate", metadataMillis: metadataMillis, downloadMillis: downloadMillis, totalMillis: (Number(java.lang.System.nanoTime()) - started) / 1000000 }); this._logFn("warn", "Failed to hydrate wiki artifact generation: " + __miniAErrMsg(e)); return false }
+  } catch(e) { this._artifactStatus = { ok: false, status: "refresh-failed", error: __miniAErrMsg(e), source: source, key: key, cachedAt: local && local.fetchedAt, retainedGeneration: local && local.generation, cacheHealthy: cacheHealthy !== false, checkedAt: new Date().toISOString() }; this._auditRetrieval(source + "-artifact", key, key, false, compressedBytes, { operation: "hydrate", metadataMillis: metadataMillis, downloadMillis: downloadMillis, totalMillis: (Number(java.lang.System.nanoTime()) - started) / 1000000 }); this._logFn("warn", "Failed to hydrate wiki artifact generation: " + __miniAErrMsg(e)); return false }
   finally {
     try { if (zip) zip.close(); else if (input) input.close() } catch(ignoreInput) {}
     try { if (reader) reader.close(); if (directory) directory.close() } catch(ignoreReader) {}
@@ -1751,6 +1772,75 @@ MiniAWikiManager.prototype.compact = function(options) {
   if (!built.ok) return { ok: false, stage: "reindex", result: built }
   var cleanup = engine.reclaimSharedBlocks({ generations: true })
   return { ok: cleanup.ok, generation: built.generation, cleanup: cleanup, fallbackPreserved: true }
+}
+
+// Explicit maintenance proof: a new engine opens only the active pointer and
+// checks the complete closure, all live Lucene records and authoritative pages.
+MiniAWikiManager.prototype.verifyServing = function(options) {
+  options = options || {}
+  var active = this._retrievalV2 || this._legacyRetrievalV2, engine, pin
+  if (!active) return { ok: true, skipped: "legacy-retrieval" }
+  try {
+    engine = new global.MiniAWikiRetrievalV2(this, active.config)
+    engine.root = active.root; engine.currentOnly = true
+    // A checksummed future contract needs a migration, not an automatic
+    // downgrade to the parser/schema supported by this runtime.
+    var pointerPath = engine.root + "/current.json", currentPointer
+    try { currentPointer = af.fromJson(io.readFileString(pointerPath)) } catch(ignorePointer) {}
+    if (currentPointer && /^[a-f0-9-]{36}$/.test(currentPointer.generation || "")) {
+      var currentDir = engine.root + "/" + currentPointer.generation, manifestPath = currentDir + "/manifest.json"
+      if (!java.nio.file.Files.isSymbolicLink(new java.io.File(currentDir).toPath()) && !java.nio.file.Files.isSymbolicLink(new java.io.File(manifestPath).toPath()) && io.fileExists(manifestPath) && global.MiniAWikiRetrievalV2.digest(manifestPath) === currentPointer.checksum) {
+        var currentManifest = af.fromJson(io.readFileString(manifestPath))
+        if (currentManifest.schema > 3 || currentManifest.parser > 6) throw new Error("unsupported-serving-schema")
+      }
+    }
+    pin = engine.acquire(__, false, { currentOnly: true })
+    var catalog = engine._validate(pin.dir, pin.manifest), self = this, seen = {}, L = Packages.org.apache.lucene
+    var live = L.index.MultiBits.getLiveDocs(pin.reader)
+    for (var i = 0; i < Number(pin.reader.maxDoc()); i++) {
+      if (live && !live.get(i)) continue
+      var doc = self._luceneStoredDoc(pin.searcher, i), id = String(doc.get("id")), passage = catalog.passages[id]
+      if (seen[id] || !passage || String(doc.get("recordType")) !== "passage" || String(doc.get("page")) !== passage.path || sha1(String(doc.get("text"))) !== passage.textHash || Number(pin.searcher.count(new L.search.TermQuery(new L.index.Term("id", id)))) !== 1) throw new Error("generation-index-text-mismatch")
+      seen[id] = true
+    }
+    if (Object.keys(seen).length !== Object.keys(catalog.passages).length) throw new Error("generation-index-count-mismatch")
+    Object.keys(catalog.pages).forEach(function(path) {
+      if (Number(pin.searcher.count(new L.search.TermQuery(new L.index.Term("page", path)))) !== catalog.pages[path].passageIds.length) throw new Error("generation-index-count-mismatch")
+    })
+    if (options.sources !== false) {
+      var inventory = self._backend.enumerate ? self._backend.enumerate("") : { ok: true, pages: self.list("") }
+      if (!inventory || inventory.ok !== true || !isArray(inventory.pages)) throw new Error("source-enumeration-failed")
+      var paths = inventory.pages.filter(function(path) { return !self._isSearchExcludedPath(path) })
+      if (paths.length !== Object.keys(catalog.pages).length) throw new Error("source-catalogue-count-mismatch")
+      paths.forEach(function(path) {
+        var raw = self._backend.read(path), record = catalog.pages[path]
+        if (!isString(raw)) throw new Error("source-read-failed: " + path)
+        if (!record || sha1(raw) !== record.revision) throw new Error("source-revision-mismatch: " + path)
+      })
+    }
+    return { ok: true, generation: pin.generation, checksum: pin.manifestChecksum, pages: Object.keys(catalog.pages).length,
+      passages: Object.keys(seen).length, fresh_reader: true, current_only: true, sources_checked: options.sources !== false }
+  } catch(e) { return { ok: false, error: __miniAErrMsg(e), code: e.analysis && e.analysis.differingFields && e.analysis.differingFields.indexOf("analyzer-capability") >= 0 ? "analyzer-capability-unavailable" : __miniAErrMsg(e).split(":")[0], fresh_reader: true, current_only: true } }
+  finally { if (pin) engine.release(pin); if (engine) engine.close() }
+}
+
+// Recover only derived artifacts. Ownership, source and runtime errors are
+// deliberately excluded from this allowlist.
+MiniAWikiManager.prototype._isServingRecoveryError = function(code) {
+  var recoverable = /^(v2-build-required|invalid-generation-pointer|generation-(integrity-failure|checksum-mismatch|files-missing|index-count-mismatch|index-field-missing|index-text-mismatch|record-missing)|catalogue-(parent-unavailable|shard-integrity-failure|integrity-failure|count-mismatch|delta-binding-failure|lineage-depth)|invalid-(generation-catalog|catalogue|catalogue-lineage|page-record|passage-record|passage-ownership|passage-order|block-postings|backlink-postings|structure-record|context-range)|unreferenced-passage-record|page-(revision|metadata)-binding-failure|passage-revision-binding-failure|source-(catalogue-count|revision)-mismatch|incompatible-generation|reindex-required)$/
+  var additional = ["manifest-merkle-failure", "invalid-generation-manifest", "generation-block-missing", "immutable-block-integrity-failure", "identity-block-mismatch", "cyclic-catalogue-lineage", "invalid-catalogue-delta", "invalid-catalogue-shard", "invalid-catalogue-tombstone"]
+  return additional.indexOf(code) >= 0 || recoverable.test(code)
+}
+MiniAWikiManager.prototype.recoverServing = function() {
+  if (!this._retrievalV2 && !this._legacyRetrievalV2) return { ok: false, error: "legacy-retrieval-recovery-unsupported", code: "legacy-retrieval-recovery-unsupported" }
+  var proof = this.verifyServing()
+  if (proof.ok) return proof
+  if (!this._isServingRecoveryError(proof.code)) return proof
+  if (isFunction(this.knowledgeLoadState) && this.knowledgeLoadState()._corrupt) return { ok: false, error: "knowledge-state-unavailable", code: "knowledge-state-unavailable" }
+  var rebuilt = this.reindex({ authoritative: true })
+  if (!rebuilt.ok) return rebuilt
+  var verified = this.verifyServing(); verified.source_rebuild = true; verified.previous_error = proof.error
+  return verified
 }
 
 MiniAWikiManager.prototype.reindex = function(options) {
@@ -3002,7 +3092,20 @@ MiniAWikiManager.prototype._makeFsBackend = function(cfg) {
       var full = resolvePath(path, true)
       var parent = new java.io.File(full).getParentFile()
       if (isDef(parent) && !io.fileExists(String(parent.getCanonicalPath()))) io.mkdir(String(parent.getCanonicalPath()))
-      io.writeFileString(full, content)
+      var temporary = full + ".tmp-" + java.util.UUID.randomUUID(), channel
+      try {
+        io.writeFileString(temporary, content)
+        if (io.fileExists(full) && java.nio.file.Files.getFileStore(new java.io.File(full).toPath()).supportsFileAttributeView("posix")) {
+          java.nio.file.Files.setPosixFilePermissions(new java.io.File(temporary).toPath(), java.nio.file.Files.getPosixFilePermissions(new java.io.File(full).toPath()))
+        }
+        channel = java.nio.channels.FileChannel.open(new java.io.File(temporary).toPath(), java.nio.file.StandardOpenOption.WRITE)
+        channel.force(true); channel.close(); channel = null
+        java.nio.file.Files.move(new java.io.File(temporary).toPath(), new java.io.File(full).toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        if (String(java.lang.System.getProperty("os.name")).toLowerCase().indexOf("windows") < 0) {
+          channel = java.nio.channels.FileChannel.open(parent.toPath(), java.nio.file.StandardOpenOption.READ)
+          channel.force(true)
+        }
+      } finally { if (channel) channel.close(); java.nio.file.Files.deleteIfExists(new java.io.File(temporary).toPath()) }
     },
     exists: function(path) {
       var started = Number(java.lang.System.nanoTime()), identifier = path

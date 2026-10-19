@@ -50,6 +50,7 @@ MiniAIngest.prototype._buildLlm = function() {
       this._log("[ingest] Could not resolve model configuration. Use a model map or a saved mini-a/models reference.")
       return __
     }
+    this._resolvedModelFingerprint = sha256(stringify(cfg, __, ""))
     var self = this
     __miniALoadLibraries(this._args.libs, function(msg) { self._log(msg) }, function(msg) { throw new Error(msg) })
     __miniAEnsureModelProvider(cfg)
@@ -472,24 +473,47 @@ MiniAIngest.prototype._stateFingerprint = function(state) {
 }
 MiniAIngest.prototype._atomicJson = function(path, value) {
   var dir = new java.io.File(path).getParentFile(), tmp = path + ".tmp-" + java.util.UUID.randomUUID()
+  if (value.version === 3 && isArray(value.operations) && isMap(value.state)) {
+    var signed = af.fromJson(stringify(value, __, "")); delete signed.integrity
+    value.integrity = sha256(stringify(signed, __, ""))
+  }
   try {
-    if (!dir.exists() && !dir.mkdirs()) throw new Error("cannot create state directory")
+    if (!dir.exists() && !dir.mkdirs() && !dir.isDirectory()) throw new Error("cannot create state directory")
     io.writeFileString(tmp, stringify(value, __, ""))
+    this._syncState(tmp, false)
     java.nio.file.Files.move(new java.io.File(tmp).toPath(), new java.io.File(path).toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    this._syncState(String(dir.getPath()), true)
   } finally { try { new java.io.File(tmp).delete() } catch(ignore) {} }
+}
+MiniAIngest.prototype._syncState = function(path, directory) {
+  // Windows FileChannel cannot open a directory; file forcing and atomic
+  // replacement still apply there, as for other existing state writers.
+  if (directory && String(java.lang.System.getProperty("os.name")).toLowerCase().indexOf("windows") >= 0) return
+  var channel = java.nio.channels.FileChannel.open(new java.io.File(path).toPath(), directory ? java.nio.file.StandardOpenOption.READ : java.nio.file.StandardOpenOption.WRITE)
+  try { channel.force(true) } finally { channel.close() }
 }
 MiniAIngest.prototype._recoveryEntries = function(wm) {
   var self = this
   return wm._ingestJournalPaths().map(function(path) {
-    var journal = af.fromJson(io.readFileString(path))
-    if (!isMap(journal) || !isArray(journal.operations) || !isMap(journal.state)) throw new Error("invalid recovery journal: " + path)
-    var id = sha1(path + "|" + String(journal.generation || journal.scopeId || "legacy"))
-    var scope = isMap(journal.scope) ? journal.scope : { unknown: true, section: "unknown", source: "unknown", sourceid: "unknown" }
-    return { id: id, journal: path, scopeId: journal.scopeId, phase: journal.phase, scope: scope,
-      pages: journal.operations.map(function(op) { return op.path }),
-      resume_command: "/ingest recovery resume " + id,
-      discard_command: "/ingest recovery discard " + id,
-      record: journal }
+    var id = sha1(path + "|unreadable")
+    try {
+      var journal = af.fromJson(io.readFileString(path))
+      if (!isMap(journal) || !isArray(journal.operations) || !isMap(journal.state) || ["prepared", "pages-applied", "finalization-pending", "complete"].indexOf(journal.phase) < 0) throw new Error("invalid recovery journal: " + path)
+      if (journal.version === 3) {
+        var signed = af.fromJson(stringify(journal, __, "")); delete signed.integrity
+        if (journal.integrity !== sha256(stringify(signed, __, "")) || journal.destination !== self._destinationIdentity(wm)) throw new Error("invalid recovery journal integrity or destination: " + path)
+      } else if (isDef(journal.version) && [1,2].indexOf(journal.version) < 0) throw new Error("unsupported recovery journal: " + path)
+      id = sha1(path + "|" + String(journal.generation || journal.scopeId || "legacy"))
+      var scope = isMap(journal.scope) ? journal.scope : { unknown: true, section: "unknown", source: "unknown", sourceid: "unknown" }
+      return { id: id, journal: path, scopeId: journal.scopeId, phase: journal.phase, scope: scope,
+        pages: journal.operations.map(function(op) { return op.path }),
+        resume_command: "/ingest recovery resume " + id,
+        discard_command: "/ingest recovery discard " + id,
+        record: journal }
+    } catch(e) {
+      return { id: id, journal: path, invalid: true, scope: { unknown: true }, pages: [], code: "ingest-journal-corrupt",
+        error: __miniAErrMsg(e), next_action: "Inspect and restore this journal from a verified copy; its unknown scope blocks ingestion." }
+    }
   })
 }
 
@@ -566,7 +590,8 @@ MiniAIngest.prototype.manageRecovery = function(action, id, confirmed) {
     }
     var entries = self._recoveryEntries(wm)
     result.recoveries = entries.map(function(e) { return self._recoverySummary(e) })
-    if (action === "list") { result.ok = true; result.status = "listed"; return result }
+    if (action === "list") { result.ok = !entries.some(function(e) { return e.invalid }); result.status = result.ok ? "listed" : "blocked"; if (!result.ok) { result.error = "ingest-journal-corrupt: unknown recovery scope"; self._diagnostic(result) }; return result }
+    if (entries.some(function(e) { return e.invalid })) throw new Error("ingest-journal-corrupt: unknown recovery scope")
     if (["resume", "discard"].indexOf(action) < 0) throw new Error("unknown recovery action")
     var selected = entries.filter(function(e) { return e.id === id })
     if (selected.length !== 1) throw new Error("recovery ID not found; list pending recovery again")
@@ -589,7 +614,7 @@ MiniAIngest.prototype.manageRecovery = function(action, id, confirmed) {
     self._applyJournal(wm, entry.record, entry.journal, result)
     result.ok = true; result.status = "recovered"; result.recovered = true
     result.recoveries = result.recoveries.filter(function(e) { return e.id !== entry.id })
-  } catch(e) { result.error = __miniAErrMsg(e) }
+  } catch(e) { result.error = __miniAErrMsg(e); self._diagnostic(result) }
   finally {
     try { if (lock) lock.release() } catch(ignoreLock) {}
     try { if (channel) channel.close() } catch(ignoreChannel) {}
@@ -649,14 +674,30 @@ MiniAIngest.prototype._collectChunks = function(state, oldIds, scope) {
 // A prepared journal contains full replacement pages and their expected preconditions.
 // Replaying a write already applied is safe only when its resulting signature matches.
 MiniAIngest.prototype._applyJournal = function(wm, journal, path, result) {
-  var previous = wm._servingBatchChanges
+  var previous = wm._servingBatchChanges, previousExport = wm._deferServingExport
+  wm._deferServingExport = true
   try {
+    var self = this
+    journal.operations.forEach(function(op) {
+      if (!op || ["write", "delete"].indexOf(op.kind) < 0 || !isString(op.path) || op.path !== __miniAWikiNormalizePath(op.path, { requireMarkdown: true }) || /(^|\/)(\.|@)/.test(op.path) || /(^|\/)(AGENTS|log|index)\.md$/i.test(op.path)) throw new Error("unsafe journal operation")
+      if (op.kind === "write" && (!isMap(op.meta) || !isString(op.body) || self._signature({ meta: op.meta, body: op.body }) !== op.after)) throw new Error("ingest-journal-corrupt: invalid replacement payload: " + op.path)
+    })
     if (wm._retrievalV2) {
       wm._servingBatchChanges = {}
       journal.operations.forEach(function(op) { wm._servingBatchChanges[op.path] = true })
     }
     return this._applyJournalPages(wm, journal, path, result)
-  } finally { wm._servingBatchChanges = previous }
+  } finally { wm._servingBatchChanges = previous; wm._deferServingExport = previousExport }
+}
+
+MiniAIngest.prototype._diagnostic = function(result) {
+  var message = String(result.error || result.reason || ""), stage = this._stage || "recovery"
+  var code = message.match(/^([a-z][a-z0-9]+(?:-[a-z0-9]+)+):/)
+  code = code ? code[1] : /ownership|conflict|concurrent|reappeared/.test(message) ? "ingest-conflict" : /manifest.*(unreadable|corrupt)|corrupt manifest/.test(message) ? "ingest-state-corrupt" : /journal/.test(message) ? "ingest-journal-failure" : /busy/.test(message) ? "wiki-writer-busy" : "ingest-" + stage + "-failed"
+  result.diagnostic = { code: code, stage: stage, retryable: code === "wiki-writer-busy" || ["finalization", "verification", "export", "cleanup"].indexOf(stage) >= 0 && !/corrupt|conflict|unsupported|unavailable/.test(code),
+    next_action: code === "ingest-conflict" ? "Review conflicting pages and ownership; preserve the pending journal." : "List ingestion recoveries and resume the indicated ID after resolving the reported cause." }
+  result.diagnostic.recovery_ids = (result.recoveries || []).map(function(e) { return e.id })
+  result.diagnostic.paths = (result.conflicts || []).map(function(e) { return e.page }).filter(function(p) { return isString(p) })
 }
 
 MiniAIngest.prototype._exportCompletedServing = function(wm, result) {
@@ -667,31 +708,122 @@ MiniAIngest.prototype._exportCompletedServing = function(wm, result) {
   }
 }
 
+MiniAIngest.prototype._servingProof = function(wm, repair) {
+  var reader
+  try {
+    if (wm._config.maintenanceSourceOnly === true) {
+      reader = new MiniAWikiManager(merge(wm._config, { maintenanceSourceOnly: false, access: repair ? "rw" : "ro" }), function() {})
+      return repair ? reader.recoverServing() : reader.verifyServing()
+    }
+    return repair ? wm.recoverServing() : wm.verifyServing()
+  } finally { if (reader) reader.close() }
+}
+
+MiniAIngest.prototype._finishJournal = function(wm, journal, path, result) {
+  var self = this
+  journal.checkpoints = journal.checkpoints || {}
+  result.progress = { pages_committed: true, pages_applied: journal.operations.length, manifest_committed: true, local_serving_verified: false, bundle_exported: false, remote_delivery: "unverified" }
+  self._stage = "verification"
+  var state = wm.knowledgeLoadState()
+  if (state._corrupt) throw new Error("ingest-state-corrupt: ownership manifest unreadable")
+  journal.operations.forEach(function(op) {
+    var page = self._page(wm, op.path)
+    if (op.kind === "write" ? self._signature(page) !== op.after : !!page) throw new Error("ingest-conflict: recovered page differs: " + op.path)
+    var expected = Object.keys(journal.state.sources || {}).filter(function(k) { return journal.state.sources[k].page === op.path })
+    expected.forEach(function(k) {
+      if (stringify(state.sources[k], __, "") !== stringify(journal.state.sources[k], __, "")) throw new Error("ingest-conflict: recovered ownership differs: " + op.path)
+    })
+    if (op.kind === "delete" && Object.keys(state.sources || {}).some(function(k) { return state.sources[k].page === op.path })) throw new Error("ingest-conflict: deleted page still owned: " + op.path)
+  })
+  // Fresh proof recognizes an activation whose checkpoint was interrupted.
+  // The finalizer can reuse that publication while finishing navigation/graph.
+  var proof = self._servingProof(wm)
+  if (journal.phase !== "complete" && (!proof.ok || !journal.checkpoints.finalized)) {
+    self._stage = "finalization"
+    result.finalize = self._finalize(wm, journal, path)
+    if (!result.finalize || result.finalize.ok !== true || result.finalize.reindexed !== true || /^failed/.test(String(result.finalize.graph))) throw new Error("finalization failed during recovery: " + stringify(result.finalize))
+    journal.checkpoints.finalized = result.finalize
+    self._atomicJson(path, journal)
+    self._stage = "verification"
+    proof = self._servingProof(wm)
+  }
+  if (!proof.ok) {
+    proof = self._servingProof(wm, true)
+    if (!proof.ok) throw new Error("serving-verification-failed: " + proof.error)
+  }
+  if (!proof.skipped && !proof.source_rebuild && result.finalize && result.finalize.publication && result.finalize.publication.generation && result.finalize.publication.generation !== proof.generation) throw new Error("ingest-conflict: published generation changed during verification")
+  if (journal.checkpoints.serving && proof.generation !== journal.checkpoints.serving.generation) proof.supersedes = journal.checkpoints.serving.generation
+  journal.checkpoints.serving = proof; result.verification = proof
+  result.progress.local_serving_verified = !proof.skipped
+  journal.phase = "complete"; self._atomicJson(path, journal)
+  self._stage = "export"
+  var engine = wm._retrievalV2, destination = engine && engine.config.bundlePath
+  if (destination && (!journal.checkpoints.export || journal.checkpoints.export.generation !== proof.generation || journal.checkpoints.export.destination !== String(destination) || !io.fileExists(destination) || global.MiniAWikiRetrievalV2.digest(destination) !== journal.checkpoints.export.checksum)) {
+    try { self._exportCompletedServing(wm, result) }
+    catch(exportError) {
+      var failedBundle = result.finalize && result.finalize.bundle
+      if (!failedBundle || failedBundle.stage !== "predecessor" || !wm._isServingRecoveryError(failedBundle.code)) throw exportError
+      // A corrupt predecessor cannot be shipped. Publish one fresh base so the
+      // healthy current generation becomes the validated fallback, then retry.
+      var deferExport = wm._deferServingExport, rebuilt
+      try { wm._deferServingExport = true; rebuilt = wm.reindex({ authoritative: true }) }
+      finally { wm._deferServingExport = deferExport }
+      if (!rebuilt.ok) throw new Error("bundle predecessor recovery failed: " + rebuilt.error)
+      proof = self._servingProof(wm)
+      if (!proof.ok) throw new Error("bundle predecessor recovery verification failed: " + proof.error)
+      proof.predecessor_rebuilt = true
+      result.verification = proof; journal.checkpoints.serving = proof
+      self._atomicJson(path, journal)
+      self._exportCompletedServing(wm, result)
+    }
+    journal.checkpoints.export = { generation: proof.generation, destination: String(destination), checksum: global.MiniAWikiRetrievalV2.digest(destination), result: result.finalize.bundle }
+    self._atomicJson(path, journal)
+  }
+  if (destination) result.progress.bundle_exported = true
+  else result.progress.bundle_export = "not-configured"
+  result.finalize = result.finalize || journal.checkpoints.finalized || { ok: true, reindexed: true }
+  if (journal.checkpoints.export) result.finalize.bundle = journal.checkpoints.export.result
+  if (/^[a-f0-9]{40}$/.test(journal.scopeId || "")) {
+    var receiptPath = wm._getIndexRoot() + "/.mini-a-wiki-ingest/receipts/" + journal.scopeId + ".json"
+    self._atomicJson(receiptPath, { version: 1, checkpoints: journal.checkpoints })
+  }
+  self._stage = "cleanup"
+  if (!new java.io.File(path).delete()) throw new Error("journal cleanup failed")
+  self._syncState(String(new java.io.File(path).getParent()), true)
+  self._cleanupTransformCache(wm, journal.scopeId)
+}
+
+MiniAIngest.prototype._cleanupTransformCache = function(wm, scope) {
+  if (!/^[a-f0-9]{40}$/.test(scope || "")) return
+  var parent = new java.io.File(wm._getIndexRoot() + "/.mini-a-wiki-ingest/transforms"), dir = new java.io.File(parent, scope)
+  try {
+    if (java.nio.file.Files.isSymbolicLink(parent.toPath()) || java.nio.file.Files.isSymbolicLink(dir.toPath())) return
+    var files = dir.listFiles() || []
+    for (var i = 0; i < files.length; i++) if (/^[a-f0-9]{64}\.json$/.test(String(files[i].getName())) && !java.nio.file.Files.isSymbolicLink(files[i].toPath())) files[i].delete()
+  } catch(ignoreCleanup) {} // Derived response cleanup never changes recovery success.
+}
+
 MiniAIngest.prototype._applyJournalPages = function(wm, journal, path, result) {
   var self = this
   // Pages and the local generation are already committed. Retry only the
   // export before removing the recovery authority, without replaying writes.
   if (journal.phase === "complete") {
-    self._exportCompletedServing(wm, result)
-    if (!new java.io.File(path).delete()) throw new Error("journal cleanup failed")
-    return
+    return self._finishJournal(wm, journal, path, result)
   }
   if (journal.phase === "finalization-pending") {
-    result.finalize = self._finalize(wm)
-    if (!result.finalize || result.finalize.ok !== true || result.finalize.reindexed !== true || /^failed/.test(String(result.finalize.graph))) throw new Error("finalization failed during recovery")
-    journal.phase = "complete"; self._atomicJson(path, journal)
-    self._exportCompletedServing(wm, result)
-    if (!new java.io.File(path).delete()) throw new Error("journal cleanup failed")
-    return
+    return self._finishJournal(wm, journal, path, result)
   }
+  self._stage = "pages"
+  result.progress = { pages_committed: false, pages_applied: 0, manifest_committed: false, local_serving_verified: false, bundle_exported: false, remote_delivery: "unverified" }
   for (var i = 0; i < journal.operations.length; i++) {
     if (i > 0 && i % 25 === 0) self._log("[ingest] Applied " + i + "/" + journal.operations.length + " page operation(s).")
     var op = journal.operations[i]
     if (["write", "delete"].indexOf(op.kind) < 0 || !isString(op.path) || op.path !== __miniAWikiNormalizePath(op.path, { requireMarkdown: true }) || /(^|\/)(\.|@)/.test(op.path) || /(^|\/)(AGENTS|log|index)\.md$/i.test(op.path)) throw new Error("unsafe journal operation")
     var current = self._page(wm, op.path), sig = self._signature(current)
-    if (op.kind === "write" && sig === op.after && sig !== op.before) continue
+    if (!current && isFunction(wm._backend.sourceStatus) && wm._backend.sourceStatus(op.path).status !== "missing") throw new Error("source-read-unavailable: " + op.path)
+    if (op.kind === "write" && sig === op.after && sig !== op.before) { result.progress.pages_applied++; continue }
     if (op.kind === "delete" && op.sourceRoot && io.fileExists(op.sourceRoot + "/" + op.sourceRel)) throw new Error("prune source reappeared: " + op.sourceRel)
-    if (op.kind === "delete" && !current) continue
+    if (op.kind === "delete" && !current) { result.progress.pages_applied++; continue }
     if (op.kind === "delete" && op.sourceRoot) {
       var observed = self._discover({ root: op.sourceRoot })
       if (!observed.complete || !Object.keys(observed.present).length && journal.allowEmptyPrune !== true) throw new Error("prune recovery inventory is incomplete or newly empty")
@@ -703,8 +835,11 @@ MiniAIngest.prototype._applyJournalPages = function(wm, journal, path, result) {
       if (self._signature(self._page(wm, op.path)) !== op.after) throw new Error("written page signature mismatch: " + op.path)
       result.written.push(op.path)
     } else result.removed.push(op.path)
+    result.progress.pages_applied++
   }
   journal.phase = "pages-applied"; self._atomicJson(path, journal)
+  result.progress.pages_committed = true
+  self._stage = "manifest"
   self._log("[ingest] Applied " + journal.operations.length + " page operation(s); committing manifest...")
   // Reload/check handled under the wiki-local lock. The journal is the recovery authority
   // until this atomic manifest replacement succeeds.
@@ -714,19 +849,18 @@ MiniAIngest.prototype._applyJournalPages = function(wm, journal, path, result) {
     if (journal.baseFingerprint && self._stateFingerprint(currentState) !== journal.baseFingerprint) throw new Error("manifest changed concurrently during application; recovery requires review")
     if (!wm.knowledgeSaveState(journal.state)) throw new Error("manifest persistence failed")
   }
+  result.progress.manifest_committed = true
   result.chunks_removed += Number(journal.chunksRemoved || 0)
   result.derivatives_invalidated = result.derivatives_invalidated.concat(journal.derivatives || [])
   result.migrated = result.migrated.concat(journal.migrations || [])
   result.repaired = result.repaired.concat(journal.repairs || [])
   journal.phase = "finalization-pending"; self._atomicJson(path, journal)
-  result.finalize = self._finalize(wm)
-  if (!isMap(result.finalize) || result.finalize.ok !== true || result.finalize.reindexed !== true || /^failed/.test(String(result.finalize.graph))) throw new Error("finalization failed")
-  journal.phase = "complete"; self._atomicJson(path, journal)
-  self._exportCompletedServing(wm, result)
-  if (!new java.io.File(path).delete()) throw new Error("journal cleanup failed")
+  self._finishJournal(wm, journal, path, result)
 }
 MiniAIngest.prototype.run = function() {
   var self = this, a = this._args, source = String(a.ingestsource || "").trim()
+  self._stage = "discovery"
+  self._transformContext = __
   var dry = toBoolean(a.ingestdryrun) === true || toBoolean(a.dryrun) === true, prune = toBoolean(a.ingestprune) === true
   var result = { ok: false, status: "failed", sync_complete: false, dryrun: dry, discovered: 0, skipped_unchanged: 0, sources_changed: 0,
     chunks_discovered: 0, chunks_reused: 0, chunks_added: 0, chunks_changed: 0, chunks_removed: 0, planned_chunks_removed: 0, llm_candidates: 0, llm_calls: 0,
@@ -746,7 +880,37 @@ MiniAIngest.prototype.run = function() {
     if (!source) { result.reason = "no-source"; return result }
     if (toBoolean(a.usewiki) !== true) { result.reason = "usewiki-not-set"; return result }
     if (String(a.wikiaccess || "").trim().toLowerCase() === "ro" && !dry) { result.reason = "wiki-read-only"; return result }
+    // Discover recovery using the original source identity before resolving or
+    // cloning it. Stored replacement pages do not require the source to exist.
+    var earlyCfg = this._buildWikiConfig(), earlyRecovery
+    if (isMap(earlyCfg)) {
+      loadLib("mini-a-wiki.js")
+      var descriptor = isObject(a.wikimanager) ? a.wikimanager : Object.create(MiniAWikiManager.prototype)
+      if (!isObject(a.wikimanager)) {
+        descriptor._config = earlyCfg; descriptor._backendType = String(earlyCfg.backend || "fs"); descriptor._backend = { root: earlyCfg.root || "." }
+        if (["fs", "s3fs"].indexOf(descriptor._backendType) >= 0) self._fileAccess.assert(earlyCfg.root || ".")
+      }
+      var earlyEntries = self._recoveryEntries(descriptor)
+      if (earlyEntries.some(function(e) { return e.invalid })) { result.recoveries = earlyEntries.map(function(e) { return self._recoverySummary(e) }); throw new Error("ingest-journal-corrupt: unknown recovery scope") }
+      var earlyMatches = earlyEntries.filter(function(e) {
+        if (!e.record.scope || !isString(e.scope.source)) return false
+        var savedSource = new java.io.File(e.scope.source)
+        if (!savedSource.isAbsolute()) savedSource = new java.io.File(e.scope.cwd || ".", e.scope.source)
+        var sameSource = /^https?:\/\//i.test(source) ? e.scope.source === source : String(savedSource.getCanonicalPath()) === String(new java.io.File(source).getCanonicalPath())
+        var section = self._defaultSection({ origin: e.scope.origin, root: e.scope.origin }, source)
+        return sameSource && e.scope.section === section && String(e.scope.sourceid || "") === String(a.ingestsourceid || "")
+      })
+      if (earlyMatches.length > 1) throw new Error("multiple journals match this scope; use an explicit recovery ID")
+      if (earlyMatches.length === 1 && !dry) {
+        earlyRecovery = self.manageRecovery("resume", earlyMatches[0].id)
+        if (!earlyRecovery.ok) { result.recoveries = earlyRecovery.recoveries; throw new Error(earlyRecovery.error || "recovery failed") }
+        ;["written", "removed", "repaired", "migrated", "derivatives_invalidated"].forEach(function(k) { result[k] = earlyRecovery[k] || [] })
+        ;["finalize", "verification", "progress"].forEach(function(k) { result[k] = earlyRecovery[k] })
+        result.recovered = true
+      }
+    }
     resolved = this._resolve(source)
+    if (!resolved.ok && earlyRecovery && earlyRecovery.ok) { result.ok = true; result.status = "recovered"; result.recovery_only = true; result.sync_complete = false; result.reason = "Stored operations recovered; source unavailable for a new reconciliation."; return result }
     if (!resolved.ok) { result.reason = "resolve-failed"; result.error = resolved.error; return result }
     this._log("[ingest] Discovering sources under " + (resolved.root || source) + "...")
     if (resolved.type === "url" && prune) { result.reason = "URL prune is unsupported: a URL is not a complete site inventory"; return result }
@@ -789,6 +953,7 @@ MiniAIngest.prototype.run = function() {
 
     var recoveryScope = sha1(self._destinationIdentity(wm) + "|" + resolved.type + "|" + String(a.ingestsourceid || resolved.origin || resolved.root || source) + "|" + section)
     var entries = self._recoveryEntries(wm), matching = entries.filter(function(e) { return !e.scopeId || e.scopeId === recoveryScope })
+    if (entries.some(function(e) { return e.invalid })) throw new Error("ingest-journal-corrupt: unknown recovery scope")
     var other = entries.filter(function(e) { return e.scopeId && e.scopeId !== recoveryScope })
     result.recoveries = entries.map(function(e) { return self._recoverySummary(e) })
     if (matching.length > 1) throw new Error("multiple journals match this scope; use an explicit recovery ID")
@@ -843,7 +1008,7 @@ MiniAIngest.prototype.run = function() {
     var scope = sha1(self._destinationIdentity(wm) + "|" + resolved.type + "|" + origin + "|" + section)
     result.scope = { id: scope, origin: origin, type: resolved.type, section: section }; result.section = section
     var discoveryConfig = sha1(stringify({ include: this._csv("ingestinclude"), exclude: this._csv("ingestexclude"), maxKb: this._num("ingestmaxfilekb", 512), defaults: _INGEST_DEFAULT_EXCLUDES }, __, ""))
-    var mode = this._ingestMode(), modelRaw = String(a.model || this._getEnv("OAF_MODEL")), model = {}
+    var mode = this._ingestMode(), modelValue = a.model || this._getEnv("OAF_MODEL"), modelRaw = isMap(modelValue) ? stringify(modelValue, __, "") : String(modelValue), model = {}
     try { model = modelRaw.charAt(0) === "{" ? af.fromJson(modelRaw) : af.fromSLON(modelRaw) } catch(ignoreModel) {}
     var publicModel = {}; ["type", "model", "temperature", "url", "maxTokens"].forEach(function(k) { if (isDef(model[k])) publicModel[k] = model[k] })
     var fingerprint = sha1(mode + "|" + this._num("ingestchunkchars", 24000) + "|" + stringify(global.__miniAWikiKnowledge.versions, __, "") + "|" + stringify(publicModel, __, "") + "|" + this._distillPrompt({ id: "" }, [], []))
@@ -975,8 +1140,11 @@ MiniAIngest.prototype.run = function() {
       self._log("[ingest] Distilling " + llmWork.length + " source(s) with the configured model...")
       llm = self._buildLlm()
       if (isObject(llm)) {
-        result.llm_calls = llmWork.length
+        self._transformContext = { root: wm._getIndexRoot() + "/.mini-a-wiki-ingest/transforms/" + scope,
+          fingerprint: sha256(fingerprint + "|" + modelRaw + "|" + String(self._resolvedModelFingerprint || "") + "|" + stringify(a.libs || [], __, "")), calls: new java.util.concurrent.atomic.AtomicInteger(0), paths: new java.util.concurrent.ConcurrentLinkedQueue() }
+        self._stage = "transformation"
         self._distillAll(llm, llmWork, siblings, Math.max(1, Math.round(self._num("ingestconcurrency", 4)))).forEach(function(d) { llmResults[d.key] = d })
+        result.llm_calls = Number(self._transformContext.calls.get())
       }
     }
     for (var i = 0; i < pending.length; i++) {
@@ -1029,15 +1197,41 @@ MiniAIngest.prototype.run = function() {
       }
       manifest.version = global.__miniAWikiKnowledge.versions.manifest
       manifest.ingestGeneration = generation
-      var journal = { version: 2, baseState: af.fromJson(baseline), scopeId: scope, scope: { source: source, cwd: String(new java.io.File(".").getCanonicalPath()), section: section, sourceid: String(a.ingestsourceid || ""), origin: origin, type: resolved.type }, allowEmptyPrune: toBoolean(a.ingestallowemptyprune) === true, generation: generation, phase: "prepared", baseFingerprint: self._stateFingerprint(af.fromJson(baseline)), operations: operations, state: manifest, chunksRemoved: removedChunks, derivatives: result.planned_derivatives_invalidated, migrations: result.planned_migrations, repairs: result.planned_repairs.filter(function(p) { return operations.some(function(op) { return op.kind === "write" && op.path === p }) }) }
+      var journal = { version: 3, destination: self._destinationIdentity(wm), checkpoints: {}, baseState: af.fromJson(baseline), scopeId: scope, scope: { source: source, cwd: String(new java.io.File(".").getCanonicalPath()), section: section, sourceid: String(a.ingestsourceid || ""), origin: origin, type: resolved.type }, allowEmptyPrune: toBoolean(a.ingestallowemptyprune) === true, generation: generation, phase: "prepared", baseFingerprint: self._stateFingerprint(af.fromJson(baseline)), operations: operations, state: manifest, chunksRemoved: removedChunks, derivatives: result.planned_derivatives_invalidated, migrations: result.planned_migrations, repairs: result.planned_repairs.filter(function(p) { return operations.some(function(op) { return op.kind === "write" && op.path === p }) }) }
       self._atomicJson(journalPath, journal); self._applyJournal(wm, journal, journalPath, result)
     }
     var incomplete = result.failed.length || result.conflicts.length || result.deferred.length || result.prune_blocked.length
+    if (!incomplete && !operations.length && !migration) {
+      self._stage = "verification"
+      var unchangedProof = self._servingProof(wm)
+      var completedCheckpoint = {}, completedPath = wm._getIndexRoot() + "/.mini-a-wiki-ingest/receipts/" + scope + ".json"
+      try { var receipt = af.fromJson(io.readFileString(completedPath)); if (receipt.version === 1 && isMap(receipt.checkpoints)) completedCheckpoint = receipt.checkpoints } catch(ignoreReceipt) {}
+      var bundleDestination = wm._retrievalV2 && wm._retrievalV2.config.bundlePath, completedExport = completedCheckpoint.export
+      var exportCurrent = bundleDestination && completedExport && completedExport.destination === String(bundleDestination) && completedExport.generation === unchangedProof.generation && io.fileExists(bundleDestination) && global.MiniAWikiRetrievalV2.digest(bundleDestination) === completedExport.checksum
+      if (!unchangedProof.ok || bundleDestination && !exportCurrent) {
+        var unchangedState = wm.knowledgeLoadState()
+        if (unchangedState._corrupt) throw new Error("ingest-state-corrupt: ownership manifest unreadable")
+        var maintenance = { version: 3, destination: self._destinationIdentity(wm), generation: String(java.util.UUID.randomUUID()),
+          scopeId: scope, scope: { source: source, cwd: String(new java.io.File(".").getCanonicalPath()), section: section, sourceid: String(a.ingestsourceid || ""), origin: origin, type: resolved.type },
+          phase: "complete", operations: [], state: unchangedState, checkpoints: completedCheckpoint }
+        self._atomicJson(journalPath, maintenance)
+        self._finishJournal(wm, maintenance, journalPath, result)
+        result.serving_recovered = !unchangedProof.ok
+      } else {
+        result.verification = unchangedProof
+        result.progress = { pages_committed: true, manifest_committed: true, local_serving_verified: !unchangedProof.skipped, bundle_exported: !!exportCurrent, bundle_export: bundleDestination ? "verified" : "not-configured", remote_delivery: "unverified" }
+      }
+    }
+    if (!incomplete && self._transformContext) {
+      var cachedPaths = self._transformContext.paths.iterator()
+      while (cachedPaths.hasNext()) new java.io.File(String(cachedPaths.next())).delete()
+    }
     result.ok = !incomplete; result.sync_complete = !incomplete && (result.missing_sources.length === 0 || prune && !Object.keys(manifest.sources).some(function(k) { return manifest.sources[k].scopeId === scope && result.missing_sources.indexOf(manifest.sources[k].source) >= 0 })) && result.unresolved.length === 0
-    result.status = incomplete ? result.written.length || result.removed.length ? "partial" : "blocked" : result.written.length || result.removed.length || migration || result.recovered ? "complete" : "noop"
+    result.status = incomplete ? result.written.length || result.removed.length ? "partial" : "blocked" : result.written.length || result.removed.length || migration || result.recovered || result.serving_recovered ? "complete" : "noop"
     return result
   } catch(e) {
     result.ok = false; result.sync_complete = false; result.error = __miniAErrMsg(e)
+    self._diagnostic(result)
     result.failed.push({ source: "execution/persistence/finalization", error: result.error })
     if (/finaliz/i.test(result.error)) result.finalization_failures.push(result.error)
     else if (/persist|atomic|journal|manifest/i.test(result.error)) result.persistence_failures.push(result.error)
@@ -1066,18 +1260,47 @@ MiniAIngest.prototype._distillAll = function(llm, pending, siblings, concurrency
     var batch = pending.slice(i, i + concurrency)
     self._log("[ingest] Distilling source(s) " + (i + 1) + "-" + Math.min(i + batch.length, pending.length) + "/" + pending.length + "...")
     var results = []
+    var completed = new java.util.concurrent.ConcurrentHashMap()
+    var started = new java.util.concurrent.ConcurrentHashMap()
+    var perform = function(p) {
+      var chunks = isArray(p.chunks) ? p.chunks.map(function(c) { return c.text }) : self._chunk(p.content)
+      var context = self._transformContext, cachePath, cached, output
+      if (context) {
+        var identity = sha256(context.fingerprint + "|" + p.key + "|" + p.hash + "|" + self._distillPrompt(p.src, chunks, siblings))
+        cachePath = context.root + "/" + identity + ".json"
+        try {
+          cached = af.fromJson(io.readFileString(cachePath))
+          if (cached.identity === identity && isMap(cached.output) && cached.output.ok === true && cached.checksum === sha256(stringify(cached.output, __, ""))) output = cached.output
+        } catch(ignoreCache) {}
+      }
+      if (!output) {
+        if (context) context.calls.incrementAndGet()
+        output = self._distill(llm, p.src, chunks, siblings)
+        if (cachePath && output.ok === true) {
+          try { self._atomicJson(cachePath, { identity: identity, output: output, checksum: sha256(stringify(output, __, "")) }) }
+          catch(cacheError) { output = { ok: false, error: "transformation checkpoint failed: " + __miniAErrMsg(cacheError) } }
+        }
+      }
+      if (cachePath && output.ok) context.paths.add(cachePath)
+      var d = merge(output, { src: p.src, hash: p.hash, key: p.key, chunks: p.chunks })
+      completed.put(p.key, stringify(d, __, ""))
+      return d
+    }
+    var transform = function(p) {
+      var signal = new java.util.concurrent.CountDownLatch(1), existing = started.putIfAbsent(p.key, signal)
+      if (existing) { existing.await(); return af.fromJson(String(completed.get(p.key))) }
+      try { return perform(p) }
+      catch(transformError) {
+        var failed = { ok: false, error: __miniAErrMsg(transformError), src: p.src, hash: p.hash, key: p.key, chunks: p.chunks }
+        completed.put(p.key, stringify(failed, __, "")); return failed
+      } finally { signal.countDown() }
+    }
     try {
-      results = parallel4Array(batch, function(p) {
-        var chunks = isArray(p.chunks) ? p.chunks.map(function(c) { return c.text }) : self._chunk(p.content)
-        var d = self._distill(llm, p.src, chunks, siblings)
-        return merge(d, { src: p.src, hash: p.hash, key: p.key, chunks: p.chunks })
-      })
+      results = parallel4Array(batch, transform)
     } catch(pe) {
-      // parallel execution unavailable or failed: fall back to serial
+      // A failed batch must not repeat items whose responses already arrived.
       results = batch.map(function(p) {
-        var chunks = isArray(p.chunks) ? p.chunks.map(function(c) { return c.text }) : self._chunk(p.content)
-        var d = self._distill(llm, p.src, chunks, siblings)
-        return merge(d, { src: p.src, hash: p.hash, key: p.key, chunks: p.chunks })
+        return completed.containsKey(p.key) ? af.fromJson(String(completed.get(p.key))) : transform(p)
       })
     }
     ;(isArray(results) ? results : []).forEach(function(r) {
@@ -1180,17 +1403,29 @@ MiniAIngest.prototype._readOafpSource = function(src, raw, format) {
 MiniAIngest.prototype._describeImage = function(request) {
   var llm = isObject(this._llm) ? this._llm : __, image = request.path
   try {
-    var raw = isString(this._args.model) && this._args.model.trim() ? this._args.model.trim() : this._getEnv("OAF_MODEL")
-    var config = {}
-    if (raw.trim()) try { config = raw.charAt(0) === "{" ? jsonParse(raw, __, __, true) : af.fromSLON(raw) } catch(ignoreConfig) {}
+    var visual = this._args.modelvisual
+    if (isString(visual)) visual = visual.trim()
+    if (!visual) visual = this._getEnv("OAF_VISUAL_MODEL").trim()
+    var raw = visual || this._args.model || this._getEnv("OAF_MODEL")
+    var config = isMap(raw) ? clone(raw) : {}
+    if (isString(raw) && raw.trim()) {
+      try { config = af.fromJSSLON(raw.trim()) } catch(ignoreParse) { config = raw.trim() }
+      if (isString(config)) config = $sec("mini-a", "models", __, this._args.secpass).get(config, "models")
+      if (!isMap(config)) throw new Error("Invalid image model configuration")
+    }
+    if (visual) llm = __
     if (!isObject(llm) && isMap(config)) {
       config = jsonParse(stringify(config), __, __, true)
       ;[config, config.params].forEach(function(options) {
         if (!isMap(options)) return
         ;["tools", "tool_choice", "toolChoice", "toolConfig", "functions", "function_call", "parallel_tool_calls"].forEach(function(key) { delete options[key] })
       })
+      __miniAEnsureModelProvider(config)
+      if (config.type === "ghcopilot") { config.excludeAllExistingTools = true; config.skillDirectories = [] }
       llm = $llm(config)
     }
+    var self = this
+    __miniAConfigureDebugChannel(llm, this._args.debugvisualch, "__mini_a_visual_llm_debug", "Image inspection", function(level, message) { self._log(message) })
     if (!isObject(llm) || !isFunction(llm.promptImage)) throw new Error("configured model does not support promptImage")
     if (isMap(config) && String(config.type || "").toLowerCase() === "openai" && request.mediaType === "image/png") {
       // OpenAF's OpenAI promptImage currently labels image bytes as JPEG.
@@ -1217,12 +1452,17 @@ MiniAIngest.prototype._describeImage = function(request) {
 }
 
 // _finalize: reuse the dream finalize pass so an ingested wiki is left indexed and linked.
-MiniAIngest.prototype._finalize = function(wm) {
+MiniAIngest.prototype._finalize = function(wm, journal, journalPath) {
   try {
     global.__mini_a_dreams_lib_mode = true
     loadLib("mini-a-dreams.js")
     var dreams = new MiniADreams(this._args, this._logFn)
-    var report = dreams._finalizeWiki(wm, __)
+    var self = this, options = {}
+    if (journal) {
+      options.verifyServing = function() { return self._servingProof(wm) }
+      options.onPublication = function(publication) { journal.checkpoints.publication = publication; self._atomicJson(journalPath, journal) }
+    }
+    var report = dreams._finalizeWiki(wm, __, options)
     if (isFunction(wm.lint)) {
       try {
         var lint = wm.lint(__, {})

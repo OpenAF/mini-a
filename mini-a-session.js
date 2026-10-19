@@ -780,7 +780,7 @@ function MiniAInteractiveSession(args, adapter) {
     lcbudget       : { type: "number", default: 0, description: "Maximum total low-cost model tokens for the session (0 disables)." },
     lcreplytool    : { type: "boolean", default: false, description: "Use a capture-only MCP tool for LC JSON retries (OpenAI-compatible/Ollama)." },
     lcjsonretries  : { type: "number", default: 1, description: "Extra same-step low-cost model retries on invalid JSON before falling back to main model (0 disables)." },
-    usedecide      : { type: "boolean", description: "Enable decision-assisted selection and complexity with modeldec or OAF_DECIDE_MODEL (false disables)." },
+    usedecide      : { type: "boolean", description: "Enable decision-assisted selection, complexity, and bounded wiki auto link repairs with modeldec or OAF_DECIDE_MODEL (false disables)." },
     llmcomplexity  : { type: "boolean", description: "Refine medium complexity with the decision model; false disables, true also enables the legacy LC check." },
     mcplazy        : { type: "boolean", default: false, description: "Defer MCP connection initialization" },
     mcpdynamic     : { type: "boolean", default: false, description: "Select MCP tools dynamically per goal" },
@@ -864,6 +864,7 @@ function MiniAInteractiveSession(args, adapter) {
     model          : { type: "string", dataEditor: "map", description: "Override OAF_MODEL configuration" },
     modellc        : { type: "string", dataEditor: "map", description: "Override OAF_LC_MODEL configuration" },
     modeldec       : { type: "string", dataEditor: "map", description: "Override OAF_DECIDE_MODEL configuration" },
+    modelvisual    : { type: "string", dataEditor: "map", description: "Override OAF_VISUAL_MODEL for image analysis (defaults to main model)" },
     modelval       : { type: "string", dataEditor: "map", description: "Override OAF_VAL_MODEL configuration" },
     auditch        : { type: "string", dataEditor: "map", description: "Audit channel definition or native file path" },
     toollog        : { type: "string", dataEditor: "map", description: "Tool usage log channel definition or native file path" },
@@ -872,6 +873,7 @@ function MiniAInteractiveSession(args, adapter) {
     debuglcch      : { type: "string", dataEditor: "map", description: "Debug channel definition or native file path for the low-cost model." },
     debugdecch     : { type: "string", dataEditor: "map", description: "Debug channel definition or native file path for the decision model." },
     debugvalch     : { type: "string", dataEditor: "map", description: "Debug channel definition or native file path for the validation model." },
+    debugvisualch  : { type: "string", dataEditor: "map", description: "Debug channel definition or native file path for the image-analysis model." },
     deepresearch   : { type: "boolean", default: false, description: "Enable deep research mode with iterative validation" },
     maxcycles      : { type: "number", default: 3, description: "Maximum research cycles in deep research mode" },
     validationgoal : { type: "string", description: "Validation criteria for deep research outcomes (string or file path; implies deepresearch=true, maxcycles=3)" },
@@ -907,6 +909,8 @@ function MiniAInteractiveSession(args, adapter) {
     subtasks       : { type: "string", dataEditor: "array", description: "Inline subtasks definition (JSON/SLON) for startup delegation." },
     subtasksfile   : { type: "string", description: "Path to a subtasks file for startup delegation." },
     subtaskssequential: { type: "boolean", default: false, description: "Run startup subtasks sequentially instead of in parallel." },
+    forkpolicy: { type: "string", default: "auto", description: "Outgoing inheritance: auto, legacy, clean, memory, context or full." },
+    forkdecide: { type: "boolean", default: true, description: "Allow bounded configured decision assistance for automatic inheritance." },
     forkstatemaxbytes: { type: "number", default: 65536, description: "Maximum serialized state size shared with delegated subtasks." },
     showdelegate   : { type: "boolean", default: false, description: "Show delegate/subtask events as separate lines (default keeps them inline)" },
     toolfallback   : { type: "boolean", default: false, description: "Retry in action mode when tool-calling output is malformed." },
@@ -938,7 +942,7 @@ function MiniAInteractiveSession(args, adapter) {
     dreamwiki      : { type: "boolean", default: false, description: "Force wiki dream when dream=true and memory is also configured." },
     dreamwikimode  : { type: "string", description: "Wiki dream mode: auto, plan, apply (default), reorg, repair, reindex, graph, or indexes." },
     dreammemorymode: { type: "string", description: "Memory dream mode: plan or apply." },
-    dreamwikillm   : { type: "boolean", default: true, description: "Allow bounded model proposals for wiki auto repairs." },
+    dreamwikillm   : { type: "boolean", default: true, description: "Allow semantic wiki auto repairs, using configured decide for bounded link choices and the main model for remaining proposals." },
     dreammaxsteps  : { type: "number", default: 40, description: "Total model step budget for wiki auto/reorg." },
     dreamwikidryrun: { type: "boolean", default: false, description: "Propose wiki changes without writing (opt-out of apply)." },
     dreamwikiorganize: { type: "string", default: "none", description: "Explicit reorg organization: none or topics." },
@@ -1021,7 +1025,7 @@ function MiniAInteractiveSession(args, adapter) {
     { category: "Session", subcategory: "Context management", names: "compressgoal compressgoalchars compressgoaltokens contextvirtualization contextvirtualizationshadow historyvm historyvmmode historyvmshadow maxcontent maxcontext maxpromptchars".split(" ") },
     { category: "Session", subcategory: "Durable runs", names: "durable resumerun runid runroot".split(" ") },
     { category: "Session", subcategory: "Console and editor", names: "editor homedir libs mode showseparator useeditor".split(" ") },
-    { category: "Models and execution", subcategory: "Model selection", names: "model modeldec modellc modellock modelstrategy contractfile contractargs savecontract reusecontract modelval secpass".split(" ") },
+    { category: "Models and execution", subcategory: "Model selection", names: "model modeldec modellc modellock modelstrategy contractfile contractargs savecontract reusecontract modelval modelvisual secpass".split(" ") },
     { category: "Models and execution", subcategory: "Decisions and advisors", names: "advisorbudgetratio advisorcooldownsteps advisorenable advisormaxuses advisoronambiguity advisoronharddecision advisoronrisk emergencyreserve evidencegate evidencegatestrictness harddecision lcbudget lcescalatedefer lcjsonretries lcreplytool llmcomplexity usedecide".split(" ") },
     { category: "Models and execution", subcategory: "Budgets and limits", names: "maxsteps maxtotalsteps rpm rtm tpm".split(" ") },
     { category: "Models and execution", subcategory: "Planning", names: "convertplan earlystopthreshold forceplanning forceupdates orchestration plancontent planfile planformat planlog planmode planstyle resumefailed saveplannotes updatefreq updateinterval useplanning validateplan".split(" ") },
@@ -1038,11 +1042,11 @@ function MiniAInteractiveSession(args, adapter) {
     { category: "Memory and knowledge", subcategory: "Wiki storage and access", names: "s3artifactbundle usewiki wikiaccess wikiaccesskey wikiartifactrefreshsecs wikibackend wikibucket wikihttpindexurl wikihttptimeout wikiignorecertcheck wikiman wikimounts wikiprefix wikiregion wikiroot wikis3artifactprefix wikisecret wikiurl wikiuseversion1".split(" ") },
     { category: "Memory and knowledge", subcategory: "Ingestion and absorption", names: "absorbmaxpages absorbmaxtokens absorboutput ingestallowemptyprune ingestchunkchars ingestconcurrency ingestdryrun ingestexclude ingestforce ingestinclude ingestindependent ingestlayout ingestledger ingestmaxfilekb ingestprune ingestsection ingestsource ingestsourceid ingesttype".split(" ") },
     { category: "Memory and knowledge", subcategory: "Dream consolidation", names: "dream dreammaxsteps dreammemorymode dreammode dreamreport dreamwiki dreamwikiapproval dreamwikidryrun dreamwikiinstructions dreamwikilintresultlimit dreamwikillm dreamwikimaxdepth dreamwikiminpages dreamwikimode dreamwikiorganize dreamwikireorg".split(" ") },
-    { category: "Delegation and servers", subcategory: "Delegation and subtasks", names: "autodelegation autodelegationmaxperstep autodelegationthreshold delegationhardtimeout delegationmaxdepth delegationmaxretries delegationstalltimeout delegationtimeout forkstatemaxbytes maxconcurrent noisytools showdelegate subtasks subtasksfile subtaskssequential usea2a usedelegation".split(" ") },
+    { category: "Delegation and servers", subcategory: "Delegation and subtasks", names: "autodelegation autodelegationmaxperstep autodelegationthreshold delegationhardtimeout delegationmaxdepth delegationmaxretries delegationstalltimeout delegationtimeout forkstatemaxbytes forkpolicy forkdecide maxconcurrent noisytools showdelegate subtasks subtasksfile subtaskssequential usea2a usedelegation".split(" ") },
     { category: "Delegation and servers", subcategory: "Worker registry", names: "workerevictionttl workermode workerreg workerreginterval workerregtoken workerregurl workers workerskills workertags".split(" ") },
     { category: "Delegation and servers", subcategory: "Web interface", names: "browsercontext onport path ssequeuetimeout web webadvanced webadvancedpath".split(" ") },
     { category: "Output and diagnostics", subcategory: "Display and visualizations", names: "format raw showexecs showthinking useascii useasciiviz usecharts usediagrams usemaps usemath usemermaid usestream usesvg usevectors".split(" ") },
-    { category: "Output and diagnostics", subcategory: "Files and logging", names: "auditch debug debugch debugdecch debugfile debuglcch debugtrace debugvalch logpromptheaders metricsch nologtrunc outfile outfileall outputfile toollog verbose".split(" ") }
+    { category: "Output and diagnostics", subcategory: "Files and logging", names: "auditch debug debugch debugdecch debugfile debuglcch debugtrace debugvalch debugvisualch logpromptheaders metricsch nologtrunc outfile outfileall outputfile toollog verbose".split(" ") }
   ]
 
   function buildSharedArgumentRows() {
@@ -1660,6 +1664,10 @@ function MiniAInteractiveSession(args, adapter) {
       logWarn("Skill wiki initialization failed: " + __miniAErrMsg(ignoreSkillWikiInitError))
       return __
     }
+  }
+
+  function getDelegateSubcommandCompletions() {
+    return ["fork", "clean", "auto", "--"]
   }
 
   function getWikiSubcommandCompletions() {
@@ -2330,7 +2338,7 @@ function MiniAInteractiveSession(args, adapter) {
       var debugFilterCompletions = ["all", "calls", "answers", "memory", "system", "prompts", "responses", "thinking", "problems"]
       var lastCompletions = ["md"]
       var editCompletions = ["last"]
-      var modelCompletions = ["model", "modellc", "modelval", "modeldec"]
+      var modelCompletions = ["model", "modellc", "modelval", "modeldec", "modelvisual"]
       var contextCompletions = ["llm", "analyze"]
       var wikiReadPathCommands = { list: true, tree: true, browse: true, read: true, write: true, backlinks: true, move: true }
       consoleReader.addCompleter(
@@ -2440,6 +2448,16 @@ function MiniAInteractiveSession(args, adapter) {
               if (filter.indexOf(debugFilterLower) === 0) candidates.add(filter)
             })
             return candidates.isEmpty() ? -1 : Number(debugInsertionPoint)
+          }
+
+          // Only complete the first modifier; later words belong to the literal goal.
+          if (lookupName === "delegate") {
+            var delegateRemainder = uptoCursor.substring(firstSpace + 1).replace(/^\s*/, "")
+            if (/\s/.test(delegateRemainder)) return -1
+            getDelegateSubcommandCompletions().forEach(function(option) {
+              if (option.indexOf(delegateRemainder) === 0) candidates.add(option)
+            })
+            return candidates.isEmpty() ? -1 : Number(cursor - delegateRemainder.length)
           }
 
           // Handle /last command completions
@@ -4336,7 +4354,8 @@ function MiniAInteractiveSession(args, adapter) {
       getModelRow("main", "model", "OAF_MODEL"),
       getModelRow("low", "modellc", "OAF_LC_MODEL"),
       getModelRow("validation", "modelval", "OAF_VAL_MODEL"),
-      getModelRow("decision", "modeldec", "OAF_DECIDE_MODEL")
+      getModelRow("decision", "modeldec", "OAF_DECIDE_MODEL"),
+      getModelRow("visual", "modelvisual", "OAF_VISUAL_MODEL")
     ]
 
     print(colorifyText("Current models:", accentColor))
@@ -5483,7 +5502,11 @@ function MiniAInteractiveSession(args, adapter) {
       return false
     }
 
-    if (isObject(activeAgent) && isDef(activeAgent._subtaskManager)) return true
+    if (isObject(activeAgent) && isDef(activeAgent._subtaskManager)) {
+      activeAgent._subtaskManager.parentArgs.forkpolicy = MiniAForkPolicy.policy(sessionOptions.forkpolicy)
+      activeAgent._subtaskManager.parentArgs.forkdecide = isDef(sessionOptions.forkdecide) ? toBoolean(sessionOptions.forkdecide) : true
+      return true
+    }
 
     var initArgs = buildArgs("__delegation_bootstrap__")
     if (!ensureModel(initArgs)) return false
@@ -5737,12 +5760,6 @@ function MiniAInteractiveSession(args, adapter) {
           value: metrics.llm_calls.validation || 0
         })
         summaryRows.push({ category: "", metric: "Decision", value: metrics.llm_calls.decision || 0 })
-        if (isMap(metrics.decisions)) {
-          summaryExport.decisions = clone(metrics.decisions)
-          ;["model", "provider", "source", "failures", "fallbacks", "duration_ms", "input_tokens", "output_tokens", "total_tokens"].forEach(function(key) {
-            summaryRows.push({ category: "Decision", metric: key, value: metrics.decisions[key] || 0 })
-          })
-        }
         if ((metrics.llm_calls.fallback_to_main || 0) > 0) {
           summaryRows.push({
             category: "",
@@ -5750,6 +5767,28 @@ function MiniAInteractiveSession(args, adapter) {
             value: metrics.llm_calls.fallback_to_main || 0
           })
         }
+      }
+
+      // Decision usage stays separate from generative model token accounting.
+      if (isMap(metrics.decisions)) {
+        var decision = metrics.decisions
+        var hasDecisionUsage = decision.usage_reports > 0
+        summaryExport.decisions = clone(decision)
+        ;[
+          ["Model", decision.model || "Not configured"],
+          ["Provider", decision.provider || "Unavailable"],
+          ["Configuration source", decision.source || "Unavailable"],
+          ["Calls", decision.calls || 0],
+          ["Input tokens", hasDecisionUsage ? decision.input_tokens || 0 : "Unavailable"],
+          ["Output tokens", hasDecisionUsage ? decision.output_tokens || 0 : "Unavailable"],
+          ["Total tokens", hasDecisionUsage ? decision.total_tokens || 0 : "Unavailable"],
+          ["Usage reports", decision.usage_reports || 0],
+          ["Elapsed (ms)", decision.duration_ms || 0],
+          ["Failures", decision.failures || 0],
+          ["Fallbacks", decision.fallbacks || 0]
+        ].forEach(function(row) {
+          summaryRows.push({ category: "Decision", metric: row[0], value: row[1] })
+        })
       }
 
       // Actions
@@ -6186,7 +6225,7 @@ function MiniAInteractiveSession(args, adapter) {
       { command: "/compact [n]", description: "Summarize old context, keep last n messages" },
       { command: "/summarize [n]", description: "Compact and display an LLM-generated conversation summary" },
       { command: "/history [n]", description: "Show the last n user goals (one per line)" },
-      { command: "/model [main|lc|val|dec]", description: "Choose a model definition for a slot (no arg = interactive slot picker)" },
+      { command: "/model [main|lc|val|dec|visual]", description: "Choose a model definition for a slot (no arg = interactive slot picker)" },
       { command: "/models", description: "List current main, low, validation and decision models" },
       { command: "/stats [mode] [out=file.json]", description: "Show session statistics (modes: detailed, tools, memory, wiki)" },
       { command: "/debug [filter]", description: "Inspect previous-goal events; filters: all, calls, answers, memory, system, prompts, responses, thinking, problems" },
@@ -6199,7 +6238,7 @@ function MiniAInteractiveSession(args, adapter) {
       { command: "/ingest <source> [section]", description: "Ingest docs into the wiki; flags: dryrun, force, independent. No source: recovery choices." }
     ]
     helpCommands.push(
-      { command: "/delegate <goal>", description: "Delegate a sub-goal to a child agent (requires usedelegation=true)" },
+      { command: "/delegate <goal>", description: "Delegate using forkpolicy; modifiers: fork, clean, auto; -- preserves literal goals (requires usedelegation=true)" },
       { command: "/subtasks", description: "List all subtasks and their status" },
       { command: "/subtask <id>", description: "Show details for a subtask" },
       { command: "/exit", description: "Leave the console" }
@@ -6223,7 +6262,7 @@ function MiniAInteractiveSession(args, adapter) {
       set: "Update a session parameter. Server-controlled settings cannot be changed here.",
       restore: "Open the saved-conversation picker. Cancel leaves this conversation untouched.",
       cls: "Clear visible Live activity; retain stored events and conversation.",
-      model: "Select main, lc, val or dec; omit the slot to show all models.",
+      model: "Select main, lc, val, dec or visual; omit the slot to show all models.",
       edit: "Open the multiline goal editor. Submit goal runs it; Cancel closes it.",
       exit: "End this session and retain saved history. Use New conversation to continue."
     }
@@ -6234,7 +6273,7 @@ function MiniAInteractiveSession(args, adapter) {
       if (name !== canonical) syntax = syntax.replace("/" + canonical, "/" + name)
       return { name: name, command: "/" + name, syntax: syntax, arguments: syntax.indexOf(" ") < 0 ? "" : syntax.substring(syntax.indexOf(" ") + 1),
         description: descriptions[canonical] || row.description || "", destination: destinations[name],
-        subcommands: ({ context: ["llm", "analyze", "vm"], model: ["main", "lc", "val", "dec"], last: ["md"], edit: ["last"], editor: ["last"], stats: ["detailed", "tools", "memory", "wiki", "out="], debug: debugTraceFilters.map(function(f) { return f.key }),
+        subcommands: ({ context: ["llm", "analyze", "vm"], model: ["main", "lc", "val", "dec", "visual"], last: ["md"], edit: ["last"], editor: ["last"], stats: ["detailed", "tools", "memory", "wiki", "out="], debug: debugTraceFilters.map(function(f) { return f.key }),
           wiki: ["context", "list", "tree", "browse", "read", "search", "backlinks", "lint", "write", "move", "mv", "delete", "remove", "rm", "init", "reindex", "compact", "mounts", "attach", "detach"],
           graph: ["query", "retrieve", "answer", "neighbors", "path", "cross", "communities", "surprise", "stats", "report", "build", "falkor", "export"],
           skills: ["search", "remote", "recommend", "open", "read", "related", "context"], absorb: ["plan", "show", "apply", "status", "resume", "delete", "cancel"], ingest: ["recovery", "dryrun", "force", "prune", "allowemptyprune", "sourceid=", "independent"],
@@ -6261,7 +6300,7 @@ function MiniAInteractiveSession(args, adapter) {
     // Navigation never needs a setting value (which may be a credential).
     var params = { command: name, args: name === "set" ? "" : raw }
     if (["set", "toggle", "unset", "show"].indexOf(name) >= 0) params.filter = name === "show" ? raw.trim() : raw.split(/[=\s]/)[0]
-    if (name === "model") params.slot = { main: "model", model: "model", lc: "modellc", modellc: "modellc", val: "modelval", modelval: "modelval", dec: "modeldec", decide: "modeldec", modeldec: "modeldec" }[raw.trim().toLowerCase()] || ""
+    if (name === "model") params.slot = { main: "model", model: "model", lc: "modellc", modellc: "modellc", val: "modelval", modelval: "modelval", dec: "modeldec", decide: "modeldec", modeldec: "modeldec", visual: "modelvisual", modelvisual: "modelvisual" }[raw.trim().toLowerCase()] || ""
     if (name === "debug") params.filter = raw.trim().toLowerCase() || "all"
     if (name === "stats") params.mode = raw.trim().split(/\s+/).filter(function(v) { return ["detailed", "tools", "memory", "wiki"].indexOf(v) >= 0 })[0] || "summary"
     if (name === "last") params.raw = raw.trim().toLowerCase() === "md"
@@ -7398,7 +7437,7 @@ function MiniAInteractiveSession(args, adapter) {
       if (commandLower === "model" || commandLower.indexOf("model ") === 0) {
         if (adapter) {
           var requestedSlot = parsedSlashCommand.argsRaw.trim().toLowerCase()
-          if (requestedSlot && ["main", "model", "lc", "modellc", "val", "modelval", "dec", "decide", "modeldec"].indexOf(requestedSlot) < 0) printErr("Invalid target. Use 'main', 'lc', 'val' or 'dec'.")
+          if (requestedSlot && ["main", "model", "lc", "modellc", "val", "modelval", "dec", "decide", "modeldec", "visual", "modelvisual"].indexOf(requestedSlot) < 0) printErr("Invalid target. Use 'main', 'lc', 'val', 'dec' or 'visual'.")
           else printCurrentModels()
           continue
         }
@@ -7406,7 +7445,7 @@ function MiniAInteractiveSession(args, adapter) {
         if (commandLower === "model") {
           // Interactive slot picker: show the current model name for each slot,
           // checking sessionOptions first then the OAF_*_MODEL env vars.
-          var _envVarForSlot = { model: "OAF_MODEL", modellc: "OAF_LC_MODEL", modelval: "OAF_VAL_MODEL", modeldec: "OAF_DECIDE_MODEL" }
+          var _envVarForSlot = { model: "OAF_MODEL", modellc: "OAF_LC_MODEL", modelval: "OAF_VAL_MODEL", modeldec: "OAF_DECIDE_MODEL", modelvisual: "OAF_VISUAL_MODEL" }
           var _slotLabel = function(slotKey) {
             var raw = sessionOptions[slotKey]
             var source = "session"
@@ -7430,11 +7469,12 @@ function MiniAInteractiveSession(args, adapter) {
             "💸 low-cost   (currently: " + _slotLabel("modellc") + ")",
             "✅ validation (currently: " + _slotLabel("modelval") + ")",
             "🧭 decision   (currently: " + _slotLabel("modeldec") + ")",
+            "👁 visual     (currently: " + _slotLabel("modelvisual") + ")",
             "🔙 Cancel"
           ]
-          var slotIdx = __miniANormalizeChoiceIndex(askChoose("Choose target model slot: ", slotOptions, 8), 4)
-          if (slotIdx < 0 || slotIdx >= 4) continue
-          target = ["model", "modellc", "modelval", "modeldec"][slotIdx]
+          var slotIdx = __miniANormalizeChoiceIndex(askChoose("Choose target model slot: ", slotOptions, 8), 5)
+          if (slotIdx < 0 || slotIdx >= 5) continue
+          target = ["model", "modellc", "modelval", "modeldec", "modelvisual"][slotIdx]
         } else if (commandLower.indexOf("model ") === 0) {
           var targetArg = command.substring(6).trim().toLowerCase()
           if (targetArg === "modellc" || targetArg === "lc") {
@@ -7443,10 +7483,12 @@ function MiniAInteractiveSession(args, adapter) {
             target = "modelval"
           } else if (["dec", "decide", "modeldec"].indexOf(targetArg) >= 0) {
             target = "modeldec"
+          } else if (targetArg === "visual" || targetArg === "modelvisual") {
+            target = "modelvisual"
           } else if (targetArg === "model" || targetArg === "main") {
             target = "model"
           } else {
-            print(colorifyText("Invalid target. Use 'main', 'lc', 'val' or 'dec'.", errorColor))
+            print(colorifyText("Invalid target. Use 'main', 'lc', 'val', 'dec' or 'visual'.", errorColor))
             continue
           }
         }
@@ -7555,13 +7597,14 @@ function MiniAInteractiveSession(args, adapter) {
       }
       if (commandLower.indexOf("delegate ") === 0) {
         if (!ensureDelegationAgent()) continue
-        var goal = command.substring(9).trim()
+        var delegation = __miniAParseDelegate(command.substring(9))
+        var goal = delegation.goal
         if (goal.length === 0) {
-          print(colorifyText("Usage: /delegate <goal>", errorColor))
+          print(colorifyText("Usage: /delegate [fork|clean|auto|--] <goal>", errorColor))
           continue
         }
         try {
-          var subtaskId = activeAgent._subtaskManager.submitAndRun(goal, {}, {})
+          var subtaskId = activeAgent._subtaskManager.submitAndRun(goal, {}, delegation.options)
           if (adapter) browserResult(activeAgent._subtaskManager.status(subtaskId), "subtask")
           print(colorifyText("Subtask submitted: " + subtaskId, successColor))
           print(colorifyText("Use /subtask " + subtaskId + " to check status", hintColor))
@@ -7738,7 +7781,7 @@ function MiniAInteractiveSession(args, adapter) {
       definitions: parameterDefinitions,
       defaultOptions: function() { return merge({}, parameterDefaults) },
       commands: function() { return getAllSlashCommandNames() },
-      completions: function() { return { wiki: getWikiSubcommandCompletions(), set: sessionParameterNames, show: sessionParameterNames, toggle: sessionParameterNames.filter(function(k) { return parameterDefinitions[k].type === "boolean" }), unset: sessionParameterNames } },
+      completions: function() { return { delegate: getDelegateSubcommandCompletions(), wiki: getWikiSubcommandCompletions(), set: sessionParameterNames, show: sessionParameterNames, toggle: sessionParameterNames.filter(function(k) { return parameterDefinitions[k].type === "boolean" }), unset: sessionParameterNames } },
       agent: function() { return activeAgent },
       stopDream: function() { if (activeDream) activeDream.requestStop() },
       attach: function(agent) {

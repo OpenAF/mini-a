@@ -19,7 +19,7 @@ MiniAWikiMan.menuLabel = function(label) {
   var names = {
     "Inspect": "🔎", "Pages & structure": "📝", "Indexes & storage": "🗂️", "Graph": "🕸️",
     "Dream": "💤", "Ingestion & absorption": "📥", "Session": "⚙️", "Exit": "👋", "Back": "🔙",
-    "Advanced options: off": "⚙️", "Advanced options: on": "⚙️", "Show last result details": "📋", "No": "❌", "Yes": "✅", "fs": "📁", "s3": "☁️", "s3fs": "☁️", "es": "🔎", "http": "🌐",
+    "Advanced options: off": "⚙️", "Advanced options: on": "⚙️", "Show last result details": "📋", "Show last command line": "💻", "No": "❌", "Yes": "✅", "fs": "📁", "s3": "☁️", "s3fs": "☁️", "es": "🔎", "http": "🌐",
     "Configured primary / federation overview": "📚", "Set up another primary": "✨",
     "Import content file": "📥", "Open configured external editor": "✏️",
     "Existing file or JSON/SLON": "📄", "Build a source selection": "🛠️",
@@ -188,15 +188,16 @@ MiniAWikiMan.prototype.category = function(group) {
     var labels = ops.map(function(op) {
       return op.title + (runner.unavailable({operation: op.id, params: op.defaults}) ? " [unavailable]" : op.id === last ? " [last used]" : "")
     })
-    var extras = ["Advanced options: " + (advanced ? "on" : "off"), "Show last result details", "Back"]
+    var extras = ["Advanced options: " + (advanced ? "on" : "off"), "Show last result details", "Show last command line", "Back"]
     var selected = this.choose(group, labels.concat(extras))
-    if (selected < 0 || selected === ops.length + 2) return
+    if (selected < 0 || selected === ops.length + 3) return
     if (selected === ops.length) { advanced = !advanced; continue }
     if (selected === ops.length + 1) {
       if (this.history.length) this.show(this.history[this.history.length - 1].result)
       else this.show("No operations have run yet.")
       continue
     }
+    if (selected === ops.length + 2) { this.showLastCommand(); continue }
     if (selected >= ops.length) continue
     var op = ops[selected], reason = runner.unavailable({operation: op.id, params: op.defaults})
     if (reason) { this.ui.print(ansiColor("FG(249)", "Unavailable: " + reason)); continue }
@@ -206,11 +207,15 @@ MiniAWikiMan.prototype.category = function(group) {
     this.showCurrentWiki()
   }
 }
+MiniAWikiMan.prototype.showLastCommand = function() {
+  if (!this._lastReplay) { this.show("No operations have run yet."); return }
+  this.separator()
+  this.ui.print(MiniAWikiOps.formatReplay(this._lastReplay.replay))
+  if (this._lastReplay.mutates) this.ui.print("Re-running this command authorizes the operation again. Failed/interrupted writes may be partial; use supported recovery actions.")
+  this.separator()
+}
 MiniAWikiMan.prototype.record = function(runner, spec, gates) {
   var replay = runner.command(spec, gates)
-  this.separator()
-  this.ui.print(MiniAWikiOps.formatReplay(replay))
-  if (MiniAWikiOps.mutates(spec)) this.ui.print("Re-running this command authorizes the operation again. Failed/interrupted writes may be partial; use supported recovery actions.")
   this.separator()
   this.ui.print(ansiColor("FG(41),BOLD", "▶ Running: " + spec.operation))
   var started = Date.now(), result = runner.execute(spec, gates)
@@ -221,6 +226,7 @@ MiniAWikiMan.prototype.record = function(runner, spec, gates) {
   // Keep the exact safe command: it already references credentials via environment variables.
   record.command = replay.command
   this.history.push(record)
+  this._lastReplay = { replay: replay, mutates: MiniAWikiOps.mutates(spec) }
   this.ui.print(ansiColor(result && result.ok === false ? "FG(196),BOLD" : "FG(41),BOLD",
     (result && result.ok === false ? "❌ Failed: " : "✅ Completed: ") + spec.operation))
   this.ui.print(ansiColor("FG(249),ITALIC", "⏱ " + record.elapsed_ms + " ms"))
@@ -242,9 +248,9 @@ MiniAWikiMan.prototype.runOperation = function(id, advanced) {
     this.show({ parameters: params })
     params = merge(params, MiniAWikiOps.parse(this.input("Parameter overrides as JSON/SLON", "{}")))
     if (id.indexOf("dream.") === 0 || id.indexOf("ingest.") === 0 || id.indexOf("absorb.") === 0 || id === "graph.build") {
-      var tuning = MiniAWikiOps.parse(this.input("Model / limits overrides (model, dreamwikillm, dreammaxsteps, maxcontext, contextguard, toolresultmaxinline, readresultmaxmatches, ingest..., absorb...)", "{}"))
+      var tuning = MiniAWikiOps.parse(this.input("Model / limits overrides (model, modelvisual, debugvisualch, modeldec, usedecide, dreamwikillm, dreammaxsteps, maxcontext, contextguard, toolresultmaxinline, readresultmaxmatches, ingest..., absorb...)", "{}"))
       Object.keys(tuning).forEach(function(k) {
-        if (!["model", "dreamwikillm", "dreammaxsteps", "maxcontext", "contextguard", "toolresultmaxinline", "readresultmaxmatches"].includes(k) && !/^(ingest|absorb)/.test(k)) throw new Error("Unsupported tuning argument: " + k)
+        if (!["model", "modelvisual", "debugvisualch", "modeldec", "usedecide", "dreamwikillm", "dreammaxsteps", "maxcontext", "contextguard", "toolresultmaxinline", "readresultmaxmatches"].includes(k) && !/^(ingest|absorb)/.test(k)) throw new Error("Unsupported tuning argument: " + k)
       })
       runner = new MiniAWikiOps(merge(clone(this.args), tuning), runner.log)
     }
