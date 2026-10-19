@@ -173,6 +173,9 @@ MiniAWikiRetrievalV2.manifestMerkle = function(manifest) {
   keys.forEach(function(key) { copy[key] = manifest[key] })
   if (isUnDef(manifest.merkleFormat)) return MiniAWikiRetrievalV2.digestText(stringify(copy, __, ""))
   if (manifest.merkleFormat !== "canonical-json-v1") throw new Error("unsupported-manifest-merkle-format")
+  return MiniAWikiRetrievalV2.digestText(MiniAWikiRetrievalV2.canonicalJSON(copy))
+}
+MiniAWikiRetrievalV2.canonicalJSON = function(value) {
   // Normalize omitted fields and JSON scalar types before ordering objects.
   // Emit JSON directly: a runtime serializer must not reorder the sorted maps.
   var canonical = function(value) {
@@ -182,7 +185,7 @@ MiniAWikiRetrievalV2.manifestMerkle = function(manifest) {
     }).join(",") + "}"
     return JSON.stringify(value)
   }
-  return MiniAWikiRetrievalV2.digestText(canonical(JSON.parse(JSON.stringify(copy))))
+  return canonical(JSON.parse(JSON.stringify(value)))
 }
 MiniAWikiRetrievalV2.slug = function(text) {
   return String(new java.lang.String(String(text).toLowerCase()).replaceAll("[^\\p{L}\\p{N} _-]", "")).trim().replace(/\s+/g, "-") || "section"
@@ -822,7 +825,7 @@ MiniAWikiRetrievalV2.prototype._validate = function(dir, manifest, validatedPare
     if (!isArray(actual) || expectedReverse[target].length !== actual.length) return false
     var byPath = function(left,right) { return left.path < right.path ? -1 : left.path > right.path ? 1 : 0 }
     var expected = expectedReverse[target].sort(byPath), sorted = actual.slice().sort(byPath)
-    return expected.every(function(posting,index) { return stringify(posting,__,"") === stringify(sorted[index],__,"") })
+    return expected.every(function(posting,index) { return MiniAWikiRetrievalV2.canonicalJSON(posting) === MiniAWikiRetrievalV2.canonicalJSON(sorted[index]) })
   })) throw new Error("invalid-backlink-postings")
   if(Object.keys(passageRefs).length!==Object.keys(catalog.passages).length)throw new Error("unreferenced-passage-record")
   if (isDef(catalog.blockRefs) && (!isMap(catalog.blockRefs) || Object.keys(catalog.blockRefs).length !== Object.keys(blockRefs).length || !Object.keys(blockRefs).every(function(locator) {

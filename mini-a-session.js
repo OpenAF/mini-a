@@ -6919,11 +6919,14 @@ function MiniAInteractiveSession(args, adapter) {
       var answer = con.readLinePrompt(colorifyText("Ingest recovery [cancel]: ", promptColor))
       if (!isString(answer) || !answer.trim()) return
       var choice = parseConsolePathArgs(answer).argv
+      if (String(choice[0] || "").toLowerCase() === "/ingest") choice.shift()
+      if (String(choice[0] || "").toLowerCase() === "recovery") choice.shift()
       action = String(choice[0] || "").toLowerCase()
       var selected = Number(choice[1] || (entries.length === 1 ? 1 : 0))
       if (action === "resume" || action === "discard") {
-        if (!entries[selected - 1]) { print(colorifyText("Choose a listed recovery number.", errorColor)); return }
-        id = entries[selected - 1].id
+        var selectedEntry = entries.filter(function(entry) { return entry.id === choice[1] })[0] || entries[selected - 1]
+        if (!selectedEntry) { print(colorifyText("Choose a listed recovery number or ID.", errorColor)); return }
+        id = selectedEntry.id
       }
     }
     if (action === "cancel") return

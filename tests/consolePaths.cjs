@@ -113,6 +113,12 @@ assert.deepEqual(recoveryCalls, [['list', undefined, undefined]]);
 assert.ok(output.includes('  Resume: /ingest recovery resume scope-id'));
 recoveryCalls = []; ctx.printIngest('recovery resume scope-id');
 assert.deepEqual(recoveryCalls, [['list', undefined, undefined], ['resume', 'scope-id', false]]);
+for (const answer of ['resume 1', 'resume scope-id', 'recovery resume scope-id', '/ingest recovery resume scope-id']) {
+  answers = [answer]; recoveryCalls = []; ctx.printIngest('');
+  assert.deepEqual(recoveryCalls, [['list', undefined, undefined], ['resume', 'scope-id', false]], answer);
+}
+answers = ['resume unknown-id']; recoveryCalls = []; ctx.printIngest('');
+assert.deepEqual(recoveryCalls, [['list', undefined, undefined]]);
 answers = ['no']; recoveryCalls = []; ctx.printIngest('recovery discard scope-id');
 assert.deepEqual(recoveryCalls, [['list', undefined, undefined]]);
 answers = ['discard scope-id']; recoveryCalls = []; ctx.printIngest('recovery discard scope-id');

@@ -3326,6 +3326,23 @@
       ow.test.assert(reader.backlinks("target.md").count,30,"stamp-only publication refreshes compact posting")
       pin=engine.acquire();engine._validate(pin.dir,pin.manifest)
       var resolve=engine._resolveCatalogue, mismatch=""
+      var reverseKeys = function(value) {
+        if (isArray(value)) return value.map(reverseKeys)
+        if (!isMap(value)) return value
+        var reordered = {}
+        Object.keys(value).reverse().forEach(function(key) { reordered[key] = reverseKeys(value[key]) })
+        return reordered
+      }
+      engine._resolveCatalogue = function() {
+        var catalog = clone(resolve.apply(engine, arguments))
+        Object.keys(catalog.reverseLinks).forEach(function(target) {
+          catalog.reverseLinks[target] = reverseKeys(catalog.reverseLinks[target]).reverse()
+        })
+        return catalog
+      }
+      try { engine._validate(pin.dir, pin.manifest) }
+      finally { engine._resolveCatalogue = resolve }
+      ow.test.assert(true, true, "backlink validation accepts reordered persisted object keys and postings")
       engine._resolveCatalogue=function() {
         var catalog=clone(resolve.apply(engine,arguments));catalog.reverseLinks["target.md"][0].stamp.size++
         return catalog
