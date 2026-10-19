@@ -820,13 +820,33 @@ MiniAWikiRetrievalV2.prototype._validate = function(dir, manifest, validatedPare
       expectedReverse[target].push({path:path,title:page.title,links:targets[target],stamp:page.stamp})
     })
   })
-  if (Object.keys(expectedReverse).length !== Object.keys(catalog.reverseLinks).length || !Object.keys(expectedReverse).every(function(target) {
-    var actual = catalog.reverseLinks[target]
-    if (!isArray(actual) || expectedReverse[target].length !== actual.length) return false
+  // Report the first mismatch without dumping a catalogue or page bodies.
+  var backlinkFailure = function(reason, target, expected, actual, path) {
+    var encode = function(value) { return isUnDef(value) ? "<missing>" : MiniAWikiRetrievalV2.canonicalJSON(value) }
+    var expectedText = encode(expected), actualText = encode(actual), fields = []
+    if (isMap(expected) && isMap(actual)) {
+      var keys = {}; Object.keys(expected).concat(Object.keys(actual)).forEach(function(key) { keys[key] = true })
+      Object.keys(keys).sort().forEach(function(key) { if (encode(expected[key]) !== encode(actual[key])) fields.push(key) })
+    }
+    var error = new Error("invalid-backlink-postings")
+    error.details = { generation: manifest.generation, reason: reason, target: target, path: path || "",
+      differing_fields: fields, expected: expectedText.substring(0, 2048), actual: actualText.substring(0, 2048),
+      truncated: expectedText.length > 2048 || actualText.length > 2048 }
+    throw error
+  }
+  var reverseTargets = {}
+  Object.keys(expectedReverse).concat(Object.keys(catalog.reverseLinks)).forEach(function(target) { reverseTargets[target] = true })
+  Object.keys(reverseTargets).sort().forEach(function(target) {
+    var expected = expectedReverse[target], actual = catalog.reverseLinks[target]
+    if (!isArray(expected) || !isArray(actual)) backlinkFailure("target-postings", target, expected, actual)
+    if (expected.length !== actual.length) backlinkFailure("posting-count", target, expected.length, actual.length)
+    actual.forEach(function(posting) { if (!isMap(posting) || !isString(posting.path)) backlinkFailure("invalid-posting", target, { path: "<source path>" }, posting) })
     var byPath = function(left,right) { return left.path < right.path ? -1 : left.path > right.path ? 1 : 0 }
-    var expected = expectedReverse[target].sort(byPath), sorted = actual.slice().sort(byPath)
-    return expected.every(function(posting,index) { return MiniAWikiRetrievalV2.canonicalJSON(posting) === MiniAWikiRetrievalV2.canonicalJSON(sorted[index]) })
-  })) throw new Error("invalid-backlink-postings")
+    expected = expected.slice().sort(byPath); var sorted = actual.slice().sort(byPath)
+    expected.forEach(function(posting,index) {
+      if (MiniAWikiRetrievalV2.canonicalJSON(posting) !== MiniAWikiRetrievalV2.canonicalJSON(sorted[index])) backlinkFailure("posting-fields", target, posting, sorted[index], posting.path)
+    })
+  })
   if(Object.keys(passageRefs).length!==Object.keys(catalog.passages).length)throw new Error("unreferenced-passage-record")
   if (isDef(catalog.blockRefs) && (!isMap(catalog.blockRefs) || Object.keys(catalog.blockRefs).length !== Object.keys(blockRefs).length || !Object.keys(blockRefs).every(function(locator) {
     var record = catalog.blockRefs[locator]

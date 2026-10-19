@@ -769,6 +769,21 @@
     assert(io.readFileString(broken), 'not json', 'corrupt authority preserved')
     assert(io.fileExists(f.wiki + '/docs/a.md'), false, 'no partial replay behind unknown scope')
   }) }
+  exports.testServingFailureDetails = function() { fixture(function(f) {
+    f.write('a.md', '# A\nContent')
+    var runner = f.runner({ wikiretrievalv2: true })
+    var details = { target: 'missing.md', path: 'docs/a.md', differing_fields: ['stamp'], expected: 'old', actual: 'new' }
+    runner._servingProof = function() { return { ok: false, error: 'invalid-backlink-postings', code: 'invalid-backlink-postings', details: details } }
+    var result = runner.run()
+    assert(result.error, 'serving-verification-failed: invalid-backlink-postings', 'stable ingestion error')
+    assert(result.verification.details.target, 'missing.md', 'initial ingest exposes diagnostic')
+    assert(result.progress.local_serving_verified, false, 'diagnostics never bypass verification')
+    var pending = runner.manageRecovery('list').recoveries
+    assert(pending.length, 1, 'failed verification preserves journal')
+    result = runner.manageRecovery('resume', pending[0].id)
+    assert(result.verification.details.actual, 'new', 'explicit resume preserves diagnostic')
+    assert(result.status, 'blocked', 'resume remains blocked on failed proof')
+  }) }
   exports.testServingProofRejectsFallbackAndStaleRecords = function() { fixture(function(f) {
     assert(f.initial().ok, true, 'initial ingest')
     var wm = new MiniAWikiManager({ root: f.wiki, access: 'rw', wikiretrievalv2: true }, function() {})

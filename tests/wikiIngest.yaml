@@ -46,6 +46,9 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/wikiIngestReconcile.js").testCorruptRecoveryListingPreservesValidEntries
 
+- name: MiniA Wiki Ingest Tests::ServingFailureDetails
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testServingFailureDetails
 - name: MiniA Wiki Ingest Tests::ServingProofRejectsFallbackAndStaleRecords
   to: oJob Test
   exec: args.func = require("tests/wikiIngestReconcile.js").testServingProofRejectsFallbackAndStaleRecords
@@ -371,6 +374,7 @@ todo:
 - MiniA Wiki Ingest Tests::TransformationCheckpointReuse
 - MiniA Wiki Ingest Tests::ParallelFailureDoesNotRepeatCompletedItems
 - MiniA Wiki Ingest Tests::CorruptRecoveryListingPreservesValidEntries
+- MiniA Wiki Ingest Tests::ServingFailureDetails
 - MiniA Wiki Ingest Tests::ServingProofRejectsFallbackAndStaleRecords
 - MiniA Wiki Ingest Tests::ExportPreflightPreservesAcceptedBundle
 - MiniA Wiki Ingest Tests::IncrementalSourceLinkResolution

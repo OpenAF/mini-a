@@ -562,6 +562,15 @@ separately, so selection remains deterministic and inspectable.
 
 ## Safe repeated ingestion
 
+If ingestion reports `serving-verification-failed: invalid-backlink-postings`, inspect
+`verification.details` in the operation result. It identifies the first mismatching
+generation, target, source page, and top-level fields, with expected/actual values
+capped at 2,048 characters each. These diagnostics also appear when resuming a
+pending recovery; no debug flag is required. Keep the wiki and its recovery journal
+for investigation. `debugch` records model traffic, and the direct console `/ingest`
+path does not initialize the agent audit channel, so an ingestion with no model
+calls need not produce either `debugch` or `auditch` files.
+
 Ingestion is an upsert by default. `ingestprune=false` reports missing sources and
 preserves their pages; a successful upsert does not claim that the wiki mirrors the
 source. `ingestprune=true` reconciles only artifacts owned by the same destination,

@@ -3325,7 +3325,7 @@
       ow.test.assert(writer._retrievalV2.build(["source-1.md"]).ok,true,"same-byte update refreshes source stamp")
       ow.test.assert(reader.backlinks("target.md").count,30,"stamp-only publication refreshes compact posting")
       pin=engine.acquire();engine._validate(pin.dir,pin.manifest)
-      var resolve=engine._resolveCatalogue, mismatch=""
+      var resolve=engine._resolveCatalogue, mismatch="", mismatchDetails
       var reverseKeys = function(value) {
         if (isArray(value)) return value.map(reverseKeys)
         if (!isMap(value)) return value
@@ -3347,9 +3347,37 @@
         var catalog=clone(resolve.apply(engine,arguments));catalog.reverseLinks["target.md"][0].stamp.size++
         return catalog
       }
-      try {engine._validate(pin.dir,pin.manifest)} catch(e) {mismatch=String(e.message||e)}
+      try {engine._validate(pin.dir,pin.manifest)} catch(e) {mismatch=String(e.message||e);mismatchDetails=e.details}
       finally {engine._resolveCatalogue=resolve}
       ow.test.assert(mismatch,"invalid-backlink-postings","full validation rejects a stamp detached from its page")
+      ow.test.assert(mismatchDetails.target, "target.md", "failure identifies backlink target")
+      ow.test.assert(mismatchDetails.differing_fields.join(","), "stamp", "failure identifies changed field")
+      ow.test.assert(mismatchDetails.path.indexOf("source-") === 0, true, "failure identifies source")
+      ow.test.assert(mismatchDetails.generation, pin.generation, "failure identifies persisted generation")
+      ;[
+        { reason: "target-postings", change: function(c) { delete c.reverseLinks["target.md"] } },
+        { reason: "posting-count", change: function(c) { c.reverseLinks["target.md"].pop() } },
+        { reason: "invalid-posting", change: function(c) { c.reverseLinks["target.md"][0] = null } },
+        { reason: "posting-fields", change: function(c) { c.reverseLinks["target.md"][0].title = new Array(5001).join("x") } }
+      ].forEach(function(test) {
+        engine._resolveCatalogue = function() { var catalog = clone(resolve.apply(engine, arguments)); test.change(catalog); return catalog }
+        var details
+        try { engine._validate(pin.dir, pin.manifest) } catch(e) { details = e.details }
+        finally { engine._resolveCatalogue = resolve }
+        ow.test.assert(details.reason, test.reason, "diagnostic classifies " + test.reason)
+        ow.test.assert(details.expected.length <= 2048 && details.actual.length <= 2048, true, "diagnostic output is bounded")
+        if (test.reason === "posting-fields") ow.test.assert(details.truncated, true, "oversized values are marked truncated")
+      })
+      var originalValidate = MiniAWikiRetrievalV2.prototype._validate
+      MiniAWikiRetrievalV2.prototype._validate = function() {
+        var error = new Error("invalid-backlink-postings"); error.details = mismatchDetails; throw error
+      }
+      try {
+        var proof = reader.verifyServing()
+        ow.test.assert(proof.code, "invalid-backlink-postings", "verification retains stable error code")
+        ow.test.assert(proof.details.target, "target.md", "fresh-reader proof preserves mismatch details")
+      } finally { MiniAWikiRetrievalV2.prototype._validate = originalValidate }
+
       engine.release(pin);pin=__
       var symlinkPath=new java.io.File(dir+"/source-2.md").toPath()
       java.nio.file.Files.delete(symlinkPath)

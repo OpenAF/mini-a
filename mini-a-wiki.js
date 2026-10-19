@@ -1820,7 +1820,7 @@ MiniAWikiManager.prototype.verifyServing = function(options) {
     }
     return { ok: true, generation: pin.generation, checksum: pin.manifestChecksum, pages: Object.keys(catalog.pages).length,
       passages: Object.keys(seen).length, fresh_reader: true, current_only: true, sources_checked: options.sources !== false }
-  } catch(e) { return { ok: false, error: __miniAErrMsg(e), code: e.analysis && e.analysis.differingFields && e.analysis.differingFields.indexOf("analyzer-capability") >= 0 ? "analyzer-capability-unavailable" : __miniAErrMsg(e).split(":")[0], fresh_reader: true, current_only: true } }
+  } catch(e) { return { ok: false, error: __miniAErrMsg(e), code: e.analysis && e.analysis.differingFields && e.analysis.differingFields.indexOf("analyzer-capability") >= 0 ? "analyzer-capability-unavailable" : __miniAErrMsg(e).split(":")[0], fresh_reader: true, current_only: true, details: e.details } }
   finally { if (pin) engine.release(pin); if (engine) engine.close() }
 }
 

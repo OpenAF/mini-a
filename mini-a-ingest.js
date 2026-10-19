@@ -781,7 +781,10 @@ MiniAIngest.prototype._finishJournal = function(wm, journal, path, result) {
   }
   if (!proof.ok) {
     proof = self._servingProof(wm, true)
-    if (!proof.ok) throw new Error("serving-verification-failed: " + proof.error)
+    if (!proof.ok) {
+      result.verification = proof
+      throw new Error("serving-verification-failed: " + proof.error)
+    }
   }
   if (!proof.skipped && !proof.source_rebuild && result.finalize && result.finalize.publication && result.finalize.publication.generation && result.finalize.publication.generation !== proof.generation) throw new Error("ingest-conflict: published generation changed during verification")
   if (journal.checkpoints.serving && proof.generation !== journal.checkpoints.serving.generation) proof.supersedes = journal.checkpoints.serving.generation
