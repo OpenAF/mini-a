@@ -1202,7 +1202,7 @@ help:
     desc     : Stable logical ingestion origin identity
     mandatory: false
   - name     : ingestlayout
-    desc     : "New-page layout: flat (default) or source folders; existing mappings stay in place"
+    desc     : "New-page layout: source (default) mirrors source folders, flat joins them with hyphens; existing mappings stay in place"
     mandatory: false
     options  : ["flat", "source"]
   - name     : ingestmode
@@ -1951,7 +1951,7 @@ jobs:
       toolargcheck    : toBoolean.isBoolean.default(true)
       toolargrepair   : toBoolean.isBoolean.default(true)
       usewiki        : toBoolean.isBoolean.default(false)
-      ingestlayout   : isString.default("flat")
+      ingestlayout   : isString.default("source")
       wikiaccess     : isString.default(__)
       wikibackend    : isString.default(__)
       wikiroot       : isString.default(__)

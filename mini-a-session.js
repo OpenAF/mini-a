@@ -958,7 +958,7 @@ function MiniAInteractiveSession(args, adapter) {
     absorbmaxtokens: { type: "number", default: 100000, description: "Aggregate absorption model input token estimate limit." },
     ingestsource   : { type: "string", description: "Folder, git repository or page URL to ingest into the wiki." },
     ingesttype     : { type: "string", description: "Ingest source type: markdown, repo or url (auto-detected when unset)." },
-    ingestlayout: { type: "string", default: "flat", description: "New-page layout: flat or source folders." },
+    ingestlayout: { type: "string", default: "source", description: "New-page layout: flat or source folders." },
     ingestsection  : { type: "string", description: "Wiki section ingested pages are written into." },
     ingestinclude  : { type: "string", description: "Comma-separated path fragments to include when ingesting." },
     ingestexclude  : { type: "string", description: "Comma-separated path fragments to exclude when ingesting." },

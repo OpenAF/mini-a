@@ -81,7 +81,7 @@ help:
     desc     : Stable logical origin identifier, independent of the physical source path
     mandatory: false
   - name     : ingestlayout
-    desc     : "New-page layout: flat (default) or source folders; existing mappings stay in place"
+    desc     : "New-page layout: source (default) mirrors source folders, flat joins them with hyphens; existing mappings stay in place"
     mandatory: false
     options  : ["flat", "source"]
   - name     : ingestmode
@@ -139,7 +139,7 @@ jobs:
       ingestallowemptyprune: toBoolean.isBoolean.default(false)
       ingestsourceid   : isString.default(__)
       wikiaccess       : isString.default("rw")
-      ingestlayout     : isString.default("flat")
+      ingestlayout     : isString.default("source")
       ingestmode       : isString.default("auto")
       ingestindependent: toBoolean.isBoolean.default(false)
       ingestforce      : toBoolean.isBoolean.default(false)

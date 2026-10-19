@@ -119,7 +119,7 @@ MiniAWikiOps.catalog = (function() {
   ;["plan", "apply", "repair", "reindex", "graph", "indexes", "reorg"].forEach(function(op) {
     add("dream." + op, "Dream", op, op !== "plan", op === "reorg" ? [["instructions", "Additional reorg guidance (optional)", ""], ["organize", "Organization: none or topics", "none"]] : [], {}, op === "reorg" ? "Live agent changes; no automatic rollback. A rerun may produce different edits." : "")
   })
-  add("ingest.run", "Ingestion & absorption", "Ingest sources (preview by default)", true, [["source", "Folder, repository URL or page URL"], ["section", "Destination section", ""], ["layout", "New-page layout: flat or source", "flat"]], { dryrun: true })
+  add("ingest.run", "Ingestion & absorption", "Ingest sources (preview by default)", true, [["source", "Folder, repository URL or page URL"], ["section", "Destination section", ""], ["layout", "New-page layout: flat or source", "source"]], { dryrun: true })
   add("ingest.recovery", "Ingestion & absorption", "List ingestion recovery", false)
   add("ingest.resume", "Ingestion & absorption", "Resume ingestion", true, [["id", "Recovery ID"]])
   add("ingest.discard", "Ingestion & absorption", "Discard ingestion recovery", true, [["id", "Recovery ID"]], {}, "Archives recovery; already-written pages are retained. This is not rollback.")

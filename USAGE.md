@@ -3531,7 +3531,7 @@ discard the old recovery first. Do not manually delete journals to dismiss error
 | `ingestsource` | string | - | Folder, git repository (path or clone URL), or page URL — **required** |
 | `ingesttype` | string | auto | `markdown`, `repo` or `url` |
 | `ingestsection` | string | source name | Wiki section ingested pages are written into |
-| `ingestlayout` | string | `flat` | New-page paths: `flat` joins source directories with hyphens; `source` preserves sanitized directories. Existing bindings stay in place. |
+| `ingestlayout` | string | `source` | New-page paths: `source` preserves sanitized directories; `flat` joins source directories with hyphens. Existing bindings stay in place. |
 | `ingestinclude` | string | - | Comma-separated path fragments to include |
 | `ingestexclude` | string | - | Comma-separated path fragments to exclude |
 | `ingestchunkchars` | number | `24000` | Maximum characters per distillation chunk |

@@ -46,7 +46,7 @@ try {
   check(result.reconciled_run === cancelled.run_id && result.verification.ok, 'next command reconciles and verifies')
   check(phases.length >= 3, 'phase progress reached Advanced events')
   var definitions = state.runtime.definitions
-  check(definitions.ingestlayout && definitions.ingestlayout.default === 'flat' && definitions.dreamwikiorganize && definitions.dreamwikiorganize.default === 'none', 'organization settings exposed with compatible defaults')
+  check(definitions.ingestlayout && definitions.ingestlayout.default === 'source' && definitions.dreamwikiorganize && definitions.dreamwikiorganize.default === 'none', 'organization settings exposed with compatible defaults')
   check(definitions.dreamwikillm && definitions.dreammaxsteps, 'same settings exposed in shared session')
   io.mkdir(root + '/source/Guide'); io.writeFileString(root + '/source/Guide/Setup.md', '# Setup\n\nExample instructions.')
   var preview = command('/ingest "' + root + '/source" reference layout=source dryrun', false)

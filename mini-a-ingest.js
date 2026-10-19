@@ -396,7 +396,7 @@ MiniAIngest.prototype._validatePage = function(page) {
 // re-ingesting the same source targets the same page.
 MiniAIngest.prototype._wikiPathFor = function(section, source, layout) {
   var rel = String(source.rel || source.id || "page")
-  var sourceLayout = String(layout || this._args.ingestlayout || "flat").toLowerCase() === "source" && !source.url
+  var sourceLayout = String(layout || this._args.ingestlayout || "source").toLowerCase() === "source" && !source.url
   var slug = rel.replace(/\.[^./]+$/, "")
              .replace(/[^A-Za-z0-9/_-]+/g, "-")
              .replace(/\/+/g, sourceLayout ? "/" : "-")
@@ -907,7 +907,7 @@ MiniAIngest.prototype.run = function() {
     if (io.fileExists(indexRoot + "/.mini-a-wiki-absorb/journal.json")) throw new Error("unfinished absorption journal; use /absorb resume")
   }
   try {
-    if (["flat", "source"].indexOf(String(a.ingestlayout || "flat").toLowerCase()) < 0) throw new Error("invalid ingestlayout")
+    if (["flat", "source"].indexOf(String(a.ingestlayout || "source").toLowerCase()) < 0) throw new Error("invalid ingestlayout")
     if (isDef(a.ingestmode) && ["auto", "normalize", "distill", "raw"].indexOf(String(a.ingestmode).trim().toLowerCase()) < 0) throw new Error("invalid ingestmode")
     if (!source) { result.reason = "no-source"; return result }
     if (toBoolean(a.usewiki) !== true) { result.reason = "usewiki-not-set"; return result }

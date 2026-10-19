@@ -234,7 +234,7 @@
     var r = f.run({ ingestprune: true }); assert(r.ok, false, 'corrupt manifest fails closed'); assert(io.fileExists(f.wiki + '/docs/b.md'), true, 'corrupt state never authorizes deletion')
   }) }
   exports.testLegacyMigration = function() { fixture(function(f) {
-    f.initial(); io.mkdir(f.src + '/nested'); f.write('nested/setup.md', '# Setup\n\nLegacy nested source'); f.run(); var s = f.state(), old = {}, root = String(new java.io.File(f.src).getCanonicalPath())
+    f.initial(); io.mkdir(f.src + '/nested'); f.write('nested/setup.md', '# Setup\n\nLegacy nested source'); f.run({ ingestlayout: 'flat' }); var s = f.state(), old = {}, root = String(new java.io.File(f.src).getCanonicalPath())
     Object.keys(s.sources).forEach(function(k) { var v = s.sources[k], key = sha1('markdown|' + root + '|' + v.source); old[key] = { source: v.source, sourceHash: v.sourceHash, page: v.page, chunks: v.chunks.slice(0, 1) } })
     s.version = 1; s.sources = old; f.save(s)
     var r = f.run({ ingestlayout: 'source' }); assert(r.ok, true, stringify(r)); assert(r.migrated.length, 3, 'validated records reassociated'); assert(io.fileExists(f.wiki + '/.mini-a-wiki-ingest/pre-migration.json'), true, 'migration backup')
