@@ -433,6 +433,7 @@
       agent._historyVm = vm
       agent._sessionArgs = { goal: "EXACT GOAL AND CONSTRAINTS" }
       agent.fnI = function() {}
+      agent._sessionArgs.maxcontext = 200000
       agent._getEffectiveContextBudget = function() { return 200000 }
       agent._withExponentialBackoff = function(fn) { return fn() }
       var chunks = [], dispatched = [], provider = []
@@ -2314,6 +2315,7 @@
         ow.test.assert(result.returnedMatches, 1, "Represent one distinct matching line")
         ow.test.assert(result.excerpted, true, "Long line is deliberately excerpted")
         ow.test.assert(result.content[0].text.length <= 600, true, "Include labels and next notice in budget")
+        if (result.next) ow.test.assert(agent._isSpilledResultObservation(agent._normalizeToolResult(result).display), true, "Paged retrieval must not be spilled again after normalization")
         var found = result.content[0].text.match(/NEEDLE_[ABC]/g) || []
         seen = seen.concat(found)
         result.ranges.forEach(function(range) {

@@ -686,7 +686,7 @@ mini-a goal="show meetup locations on a map" \
 | `conversation` | string | - | Conversation history file to load/save |
 | `maxcontext` | number | `0` | Maximum context size in tokens (auto-summarize when exceeded) |
 | `contextguard` | boolean | `false` | Enable a generic small-window safety budget and bounded tool-output handling when `maxcontext=0` |
-| `contextguardbudget` | number | `32000` | Assumed smallest context window used by `contextguard` when `maxcontext=0` |
+| `contextguardbudget` | number | `0` | Explicit context ceiling when `maxcontext=0`; `0` uses automatic compaction and provider-overflow recovery |
 | `toolresultmaxinline` | number | `4096` | Max inline bytes kept from large tool or `readresult` outputs before spill/truncation under `contextguard` |
 | `readresultmaxmatches` | number | `20` | Max matching regions returned by `proxy-dispatch` `readresult` `op='grep'` under `contextguard` |
 | `compressgoal` | boolean | `false` | Automatically compress oversized goal text before execution |

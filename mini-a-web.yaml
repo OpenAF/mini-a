@@ -145,7 +145,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : contextguardbudget
-    desc     : "Assumed smallest context window used by contextguard when maxcontext=0 (default: 32000)"
+    desc     : "Explicit context ceiling when maxcontext=0; 0 uses automatic compaction and provider-overflow recovery (default: 0)"
     example  : "32000"
     mandatory: false
   - name     : toolresultmaxinline
@@ -1685,7 +1685,7 @@ jobs:
       earlystopthreshold: toNumber().isNumber().default(__)
       maxcontext      : toNumber().isNumber().default(200000)
       contextguard    : toBoolean().isBoolean().default(false)
-      contextguardbudget: toNumber().isNumber().default(32000)
+      contextguardbudget: toNumber().isNumber().default(0)
       toolresultmaxinline: toNumber().isNumber().default(__)
       readresultmaxmatches: toNumber().isNumber().default(__)
       compressgoal    : toBoolean().isBoolean().default(false)

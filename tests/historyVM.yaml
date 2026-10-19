@@ -2,6 +2,26 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA History VM Tests::LowCostExecutorHistoryLifecycle
+  from: MiniA History VM Tests::Init
+  to: oJob Test
+  exec: args.func = require("tests/historyVM.js").testLowCostExecutorHistoryLifecycle
+
+- name: MiniA History VM Tests::AutomaticContextTarget
+  from: MiniA History VM Tests::Init
+  to: oJob Test
+  exec: args.func = require("tests/historyVM.js").testAutomaticContextTargetIsNotHardLimit
+
+- name: MiniA History VM Tests::DisposableEvidenceAcrossProviderChanges
+  from: MiniA History VM Tests::Init
+  to: oJob Test
+  exec: args.func = require("tests/historyVM.js").testDisposableEvidenceAcrossProviderChanges
+
+- name: MiniA History VM Tests::RetrievalEvidenceRepresentations
+  from: MiniA History VM Tests::Init
+  to: oJob Test
+  exec: args.func = require("tests/historyVM.js").testRetrievalEvidenceRepresentations
+
 - name: MiniA History VM Tests::ConcurrentAppends
   from: MiniA History VM Tests::Init
   to: oJob Test
@@ -241,6 +261,10 @@ jobs:
   exec: args.func = require("tests/historyVM.js").testRecoverBranchWithoutCheckpoint
 
 todo:
+- MiniA History VM Tests::LowCostExecutorHistoryLifecycle
+- MiniA History VM Tests::AutomaticContextTarget
+- MiniA History VM Tests::DisposableEvidenceAcrossProviderChanges
+- MiniA History VM Tests::RetrievalEvidenceRepresentations
 - MiniA History VM Tests::ConcurrentAppends
 - MiniA History VM Tests::GoalAndEvidencePaging
 - MiniA History VM Tests::NativeRoundBudgetGuard

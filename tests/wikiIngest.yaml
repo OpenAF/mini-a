@@ -2,6 +2,18 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA Wiki Ingest Tests::OwnershipSerializationOrder
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testOwnershipSerializationOrder
+
+- name: MiniA Wiki Ingest Tests::OwnershipSerializationRecovery
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testOwnershipSerializationRecovery
+
+- name: MiniA Wiki Ingest Tests::OwnershipChangesStillConflict
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testOwnershipChangesStillConflict
+
 - name: MiniA Wiki Ingest Tests::ExportRepairsCorruptPredecessor
   to: oJob Test
   exec: args.func = require("tests/wikiIngestReconcile.js").testExportRepairsCorruptPredecessor
@@ -348,6 +360,9 @@ jobs:
   exec: args.func = require("tests/wikiIngestReconcile.js").testPreparedRecoveryWithIncompleteOrigin
 
 todo:
+- MiniA Wiki Ingest Tests::OwnershipSerializationOrder
+- MiniA Wiki Ingest Tests::OwnershipSerializationRecovery
+- MiniA Wiki Ingest Tests::OwnershipChangesStillConflict
 - MiniA Wiki Ingest Tests::ExportRepairsCorruptPredecessor
 - MiniA Wiki Ingest Tests::UnchangedIngestRepairsServingAndPreservesExport
 - MiniA Wiki Ingest Tests::JournalIntegrityBlocksPayloadCorruption

@@ -28,6 +28,67 @@
     f.initial = function() { f.write('a.md', '# A\n\n## One\n\nFIRST\n\n## Two\n\nSECOND\n\n## Three\n\nTHIRD'); f.write('b.md', '# B\n\nB remains'); return f.run() }
     try { fn(f) } finally { io.rm(src); io.rm(wiki) }
   }
+  // JSON object property order is not part of persisted ownership identity.
+  var reverseJsonKeys = function(value) {
+    if (isArray(value)) return value.map(reverseJsonKeys)
+    if (!isMap(value)) return value
+    var out = {}
+    Object.keys(value).reverse().forEach(function(k) { out[k] = reverseJsonKeys(value[k]) })
+    return out
+  }
+  exports.testOwnershipSerializationOrder = function() { fixture(function(f) {
+    io.mkdir(f.src + '/Cloud & Common team/AIP')
+    f.write('Cloud & Common team/AIP/20260827.md', '# AIP\n\n## Status\n\nReady\n\n## Next\n\nShip')
+    f.write('empty.md', '')
+    var options = { wikiretrievalv2: true, usewikigraph: true, wikilexical: { language: 'english', ngrams: true, shingles: true, queryExpansion: true, pseudoRelevanceFeedback: true } }
+    var runner = f.runner(options), finish = runner._finishJournal
+    runner._finishJournal = function(wm, journal, path, result) {
+      var state = f.state(), key = Object.keys(state.sources)[0]
+      state.sources[key] = reverseJsonKeys(state.sources[key])
+      f.save(state)
+      return finish.call(this, wm, journal, path, result)
+    }
+    var result = runner.run()
+    assert(result.error, __, 'equivalent ownership must not prevent finalization: ' + stringify(result.error))
+    assert(result.failed.length, 1, 'empty source remains a separate failure')
+    assert(result.failed[0].source, 'empty.md', 'empty source is identified')
+    assert(result.progress.local_serving_verified, true, 'nonempty sources publish despite empty source')
+    assert(f.runner(options).manageRecovery('list').recoveries.length, 0, 'successful finalization clears journal')
+    f.write('empty.md', '# Filled\n\nReady')
+    assert(f.run(options).ok, true, 'repeat can ingest previously empty source')
+    assert(f.run(options).status, 'noop', 'repeat stays idempotent')
+  }) }
+  exports.testOwnershipSerializationRecovery = function() { fixture(function(f) {
+    f.write('a.md', '# A\n\n## One\n\nFirst\n\n## Two\n\nSecond')
+    var runner = f.runner({ wikiretrievalv2: true })
+    runner._finishJournal = function() { throw new Error('injected interruption after manifest') }
+    assert(runner.run().ok, false, 'pending finalization is retained')
+    var state = f.state(), key = Object.keys(state.sources)[0]
+    state.sources[key] = reverseJsonKeys(state.sources[key]); f.save(state)
+    var result = f.run({ wikiretrievalv2: true })
+    assert(result.ok, true, 'resume accepts equivalent persisted ownership: ' + stringify(result.error))
+    assert(result.progress.local_serving_verified, true, 'resume verifies current serving generation')
+  }) }
+  exports.testOwnershipChangesStillConflict = function() {
+    [
+      { field: 'sourceHash', change: function(s) { s.sourceHash = 'changed' } },
+      { field: 'active', change: function(s) { s.active = 'true' } },
+      { field: 'signature', change: function(s) { delete s.signature } },
+      { field: 'chunks[0]', change: function(s) { s.chunks.reverse() } },
+      { field: 'chunks.length', change: function(s) { s.chunks.pop() } }
+    ].forEach(function(test) { fixture(function(f) {
+      f.write('a.md', '# A\n\n## One\n\nFirst\n\n## Two\n\nSecond')
+      var runner = f.runner()
+      runner._finishJournal = function() { throw new Error('injected interruption after manifest') }
+      assert(runner.run().ok, false, 'pending journal created')
+      var state = f.state(), key = Object.keys(state.sources)[0]
+      test.change(state.sources[key]); f.save(state)
+      var result = f.run()
+      assert(String(result.error).indexOf('ingest-conflict: recovered ownership differs:'), 0, 'real changes remain blocked')
+      assert(String(result.error).indexOf(test.field) >= 0, true, 'diagnostic names differing field ' + test.field)
+      assert(f.runner().manageRecovery('list').recoveries.length, 1, 'conflict preserves recovery authority')
+    }) })
+  }
   exports.testLegacyContextProvenance = function() { fixture(function(f) {
     f.write('a.md','# Original source\nSOURCE_ONLY_PARAMETER is original transformation input.')
     var runner=f.runner({ingestmode:'distill'})

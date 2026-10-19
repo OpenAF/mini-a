@@ -719,6 +719,37 @@ MiniAIngest.prototype._servingProof = function(wm, repair) {
   } finally { if (reader) reader.close() }
 }
 
+// Compare persisted JSON values, not object insertion order. Keep array order,
+// scalar types and missing fields significant; report only the differing path.
+MiniAIngest.prototype._ownershipDifference = function(actual, expected) {
+  var jsonValue = function(value) { return isUnDef(value) ? __ : af.fromJson(stringify(value, __, "")) }
+  var difference = function(a, b, path) {
+    if (a === b) return ""
+    if (isArray(a) || isArray(b)) {
+      if (!isArray(a) || !isArray(b)) return path
+      if (a.length !== b.length) return path + ".length"
+      for (var i = 0; i < a.length; i++) {
+        var diff = difference(a[i], b[i], path + "[" + i + "]")
+        if (diff) return diff
+      }
+      return ""
+    }
+    if (isMap(a) && isMap(b)) {
+      var keys = Object.keys(a).concat(Object.keys(b)).sort()
+      for (var j = 0; j < keys.length; j++) {
+        if (j > 0 && keys[j] === keys[j - 1]) continue
+        var k = keys[j], field = path + "." + k
+        if (!Object.prototype.hasOwnProperty.call(a, k) || !Object.prototype.hasOwnProperty.call(b, k)) return field
+        var diff = difference(a[k], b[k], field)
+        if (diff) return diff
+      }
+      return ""
+    }
+    return path
+  }
+  return difference(jsonValue(actual), jsonValue(expected), "$")
+}
+
 MiniAIngest.prototype._finishJournal = function(wm, journal, path, result) {
   var self = this
   journal.checkpoints = journal.checkpoints || {}
@@ -731,7 +762,8 @@ MiniAIngest.prototype._finishJournal = function(wm, journal, path, result) {
     if (op.kind === "write" ? self._signature(page) !== op.after : !!page) throw new Error("ingest-conflict: recovered page differs: " + op.path)
     var expected = Object.keys(journal.state.sources || {}).filter(function(k) { return journal.state.sources[k].page === op.path })
     expected.forEach(function(k) {
-      if (stringify(state.sources[k], __, "") !== stringify(journal.state.sources[k], __, "")) throw new Error("ingest-conflict: recovered ownership differs: " + op.path)
+      var difference = self._ownershipDifference(state.sources[k], journal.state.sources[k])
+      if (difference) throw new Error("ingest-conflict: recovered ownership differs: " + op.path + " (field " + difference + ")")
     })
     if (op.kind === "delete" && Object.keys(state.sources || {}).some(function(k) { return state.sources[k].page === op.path })) throw new Error("ingest-conflict: deleted page still owned: " + op.path)
   })

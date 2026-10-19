@@ -2527,11 +2527,16 @@ MiniA.prototype._initHistoryVm = function(args, existingPayload) {
   return this._historyVm
 }
 
+MiniA.prototype._getActiveConversationLLM = function() {
+  return this._use_lc && this._activeConversationModel === "lc" && isObject(this.lc_llm) ? this.lc_llm : this.llm
+}
+
 MiniA.prototype._prepareHistoryVmProjection = function(currentStep, consumer) {
   var vm = this._historyVm
-  if (!isObject(vm) || vm.degraded || (!vm.enabled && !vm.shadow) || !isObject(this.llm) || !isFunction(this.llm.getGPT)) return false
+  var llm = this._getActiveConversationLLM()
+  if (!isObject(vm) || vm.degraded || (!vm.enabled && !vm.shadow) || !isObject(llm) || !isFunction(llm.getGPT)) return false
   try {
-    var conversation = this.llm.getGPT().getConversation()
+    var conversation = llm.getGPT().getConversation()
     if (!isArray(conversation)) return false
     vm.captureProviderConversation(conversation)
     if (vm.degraded) return false
@@ -2552,8 +2557,9 @@ MiniA.prototype._prepareHistoryVmProjection = function(currentStep, consumer) {
       })
     }
     if (vm.enabled && !vm.shadow) {
-      this.llm.getGPT().setConversation(projected)
-      if (this._use_lc && isObject(this.lc_llm)) this._copyConversationBetweenLlms(this.llm, this.lc_llm)
+      llm.getGPT().setConversation(projected)
+      // Keep Phase 1 model switching compatible, copying from the active owner.
+      if (this._use_lc && isObject(this.lc_llm)) this._copyConversationBetweenLlms(llm, llm === this.llm ? this.lc_llm : this.llm)
     }
     return true
   } catch(e) {
@@ -2670,6 +2676,9 @@ MiniA.prototype._syncContextSources = function() {
 MiniA.prototype._captureContextToolResult = function(name, params, result) {
   var vm = this._historyVm
   if (!isObject(vm) || !vm.contextVirtualization || vm.degraded || isUnDef(result) || isMap(result) && isDef(result.error)) return
+  // Execution envelopes duplicate the result already captured by the tool.
+  // Keep the complete envelope in captureToolExchange for audit/recovery only.
+  if (isMap(result) && isDef(result.routeUsed) && isDef(result.timing) && isDef(result.rawResult)) result = result.rawResult
   var tool = String(name || "").toLowerCase(), p = isMap(params) ? params : {}
   var op = String(p.op || p.operation || "read").toLowerCase()
   if (["write", "delete", "move", "attach", "detach", "invoke", "run", "init"].indexOf(op) >= 0) return
@@ -2707,6 +2716,7 @@ MiniA.prototype._projectContextInvocation = function(llm, prompt, consumer, reco
   this._syncContextSources()
   if (!consumer || consumer === "executor") vm.captureProviderConversation(conversation)
   var configured = this._getEffectiveContextBudget(__, 0)
+  var enforceBudget = this._getExplicitContextBudget() > 0
   var args = isMap(this._sessionArgs) ? this._sessionArgs : {}
   var model = isMap(recovery) && isMap(recovery.model) ? recovery.model : llm === this.lc_llm ? this._oaf_lc_model : (llm === this.val_llm ? this._oaf_val_model : this._oaf_model)
   var output = isMap(model) && isNumber(model.max_tokens) ? model.max_tokens : Math.min(4096, Math.floor((configured || 32000) * 0.15))
@@ -2718,12 +2728,15 @@ MiniA.prototype._projectContextInvocation = function(llm, prompt, consumer, reco
     })
   }
   var fixed = { prompt: vm.estimateTokens(prompt), tools: consumer === "summarizer" ? 0 : vm.estimateTokens(stringify(schemas, __, "")), safety: 256 }
+  // Preflight leaves space for the latest runtime observations before selecting
+  // supplemental evidence. The final invocation charges the actual prompt.
+  if (isMap(recovery) && isNumber(recovery.progressReserveTokens)) fixed.prompt += Math.max(0, recovery.progressReserveTokens)
   fixed.instructions = (!consumer || consumer === "executor") && isString(this._systemInst) && !conversation.some(function(entry) { return isMap(entry) && (entry.role === "system" || entry.role === "developer") && (entry.content === this._systemInst || isArray(entry.parts) && isMap(entry.parts[0]) && entry.parts[0].text === this._systemInst) }, this) ? vm.estimateTokens(this._systemInst) : 0
   var total = configured > 0 ? configured : vm.estimateTokens(stringify(vm.materializeConversation(conversation), __, "")) + fixed.prompt + fixed.tools + fixed.instructions + fixed.safety + output
   if (vm.degraded) {
     var degradedTokens = vm.estimateTokens(stringify(conversation, __, ""))
     var degradedTotal = degradedTokens + fixed.prompt + fixed.tools + fixed.instructions + fixed.safety + output
-    if (!vm.contextVirtualizationShadow && configured > 0 && degradedTotal > configured) throw this._contextBudgetError(consumer || "executor", configured, degradedTotal, {
+    if (!vm.contextVirtualizationShadow && enforceBudget && degradedTotal > configured) throw this._contextBudgetError(consumer || "executor", configured, degradedTotal, {
       protected_conversation: degradedTokens, current_prompt: fixed.prompt, tool_schemas: fixed.tools,
       separate_instructions: fixed.instructions, safety_allowance: fixed.safety, output_reserve: output, selected_context: 0
     }, "canonical backing unavailable")
@@ -2735,7 +2748,7 @@ MiniA.prototype._projectContextInvocation = function(llm, prompt, consumer, reco
     // Auxiliary models own independent provider histories. Add a task-specific
     // source view without rebinding their message indexes to executor history.
     var occupied = vm.estimateTokens(stringify(conversation, __, "")) + fixed.prompt + fixed.tools + fixed.instructions + fixed.safety + output
-    if (!vm.contextVirtualizationShadow && configured > 0 && occupied > total) {
+    if (!vm.contextVirtualizationShadow && enforceBudget && occupied > total) {
       throw this._contextBudgetError(consumer, total, occupied, { protected_conversation: vm.estimateTokens(stringify(conversation, __, "")),
         current_prompt: fixed.prompt, tool_schemas: fixed.tools, separate_instructions: fixed.instructions,
         safety_allowance: fixed.safety, output_reserve: output, selected_context: 0 }, "impossible (independent auxiliary history)")
@@ -2759,7 +2772,12 @@ MiniA.prototype._projectContextInvocation = function(llm, prompt, consumer, reco
     projected = vm.projectActiveContext(conversation, merge(options, { emergency: true }, true))
     if (!projected.overflow) this.fnI("recover", "Context budget recovery compacted recent work (estimated " + beforeRecovery + " -> " + projected.requestTokens + " tokens; budget " + configured + ").")
   }
-  if (projected.overflow && configured > 0) {
+  if (projected.overflow && !enforceBudget) {
+    // The automatic target guides compaction; only an explicit ceiling can
+    // reject protected input before the provider has evaluated the request.
+    projected = vm.projectActiveContext(conversation, merge(options, { emergency: true, allowOverflow: true }, true))
+  }
+  if (projected.overflow && enforceBudget) {
     throw this._contextBudgetError(consumer || "executor", configured, projected.requestTokens, {
       protected_conversation: projected.protectedTokens, current_prompt: fixed.prompt, tool_schemas: fixed.tools,
       separate_instructions: fixed.instructions, safety_allowance: fixed.safety, output_reserve: output,
@@ -10322,6 +10340,13 @@ MiniA.prototype._processDirectDisplayToolResult = function(toolName, original) {
     return original
 }
 
+MiniA.prototype._getExplicitContextBudget = function(args) {
+  var opts = isMap(args) ? args : (isMap(this._sessionArgs) ? this._sessionArgs : {})
+  if (isNumber(opts.maxcontext) && opts.maxcontext > 0) return Math.floor(opts.maxcontext)
+  if (toBoolean(opts.contextguard) === true && isNumber(opts.contextguardbudget) && opts.contextguardbudget > 0) return Math.floor(opts.contextguardbudget)
+  return 0
+}
+
 MiniA.prototype._getEffectiveContextBudget = function(args, fallback) {
   var opts = isMap(args) ? args : (isMap(this._sessionArgs) ? this._sessionArgs : {})
   var defaultValue = isNumber(fallback) ? fallback : 0
@@ -10331,6 +10356,10 @@ MiniA.prototype._getEffectiveContextBudget = function(args, fallback) {
     return Math.floor(guardBudget)
   }
   return defaultValue
+}
+
+MiniA.prototype._isSpilledResultObservation = function(content) {
+  return isString(content) && /action\s*[=:]\s*['"]?readresult|auto-spilled to temporary|retroactively spilled|\[(?:TRUNCATED(?: at \d+|;)|LIMITED;)|result_(?:stat|read|head|tail|slice|grep)/i.test(content)
 }
 
 MiniA.prototype._getToolResultInlineLimit = function(args, fallback) {
@@ -16653,7 +16682,7 @@ MiniA.prototype.init = function(args) {
       { name: "toolcachettl", type: "number", default: __ },
       { name: "mcplazy", type: "boolean", default: false },
       { name: "contextguard", type: "boolean", default: false },
-      { name: "contextguardbudget", type: "number", default: 32000 },
+      { name: "contextguardbudget", type: "number", default: 0 },
       { name: "toolresultmaxinline", type: "number", default: __ },
       { name: "readresultmaxmatches", type: "number", default: __ },
       { name: "usedecide", type: "boolean", default: __ },
@@ -16831,8 +16860,8 @@ MiniA.prototype.init = function(args) {
     args.outputfile = _$(args.outputfile, "args.outputfile").isString().default(__)
     args.updatefreq = _$(args.updatefreq, "args.updatefreq").isString().default("auto")
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
-    args.contextguardbudget = _$(args.contextguardbudget, "args.contextguardbudget").isNumber().default(32000)
-    if (args.contextguardbudget <= 0) args.contextguardbudget = 32000
+    args.contextguardbudget = _$(args.contextguardbudget, "args.contextguardbudget").isNumber().default(0)
+    if (args.contextguardbudget < 0) args.contextguardbudget = 0
     args.toolresultmaxinline = _$(args.toolresultmaxinline, "args.toolresultmaxinline").isNumber().default(__)
     if (isNumber(args.toolresultmaxinline) && args.toolresultmaxinline <= 0) args.toolresultmaxinline = __
     args.readresultmaxmatches = _$(args.readresultmaxmatches, "args.readresultmaxmatches").isNumber().default(__)
@@ -18302,7 +18331,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "contextvirtualizationshadow", type: "boolean", default: false },
       { name: "maxcontext", type: "number", default: 0 },
       { name: "contextguard", type: "boolean", default: false },
-      { name: "contextguardbudget", type: "number", default: 32000 },
+      { name: "contextguardbudget", type: "number", default: 0 },
       { name: "toolresultmaxinline", type: "number", default: __ },
       { name: "readresultmaxmatches", type: "number", default: __ },
       { name: "compressgoal", type: "boolean", default: false },
@@ -18447,8 +18476,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.updatefreq = _$(args.updatefreq, "args.updatefreq").isString().default("auto")
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
     args.contextguard = _$(toBoolean(args.contextguard), "args.contextguard").isBoolean().default(false)
-    args.contextguardbudget = _$(args.contextguardbudget, "args.contextguardbudget").isNumber().default(32000)
-    if (isNumber(args.contextguardbudget) && args.contextguardbudget <= 0) args.contextguardbudget = 32000
+    args.contextguardbudget = _$(args.contextguardbudget, "args.contextguardbudget").isNumber().default(0)
+    if (isNumber(args.contextguardbudget) && args.contextguardbudget < 0) args.contextguardbudget = 0
     args.toolresultmaxinline = _$(args.toolresultmaxinline, "args.toolresultmaxinline").isNumber().default(__)
     if (isNumber(args.toolresultmaxinline) && args.toolresultmaxinline <= 0) args.toolresultmaxinline = __
     args.readresultmaxmatches = _$(args.readresultmaxmatches, "args.readresultmaxmatches").isNumber().default(__)
@@ -19537,8 +19566,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             // Regex covers both YAML-style (action='readresult') and JSON-style ("action": "readresult").
             // Also catches truncated readresult content: _normalizeToolResult strips the response wrapper
             // and stores only content[0].text in the OBS entry, so "action: readresult" never appears
-            // there — but the [TRUNCATED] marker written by readresult always does.
-            if (/action\s*[=:]\s*['"]?readresult|auto-spilled to temporary|retroactively spilled|\[TRUNCATED at \d+|result_(?:stat|read|head|tail|slice|grep)/i.test(obsContent)) {
+            // there. Recognize pagination notices and retain runtime retrieval provenance
+            // for complete reads that have no truncation marker.
+            if (this._isSpilledResultObservation(obsContent) || isMap(runtime.retrievalObservations) && runtime.retrievalObservations[label] === true) {
               var _rfMatch = obsContent.match(/resultFile[=:\s]+['"]?([^\s,'"}\]]+)/)
               var _rfHint = _rfMatch ? " Use " + (toBoolean(args.usestdutils) === true
                 ? "result_grep resultFile='" + _rfMatch[1] + "' pattern=... or result_slice fromLine=... toLine=..."
@@ -19856,6 +19886,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var _RESULT_ALIAS_NAMES = { "result_stat":true, "result_read":true, "result_head":true, "result_tail":true, "result_slice":true, "result_grep":true }
         var isReadresultCall = (_RESULT_ALIAS_NAMES[toolName] === true) ||
           (toolName === "proxy-dispatch" && isMap(params) && params.action === "readresult")
+        if (isReadresultCall) {
+          if (!isMap(runtime.retrievalObservations)) runtime.retrievalObservations = {}
+          runtime.retrievalObservations["[OBS " + stepLabel + "]"] = true
+        }
         if (inlineLimit > 0 && !isProxySpill && !isReadresultCall && observation.length > inlineLimit) {
           try {
             var obsTempFile = java.nio.file.Files.createTempFile("mini-a-tool-obs-", ".txt")
@@ -20220,14 +20254,17 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (isObject(this._historyVm) && !this._historyVm.degraded && (this._historyVm.enabled || this._historyVm.shadow)) {
         this._prepareHistoryVmProjection(runtime.currentStepNumber)
         if (this._historyVm.contextVirtualization && !this._historyVm.contextVirtualizationShadow) {
-          this._prepareContextInvocation(this.llm, cachedGoalBlock + cachedHookContextBlock + stateSnapshot, "executor", stepRecovery)
+          this._prepareContextInvocation(this._getActiveConversationLLM(), cachedGoalBlock + cachedHookContextBlock + stateSnapshot, "executor",
+            merge(stepRecovery, { progressReserveTokens: Math.min(4096, Math.floor(contextMaxTokens * 0.2)) }, true))
         }
-        try { fixedRequestTokens += this._estimateTokens(stringify(this.llm.getGPT().getConversation(), __, "")) } catch(ignoreHistoryVmConversationSize) {}
-        fixedRequestTokens += this._estimateTokens((this._systemInst || "") + cachedGoalBlock + cachedHookContextBlock)
+        try { fixedRequestTokens += this._estimateTokens(stringify(this._getActiveConversationLLM().getGPT().getConversation(), __, "")) } catch(ignoreHistoryVmConversationSize) {}
+        fixedRequestTokens += this._estimateTokens(cachedGoalBlock + cachedHookContextBlock)
         fixedRequestTokens += this._estimateTokens(stringify(this.mcpTools || [], __, ""))
       }
       var remainingContextTokens = contextMaxTokens - fixedRequestTokens
-      var promptContextBudget = isObject(this._historyVm) && this._historyVm.enabled === true
+      // An automatic target must not starve the executor of every new result.
+      // Explicit ceilings still apply to the complete request at dispatch.
+      var promptContextBudget = isObject(this._historyVm) && this._historyVm.enabled === true && this._getExplicitContextBudget(args) > 0
         ? Math.max(0, remainingContextTokens)
         : Math.max(2000, remainingContextTokens)
       // VM-PLAN.md #5: overflow recovery must report the unsatisfiable budget and
@@ -20237,7 +20274,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       // content every step. Track consecutive overflow steps and force a stop
       // (with an IN_PROGRESS summary, same pattern as the other hard ceilings
       // above) once retrying clearly cannot recover.
-      if (isObject(this._historyVm) && this._historyVm.enabled === true && remainingContextTokens < 0 &&
+      if (isObject(this._historyVm) && this._historyVm.enabled === true && this._getExplicitContextBudget(args) > 0 && remainingContextTokens < 0 &&
           (!this._historyVm.contextVirtualization || this._historyVm.contextVirtualizationShadow)) {
         runtime.historyVmBudgetOverflowStreak = (runtime.historyVmBudgetOverflowStreak || 0) + 1
         if (runtime.historyVmBudgetWarned !== true) {

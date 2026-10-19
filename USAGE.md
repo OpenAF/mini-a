@@ -1373,7 +1373,7 @@ Extend or override these presets by editing the YAML file—Mini-A reloads it on
 
 #### Context Guard for Small Windows
 - **`contextguard`** (boolean, default: false): When `maxcontext=0`, enable a conservative small-window safety policy that proactively compresses oversized tool output and bounds proxy `readresult` extraction to avoid overflowing smaller model context windows.
-- **`contextguardbudget`** (number, default: 32000): Assumed smallest context window, in tokens, used by `contextguard` when `maxcontext=0`.
+- **`contextguardbudget`** (number, default: 0): A positive value sets an explicit context ceiling when `maxcontext=0`. With `0`, the guard uses 32,000 estimated tokens as a compaction target, not a dispatch ceiling. If protected input still exceeds that target, Mini-A lets the provider decide and automatically attempts recovery on recognized context-overflow errors (up to three times per run). Explicit positive `maxcontext` or `contextguardbudget` limits remain enforced. Automatic mode retains a bounded window of fresh tool observations even when protected input exceeds the compaction target.
 - **`toolresultmaxinline`** (number, default: `4096` when `contextguard=true`): Maximum inline bytes kept from large tool or `readresult` outputs before Mini-A spills or truncates the content under `contextguard`.
 - **`readresultmaxmatches`** (number, default: `20` when `contextguard=true`): Maximum distinct matching lines returned by `proxy-dispatch` `readresult` with `op='grep'` when `contextguard` is active.
 
@@ -2929,7 +2929,7 @@ Use `historyvmshadow=true` first to capture and estimate savings without changin
 
 Phase 2 can be enabled explicitly with `historyvm=true contextvirtualization=true`. It extends the same canonical journal with stable typed handles, parent/child metadata, deterministic L0-L4 representations, structural compression, hierarchical summaries, coarse-to-fine retrieval, bounded line/section/JSON-path reads, adaptive utility-per-token assembly, typed provenance/supersession graphs, consumer-specific executor/planner/advisor/validator/delegate views, and per-consumer working-set deltas. At model-call boundaries the active projection preserves system/developer instructions, real user constraints, recent exchanges and unknown content. The latest synthetic step prompt stays exact so the current goal remains available across native tool rounds, including emergency paging. Older assistant messages and older synthetic step scaffolding can be summarized or omitted; completed native tool-call groups are preserved or frozen together. Detailed provider-message representations summarize the message body, while exact reads retain the full original envelope. Exact canonical content is restored before conversation persistence and remains retrievable with `context_search`, `context_get`, `context_expand`, `context_children`, and `context_related`.
 
-With active Phase 2 and a positive effective context budget (`maxcontext`, or the `contextguardbudget` fallback when enabled), an oversized request automatically gets one emergency projection. Recent completed assistant work and complete tool exchanges may use bounded representations with recovery handles; exact originals remain in the canonical journal. Real user messages, instructions, incomplete tool exchanges, and unknown or multimodal content remain exact. The provider view changes only when the complete request fits. If executor working notes still prevent dispatch, Mini-A attempts isolated chunked summarization and rebuilds the prompt, preserving the supplied goal, explicit constraints, hook instructions, and newly delivered inbox messages. This allows one note-recovery attempt per logical request and at most three per run. Failed, empty, or nonshrinking summaries preserve the original notes and conversation. Recovery never resets provider history, increases the budget, or lowers the output reserve.
+With active Phase 2 and an explicit positive context budget (`maxcontext`, or `contextguardbudget` when enabled), an oversized request automatically gets one emergency projection. Recent completed assistant work and complete tool exchanges may use bounded representations with recovery handles; exact originals remain in the canonical journal. Real user messages, instructions, incomplete tool exchanges, and unknown or multimodal content remain exact. The provider view changes only when the complete request fits. If executor working notes still prevent dispatch, Mini-A attempts isolated chunked summarization and rebuilds the prompt, preserving the supplied goal, explicit constraints, hook instructions, and newly delivered inbox messages. This allows one note-recovery attempt per logical request and at most three per run. Failed, empty, or nonshrinking summaries preserve the original notes and conversation. Recovery never resets provider history, increases the budget, or lowers the output reserve.
 
 Native tool execution also checks this budget between recursive provider rounds, for both streaming and non-streaming adapters. Complete Ollama tool exchanges retain their `tool_name` metadata while their output bodies can be paged. A completed native-tool follow-up report can contain Markdown and JSON examples without those examples becoming new actions. Memory count messages are emitted only when counts change and remain static in the console.
 
@@ -3454,6 +3454,14 @@ their saved operations can still be resumed using the displayed recovery ID.
 /ingest recovery discard <id>
 /ingest "/path/New Docs" "New Section" independent
 ```
+
+If ingestion reports `recovered ownership differs` after committing pages and
+the manifest, preserve the pending journal and use its resume command after
+resolving the mismatch or updating Mini-A. Verification ignores JSON object-key
+order but still rejects changed values, missing fields and reordered chunks;
+the error identifies the differing field without printing source content.
+Empty or unreadable source files are reported separately and do not prevent
+successfully applied pages from being finalized.
 
 With retrieval V2 enabled, finalization normally updates the existing serving
 generation incrementally. If its parser or lexical contract is incompatible,

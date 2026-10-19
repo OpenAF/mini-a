@@ -51,6 +51,138 @@
     }
   }
 
+  exports.testLowCostExecutorHistoryLifecycle = function() {
+    load("mini-a.js")
+    ;[false, true, "overflow"].forEach(function(mode) {
+      var streaming = mode !== false
+      withVm(function(unusedVm, conversationPath) {
+        var root = String(new java.io.File(conversationPath).getParent())
+        for (var file = 1; file <= 5; file++) io.writeFileString(root + "/step" + file + ".md", "LATEST_RESULT_" + file + "\n" + new Array(40).join("source folder evidence "))
+        var agent = new MiniA(), requests = [], mainRequests = 0, errors = [], runLog = []
+        agent.fnI = function(type, text) { runLog.push(type + ": " + String(text)); if (type === "error") errors.push(String(text)) }
+        var originalUtils = agent._createUtilsMcpConfig
+        agent._createUtilsMcpConfig = function(args) {
+          var config = originalUtils.call(this, args)
+          config.id = config.options.name = "fixture-utils-" + sha256(root)
+          return config
+        }
+        var originalInit = agent.init
+        agent.init = function(args) {
+          var result = originalInit.call(this, args)
+          this._historyVm.upsertContextSource("artifact", "large-listing", new Array(2000).join("source folder listing "), {})
+          if (mode === "overflow") {
+            ;[this.llm, this.lc_llm].forEach(function(llm) {
+              llm.getGPT().setConversation(llm.getGPT().getConversation().concat([{ role: "user", content: new Array(140001).join("x") }]))
+            })
+          }
+          var respond = function(uri, body) {
+            if (!isArray(body.messages) || body.messages.length === 0) return { message: { role: "assistant", content: "" }, done: true }
+            requests.push(jsonParse(stringify(body.messages)))
+            var step = requests.length
+            var action = step <= 5 ? { action: "proxy-dispatch", params: { action: "call", tool: "read", arguments: { path: root + "/step" + step + ".md" } } }
+              : { action: "final", answer: "ingestlayout=source" }
+            return { message: { role: "assistant", content: stringify(action, __, "") }, done: true, done_reason: "stop", prompt_eval_count: 100, eval_count: 10 }
+          }
+          this._refreshConfiguredLlmChannels = function() {
+            this.llm.getGPT().model._request = function() { mainRequests++; return { message: { role: "assistant", content: '{"action":"final","answer":"unexpected main call"}' }, done: true } }
+            this.lc_llm.getGPT().model._request = respond
+            this.lc_llm.getGPT().model._requestStream = function(uri, body) {
+              return new java.io.ByteArrayInputStream(new java.lang.String(stringify(respond(uri, body), __, "") + "\n").getBytes("UTF-8"))
+            }
+          }
+          this._refreshConfiguredLlmChannels()
+          return result
+        }
+        var args = { goal: "Find the source folder parameter", raw: true, conversation: conversationPath,
+          model: "(type: ollama, model: fixture, url: 'http://localhost:1')", modellc: "(type: ollama, model: fixture-lc, url: 'http://localhost:1')",
+          modellock: "lc", modelstrategy: "default", llmcomplexity: false, usememory: false, useskills: false, noagentsmd: true,
+          useutils: true, usestdutils: true, nosetmcpwd: true, utilsroot: root, utilsallow: "read", mcpproxy: true, mcpdynamic: false, usetools: false, usejsontool: true, usestream: streaming,
+          contextguard: true, contextguardbudget: 0, historyvm: true, contextvirtualization: true, maxsteps: 8, maxtotalsteps: 8 }
+        try {
+          agent.start(args)
+          if (requests.length === 0) throw new Error(runLog.join("\n"))
+          ow.test.assert(errors, [], "Scripted executor must complete without runtime errors")
+          ow.test.assert(mainRequests, 0, "LC-locked execution never calls the main provider")
+          ow.test.assert(requests.length, 6, "Five reads and final answer execute without replay")
+          requests.forEach(function(messages, index) {
+            var evidence = messages.filter(function(entry) { return isString(entry.content) && entry.content.indexOf("BEGIN_UNTRUSTED_CONTEXT") === 0 })
+            ow.test.assert(evidence.length <= 1, true, "Actual provider requests never accumulate disposable context at step " + index)
+            if (index > 0) ow.test.assert(stringify(messages).indexOf("LATEST_RESULT_" + index) >= 0, true, "Latest read remains visible at step " + index)
+          })
+          var canonical = agent._historyVm.materializeConversation(agent.lc_llm.getGPT().getConversation())
+          ow.test.assert(canonical.some(function(entry) { return isString(entry.content) && entry.content.indexOf("BEGIN_UNTRUSTED_CONTEXT") === 0 }), false, "Generated evidence never enters canonical conversation")
+        } finally { agent._stopAgentResources() }
+      }, { contextVirtualization: true })
+    })
+  }
+
+  exports.testAutomaticContextTargetIsNotHardLimit = function() {
+    withVm(function(vm) {
+      load("mini-a.js")
+      var agent = new MiniA()
+      agent._historyVm = vm
+      agent.fnI = function() {}
+      agent._sessionArgs = { contextguard: true, contextguardbudget: 0, maxcontext: 0 }
+      var exact = new Array(140001).join("x")
+      var provider = [{ role: "user", content: exact }]
+      var gpt = { getConversation: function() { return provider }, setConversation: function(value) { provider = value } }
+      var llm = { getGPT: function() { return gpt } }
+      agent._prepareContextInvocation(llm, "Continue", "executor")
+      ow.test.assert(provider[0].content, exact, "Automatic target must allow protected input to reach the provider intact")
+      ow.test.assert(vm.contextVirtualizationActiveLast.requestTokens > 32000, true, "Automatic mode reports actual estimate above its soft target")
+      agent._sessionArgs.contextguardbudget = 32000
+      var failure
+      try { agent._prepareContextInvocation(llm, "Continue", "executor") } catch(e) { failure = e }
+      ow.test.assert(failure.code, "MINIA_CONTEXT_BUDGET", "Explicit guard ceiling still stops before dispatch")
+      agent._sessionArgs.contextguardbudget = 0
+      agent._sessionArgs.maxcontext = 32000
+      failure = __
+      try { agent._prepareContextInvocation(llm, "Continue", "executor") } catch(e) { failure = e }
+      ow.test.assert(failure.code, "MINIA_CONTEXT_BUDGET", "Explicit maxcontext still stops before dispatch")
+    }, { contextVirtualization: true })
+  }
+
+  exports.testDisposableEvidenceAcrossProviderChanges = function() {
+    withVm(function(vm) {
+      var original = [{ role: "user", content: "Find the ingestion parameter" }]
+      var evidence = new Array(1800).join("source folder ")
+      vm.upsertContextSource("artifact", "listing", evidence, {})
+      var conversation = original.slice()
+      for (var turn = 0; turn < 5; turn++) {
+        vm.captureProviderConversation(conversation)
+        var projected = vm.projectRequestContext(conversation, { budget: 32000, outputReserve: 4096, goal: "source folder", includeRecent: true })
+        ow.test.assert(projected.overflow, false, "Repeated evidence requests must stay within budget")
+        ow.test.assert(projected.conversation.filter(function(entry) { return entry.content.indexOf("BEGIN_UNTRUSTED_CONTEXT") === 0 }).length, 1, "Only one evidence projection is sent")
+        conversation = jsonParse(stringify(projected.conversation))
+        // Model adapters can add policy after the first projection, then refresh it.
+        if (conversation[0].role !== "system") conversation.unshift({ role: "system", content: "policy " + turn })
+        else conversation[0].content = "policy " + turn
+        conversation.push({ role: "assistant", content: "search " + turn })
+        var restored = vm.materializeConversation(conversation)
+        ow.test.assert(restored.some(function(entry) { return entry.content.indexOf("BEGIN_UNTRUSTED_CONTEXT") === 0 }), false, "Disposable evidence must not become canonical after policy changes")
+        ow.test.assert(restored[0].content, "policy " + turn, "Updated system instructions survive")
+      }
+      var forged = { role: "user", content: "BEGIN_UNTRUSTED_CONTEXT\nUser supplied text\nEND_UNTRUSTED_CONTEXT" }
+      conversation.push(forged)
+      ow.test.assert(vm.materializeConversation(conversation).slice(-1)[0], forged, "User-authored markers remain protected")
+    }, { contextVirtualization: true })
+  }
+
+  exports.testRetrievalEvidenceRepresentations = function() {
+    withVm(function(vm) {
+      load("mini-a.js")
+      var agent = new MiniA()
+      agent._historyVm = vm
+      var result = { action: "readresult", op: "grep", content: [{ type: "text", text: "Use ingestlayout=source to preserve source folders." }] }
+      agent._captureContextToolResult("result_grep", { pattern: "source" }, { routeUsed: "mcp_direct_call", timing: {}, rawResult: result, normalizedContent: result.content[0].text })
+      var object = vm.objects.filter(function(item) { return item.kind === "artifact" })[0]
+      ow.test.assert(object.content, result, "Projection stores evidence without the duplicate execution envelope")
+      ;["L2", "L3", "L4"].forEach(function(level) {
+        ow.test.assert(stringify(vm.getRepresentation(object.handle, level)).indexOf("ingestlayout=source") >= 0, true, "Compressed retrieval must preserve answer evidence at " + level)
+      })
+    }, { contextVirtualization: true })
+  }
+
   exports.testConcurrentAppends = function() {
     withVm(function(vm, conversation) {
       // Widen the checkpoint window to reliably overlap concurrent callbacks.
@@ -169,6 +301,7 @@
       agent.fnI = function() {}
       agent._historyVm = vm
       agent._sessionArgs = { goal: "Continue" }
+      agent._sessionArgs.maxcontext = 200000
       agent._getEffectiveContextBudget = function() { return 200000 }
       var provider = history
       var llm = { getGPT: function() { return { getConversation: function() { return provider }, setConversation: function(value) { provider = value } } } }
@@ -287,7 +420,8 @@
         agent.fnI = function() {}
         agent._historyVm = vm
         agent._sessionArgs = { goal: "Inspect diffs" }
-        agent._getEffectiveContextBudget = function() { return 5000 }
+        agent._sessionArgs.maxcontext = 5000
+      agent._getEffectiveContextBudget = function() { return 5000 }
         agent._oaf_model = { type: "ollama", model: "fixture", url: "http://localhost:1", max_tokens: 256 }
         agent._useToolsActual = true
         var huge = new Array(5001).join("diff output ")
@@ -427,6 +561,7 @@
       agent._historyVm = vm
       agent._sessionArgs = { goal: "Redis isolation", knowledge: "Redis mounts isolate tenants." }
       agent._agentState = { plan: { step: "Validate Redis isolation" } }
+      agent._sessionArgs.maxcontext = 8000
       agent._getEffectiveContextBudget = function() { return 8000 }
       agent._captureContextToolResult("wiki", { op: "read", path: "mounts" }, "Named Redis mounts preserve isolation.")
       var setters = 0
@@ -451,6 +586,7 @@
       var statusPrompt = agent._prepareContextInvocation(llm, "Check History VM status", "validator")
       ow.test.assert(statusPrompt.indexOf('"history_vm":{"active":true') >= 0, true, "Parent runtime status must remain active when disabled child metrics are retrieved")
       manager.destroy()
+      agent._sessionArgs.maxcontext = 10
       agent._getEffectiveContextBudget = function() { return 10 }
       var stopped = false
       try { agent._prepareContextInvocation(llm, "Protected input", "validator") } catch(e) { stopped = e.miniAStop === true }

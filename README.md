@@ -505,7 +505,7 @@ Mini-A ships with complementary components:
 | `routerproxythreshold` | Payload-size threshold (bytes) where proxy routes are preferred for large requests | falls back to `mcpproxythreshold` |
 | `mcpproxytoon` | When `mcpproxythreshold>0`, serialize proxy-spilled results as TOON text (`af.toTOON`) to improve search/read efficiency on large payloads | `false` |
 | `contextguard` | Enable generic context/tool-output guardrails when `maxcontext=0`, including proactive compression and bounded `readresult` extraction | `false` |
-| `contextguardbudget` | Assumed smallest context window used by `contextguard` when `maxcontext=0` | `32000` |
+| `contextguardbudget` | Explicit context ceiling when `maxcontext=0`; `0` uses automatic compaction and provider-overflow recovery | `0` |
 | `toolresultmaxinline` | Max inline bytes kept from large tool or `readresult` outputs before spill/truncation under `contextguard` | `4096` when `contextguard=true` |
 | `readresultmaxmatches` | Max matching regions returned by `proxy-dispatch` `readresult` `op='grep'` under `contextguard` | `20` when `contextguard=true` |
 | `historyvm` | Persist exact conversation events in a conversation-owned journal and replace eligible old large provider messages with bounded, retrievable references | `false` |
@@ -675,7 +675,7 @@ Wiki folders become browsable sub-wikis when they contain `index.md`. Agents can
 | `tpm` | Rate limit (tokens per minute across prompt + completion) | - |
 | `maxcontext` | Context budget in tokens before proactive summarization | `0` |
 | `contextguard` | Enable a generic small-window safety budget and bounded tool-output handling when `maxcontext=0` | `false` |
-| `contextguardbudget` | Assumed smallest context window used by `contextguard` when `maxcontext=0` | `32000` |
+| `contextguardbudget` | Explicit context ceiling when `maxcontext=0`; `0` uses automatic compaction and provider-overflow recovery | `0` |
 | `toolresultmaxinline` | Max inline bytes kept from large tool or `readresult` outputs before spill/truncation under `contextguard` | `4096` when `contextguard=true` |
 | `readresultmaxmatches` | Max matching regions returned by `proxy-dispatch` `readresult` `op='grep'` under `contextguard` | `20` when `contextguard=true` |
 | `historyvm` | Enable durable bounded conversation history; requires a writable `conversation=` path; web S3 history includes recoverable canonical snapshots | `false` |
