@@ -262,7 +262,7 @@ filesHash:
   docs/VIRTUAL-SKILLS.md: 7c6216a6a2242ec5deeab1fdcdd51916915ccc8b
   docs/WHATS-NEW.md: 651a11a3d9c22dfefd2bc1bfb7df6e7cc6d08ece
   docs/WIKI-RETRIEVAL-V2.md: 4fe8883850461e4dd8ea717ef95f3281ccb36c77
-  docs/WIKI.md: e102b953c4b099b18647f8e335d51e0d98f4de13
+  docs/WIKI.md: 819335521b553717b3f34f54b6be9050fefcfb3d
   docs/WORKIQ.md: 9d2a64d6e06e148775a77b8c4df40427ffb16524
   evals/context-virtualization.yaml: 3a58466efa06dbf3dfc028d6a4b59bfc3dcb80a6
   evals/core.yaml: 5bd4c7f5b1fc650e1b656a09f169fbaf2610a9ad
@@ -344,7 +344,7 @@ filesHash:
   mini-a-fork-policy.js: 5da8a44ba71493fe0dfacfe1baf6fcd1973c53cd
   mini-a-graph.js: 4e93499f09dd85057a74094c6d605f1d74777f8c
   mini-a-history-vm.js: 1c0a55aa80a417612d42cf6b4d557149f8a55601
-  mini-a-ingest.js: d20bc96af6355d87c2b7701b3af161a79243111a
+  mini-a-ingest.js: b4143d26d89e3ccdefdcfdbcae5967761d746c9c
   mini-a-ingest.yaml: 44224cdc6d1776e51dc6e59c082e49b39c4e9c10
   mini-a-mcp-skills.js: 6835e75f88fd3791444cca547eea943faf08a48f
   mini-a-mcp-wiki.js: 89e61853ca08183b5c5a70f3095d503356f5d694
@@ -373,8 +373,8 @@ filesHash:
   mini-a-web.yaml: fb4c8d17ddb5b1bb139333128bb2fb479a686b51
   mini-a-wiki-knowledge.js: 761d3b090b377937284a809d251d720020e0f786
   mini-a-wiki-maintenance.js: c4eb53388a3674092c0a722e7631de09df759c8a
-  mini-a-wiki-retrieval.js: 76204e5653363ef15676be4ce99d3c356e87ede7
-  mini-a-wiki.js: c0c3379d3d269dc5b5ab588117c3467ed070aac2
+  mini-a-wiki-retrieval.js: 8bdd6a99e9eb67eaae62b0ac1fa73085beb26dd7
+  mini-a-wiki.js: 3635b52faa854f5a9a87b64e67363ee68531e4e8
   mini-a-wikiman.js: d3893459789696a0ab68e3fd7a7fb29f24c45255
   mini-a-wikiops.js: 8319cc308dca129e8b953ab621e07df961694d9a
   mini-a-worker.yaml: 61db1be4bd04386b3d55b7461c842174f4de3f07
