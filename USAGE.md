@@ -84,6 +84,7 @@ To print a starter skill template, run:
 ```bash
 mini-a --skill          # markdown format (SKILL.md)
 mini-a --skills         # self-contained YAML format (SKILL.yaml)
+mini-a --skill=virtual  # virtual wiki Markdown skill (also: --skills=virtual)
 ```
 
 For a full guide to the YAML skill format including schema reference, `refs` styles, `@`-reference resolution, and migration from `SKILL.md`, see **[docs/SKILLS-YAML-FORMAT.md](docs/SKILLS-YAML-FORMAT.md)**.

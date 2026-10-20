@@ -30,6 +30,9 @@ Use when reviewing a proposed code change.
 3. Check the available validation and report any remaining gaps.
 ```
 
+Generate this starter page with `mini-a --skill=virtual` (or
+`mini-a --skills=virtual`), then save the output in your wiki directory.
+
 Start the console with that directory as a dedicated library:
 
 ```bash

@@ -2,7 +2,8 @@
 
 | Purpose | Legacy (`useutils=true`) | `usestdutils=true` |
 |---|---|---|
-| Read file / list dir / file info | `filesystemQuery` | `read` |
+| Read file (line ranges, `countLines`) | `filesystemQuery` | `read` |
+| List directory / file info | `filesystemQuery` | `filesystemBatch` (`list` / `info` operations) |
 | Glob paths | `filesystemQuery` | `glob` |
 | Search content | `filesystemQuery` | `grep` |
 | Edit / write / delete | `filesystemModify` | `apply_patch` (plus `filesystemModify`) |

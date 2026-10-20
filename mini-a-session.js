@@ -116,6 +116,15 @@ function MiniAInteractiveSession(args, adapter) {
   var helpRequested = hasHelpFlag(args)
   var cheatsheetRequested = hasCheatsheetFlag(args)
   var requestedTemplateKind = findRequestedTemplateKind(args)
+  var virtualSkillTemplateRequested = false
+  if (requestedTemplateKind === "skill" || requestedTemplateKind === "skills") {
+    Object.keys(args).some(function(key) {
+      var normalized = String(key || "").toLowerCase()
+      if (normalized !== "--" + requestedTemplateKind && normalized !== requestedTemplateKind) return false
+      virtualSkillTemplateRequested = isString(args[key]) && args[key].toLowerCase().trim() === "virtual"
+      return true
+    })
+  }
 
   // Init
   MiniA.applyLauncherEnvDefaults(args)
@@ -1091,8 +1100,8 @@ function MiniAInteractiveSession(args, adapter) {
       { option: "--cheatsheet", description: "Render CHEATSHEET.md and exit." },
       { option: "--agent", description: "Print a starter agent markdown template and exit." },
       { option: "--hook", description: "Print a starter hook YAML template and exit." },
-      { option: "--skill", description: "Print a starter skill markdown template and exit." },
-      { option: "--skills", description: "Print a starter self-contained skill YAML template and exit." },
+      { option: "--skill", description: "Print a starter skill markdown template; =virtual prints a wiki skill." },
+      { option: "--skills", description: "Print a starter self-contained skill YAML template; =virtual prints a wiki skill." },
       { option: "--command", description: "Print a starter slash-command markdown template and exit." }
     ]
 
@@ -1371,6 +1380,39 @@ function MiniAInteractiveSession(args, adapter) {
     return true
   }
 
+  function printVirtualSkillTemplate() {
+    var lines = [
+      "---",
+      "type: skill",
+      "name: review-change",
+      "description: Review a code change for correctness and missing validation.",
+      "tags: [code, review]",
+      "intent: [review a change, check a patch]",
+      "---",
+      "",
+      "<!-- Save as: ./team-skills/review-change.md",
+      "Start: mini-a useskillswiki=true skillwikiroot=./team-skills",
+      "Discover: /skills search review change",
+      "Inspect: /skills open wiki:review-change.md",
+      "Read: /skills read wiki:review-change.md Procedure",
+      "Use the exact wiki: reference returned by search for mounted libraries.",
+      "Reference: docs/VIRTUAL-SKILLS.md -->",
+      "",
+      "# When to use",
+      "Use when reviewing a proposed code change.",
+      "",
+      "# Procedure",
+      "1. Read the diff and the surrounding implementation.",
+      "2. Identify concrete behavior changes and affected callers.",
+      "3. Check the available validation and report any remaining gaps.",
+      "",
+      "# Acceptance checks",
+      "Support findings with source locations and distinguish tested behavior from assumptions."
+    ]
+    print(lines.join("\n"))
+    return true
+  }
+
   function printSkillsTemplate() {
     var lines = [
       "# Mini-A Self-Contained Skill Template (YAML format)",
@@ -1487,6 +1529,7 @@ function MiniAInteractiveSession(args, adapter) {
   }
 
   function printNamedTemplate(kind) {
+    if ((kind === "skill" || kind === "skills") && virtualSkillTemplateRequested) return printVirtualSkillTemplate()
     if (kind === "agent") return printAgentTemplate()
     if (kind === "hook") return printHookTemplate()
     if (kind === "skill") return printSkillTemplate()
