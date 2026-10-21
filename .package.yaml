@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20261019'
+version: '20261020'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -244,7 +244,7 @@ filesHash:
   METRICS.md: f01c6497abf6bd29e66fb4d73dce456966e4775f
   README.md: 3040af4f5d407345b888fe501274d86001527703
   RELEASE_NOTES.md: c73293147879b0288813a080a234b8a8c444447c
-  USAGE.md: d95af5410dc7579d817981a0a3e4d7b4d88a0bfd
+  USAGE.md: 4c7fe1d00d03e6199d1cc2491442ba2e5849bd6c
   docs/ABSORB.md: 31bbe919b680e78b369772608d10dda78d1e015e
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/AGENT-PLUGINS.md: af8f692ac4bc690ac9df180e86bb1a1307a5aae5
@@ -259,7 +259,7 @@ filesHash:
   docs/REPLY-JSON.md: 9dd6747356eb044924928dd08737a01e162e5f5c
   docs/SKILLS-YAML-FORMAT.md: 7457c1d133dea0e6ba860826339b2e8f7a23db94
   docs/SUPERVISED.md: 30d6a276f66d4319d3c66f7ad066a2df54c088a8
-  docs/VIRTUAL-SKILLS.md: 7c6216a6a2242ec5deeab1fdcdd51916915ccc8b
+  docs/VIRTUAL-SKILLS.md: 42a62ce95a0310fb72f1af1115401891423f17e5
   docs/WHATS-NEW.md: 651a11a3d9c22dfefd2bc1bfb7df6e7cc6d08ece
   docs/WIKI-RETRIEVAL-V2.md: 4fe8883850461e4dd8ea717ef95f3281ccb36c77
   docs/WIKI.md: 819335521b553717b3f34f54b6be9050fefcfb3d
@@ -360,7 +360,7 @@ filesHash:
   mini-a-response.js: 14d6bbe7dfd7cb9438624954638c8b5148b5b954
   mini-a-router.js: 381d0f2d34864fdca03d5d4f528fa0f827bbed48
   mini-a-sandbox.js: 2844520cfb6595675d7773b29af0943fcc6ed6dd
-  mini-a-session.js: 3feb8d84aa9c7b6aa102fbaf8658d0646b7b1276
+  mini-a-session.js: 4ed1df6090b78fe1301e74dd42801f8e1db8759f
   mini-a-skill-runtime.js: fe1ac2f5b83eb42e97d107b1a93a9fb7b2c6fcdb
   mini-a-skills.js: dc872bc2ab80de9cd48375768b642fab514bf826
   mini-a-subtask.js: 4c0eb1ab97fcbda0bcf7d9dcbe1c00a2831c615a
@@ -388,16 +388,16 @@ filesHash:
   public/favicon.ico: 7d62af53ff8c43ba32d022107153e6877567ba75
   public/index.md: 5891fc5105ebd0c290e40024d886dc77485228d2
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
-  skills/mini-a-contract-authoring/SKILL.md: a1bcb7ea1d721631714ad774a145ea9c08199315
+  skills/mini-a-contract-authoring/SKILL.md: ddb6c5ccf38cd2a75a1359747e6f293d6500a9b1
   skills/mini-a-contract-authoring/references/CONTRACT.md: 58d482c7a033e0c03e7b0fe40d037bcd99e663c9
   skills/mini-a-files/SKILL.md: afe4456cc731d4cc8e16726f983658fdfe3cb7e5
-  skills/mini-a-files/references/names.md: b3d0b8ba197b888448a5fb35f0389bfd3fd9cdfa
+  skills/mini-a-files/references/names.md: c149205b16fd6b32a39ee9aa65b3c32cd947b8ef
   skills/mini-a-memory/SKILL.md: 55f7a125141098343f41da4c77e9d699724a4b02
-  skills/mini-a-planning/SKILL.md: 1a87441e87c33c553d717dcf8c25984e615a6f53
+  skills/mini-a-planning/SKILL.md: cbc110de90d982975ea584ae5cfac25e1d8c9f49
   skills/mini-a-runtime-diagnostics/SKILL.md: 85d729d84045575d2e400dc73787fa17d448ec43
   skills/mini-a-runtime-diagnostics/references/diagnostics.md: 9920130873f9bc3c296f27049fb48609d4aa2a1c
   skills/mini-a-shell/SKILL.md: d52f58f7fb6d11c5e680464ab270422c1f485b8e
-  skills/mini-a-shell/references/spill.md: c82a6f931cefa2aeca6769215385765662e3ef82
+  skills/mini-a-shell/references/spill.md: ac74cad4d86f23a0d773847c24e8623275f33ad6
   skills/mini-a-skill-authoring/SKILL.md: 981ef8d1339c08a259d8c8390274c237028c6f59
   skills/mini-a-skill-authoring/references/formats.md: 1598f2b6c244334d305bcd9b57e87f5627260403
   skills/mini-a-visual-output/SKILL.md: bb71e2b5c9c24d9dd2d4dd33f17024b33584b402
