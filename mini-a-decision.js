@@ -62,6 +62,34 @@ MiniADecision.digest = function(text) {
   return java.util.Base64.getEncoder().encodeToString(bytes)
 }
 
+// Shared bounded consultation contract for user commands and the agent utility.
+MiniADecision.validateConsultation = function(request) {
+  var invalid = function() { throw MiniADecision.error("LLM_DECISION_INVALID_REQUEST") }
+  if (!isMap(request) || Object.keys(request).some(function(k) { return ["state", "questions"].indexOf(k) < 0 }) ||
+      (!isString(request.state) && !isMap(request.state) && !isArray(request.state)) ||
+      (isString(request.state) && !request.state.trim()) || !isMap(request.questions)) invalid()
+  var keys = Object.keys(request.questions)
+  if (!keys.length) invalid()
+  if (keys.length > 32 || af.fromString2Bytes(stringify(request, __, "")).length > 48 * 1024) {
+    throw MiniADecision.error("MINI_A_DECISION_REQUEST_BUDGET")
+  }
+  keys.forEach(function(key) {
+    var q = request.questions[key]
+    if (!key.trim() || !isMap(q) || Object.keys(q).some(function(k) { return ["type", "instructions", "criteria"].indexOf(k) < 0 }) ||
+        ["boolean", "choice", "score"].indexOf(q.type) < 0 || !isString(q.instructions) || !q.instructions.trim()) invalid()
+    var text = function(v) { return isString(v) && v.trim().length > 0 }
+    if (q.type === "boolean") {
+      if (isDef(q.criteria) && (!isMap(q.criteria) || Object.keys(q.criteria).length !== 2 ||
+          !Object.prototype.hasOwnProperty.call(q.criteria, "false") || !Object.prototype.hasOwnProperty.call(q.criteria, "true") ||
+          !text(q.criteria.false) || !text(q.criteria.true))) invalid()
+    }
+    else if (q.type === "choice") {
+      if (!isMap(q.criteria) || Object.keys(q.criteria).length < 2 || Object.keys(q.criteria).some(function(k) { return !k.trim() || !text(q.criteria[k]) })) invalid()
+    } else if (!isArray(q.criteria) || q.criteria.length < 2 || !q.criteria.every(text)) invalid()
+  })
+  return request
+}
+
 MiniADecision.request = function(request) {
   try {
     if (!isMap(request) || Object.keys(request).some(function(key) { return ["state", "questions", "options"].indexOf(key) < 0 }) || isUnDef(request.state) || !isMap(request.questions)) {
@@ -107,19 +135,15 @@ if (typeof MiniA === "function") {
     return function(request) {
       try {
         if (!parent._decision || !parent._decision._config || parent._decision._error) throw MiniADecision.error("MINI_A_DECISION_NOT_CONFIGURED")
-        if (!isMap(request) || Object.keys(request).some(function(key) { return ["state", "questions"].indexOf(key) < 0 }) ||
-            (!isString(request.state) && !isMap(request.state) && !isArray(request.state)) ||
-            (isString(request.state) && !request.state.trim()) || !isMap(request.questions) || !Object.keys(request.questions).length) {
-          throw MiniADecision.error("LLM_DECISION_INVALID_REQUEST")
-        }
-        if (Object.keys(request.questions).length > 32 || new java.lang.String(stringify(request, __, "")).getBytes("UTF-8").length > 48 * 1024) {
-          throw MiniADecision.error("MINI_A_DECISION_REQUEST_BUDGET")
-        }
+        MiniADecision.validateConsultation(request)
         if (parent._decisionToolBudget.getAndIncrement() >= 32) throw MiniADecision.error("MINI_A_DECISION_TOOL_LIMIT")
         var controls = parent._decisionToolControls
         if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
-        var result = parent._decision.decide(request.state, request.questions)
-        if (controls && isFunction(controls.afterCall)) controls.afterCall(parent._getTotalTokens(result.stats || {}))
+        var result
+        try { result = parent._decision.decide(request.state, request.questions) }
+        finally {
+          if (controls && isFunction(controls.afterCall)) controls.afterCall(parent._getTotalTokens(result && result.stats || {}))
+        }
         return result
       } catch(e) {
         var safe = MiniADecision.sanitize(e)

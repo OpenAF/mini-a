@@ -9841,7 +9841,7 @@ MiniA.prototype._createRateLimiter = function(args) {
 
     if (requestLimit === null && tokenLimit === null) {
         return {
-            beforeCall: function() {},
+            beforeCall: function(isCancelled) { return !isFunction(isCancelled) || !isCancelled() },
             tryBeforeCall: function() { return true },
             afterReservedCall: function() {},
             afterCall : function() {}
@@ -9889,6 +9889,14 @@ MiniA.prototype._createRateLimiter = function(args) {
     }
 
     var admissionLock = "mini_a_rate_" + genUUID()
+    var recordTokens = function(tokensUsed) {
+        var timestamp = now()
+        prune(timestamp)
+        if (tokenLimit !== null) {
+            var numericTokens = isNumber(tokensUsed) && isFinite(tokensUsed) ? Math.max(0, Math.round(tokensUsed)) : 0
+            tokenEntries.push({ time: timestamp, tokens: numericTokens })
+        }
+    }
     return {
         tryBeforeCall: function() {
             var admitted = false
@@ -9902,33 +9910,38 @@ MiniA.prototype._createRateLimiter = function(args) {
             return admitted
         },
         afterReservedCall: function(tokensUsed) {
-            sync(function() {
-                if (tokenLimit !== null) tokenEntries.push({ time: now(), tokens: Math.max(0, Math.round(tokensUsed || 0)) })
-            }, admissionLock)
+            sync(function() { recordTokens(tokensUsed) }, admissionLock)
         },
-        beforeCall: function() {
-            if (requestLimit === null && tokenLimit === null) return
+        // Reserve RPM at admission, including calls that have not completed yet.
+        // The optional predicate makes interactive waits cancellable without
+        // changing existing callers that simply wait until admitted.
+        beforeCall: function(isCancelled) {
+            var cancellable = isFunction(isCancelled), logged = false
             while (true) {
-                var nowTime = now()
-                prune(nowTime)
-                var waitMs = computeWait(nowTime)
-                if (!isNumber(waitMs) || waitMs <= 0) break
+                if (cancellable && isCancelled()) return false
+                var admitted = false, waitMs = 0
+                sync(function() {
+                    var timestamp = now()
+                    prune(timestamp)
+                    waitMs = computeWait(timestamp)
+                    if (waitMs > 0) return
+                    if (requestLimit !== null) requestTimestamps.push(timestamp)
+                    normalInFlight++
+                    admitted = true
+                }, admissionLock)
+                if (admitted) return true
                 var delay = Math.max(1, Math.ceil(waitMs))
-                parent.fnI("rate", `Rate limit reached: waiting ${delay}ms before next LLM call...`)
-                sleep(delay, true)
+                if (!logged) {
+                    parent.fnI("rate", `Rate limit reached: waiting ${delay}ms before next LLM call...`)
+                    logged = true
+                }
+                sleep(cancellable ? Math.min(delay, 100) : delay, true)
             }
-            sync(function() { normalInFlight++ }, admissionLock)
         },
         afterCall: function(tokensUsed) {
             sync(function() {
                 normalInFlight = Math.max(0, normalInFlight - 1)
-                var nowTime = now()
-                prune(nowTime)
-                if (requestLimit !== null) requestTimestamps.push(nowTime)
-                if (tokenLimit !== null) {
-                    var numericTokens = isNumber(tokensUsed) && !isNaN(tokensUsed) ? Math.max(0, Math.round(tokensUsed)) : 0
-                    tokenEntries.push({ time: nowTime, tokens: numericTokens })
-                }
+                recordTokens(tokensUsed)
             }, admissionLock)
         }
     }

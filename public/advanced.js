@@ -199,6 +199,7 @@ window.MiniAAdvancedUI = function(bridge) {
     ['activity', 'Live activity', 'Follow agent actions, tool calls, progress, and results in real time.'],
     ['settings', 'Settings', 'Adjust parameters for this session and manage saved presets.'],
     ['prompts', 'Prompt workspace', 'Edit personas, instructions, knowledge, and the goal prefix for this session.'],
+    ['decide', 'Decisions', 'Ask the configured decision model using shared evidence and typed questions.'],
     ['models', 'Models', 'Choose and configure the main, low-cost, validation, and decision models.'],
     ['history', 'History', 'Open saved conversations, restore history, or rewind exchanges.'],
     ['context', 'Context', 'Inspect, compact, and summarize the agent conversation context.'],
@@ -231,6 +232,7 @@ window.MiniAAdvancedUI = function(bridge) {
     reset: 'M3 5v5h5M3 10a9 9 0 1 1 1 7',
     save: 'M4 3h13l3 3v15H4V3ZM8 3v6h8V3M8 21v-8h8v8',
     load: 'M12 3v12m-4-4 4 4 4-4M4 15v6h16v-6',
+    decide: 'M9 3h6v6H9ZM3 15h6v6H3Zm12 0h6v6h-6ZM12 9v3m-6 0h12M6 12v3m12-3v3',
     models: 'M8 8h8v8H8zM9 3v3m6-3v3M9 18v3m6-3v3M3 9h3m-3 6h3m12-6h3m-3 6h3',
     history: 'M3 5v5h5M3 10a9 9 0 1 1 1 7M12 7v5l3 2',
     context: 'M8 4H5v16h3M16 4h3v16h-3M9 9h6m-6 6h6',
@@ -714,6 +716,89 @@ window.MiniAAdvancedUI = function(bridge) {
     form.onsubmit = e => { e.preventDefault(); command(build(...nodes.map(n=>n.value))).catch(showError); };
     screen.append(form);
   }
+  function decisionScreen() {
+    const uuid = bridge.uuid(), generation = resultGeneration;
+    const current = () => uuid === bridge.uuid() && generation === resultGeneration && activeScreen === 'decide';
+    const locked = () => !current() || busy || snapshot?.closed;
+    const form = el('form', undefined, 'advanced-form advanced-decision-form');
+    const feedback = el('p'); feedback.setAttribute('role', 'status');
+    const field = (label, node, parent = form) => { const wrap = el('label', label); node.setAttribute('aria-label', label); wrap.append(node); parent.append(wrap); return node; };
+    const scope = field('Shared scope / instructions', el('textarea'));
+    const evidence = field('Evidence', el('textarea'));
+    const questions = el('div'); form.append(questions);
+    let reviewed = null;
+    const review = el('pre'); review.hidden = true;
+    const invalidate = () => { reviewed = null; review.hidden = true; submit.hidden = true; };
+    const rows = [];
+    function addQuestion() {
+      if (locked() || rows.length >= 32) return;
+      invalidate();
+      const row = el('fieldset'), model = {row}; row.append(el('legend', 'Question'));
+      model.name = field('Question name', input('e.g. urgent'), row);
+      model.type = field('Question type', el('select'), row);
+      for (const type of ['boolean','choice','score']) { const option = el('option', type); option.value = type; model.type.append(option); }
+      model.instructions = field('Question instructions', el('textarea'), row);
+      model.criteria = field('Criteria: choice uses key = description per line; score uses one level per line', el('textarea'), row);
+      model.criteria.parentNode.hidden = true;
+      model.type.onchange = () => { model.criteria.parentNode.hidden = model.type.value === 'boolean'; invalidate(); };
+      row.append(button('Remove question', () => { if (locked()) return; rows.splice(rows.indexOf(model), 1); row.remove(); invalidate(); }));
+      rows.push(model); questions.append(row);
+    }
+    const add = button('Add question', addQuestion);
+    const prepare = el('button', 'Review request'); prepare.type = 'submit';
+    const submit = button('Submit decision', async () => {
+      if (locked() || !reviewed) return;
+      try { await command('/decide ' + reviewed); } catch (error) { if (current()) feedback.textContent = error.message || String(error); }
+    }); submit.hidden = true;
+    const cancel = button('Cancel', () => { if (!current()) return; form.reset(); questions.replaceChildren(); rows.length = 0; invalidate(); feedback.textContent = 'Decision cancelled.'; if (!locked()) addQuestion(); });
+    form.append(add, prepare, cancel, review, submit, feedback);
+    form.oninput = invalidate;
+    form.onsubmit = event => {
+      event.preventDefault(); if (locked()) return;
+      try {
+        if (!rows.length) throw new Error('Add at least one question.');
+        const request = {state: {scope: scope.value, evidence: evidence.value}, questions: Object.create(null)};
+        for (const item of rows) {
+          const name = item.name.value.trim(), type = item.type.value;
+          if (!name || Object.hasOwn(request.questions, name) || ['__proto__','constructor','prototype'].includes(name)) throw new Error('Question names must be nonempty and unique.');
+          if (!item.instructions.value.trim()) throw new Error('Each question needs instructions.');
+          const question = {type, instructions: item.instructions.value};
+          if (type !== 'boolean') {
+            const lines = item.criteria.value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+            if (lines.length < 2) throw new Error('Provide at least two criteria.');
+            if (type === 'score') question.criteria = lines;
+            else {
+              question.criteria = Object.create(null);
+              for (const line of lines) {
+                const at = line.indexOf('='), key = line.slice(0, at).trim(), description = line.slice(at + 1).trim();
+                if (at < 1 || !description || Object.hasOwn(question.criteria, key)) throw new Error('Choice criteria need unique key = description lines.');
+                question.criteria[key] = description;
+              }
+            }
+          }
+          request.questions[name] = question;
+        }
+        reviewed = JSON.stringify(request);
+        if (new TextEncoder().encode(reviewed).length > 48 * 1024) throw new Error('Request exceeds 48 KiB.');
+        review.textContent = JSON.stringify(request, null, 2); review.hidden = false; submit.hidden = false; feedback.textContent = '';
+      } catch (error) { invalidate(); feedback.textContent = error.message || String(error); }
+    };
+    const wizard = button('Ask inputs step by step', () => { if (!locked()) return command('/decide interactive'); });
+    screen.append(wizard, el('h4', 'Guided request'), form); addQuestion();
+    const structured = el('form', undefined, 'advanced-form advanced-decision-form'); structured.append(el('h4', 'JSON / SLON request'));
+    const raw = field('Request containing state and questions', el('textarea'), structured);
+    raw.placeholder = '{"state":"Evidence","questions":{"urgent":{"type":"boolean","instructions":"Is this urgent?"}}}';
+    const run = el('button', 'Submit structured request'); run.type = 'submit'; structured.append(run);
+    const rawFeedback = el('p'); rawFeedback.setAttribute('role', 'status'); structured.append(rawFeedback);
+    structured.onsubmit = async event => {
+      event.preventDefault(); if (locked()) return;
+      if (!raw.value.trim()) { rawFeedback.textContent = 'Enter a JSON or SLON request.'; return; }
+      try { await command('/decide ' + raw.value); } catch (error) { if (current()) rawFeedback.textContent = error.message || String(error); }
+    };
+    screen.append(structured);
+    settingsRefresh = () => { for (const node of [...form.querySelectorAll('input,textarea,select,button'), ...structured.querySelectorAll('textarea,button')]) node.disabled = !!locked(); wizard.disabled = !!locked(); add.disabled = locked() || rows.length >= 32; };
+    settingsRefresh();
+  }
   function actions(items) { const group=el('div',undefined,'advanced-actions'); items.forEach(([name,cmd])=>group.append(button(name,()=>command(cmd)))); screen.append(group); }
   let statsMode = 'summary', statsMetrics = null, statsDetails = null, statsCharts = [], statsGeneration = 0;
   function destroyStatsCharts() {
@@ -828,7 +913,11 @@ window.MiniAAdvancedUI = function(bridge) {
     const value = block.value, meta = block.meta || {}, container = el('section',undefined,'advanced-result-block');
     if (block.type === 'markdown') { if (meta.ref) container.append(el('h4',meta.ref)); if (meta.path) container.append(el('h4',meta.path),breadcrumbs(meta.path)); if (meta.page) container.append(structuredMap(meta.page)); container.append(reader(String(value || ''))); }
     else if (block.type === 'answer') { container.append(el('h4','Previous goal'),el('pre',value.goal || ''),reader(String(value.answer || ''),meta.raw === true)); }
-    else if (block.type === 'saved') { container.append(el('p','Saved on server: '+value.destination),reader(String(value.content || ''),true,value.destination)); }
+    else if (block.type === 'decision-compose') container.append(el('p','Compose a decision using the form below.'));
+    else if (block.type === 'decision') {
+      if (value.error) container.append(el('p', value.error, 'advanced-warning'));
+      else { container.append(el('h4','Answers'),structuredMap(value.response?.answers || {}),el('h4','Usage'),structuredMap(value.stats || {})); const raw = el('details'); raw.append(el('summary','Full response'),reader(JSON.stringify(value, null, 2),true,'decision.json')); container.append(raw); }
+    } else if (block.type === 'saved') { container.append(el('p','Saved on server: '+value.destination),reader(String(value.content || ''),true,value.destination)); }
     else if (block.type === 'export') { const raw = typeof value === 'string' ? value : asText(value); container.append(reader(raw,true,'graph.'+(meta.format || 'txt'))); if (meta.format === 'mermaid') container.append(markdown('```mermaid\n'+raw+'\n```')); }
     else if (block.type === 'history') {
       if (value.picker) container.append(el('p','Choose a saved conversation below, or Cancel to keep this conversation.'),button('Cancel',()=>{activeScreen='activity';renderScreen();}));
@@ -1233,6 +1322,7 @@ window.MiniAAdvancedUI = function(bridge) {
     if (!snapshot) return;
     if (!['subtasks','prompts'].includes(activeScreen)) resultPanel();
     if (activeScreen === 'help') { helpScreen(); }
+    else if (activeScreen === 'decide') { decisionScreen(); }
     else if (activeScreen === 'prompts') { promptWorkspace(); }
     else if (activeScreen === 'answer') { actions([['Previous answer','/last'],['Raw answer','/last md']]); commandForm('Save on server', file => file ? `/save ${quote(file)}` : '/save', ['Server path (default response.md)']); }
     else if (activeScreen === 'settings' || activeScreen === 'models') {

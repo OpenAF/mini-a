@@ -412,7 +412,7 @@ MiniAAdvanced.prototype.request = function(data) {
       })
       return result
     }
-    var metrics = agent && isFunction(agent.getMetrics) ? agent.getMetrics() : null
+    var metrics = isFunction(state.runtime.metrics) ? state.runtime.metrics() : agent && isFunction(agent.getMetrics) ? agent.getMetrics() : null
     var details = metrics ? this.safe(metrics) : null
     // Keep diagnostic maps/arrays, but leave narrative advisor traces in Debug.
     if (details && isMap(details.advisor)) delete details.advisor.trace

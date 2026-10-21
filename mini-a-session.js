@@ -43,6 +43,7 @@ function MiniAInteractiveSession(args, adapter) {
   var printTree = adapter ? function(value) { return { type: "tree", value: value } } : host.printTree
   var printTable = adapter ? function(value) { return { type: "table", value: value } } : host.printTable
   var ansiColor = adapter ? function(color, value) { return value || "" } : host.ansiColor
+  var ask = adapter ? function(label) { return adapter.ask("text", label) } : host.ask
   var askChoose = adapter ? function(label, choices) { return adapter.ask("choice", label, choices) } : host.askChoose
   var __conAnsi = adapter ? false : host.getAnsi()
   var cls = adapter ? function() { adapter.view("clear") } : host.cls
@@ -499,7 +500,7 @@ function MiniAInteractiveSession(args, adapter) {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "rewind", "history", "model", "models", "stats", "debug", "skills", "edit", "editor", "wiki", "graph", "dream", "ingest", "absorb", "delegate", "subtasks", "subtask", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "rewind", "history", "model", "models", "decide", "stats", "debug", "skills", "edit", "editor", "wiki", "graph", "dream", "ingest", "absorb", "delegate", "subtasks", "subtask", "exit", "quit"]
   var builtInSlashCommands  = {}
   slashCommands.forEach(function(cmd) { builtInSlashCommands[cmd] = true })
   var customSlashCommands      = {}
@@ -2494,6 +2495,15 @@ function MiniAInteractiveSession(args, adapter) {
             return candidates.isEmpty() ? -1 : Number(debugInsertionPoint)
           }
 
+          if (lookupName === "decide") {
+            var decideRemainder = uptoCursor.substring(firstSpace + 1).replace(/^\s*/, "").toLowerCase()
+            if (/\s/.test(decideRemainder)) return -1
+            ;["interactive", "help"].forEach(function(option) {
+              if (option.indexOf(decideRemainder) === 0) candidates.add(option)
+            })
+            return candidates.isEmpty() ? -1 : Number(cursor - decideRemainder.length)
+          }
+
           // Only complete the first modifier; later words belong to the literal goal.
           if (lookupName === "delegate") {
             var delegateRemainder = uptoCursor.substring(firstSpace + 1).replace(/^\s*/, "")
@@ -3620,6 +3630,7 @@ function MiniAInteractiveSession(args, adapter) {
   }
 
   function resetMetrics() {
+    directDecisionMetrics = __
     if (isObject(global.__mini_a_metrics)) {
       // Reset all atomic counters
       Object.keys(global.__mini_a_metrics).forEach(function(key) {
@@ -4047,6 +4058,8 @@ function MiniAInteractiveSession(args, adapter) {
   var internalParameters = { goalprefix: true, usehistory: true, historykeep: true, historykeepperiod: true, historykeepcount: true, useeditor: true, editor: true }
   var activeDream = __
   var activeAgent = __
+  var directDecisionMetrics = __
+  var directDecisionLimiter = __, directDecisionLimits = ""
   var shutdownHandled = false
   var subtaskLogsByShortId = {}
   var workerRegBootstrapped = false
@@ -5710,6 +5723,22 @@ function MiniAInteractiveSession(args, adapter) {
     return options
   }
 
+  function sessionMetrics() {
+    var metrics = isObject(activeAgent) && isFunction(activeAgent.getMetrics) ? clone(activeAgent.getMetrics()) : __
+    if (!directDecisionMetrics) return metrics
+    if (!isMap(metrics)) metrics = {}
+    var combined = isMap(metrics.decisions) ? metrics.decisions : {}
+    ;["calls", "failures", "fallbacks", "empty_selections", "duration_ms", "input_tokens", "output_tokens", "total_tokens", "usage_reports"].forEach(function(key) {
+      combined[key] = (combined[key] || 0) + (directDecisionMetrics[key] || 0)
+    })
+    ;["model", "provider", "source"].forEach(function(key) { combined[key] = directDecisionMetrics[key] })
+    metrics.decisions = combined
+    if (!isMap(metrics.llm_calls)) metrics.llm_calls = {}
+    metrics.llm_calls.decision = combined.calls
+    metrics.llm_calls.total = (metrics.llm_calls.total || 0) + directDecisionMetrics.calls
+    return metrics
+  }
+
   function printStats(args) {
     var statsOptions = parseStatsOptions(args)
     if (statsOptions.ok !== true) {
@@ -5718,14 +5747,9 @@ function MiniAInteractiveSession(args, adapter) {
       return
     }
 
-    if (!isObject(activeAgent) || typeof activeAgent.getMetrics !== "function") {
-      print(colorifyText("No active agent available. Run a goal first to collect metrics.", hintColor))
-      return
-    }
-
-    var metrics = activeAgent.getMetrics()
+    var metrics = sessionMetrics()
     if (!isObject(metrics)) {
-      print(colorifyText("Unable to retrieve metrics.", errorColor))
+      print(colorifyText("No metrics available. Run a goal or /decide first.", hintColor))
       return
     }
 
@@ -6251,6 +6275,148 @@ function MiniAInteractiveSession(args, adapter) {
     }
   }
 
+  function decideHelp() {
+    return 'Usage: /decide [interactive|help|JSON/SLON]\nWithout arguments, compose a guided request. Use /decide interactive for question-by-question prompts in console or web. Configure /model dec or OAF_DECIDE_MODEL; usedecide=false disables calls.\n' +
+      'Request: {"state":{"scope":"Use only this evidence","evidence":"The customer was charged twice"},"questions":{"urgent":{"type":"boolean","instructions":"Does this need immediate attention?"}}}\n' +
+      'Question types: boolean; choice with a criteria map; score with an ordered criteria array (levels start at zero). Maximum 32 questions / 48 KiB.'
+  }
+
+  function composeDecision() {
+    print(colorifyText('Compose a decision. Choose Cancel in a menu or type /cancel at a text prompt; use """ for multiline text.', hintColor))
+    var read = function(label) {
+      var value = ask(label + ': ')
+      if (isUnDef(value) || value === null || String(value).trim() === "/cancel") throw { cancelled: true }
+      if (String(value).trim() === '"""') {
+        var lines = []
+        print('Finish multiline input with """; /cancel cancels the request.')
+        while (true) {
+          var line = ask(multiLinePrompt)
+          if (isUnDef(line) || line === null || String(line).trim() === "/cancel") throw { cancelled: true }
+          if (String(line).trim() === '"""') break
+          lines.push(String(line))
+        }
+        value = lines.join("\n")
+      }
+      return String(value)
+    }
+    var choose = function(label, choices) {
+      var options = choices.concat(["Cancel"])
+      var value = askChoose(label, options, options.length)
+      if (isUnDef(value) || value === null) throw { cancelled: true }
+      var index = __miniANormalizeChoiceIndex(value, choices.length)
+      if (index < 0) throw { cancelled: true }
+      return index
+    }
+    var request = { state: { scope: read("Shared scope / instructions"), evidence: read("Evidence") }, questions: {} }
+    while (true) {
+      var name = read("Question name").trim()
+      if (!name || Object.prototype.hasOwnProperty.call(request.questions, name) || ["__proto__", "constructor", "prototype"].indexOf(name) >= 0) {
+        printErr("Choose a nonempty, unique question name."); continue
+      }
+      var type = ["boolean", "choice", "score"][choose("Question type: ", ["boolean", "choice", "score"])]
+      var question = { type: type, instructions: read("Question instructions") }
+      while (!question.instructions.trim()) {
+        printErr("Question instructions are required.")
+        question.instructions = read("Question instructions")
+      }
+      if (type !== "boolean") {
+        question.criteria = type === "choice" ? {} : []
+        while (true) {
+          var count = Object.keys(question.criteria).length
+          if (count >= 2 && choose(type === "choice" ? "Add another choice? " : "Add another score level? ", ["No", "Yes"]) === 0) break
+          if (type === "choice") {
+            var key = read("Choice key" + (count < 2 ? " (at least two choices required)" : "")).trim()
+            if (!key || Object.prototype.hasOwnProperty.call(question.criteria, key) || ["__proto__", "constructor", "prototype"].indexOf(key) >= 0) {
+              printErr("Choose a nonempty, unique choice key."); continue
+            }
+            var description = read("Description for " + key)
+            while (!description.trim()) { printErr("A choice description is required."); description = read("Description for " + key) }
+            question.criteria[key] = description
+          } else {
+            var level = read("Score level " + count + (count < 2 ? " (at least two levels required)" : ""))
+            if (!level.trim()) { printErr("A score level description is required."); continue }
+            question.criteria.push(level)
+          }
+        }
+      }
+      var single = {}; single[name] = question
+      try { MiniADecision.validateConsultation({ state: request.state, questions: single }) }
+      catch(e) { printErr("Invalid question or criteria."); continue }
+      request.questions[name] = question
+      if (Object.keys(request.questions).length >= 32 || choose("Add another question? ", ["No", "Yes"]) === 0) break
+    }
+    MiniADecision.validateConsultation(request)
+    $o(request, { __format: "cyaml" })
+    return choose("Submit this request? ", ["No", "Yes"]) === 1 ? request : __
+  }
+
+  function runDecision(raw) {
+    if (raw.trim().toLowerCase() === "help") {
+      if (adapter) browserResult(decideHelp(), "text")
+      else print(decideHelp())
+      return
+    }
+    var interactive = raw.trim().toLowerCase() === "interactive"
+    if (adapter && !raw.trim()) { browserResult({ compose: true }, "decision-compose"); return }
+    var isCancelled = function() { return adapter && isFunction(adapter.isCancelled) && adapter.isCancelled() }
+    try {
+      if (isCancelled()) throw { cancelled: true }
+      if (isDef(sessionOptions.usedecide) && toBoolean(sessionOptions.usedecide) === false) {
+        printErr("Decision calls are disabled. Use /set usedecide true to enable them."); return
+      }
+      var client = new MiniADecision({ modeldec: sessionOptions.modeldec, configureClient: function(llm) {
+        __miniAConfigureDebugChannel(llm, sessionOptions.debugdecch, "__mini_a_de_llm_debug", "Decision LLM",
+          function(level, message) { if (level === "warn") printErr(message) }, {})
+      }, observe: function(event) {
+        var metrics = directDecisionMetrics
+        if (event.called) metrics.calls++
+        metrics.duration_ms += event.duration_ms || 0
+        if (event.error) metrics.failures++
+        var stats = event.stats || {}, tokens = stats.tokens || {}
+        var input = isNumber(tokens.prompt) ? tokens.prompt : stats.prompt_tokens
+        var output = isNumber(tokens.completion) ? tokens.completion : stats.completion_tokens
+        var total = isNumber(tokens.total) ? tokens.total : stats.total_tokens
+        if (isNumber(input)) metrics.input_tokens += input
+        if (isNumber(output)) metrics.output_tokens += output
+        if (isNumber(total)) metrics.total_tokens += total
+        else if (isNumber(input) && isNumber(output)) metrics.total_tokens += input + output
+        if (isNumber(input) || isNumber(output) || isNumber(total)) metrics.usage_reports++
+      } })
+      if (client._error) throw MiniADecision.error(client._error)
+      if (!client.isConfigured()) { printErr("No decision model configured. Use /model dec or OAF_DECIDE_MODEL."); return }
+      var request
+      if (raw.trim() && !interactive) {
+        try { request = af.fromJSSLON(raw) } catch(parseError) { throw MiniADecision.error("LLM_DECISION_INVALID_REQUEST") }
+      } else request = composeDecision()
+      if (isUnDef(request)) { print("Decision cancelled."); return }
+      MiniADecision.validateConsultation(request)
+      if (!directDecisionMetrics) directDecisionMetrics = { calls: 0, failures: 0, duration_ms: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, usage_reports: 0 }
+      directDecisionMetrics.model = client._config.model
+      directDecisionMetrics.provider = client._config.type
+      directDecisionMetrics.source = isDef(sessionOptions.modeldec) ? "modeldec" : "OAF_DECIDE_MODEL"
+      var limits = stringify({ rpm: Number(sessionOptions.rpm || sessionOptions.rtm), tpm: Number(sessionOptions.tpm) }, __, "")
+      if (!directDecisionLimiter || limits !== directDecisionLimits) {
+        directDecisionLimiter = MiniA.prototype._createRateLimiter.call({ fnI: function(level, message) { print(message) } },
+          { rpm: Number(sessionOptions.rpm || sessionOptions.rtm), tpm: Number(sessionOptions.tpm) })
+        directDecisionLimits = limits
+      }
+      if (directDecisionLimiter.beforeCall(isCancelled) === false) throw { cancelled: true }
+      var result
+      try {
+        if (isCancelled()) throw { cancelled: true }
+        result = client.decide(request.state, request.questions)
+      }
+      finally { directDecisionLimiter.afterCall(MiniA.prototype._getTotalTokens(result && result.stats || {})) }
+      if (adapter) browserResult(result, "decision")
+      else $o(result, { __format: "cyaml" })
+    } catch(e) {
+      if (e && e.cancelled) { print("Decision cancelled."); return }
+      var safe = MiniADecision.sanitize(e)
+      if (adapter) browserResult({ error: safe.code, status: safe.status }, "decision")
+      else printErr(safe.code + (isDef(safe.status) ? " (HTTP " + safe.status + ")" : ""))
+    }
+  }
+
   function commandHelpRows() {
     var helpCommands = [
       { command: "/help", description: "Show this help message" },
@@ -6270,6 +6436,7 @@ function MiniAInteractiveSession(args, adapter) {
       { command: "/summarize [n]", description: "Compact and display an LLM-generated conversation summary" },
       { command: "/history [n]", description: "Show the last n user goals (one per line)" },
       { command: "/model [main|lc|val|dec|visual]", description: "Choose a model definition for a slot (no arg = interactive slot picker)" },
+      { command: "/decide [interactive|help|JSON/SLON]", description: "Ask the decision model directly; no arguments opens guided input" },
       { command: "/models", description: "List current main, low, validation and decision models" },
       { command: "/stats [mode] [out=file.json]", description: "Show session statistics (modes: detailed, tools, memory, wiki)" },
       { command: "/debug [filter]", description: "Inspect previous-goal events; filters: all, calls, answers, memory, system, prompts, responses, thinking, problems" },
@@ -6294,7 +6461,7 @@ function MiniAInteractiveSession(args, adapter) {
     var destinations = {
       help: "help", set: "settings", toggle: "settings", unset: "settings", show: "settings", reset: "settings",
       restore: "history", last: "answer", save: "answer", clear: "history", rewind: "history", history: "history",
-      cls: "activity", context: "context", compact: "context", summarize: "context", model: "models", models: "models",
+      cls: "activity", context: "context", compact: "context", summarize: "context", model: "models", models: "models", decide: "decide",
       stats: "stats", debug: "debug", skills: "skills", edit: "editor", editor: "editor", wiki: "wiki", graph: "graph",
       dream: "dream", ingest: "ingest", absorb: "absorb", delegate: "subtasks", subtasks: "subtasks", subtask: "subtasks",
       exit: "history", quit: "history"
@@ -6317,13 +6484,13 @@ function MiniAInteractiveSession(args, adapter) {
       if (name !== canonical) syntax = syntax.replace("/" + canonical, "/" + name)
       return { name: name, command: "/" + name, syntax: syntax, arguments: syntax.indexOf(" ") < 0 ? "" : syntax.substring(syntax.indexOf(" ") + 1),
         description: descriptions[canonical] || row.description || "", destination: destinations[name],
-        subcommands: ({ context: ["llm", "analyze", "vm"], model: ["main", "lc", "val", "dec", "visual"], last: ["md"], edit: ["last"], editor: ["last"], stats: ["detailed", "tools", "memory", "wiki", "out="], debug: debugTraceFilters.map(function(f) { return f.key }),
+        subcommands: ({ decide: ["interactive", "help"], context: ["llm", "analyze", "vm"], model: ["main", "lc", "val", "dec", "visual"], last: ["md"], edit: ["last"], editor: ["last"], stats: ["detailed", "tools", "memory", "wiki", "out="], debug: debugTraceFilters.map(function(f) { return f.key }),
           wiki: ["context", "list", "tree", "browse", "read", "search", "backlinks", "lint", "write", "move", "mv", "delete", "remove", "rm", "init", "reindex", "compact", "mounts", "attach", "detach"],
           graph: ["query", "retrieve", "answer", "neighbors", "path", "cross", "communities", "surprise", "stats", "report", "build", "falkor", "export"],
           skills: ["search", "remote", "recommend", "open", "read", "related", "context"], absorb: ["plan", "show", "apply", "status", "resume", "delete", "cancel"], ingest: ["recovery", "dryrun", "force", "prune", "allowemptyprune", "sourceid=", "independent"],
           dream: ["memory", "wiki", "plan", "apply", "reorg", "repair", "reindex", "graph", "indexes", "dryrun"], subtask: ["result", "cancel"] })[name] || [],
         aliases: canonical === "edit" ? ["editor"] : canonical === "exit" ? ["quit"] : [],
-        examples: ({ set: ["/set debug true"], show: ["/show wiki"], model: ["/model lc"], last: ["/last", "/last md"], history: ["/history 10"], stats: ["/stats detailed tools", "/stats out=metrics.json"], wiki: ['/wiki read "Team Docs/index.md"', '/wiki write "notes.md"'], graph: ["/graph export mermaid", "/graph retrieve installation"], skills: ["/skills search testing", "/skills read reference"], ingest: ['/ingest "./docs" "Docs" dryrun prune sourceid=docs'], absorb: ["/absorb status", "/absorb show plan-id"], dream: ["/dream wiki plan dryrun"], subtask: ["/subtask result task-id", "/subtask cancel task-id"] })[name] || ["/" + name], prerequisite: ["wiki", "graph", "ingest", "absorb"].indexOf(name) >= 0 ? "Wiki enabled; write operations require wikiaccess=rw." : name === "delegate" ? "usedelegation=true" : "" }
+        examples: ({ decide: ["/decide", "/decide interactive", '/decide {"state":"Evidence","questions":{"urgent":{"type":"boolean","instructions":"Is this urgent?"}}}'], set: ["/set debug true"], show: ["/show wiki"], model: ["/model lc"], last: ["/last", "/last md"], history: ["/history 10"], stats: ["/stats detailed tools", "/stats out=metrics.json"], wiki: ['/wiki read "Team Docs/index.md"', '/wiki write "notes.md"'], graph: ["/graph export mermaid", "/graph retrieve installation"], skills: ["/skills search testing", "/skills read reference"], ingest: ['/ingest "./docs" "Docs" dryrun prune sourceid=docs'], absorb: ["/absorb status", "/absorb show plan-id"], dream: ["/dream wiki plan dryrun"], subtask: ["/subtask result task-id", "/subtask cancel task-id"] })[name] || ["/" + name], prerequisite: name === "decide" ? "modeldec or OAF_DECIDE_MODEL configured; usedecide must not be false." : ["wiki", "graph", "ingest", "absorb"].indexOf(name) >= 0 ? "Wiki enabled; write operations require wikiaccess=rw." : name === "delegate" ? "usedelegation=true" : "" }
     })
     ;[customSlashCommands, customSkillSlashCommands].forEach(function(entries, index) {
       Object.keys(entries).sort().forEach(function(name) {
@@ -6342,7 +6509,7 @@ function MiniAInteractiveSession(args, adapter) {
     var name = (match[2] || "help").toLowerCase(), raw = match[3] || ""
     var metadata = commandMetadata().filter(function(m) { return m.command === match[1] + name || (isArray(m.aliases) && m.aliases.indexOf(match[1] + name) >= 0) })[0]
     // Navigation never needs a setting value (which may be a credential).
-    var params = { command: name, args: name === "set" ? "" : raw }
+    var params = { command: name, args: name === "set" || name === "decide" ? "" : raw }
     if (["set", "toggle", "unset", "show"].indexOf(name) >= 0) params.filter = name === "show" ? raw.trim() : raw.split(/[=\s]/)[0]
     if (name === "model") params.slot = { main: "model", model: "model", lc: "modellc", modellc: "modellc", val: "modelval", modelval: "modelval", dec: "modeldec", decide: "modeldec", modeldec: "modeldec", visual: "modelvisual", modelvisual: "modelvisual" }[raw.trim().toLowerCase()] || ""
     if (name === "debug") params.filter = raw.trim().toLowerCase() || "all"
@@ -7265,6 +7432,10 @@ function MiniAInteractiveSession(args, adapter) {
         printHelp()
         continue
       }
+      if (parsedSlashCommand.name === "decide") {
+        runDecision(parsedSlashCommand.argsRaw)
+        continue
+      }
       if (commandLower === "help") {
         printHelp()
         continue
@@ -7828,8 +7999,9 @@ function MiniAInteractiveSession(args, adapter) {
       definitions: parameterDefinitions,
       defaultOptions: function() { return merge({}, parameterDefaults) },
       commands: function() { return getAllSlashCommandNames() },
-      completions: function() { return { delegate: getDelegateSubcommandCompletions(), wiki: getWikiSubcommandCompletions(), set: sessionParameterNames, show: sessionParameterNames, toggle: sessionParameterNames.filter(function(k) { return parameterDefinitions[k].type === "boolean" }), unset: sessionParameterNames } },
+      completions: function() { return { decide: ["interactive", "help"], delegate: getDelegateSubcommandCompletions(), wiki: getWikiSubcommandCompletions(), set: sessionParameterNames, show: sessionParameterNames, toggle: sessionParameterNames.filter(function(k) { return parameterDefinitions[k].type === "boolean" }), unset: sessionParameterNames } },
       agent: function() { return activeAgent },
+      metrics: sessionMetrics,
       stopDream: function() { if (activeDream) activeDream.requestStop() },
       attach: function(agent) {
         activeAgent = agent
@@ -7949,6 +8121,6 @@ function MiniAInteractiveSession(args, adapter) {
 }
 MiniAInteractiveSession.host = {
   print: print, printErr: printErr, printnl: printnl, printTree: printTree,
-  printTable: printTable, ansiColor: ansiColor, askChoose: askChoose,
+  printTable: printTable, ansiColor: ansiColor, ask: ask, askChoose: askChoose,
   cls: cls, getAnsi: function() { return typeof __conAnsi !== "undefined" && __conAnsi }
 }

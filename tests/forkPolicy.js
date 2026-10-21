@@ -232,6 +232,47 @@
     assert(f.manager.subtasks[id].status, "cancelled", "Cancellation remains terminal")
     f.manager.destroy()
   }
+  exports.testConcurrentNormalRateAdmission = function() {
+    var agent = new MiniA()
+    agent.fnI = function() {}
+    var limiter = agent._createRateLimiter({ rpm: 1 })
+    var ready = new java.util.concurrent.CountDownLatch(2)
+    var start = new java.util.concurrent.CountDownLatch(1)
+    var finished = new java.util.concurrent.CountDownLatch(2)
+    var admitted = new java.util.concurrent.atomic.AtomicInteger(0)
+    var errors = new java.util.concurrent.ConcurrentLinkedQueue()
+    var cancel = new java.util.concurrent.atomic.AtomicBoolean(false)
+    for (var i = 0; i < 2; i++) $doV(function() {
+      var reserved = false
+      try {
+        ready.countDown()
+        start.await()
+        if (limiter.beforeCall(function() { return cancel.get() })) {
+          reserved = true
+          admitted.incrementAndGet()
+          while (!cancel.get()) sleep(10, true)
+        }
+      } catch(e) { errors.add(String(e)) }
+      finally {
+        try { if (reserved) limiter.afterCall(0) }
+        finally { finished.countDown() }
+      }
+    })
+    try {
+      assert(ready.await(5, java.util.concurrent.TimeUnit.SECONDS), true, "Both callers ready")
+      start.countDown()
+      var until = now() + 5000
+      while (admitted.get() === 0 && now() < until) sleep(10, true)
+      sleep(150, true)
+      assert(admitted.get(), 1, "Concurrent normal callers share one RPM reservation")
+    } finally {
+      cancel.set(true)
+      start.countDown()
+      assert(finished.await(5, java.util.concurrent.TimeUnit.SECONDS), true, "Waiting caller exits after cancellation")
+    }
+    assert(errors.size(), 0, "No worker errors")
+    assert(admitted.get(), 1, "Cancellation prevents the second admission")
+  }
   exports.testDefaultGateRemainsOptIn = function() {
     var f = fixture({}, state()), seen = decision(f, "memory")
     assert(isUnDef(f.agent._decisionGate("unrelated", {}, {}, { choice: {} })), true, "Existing gate remains explicit opt-in")

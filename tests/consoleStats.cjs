@@ -11,7 +11,7 @@ const metrics = {llm_calls: {total: 4, normal: 1, decision: 3}, decisions: {
   failures: 1, fallbacks: 1, reasons: {provider_error: 1}
 }};
 const context = vm.createContext({
-  activeAgent: {getMetrics: () => metrics},
+  activeAgent: {getMetrics: () => metrics}, sessionMetrics: () => metrics,
   parseStatsOptions: () => ({ok: true, outputPath: '/fixture/stats.json'}),
   isObject: x => x !== null && typeof x === 'object',
   isMap: x => x !== null && typeof x === 'object' && !Array.isArray(x),

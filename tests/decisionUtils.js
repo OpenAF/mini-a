@@ -104,4 +104,25 @@
     ow.test.assert(call(cfg, request).error.indexOf("MINI_A_DECISION_NOT_CONFIGURED") >= 0, true, "Old tool callback cannot bypass a current opt-out")
     ow.test.assert(calls, 1, "Opt-out makes no provider call")
   }
+
+  exports.testDecisionUtilityFailureReleasesLimiter = function() {
+    var agent = fixture(function() { throw { code: "LLM_DECISION_PROVIDER_ERROR", status: 429, message: "SECRET" } })
+    var limiter = agent._createRateLimiter({ tpm: 100 }), completed = [], admitted = 0
+    agent._decisionToolControls = {
+      beforeCall: function() { limiter.beforeCall(); admitted++ },
+      afterCall: function(tokens) { completed.push(tokens); limiter.afterCall(tokens) }
+    }
+    var run = agent._createDecisionToolRunner({ useutils: true, usedecide: true })
+    var result = run(request)
+    ow.test.assert(result.error, "LLM_DECISION_PROVIDER_ERROR", "Provider failure remains sanitized")
+    ow.test.assert(result.status, 429, "HTTP status preserved")
+    ow.test.assert(completed.length, 1, "Failed call releases limiter exactly once")
+    ow.test.assert(completed[0], 0, "Failed call records zero tokens")
+    ow.test.assert(limiter.tryBeforeCall(), true, "Optional decisions remain available after failure")
+    limiter.afterReservedCall(0)
+    agent._decisionToolControls.beforeCall = function() { throw new Error("Admission failed") }
+    run(request)
+    ow.test.assert(completed.length, 1, "No cleanup for failed admission")
+    ow.test.assert(admitted, 1, "Only one request was admitted")
+  }
 })()

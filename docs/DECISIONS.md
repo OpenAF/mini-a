@@ -54,6 +54,56 @@ These candidate sites were evaluated and left on their existing logic:
 
 Quality claims for any gate need paired enabled/disabled runs (`evals/decide.yaml`) on held-out tasks; the offline tests only establish fallback and contract behaviour.
 
+## Direct console and Advanced web requests
+
+Use `/decide` to ask the configured decision model directly. The console guides
+you through shared scope/instructions, evidence, and named questions, then shows
+the request for review before submission. Type `/cancel` at a prompt to cancel;
+enter `"""` to start multiline input and another `"""` line to finish it.
+
+Use `/decide interactive` in either console or Advanced web to answer the
+inputs step by step (web uses input dialogs). The Advanced Decisions screen also
+has an **Ask inputs step by step** button. The prompts collect shared scope,
+evidence, question names/types/instructions, then individual choice keys and
+descriptions or ordered score-level descriptions. Question types and yes/no decisions use selection menus. After at least two
+criteria, a menu asks whether to add another choice or score level. No JSON/SLON is needed in this flow.
+Blank required instructions/descriptions are requested again, and the Cancel menu entry or `/cancel` at a text prompt
+cancels before submission.
+
+In Advanced web, `/decide` opens the **Decisions** screen. Its guided form lets
+you add/remove questions and review before submitting. Choice criteria use one
+`key = description` per line; score criteria use one level per line, ordered
+from lowest to highest. The same screen also has a multiline JSON/SLON editor.
+`/decide help` displays syntax and an example without making a provider call.
+
+You can submit a complete request directly in either surface:
+
+```text
+/decide {"state":{"scope":"Assess only the supplied incident facts.","evidence":"One customer was charged twice; other payments work."},"questions":{"urgent":{"type":"boolean","instructions":"Does this require immediate attention?"},"team":{"type":"choice","instructions":"Choose the responsible team.","criteria":{"billing":"Payments and refunds","technical":"Software failures"}}}}
+```
+
+The request accepts only `state` and `questions`, with the same boolean, choice,
+and ordinal score contracts as the decision utility. Score levels start at zero.
+Requests are limited to 32 questions and 48 KiB of serialized UTF-8 data.
+Provider options, request-level model overrides, and file/image inputs are not
+accepted. Evidence must be supplied in the request; the command does not load
+files or add conversation history automatically.
+
+The current session's `modeldec` overrides `OAF_DECIDE_MODEL`. The command works
+when `usedecide` is unset or true, without `useutils=true`; an explicit
+`usedecide=false` blocks submission. It can run before the first agent goal and
+does not call the main/LC model. Every submission uses a fresh decision client,
+with no retries or fallback. Missing/invalid configuration and provider errors
+are reported without exposing provider response bodies.
+
+Results include named typed answers, available probabilities, and usage in the
+`{response, stats}` wrapper. Advanced results include a full-response reader and
+remain available in the Decisions command-result history. `/last` and the agent
+conversation retain their previous contents. Direct calls honor session
+`rpm`/`tpm` limits through a separate session limiter, attach `debugdecch`, and
+are included once in `/stats` and Advanced Statistics. Changing rate limits
+creates a fresh direct-call limiter. `/clear` clears direct-call statistics.
+
 ## Decision utility
 
 With a valid `OAF_DECIDE_MODEL` configuration, `useutils=true usedecide=true`
@@ -160,6 +210,8 @@ The MCP returns typed failures without retries or model fallback. OpenAF error c
 ```bash
 ojob tests/decision.yaml
 ojob tests/decisionUtils.yaml
+node tests/decideCommand.cjs
+OAF_DECIDE_MODEL="(type: ollama, model: env-decision)" oaf -f tests/decideCommand.js
 ojob tests/capabilityPolicy.yaml
 ojob tests/eval.yaml
 python3 tests/decisionMcp.py
@@ -192,3 +244,11 @@ Outgoing delegation now defaults to `forkpolicy=auto`. For ambiguous inheritance
 Set `forkdecide=false` to retain deterministic automatic inheritance without this classifier. `usedecide=false` also disables it. No configuration, unsupported capability, invalid configuration/output, abstention/refusal, timeout, exhausted allowance, or rate pressure uses the precomputed deterministic fallback. No main or low-cost generation call is substituted.
 
 The classifier accepts only a normalized named `choice` answer for `inheritance`, drawn from the feasible scopes or `abstain`. Probability fields are not required. Input is at most 8 KiB serialized UTF-8 and respects lower applicable limits. It has eight run-local allowance reservations, no provider retries, a maximum 2-second real transport timeout, non-waiting RPM/TPM admission, and a 64-entry validated-choice cache. It skips custom adapters whose real transport bound cannot be established. Failures disable only the fork-policy path where appropriate. Existing decision observation accounts for actual reported usage once; inherited-token estimates remain separate. See [Delegation](DELEGATION.md#automatic-inheritance-and-migration) for precedence, worker behavior, budgets, and migration.
+
+Manual verification for `/decide`: with your configured decision provider, run
+`/decide help`, compose boolean/choice/score questions in the console, cancel one
+request at review, and submit another. Repeat in Advanced's Decisions screen
+and its structured editor; inspect answers, full response, previous results,
+`/stats`, and `debugdecch`. Confirm `/last` still shows the previous agent answer.
+The automated command/form tests use injected clients and DOM fixtures; they do
+not establish live provider support or manual browser/terminal layout quality.

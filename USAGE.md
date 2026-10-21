@@ -297,6 +297,8 @@ To view conversation token usage:
 - `/stats memory` — Displays working-memory statistics for the current console session when `usememory=true`, including resolved/session/global entry totals, activity counters, and per-section counts across `facts`, `evidence`, `openQuestions`, `hypotheses`, `decisions`, `artifacts`, `risks`, and `summaries`.
 - `/stats detailed memory` — Prints the regular detailed metrics tree plus the focused memory tables. Add `out=<file.json>` to save the exported data.
 
+Ask a decision model directly with `/decide`: compose scope/evidence and typed questions in the console or Advanced web **Decisions** screen, or pass `/decide <JSON/SLON>` with `state` and `questions`. `/decide interactive` asks for each input individually, including choice/score criteria, using console prompts or web dialogs. `/decide help` shows an example. It uses `modeldec` or `OAF_DECIDE_MODEL`, requires no agent goal or utility tools, and respects `usedecide=false`. Calls appear in session statistics; see [Direct decision requests](docs/DECISIONS.md#direct-console-and-advanced-web-requests).
+
 Need to revisit or store the most recent response? `/last [md]` reprints the previous final answer so you can copy it (add `md` to emit the raw Markdown instead of the formatted view), and `/save <path>` writes that answer straight to a file. When providing a path, press <kbd>Tab</kbd> to leverage the console's new filesystem auto-completion for slash commands.
 
 Paths containing spaces can be quoted with double or single quotes in console commands:
