@@ -8496,7 +8496,8 @@ MiniA.prototype._initSkillWiki = function(args) {
       wikilexical: args.wikilexical,
       wikiretrievalv2: args.wikiretrievalv2,
       wikiretrievalconfig: args.wikiretrievalconfig,
-      wikitelemetry: args.wikitelemetry
+      wikitelemetry: args.wikitelemetry,
+      usegraph: toBoolean(args.usewikigraph) === true
     }
     if (cfg.backend === "s3" || cfg.backend === "s3fs") {
       cfg.bucket = args.wikibucket; cfg.prefix = args.wikiprefix; cfg.url = args.wikiurl

@@ -1685,7 +1685,8 @@ function MiniAInteractiveSession(args, adapter) {
         wikilexical: sessionOptions.wikilexical,
         wikiretrievalv2: sessionOptions.wikiretrievalv2,
         wikiretrievalconfig: sessionOptions.wikiretrievalconfig,
-        wikitelemetry: sessionOptions.wikitelemetry
+        wikitelemetry: sessionOptions.wikitelemetry,
+        usegraph: toBoolean(sessionOptions.usewikigraph) === true
       }
       if (cfg.backend === "s3" || cfg.backend === "s3fs") {
         cfg.bucket = sessionOptions.wikibucket; cfg.prefix = sessionOptions.wikiprefix; cfg.url = sessionOptions.wikiurl
