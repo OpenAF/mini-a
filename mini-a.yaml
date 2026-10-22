@@ -1869,7 +1869,7 @@ jobs:
       subtasks       : isString.default(__)
       subtasksfile   : isString.default(__)
       subtaskssequential: toBoolean.isBoolean.default(false)
-      forkpolicy    : isString.default(auto)
+      forkpolicy    : isString.default("auto")
       forkdecide    : toBoolean.isBoolean.default(true)
       forkstatemaxbytes: toNumber.isNumber.default(__)
       workerregurl   : isString.default(__)
