@@ -3042,6 +3042,37 @@ function MiniAInteractiveSession(args, adapter) {
     }
   }
 
+  // Read a saved web conversation without restoring an agent or changing session state.
+  function previewSavedConversation(id, prefix) {
+    if (!isString(id) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw new Error("Invalid conversation id")
+    var directories = adapter && isArray(adapter.historyDirectories) ? adapter.historyDirectories.slice() : []
+    directories.push(conversationHistoryDirPath)
+    var path, payload
+    for (var i = 0; i < directories.length; i++) {
+      var root = canonicalizePath(directories[i]), candidate = canonicalizePath(root + "/c-" + id + ".json")
+      if (candidate.indexOf(root + "/") !== 0) throw new Error("Invalid conversation path")
+      if (io.fileExists(candidate)) { path = candidate; break }
+    }
+    if (!path) return { messages: [], unavailable: true }
+    // Bound disk reads as well as the response; never load an unbounded archive in the UI.
+    if (io.fileInfo(path).size > 8 * 1024 * 1024) return { messages: [], unavailable: true, reason: "Conversation is too large to preview." }
+    payload = loadConversationPayload(path)
+    if (!isObject(payload) || !isArray(payload.c)) return { messages: [], unavailable: true }
+    var messages = [], remaining = 20000, truncated = false, title = ""
+    payload.c.forEach(function(entry) {
+      if (!isMap(entry) || ["user", "assistant"].indexOf(entry.role) < 0) return
+      var content = flattenConversationContent(entry.content)
+      if (entry.role === "user" && isString(prefix) && prefix.length && content.indexOf(prefix) === 0) content = content.substring(prefix.length).replace(/^\s*\n/, "")
+      if (!content.length) return
+      if (!title && entry.role === "user") title = content.replace(/\s+/g, " ").trim().substring(0, 100)
+      if (messages.length >= 40 || remaining <= 0) { truncated = true; return }
+      if (content.length > remaining) truncated = true
+      content = content.substring(0, remaining); remaining -= content.length
+      messages.push({ role: entry.role, content: content })
+    })
+    return { title: title, messages: messages, truncated: truncated }
+  }
+
   function analyzeConversationEntries(entries, estimatorFn) {
     var data = {
       system   : { label: "System", tokens: 0, chars: 0, messages: 0 },
@@ -8011,6 +8042,7 @@ function MiniAInteractiveSession(args, adapter) {
       },
       saveConversation: function() { persistConversationSnapshot(activeAgent) },
       pruneHistory: pruneConversationHistory,
+      previewSavedConversation: previewSavedConversation,
       afterGoal: function(goal, result) { runHooks("after_goal", { MINI_A_GOAL: goal, MINI_A_RESULT: String(result || "").substring(0, 2000) }) },
       options: function() { return merge({}, sessionOptions) },
       sync: function(agent, goal, result) {

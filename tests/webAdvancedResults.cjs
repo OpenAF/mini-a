@@ -7,6 +7,7 @@ function node(tag, text = '', cls) {
   return {tag, textContent:text, className:cls, children:[], attributes:{}, dataset:{},
     append(...nodes){this.children.push(...nodes)}, replaceChildren(...nodes){this.children=nodes},
     setAttribute(k,v){this.attributes[k]=v}, addEventListener(){},
+    focus(){this.focused=true},scrollIntoView(){this.scrolled=true},
     get childElementCount(){return this.children.length},
     get value(){return this._value ?? (this.tag==='select'?this.children[0]?.value || '':'')},set value(v){this._value=v},
     get firstChild(){return this.children[0]},
@@ -59,7 +60,22 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
   const severity=all(lint).find(n=>n.tag==='select');severity.value='error';severity.onchange();assert.ok(find(lint,'a.md'));assert.ok(!find(lint,'b.md'));
   const recovery=context.renderBlock({type:'recoveries',value:{recoveries:[{id:'saved-id'}]}});
   await find(recovery,'Discard').onclick();assert.equal(commands.pop(),'/ingest recovery discard "saved-id"','discard stays in shared confirmation handler');
-  const plans=context.renderBlock({type:'absorb',value:{plans:['plan-id']}});await find(plans,'show').onclick();assert.equal(commands.pop(),'/absorb show "plan-id"');
+  const plans=context.renderBlock({type:'absorb',value:{plans:['plan-id']}});await find(plans,'Review plan').onclick();assert.equal(commands.pop(),'/absorb show "plan-id"');
+  const graph=context.renderBlock({type:'graph',value:[{from:'doc:a file.md',to:'doc:b.md',type:'links',provenance:'explicit'}],meta:{operation:'neighbors'}});
+  assert.ok(all(graph).some(n=>n.tag==='caption'&&n.textContent==='Relationships (1)'));
+  await find(graph,'doc:b.md').onclick();assert.equal(commands.pop(),'/graph neighbors "doc:b.md"');
+  assert.ok(all(graph).some(n=>n.tag==='td'&&n.textContent==='explicit'),'relationship evidence stays visible');
+  const graphPath=context.renderBlock({type:'graph',value:['doc:b.md','doc:a.md'],meta:{operation:'path'}});
+  const route=all(graphPath).find(n=>n.tag==='ol');assert.equal(route.children[0].children[0].textContent,'Neighbors: doc:b.md','path order stays intact');
+  const composition=context.renderBlock({type:'context',value:{messageCount:3,totalTokens:400,totalChars:900,estimateMethod:'approx',sections:[{section:'User',tokens:100,messages:1},{section:'Assistant',tokens:300,messages:2}]}});
+  assert.ok(all(composition).some(n=>n.textContent==='25.0%'));assert.ok(all(composition).some(n=>n.textContent==='75.0%'));
+  assert.ok(all(composition).some(n=>n.textContent.includes('not a model capacity limit')));
+  const zero=context.renderBlock({type:'context',value:{totalTokens:0,sections:[{section:'User',tokens:0,messages:0}]}});
+  assert.ok(all(zero).some(n=>n.tag==='td'&&n.textContent==='—'));
+  const dream=context.renderBlock({type:'dream',value:{status:'planned',dryrun:true,verification:{ok:false},diagnosed_issues:[{}],unresolved_issues:[{}]}});
+  assert.ok(all(dream).some(n=>n.textContent==='Recorded status: planned · Dry run'));
+  assert.ok(all(dream).some(n=>n.tag==='summary'&&n.textContent==='Unresolved issues: 1'));
+  assert.ok(all(dream).some(n=>n.className==='advanced-warning'),'failed verification is visible before raw data');
   const task=context.renderBlock({type:'subtask',value:{id:'child',answer:'# Child answer'}});await find(task,'Result').onclick();assert.equal(commands.pop(),'/subtask result child');
   assert.ok(all(task).some(n=>n.tag==='markdown'),'child answer reader');
   context.activeScreen='wiki';context.screen=node('section');context.resultPanel();await flush();
@@ -72,6 +88,15 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
   find(panel,'Older results').onclick();assert.equal(pending[0].data.before,12);pending.shift().resolve({results:[{sequence:6,command:'/wiki list',status:'completed',timestamp:'before'}],before:6,hasMore:false});await flush();
   const selector=all(panel).find(n=>n.attributes['aria-label']==='Previous results');selector.value='6';selector.onchange();assert.equal(context.previousSelections.wiki,6);
   context.uuid='other';pending.shift().resolve({timestamp:'old',value:{blocks:[{type:'markdown',value:'STALE'}]}});await flush();assert.ok(!all(panel).some(n=>n.textContent==='STALE'));
+  // Submitted results come into view once; later user interaction keeps focus.
+  for (const keepFocus of [false,true]) {
+    context.resultGeneration++;context.screen=node('section');context.screen.dataset.focusResult='new-request';context.previousSelections={};
+    context.document.activeElement=keepFocus?context.composer:context.screen;
+    context.api=async data=>data.action==='results'?{results:[{sequence:20,command:'/wiki list',status:'completed'}]}:{runId:'new-request',value:{status:'completed',blocks:[]}};
+    context.resultPanel();await flush();
+    const result=context.screen.children[0];assert.equal(!!result.focused,!keepFocus);assert.equal(!!result.scrolled,!keepFocus);
+    result.focused=false;context.document.activeElement=context.screen;await context.resultRefresh();assert.equal(result.focused,false,'refresh does not steal focus again');
+  }
   // Live inspection does not submit commands and updates stable cards even with focus inside.
   context.activeScreen='subtasks';context.screen=node('section');context.snapshot={busy:true};
   let tasks=[{id:'child',goal:'Research',status:'running',startedAt:Date.now()-2000,attempt:1}];
@@ -102,6 +127,7 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
   assert.ok(!all(context.screen).some(n=>n.textContent==='STALE TASK'));
   // String and structured view events are retained-compatible, never replay navigation.
   context.events=node('div');context.activeScreen='wiki';context.liveFloor=0;context.liveClearRun=null;
+  context.resetActivity=()=>context.events.replaceChildren();
   vm.runInContext(source.slice(source.indexOf('  function appendEvent('),source.indexOf('  async function poll(')),context);
   context.appendEvent({type:'view',value:'models',sequence:4},true);assert.equal(context.activeScreen,'wiki');
   context.appendEvent({type:'view',value:{name:'settings'},sequence:5},true);assert.equal(context.activeScreen,'wiki');

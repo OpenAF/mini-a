@@ -382,10 +382,28 @@ MiniAAdvanced.prototype.request = function(data) {
   var self = this, state = this.get(data.uuid)
   var after = Math.max(0, Math.floor(Number(data.after) || 0))
   if (!isFinite(after)) throw new Error("Invalid cursor")
-  if (data.action === "sessions") {
-    return { sessions: io.listFiles(this.root).files.filter(function(file) {
-      return file.isFile && /^[0-9a-f-]{36}\.json$/i.test(file.filename)
-    }).map(function(file) { return { uuid: file.filename.replace(/\.json$/, ""), updated: file.lastModified } }).sort(function(a,b) { return b.updated - a.updated }).slice(0,100) }
+  if (data.action === "sessions" || data.action === "session-preview") {
+    function preview(id) {
+      if (!isString(id) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw new Error("Invalid conversation id")
+      var file = self.root + "/" + id + ".json"
+      if (!io.fileExists(file)) throw new Error("Saved conversation not found")
+      var saved = io.readFileJSON(file)
+      var prefix = isMap(saved.options) && isString(saved.options.goalprefix) ? saved.options.goalprefix : self.inheritedOptions().goalprefix
+      return self.safe(state.runtime.previewSavedConversation(id, prefix), __, true)
+    }
+    if (data.action === "session-preview") return preview(data.session)
+    var offset = isDef(data.offset) ? Number(data.offset) : 0, limit = isDef(data.limit) ? Number(data.limit) : 100
+    if (!isFinite(offset) || offset < 0 || offset % 1 || !isFinite(limit) || limit < 1 || limit > 100 || limit % 1) throw new Error("Invalid history page")
+    var matching = io.listFiles(this.root).files.filter(function(file) {
+      return file.isFile && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/i.test(file.filename)
+    }).map(function(file) { return { uuid: file.filename.replace(/\.json$/, ""), updated: file.lastModified } }).sort(function(a,b) { return b.updated - a.updated || a.uuid.localeCompare(b.uuid) }).map(function(item) {
+      try { item.title = preview(item.uuid).title } catch(ignorePreview) { item.unavailable = true }
+      return item
+    }).filter(function(item) {
+      var query = String(data.query || "").toLowerCase()
+      return (String(item.title || "") + " " + item.uuid).toLowerCase().indexOf(query) >= 0
+    })
+    return { sessions: matching.slice(offset, offset + limit), nextOffset: offset + limit < matching.length ? offset + limit : null }
   }
   if (data.action === "preset-export") return { values: this.presetOptions(state) }
   if (data.action === "snapshot") return this.snapshot(state, after)

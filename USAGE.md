@@ -4428,11 +4428,16 @@ The console-colored Advanced pane follows the same light/dark theme as Simple vi
 and opens in **Live activity**. Use the compact icon-and-text view selector to
 choose a pane. Hover over an option for its description. Progress remains available
 in Live activity and in the command’s destination pane. Disable **Auto-follow** to inspect older
-entries. Drag the centered divider handle to resize the Advanced pane; its size is remembered.
+entries. Combine the text filter with **Activity event type** to narrow the stream.
+While auto-follow is off, **new events · Resume** counts arriving events (including
+filtered events) and resumes following the latest matching entry.
+Drag the centered divider handle to resize the Advanced pane; its size is remembered.
 The handle supports touch and mouse dragging, or arrow keys when focused. On narrow
 screens the panes initially stack and the divider moves vertically. The
 position button in the pane header opens a menu to dock Advanced on the right, bottom, top, or left;
 an explicit position is remembered across reloads.
+**Focus pane** expands Advanced to fill the window; **Restore split** returns to
+the previous pane size and docking position without changing the saved layout.
 The expand icon at the top right of the prompt opens a full-screen composer in
 both Simple and Advanced views, including on mobile. The draft and attachments
 stay in place. Enter adds a newline; **Ctrl/Cmd+Enter** or **Send** submits.
@@ -4462,10 +4467,21 @@ The top-right expand icon matches the main input and opens an editor across the
 browser viewport; the same control switches to the collapse icon. Collapse or Escape
 returns to the workspace and retains its draft. Switching Advanced views also
 retains drafts for the current conversation. Drafts are local to the browser and
-are cleared by a reload or conversation switch.
+are cleared by a reload. Switching conversations asks you to review, discard,
+or cancel while changes are pending. Each stacked editor can collapse independently;
+its header shows a short preview and draft/inactive status.
 
-**Apply changes** submits the edited fields together; they take effect on the next
-goal. **Discard edits** restores the currently applied values. **Reset to inherited
+**Settings** groups parameters into Models, Tools & access, Knowledge, Execution,
+and Output. Search matches category names, exact parameter names, and descriptions.
+Use All, Overrides, or Pending changes to filter the list. Detailed model
+configuration is expandable. Session presets appear near the top of both views.
+
+Settings, Models, and Prompt workspace share one pending-changes set. The sticky
+bar shows its total and offers **Review**, **Apply changes**, and **Discard edits**.
+Search and view changes preserve drafts. Review shows current and draft values;
+if an applied value changed while you were editing, review the conflict and select
+**Keep my draft**, or discard your edits. **Apply changes** submits all edited
+fields together; they take effect on the next goal. **Discard edits** restores the currently applied values. **Reset to inherited
 value** stages removal of that field's session override, restoring the server
 configuration or default preset when applied. Each editor shows draft/applied
 state and inherited/session source; chatbot persona is marked inactive when
@@ -4478,6 +4494,44 @@ presets, which save all applied session settings. Apply or discard drafts before
 saving or loading one. Existing conversation history still influences results;
 to compare a configuration with fresh history, save a preset, choose **New
 conversation**, and apply the saved preset in Prompt workspace.
+
+**History** searches saved conversation titles and IDs, groups entries by date,
+and loads server results in pages of 50. Server titles come from the first user
+message, with an ID fallback for older or unavailable archives. Selecting an entry
+scrolls and moves keyboard focus to a read-only preview. **Back to conversations**
+returns to the selected entry. **Open conversation** explicitly switches sessions after
+resolving pending edits. Previews omit system/tool messages and are bounded to 40
+messages and 20,000 characters; archives over 8 MiB have no preview. Browser
+previews use the saved display transcript. Restore, Clear, Rewind, and Save answer
+are under **Current conversation operations**.
+
+**Wiki** starts with Search, Browse root, List pages, Tree, and Browse / read.
+Connection, editing, and maintenance commands are in a separate expandable section.
+
+**Graph** starts with relationship exploration. Results offer an accessible
+relationship table with neighbor actions, ordered paths, and related pages;
+full data and Mermaid export remain available. Path search, reports, exports,
+and maintenance are expandable sections.
+
+**Ingest** provides source/section fields, labeled options, separate **Preview
+ingestion** and **Ingest source** actions, operation progress, and recovery
+inspection. **Absorb** leads with saved-plan/recovery status and plan review.
+**Dream** provides a wiki preview action and defaults its maintenance form to a
+dry run, with summarized findings before full result data. Workflow form values
+survive view changes and command results within the conversation; a reload or
+conversation switch clears them. Commands retain the console's validation,
+permissions, and confirmation behavior.
+
+**Context** presents message/token totals and a role-composition table; these
+figures describe the recorded context, not the model's capacity limit. Analysis
+and maintenance controls are secondary. **Debug** selections jump to record
+details with **Copy payload**, **Download record**, and **Back to events**.
+**Help** and local **Skills** entries expand for arguments, prerequisites and
+examples. **Answer** prioritizes the answer reader, copy and download controls;
+the original goal and server-save form are expandable.
+
+Completed submitted commands bring their results into view once. They do not
+take focus away if the user has moved to another control while waiting.
 
 Text fields in Advanced Settings, Models, command forms, and console interaction
 dialogs have a small **Edit data** icon inside the right edge of the field. It

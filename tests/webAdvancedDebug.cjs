@@ -25,6 +25,7 @@ function node(tag, text, className) {
     replaceChildren(...children) { this.children = children; },
     setAttribute(name, value) { this.attributes[name] = value; },
     addEventListener(name, fn) { this.listeners[name] = fn; },
+    focus() { this.focused = true; }, scrollIntoView() { this.scrolled = true; },
     contains(target) { return this === target || this.children.some(child => child.contains(target)); },
     get lastChild() { return this.children.at(-1); },
     get value() { return this._value ?? (this.tag === 'select' ? this.children[0]?.value : ''); },
@@ -38,7 +39,7 @@ function setup() {
     uuid: 'first', document: {body: {classList: {contains: () => false}}}, window: {},
     button: (text, onclick) => Object.assign(node('button', text), {onclick}),
     api: data => new Promise((resolve, reject) => requests.push({data, resolve, reject})),
-    events: node('div'), showError() { assert.fail('Debug errors must stay in Debug'); }
+    events: node('div'), navigator:{clipboard:{writeText:async text=>{context.copied=text;}}}, showError() { assert.fail('Debug errors must stay in Debug'); }
   });
   context.bridge = {uuid: () => context.uuid};
   vm.runInContext(source.slice(source.indexOf('  function activityText('), source.indexOf('  const toolbar =')), context);
@@ -72,6 +73,12 @@ async function page(ui, entries = [item(1), item(2)], extra = {}) {
   assert.equal(ui.body.children[0].children[0].children[0].attributes['aria-pressed'], 'false');
   assert.equal(ui.content.children.length, 1);
   assert.equal(ui.content.children[0].children[0].textContent, JSON.stringify(record(2), null, 2), 'full record plain-text fallback');
+  assert.equal(ui.details.focused,true);assert.equal(ui.details.scrolled,true);
+  const copy=ui.details.children.find(n=>n.textContent==='Copy payload');
+  await copy.onclick();assert.equal(ui.context.copied,JSON.stringify(record(2).payload,null,2));assert.match(ui.status.textContent,/Payload copied/);
+  ui.context.navigator.clipboard.writeText=async()=>{throw Error('Clipboard unavailable');};
+  await copy.onclick();assert.match(ui.status.textContent,/Could not copy payload/);
+  ui.status.textContent='#2 tool_call';
   oldDetail.resolve(record(1)); await flush();
   assert.equal(ui.status.textContent, '#2 tool_call', 'stale selection ignored');
   ui.more.onclick();
@@ -81,6 +88,7 @@ async function page(ui, entries = [item(1), item(2)], extra = {}) {
   assert.equal(ui.status.textContent, '#2 tool_call', 'pagination preserves details');
   assert.equal(ui.more.hidden, true);
   ui.body.children[2].listeners.click({target: ui.body.children[2]});
+  assert.equal(copy.disabled,true,'selection clears the previous payload immediately');
   ui.requests.at(-1).resolve({}); await flush();
   assert.match(ui.status.textContent, /no longer available/);
   assert.equal(ui.content.children.length, 0, 'new selection replaces old details immediately');

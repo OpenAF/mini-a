@@ -3,26 +3,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync('public/advanced.js', 'utf8');
-function all(node) { return [node, ...node.children.flatMap(all)]; }
-function el(tag, text = '', className) {
-  return {tag, textContent:text, className, children:[], dataset:{}, listeners:{}, value:'', isConnected:true,
-    append(...nodes) { nodes.forEach(node => { node.remove(); node.parentElement = this; this.children.push(node); }); },
-    prepend(node) { node.remove(); node.parentElement = this; this.children.unshift(node); },
-    remove() { if (this.parentElement) this.parentElement.children.splice(this.parentElement.children.indexOf(this), 1); this.parentElement = null; },
-    replaceChildren(...nodes) { this.children.forEach(n => n.parentElement = null); this.children = []; this.append(...nodes); },
-    insertBefore(node, next) { node.remove(); node.parentElement = this; const index = this.children.indexOf(next); this.children.splice(index < 0 ? this.children.length : index, 0, node); },
-    get nextSibling() { const siblings = this.parentElement?.children || []; return siblings[siblings.indexOf(this) + 1] || null; },
-    setAttribute(key, value) { this[key] = value; },
-    addEventListener(type, listener) { (this.listeners[type] ||= []).push(listener); },
-    emit(type, event = {}) { this.listeners[type]?.forEach(listener => listener(event)); },
-    querySelector(selector) { return all(this).slice(1).find(node => selector === '[data-prompt-expand]' && node.dataset.promptExpand); },
-    showModal() { this.open = true; }, close() { this.open = false; this.emit('close'); }, focus() { this.focused = true; }
-  };
-}
+const {el, all} = require('./webAdvancedFixture.cjs');
 const requests = [], bindings = [];
 let uuid = 'first', serial = 0, reject = false, overlap = false;
 const context = vm.createContext({
-  el, button:(text, onclick) => Object.assign(el('button',text),{onclick}),
+  storageMode:"current", el, button:(text, onclick) => Object.assign(el('button',text),{onclick}),
   presetRequest: data => context.api(data),
   tabIcon:() => el('svg'),
   input:(placeholder, value = '') => Object.assign(el('input'),{placeholder,value}),
@@ -141,8 +126,18 @@ function complete(data, failed = false) {
   setting('rules').readOnly=true; render();
   assert.equal(field('rules').disabled,true);
   assert.equal(bindings.at(-1).field.disabled,false,'read-only fields receive no new structured editor');
+  edit('youare','Switch guard draft');
+  const beforeSwitch = requests.length;
+  let proceed = context.resolvePendingChanges();
+  all(evaluate('draftDialog')).find(n => n.textContent === 'Cancel').onclick();
+  assert.equal(await proceed,false); assert.equal(field('youare').value,'Switch guard draft');
+  proceed = context.resolvePendingChanges();
+  all(evaluate('draftDialog')).find(n => n.textContent === 'Discard and continue').onclick();
+  assert.equal(await proceed,true); assert.equal(dirty('youare'),false);
+  assert.equal(requests.length,beforeSwitch,'resolving a switch never submits draft settings implicitly');
   // Execute the actual reset hook, including collapse and draft cleanup on UUID changes.
   Object.assign(context,{dialog:el('dialog'),previousSelections:{},events:el('div'),resultGeneration:0});
+  context.resetActivity=()=>context.events.replaceChildren();
   vm.runInContext(source.slice(source.indexOf('  function resetSessionView() {'),source.indexOf('  async function mutate(')),context);
   uuid='second'; context.resetSessionView();
   assert.equal(evaluate('Object.keys(promptDrafts).length'),0,'drafts cannot leak to another conversation');

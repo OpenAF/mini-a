@@ -27,14 +27,32 @@ try {
   var first=advanced.get('first'), second=advanced.get('second')
   check(first.runtime.options().conversation === testRoot + '/.openaf-mini-a/history/c-first.json', 'Advanced conversations use the console history directory: ' + first.runtime.options().conversation + ' expected ' + testRoot)
   check(advanced.request({uuid:'first',action:'stats'}).metrics === null, 'stats before first goal')
-  var originalAgent = first.runtime.agent
+  var originalAgent = first.runtime.agent, originalMetrics = first.runtime.metrics
   first.runtime.agent = function() { return { getMetrics: function() { return { goals: { achieved: 2 }, advisor: { trace: ['private'] }, memory: { enabled: true, sections: [{name: 'notes', count: 2}] }, invalid: NaN } } } }
+  first.runtime.metrics = function() { return first.runtime.agent().getMetrics() }
   var chartStats = advanced.request({uuid:'first',action:'stats'})
   check(chartStats.metrics.goals.achieved === 2, 'structured chart metrics')
   check(chartStats.details.memory.sections[0].name === 'notes' && chartStats.details.memory.enabled === true, 'structured statistics retain arrays and booleans')
   check(stringify(chartStats).indexOf('private') < 0, 'chart metrics omit text and traces')
   check(!global.__busy.first && jobs.length === 0, 'statistics read does not schedule a command')
   first.runtime.agent = originalAgent
+  first.runtime.metrics = originalMetrics
+  var previewId = "12345678-1234-1234-1234-123456789abc"
+  var previewFile = testRoot + '/.openaf-mini-a/history/c-' + previewId + '.json'
+  io.writeFileJSON(testRoot + '/' + previewId + '.json', { options: { goalprefix: 'PRIVATE PREFIX\n' } })
+  io.writeFileJSON(previewFile, { c: [{ role: 'system', content: 'PRIVATE SYSTEM' }, { role: 'user', content: 'PRIVATE PREFIX\nPreview test topic' }, { role: 'assistant', content: 'Answer token=TOP-SECRET' }] })
+  var preview = advanced.request({uuid:'first',action:'session-preview',session:previewId})
+  check(preview.title === 'Preview test topic' && preview.messages.length === 2, 'preview title and role filtering')
+  check(stringify(preview).indexOf('PRIVATE') < 0 && stringify(preview).indexOf('TOP-SECRET') < 0, 'preview strips prefix and redacts secrets')
+  check(!advanced.sessions[previewId] && jobs.length === 0, 'preview does not restore target or schedule work')
+  var listed = advanced.request({uuid:'first',action:'sessions',query:'Preview test',limit:50})
+  check(listed.sessions.length === 1 && listed.sessions[0].title === 'Preview test topic', 'server history search finds content-derived title')
+  var invalidPreview = false
+  try { advanced.request({uuid:'first',action:'session-preview',session:'../../presets'}) } catch(e) { invalidPreview = true }
+  check(invalidPreview, 'preview rejects path traversal')
+  io.writeFileString(previewFile, 'invalid json')
+  check(advanced.request({uuid:'first',action:'session-preview',session:previewId}).unavailable, 'corrupt archives degrade to unavailable preview')
+  io.rm(previewFile); io.rm(testRoot + '/' + previewId + '.json')
   var snap=advanced.snapshot(first,0)
   check(snap.commands.indexOf('absorb')>=0,'broad command registry')
   var settingByName = {}

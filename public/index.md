@@ -96,25 +96,31 @@
     })();
     </script>
 <script type="module">
-    // Try local first, fallback to CDN
-    let mermaid;
-    try {
-        mermaid = await import('js/mermaid.js');
-        console.log('Mermaid loaded from local server');
-    } catch (error) {
-        console.warn('Local mermaid failed, loading from CDN:', error);
-        mermaid = await import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs');
-        console.log('Mermaid loaded from CDN');
+    // The Mermaid oPack registers a classic browser bundle through mapLibs.
+    let mermaidLib = window.mermaid;
+    if (!mermaidLib) {
+        try {
+            await new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = new URL('./js/mermaid.js', document.baseURI).href;
+                script.onload = resolve; script.onerror = () => reject(new Error('Local Mermaid bundle unavailable'));
+                document.head.append(script);
+            });
+            mermaidLib = window.mermaid;
+            if (!mermaidLib || typeof mermaidLib.initialize !== 'function') throw new Error('Invalid local Mermaid bundle');
+        } catch (error) {
+            console.warn('Local Mermaid unavailable, loading from CDN:', error);
+            const module = await import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs');
+            mermaidLib = module.default || module;
+        }
     }
-    
-    // Handle both default export and named exports
-    const mermaidLib = mermaid.default || mermaid;
-    
+
     // Detect initial theme based on body classes or system preference
     const initialDark = document.body.classList.contains('markdown-body-dark') || 
                         (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
     mermaidLib.initialize({ 
         startOnLoad: false,
+        securityLevel: 'strict',
         theme: initialDark ? 'dark' : 'default',
         themeVariables: {
             darkMode: initialDark
@@ -2912,6 +2918,7 @@
     }
 
     async function handleBranchConversation() {
+        if (advancedUI && !await advancedUI.beforeSessionChange()) return;
         try {
             const events = getCurrentConversationEvents();
             if (!events.length) {
@@ -5252,6 +5259,7 @@
 
     async function loadConversationEntry(entry, strict = false) {
         if (!entry) return;
+        if (advancedUI && !await advancedUI.beforeSessionChange()) return;
         resetActivityDisclosure = true;
 
         if (isProcessing) {
@@ -5984,7 +5992,7 @@
         if (binaryAttachments.length && !rawPrompt.trim()) { notifyAttachmentWarning('Enter a question or instruction for the attached files.'); composerNotice('Enter a question or instruction for the attached files.'); return; }
         if (advancedUI && advancedUI.enabled()) {
             if (!rawPrompt.trim()) return;
-            try { await advancedUI.submit(buildPromptWithAttachments(rawPrompt, attachmentsEnabled ? attachments : []), binaryAttachments); clearAttachments(); setComposerExpanded(false); autoResizeTextarea(); }
+            try { if (await advancedUI.submit(buildPromptWithAttachments(rawPrompt, attachmentsEnabled ? attachments : []), binaryAttachments) === false) return; clearAttachments(); setComposerExpanded(false); autoResizeTextarea(); }
             catch (error) { console.error(error); alert(error.message); }
             return;
         }
@@ -6437,6 +6445,7 @@
 
     /* ========== EVENT HANDLERS ========== */
     async function handleClearClick() {
+        if (advancedUI && !await advancedUI.beforeSessionChange()) return;
         resetActivityDisclosure = true;
         const uuidToClear = currentSessionUuid || 
             (typeof window !== 'undefined' ? window.mini_a_session_uuid : null);

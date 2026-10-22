@@ -13,6 +13,9 @@ window.MiniAAdvancedUI = function(bridge) {
     ['goalprefix', 'Goal prefix', 'Reusable wording prepended to every submitted goal.']
   ];
   const promptDrafts = {};
+  const workflowDrafts = {};
+  const promptExpanded = {};
+  let draftDialog = null;
   let promptPending = null, promptRefresh = null, promptPopup = null, settingsRefresh = null;
   let promptFeedback = '';
   let subtaskRefresh = null, subtaskTick = 0;
@@ -116,7 +119,7 @@ window.MiniAAdvancedUI = function(bridge) {
   split.append(el('span', undefined, 'advanced-divider-grip'));
   document.body.append(split);
   const stacked = window.matchMedia('(max-width:900px)');
-  let splitSize = 45, drag = null, dockPreference = null, dockButtons = [], dockTrigger = null;
+  let splitSize = 45, drag = null, dockPreference = null, dockButtons = [], dockTrigger = null, paneFocused = false;
   try { const saved = localStorage.getItem('mini-a-advanced-dock'); if (['right','bottom','top','left'].includes(saved)) dockPreference = saved; } catch (_) {}
   function dockPosition() { return dockPreference || (stacked.matches ? 'bottom' : 'right'); }
   function horizontalDivider() { return ['top','bottom'].includes(dockPosition()); }
@@ -124,6 +127,14 @@ window.MiniAAdvancedUI = function(bridge) {
     finishDrag(); dockPreference = position;
     try { localStorage.setItem('mini-a-advanced-dock', position); } catch (_) {}
     applySplit();
+  }
+  function setPaneFocused(value) {
+    finishDrag(); paneFocused = value;
+    document.body.classList.toggle('advanced-pane-focused', value);
+    split.hidden = !enabled || value;
+    focusControl.textContent = value ? 'Restore split' : 'Focus pane';
+    focusControl.setAttribute('aria-pressed', String(value));
+    applySplit(splitSize, false);
   }
   try { const saved = Number(localStorage.getItem('mini-a-advanced-split')); if (saved >= 30 && saved <= 70) splitSize = saved; } catch (_) {}
   function applySplit(size = splitSize, persist = true) {
@@ -181,13 +192,35 @@ window.MiniAAdvancedUI = function(bridge) {
   const follow = el('input'); follow.type = 'checkbox'; follow.checked = true;
   follow.setAttribute('aria-label', 'Auto-follow live activity'); followLabel.append(follow);
   activityHeader.append(el('h3', 'Live activity'), followLabel);
-  activity.append(activityHeader, filter, events);
+  const eventTypeFilter = el('select'); eventTypeFilter.setAttribute('aria-label', 'Activity event type');
+  const allEvents = el('option', 'All event types'); allEvents.value = ''; eventTypeFilter.append(allEvents);
+  const activityFilters = el('div', undefined, 'advanced-activity-filters'); activityFilters.append(filter, eventTypeFilter);
+  let unseenEvents = 0;
+  const newEvents = button('', () => { follow.checked = true; followActivity(); follow.focus(); }); newEvents.hidden = true;
+  newEvents.className = 'advanced-new-events';
+  newEvents.title = 'Events received while auto-follow was paused, including events hidden by filters. Resume at the latest matching event.';
+  activity.append(activityHeader, activityFilters, newEvents, events);
+  function updateNewEvents() {
+    newEvents.textContent = unseenEvents + ' new event' + (unseenEvents === 1 ? '' : 's') + ' · Resume';
+    newEvents.hidden = !unseenEvents || follow.checked;
+  }
+  function resetActivity() {
+    events.replaceChildren(); unseenEvents = 0;
+    eventTypeFilter.replaceChildren(allEvents); eventTypeFilter.value = '';
+    updateNewEvents();
+  }
+  function eventMatches(node) {
+    return (!eventTypeFilter.value || node.dataset.type === eventTypeFilter.value) && node.textContent.toLowerCase().includes(filter.value.toLowerCase());
+  }
   function followActivity() {
-    if (follow.checked) requestAnimationFrame(() => { if (follow.checked) events.scrollTop = events.scrollHeight; });
+    if (follow.checked) {
+      unseenEvents = 0; updateNewEvents();
+      requestAnimationFrame(() => { if (follow.checked) events.scrollTop = events.scrollHeight; });
+    }
   }
   follow.onchange = followActivity;
   applySplit();
-  filter.oninput = () => { [...events.children].forEach(n => n.hidden = !n.textContent.toLowerCase().includes(filter.value.toLowerCase())); followActivity(); };
+  filter.oninput = eventTypeFilter.onchange = () => { [...events.children].forEach(n => n.hidden = !eventMatches(n)); followActivity(); };
   shell.append(paneHeader, nav, screen, activity); document.body.append(shell);
   const suggestions = el('div', undefined, 'advanced-completions'); suggestions.hidden = true;
   suggestions.setAttribute('role', 'listbox'); toolbar.after(suggestions);
@@ -315,6 +348,9 @@ window.MiniAAdvancedUI = function(bridge) {
   docking.addEventListener('focusout', event => { if (!docking.contains(event.relatedTarget)) closeDockOptions(); });
   document.addEventListener('pointerdown', event => { if (!docking.contains(event.target)) closeDockOptions(); });
   paneHeader.append(docking); applySplit();
+  const focusControl = button('Focus pane', () => setPaneFocused(!paneFocused));
+  focusControl.setAttribute('aria-pressed', 'false'); focusControl.title = 'Expand the Advanced pane. Restore split returns to the previous size and position.';
+  paneHeader.append(focusControl);
   const controls = el('div', undefined, 'advanced-session-actions');
   function sessionAction(label, icon, action) {
     const control = button('', action);
@@ -325,6 +361,7 @@ window.MiniAAdvancedUI = function(bridge) {
   }
   async function newConversation() {
     if (busy) throw new Error('Stop or finish the current operation before starting a new conversation.');
+    if (!await resolvePendingChanges()) return;
     await bridge.newConversation(); resetSessionView();
     activeScreen = 'activity'; renderScreen();
     sessionStorage.removeItem(storeKey); await poll();
@@ -346,12 +383,14 @@ window.MiniAAdvancedUI = function(bridge) {
   function resetSessionView() {
     if (dialog.open) dialog.close();
     if (promptPopup) promptPopup.close();
+    if (draftDialog) draftDialog.close();
     Object.keys(promptDrafts).forEach(key => delete promptDrafts[key]);
+    Object.keys(workflowDrafts).forEach(key => delete workflowDrafts[key]);
     promptPending = promptRefresh = settingsRefresh = null;
     promptFeedback = '';
     after = 0; snapshot = null; dialogId = null; liveFloor = 0; liveClearRun = null; submittedView = null; viewParams = {};
     Object.keys(previousSelections).forEach(key => delete previousSelections[key]);
-    resultGeneration++; resultRefresh = subtaskRefresh = null; events.replaceChildren();
+    resultGeneration++; resultRefresh = subtaskRefresh = null; resetActivity();
   }
   async function mutate(data) {
     const uuid = bridge.uuid(), requestId = bridge.newRequestId();
@@ -363,20 +402,23 @@ window.MiniAAdvancedUI = function(bridge) {
       activeScreen = destination.name === 'editor' ? 'activity' : destination.name; viewParams = destination.params || {};
       submittedView = {requestId, name: activeScreen};
       delete previousSelections[activeScreen];
-      if (viewParams.command === 'cls') { liveFloor = after; events.replaceChildren(); }
+      if (viewParams.command === 'cls') { liveFloor = after; resetActivity(); }
       if (activeScreen === 'stats') statsMode = viewParams.mode || 'summary';
-      filter.value = ''; filter.oninput(); renderScreen();
+      filter.value = ''; filter.oninput(); renderScreen(requestId);
       if (activeScreen !== 'activity') screen.focus({preventScroll:true});
     }
     busy = true; await poll();
   }
   async function command(value, attachments) {
+    if (/^\/(?:clear|reset|restore|rewind|exit|quit)(?:\s|$)/.test(value) && !await resolvePendingChanges()) return false;
     history.push(value); historyIndex = history.length;
     await mutate({action:'command',command:value,attachments});
   }
   function setEnabled(value) {
     debugGeneration++;
-    enabled = value; shell.hidden = split.hidden = !value; if (!value) finishDrag(); document.body.classList.toggle('mini-a-advanced', value);
+    enabled = value; shell.hidden = !value; split.hidden = !value || paneFocused;
+    if (!value) setPaneFocused(false);
+    document.body.classList.toggle('mini-a-advanced', value);
     toggle.textContent = value ? 'Simple' : 'Advanced';
     if (value) { const uuid = sessionStorage.getItem(storeKey); if (uuid && !snapshot) bridge.resume(uuid); if (activeScreen === 'debug') renderScreen(); poll().catch(showError); }
   }
@@ -392,7 +434,7 @@ window.MiniAAdvancedUI = function(bridge) {
   function appendEvent(record, navigate = true) {
     if (record.type === 'view') {
       // Navigation happens once, from the submission receipt. Replays never move focus.
-      if (record.value === 'clear') { liveFloor = record.sequence; liveClearRun = record.runId; events.replaceChildren(); }
+      if (record.value === 'clear') { liveFloor = record.sequence; liveClearRun = record.runId; resetActivity(); }
       return;
     }
     if (record.sequence <= liveFloor || (liveClearRun && record.runId === liveClearRun)) return;
@@ -418,7 +460,11 @@ window.MiniAAdvancedUI = function(bridge) {
       } catch(e){showError(e);}
     });
     events.append(details);
-    details.hidden = !details.textContent.toLowerCase().includes(filter.value.toLowerCase());
+    if (![...eventTypeFilter.children].some(option => option.value === record.type)) {
+      const option = el('option', record.type); option.value = record.type; eventTypeFilter.append(option);
+    }
+    details.hidden = !eventMatches(details);
+    if (!follow.checked && navigate) { unseenEvents++; updateNewEvents(); }
     while (events.childElementCount > 1000) events.firstChild.remove();
   }
   async function poll() {
@@ -535,8 +581,9 @@ window.MiniAAdvancedUI = function(bridge) {
         if (!pending.failed) Object.entries(pending.entries).forEach(([name, submitted]) => {
           const draft = promptDrafts[name];
           const setting = data.settings.find(s => s.name === name);
-          if (draft && setting && draft.value === submitted.value && draft.reset === submitted.reset) {
-            draft.value = promptText(setting.value); draft.reset = false; draft.baseline = draft.value;
+          if (draft && setting) {
+            if (draft.value === submitted.value && draft.reset === submitted.reset) { draft.value = promptText(setting.value); draft.reset = false; }
+            draft.baseline = promptText(setting.value); draft.conflict = false;
           }
         });
         const presetMessage = {save:'saved.',apply:'applied.',default:'set as default.',delete:'deleted.'};
@@ -549,7 +596,8 @@ window.MiniAAdvancedUI = function(bridge) {
       if (!draft) return;
       const dirty = promptDirty(draft), value = promptText(setting.value);
       if (!dirty) draft.value = value;
-      draft.baseline = value;
+      if (dirty && draft.baseline !== value && !promptPending?.entries[setting.name]) draft.conflict = true;
+      if (!dirty) { draft.baseline = value; draft.conflict = false; }
     });
   }
   async function submitPromptSettings(data, entries = {}) {
@@ -570,6 +618,93 @@ window.MiniAAdvancedUI = function(bridge) {
       if (pending.uuid === bridge.uuid()) promptFeedback = 'Changes could not be applied: ' + (error.message || String(error));
       throw error;
     } finally { if (promptRefresh) promptRefresh(); if (settingsRefresh) settingsRefresh(); }
+  }
+  function draftFor(setting) {
+    return promptDrafts[setting.name] || (promptDrafts[setting.name] = {value:promptText(setting.value),baseline:promptText(setting.value),reset:false,conflict:false});
+  }
+  function dirtyNames() { return Object.keys(promptDrafts).filter(name => promptDirty(promptDrafts[name])); }
+  function refreshDraftViews() { if (promptRefresh) promptRefresh(); if (settingsRefresh) settingsRefresh(); }
+  function discardDrafts() {
+    dirtyNames().forEach(name => {
+      const draft = promptDrafts[name];
+      draft.value = promptText(snapshot.settings.find(s => s.name === name)?.value);
+      draft.baseline = draft.value; draft.reset = false; draft.conflict = false;
+    });
+    refreshDraftViews();
+  }
+  function applyDrafts() {
+    const values = {}, reset = [], entries = {};
+    dirtyNames().forEach(name => {
+      const draft = promptDrafts[name], setting = snapshot.settings.find(s => s.name === name);
+      if (!setting || setting.readOnly) return;
+      if (draft.conflict) throw new Error('Review changed server values before applying your draft.');
+      entries[name] = {...draft};
+      if (draft.reset) reset.push(name);
+      else values[name] = setting.type === 'boolean' ? draft.value === 'true' : draft.value;
+    });
+    return submitPromptSettings({action:'settings',values,reset}, entries);
+  }
+  function reviewDrafts() {
+    const popup = el('dialog', undefined, 'advanced-dialog advanced-draft-review');
+    popup.setAttribute('aria-label', 'Review pending changes');
+    popup.append(el('h3', 'Pending session changes'), el('p', 'Settings and Prompt workspace apply together.'));
+    dirtyNames().forEach(name => {
+      const draft = promptDrafts[name], setting = snapshot.settings.find(s => s.name === name);
+      const row = el('section'); row.append(el('h4', name));
+      // Values are text nodes, including model JSON and user-authored prompt text.
+      row.append(el('small', 'Current value'), el('pre', promptText(setting?.value) || '(unset)'));
+      row.append(el('small', draft.reset ? 'Reset to inherited value' : 'Draft value'), el('pre', draft.value || '(unset)'));
+      if (draft.conflict) row.append(el('p', 'The applied value changed while you were editing.', 'advanced-input-error'), button('Keep my draft', () => {
+        draft.baseline = promptText(snapshot.settings.find(s => s.name === name)?.value); draft.conflict = false; popup.close(); refreshDraftViews(); reviewDrafts();
+      }));
+      popup.append(row);
+    });
+    popup.append(button('Close', () => popup.close()));
+    const previous = document.activeElement;
+    popup.addEventListener('close', () => { popup.remove(); if (draftDialog === popup) draftDialog = null; previous?.focus(); });
+    draftDialog = popup; document.body.append(popup); popup.showModal();
+  }
+  function pendingBar() {
+    const bar = el('div', undefined, 'advanced-pending-bar'), count = el('span'); count.setAttribute('role', 'status');
+    const review = button('Review', reviewDrafts), apply = promptAction('Apply changes', 'apply', applyDrafts);
+    const discard = promptAction('Discard edits', 'discard', discardDrafts);
+    bar.append(count, review, apply, discard); screen.append(bar);
+    return () => {
+      const names = dirtyNames(), locked = busy || !!promptPending || !!snapshot.closed;
+      count.textContent = names.length + ' pending · Settings + Prompt workspace';
+      review.disabled = !names.length; apply.disabled = locked || !names.length || names.some(name => promptDrafts[name].conflict);
+      discard.disabled = !!promptPending || !names.length;
+    };
+  }
+  async function resolvePendingChanges() {
+    if (promptPending) throw new Error('Wait for the pending changes to finish applying.');
+    if (!dirtyNames().length) return true;
+    if (draftDialog) return false;
+    return new Promise(resolve => {
+      const popup = el('dialog', undefined, 'advanced-dialog'); let proceed = false;
+      const previous = document.activeElement;
+      popup.setAttribute('aria-label', 'Resolve pending changes');
+      popup.append(el('h3', 'You have pending session changes'), el('p', 'Review and apply them before switching, discard them, or stay in this conversation.'),
+        button('Review changes', () => { popup.close(); setEnabled(true); activeScreen = 'prompts'; renderScreen(); reviewDrafts(); }),
+        button('Discard and continue', () => { discardDrafts(); proceed = true; popup.close(); }), button('Cancel', () => popup.close()));
+      popup.addEventListener('close', () => { popup.remove(); if (draftDialog === popup) draftDialog = null; previous?.focus(); resolve(proceed); });
+      draftDialog = popup; document.body.append(popup); popup.showModal();
+    });
+  }
+  function sessionPresets() {
+    const panel = el('details', undefined, 'advanced-session-presets'); panel.append(el('summary', 'Session presets · ' + (storageMode === 'browser' ? 'Browser storage' : 'Server storage')));
+    const controls = el('div', undefined, 'advanced-actions'), name = input('Preset name'), names = el('select');
+    name.setAttribute('aria-label', 'Preset name'); names.setAttribute('aria-label', 'Saved preset');
+    const buttons = [button('Save preset', () => submitPromptSettings({action:'preset',op:'save',name:name.value}))];
+    controls.append(name, buttons[0], names);
+    ['apply','default','delete'].forEach(op => { const control = button(({apply:'Apply preset',default:'Set default',delete:'Delete preset'})[op], () => submitPromptSettings({action:'preset',op,name:names.value})); buttons.push(control); controls.append(control); });
+    panel.append(el('p', 'Presets contain all applied session settings. Apply or discard pending changes first.', 'advanced-prompt-help'), controls); screen.append(panel);
+    let last = '';
+    return () => {
+      const serialized = JSON.stringify(snapshot.presets);
+      if (serialized !== last) { const selected = names.value; names.replaceChildren(); snapshot.presets.forEach(p => { const option = el('option', p); option.value = p; names.append(option); }); if (snapshot.presets.includes(selected)) names.value = selected; last = serialized; }
+      buttons.forEach((control, index) => { control.disabled = busy || !!promptPending || !!snapshot.closed || !!dirtyNames().length || (index > 0 && !snapshot.presets.length); });
+    };
   }
   function updatePromptExpandIcon(control, expanded, label, field) {
     const action = (expanded ? 'Collapse ' : 'Expand ') + label + ' editor';
@@ -605,38 +740,20 @@ window.MiniAAdvancedUI = function(bridge) {
     const refreshers = [];
     const relatedNames = ['chatbotmode','promptprofile','systempromptbudget','noagentsmd','format'];
     const find = name => snapshot.settings.find(s => s.name === name);
-    const draftFor = setting => promptDrafts[setting.name] || (promptDrafts[setting.name] = {value:promptText(setting.value),baseline:promptText(setting.value),reset:false});
-    const workspaceNames = [...promptFields.map(([name]) => name), ...relatedNames];
-    const dirtyNames = () => workspaceNames.filter(name => promptDrafts[name] && promptDirty(promptDrafts[name]));
     const locked = () => busy || !!promptPending || !!snapshot.closed;
-    const controls = el('div', undefined, 'advanced-actions');
+    const refreshPresets = sessionPresets(), refreshPending = pendingBar();
     const feedback = el('p', undefined, 'advanced-prompt-help'); feedback.setAttribute('role', 'status');
-    const apply = promptAction('Apply changes', 'apply', () => {
-      const values = {}, reset = [], entries = {};
-      dirtyNames().forEach(name => {
-        const draft = promptDrafts[name], setting = find(name);
-        if (!setting || setting.readOnly) return;
-        entries[name] = {...draft};
-        if (draft.reset) reset.push(name);
-        else values[name] = setting.type === 'boolean' ? draft.value === 'true' : draft.value;
-      });
-      return submitPromptSettings({action:'settings',values,reset}, entries);
-    });
-    const discard = promptAction('Discard edits', 'discard', () => {
-      dirtyNames().forEach(name => {
-        const draft = promptDrafts[name]; draft.value = promptText(find(name)?.value); draft.baseline = draft.value; draft.reset = false;
-      });
-      promptRefresh();
-    });
-    controls.append(apply, discard, promptAction('New conversation', 'newconversation', newConversation));
-    screen.append(el('p', 'Applied changes take effect on the next submitted goal. Existing conversation history still influences answers. For a fresh test, save a preset, start a new conversation, and apply that preset.', 'advanced-prompt-help'), controls, feedback);
+    screen.append(el('p', 'Applied changes take effect on the next goal. Existing conversation history still influences answers.', 'advanced-prompt-help'), feedback);
     const list = el('div', undefined, 'advanced-prompt-fields'); screen.append(list);
     promptFields.forEach(([name, label, help]) => {
       const setting = find(name); if (!setting) return;
-      const draft = draftFor(setting), row = el('section', undefined, 'advanced-prompt-card');
-      const title = el('label', label + ' (' + name + ')');
+      const draft = draftFor(setting), row = el('details', undefined, 'advanced-prompt-card');
+      row.open = promptExpanded[name] !== undefined ? promptExpanded[name] : name === 'youare';
+      row.addEventListener('toggle', () => { promptExpanded[name] = row.open; });
+      const summary = el('summary'), preview = el('span', undefined, 'advanced-prompt-preview');
+      const title = el('span', label + ' (' + name + ')');
       const field = el('textarea'); field.value = draft.value; field.rows = 6; field.spellcheck = false;
-      field.id = 'advanced-prompt-' + name; title.htmlFor = field.id;
+      field.id = 'advanced-prompt-' + name; field.setAttribute('aria-label', label + ' (' + name + ')');
       const description = el('p', help + ' @file references remain references; this editor does not write to the referenced file.', 'advanced-prompt-help');
       description.id = field.id + '-help'; field.setAttribute('aria-describedby', description.id);
       const state = el('small'); state.setAttribute('role', 'status');
@@ -649,18 +766,19 @@ window.MiniAAdvancedUI = function(bridge) {
       expand.className = 'advanced-prompt-expand'; expand.dataset.promptExpand = name;
       updatePromptExpandIcon(expand, false, label, field); holder.append(expand);
       const reset = promptAction('Reset to inherited value', 'reset', () => { draft.value = promptText(find(name).inheritedValue); draft.reset = true; promptRefresh(); });
-      actions.append(reset); row.append(title, description, state, holder, actions); list.append(row);
+      actions.append(reset); summary.append(title, state, preview); row.append(summary, description, holder, actions); list.append(row);
       if (!setting.readOnly && setting.dataEditor === 'array') window.MiniADataEditor.bind(field, {label:name,root:'array'});
       field.addEventListener('input', () => { draft.value = field.value; draft.reset = false; promptRefresh(); });
       // Structured rules editing writes the source textarea through input/change events.
       field.addEventListener('change', () => { draft.value = field.value; draft.reset = false; promptRefresh(); });
       refreshers.push(() => {
         const current = find(name);
+        preview.textContent = draft.value.replace(/\s+/g, ' ').slice(0, 100) || '(unset)';
         if (field.value !== draft.value) field.value = draft.value;
         field.disabled = !!current.readOnly || !!snapshot.closed;
         reset.disabled = locked() || current.readOnly;
         const inactive = name === 'chatyouare' && find('chatbotmode')?.value !== true;
-        state.textContent = `${promptPending?.entries[name] ? 'Applying…' : draft.reset ? 'Draft reset' : promptDirty(draft) ? 'Draft' : 'Applied'} · ${current.source === 'session' ? 'Session override' : 'Inherited setting'}${inactive ? ' · Inactive: chatbot mode is off' : ''}${current.readOnly ? ' · Server-controlled' : ''}`;
+        state.textContent = `${promptPending?.entries[name] ? 'Applying…' : draft.reset ? 'Draft reset' : promptDirty(draft) ? 'Draft' : 'Applied'}${draft.conflict ? ' · Conflict: review required' : ''} · ${current.source === 'session' ? 'Session override' : 'Inherited setting'}${inactive ? ' · Inactive: chatbot mode is off' : ''}${current.readOnly ? ' · Server-controlled' : ''}`;
       });
     });
     const related = el('details', undefined, 'advanced-prompt-related'); related.append(el('summary', 'Related settings'));
@@ -670,35 +788,272 @@ window.MiniAAdvancedUI = function(bridge) {
       field.setAttribute('aria-label', name); field.title = setting.description || '';
       if (setting.type === 'boolean') { field.type = 'checkbox'; field.checked = draft.value === 'true'; }
       else if (setting.type === 'number') field.type = 'number';
-      field.oninput = () => { draft.value = setting.type === 'boolean' ? String(field.checked) : field.value; promptRefresh(); };
+      field.oninput = () => { draft.value = setting.type === 'boolean' ? String(field.checked) : field.value; draft.reset = false; promptRefresh(); };
       label.append(field); related.append(label);
       refreshers.push(() => { field.disabled = setting.readOnly || !!snapshot.closed; if (setting.type === 'boolean') field.checked = draft.value === 'true'; else if (field.value !== draft.value) field.value = draft.value; });
     });
     screen.append(related);
-    const presets = el('div', undefined, 'advanced-actions');
-    const name = input('Preset name'); name.setAttribute('aria-label', 'Prompt preset name');
-    const names = el('select'); names.setAttribute('aria-label', 'Saved prompt preset');
-    let presetList = '';
-    const save = promptAction('Save preset', 'save', () => submitPromptSettings({action:'preset',op:'save',name:name.value}));
-    const load = promptAction('Apply preset', 'load', () => submitPromptSettings({action:'preset',op:'apply',name:names.value}));
-    presets.append(name, save, names, load); screen.append(el('p', 'Presets save all applied session settings. Apply or discard drafts before saving or loading a preset.', 'advanced-prompt-help'), presets);
     promptRefresh = () => {
-      refreshers.forEach(refresh => refresh());
+      refreshers.forEach(refresh => refresh()); refreshPending(); refreshPresets();
       feedback.textContent = promptPending ? 'Applying…' : promptFeedback;
       feedback.hidden = !feedback.textContent;
-      apply.disabled = locked() || !dirtyNames().length;
-      discard.disabled = !!promptPending || !dirtyNames().length;
-      save.disabled = load.disabled = locked() || !!dirtyNames().length;
-      const serialized = JSON.stringify(snapshot.presets);
-      if (serialized !== presetList) {
-        const selected = names.value; names.replaceChildren();
-        snapshot.presets.forEach(preset => { const option = el('option', preset); option.value = preset; names.append(option); });
-        if (snapshot.presets.includes(selected)) names.value = selected;
-        presetList = serialized;
-      }
-      if (!snapshot.presets.length) load.disabled = true;
     };
     promptRefresh();
+  }
+  function settingCategory(name) {
+    if (/^(model|llm|lc|advisor|emergencyreserve)/.test(name)) return 'Models';
+    if (/^(mcp|shell|useshell|tool|usetool|useutils|utils|fileallow|policy|checkall|readwrite|browser|usebrowser|web|onport|worker)/.test(name)) return 'Tools & access';
+    if (/^(wiki|usewiki|knowledge|memory|usememory|ingest|absorb|dream|skills|useskills|extraskills|rag|userag)/.test(name)) return 'Knowledge';
+    if (/^(format|output|outfile|debug|audit|metrics|log|stream|verbose|color|markdown|show|answer)/.test(name)) return 'Output';
+    return 'Execution';
+  }
+  function settingsWorkspace() {
+    const refreshPresets = sessionPresets(), refreshPending = pendingBar();
+    const search = input('Search categories, parameters, descriptions', viewParams.filter || ''); search.setAttribute('aria-label', 'Search settings');
+    const category = el('select'), scope = el('select'); category.setAttribute('aria-label', 'Settings category'); scope.setAttribute('aria-label', 'Settings filter');
+    ['All categories','Models','Tools & access','Knowledge','Execution','Output'].forEach(value => { const option = el('option', value); option.value = value; category.append(option); });
+    ['All','Overrides','Pending changes'].forEach(value => { const option = el('option', value); option.value = value; scope.append(option); });
+    if (activeScreen === 'models') category.value = 'Models';
+    const filters = el('div', undefined, 'advanced-settings-filters'); filters.append(search, category, scope); screen.append(filters);
+    const count = el('p', undefined, 'advanced-prompt-help'); count.setAttribute('role', 'status');
+    const list = el('div', undefined, 'advanced-settings'); screen.append(count, list);
+    const feedback = el('p', undefined, 'advanced-prompt-help'); feedback.setAttribute('role', 'status'); screen.append(feedback);
+    let refreshers = [], commandFilter = viewParams.command, membership = '';
+    const filterMembership = () => scope.value === 'Pending changes' ? dirtyNames().join('|') : scope.value === 'Overrides' ? snapshot.settings.filter(s => s.source === 'session').map(s => s.name).join('|') : '';
+    function render() {
+      membership = filterMembership();
+      list.replaceChildren(); refreshers = [];
+      const matches = snapshot.settings.filter(setting => {
+        const group = settingCategory(setting.name), query = search.value.toLowerCase();
+        if (activeScreen === 'models' && viewParams.slot && setting.name !== viewParams.slot) return false;
+        if (category.value !== 'All categories' && category.value !== group) return false;
+        if (scope.value === 'Overrides' && setting.source !== 'session') return false;
+        if (scope.value === 'Pending changes' && !promptDirty(draftFor(setting))) return false;
+        return commandFilter === 'show' ? setting.name.startsWith(query) : ['set','toggle','unset'].includes(commandFilter) ? setting.name === query : `${group} ${setting.name} ${setting.description}`.toLowerCase().includes(query);
+      });
+      count.textContent = matches.length ? matches.length + ' parameters' : 'No matching parameters.';
+      ['Models','Tools & access','Knowledge','Execution','Output'].forEach(group => {
+        const settings = matches.filter(setting => settingCategory(setting.name) === group); if (!settings.length) return;
+        list.append(el('h4', group));
+        settings.forEach(setting => {
+          const draft = draftFor(setting), row = el('div', undefined, 'advanced-setting-row');
+          const labelText = (setting.description || setting.name).split(/[.;]/)[0].slice(0, 90);
+          const label = el('label', labelText);
+          const exact = el('code', setting.name), state = el('small'), provenance = el('small');
+          const field = input('', draft.value); field.setAttribute('aria-label', setting.name); field.id = 'advanced-setting-' + setting.name; label.htmlFor = field.id;
+          if (setting.type === 'boolean') { field.type = 'checkbox'; field.checked = draft.value === 'true'; }
+          else if (setting.type === 'number') field.type = 'number';
+          const controls = el('div', undefined, 'advanced-setting-control'); controls.append(field);
+          if (settingCategory(setting.name) === 'Models' && setting.dataEditor) {
+            const details = el('details'); details.append(el('summary', 'Configuration'), controls); row.append(label, exact, details);
+          } else row.append(label, exact, controls);
+          if (!setting.readOnly && ['map','array'].includes(setting.dataEditor)) window.MiniADataEditor.bind(field, {label:setting.name,root:setting.dataEditor});
+          const change = () => { draft.value = setting.type === 'boolean' ? String(field.checked) : field.value; draft.reset = false; refreshDraftViews(); };
+          field.addEventListener('input', change); field.addEventListener('change', change);
+          if ((setting.description || '').replace(/[.;]$/, '') !== labelText) row.append(el('small', setting.description || ''));
+          row.append(provenance, state);
+          if (!setting.readOnly) row.append(button('Reset to inherited value', () => { draft.value = promptText(snapshot.settings.find(s => s.name === setting.name).inheritedValue); draft.reset = true; refreshDraftViews(); }));
+          list.append(row);
+          refreshers.push(() => {
+            const current = snapshot.settings.find(s => s.name === setting.name);
+            field.disabled = current.readOnly || !!snapshot.closed;
+            if (setting.type === 'boolean') field.checked = draft.value === 'true'; else field.value = draft.value;
+            provenance.textContent = `${current.source === 'session' ? 'Session override' : current.source === 'server' ? 'Server default' : current.source} · Default: ${promptText(current.defaultValue) || '(unset)'}${current.readOnly ? ' · Server-controlled' : ''}`;
+            state.textContent = draft.conflict ? 'Conflict · Review required' : promptPending?.entries[setting.name] ? 'Applying…' : draft.reset ? 'Pending reset' : promptDirty(draft) ? 'Pending change' : '';
+            state.className = 'advanced-draft-state';
+          });
+        });
+      });
+      refreshers.forEach(refresh => refresh());
+    }
+    search.oninput = () => { commandFilter = null; render(); };
+    category.onchange = scope.onchange = render;
+    settingsRefresh = () => { if (membership !== filterMembership()) render(); else refreshers.forEach(refresh => refresh()); refreshPending(); refreshPresets(); feedback.textContent = promptPending ? 'Applying…' : promptFeedback; feedback.hidden = !feedback.textContent; };
+    render(); settingsRefresh();
+  }
+  function historyWorkspace() {
+    const search = input('Search conversation titles or IDs'); search.setAttribute('aria-label', 'Search conversations');
+    const notice = el('p', 'Loading saved conversations…', 'advanced-screen-description'); notice.setAttribute('role','status');
+    const saved = el('ul', undefined, 'advanced-history-list'); saved.setAttribute('aria-label','Saved conversations');
+    const preview = el('section', undefined, 'advanced-history-preview'); preview.setAttribute('aria-label','Conversation preview'); preview.tabIndex = -1; preview.hidden = true;
+    const generation = resultGeneration, uuid = bridge.uuid(); let serial = 0, previewSerial = 0, offset = 0, lastGroup = '', queryTimer;
+    const current = () => generation === resultGeneration && uuid === bridge.uuid();
+    const more = button('Load more', () => load(false)); more.hidden = true;
+    const refresh = button('Refresh list', () => load(true));
+    screen.append(search, refresh, notice, saved, more, preview);
+    function showPreview() {
+      preview.focus({preventScroll:true});
+      preview.scrollIntoView({block:'start', behavior:'instant'});
+    }
+    async function select(session, origin) {
+      const request = ++previewSerial;
+      const back = button('Back to conversations', () => {
+        previewSerial++; preview.hidden = true;
+        origin.focus({preventScroll:true}); origin.scrollIntoView({block:'center', behavior:'instant'});
+      });
+      preview.hidden = false; preview.replaceChildren(back, el('p', 'Loading preview…'));
+      showPreview();
+      try {
+        const data = session.entry ? { messages: [], content:session.entry.content || session.entry.prompt || '', title:session.title } : await api({action:'session-preview',session:session.uuid});
+        if (!current() || request !== previewSerial) return;
+        preview.replaceChildren(back, el('h4', data.title || session.title || 'Conversation ' + session.uuid.slice(0,8)), el('p', 'Read-only preview · Your current conversation and drafts are unchanged.', 'advanced-prompt-help'));
+        if (session.entry) preview.append(el('pre', data.content.slice(0,20000), 'advanced-preview-text'));
+        else (data.messages || []).forEach(message => preview.append(el('strong',message.role === 'user' ? 'You' : 'Assistant'),el('pre',message.content,'advanced-preview-text')));
+        if (data.unavailable || !(data.messages || []).length && !data.content) preview.append(el('p', data.reason || 'No preview is available for this saved conversation.'));
+        if (data.truncated || data.content?.length > 20000) preview.append(el('p', 'Preview shortened. Open the conversation to view more.'));
+        preview.append(button('Open conversation', async () => {
+          if (busy) throw new Error('Finish the current operation first.');
+          if (!await resolvePendingChanges()) return;
+          if (!current() || request !== previewSerial) return;
+          if (session.entry) await bridge.openBrowserHistory(session.entry); else bridge.resume(session.uuid);
+          resetSessionView(); filter.value = ''; filter.oninput(); activeScreen = 'activity'; renderScreen(); bridge.refresh(); await poll();
+        }));
+        showPreview();
+      } catch(error) {
+        if (current() && request === previewSerial) {
+          preview.replaceChildren(back, el('p', 'Could not load preview: ' + error.message),button('Retry preview', () => select(session, origin)));
+          showPreview();
+        }
+      }
+    }
+    async function load(reset) {
+      const request = ++serial;
+      if (reset) { offset = 0; lastGroup = ''; saved.replaceChildren(); preview.hidden = true; previewSerial++; }
+      const start = offset; more.disabled = true; notice.textContent = 'Loading saved conversations…';
+      try {
+        const query = search.value.toLowerCase();
+        const data = storageMode === 'browser' ? {sessions:(bridge.browserHistory ? bridge.browserHistory() : []).map(entry => ({uuid:entry.uuid,updated:entry.updatedAt || entry.timestamp,title:entry.title || entry.prompt,entry})).sort((a,b) => new Date(b.updated) - new Date(a.updated)).filter(item => `${item.title || ''} ${item.uuid}`.toLowerCase().includes(query)).slice(start,start + 51)} : await api({action:'sessions',query,offset:start,limit:50});
+        if (!current() || request !== serial) return;
+        const sessions = data.sessions || [], page = sessions.slice(0,50); more.hidden = storageMode === 'browser' ? sessions.length <= 50 : data.nextOffset == null;
+        page.forEach(session => {
+          const date = new Date(session.updated), group = isNaN(date.getTime()) ? 'Unknown date' : date.toLocaleDateString();
+          if (group !== lastGroup) { const heading = el('li',group,'advanced-history-group'); saved.append(heading); lastGroup = group; }
+          const row = el('li'), control = button('', () => select(session, control)); control.className = 'advanced-history-open'; control.title = 'Preview conversation ' + session.uuid;
+          if (session.uuid === bridge.uuid()) control.setAttribute('aria-current','true');
+          control.append(el('span',session.title || 'Conversation ' + session.uuid.slice(0,8),'advanced-history-title'), el('time',isNaN(date.getTime()) ? '' : date.toLocaleTimeString(),'advanced-history-date'));
+          if (session.uuid === bridge.uuid()) control.append(el('span','Current','advanced-history-current'));
+          row.append(control); saved.append(row);
+        });
+        offset = start + page.length;
+        notice.textContent = offset ? offset + ' conversations · Select one to preview.' : query ? 'No matching conversations.' : 'No saved conversations yet.';
+      } catch(error) { if (current() && request === serial) { notice.textContent = 'Could not load saved conversations. Use Refresh list to try again.'; showError(error); } }
+      finally { if (current() && request === serial) more.disabled = false; }
+    }
+    search.oninput = () => { clearTimeout(queryTimer); serial++; previewSerial++; queryTimer = setTimeout(() => { if (current()) load(true); },200); };
+    const maintenance = el('details', undefined, 'advanced-history-maintenance'); maintenance.append(el('summary','Current conversation operations')); screen.append(maintenance);
+    // Existing command builders continue to own command semantics.
+    const before = screen.childElementCount;
+    actions([['History','/history'],['Previous answer','/last'],['Restore','/restore'],['Clear','/clear']]);
+    commandForm('Rewind',count => `/rewind ${count}`,['Exchanges']); commandForm('Save answer',file => file ? `/save ${quote(file)}` : '/save',['Server path']);
+    Array.from(screen.children).slice(before).forEach(node => maintenance.append(node));
+    load(true);
+  }
+  function secondarySection(title, build) {
+    const section = el('details', undefined, 'advanced-secondary-results');
+    section.append(el('summary', title)); screen.append(section);
+    const before = screen.childElementCount; build();
+    Array.from(screen.children).slice(before).forEach(node => section.append(node));
+    return section;
+  }
+  function workflowStatus(memory = false) {
+    const value = name => snapshot?.settings?.find(setting => setting.name === name)?.value;
+    const status = el('p', undefined, 'advanced-workflow-status'); status.setAttribute('role', 'status');
+    status.textContent = 'Wiki: ' + (value('usewiki') === true ? 'enabled' : 'disabled') + ' · Access: ' + (value('wikiaccess') || 'read-only');
+    if (memory) status.textContent += ' · Memory: ' + (value('memorych') ? 'configured' : 'not configured');
+    screen.append(status);
+  }
+  function workflowForm(key, title, specs, build, primary, alternate) {
+    const draft = workflowDrafts[key] ||= {};
+    const form = el('form', undefined, 'advanced-form advanced-workflow-form'); form.append(el('h4', title));
+    const fields = {};
+    for (const spec of specs) {
+      const field = spec.options ? el('select') : spec.multiline ? el('textarea') : input(spec.placeholder || spec.label);
+      if (spec.options) for (const [value, label] of spec.options) { const option = el('option', label); option.value = value; field.append(option); }
+      if (spec.check) field.type = 'checkbox';
+      if (draft[spec.name] === undefined) draft[spec.name] = spec.default ?? (spec.check ? false : field.value);
+      if (spec.check) field.checked = draft[spec.name]; else field.value = draft[spec.name];
+      field.setAttribute('aria-label', spec.label);
+      const label = el('label', spec.label); label.append(field); if (spec.check) label.className = 'advanced-workflow-check';
+      form.append(label); fields[spec.name] = field;
+      field.oninput = field.onchange = () => { draft[spec.name] = spec.check ? field.checked : field.value; feedback.textContent = ''; };
+      if (spec.dataEditor && window.MiniADataEditor) window.MiniADataEditor.bind(field, {label:spec.label,root:spec.dataEditor});
+      if (spec.help) form.append(el('p', spec.help, 'advanced-prompt-help'));
+    }
+    const feedback = el('p'); feedback.setAttribute('role', 'status');
+    const generation = resultGeneration, uuid = bridge.uuid();
+    const current = () => generation === resultGeneration && uuid === bridge.uuid();
+    let pending = false;
+    async function run(preview) {
+      if (!current() || pending || busy || snapshot?.closed) return;
+      try {
+        const value = build(draft, preview); pending = true; refresh();
+        await command(value);
+      } catch (error) { if (current()) feedback.textContent = error.message || String(error); }
+      finally { pending = false; if (current()) refresh(); }
+    }
+    const controls = el('div', undefined, 'advanced-actions');
+    const submit = el('button', primary); submit.type = 'submit'; controls.append(submit);
+    const preview = alternate ? button(alternate, () => run(true)) : null;
+    if (preview) controls.prepend(preview);
+    form.onsubmit = event => { event.preventDefault(); return run(false); };
+    form.append(controls, feedback); screen.append(form);
+    const previous = settingsRefresh;
+    function refresh() {
+      const disabled = !current() || pending || busy || snapshot?.closed;
+      for (const field of [...Object.values(fields), submit, preview].filter(Boolean)) field.disabled = !!disabled;
+    }
+    settingsRefresh = () => { if (previous) previous(); refresh(); }; refresh();
+    return form;
+  }
+  function ingestWorkspace() {
+    workflowStatus();
+    screen.append(el('p', 'Choose a source and destination section, preview the work, then ingest. Progress and recovery use the same operation history below.', 'advanced-screen-description'));
+    workflowForm('ingest', 'Source and options', [
+      {name:'source',label:'Source',help:'Server folder, repository URL, or page URL.'}, {name:'section',label:'Destination section'},
+      {name:'sourceid',label:'Source ID (optional)'},
+      {name:'layout',label:'Layout',options:[['','Configured default'],['flat','Flat'],['source','Group by source']]},
+      {name:'force',label:'Force reprocessing',check:true}, {name:'prune',label:'Prune removed source pages',check:true},
+      {name:'allowemptyprune',label:'Allow pruning from an empty source',check:true},
+      {name:'independent',label:'Run independently of pending recovery',check:true}
+    ], (draft, preview) => {
+      if (!draft.source.trim()) throw new Error('Enter a source to ingest.');
+      if (draft.allowemptyprune && !draft.prune) throw new Error('Enable pruning before allowing an empty source to prune pages.');
+      const flags = ['force','prune','allowemptyprune','independent'].filter(key => draft[key]);
+      if (preview) flags.push('dryrun');
+      if (draft.sourceid.trim()) flags.push(quote('sourceid=' + draft.sourceid.trim()));
+      if (draft.layout) flags.push('layout=' + draft.layout);
+      return '/ingest ' + quote(draft.source.trim()) + (draft.section.trim() ? ' ' + quote(draft.section.trim()) : '') + (flags.length ? ' ' + flags.join(' ') : '');
+    }, 'Ingest source', 'Preview ingestion');
+    actions([['Check recovery','/ingest recovery']]); resultPanel();
+    secondarySection('Recovery by ID', () => {
+      screen.append(el('p', 'Resume pending work, or archive its recovery journal. Discard keeps pages already written; the server asks for confirmation.'));
+      workflowForm('ingest-recovery', 'Recovery', [{name:'id',label:'Recovery ID'},{name:'op',label:'Recovery action',options:[['resume','Resume'],['discard','Discard journal']]}], draft => {
+        if (!draft.id.trim()) throw new Error('Enter a recovery ID.');
+        return '/ingest recovery ' + draft.op + ' ' + quote(draft.id.trim());
+      }, 'Run recovery action');
+    });
+  }
+  function planningWorkspace(kind) {
+    workflowStatus(kind === 'dream');
+    if (kind === 'absorb') {
+      screen.append(el('p', 'Check saved plans and pending recovery, create a plan from a specification, then review it before applying.', 'advanced-screen-description'));
+      actions([['Refresh plans and recovery','/absorb status']]); resultPanel();
+      workflowForm('absorb-plan', 'Create a plan', [{name:'spec',label:'Spec file or inline JSON/SLON',multiline:true,dataEditor:'map'}], draft => {
+        if (!draft.spec.trim()) throw new Error('Enter a specification or file path.');
+        return '/absorb plan ' + quote(draft.spec.trim());
+      }, 'Create plan');
+      secondarySection('Manage a plan by ID', () => workflowForm('absorb-manage', 'Plan action', [
+        {name:'id',label:'Plan ID'}, {name:'op',label:'Plan action',options:[['show','Review'],['apply','Apply'],['resume','Resume'],['delete','Delete'],['cancel','Cancel']]}
+      ], draft => { if (!draft.id.trim()) throw new Error('Enter a plan ID.'); return '/absorb ' + draft.op + ' ' + quote(draft.id.trim()); }, 'Run plan action'));
+    } else {
+      screen.append(el('p', 'Preview wiki maintenance before applying it. Results below describe the last run; the configuration above describes this session.', 'advanced-screen-description'));
+      actions([['Preview wiki maintenance','/dream wiki auto dryrun']]); resultPanel();
+      workflowForm('dream', 'Plan or run maintenance', [
+        {name:'target',label:'Target',options:[['wiki','Wiki'],['memory','Memory']]},
+        {name:'mode',label:'Wiki mode',options:[['plan','Plan'],['auto','Auto'],['apply','Apply'],['reorg','Reorganize'],['repair','Repair'],['reindex','Reindex'],['graph','Graph'],['indexes','Indexes']]},
+        {name:'dryrun',label:'Dry run',check:true,default:true,help:'Memory uses its own maintenance behavior; Wiki mode only applies to the Wiki target.'}
+      ], draft => '/dream ' + draft.target + (draft.target === 'wiki' ? ' ' + draft.mode : '') + (draft.dryrun ? ' dryrun' : ''), 'Run maintenance');
+    }
   }
   function commandForm(label, build, fields) {
     const form = el('form', undefined, 'advanced-form'); form.append(el('h4',label));
@@ -883,8 +1238,8 @@ window.MiniAAdvancedUI = function(bridge) {
       for (const item of snapshot.commandMetadata || []) {
         if (skillsOnly && item.kind !== 'skill') continue;
         if (!JSON.stringify(item).toLowerCase().includes(search.value.toLowerCase())) continue;
-        const card = el('section',undefined,'advanced-help-entry');
-        card.append(el('h4',item.syntax), el('p',item.description));
+        const card = el('details',undefined,'advanced-help-entry');
+        const summary = el('summary'); summary.append(el('strong',item.syntax), el('span',item.description,'advanced-help-description')); card.append(summary);
         if (item.aliases?.length) card.append(el('p','Aliases: '+item.aliases.join(', ')));
         if (item.subcommands?.length) card.append(el('p','Subcommands / options: '+item.subcommands.join(', ')));
         if (item.prerequisite) card.append(el('p',item.prerequisite));
@@ -909,10 +1264,122 @@ window.MiniAAdvancedUI = function(bridge) {
     if (!list.childElementCount) list.append(el('li','No entries.'));
     return list;
   }
+  function resultDetails(value, title = 'Full result data') {
+    const details = el('details', undefined, 'advanced-result-details');
+    details.append(el('summary', title), structuredOutput(value));
+    const raw = typeof value === 'string' ? value : asText(value);
+    if (raw !== undefined) details.append(button('Copy data', () => navigator.clipboard.writeText(raw)), button('Download data', () => download(raw, 'result.json')));
+    return details;
+  }
+  function contextResult(value) {
+    const container = el('section');
+    if (!Array.isArray(value.sections)) { container.append(structuredOutput(value)); return container; }
+    const number = value => typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : 'Unavailable';
+    const metrics = el('dl', undefined, 'advanced-context-summary');
+    for (const [label, count] of [['Messages',value.messageCount],['Tokens',value.totalTokens],['Characters',value.totalChars]]) metrics.append(el('dt',label),el('dd',number(count)));
+    container.append(metrics, el('p', 'Token accounting: ' + ({actual:'provider usage where available, estimates elsewhere',model:'model tokenizer estimates',approx:'approximate estimates',llm:'LLM analysis'}[value.estimateMethod] || 'unspecified') + '. This is context composition, not a model capacity limit.', 'advanced-prompt-help'));
+    const table = el('table', undefined, 'advanced-workflow-table'); table.append(el('caption','Context composition'));
+    const head = el('tr'); ['Role','Messages','Tokens','Share of tokens'].forEach(label => { const th = el('th',label); th.setAttribute('scope','col'); head.append(th); });
+    const thead = el('thead'), body = el('tbody'); thead.append(head); table.append(thead,body);
+    for (const section of value.sections) {
+      const row = el('tr'); const share = value.totalTokens > 0 && Number.isFinite(section.tokens) ? (section.tokens / value.totalTokens * 100).toFixed(1) + '%' : '—';
+      row.append(el('td',section.section),el('td',number(section.messages)),el('td',number(section.tokens)),el('td',share)); body.append(row);
+    }
+    container.append(table,resultDetails(value)); return container;
+  }
+  function graphResult(value, meta) {
+    const container = el('section'), edges = [], nodes = new Set(), paths = new Set();
+    const visit = item => {
+      if (Array.isArray(item)) { item.forEach(visit); return; }
+      if (!item || typeof item !== 'object') return;
+      if (typeof item.from === 'string' && typeof item.to === 'string') edges.push(item);
+      for (const [key, entry] of Object.entries(item)) {
+        if (typeof entry === 'string') {
+          if (['path','page','ref'].includes(key)) paths.add(entry);
+          if (['id','from','to'].includes(key)) nodes.add(entry);
+        } else if (entry && typeof entry === 'object') visit(entry);
+      }
+    };
+    visit(value);
+    if (meta.operation === 'path' && Array.isArray(value)) value.filter(item => typeof item === 'string').forEach(id => nodes.add(id));
+    for (const id of nodes) if (id.startsWith('doc:')) paths.add(id.slice(4));
+    if (meta.retrievalAlias) container.append(el('p','answer is a retrieval alias; no answer synthesis is performed.'));
+    if (value?.error) container.append(el('p',String(value.error),'advanced-warning'));
+    if (edges.length) {
+      const table = el('table', undefined, 'advanced-workflow-table'); table.append(el('caption','Relationships (' + edges.length + ')'));
+      const thead = el('thead'), head = el('tr'), body = el('tbody');
+      for (const label of ['From','Relationship','To','Evidence']) { const th = el('th',label); th.setAttribute('scope','col'); head.append(th); }
+      thead.append(head); table.append(thead,body);
+      for (const edge of edges.slice(0,200)) {
+        const row = el('tr'), from = el('td'), to = el('td');
+        from.append(button(edge.from, () => command('/graph neighbors ' + quote(edge.from))));
+        to.append(button(edge.to, () => command('/graph neighbors ' + quote(edge.to))));
+        row.append(from,el('td',edge.type || edge.relation || 'linked'),to,el('td',typeof edge.provenance === 'string' ? edge.provenance : asText(edge.provenance) || 'Not reported')); body.append(row);
+      }
+      const frame = el('div', undefined, 'advanced-table-frame'); frame.append(table); container.append(frame);
+      if (edges.length > 200) container.append(el('p','Showing the first 200 relationships. Full data is available below.'));
+    } else if (nodes.size) {
+      const list = el(meta.operation === 'path' ? 'ol' : 'ul', undefined, 'advanced-result-list');
+      list.setAttribute('aria-label',meta.operation === 'path' ? 'Graph path' : 'Graph nodes');
+      for (const id of [...nodes].slice(0,200)) { const row = el('li'); row.append(button('Neighbors: ' + id, () => command('/graph neighbors ' + quote(id)))); list.append(row); }
+      container.append(list);
+    } else if (Array.isArray(value) && !value.length) container.append(el('p','No relationships or nodes were returned.'));
+    else container.append(structuredOutput(value));
+    if (paths.size) { const pages = el('details'); pages.append(el('summary','Related pages'),pageList([...paths].slice(0,200))); container.append(pages); }
+    container.append(resultDetails(value)); return container;
+  }
+  function recoveryResult(value) {
+    const container = el('section');
+    if (value.error) container.append(el('p',String(value.error),'advanced-warning'));
+    if (!value.recoveries?.length) container.append(el('p',value.ok === false ? 'Recovery could not be listed.' : 'No pending ingestion recovery.'));
+    for (const entry of value.recoveries || []) {
+      const card = el('section', undefined, 'advanced-workflow-card');
+      card.append(el('h4',entry.scope?.source || entry.id),el('p','Phase: ' + (entry.phase || 'unknown') + ' · ID: ' + entry.id));
+      if (entry.scope?.section) card.append(el('p','Section: ' + entry.scope.section));
+      if (Array.isArray(entry.pages)) card.append(el('p',entry.pages.length + ' affected pages'));
+      card.append(button('Resume',()=>command('/ingest recovery resume '+quote(entry.id))),button('Discard',()=>command('/ingest recovery discard '+quote(entry.id))));
+      container.append(card);
+    }
+    container.append(el('p','Discard archives recovery and keeps pages already written. It does not roll them back.','advanced-prompt-help'),resultDetails(value));
+    return container;
+  }
+  function absorbResult(value) {
+    const container = el('section');
+    container.append(el('p','Recorded status: ' + (value.status || value.plan?.status || (value.ok === false ? 'failed' : 'available'))));
+    if (value.error) container.append(el('p',String(value.error),'advanced-warning'));
+    if (value.recovery) container.append(el('p','Pending recovery: ' + (value.recovery.id || 'unknown') + ' · ' + (value.recovery.phase || 'unknown'),'advanced-warning'));
+    const plans = value.plans || (value.id || value.planId ? [value] : []);
+    if (Array.isArray(value.plans) && !plans.length) container.append(el('p','No saved plans. Create a plan from a specification below.'));
+    for (const plan of plans) {
+      const id = typeof plan === 'string' ? plan : plan.id || plan.planId; if (!id) continue;
+      const card = el('section', undefined, 'advanced-workflow-card'); card.append(el('h4',id),button('Review plan',()=>command('/absorb show '+quote(id))));
+      const actions = el('details'); actions.append(el('summary','Apply and manage'));
+      for (const [op,label] of [['apply','Apply plan'],['resume','Resume plan'],['delete','Delete plan'],['cancel','Cancel plan']]) actions.append(button(label,()=>command('/absorb '+op+' '+quote(id))));
+      card.append(actions); container.append(card);
+    }
+    if (Array.isArray(value.plan?.operations)) container.append(el('p',value.plan.operations.length + ' planned operations'));
+    container.append(resultDetails(value)); return container;
+  }
   function renderBlock(block) {
     const value = block.value, meta = block.meta || {}, container = el('section',undefined,'advanced-result-block');
     if (block.type === 'markdown') { if (meta.ref) container.append(el('h4',meta.ref)); if (meta.path) container.append(el('h4',meta.path),breadcrumbs(meta.path)); if (meta.page) container.append(structuredMap(meta.page)); container.append(reader(String(value || ''))); }
-    else if (block.type === 'answer') { container.append(el('h4','Previous goal'),el('pre',value.goal || ''),reader(String(value.answer || ''),meta.raw === true)); }
+    else if (block.type === 'answer') { container.append(reader(String(value.answer || ''),meta.raw === true)); const goal = el('details'); goal.append(el('summary','Previous goal'),el('pre',value.goal || '')); container.append(goal); }
+    else if (block.type === 'context') container.append(contextResult(value));
+    else if (block.type === 'graph') container.append(graphResult(value,meta));
+    else if (block.type === 'recoveries') container.append(recoveryResult(value));
+    else if (block.type === 'absorb') container.append(absorbResult(value));
+    else if (block.type === 'dream') {
+      container.append(el('p','Recorded status: ' + (value.status || (value.ok === false ? 'failed' : 'completed')) + (value.dryrun ? ' · Dry run' : '')));
+      if (value.error) container.append(el('p',String(value.error),'advanced-warning'));
+      if (value.verification?.ok === false) container.append(el('p','Verification reported unresolved issues. Review the details before applying further maintenance.','advanced-warning'));
+      for (const [key,label] of [['diagnosed_issues','Diagnosed issues'],['attempted_actions','Attempted actions'],['verified_fixes','Verified fixes'],['unresolved_issues','Unresolved issues']]) {
+        if (!Array.isArray(value[key])) continue;
+        const details = el('details'); details.append(el('summary',label + ': ' + value[key].length));
+        if (value[key].length) details.append(structuredOutput(value[key]));
+        container.append(details);
+      }
+      container.append(resultDetails(value));
+    }
     else if (block.type === 'decision-compose') container.append(el('p','Compose a decision using the form below.'));
     else if (block.type === 'decision') {
       if (value.error) container.append(el('p', value.error, 'advanced-warning'));
@@ -940,21 +1407,12 @@ window.MiniAAdvancedUI = function(bridge) {
     } else if (block.type === 'help') container.append(el('p','Use the searchable command list below.'));
     else {
       if (meta.retrievalAlias) container.append(el('p','answer is a retrieval alias; no answer synthesis is performed.'));
-      if (block.type === 'graph') {
-        const paths = new Set(), nodes = new Set();
-        const visit = item => { if(Array.isArray(item))item.forEach(visit); else if(item && typeof item === 'object')Object.entries(item).forEach(([key,v])=>{if(typeof v==='string'){if(['path','page','ref'].includes(key))paths.add(v);if(['id','from','to'].includes(key)){nodes.add(v);if(v.startsWith('doc:'))paths.add(v.slice(4));}}else if(typeof v==='object')visit(v);}); };
-        visit(value);container.append(pageList([...paths]));for(const id of nodes)container.append(button('Neighbors: '+id,()=>command('/graph neighbors '+quote(id))));
-      }
       container.append(structuredOutput(value));
       const raw = typeof value === 'string' ? value : asText(value);
       if (raw !== undefined) container.append(button('Copy data',()=>navigator.clipboard.writeText(raw)),button('Download data',()=>download(raw,typeof value === 'string'?'result.txt':'result.json')));
       if (block.type === 'subtask' && value.id) container.append(button('Details',()=>command('/subtask '+value.id)),button('Result',()=>command('/subtask result '+value.id)),button('Cancel task',()=>command('/subtask cancel '+value.id)));
       if (block.type === 'subtask' && typeof value.answer === 'string') container.append(reader(value.answer));
-      if (block.type === 'recoveries') for (const entry of value.recoveries || []) container.append(el('h4',entry.id),button('Resume',()=>command('/ingest recovery resume '+quote(entry.id))),button('Discard',()=>command('/ingest recovery discard '+quote(entry.id))));
-      if (block.type === 'absorb') {
-        const plans = value.plans || (value.id || value.planId ? [value] : []);
-        for (const plan of plans) { const id = typeof plan === 'string' ? plan : plan.id || plan.planId; if(!id)continue;container.append(el('h4',id)); for(const op of ['show','apply','resume','delete','cancel'])container.append(button(op,()=>command('/absorb '+op+' '+quote(id)))); }
-      }
+
     }
     return container;
   }
@@ -964,7 +1422,8 @@ window.MiniAAdvancedUI = function(bridge) {
   }
   function resultPanel(host = screen) {
     const generation = resultGeneration, uuid = bridge.uuid(), view = activeScreen;
-    const panel = el('section',undefined,'advanced-result-panel'); panel.setAttribute('aria-label','Command results');
+    const panel = el('section',undefined,'advanced-result-panel'); panel.setAttribute('aria-label','Command results'); panel.tabIndex = -1;
+    let focusRequest = screen.dataset.focusResult;
     const select = el('select'); select.setAttribute('aria-label','Previous results');
     const notice = el('p','Loading results…'); notice.setAttribute('role','status');
     const content = el('div'), progress = el('details'); progress.append(el('summary','Operation progress'));
@@ -984,6 +1443,10 @@ window.MiniAAdvancedUI = function(bridge) {
         const messages = el('details'); messages.open = !result.blocks?.length || result.status !== 'completed'; messages.append(el('summary', result.legacy ? 'Legacy command output' : 'Messages'));
         for(const message of result.messages)messages.append(structuredOutput(message.value));content.append(messages);
       }
+      if (focusRequest && record.runId === focusRequest && result.status !== 'running') {
+        focusRequest = null;
+        if (document.activeElement === screen) { panel.focus({preventScroll:true}); panel.scrollIntoView({block:'start',behavior:'instant'}); }
+      }
     }
     async function load(reset = true) {
       if(!current())return;
@@ -998,7 +1461,7 @@ window.MiniAAdvancedUI = function(bridge) {
         else if(preferred) {const option=el('option','Selected previous result #'+preferred);option.value=String(preferred);select.append(option);select.value=String(preferred);}
         const next=Number(select.value);
         if(next && next!==selected)await choose(next);
-        if(!next)notice.textContent='No previous results. Run a command using the controls below.';
+        if(!next)notice.textContent='No previous results. Run a command to see its result here.';
         progress.hidden=!(snapshot?.busy && submittedView?.name===view);
         if(!progress.hidden) {
           progress.open=true;progressContent.replaceChildren();
@@ -1177,7 +1640,7 @@ window.MiniAAdvancedUI = function(bridge) {
   let debugGeneration = 0;
   function debugScreen() {
     const generation = debugGeneration, uuid = bridge.uuid();
-    let cursor = 0, pageRequest = 0, recordRequest = 0, selected = null, rows = [], filters = [];
+    let cursor = 0, pageRequest = 0, recordRequest = 0, selected = null, selectedRecord = null, rows = [], filters = [];
     const current = () => generation === debugGeneration && uuid === bridge.uuid() && activeScreen === 'debug' && enabled;
     const controls = el('div', undefined, 'advanced-actions advanced-debug-controls');
     const category = el('select'); category.setAttribute('aria-label', 'Debug category');
@@ -1196,9 +1659,23 @@ window.MiniAAdvancedUI = function(bridge) {
     });
     head.append(headings); table.append(head, body); frame.append(table);
     const details = el('section', undefined, 'advanced-debug-details');
-    details.setAttribute('aria-label', 'Selected debug record');
+    details.setAttribute('aria-label', 'Selected debug record'); details.tabIndex = -1;
     const detailStatus = el('p', 'Select an event to inspect.'); detailStatus.setAttribute('role', 'status');
     const content = el('div'); details.append(el('h4', 'Record details'), detailStatus, content);
+    const copy = button('Copy payload', async () => {
+      if (!current() || !selectedRecord) return;
+      const record = selectedRecord;
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(record.payload, null, 2));
+        if (current() && selectedRecord === record) detailStatus.textContent = `#${record.sequence} ${record.kind} · Payload copied`;
+      } catch (error) { if (current() && selectedRecord === record) detailStatus.textContent = 'Could not copy payload: ' + (error.message || String(error)); }
+    });
+    const save = button('Download record', () => { if (current() && selectedRecord) download(JSON.stringify(selectedRecord, null, 2), 'debug-' + selectedRecord.sequence + '.json'); });
+    copy.disabled = save.disabled = true;
+    details.append(copy, save, button('Back to events', () => {
+      const control = rows.find(row => row.item.sequence === selected)?.control;
+      if (control) { control.focus({preventScroll:true}); control.scrollIntoView({block:'center',behavior:'instant'}); }
+    }));
     controls.append(el('label', 'Category ')); controls.lastChild.append(category);
     controls.append(refresh);
     screen.append(controls, notice, frame, more, details);
@@ -1209,12 +1686,13 @@ window.MiniAAdvancedUI = function(bridge) {
         row.control.setAttribute('aria-pressed', String(chosen));
       });
     }
-    async function select(item) {
+    async function select(item, reveal = false) {
       if (!current()) return;
       selected = item.sequence; const request = ++recordRequest;
-      markSelection(); content.replaceChildren();
+      markSelection(); content.replaceChildren(); selectedRecord = null; copy.disabled = save.disabled = true;
       detailStatus.textContent = `Loading record #${selected}…`;
       details.setAttribute('aria-busy', 'true');
+      if (reveal) { details.focus({preventScroll:true}); details.scrollIntoView({block:'start',behavior:'instant'}); }
       try {
         const record = await api({action: 'trace', sequence: selected});
         if (!current() || request !== recordRequest) return;
@@ -1223,6 +1701,7 @@ window.MiniAAdvancedUI = function(bridge) {
           return;
         }
         detailStatus.textContent = `#${record.sequence} ${record.kind}`;
+        selectedRecord = record; copy.disabled = save.disabled = false;
         content.replaceChildren(structuredMap(record));
       } catch (error) {
         if (current() && request === recordRequest) detailStatus.textContent = 'Unable to load record: ' + (error.message || String(error)) + '. Select it again to retry.';
@@ -1234,7 +1713,7 @@ window.MiniAAdvancedUI = function(bridge) {
       if (!current()) return;
       const request = ++pageRequest, key = category.value;
       if (reset) {
-        cursor = 0; selected = null; rows = []; recordRequest++;
+        cursor = 0; selected = null; selectedRecord = null; copy.disabled = save.disabled = true; rows = []; recordRequest++;
         body.replaceChildren(); content.replaceChildren(); more.hidden = true;
         details.setAttribute('aria-busy', 'false'); detailStatus.textContent = 'Select an event to inspect.';
       }
@@ -1249,12 +1728,12 @@ window.MiniAAdvancedUI = function(bridge) {
           category.value = key;
         }
         for (const item of result.events || []) {
-          const row = el('tr'), control = button('#' + item.sequence, () => select(item));
+          const row = el('tr'), control = button('#' + item.sequence, () => select(item, true));
           control.setAttribute('aria-label', `Inspect #${item.sequence} ${item.kind} — ${activityText(item.summary) || item.kind}`);
           const sequence = el('td'); sequence.append(control);
           row.append(sequence, el('td', item.kind), el('td', activityText(item.summary) || item.kind),
             el('td', item.timestamp, 'advanced-debug-secondary'), el('td', filters.find(filter => filter.category === item.category)?.label || item.category, 'advanced-debug-secondary'));
-          row.addEventListener('click', event => { if (!control.contains(event.target)) select(item); });
+          row.addEventListener('click', event => { if (!control.contains(event.target)) select(item, true); });
           rows.push({item, node: row, control}); body.append(row); cursor = item.sequence;
         }
         more.hidden = !result.hasMore;
@@ -1304,7 +1783,8 @@ window.MiniAAdvancedUI = function(bridge) {
       if (content) renderStats(content);
     }
   }).observe(document.body, {attributes: true, attributeFilter: ['class']});
-  function renderScreen() {
+  function renderScreen(focusRequest = '') {
+    screen.dataset.focusResult = focusRequest;
     promptRefresh = null;
     settingsRefresh = null;
     debugGeneration++;
@@ -1320,84 +1800,53 @@ window.MiniAAdvancedUI = function(bridge) {
     if (activeScreen === 'activity') { followActivity(); return; }
     screen.replaceChildren(el('h3', selected[1]), el('p', selected[2], 'advanced-screen-description'));
     if (!snapshot) return;
-    if (!['subtasks','prompts'].includes(activeScreen)) resultPanel();
-    if (activeScreen === 'help') { helpScreen(); }
-    else if (activeScreen === 'decide') { decisionScreen(); }
+    if (!['subtasks','prompts','settings','models','history','wiki','graph','ingest','absorb','dream','context','debug','help','skills','decide'].includes(activeScreen)) resultPanel();
+    if (activeScreen === 'help') { helpScreen(); secondarySection('Previous command results', () => resultPanel()); }
+    else if (activeScreen === 'decide') { screen.append(el('p','1. Add evidence and questions → 2. Review the request → 3. Submit and inspect the result','advanced-workflow-status')); decisionScreen(); resultPanel(); }
     else if (activeScreen === 'prompts') { promptWorkspace(); }
-    else if (activeScreen === 'answer') { actions([['Previous answer','/last'],['Raw answer','/last md']]); commandForm('Save on server', file => file ? `/save ${quote(file)}` : '/save', ['Server path (default response.md)']); }
+    else if (activeScreen === 'answer') { actions([['Refresh answer','/last'],['Raw answer','/last md']]); secondarySection('Save a copy on the server', () => commandForm('Save on server', file => file ? `/save ${quote(file)}` : '/save', ['Server path (default response.md)'])); }
     else if (activeScreen === 'settings' || activeScreen === 'models') {
-      const search=input('Search settings', viewParams.filter || ''); screen.append(search);
-      const list=el('div',undefined,'advanced-settings'); screen.append(list);
-      let commandFilter = viewParams.command;
-      let fieldRefreshers = [];
-      const render=()=>{
-        fieldRefreshers = [];
-        list.replaceChildren();
-        snapshot.settings.filter(s=>(activeScreen!=='models'||(viewParams.slot ? s.name === viewParams.slot : ['model','modellc','modelval','modeldec','modelvisual'].includes(s.name))) && (commandFilter === 'show' ? s.name.startsWith(search.value.toLowerCase()) : ['set','toggle','unset'].includes(commandFilter) ? s.name === search.value.toLowerCase() : `${s.name} ${s.description}`.toLowerCase().includes(search.value.toLowerCase()))).forEach(s=>{
-          const row=el('div'); const label=el('label', s.name); const description=el('small',`${s.description || ''} · ${s.source === 'session' ? 'Session override' : s.source === 'server' ? 'Server default' : s.source} · Default: ${asText(s.defaultValue) ?? '(unset)'}${s.readOnly?' · Server-controlled':''}`);
-          const field=input('',s.value === undefined ? '' : asText(s.value)); field.disabled=s.readOnly; field.setAttribute('aria-label',s.name);
-          if (s.type==='boolean') {field.type='checkbox';field.checked=s.value===true;label.className='advanced-boolean-setting';}
-          label.append(field); row.append(label,description);
-          if (!s.readOnly && ['map', 'array'].includes(s.dataEditor)) window.MiniADataEditor.bind(field, {label: s.name, root: s.dataEditor});
-          if (!s.readOnly) row.append(button('Apply',async()=>{await mutate({action:'settings',values:{[s.name]:s.type==='boolean'?field.checked:field.value}});}));
-          const fieldValue = () => s.type === 'boolean' ? field.checked : field.value;
-          const settingValue = value => s.type === 'boolean' ? value === true : value === undefined ? '' : asText(value);
-          let previousValue = settingValue(s.value);
-          fieldRefreshers.push(() => {
-            const current = snapshot.settings.find(setting => setting.name === s.name);
-            if (!current) return;
-            const value = settingValue(current.value);
-            // Keep unsubmitted field edits while refreshing applied values and presets.
-            if (fieldValue() === previousValue) { if (s.type === 'boolean') field.checked = value; else field.value = value; }
-            previousValue = value;
-          });
-          list.append(row);
-        });
-      }; search.oninput=()=>{commandFilter=null;render();}; render();
-      const presets=el('div',undefined,'advanced-actions'); const name=input('Preset name'); const names=el('select'); snapshot.presets.forEach(p=>{const o=el('option',p);o.value=p;names.append(o);});
-      name.setAttribute('aria-label','Preset name'); names.setAttribute('aria-label','Saved preset');
-      const presetControls = [button('Save preset',()=>submitPromptSettings({action:'preset',op:'save',name:name.value}))];
-      presets.append(name,presetControls[0],names);
-      ['apply','default','delete'].forEach(op=>{const control=button(op,()=>submitPromptSettings({action:'preset',op,name:names.value}));presetControls.push(control);presets.append(control);}); screen.append(presets);
-      const feedback=el('p',undefined,'advanced-prompt-help');feedback.setAttribute('role','status');screen.append(feedback);
-      screen.append(el('p',`Presets use ${storageMode === 'browser' ? 'this browser' : 'current server storage'} and contain applied settings. Apply edited fields before saving a preset.`,'advanced-prompt-help'));
-      let presetList = JSON.stringify(snapshot.presets);
-      settingsRefresh = () => {
-        fieldRefreshers.forEach(refresh=>refresh());
-        const serialized=JSON.stringify(snapshot.presets);
-        if(serialized!==presetList){const selected=names.value;names.replaceChildren();snapshot.presets.forEach(p=>{const option=el('option',p);option.value=p;names.append(option);});if(snapshot.presets.includes(selected))names.value=selected;presetList=serialized;}
-        presetControls.forEach((control,index)=>{control.disabled=busy||!!promptPending||!!snapshot.closed||(index>0&&!snapshot.presets.length);});
-        feedback.textContent=promptPending?'Applying…':promptFeedback;feedback.hidden=!feedback.textContent;
-      };
-      settingsRefresh();
+      settingsWorkspace();
     } else if (activeScreen==='debug') {
       debugScreen();
     } else if(activeScreen==='wiki') {
+      commandForm('Search',q=>`/wiki search ${q}`,['Query']);
+      actions([['Browse root','/wiki browse'],['List pages','/wiki list --meta'],['Tree','/wiki tree']]);
+      commandForm('Browse / read', (op,path)=>`/wiki ${op||'browse'} ${quote(path)}`,[{name:'Operation',options:['browse','read']},'Path']);
+      resultPanel();
+      const secondary = el('details', undefined, 'advanced-secondary-results');
+      secondary.append(el('summary', 'Connections, editing and maintenance')); screen.append(secondary);
+      const before = screen.childElementCount;
+      actions([['Context','/wiki context'],['Mounts','/wiki mounts'],['Lint','/wiki lint'],['Statistics','/stats wiki']]);
       commandForm('Attach wiki', (name,backend,root) => `/wiki attach ${quote(name)} backend=${backend || 'fs'} root=${quote(root || '.')}`, ['Name','Backend','Root']);
       commandForm('Detach wiki', name => `/wiki detach ${name}`, ['Name']);
-      actions([['Context','/wiki context'],['Mounts','/wiki mounts'],['List','/wiki list --meta'],['Tree','/wiki tree'],['Lint','/wiki lint'],['Statistics','/stats wiki']]);
-      commandForm('Browse / read', (op,path)=>`/wiki ${op||'browse'} ${quote(path)}`,['Operation','Path']);
-      commandForm('Search',q=>`/wiki search ${q}`,['Query']);
       commandForm('Write page',(path,content)=>`/wiki write ${quote(path)} ${content}`,['Path','Content']);
       commandForm('Move page',(from,to)=>`/wiki move ${quote(from)} ${quote(to)}`,['From','To']);
       commandForm('Maintenance',(op,path,mode)=>`/wiki ${op} ${path ? quote(path) : ''} ${mode}`,[{name:'Operation',options:['delete','init','reindex','compact']},'Path (delete / init)',{name:'Compaction mode',options:['','dryrun','offline=true']}]);
       commandForm('Wiki command',args=>`/wiki ${args}`,['Subcommand and arguments']);
+      Array.from(screen.children).slice(before).forEach(node => secondary.append(node));
     } else if(activeScreen==='graph') {
-      actions([['Statistics','/graph stats'],['Build','/graph build']]);
-      commandForm('Inspect graph',(op,path)=>`/graph ${op||'neighbors'} ${quote(path)}`,[{name:'Operation',options:['neighbors','cross']},'Path or node ID']);
-      commandForm('Retrieve', (op,query)=>`/graph ${op} ${query}`,[{name:'Operation',options:['query','retrieve','answer']},'Query']);
-      commandForm('Export', format=>`/graph export ${format}`,[{name:'Format',options:['mermaid','graphml','neo4j','html','svg']}]);
-      actions([['Report','/graph report'],['Communities','/graph communities'],['Surprise links','/graph surprise']]);
-      commandForm('Find path',(from,to)=>`/graph path ${quote(from)} ${quote(to)}`,['From','To']);
-      commandForm('Graph operation',args=>`/graph ${args}`,['Subcommand and arguments']);
+      workflowStatus();
+      screen.append(el('p','Explore neighbors or find a path. Relationship results include a keyboard-accessible table; Mermaid export provides a diagram.','advanced-screen-description'));
+      workflowForm('graph-neighbors', 'Explore relationships', [{name:'operation',label:'Operation',options:[['neighbors','Neighbors'],['cross','Cross-wiki links']]},{name:'path',label:'Path or node ID'}], draft => {
+        if (!draft.path.trim()) throw new Error('Enter a path or node ID.');
+        return '/graph ' + draft.operation + ' ' + quote(draft.path.trim());
+      }, 'Explore');
+      resultPanel();
+      secondarySection('Find a path or search', () => {
+        commandForm('Find path',(from,to)=>`/graph path ${quote(from)} ${quote(to)}`,['From','To']);
+        commandForm('Search graph',query=>`/graph query ${query}`,['Query']);
+      });
+      secondarySection('Reports, export and maintenance', () => {
+        actions([['Statistics','/graph stats'],['Report','/graph report'],['Communities','/graph communities'],['Surprise links','/graph surprise'],['Build','/graph build']]);
+        commandForm('Retrieve', (op,query)=>`/graph ${op} ${query}`,[{name:'Operation',options:['retrieve','answer']},'Query']);
+        commandForm('Export', format=>`/graph export ${format}`,[{name:'Format',options:['mermaid','graphml','neo4j','html','svg']}]);
+        commandForm('Graph operation',args=>`/graph ${args}`,['Subcommand and arguments']);
+      });
     } else if(activeScreen==='ingest') {
-      commandForm('Ingest source',(source,section,flags)=>`/ingest ${quote(source)}${section ? ' ' + quote(section) : ''} ${flags}`,['Source','Section','Options (dryrun / force / prune / allowemptyprune / sourceid= / independent)']);
-      actions([['Recovery','/ingest recovery']]);commandForm('Recover',args=>`/ingest recovery ${args}`,['resume / discard and ID']);
-    } else if(activeScreen==='absorb') {
-      actions([['Status','/absorb status']]);commandForm('Create plan',spec=>`/absorb plan ${quote(spec)}`,[{name:'Spec file or inline JSON/SLON',dataEditor:'map'}]);
-      commandForm('Manage plan',(op,id)=>`/absorb ${op} ${quote(id)}`,['show / apply / resume / delete / cancel','Plan ID']);
-    } else if(activeScreen==='dream') {
-      commandForm('Dream operation',(op,mode,flags)=>`/dream ${op} ${mode} ${flags}`,[{name:'Target',options:['','memory','wiki']},{name:'Mode',options:['','auto','plan','apply','reorg','repair','reindex','graph','indexes']},{name:'Dry run',options:['','dryrun']}]);
+      ingestWorkspace();
+    } else if(activeScreen==='absorb' || activeScreen==='dream') {
+      planningWorkspace(activeScreen);
     } else if(activeScreen==='subtasks') {
       subtaskScreen();
       commandForm('Delegate',goal=>`/delegate ${goal}`,['Goal']);
@@ -1407,44 +1856,19 @@ window.MiniAAdvancedUI = function(bridge) {
       resultPanel(history);
     } else if(activeScreen==='skills') {
       helpScreen(true);
-      actions([['List skills','/skills'],['Help','/help']]); commandForm('Inspect skills',args=>`/skills ${args}`,['Filter or subcommand']);commandForm('Run skill or custom command',cmd=>cmd,['$skill or /command with arguments']);
+      resultPanel();
+      secondarySection('Discover or run skills', () => { actions([['List skills','/skills'],['Help','/help']]); commandForm('Inspect skills',args=>`/skills ${args}`,['Filter or subcommand']);commandForm('Run skill or custom command',cmd=>cmd,['$skill or /command with arguments']); });
     } else if(activeScreen==='history') {
-      const notice=el('p','Loading saved conversations…','advanced-screen-description');
-      notice.setAttribute('role','status');
-      const historyGeneration=resultGeneration, historyUuid=bridge.uuid();
-      const saved=el('ul',undefined,'advanced-history-list');
-      saved.setAttribute('aria-label','Saved conversations');
-      screen.append(button('Refresh list',()=>renderScreen()),notice,saved);
-      (storageMode === 'browser' ? Promise.resolve({sessions:(bridge.browserHistory ? bridge.browserHistory() : []).map(entry=>({uuid:entry.uuid,updated:entry.updatedAt || entry.timestamp,title:entry.title || entry.prompt,entry}))}) : api({action:'sessions'})).then(data=>{
-        if(historyGeneration!==resultGeneration || historyUuid!==bridge.uuid())return;
-        const sessions=data.sessions||[];
-        notice.textContent=sessions.length ? 'Select a conversation to open it.' : 'No saved conversations yet.';
-        sessions.forEach(session=>{
-          const current=session.uuid===bridge.uuid();
-          const row=el('li');
-          const open=button('',async()=>{
-            if(busy)throw new Error('Finish the current operation first.');
-            if (session.entry) await bridge.openBrowserHistory(session.entry);
-            else bridge.resume(session.uuid);
-            resetSessionView();
-            filter.value='';filter.oninput();
-            activeScreen='activity';renderScreen();
-            bridge.refresh();await poll();
-          });
-          open.className='advanced-history-open';
-          open.title='Open conversation '+session.uuid;
-          if(current)open.setAttribute('aria-current','true');
-          open.append(el('span',session.title || 'Conversation '+session.uuid.slice(0,8),'advanced-history-title'),
-            el('time',new Date(session.updated).toLocaleString(),'advanced-history-date'));
-          if(current)open.append(el('span','Current','advanced-history-current'));
-          row.append(open);saved.append(row);
-        });
-      }).catch(error=>{notice.textContent='Could not load saved conversations. Use Refresh list to try again.';showError(error);});
-      actions([['History','/history'],['Previous answer','/last'],['Restore','/restore'],['Clear','/clear']]);commandForm('Rewind',count=>`/rewind ${count}`,['Exchanges']);commandForm('Save answer',file=>file ? `/save ${quote(file)}` : '/save',['Server path']);
+      historyWorkspace();
     } else if(activeScreen==='context') {
-      actions([['Summary','/context'],['Analyze','/context analyze'],['Virtual memory','/context vm']]);commandForm('Compact / summarize',(op,keep)=>`/${op} ${keep}`,[{name:'Operation',options:['compact','summarize']},'Messages to keep']);
+      actions([['Refresh context summary','/context'],['Virtual memory','/context vm']]); resultPanel();
+      secondarySection('Analysis and maintenance', () => { actions([['Analyze with model','/context analyze']]);commandForm('Compact / summarize',(op,keep)=>`/${op} ${keep}`,[{name:'Operation',options:['compact','summarize']},'Messages to keep']); });
     } else if(activeScreen==='stats') { statisticsScreen(); return; }
-
+    if (['settings','models','history'].includes(activeScreen)) {
+      const previous = el('details', undefined, 'advanced-secondary-results');
+      previous.open = submittedView?.name === activeScreen;
+      previous.append(el('summary', 'Previous command results')); screen.append(previous); resultPanel(previous);
+    }
   }
   renderScreen();
   const composer=document.querySelector('#promptInput');
@@ -1465,8 +1889,8 @@ window.MiniAAdvancedUI = function(bridge) {
   });
   setInterval(()=>poll().catch(showError),1000);
   if(sessionStorage.getItem(storeKey))setEnabled(true);
-  return { enabled:()=>enabled, stop:()=>api({action:'stop'}), submit:async (value, attachments)=>{
-    await command(value, attachments);
+  return { beforeSessionChange:resolvePendingChanges, enabled:()=>enabled, stop:()=>api({action:'stop'}), submit:async (value, attachments)=>{
+    if (await command(value, attachments) === false) return false;
     composer.value=''; suggestions.hidden=true;
   }};
 };
