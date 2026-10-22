@@ -759,6 +759,7 @@ MiniA.prototype._stopAgentResources = function() {
   // worker promise again, so make resource teardown strictly once-only.
   if (this._resourcesStopped === true) return
   this._resourcesStopped = true
+  this._closeStartupPreparation()
   if (this._ownsComms && this._comms) this._comms.broker.close()
 
   if (isFunction(MiniA._releaseMetricsChannel)) MiniA._releaseMetricsChannel(this)
@@ -814,6 +815,9 @@ MiniA.prototype._stopAgentResources = function() {
     try { this._wikiManager.close() } catch(ignoreWikiCloseErr) {}
   }
 
+  if (isObject(this._skillWikiManager) && this._skillWikiManager !== this._wikiManager && isFunction(this._skillWikiManager.close)) {
+    try { this._skillWikiManager.close() } catch(ignoreSkillWikiClose) {}
+  }
   if (isFunction(MiniA._untrackInstance)) MiniA._untrackInstance(this)
 }
 
@@ -2223,6 +2227,7 @@ MiniA.prototype.getMetrics = function() {
             session_sections: memorySnapshot.sessionSections,
             global_sections: memorySnapshot.globalSections
         },
+        startup: this.getStartupTimings(),
         history_vm: this.getHistoryVmDiagnostics(),
         tool_selection: {
             dynamic_used: global.__mini_a_metrics.tool_selection_dynamic_used.get(),
@@ -2932,7 +2937,8 @@ MiniA.prototype._createBareLlmInstance = function(modelConfig, debugConfig, defa
   if (!isMap(modelConfig)) return __
 
   try {
-    var llmInstance = $llm(modelConfig)
+    var role = /low.cost/i.test(label || "") ? "lc" : /validat/i.test(label || "") ? "validator" : /visual|image/i.test(label || "") ? "visual" : /reflect/i.test(label || "") ? "reflection" : "main"
+    var llmInstance = this._instrumentStartupLlm($llm(modelConfig), role)
     this._configureDebugChannel(llmInstance, debugConfig, defaultName, label)
     return llmInstance
   } catch (e) {
@@ -8435,8 +8441,403 @@ MiniA.prototype._gcSessionNamespaces = function(args) {
   }
 }
 
-MiniA.prototype._initWiki = function(args) {
-  this._wikiManager = __
+// Resource preparation deliberately excludes init(): no memory namespaces, hooks,
+// startup subtasks, conversation mutation, or model calls run before submission.
+MiniA.prepareWebSession = function(uuid) {
+  if (toBoolean(global.maArgs.sessionprewarm) === false) return { prepared: false }
+  // Resolve Advanced settings without holding the conversation registry lock.
+  var state = global.__advanced ? global.__advanced.get(uuid) : __
+  var args = state ? merge(global.maArgs, state.runtime.options()) : merge({}, global.maArgs)
+  if (toBoolean(args.sessionprewarm) === false) return { prepared: false }
+  global.__sessionLock.lock()
+  try {
+    if (global.__busy[uuid]) return { prepared: false, busy: true }
+    if (global.__conversations[uuid] || global.__preparedConversations[uuid]) return { prepared: true }
+    // Bound speculative resources independently of conversation/history retention.
+    if (Object.keys(global.__preparedConversations).length >= 16) return { prepared: false }
+    var agent = new MiniA()
+    global.__preparedConversations[uuid] = agent
+    global.__lastActivity[uuid] = now()
+    agent.prepareSession(args)
+    return { prepared: true }
+  } finally { global.__sessionLock.unlock() }
+}
+
+MiniA.prototype._startupKey = function(value) {
+  var stable = function(v) {
+    if (isArray(v)) return v.map(stable)
+    if (!isMap(v)) return v
+    var out = {}
+    Object.keys(v).sort().forEach(function(key) { if (isDef(v[key])) out[key] = stable(v[key]) })
+    return out
+  }
+  return sha384(stringify(stable(value), __, ""))
+}
+
+MiniA.prototype._startupWikiKey = function(args) {
+  var cfg = this._normalizeWikiArgs(merge({}, args)), selected = {}
+  Object.keys(cfg).forEach(function(key) {
+    if (/^(wiki|skillwiki|usewiki|useskillswiki)/.test(key) || key === "fileallow" || key === "s3artifactbundle") selected[key] = cfg[key]
+  })
+  selected.useskillswiki = toBoolean(cfg.useskillswiki) === true
+  return this._startupKey(selected)
+}
+
+MiniA.prototype._startupWikiManagers = function(entry) {
+  var out = []
+  var visit = function(manager) {
+    if (!isObject(manager) || out.indexOf(manager) >= 0) return
+    out.push(manager)
+    ;(manager._mounts || []).forEach(function(mount) { visit(mount.manager) })
+  }
+  visit(entry.wiki); visit(entry.skillWiki)
+  return out
+}
+
+MiniA.prototype._startupWikiStamp = function(entry) {
+  return this._startupWikiManagers(entry).map(function(manager) {
+    if (manager._catalog) return "catalog"
+    var root = manager._getIndexRoot()
+    var paths = [root, root + "/.mini-a-wiki-serving/current.json", root + "/.mini-a-wiki-serving/previous.json", manager._getGraphPath() + "/graph.json"]
+    if (manager._archiveRoot) paths.push(manager._backend.root)
+    return paths.map(function(path) {
+      var file = new java.io.File(path)
+      return path + ":" + file.lastModified() + ":" + file.length()
+    }).join("|")
+  }).join("\n")
+}
+
+MiniA.prototype._closeStartupEntry = function(entry) {
+  if (!entry || entry.adopted || entry.disposed) return
+  entry.closed = true
+  if (entry.done.getCount() !== 0) return // the worker closes its eventual result
+  if (!entry.disposeOnce.compareAndSet(false, true)) return
+  entry.disposed = true
+  ;(entry.entries || []).forEach(function(item) {
+    if (item.client && isFunction(item.client.destroy)) { try { item.client.destroy() } catch(ignoreClose) {} }
+    item.client = __
+  })
+  if (entry.client && isFunction(entry.client.destroy)) {
+    try { entry.client.destroy() } catch(ignoreClientClose) {}
+  }
+  // Closing a primary closes its mounts. A shared skill wiki is closed only once.
+  ;[entry.wiki, entry.skillWiki !== entry.wiki ? entry.skillWiki : __].forEach(function(manager) {
+    if (manager && isFunction(manager.close)) { try { manager.close() } catch(ignoreWikiClose) {} }
+  })
+}
+
+MiniA.prototype._closeStartupPreparation = function() {
+  var parent = this
+  ;(this._startupEntries || []).forEach(function(entry) { parent._closeStartupEntry(entry) })
+}
+
+MiniA.prototype._scheduleStartupEntry = function(entry, operation) {
+  var parent = this
+  entry.done = new java.util.concurrent.CountDownLatch(1)
+  entry.disposeOnce = new java.util.concurrent.atomic.AtomicBoolean(false)
+  this._startupEntries.push(entry)
+  try {
+    $doV(function() {
+      var started = now()
+      try { if (!entry.closed) operation() } catch(e) { entry.failed = true }
+      finally {
+        entry.millis = now() - started
+        entry.done.countDown()
+        if (entry.closed || entry.failed || parent._resourcesStopped) parent._closeStartupEntry(entry)
+      }
+    })
+  } catch(scheduleError) {
+    entry.failed = true
+    entry.done.countDown()
+    this._closeStartupEntry(entry)
+  }
+}
+
+MiniA.prototype._awaitStartupEntry = function(entry) {
+  var started = now()
+  while (!entry.done.await(100, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+    if (this._resourcesStopped || this._stopRequested) throw new Error("Session preparation cancelled")
+  }
+  if (this._startupTimings) {
+    this._startupTimings.preparation_wait_ms += now() - started
+    this._startupTimings.preparation_ms += entry.millis || 0
+  }
+  return !entry.closed && !entry.failed
+}
+
+MiniA.prototype.prepareSession = function(args) {
+  if (this._resourcesStopped || this._isInitialized || toBoolean(args.sessionprewarm) === false) return
+  // One wiki task and one MCP task per agent bound concurrency. Settings changes
+  // invalidate these resources at adoption, without blocking the prompt editor.
+  if (this._startupEntries) return
+  this._startupEntries = []
+  var parent = this, snapshot = merge({}, args)
+  if (toBoolean(snapshot.usewiki) === true || toBoolean(snapshot.useskillswiki) === true) {
+    try {
+      this._normalizeWikiArgs(snapshot)
+      if (snapshot.usewiki && snapshot.wikiaccess === "rw") throw new Error("Writable wiki setup runs at submission")
+      var wiki = { kind: "wiki", key: this._startupWikiKey(snapshot), messages: [] }
+      this._scheduleStartupEntry(wiki, function() {
+        var report = function(level, message) {
+          if (wiki.adopted) parent.fnI(level, message)
+          else if (!wiki.closed) wiki.messages.push({ level: level, message: message })
+        }
+        wiki.wiki = parent._initWiki(snapshot, true, report)
+        wiki.skillWiki = parent._initSkillWiki(snapshot, true, report, wiki.wiki)
+        wiki.failed = (toBoolean(snapshot.usewiki) === true && !wiki.wiki) || (toBoolean(snapshot.useskillswiki) === true && !wiki.skillWiki)
+        if (!wiki.failed) wiki.stamp = parent._startupWikiStamp(wiki)
+      })
+    } catch(ignoreWikiPreparation) { /* foreground init reports configuration errors */ }
+  }
+  var mcp = { kind: "mcp", entries: [] }
+  try {
+    var normalized = this._normalizeMcpJobPaths(snapshot.mcp, [String(new java.io.File(".").getCanonicalPath()), snapshot._agentBaseDir, getOPackPath("mini-a")])
+    var configs = isString(normalized.mcp) ? af.fromJSSLON(normalized.mcp) : (normalized.mcp || [])
+    if (!isArray(configs)) configs = [configs]
+    var currentDefaultDir = typeof __flags !== "undefined" && __flags.JSONRPC && __flags.JSONRPC.cmd ? __flags.JSONRPC.cmd.defaultDir : __
+    var preparationDir = toBoolean(snapshot.nosetmcpwd) === true ? currentDefaultDir :
+      (normalized.defaultDir || snapshot._mcpDefaultDir || snapshot._agentBaseDir || getOPackPath("mini-a"))
+    var seenMcpIds = {}
+    configs.forEach(function(config) {
+      if (!isMap(config)) return
+      var type = String(config.type || "stdio").toLowerCase()
+      // oJob/dummy/plugin tools can close over mutable session state or execute
+      // local initialization jobs. Keep their original foreground lifecycle.
+      if (["stdio", "remote", "http"].indexOf(type) < 0 || (config.options && config.options.type === "ojob")) return
+      if (isMap(config.auth) && /authorization_code|device_code/.test(String(config.auth.grantType || config.auth.type || ""))) return
+      if (Object.keys(config).some(function(key) { return isFunction(config[key]) })) return
+      var identity = isString(config.id) ? config.id : parent._startupKey(config)
+      if (seenMcpIds[identity]) return
+      seenMcpIds[identity] = true
+      var transportConfig = merge({}, config)
+      // Pin the same cwd that foreground init would select; do not change the
+      // process-global JSONRPC default while other sessions may be using it.
+      if (type === "stdio" && !isString(config.pwd)) transportConfig.pwd = preparationDir || "."
+      mcp.entries.push({ key: parent._startupKey(config), config: transportConfig,
+        defaultDir: type === "stdio" && !isString(config.pwd) ? (preparationDir || ".") : __ })
+    })
+    if (mcp.entries.length) this._scheduleStartupEntry(mcp, function() {
+      mcp.entries.forEach(function(entry) {
+        if (mcp.closed || parent._resourcesStopped) return
+        try {
+          entry.hooks = {}
+          entry.client = parent._newStartupMcpClient(entry.config, entry.hooks)
+          entry.client.initialize()
+          entry.client.__miniAPreinitialized = true
+        } catch(e) {
+          if (entry.client && isFunction(entry.client.destroy)) { try { entry.client.destroy() } catch(ignoreDestroy) {} }
+          entry.client = __ // retry through the ordinary foreground path
+        }
+      })
+    })
+  } catch(ignoreMcpPreparation) { /* foreground init retains its normal errors */ }
+}
+
+MiniA.prototype._newStartupMcpClient = function(config, hooks) {
+  var client = $mcp(merge(config, {
+    shared: false,
+    preFn: function(t, a) { if (isFunction(hooks.preFn)) hooks.preFn(t, a) },
+    posFn: function(t, a, r) { if (isFunction(hooks.posFn)) hooks.posFn(t, a, r) }
+  }))
+  client.__miniAStartupHooks = hooks
+  return client
+}
+
+MiniA.prototype._takeStartupMcp = function(config, hooks) {
+  var batch = (this._startupEntries || []).filter(function(entry) { return entry.kind === "mcp" })[0]
+  if (!batch) return __
+  if (toBoolean(this._startupRunPrewarm) === false) { this._closeStartupEntry(batch); return __ }
+  // A changed descriptor never waits for or adopts an unrelated connection.
+  var key = this._startupKey(config)
+  var entry = batch.entries.filter(function(item) { return item.key === key && !item.adopted })[0]
+  if (!entry) return __
+  if (isString(entry.defaultDir)) {
+    var currentDefaultDir = typeof __flags !== "undefined" && __flags.JSONRPC && __flags.JSONRPC.cmd ? __flags.JSONRPC.cmd.defaultDir : __
+    if (entry.defaultDir !== (currentDefaultDir || ".")) return __
+  }
+  if (!this._awaitStartupEntry(batch) || !entry.client) return __
+  entry.adopted = true
+  var client = entry.client
+  entry.client = __ // ownership transfers to the agent/proxy cleanup paths
+  if (hooks) {
+    client.__miniAStartupHooks.preFn = hooks.preFn
+    client.__miniAStartupHooks.posFn = hooks.posFn
+  }
+  if (this._startupTimings) this._startupTimings.mcp_reused++
+  return client
+}
+
+MiniA.prototype._startupMcpClient = function(config, hooks) {
+  return this._takeStartupMcp(config, hooks) || this._newStartupMcpClient(config, hooks)
+}
+
+MiniA.prototype._adoptStartupWiki = function(args) {
+  var entry = (this._startupEntries || []).filter(function(item) { return item.kind === "wiki" })[0]
+  if (!entry || entry.adopted) return false
+  if (toBoolean(args.sessionprewarm) === false || entry.key !== this._startupWikiKey(args)) {
+    this._closeStartupEntry(entry)
+    return false
+  }
+  if (!this._awaitStartupEntry(entry)) { this._closeStartupEntry(entry); return false }
+  try {
+    this._startupWikiManagers(entry).forEach(function(manager) {
+      // Cold construction always checks remote artifacts. Preserve that freshness
+      // even when periodic refresh is disabled, reusing already downloaded data.
+      if (manager._backendType === "http") manager._hydrateHttpArtifacts()
+      if (manager._backendType === "s3") manager._hydrateS3Artifacts()
+    })
+    if (entry.stamp !== this._startupWikiStamp(entry)) { this._closeStartupEntry(entry); return false }
+  } catch(refreshError) { this._closeStartupEntry(entry); return false }
+  entry.adopted = true
+  this._wikiManager = entry.wiki
+  this._skillWikiManager = entry.skillWiki
+  this._wikiLintStaleDays = args.wikilintstaleddays
+  entry.messages.forEach(function(message) { this.fnI(message.level, message.message) }.bind(this))
+  entry.messages = []
+  if (entry.wiki) this.fnI("info", "📖 [wiki] enabled (backend=" + entry.wiki._backendType + ", access=" + entry.wiki._access + ")")
+  if (entry.skillWiki) this.fnI("info", entry.skillWiki === entry.wiki ? "🧩 [skills] virtual skill library enabled (reusing usewiki's wiki)" : "🧩 [skills] virtual skill library enabled (backend=" + entry.skillWiki._backendType + ")")
+  if (this._resourcesStopped) {
+    ;[entry.wiki, entry.skillWiki !== entry.wiki ? entry.skillWiki : __].forEach(function(manager) {
+      if (manager) { try { manager.close() } catch(ignoreCancelledWikiClose) {} }
+    })
+    throw new Error("Session preparation cancelled")
+  }
+  if (this._startupTimings) this._startupTimings.wiki_reused = true
+  return true
+}
+
+MiniA.prototype._beginStartupTiming = function(args) {
+  this._startupTimingArgs = args
+  this._startupTimingPending = true
+  this._startupRunPrewarm = args.sessionprewarm
+  this._startupTimings = { submitted_at: isNumber(args.__startupSubmittedAt) ? args.__startupSubmittedAt : now(), phases_ms: {}, preparation_ms: 0, preparation_wait_ms: 0, mcp_reused: 0, wiki_reused: false }
+}
+
+MiniA.prototype.getStartupTimings = function() {
+  return this._startupTimings ? jsonParse(stringify(this._startupTimings, __, "")) : {}
+}
+
+MiniA.prototype._timeStartup = function(name, operation) {
+  var started = now()
+  try { return operation() } finally {
+    if (this._startupTimings) {
+      var timing = this._startupTimings
+      var end = isDef(timing.first_provider_ms) ? Math.min(now(), timing.submitted_at + timing.first_provider_ms) : now()
+      if (end >= started) timing.phases_ms[name] = (timing.phases_ms[name] || 0) + end - started
+    }
+  }
+}
+
+MiniA.prototype._instrumentStartupLlm = function(llm, role) {
+  var parent = this
+  Object.keys(llm).forEach(function(name) {
+    if (!/^(prompt.*WithStats|promptImage|decideWithStats)/.test(name) || !isFunction(llm[name])) return
+    var original = llm[name]
+    llm[name] = function() {
+      var timing = parent._startupTimings
+      if (timing) {
+        if (role === "main" && isUnDef(timing.first_main_provider_ms)) timing.first_main_provider_ms = now() - timing.submitted_at
+        if (isUnDef(timing.first_provider_ms)) {
+          timing.first_provider_ms = now() - timing.submitted_at
+          timing.first_provider_role = role
+          parent._trace("startup", parent.getStartupTimings())
+        }
+      }
+      return original.apply(llm, arguments)
+    }
+  })
+  return llm
+}
+
+MiniA.prototype._normalizeWikiArgs = function(args) {
+  args.usewiki = _$(toBoolean(args.usewiki), "args.usewiki").isBoolean().default(false)
+  args.wikiaccess = _$(args.wikiaccess, "args.wikiaccess").isString().default("ro")
+  if (["ro", "rw"].indexOf(String(args.wikiaccess).toLowerCase().trim()) < 0) args.wikiaccess = "ro"
+  else args.wikiaccess = String(args.wikiaccess).toLowerCase().trim()
+  args.wikibackend = _$(args.wikibackend, "args.wikibackend").isString().default("fs")
+  if (["fs", "s3", "es", "s3fs", "http", "https"].indexOf(String(args.wikibackend).toLowerCase().trim()) < 0) args.wikibackend = "fs"
+  else { args.wikibackend = String(args.wikibackend).toLowerCase().trim(); if (args.wikibackend === "https") args.wikibackend = "http" }
+  args.wikiroot = _$(args.wikiroot, "args.wikiroot").isString().default(__)
+  args.wikibucket = _$(args.wikibucket, "args.wikibucket").isString().default(__)
+  args.wikiprefix = _$(args.wikiprefix, "args.wikiprefix").isString().default("wiki/")
+  args.wikiurl = _$(args.wikiurl, "args.wikiurl").isString().default("https://s3.amazonaws.com")
+  args.wikiaccesskey = _$(args.wikiaccesskey, "args.wikiaccesskey").isString().default(__)
+  args.wikisecret = _$(args.wikisecret, "args.wikisecret").isString().default(__)
+  args.wikiregion = _$(args.wikiregion, "args.wikiregion").isString().default(__)
+  args.wikiuseversion1 = _$(toBoolean(args.wikiuseversion1), "args.wikiuseversion1").isBoolean().default(false)
+  args.wikiignorecertcheck = _$(toBoolean(args.wikiignorecertcheck), "args.wikiignorecertcheck").isBoolean().default(false)
+  args.wikiindexdir = _$(args.wikiindexdir, "args.wikiindexdir").isString().default(__)
+  args.wikis3artifactprefix = _$(args.wikis3artifactprefix, "args.wikis3artifactprefix").isString().default(__)
+  args.s3artifactbundle = _$(toBoolean(args.s3artifactbundle), "args.s3artifactbundle").isBoolean().default(false)
+  args.wikihttpindexurl = _$(args.wikihttpindexurl, "args.wikihttpindexurl").isString().default(__)
+  var _wikiHttpTimeout = isNumber(args.wikihttptimeout) ? args.wikihttptimeout : Number(args.wikihttptimeout)
+  if (isNaN(_wikiHttpTimeout)) _wikiHttpTimeout = __
+  args.wikihttptimeout = _$(_wikiHttpTimeout, "args.wikihttptimeout").isNumber().default(30000)
+  var _wikiArtifactRefreshSecs = isNumber(args.wikiartifactrefreshsecs) ? args.wikiartifactrefreshsecs : Number(args.wikiartifactrefreshsecs)
+  if (isNaN(_wikiArtifactRefreshSecs)) _wikiArtifactRefreshSecs = __
+  args.wikiartifactrefreshsecs = _$(_wikiArtifactRefreshSecs, "args.wikiartifactrefreshsecs").isNumber().default(0)
+  if (isUnDef(args.wikilexical) && isString(getEnv("OAF_MINI_A_WIKI_LEXICAL"))) args.wikilexical = getEnv("OAF_MINI_A_WIKI_LEXICAL")
+  if (isDef(args.wikilexical) && !isString(args.wikilexical) && !isMap(args.wikilexical)) throw new Error("args.wikilexical must be a SLON/JSON string or object")
+  args.wikimetacache = _$(toBoolean(args.wikimetacache), "args.wikimetacache").isBoolean().default(true)
+  var _wikiLintStaleDays = isNumber(args.wikilintstaleddays) ? args.wikilintstaleddays : Number(args.wikilintstaleddays)
+  if (isNaN(_wikiLintStaleDays)) _wikiLintStaleDays = __
+  args.wikilintstaleddays = _$( _wikiLintStaleDays, "args.wikilintstaleddays").isNumber().default(90)
+  var _wikiLintStreamThreshold = isNumber(args.wikilintstreamthreshold) ? args.wikilintstreamthreshold : Number(args.wikilintstreamthreshold)
+  if (isNaN(_wikiLintStreamThreshold)) _wikiLintStreamThreshold = __
+  args.wikilintstreamthreshold = _$(_wikiLintStreamThreshold, "args.wikilintstreamthreshold").isNumber().default(2000)
+  var _wikiLintMaxPairs = isNumber(args.wikilintmaxpairs) ? args.wikilintmaxpairs : Number(args.wikilintmaxpairs)
+  if (isNaN(_wikiLintMaxPairs)) _wikiLintMaxPairs = __
+  args.wikilintmaxpairs = _$(_wikiLintMaxPairs, "args.wikilintmaxpairs").isNumber().default(250000)
+  var _wikiLintResultLimit = isNumber(args.wikilintresultlimit) ? args.wikilintresultlimit : Number(args.wikilintresultlimit)
+  if (isNaN(_wikiLintResultLimit)) _wikiLintResultLimit = __
+  args.wikilintresultlimit = _$(_wikiLintResultLimit, "args.wikilintresultlimit").isNumber().default(0)
+  args.dreamwikisurgical = _$(toBoolean(args.dreamwikisurgical), "args.dreamwikisurgical").isBoolean().default(false)
+  args.usewikigraph = _$(toBoolean(args.usewikigraph), "args.usewikigraph").isBoolean().default(false)
+  args.wikigraphsemantic = _$(toBoolean(args.wikigraphsemantic), "args.wikigraphsemantic").isBoolean().default(false)
+  args.wikigraphcommunity = _$(args.wikigraphcommunity, "args.wikigraphcommunity").isString().default("louvain")
+  args.wikigraphsearchhints = _$(toBoolean(args.wikigraphsearchhints), "args.wikigraphsearchhints").isBoolean().default(true)
+  args.wikigraphmounts = _$(toBoolean(args.wikigraphmounts), "args.wikigraphmounts").isBoolean().default(true)
+  var _wikiGraphHintCap = isNumber(args.wikigraphhintcap) ? args.wikigraphhintcap : Number(args.wikigraphhintcap)
+  if (isNaN(_wikiGraphHintCap)) _wikiGraphHintCap = __
+  args.wikigraphhintcap = _$(_wikiGraphHintCap, "args.wikigraphhintcap").isNumber().default(5)
+  var _wikiMountGraphTtlMs = isNumber(args.wikimountgraphttlms) ? args.wikimountgraphttlms : Number(args.wikimountgraphttlms)
+  if (isNaN(_wikiMountGraphTtlMs)) _wikiMountGraphTtlMs = __
+  args.wikimountgraphttlms = _$(_wikiMountGraphTtlMs, "args.wikimountgraphttlms").isNumber().default(60000)
+  args.wikigraphcross = _$(toBoolean(args.wikigraphcross), "args.wikigraphcross").isBoolean().default(true)
+  args.wikigraphcrossjoin = _$(args.wikigraphcrossjoin, "args.wikigraphcrossjoin").isString().default("link,tag,alias,concept")
+  var _wikiGraphCrossCap = isNumber(args.wikigraphcrosscap) ? args.wikigraphcrosscap : Number(args.wikigraphcrosscap)
+  if (isNaN(_wikiGraphCrossCap)) _wikiGraphCrossCap = __
+  args.wikigraphcrosscap = _$(_wikiGraphCrossCap, "args.wikigraphcrosscap").isNumber().default(5)
+  var _wikiGraphCrossDepth = isNumber(args.wikigraphcrossdepth) ? args.wikigraphcrossdepth : Number(args.wikigraphcrossdepth)
+  if (isNaN(_wikiGraphCrossDepth)) _wikiGraphCrossDepth = __
+  args.wikigraphcrossdepth = _$(_wikiGraphCrossDepth, "args.wikigraphcrossdepth").isNumber().default(1)
+  var _wikiGraphCrossMaxDf = isNumber(args.wikigraphcrossmaxdf) ? args.wikigraphcrossmaxdf : Number(args.wikigraphcrossmaxdf)
+  if (isNaN(_wikiGraphCrossMaxDf)) _wikiGraphCrossMaxDf = __
+  args.wikigraphcrossmaxdf = _$(_wikiGraphCrossMaxDf, "args.wikigraphcrossmaxdf").isNumber().default(0.25)
+  var _wikiGraphCrossMinKeyLen = isNumber(args.wikigraphcrossminkeylen) ? args.wikigraphcrossminkeylen : Number(args.wikigraphcrossminkeylen)
+  if (isNaN(_wikiGraphCrossMinKeyLen)) _wikiGraphCrossMinKeyLen = __
+  args.wikigraphcrossminkeylen = _$(_wikiGraphCrossMinKeyLen, "args.wikigraphcrossminkeylen").isNumber().default(3)
+  args.wikigraphautosave = _$(args.wikigraphautosave, "args.wikigraphautosave").isString().default("always")
+  if (["always", "debounced", "off"].indexOf(String(args.wikigraphautosave).toLowerCase().trim()) < 0) args.wikigraphautosave = "always"
+  else args.wikigraphautosave = String(args.wikigraphautosave).toLowerCase().trim()
+  var _wikiGraphSaveDebounceMs = isNumber(args.wikigraphsavedebouncems) ? args.wikigraphsavedebouncems : Number(args.wikigraphsavedebouncems)
+  if (isNaN(_wikiGraphSaveDebounceMs)) _wikiGraphSaveDebounceMs = __
+  args.wikigraphsavedebouncems = _$(_wikiGraphSaveDebounceMs, "args.wikigraphsavedebouncems").isNumber().default(5000)
+  args.wikigraphfalkorhost = _$(args.wikigraphfalkorhost, "args.wikigraphfalkorhost").isString().default(__)
+  var _wikiGraphFalkorPort = isNumber(args.wikigraphfalkorport) ? args.wikigraphfalkorport : Number(args.wikigraphfalkorport)
+  if (isNaN(_wikiGraphFalkorPort)) _wikiGraphFalkorPort = __
+  args.wikigraphfalkorport = _$(_wikiGraphFalkorPort, "args.wikigraphfalkorport").isNumber().default(6379)
+  args.wikigraphfalkorgraph = _$(args.wikigraphfalkorgraph, "args.wikigraphfalkorgraph").isString().default("mini_a_wiki")
+  args.wikigraphfalkoruser = _$(args.wikigraphfalkoruser, "args.wikigraphfalkoruser").isString().default(__)
+  args.wikigraphfalkorpass = _$(args.wikigraphfalkorpass, "args.wikigraphfalkorpass").isString().default(__)
+  // wikimounts: SLON/JSON array of {name, backend, root|bucket|...} — left as-is (parsed at wiki init)
+  if (isUnDef(args.wikimounts)) args.wikimounts = __
+  return args
+}
+
+MiniA.prototype._initWiki = function(args, prepareOnly, report) {
+  report = report || this.fnI.bind(this)
+  if (!prepareOnly) this._wikiManager = __
   if (toBoolean(args.usewiki) !== true) return
   try {
     var wikiGraphEnabled = toBoolean(args.usewikigraph) === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0)
@@ -8457,13 +8858,15 @@ MiniA.prototype._initWiki = function(args) {
       }.bind(this)
     }
     cfg = __miniAWikiPrimaryConfig(cfg, args.wikiroot, args.wikimounts)
-    this._wikiManager = __miniAWikiCreatePrimary(cfg, function(level, msg) {
-      this.fnI(level || "info", "[wiki] " + msg)
+    var manager = __miniAWikiCreatePrimary(cfg, function(level, msg) {
+      report(level || "info", "[wiki] " + msg)
     }.bind(this))
+    if (prepareOnly) return manager
+    this._wikiManager = manager
     this._wikiLintStaleDays = isNumber(args.wikilintstaleddays) ? args.wikilintstaleddays : 90
-    this.fnI("info", `📖 [wiki] enabled (backend=${this._wikiManager._backendType}, access=${this._wikiManager._access})`)
+    report("info", `📖 [wiki] enabled (backend=${this._wikiManager._backendType}, access=${this._wikiManager._access})`)
   } catch(e) {
-    this.fnI("warn", `[wiki] failed to initialize: ${__miniAErrMsg(e)}`)
+    report("warn", `[wiki] failed to initialize: ${__miniAErrMsg(e)}`)
   }
 }
 
@@ -8472,14 +8875,17 @@ MiniA.prototype._initWiki = function(args) {
 // ordinary knowledge pages and skill pages side by side. A dedicated backend/root/
 // mounts is only constructed when the caller explicitly asks for one, e.g. to point
 // at a separate skill-only library while still using usewiki for team knowledge.
-MiniA.prototype._initSkillWiki = function(args) {
-  this._skillWikiManager = __
+MiniA.prototype._initSkillWiki = function(args, prepareOnly, report, preparedWiki) {
+  report = report || this.fnI.bind(this)
+  if (!prepareOnly) this._skillWikiManager = __
+  var primary = prepareOnly ? preparedWiki : this._wikiManager
   if (toBoolean(args.useskillswiki) !== true) return
   try {
     var hasDedicatedConfig = isString(args.skillwikiroot) || isString(args.skillwikibackend) || isDef(args.skillwikimounts)
-    if (!hasDedicatedConfig && isObject(this._wikiManager)) {
-      this._skillWikiManager = this._wikiManager
-      this.fnI("info", "🧩 [skills] virtual skill library enabled (reusing usewiki's wiki)")
+    if (!hasDedicatedConfig && isObject(primary)) {
+      if (prepareOnly) return primary
+      this._skillWikiManager = primary
+      report("info", "🧩 [skills] virtual skill library enabled (reusing usewiki's wiki)")
       return
     }
     if (typeof MiniAWikiManager !== "function") loadLib("mini-a-wiki.js")
@@ -8512,13 +8918,15 @@ MiniA.prototype._initSkillWiki = function(args) {
       cfg.accessKey = args.wikiaccesskey; cfg.secret = args.wikisecret
     }
     cfg = __miniAWikiPrimaryConfig(cfg, args.skillwikiroot, args.skillwikimounts)
-    this._skillWikiManager = __miniAWikiCreatePrimary(cfg, function(level, msg) {
-      this.fnI(level || "info", "[skills] " + msg)
+    var manager = __miniAWikiCreatePrimary(cfg, function(level, msg) {
+      report(level || "info", "[skills] " + msg)
     }.bind(this))
-    this.fnI("info", `🧩 [skills] virtual skill library enabled (backend=${this._skillWikiManager._backendType})`)
+    if (prepareOnly) return manager
+    this._skillWikiManager = manager
+    report("info", `🧩 [skills] virtual skill library enabled (backend=${this._skillWikiManager._backendType})`)
   } catch(e) {
-    this.fnI("warn", `[skills] failed to initialize skill wiki: ${__miniAErrMsg(e)}`)
-    this._skillWikiManager = __
+    report("warn", `[skills] failed to initialize skill wiki: ${__miniAErrMsg(e)}`)
+    if (!prepareOnly) this._skillWikiManager = __
   }
 }
 
@@ -12492,7 +12900,8 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         if (!isObject(entry.client) || typeof entry.client.listTools !== "function") return
         try {
           var listResult = entry.client.listTools()
-          var extracted = helpers.extractTools(listResult)
+          client.__miniAPreinitialized = false
+      var extracted = helpers.extractTools(listResult)
           entry.tools = extracted.tools
           if (isDef(extracted.serverInfo)) entry.serverInfo = extracted.serverInfo
           entry.lastRefreshed = now()
@@ -12527,7 +12936,10 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
       // Local ojob-backed MCPs should be recreated so code/arg changes are applied immediately.
       var forceFreshClient = descriptorType === "ojob" || optionsType === "ojob"
 
-      if (isObject(existing) && isObject(existing.client) && forceFreshClient !== true) {
+      var preparedClient = !(isObject(existing) && isObject(existing.client)) ? parent._takeStartupMcp(configObject) : __
+      if (isObject(preparedClient)) {
+        client = preparedClient
+      } else if (isObject(existing) && isObject(existing.client) && forceFreshClient !== true) {
         client = existing.client
       } else {
         if (forceFreshClient === true && isObject(existing) && isObject(existing.client) && typeof existing.client.destroy === "function") {
@@ -12544,11 +12956,21 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
       var listResult
       try {
         listResult = client.listTools()
+        if (!isMap(listResult) || !isArray(listResult.tools)) throw new Error("Invalid MCP catalog")
       } catch(e) {
         if (isObject(client) && typeof client.destroy === "function") {
           try { client.destroy() } catch(ignoreDestroy) {}
         }
-        throw new Error("Failed to list tools for MCP connection #" + (index + 1) + " in proxy: " + e.message)
+        if (client.__miniAPreinitialized !== true) throw new Error("Failed to list tools for MCP connection #" + (index + 1) + " in proxy: " + e.message)
+        if (parent._startupTimings) parent._startupTimings.mcp_reused--
+        client = $mcp(merge(configObject, { shared: true }))
+        try {
+          client.initialize()
+          listResult = client.listTools()
+        } catch(reconnectError) {
+          try { client.destroy() } catch(ignoreReconnectClose) {}
+          throw reconnectError
+        }
       }
 
       var extracted = helpers.extractTools(listResult)
@@ -16166,7 +16588,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "rpm", "tpm", "rtm", "maxsteps", "knowledge", "fileallow", "chatyouare", "youare", "homedir",
     "promptprofile", "systempromptbudget", "outfile", "outfileall", "libs", "model", "modellc", "modelval", "modeldec", "modelvisual",
     "conversation", "historyvm", "historyvmmode", "historyvmshadow", "contextvirtualization", "contextvirtualizationshadow", "shell", "usesandbox", "sandboxprofile", "sandboxnonetwork", "shellallow", "shellbanextra",
-    "shelltimeout", "shellmaxbytes", "toolcachettl", "mcplazy", "mcpdynamic", "mcpproxy", "mcpproxythreshold", "toolargcheck", "toolargrepair",
+    "shelltimeout", "shellmaxbytes", "toolcachettl", "sessionprewarm", "mcplazy", "mcpdynamic", "mcpproxy", "mcpproxythreshold", "toolargcheck", "toolargrepair",
     "mcpproxytoon", "contextguard", "contextguardbudget", "toolresultmaxinline", "readresultmaxmatches",
     "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugdecch", "debugvalch", "debugvisualch", "capabilityselection", "capabilitylimit", "policy", "policyfile", "planfile",
     "planformat", "plancontent", "planstyle", "forceplanning", "saveplannotes", "outputfile", "updatefreq",
@@ -16575,10 +16997,12 @@ MiniA.prototype._warnUnknownArgs = function(args, options) {
 
 MiniA.prototype.init = function(args) {
   args = _$(args, "args").isMap().default({})
+  if (!this._startupTimings || this._startupTimingArgs !== args) this._beginStartupTiming(args)
   this._configureFileAccess(args)
   var explicitExternalArgs = jsonParse(stringify(args, __, ""), __, __, true)
   this._applyAgentMetadata(args)
   this._applyExplicitExternalArgs(args, explicitExternalArgs)
+  this._normalizeWikiArgs(args)
   this._forkPolicyRun = genUUID()
   this._initDecisionRuntime(args)
   this._validateSupervisedArgs(args)
@@ -16613,14 +17037,14 @@ MiniA.prototype.init = function(args) {
   // and memoryinject=relevant's goal-relevant durable memory, both read from
   // this._globalMemoryManager/this._sessionMemoryManager). This runs unconditionally, ahead
   // of the _isInitialized short-circuit below, because init() is also called directly by
-  // some embedders (e.g. the interactive console) before start()/_startInternal -- putting
+  // some embedders and attachment handlers before start()/_startInternal -- putting
   // memory setup only in _startInternal would miss that path. _initWorkingMemory does its
   // own arg coercion (toBoolean/isString on the raw args), so it doesn't need this function's
   // later, fuller arg validation to have run first.
   // Guarded by reference-equality against the same args object, not just _isInitialized below:
-  // the console calls init(_args) directly and then start(_args), and start()/_startInternal
+  // an embedder may call init(args) directly and then start(args), and start()/_startInternal
   // calls this.init(args) again with that same reference -- without this guard the global
-  // manager would be torn down and reloaded a second time on every turn. A genuinely new run
+  // manager would be torn down and reloaded a second time for that run. A genuinely new run
   // (a different args object) still re-initializes as expected.
   if (this._memoryInitializedArgs !== args) {
     var initialState = {}
@@ -16636,7 +17060,7 @@ MiniA.prototype.init = function(args) {
       }
     }
     this._agentState = isObject(initialState) ? initialState : {}
-    this._initWorkingMemory(args, this._agentState)
+    this._timeStartup("memory", function() { this._initWorkingMemory(args, this._agentState) }.bind(this))
     this._memoryInitializedArgs = args
   }
 
@@ -17091,8 +17515,12 @@ MiniA.prototype.init = function(args) {
     this._useTools = this._useToolsMain || this._useToolsLC
     this._useUtils = args.useutils
     this._configurePlanUpdates(args)
-    this._initWiki(args)
-    this._initSkillWiki(args)
+    this._timeStartup("wiki", function() {
+      if (!this._adoptStartupWiki(args)) {
+        this._initWiki(args)
+        this._initSkillWiki(args)
+      }
+    }.bind(this))
 
     // Normalize format argument based on outfile
     if (isDef(args.outfile) && isUnDef(args.format)) args.format = "json"
@@ -17349,9 +17777,9 @@ MiniA.prototype.init = function(args) {
     applyPromptCachingDefault(this._oaf_val_model)
     applyPromptCachingDefault(this._oaf_reflect_model)
 
-    this.llm = $llm(this._oaf_model)
-    if (this._use_lc) this.lc_llm = $llm(this._oaf_lc_model)
-    if (this._use_val) this.val_llm = $llm(this._oaf_val_model)
+    this.llm = this._instrumentStartupLlm($llm(this._oaf_model), "main")
+    if (this._use_lc) this.lc_llm = this._instrumentStartupLlm($llm(this._oaf_lc_model), "lc")
+    if (this._use_val) this.val_llm = this._instrumentStartupLlm($llm(this._oaf_val_model), "validator")
     this._activeConversationModel = "main"
     this._debugchConfig = args.debugch
     this._debuglcchConfig = args.debuglcch
@@ -17486,8 +17914,7 @@ MiniA.prototype.init = function(args) {
             // the callTool wrapper below). Reusing a shared client across runs can keep stale
             // references to a previous agent instance and trigger errors such as
             // "_subtaskManager from undefined". Keep per-agent MCP clients isolated here.
-            mcp = $mcp(merge(mcpConfig, {
-              shared: false,
+            mcp = this._startupMcpClient(mcpConfig, {
               preFn : (t, a) => {
                 if (isObject(parent._runtime)) {
                   parent._runtime.modelToolCallDetected = true
@@ -17573,21 +18000,12 @@ MiniA.prototype.init = function(args) {
                   })
                 }
               }
-            }))
+            })
             this._mcpConnections[id] = mcp
-            mcp.initialize()
+            this._timeStartup("mcp_initialize", function() {
+              if (mcp.__miniAPreinitialized !== true) mcp.initialize()
+            })
             this._lazyMcpConnections[id] = false
-            if (args.mcplazy !== true) {
-              sleep(100, true)
-            }
-            if (!isFunction(mcp.__miniAOriginalCallTool)) {
-              mcp.__miniAOriginalCallTool = mcp.callTool.bind(mcp)
-              mcp.callTool = (toolName, params, meta) => {
-                var ctx = __
-                if (isObject(meta) && isObject(meta.__miniACallContext)) ctx = meta.__miniACallContext
-                return parent._executeToolWithCache(id, toolName, params, ctx)
-              }
-            }
           }
 
           this._ensureMcpConnectionMetadata(id, mcpConfig, index)
@@ -17596,7 +18014,26 @@ MiniA.prototype.init = function(args) {
             this._lazyMcpConnections[id] = false
           }
 
-          if (isExisting && !isFunction(mcp.__miniAOriginalCallTool)) {
+          var tools
+          try {
+            tools = this._timeStartup("mcp_catalog", function() { return mcp.listTools() })
+            if (!isMap(tools) || !isArray(tools.tools)) throw new Error("Invalid MCP catalog")
+          } catch(catalogError) {
+            if (mcp.__miniAPreinitialized !== true) throw catalogError
+            var hooks = mcp.__miniAStartupHooks
+            try { mcp.destroy() } catch(ignorePreparedClientClose) {}
+            mcp = this._newStartupMcpClient(mcpConfig, hooks)
+            this._mcpConnections[id] = mcp
+            if (this._startupTimings) this._startupTimings.mcp_reused--
+            this._timeStartup("mcp_initialize", function() { mcp.initialize() })
+            tools = this._timeStartup("mcp_catalog", function() { return mcp.listTools() })
+          }
+          mcp.__miniAPreinitialized = false
+          if (this._resourcesStopped) {
+            try { mcp.destroy() } catch(ignoreCancelledMcpClose) {}
+            throw new Error("Session preparation cancelled")
+          }
+          if (!isFunction(mcp.__miniAOriginalCallTool)) {
             mcp.__miniAOriginalCallTool = mcp.callTool.bind(mcp)
             mcp.callTool = (toolName, params, meta) => {
               var ctx = __
@@ -17605,7 +18042,6 @@ MiniA.prototype.init = function(args) {
             }
           }
 
-          var tools = mcp.listTools()
           if (isDef(tools) && isDef(tools.tools)) {
             tools = tools.tools
           } else {
@@ -17668,8 +18104,10 @@ MiniA.prototype.init = function(args) {
     this._promptArgs = merge(args, {})
     this._refreshRunPrompt(args)
 
+    this._closeStartupPreparation()
     this._isInitialized = true
   } catch(ee) {
+    this._closeStartupPreparation()
     this._isInitialized = false
     this._initError = ee
     var _initErrMsg = __miniAErrMsg(ee)
@@ -17685,6 +18123,10 @@ MiniA.prototype.init = function(args) {
 // Rebuild generated instructions after the current memory session is bound.
 // Connections and the model conversation belong to the session, not this prompt.
 MiniA.prototype._refreshRunPrompt = function(args) {
+  return this._timeStartup("prompt", function() { return this._buildRunPrompt(args) }.bind(this))
+}
+
+MiniA.prototype._buildRunPrompt = function(args) {
   var activationArgs = args
   var previousArgs = this._promptArgs || {}
   args = merge(previousArgs, args)
@@ -17744,7 +18186,7 @@ MiniA.prototype._refreshRunPrompt = function(args) {
     var hasProxyDispatchAction = isObject(this.mcpToolToConnection) && isDef(this.mcpToolToConnection["proxy-dispatch"])
     // Use args.mcpproxy directly rather than this._useMcpProxy: the latter is only
     // preset inside _startInternal (before start() calls init() a second time), so
-    // callers that invoke init() directly first (e.g. the console) would otherwise
+    // callers that invoke init() directly before start() would otherwise
     // build the system prompt while this._useMcpProxy still held its stale default,
     // baking a proxy-dispatch-less prompt into the first request.
     var promptUseMcpProxy = hasProxyDispatchAction && toBoolean(args.mcpproxy) === true
@@ -18152,6 +18594,8 @@ MiniA.prototype._supportsConsoleUserInput = function(args) {
  * </odoc>
  */
 MiniA.prototype.start = function(args) {
+    if (!this._startupTimingPending || this._startupTimingArgs !== args) this._beginStartupTiming(args)
+    this._startupTimingPending = false
     this._supervised = __
     this._supervisedResume = __
     this._validateSupervisedArgs(args)
@@ -18573,88 +19017,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var _skillsMaxChars = isNumber(args.skillsmaxchars) ? args.skillsmaxchars : Number(args.skillsmaxchars)
     if (isNaN(_skillsMaxChars)) _skillsMaxChars = __
     args.skillsmaxchars = _$(_skillsMaxChars, "args.skillsmaxchars").isNumber().default(12000)
-    args.usewiki = _$(toBoolean(args.usewiki), "args.usewiki").isBoolean().default(false)
-    args.wikiaccess = _$(args.wikiaccess, "args.wikiaccess").isString().default("ro")
-    if (["ro", "rw"].indexOf(String(args.wikiaccess).toLowerCase().trim()) < 0) args.wikiaccess = "ro"
-    else args.wikiaccess = String(args.wikiaccess).toLowerCase().trim()
-    args.wikibackend = _$(args.wikibackend, "args.wikibackend").isString().default("fs")
-    if (["fs", "s3", "es", "s3fs", "http", "https"].indexOf(String(args.wikibackend).toLowerCase().trim()) < 0) args.wikibackend = "fs"
-    else { args.wikibackend = String(args.wikibackend).toLowerCase().trim(); if (args.wikibackend === "https") args.wikibackend = "http" }
-    args.wikiroot = _$(args.wikiroot, "args.wikiroot").isString().default(__)
-    args.wikibucket = _$(args.wikibucket, "args.wikibucket").isString().default(__)
-    args.wikiprefix = _$(args.wikiprefix, "args.wikiprefix").isString().default("wiki/")
-    args.wikiurl = _$(args.wikiurl, "args.wikiurl").isString().default("https://s3.amazonaws.com")
-    args.wikiaccesskey = _$(args.wikiaccesskey, "args.wikiaccesskey").isString().default(__)
-    args.wikisecret = _$(args.wikisecret, "args.wikisecret").isString().default(__)
-    args.wikiregion = _$(args.wikiregion, "args.wikiregion").isString().default(__)
-    args.wikiuseversion1 = _$(toBoolean(args.wikiuseversion1), "args.wikiuseversion1").isBoolean().default(false)
-    args.wikiignorecertcheck = _$(toBoolean(args.wikiignorecertcheck), "args.wikiignorecertcheck").isBoolean().default(false)
-    args.wikiindexdir = _$(args.wikiindexdir, "args.wikiindexdir").isString().default(__)
-    args.wikis3artifactprefix = _$(args.wikis3artifactprefix, "args.wikis3artifactprefix").isString().default(__)
-    args.s3artifactbundle = _$(toBoolean(args.s3artifactbundle), "args.s3artifactbundle").isBoolean().default(false)
-    args.wikihttpindexurl = _$(args.wikihttpindexurl, "args.wikihttpindexurl").isString().default(__)
-    var _wikiHttpTimeout = isNumber(args.wikihttptimeout) ? args.wikihttptimeout : Number(args.wikihttptimeout)
-    if (isNaN(_wikiHttpTimeout)) _wikiHttpTimeout = __
-    args.wikihttptimeout = _$(_wikiHttpTimeout, "args.wikihttptimeout").isNumber().default(30000)
-    var _wikiArtifactRefreshSecs = isNumber(args.wikiartifactrefreshsecs) ? args.wikiartifactrefreshsecs : Number(args.wikiartifactrefreshsecs)
-    if (isNaN(_wikiArtifactRefreshSecs)) _wikiArtifactRefreshSecs = __
-    args.wikiartifactrefreshsecs = _$(_wikiArtifactRefreshSecs, "args.wikiartifactrefreshsecs").isNumber().default(0)
-    if (isUnDef(args.wikilexical) && isString(getEnv("OAF_MINI_A_WIKI_LEXICAL"))) args.wikilexical = getEnv("OAF_MINI_A_WIKI_LEXICAL")
-    if (isDef(args.wikilexical) && !isString(args.wikilexical) && !isMap(args.wikilexical)) throw new Error("args.wikilexical must be a SLON/JSON string or object")
-    args.wikimetacache = _$(toBoolean(args.wikimetacache), "args.wikimetacache").isBoolean().default(true)
-    var _wikiLintStaleDays = isNumber(args.wikilintstaleddays) ? args.wikilintstaleddays : Number(args.wikilintstaleddays)
-    if (isNaN(_wikiLintStaleDays)) _wikiLintStaleDays = __
-    args.wikilintstaleddays = _$( _wikiLintStaleDays, "args.wikilintstaleddays").isNumber().default(90)
-    var _wikiLintStreamThreshold = isNumber(args.wikilintstreamthreshold) ? args.wikilintstreamthreshold : Number(args.wikilintstreamthreshold)
-    if (isNaN(_wikiLintStreamThreshold)) _wikiLintStreamThreshold = __
-    args.wikilintstreamthreshold = _$(_wikiLintStreamThreshold, "args.wikilintstreamthreshold").isNumber().default(2000)
-    var _wikiLintMaxPairs = isNumber(args.wikilintmaxpairs) ? args.wikilintmaxpairs : Number(args.wikilintmaxpairs)
-    if (isNaN(_wikiLintMaxPairs)) _wikiLintMaxPairs = __
-    args.wikilintmaxpairs = _$(_wikiLintMaxPairs, "args.wikilintmaxpairs").isNumber().default(250000)
-    var _wikiLintResultLimit = isNumber(args.wikilintresultlimit) ? args.wikilintresultlimit : Number(args.wikilintresultlimit)
-    if (isNaN(_wikiLintResultLimit)) _wikiLintResultLimit = __
-    args.wikilintresultlimit = _$(_wikiLintResultLimit, "args.wikilintresultlimit").isNumber().default(0)
-    args.dreamwikisurgical = _$(toBoolean(args.dreamwikisurgical), "args.dreamwikisurgical").isBoolean().default(false)
-    args.usewikigraph = _$(toBoolean(args.usewikigraph), "args.usewikigraph").isBoolean().default(false)
-    args.wikigraphsemantic = _$(toBoolean(args.wikigraphsemantic), "args.wikigraphsemantic").isBoolean().default(false)
-    args.wikigraphcommunity = _$(args.wikigraphcommunity, "args.wikigraphcommunity").isString().default("louvain")
-    args.wikigraphsearchhints = _$(toBoolean(args.wikigraphsearchhints), "args.wikigraphsearchhints").isBoolean().default(true)
-    args.wikigraphmounts = _$(toBoolean(args.wikigraphmounts), "args.wikigraphmounts").isBoolean().default(true)
-    var _wikiGraphHintCap = isNumber(args.wikigraphhintcap) ? args.wikigraphhintcap : Number(args.wikigraphhintcap)
-    if (isNaN(_wikiGraphHintCap)) _wikiGraphHintCap = __
-    args.wikigraphhintcap = _$(_wikiGraphHintCap, "args.wikigraphhintcap").isNumber().default(5)
-    var _wikiMountGraphTtlMs = isNumber(args.wikimountgraphttlms) ? args.wikimountgraphttlms : Number(args.wikimountgraphttlms)
-    if (isNaN(_wikiMountGraphTtlMs)) _wikiMountGraphTtlMs = __
-    args.wikimountgraphttlms = _$(_wikiMountGraphTtlMs, "args.wikimountgraphttlms").isNumber().default(60000)
-    args.wikigraphcross = _$(toBoolean(args.wikigraphcross), "args.wikigraphcross").isBoolean().default(true)
-    args.wikigraphcrossjoin = _$(args.wikigraphcrossjoin, "args.wikigraphcrossjoin").isString().default("link,tag,alias,concept")
-    var _wikiGraphCrossCap = isNumber(args.wikigraphcrosscap) ? args.wikigraphcrosscap : Number(args.wikigraphcrosscap)
-    if (isNaN(_wikiGraphCrossCap)) _wikiGraphCrossCap = __
-    args.wikigraphcrosscap = _$(_wikiGraphCrossCap, "args.wikigraphcrosscap").isNumber().default(5)
-    var _wikiGraphCrossDepth = isNumber(args.wikigraphcrossdepth) ? args.wikigraphcrossdepth : Number(args.wikigraphcrossdepth)
-    if (isNaN(_wikiGraphCrossDepth)) _wikiGraphCrossDepth = __
-    args.wikigraphcrossdepth = _$(_wikiGraphCrossDepth, "args.wikigraphcrossdepth").isNumber().default(1)
-    var _wikiGraphCrossMaxDf = isNumber(args.wikigraphcrossmaxdf) ? args.wikigraphcrossmaxdf : Number(args.wikigraphcrossmaxdf)
-    if (isNaN(_wikiGraphCrossMaxDf)) _wikiGraphCrossMaxDf = __
-    args.wikigraphcrossmaxdf = _$(_wikiGraphCrossMaxDf, "args.wikigraphcrossmaxdf").isNumber().default(0.25)
-    var _wikiGraphCrossMinKeyLen = isNumber(args.wikigraphcrossminkeylen) ? args.wikigraphcrossminkeylen : Number(args.wikigraphcrossminkeylen)
-    if (isNaN(_wikiGraphCrossMinKeyLen)) _wikiGraphCrossMinKeyLen = __
-    args.wikigraphcrossminkeylen = _$(_wikiGraphCrossMinKeyLen, "args.wikigraphcrossminkeylen").isNumber().default(3)
-    args.wikigraphautosave = _$(args.wikigraphautosave, "args.wikigraphautosave").isString().default("always")
-    if (["always", "debounced", "off"].indexOf(String(args.wikigraphautosave).toLowerCase().trim()) < 0) args.wikigraphautosave = "always"
-    else args.wikigraphautosave = String(args.wikigraphautosave).toLowerCase().trim()
-    var _wikiGraphSaveDebounceMs = isNumber(args.wikigraphsavedebouncems) ? args.wikigraphsavedebouncems : Number(args.wikigraphsavedebouncems)
-    if (isNaN(_wikiGraphSaveDebounceMs)) _wikiGraphSaveDebounceMs = __
-    args.wikigraphsavedebouncems = _$(_wikiGraphSaveDebounceMs, "args.wikigraphsavedebouncems").isNumber().default(5000)
-    args.wikigraphfalkorhost = _$(args.wikigraphfalkorhost, "args.wikigraphfalkorhost").isString().default(__)
-    var _wikiGraphFalkorPort = isNumber(args.wikigraphfalkorport) ? args.wikigraphfalkorport : Number(args.wikigraphfalkorport)
-    if (isNaN(_wikiGraphFalkorPort)) _wikiGraphFalkorPort = __
-    args.wikigraphfalkorport = _$(_wikiGraphFalkorPort, "args.wikigraphfalkorport").isNumber().default(6379)
-    args.wikigraphfalkorgraph = _$(args.wikigraphfalkorgraph, "args.wikigraphfalkorgraph").isString().default("mini_a_wiki")
-    args.wikigraphfalkoruser = _$(args.wikigraphfalkoruser, "args.wikigraphfalkoruser").isString().default(__)
-    args.wikigraphfalkorpass = _$(args.wikigraphfalkorpass, "args.wikigraphfalkorpass").isString().default(__)
-    // wikimounts: SLON/JSON array of {name, backend, root|bucket|...} — left as-is (parsed at wiki init)
-    if (isUnDef(args.wikimounts)) args.wikimounts = __
+    this._normalizeWikiArgs(args)
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
     args.utilsallow = _$(args.utilsallow, "args.utilsallow").isString().default(__)
@@ -19206,8 +19569,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       return this._processFinalAnswer(blockedAnswer, args)
     }
 
-    this._registerMcpToolsForGoal(args)
-    var skillBlocked = this._consultSkillsForRun(args, { beforeCall: addCall, afterCall: registerCallUsage })
+    this._timeStartup("goal_tools", function() { this._registerMcpToolsForGoal(args) }.bind(this))
+    var skillBlocked = this._timeStartup("skills", function() {
+      return this._consultSkillsForRun(args, { beforeCall: addCall, afterCall: registerCallUsage })
+    }.bind(this))
     if (skillBlocked.length > 0) {
       var skillBlockedAnswer = "Skill-dependent work is blocked: " + skillBlocked.map(function(item) { return item.ref + " (" + item.reason + ")" }).join("; ") + ". Restore the required guidance or adjust the skill limits before retrying."
       this._origAnswer = skillBlockedAnswer
@@ -22331,7 +22696,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var finalLLM = this.llm
     if (this._useToolsActual === true) {
       try {
-        finalLLM = $llm(this._oaf_model)
+        finalLLM = this._instrumentStartupLlm($llm(this._oaf_model), "main")
         if (isFunction(finalLLM.withInstructions) && isString(this._systemInst) && this._systemInst.length > 0) {
           var updatedFinalLLM = finalLLM.withInstructions(this._systemInst)
           if (isDef(updatedFinalLLM)) finalLLM = updatedFinalLLM
@@ -23323,7 +23688,7 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
     var valModelConfig = this._use_val ? this._oaf_val_model : this._oaf_model
     if (isObject(valModelConfig)) {
       try {
-        effectiveLLM = $llm(valModelConfig)
+        effectiveLLM = this._instrumentStartupLlm($llm(valModelConfig), "validator")
         // Attach debugvalch to the fresh instance so the debug channel captures these calls
         if (isString(this._debugvalchConfig) && this._debugvalchConfig.length > 0) {
           this._configureDebugChannel(effectiveLLM, this._debugvalchConfig, "__mini_a_val_llm_debug", "Validation LLM")

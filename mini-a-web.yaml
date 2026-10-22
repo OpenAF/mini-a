@@ -575,8 +575,13 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : sessionprewarm
+    desc     : Prepare wiki and external MCP resources while composing a new-session prompt (default true)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : mcplazy
-    desc     : "Initialize MCP connections lazily on first use instead of during Init"
+    desc     : "MCP preparation compatibility option; direct tool catalogs are still discovered before model dispatch"
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
@@ -1220,6 +1225,21 @@ todo:
       if (isDef(mutationToken)) global._mini_a_web_release(postData.uuid, mutationToken)
     }
 
+# Prepare new-session resources without starting a goal.
+- (httpdService   ): "${onport:-8888}"
+  ((uri          )): /prepare
+  ((execURI      )): | #js
+    if (!global._mini_a_web_checkToken(request)) return ow.server.httpd.reply({ error: "unauthorized" })
+    try {
+      var raw = request.files.postData
+      if (!isString(raw) || raw.length > 1024) return ow.server.httpd.reply({ error: "invalid request" })
+      var data = jsonParse(raw)
+      if (!isMap(data) || !global._mini_a_web_isValidUuid(data.uuid)) return ow.server.httpd.reply({ error: "invalid uuid" })
+      return ow.server.httpd.reply(MiniA.prepareWebSession(data.uuid))
+    } catch(e) {
+      return ow.server.httpd.reply({ error: "unable to prepare session" })
+    }
+
 # Submit a prompt
 - (httpdService   ): "${onport:-8888}"
   ((uri          )): /prompt
@@ -1794,6 +1814,7 @@ jobs:
       historys3region : isString().default(__)
       historys3useversion1: toBoolean().isBoolean().default(false)
       historys3ignorecertcheck: toBoolean().isBoolean().default(false)
+      sessionprewarm : toBoolean().isBoolean().default(true)
       mcplazy        : toBoolean().isBoolean().default(false)
       mcpdynamic     : toBoolean().isBoolean().default(false)
       mcpproxy       : toBoolean().isBoolean().default(false)
@@ -1954,6 +1975,7 @@ jobs:
     global.__historypath = args.historypath
     global.__historykeep = args.historykeep
     global.__conversations = {}
+    global.__preparedConversations = {}
     global.__lastActivity = { }
     global.__showexecs = args.showexecs
     global.__usestream = args.usestream
@@ -1998,9 +2020,14 @@ jobs:
     }
     global._mini_a_web_dispose = function(uuid) {
       var agent = global.__conversations[uuid]
+      var prepared = global.__preparedConversations && global.__preparedConversations[uuid]
       try {
         if (isObject(agent) && isFunction(agent._stopAgentResources)) agent._stopAgentResources()
-      } finally { delete global.__conversations[uuid] }
+        if (isObject(prepared) && isFunction(prepared._stopAgentResources)) prepared._stopAgentResources()
+      } finally {
+        delete global.__conversations[uuid]
+        if (global.__preparedConversations) delete global.__preparedConversations[uuid]
+      }
     }
 
     global.__webtoken = (isString(args.webtoken) && args.webtoken.trim().length > 0) ? args.webtoken.trim() : __
@@ -2094,7 +2121,7 @@ jobs:
     MiniA.applyLibEnvDefault(args)
     global.maArgs = merge(args, {})
     var needsWorkerRegBootstrap = isNumber(args.workerreg)
-    if (!toBoolean(args.mcplazy) || needsWorkerRegBootstrap) {
+    if (needsWorkerRegBootstrap) {
       var _ma = new MiniA()
       try {
         _ma.init( merge( global.maArgs, { mcpdynamic: false } ) )

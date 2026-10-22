@@ -1142,7 +1142,8 @@ Default behavior note:
 - **`usetoolslc`** (boolean, default: false): Register MCP tools directly only on the low-cost model (`OAF_LC_MODEL` / `modellc`). Useful when you want native tool calling on the cheaper tier without enabling it on the main model.
 - **`usejsontool`** (boolean, normally `false`): Uses Mini-A's JSON action loop and disables native tool registration on both model tiers, including when `mcpproxynative=true`. Automatically enabled for GPT-OSS models and for `usetools=true mcpproxy=true` unless explicitly overridden. An explicit run value takes precedence over the resolved session value; `usejsontool=false` retains native behavior. JSON-encoded action arrays are accepted as batches; malformed batches return corrective errors.
 - **`mcpdynamic`** (boolean, default: false): When `usetools=true`, analyze the goal and only register the MCP tools that appear relevant, consulting the available LLMs to pick a promising connection when heuristics fail and only falling back to all tools if no confident choice is produced
-- **`mcplazy`** (boolean, default: false): Defer MCP connection initialization until a tool is first executed; useful when configuring many optional integrations
+- **`sessionprewarm`** (boolean, default: true): Prepare read-only wiki resources and configured external MCP transports while composing a console or web prompt. Use `false` to keep setup at submission.
+- **`mcplazy`** (boolean, default: false): Compatibility setting for MCP preparation. Direct connections still initialize and list tools before the first model request; this is not a guarantee of deferred networking.
 - **`mcpproxy`** (boolean, default: false): Aggregate all MCP connections (including `mcp="..."` and `useutils=true`) through a single proxy interface that exposes a `proxy-dispatch` tool. This reduces context usage by presenting only one tool to the LLM instead of exposing all tools from all connections individually. The LLM can use `proxy-dispatch` to list, search, and call tools across all downstream MCP connections. For large payloads, `proxy-dispatch` also supports `argumentsFile` (load arguments from JSON file) and `resultToFile=true` (store result in temporary JSON `resultFile`). Prefer this for large input/output when `useutils=true` (recommended) or `useshell=true readwrite=true`. See [docs/MCPPROXY-FEATURE.md](docs/MCPPROXY-FEATURE.md) for flow diagrams and advanced usage notes.
 - **`adaptiverouting`** (boolean, default: false): Enable the adaptive route layer (`mini-a-router.js`) that chooses execution pathways (direct MCP/proxy/shell/utility/delegation) from rule-based intent analysis and execution history while preserving existing policy controls.
 - **`routerorder`** (string, optional): Comma-separated preferred route order (for example `mcp_direct_call,mcp_proxy_path,shell_execution`).
@@ -2137,30 +2138,24 @@ Mini-A implements smart caching for deterministic and read-only tools to avoid r
 - Consistent instructions even as tool rosters grow
 - Minimizes repeated token overhead
 
-### Lazy MCP Initialization
+### Preparing new sessions
 
-Pass `mcplazy=true` to defer establishing MCP connections until a tool is actually needed. This optimization significantly shortens startup times when working with many optional integrations.
+Console sessions and both web views prepare resources in the background while you compose a prompt. `sessionprewarm=true` is the default. Each prepared wiki reader and MCP transport belongs to the agent that will use it; conversations, working memory, hooks, skill consultation, and model requests begin with the submitted goal.
 
-**When to use:**
-- Multiple MCP servers configured but not all needed for every goal
-- Slow-starting MCP servers
-- Network-based MCP connections with high latency
-- Development environments with optional tools
+Read-only primary wikis, mounts, and dedicated skill wikis are prepared together. Submission checks configuration, file-access boundaries, local graph/publication stamps, and remote artifacts before adoption. Changed resources follow ordinary initialization. Writable wiki setup stays at submission because it can create wiki files.
 
-**Benefits:**
-- Faster agent startup
-- Reduced resource consumption
-- Connections only established when needed
-- Failed connections don't block startup
+Configured external stdio and HTTP MCP transports can negotiate their connection early. Tool catalogs are always fetched at submission. Local `type=ojob` and dummy tools, plugin-discovered connections, and interactive OAuth flows retain foreground initialization. Existing proxy reuse and fresh local oJob clients remain in effect. Failed or cancelled preparation falls back to ordinary setup, and unused resources close on session cleanup. The web server retains at most 16 prepared sessions, with normal idle-session expiry.
 
-**Example:**
+To disable background resource preparation:
 
 ```bash
-mini-a goal="analyze local files" \
-  mcp="[(cmd: 'ojob mcps/mcp-db.yaml...'), (cmd: 'ojob mcps/mcp-net.yaml...')]" \
-  mcplazy=true \
-  usetools=true
+opack exec mini-a sessionprewarm=false
+./mini-a-web.sh onport=8888 sessionprewarm=false
 ```
+
+For embedded agents, call `agent.prepareSession(options)` before the user submits a goal, then `agent.start(runOptions)` on the same agent. Call `agent._stopAgentResources()` when disposing of it. `agent.getStartupTimings()` and `agent.getMetrics().startup` report time from submission to the first instrumented provider invocation and separately to the first main-model invocation. These timings measure local dispatch, not server receipt or time to first token. A `startup` trace event is emitted at the first invocation when tracing is enabled.
+
+`mcplazy=true` is retained for compatibility. The direct MCP path still initializes connections and lists tools before model dispatch; use session preparation to move eligible connection work ahead of submission.
 
 ## MCP Integration Deep Dive
 

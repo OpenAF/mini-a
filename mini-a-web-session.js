@@ -1,6 +1,7 @@
 // Shared prompt route used by Simple chat and Advanced console commands.
 function MiniAWebPrompt(request) {
   var _res = {}
+  var submittedAt = Date.now()
   try {
     if (!global._mini_a_web_checkToken(request)) {
       return ow.server.httpd.reply({ error: "unauthorized" })
@@ -86,7 +87,8 @@ function MiniAWebPrompt(request) {
       }
       var startArgs = merge(effectiveArgs, {
         goal        : __miniAPrefixGoal(postData.prompt, effectiveArgs.goalprefix),
-        raw         : true
+        raw         : true,
+        __startupSubmittedAt: submittedAt
       })
       if (isMap(postData.skillUsage) && isString(postData.skillUsage.name) && /^[a-z0-9][a-z0-9_-]*$/.test(postData.skillUsage.name)) {
         startArgs._skillHandoff = [{ ref: "local:" + postData.skillUsage.name, args: isString(postData.skillUsage.args) ? postData.skillUsage.args.substring(0, 4000) : "", required: true }]
@@ -134,7 +136,9 @@ function MiniAWebPrompt(request) {
         }
     
         // Initialize MiniA
-        lma = new MiniA()
+        lma = global.__preparedConversations && global.__preparedConversations[uuid] || new MiniA()
+        if (global.__preparedConversations) delete global.__preparedConversations[uuid]
+        lma._beginStartupTiming(startArgs)
         global.__conversations[uuid] = lma
         var pendingProxyThought = __
         lma.setInteractionFn( (e, m) => {
@@ -370,9 +374,12 @@ function MiniAWebPrompt(request) {
         if (isString(startArgs.conversation) && isUnDef(advancedState)) startArgs.conversation = global._mini_a_web_loadFile(startArgs.conversation)
         // Input capability must be attached before init builds the utility catalog.
         if (isDef(advancedState)) advancedState.runtime.attach(lma)
-        lma.init(startArgs)
+        // Image attachment inspection needs a configured model before start().
+        // Ordinary prompts initialize once inside start().
+        if (binaryAttachments.length) lma.init(startArgs)
       } else {
         lma = global.__conversations[ uuid ]
+        lma._beginStartupTiming(startArgs)
       }
 
       lma._historyCheckpointFn = function(goal) {

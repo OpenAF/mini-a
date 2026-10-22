@@ -165,6 +165,7 @@ if (typeof MiniA === "function") {
       duration_ms: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, usage_reports: 0, reasons: {} }
     if (!this._decisionMetricsLock) this._decisionMetricsLock = "mini_a_decision_metrics_" + genUUID()
     this._decision = new MiniADecision({ modeldec: args.modeldec, configureClient: function(client) {
+      self._instrumentStartupLlm(client, "decision")
       self._configureDebugChannel(client, args.debugdecch, "__mini_a_de_llm_debug", "Decision LLM")
     }, enabled: isUnDef(args.usedecide) || toBoolean(args.usedecide) === true, observe: function(event) {
       sync(function() {

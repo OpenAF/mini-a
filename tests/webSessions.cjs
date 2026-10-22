@@ -10,8 +10,11 @@ const pending = [], agents = [];
 class Agent {
   constructor() { agents.push(this); this.history = []; }
   setInteractionFn(fn) { this.fn = fn; }
+  _beginStartupTiming(args) { this.submittedAt = args.__startupSubmittedAt; }
+  prepareSession(args) { this.preparedArgs = args; }
   init(args) { this.args = args; if (fail) throw Error('init fixture failure'); }
   start(args) {
+    if (!this.args) this.init(args);
     if (this.history.length === 0) assert.equal(args, this.args, 'init and start share complete args');
     this.lastArgs = args; starts++; this.history.push({ tool: 'fixture result' });
     return finalResult;
@@ -73,8 +76,8 @@ call('clear',{uuid:'retained'}); assert.equal(closes,4); assert.equal(g.__res.re
 g.__conversations.loaded = new Agent(); call('load-history',{uuid:'loaded',history:[]}); assert.equal(closes,5);
 // Execute the bootstrap block in both ownership modes.
 const bootstrap = yaml.slice(yaml.indexOf('    var needsWorkerRegBootstrap'), yaml.indexOf('    global._mini_a_web_historyS3Key')).replace(/^    /gm,'');
-c.args = { mcplazy:false }; vm.runInContext(bootstrap,c); assert.equal(closes,6);
-c.args = { mcplazy:false,workerreg:9999 }; vm.runInContext(bootstrap,c); assert.equal(closes,6); assert.ok(g.__bootstrapAgent);
+c.args = { mcplazy:false }; vm.runInContext(bootstrap,c); assert.equal(closes,5);
+c.args = { mcplazy:false,workerreg:9999 }; vm.runInContext(bootstrap,c); assert.equal(closes,5); assert.ok(g.__bootstrapAgent);
 console.log('Web expiry, history and bootstrap ownership checks passed.');
 
 // All supported result shapes reach the final transcript without losing typed data.
@@ -281,3 +284,40 @@ const recovered = JSON.parse(g._mini_a_web_buildHistoryPayload('recovery'));
 assert.equal(recovered.c.at(-1).role, 'assistant');
 assert.equal(recovered.c.at(-1).content, 'Important answer');
 console.log('Final answers survive local recovery and remote history payload rebuilding.');
+
+// New-session preparation uses the same reservation, auth and disposal boundaries.
+const core = fs.readFileSync('mini-a.js', 'utf8');
+vm.runInContext(core.slice(core.indexOf('MiniA.prepareWebSession ='), core.indexOf('MiniA.prototype._startupKey =')), c);
+g.__preparedConversations = {};
+g.maArgs.sessionprewarm = true;
+g.__advanced = undefined;
+c.now = Date.now;
+let prepCount = agents.length;
+assert.equal(call('prepare', {uuid:'warm'}).prepared, true);
+const warmAgent = g.__preparedConversations.warm;
+assert.equal(g.__busy.warm, undefined, 'Preparation never marks the conversation busy');
+assert.equal(agents.length, prepCount + 1);
+assert.equal(warmAgent.args, undefined, 'preparation never calls full init');
+assert.equal(call('prepare', {uuid:'warm'}).prepared, true);
+assert.equal(agents.length, prepCount + 1, 'repeated prepare is idempotent');
+call('prompt', {uuid:'warm',prompt:'adopt resources'}); pending.shift()();
+assert.equal(g.__conversations.warm, warmAgent);
+assert.equal(g.__preparedConversations.warm, undefined);
+assert.equal(typeof warmAgent.submittedAt, 'number');
+const held = g._mini_a_web_reserve('prep-busy');
+assert.equal(call('prepare', {uuid:'prep-busy'}).busy, true);
+g._mini_a_web_release('prep-busy', held);
+g.maArgs.sessionprewarm = false;
+assert.equal(call('prepare', {uuid:'disabled-prep'}).prepared, false);
+g.maArgs.sessionprewarm = true;
+call('prepare', {uuid:'abandoned'});
+const abandoned = g.__preparedConversations.abandoned;
+call('clear', {uuid:'abandoned',force:true});
+assert.equal(g.__preparedConversations.abandoned, undefined);
+for (let i=0; i<16; i++) call('prepare',{uuid:'capacity-'+i});
+assert.equal(Object.keys(g.__preparedConversations).length,16);
+assert.equal(call('prepare',{uuid:'over-capacity'}).prepared,false);
+g._mini_a_web_checkToken = () => false;
+assert.equal(call('prepare',{uuid:'unauthorized-prep'}).error,'unauthorized');
+assert.equal(g.__preparedConversations['unauthorized-prep'],undefined);
+console.log('Web preparation auth, adoption, busy, opt-out, capacity and cleanup checks passed.');

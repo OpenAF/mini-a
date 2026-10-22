@@ -570,6 +570,9 @@ MiniAAdvanced.prototype.request = function(data) {
       self.emit(state, "complete", { requestId: data.requestId, action: data.action, settingsChanged: isDef(previousOptions) && previousOptions !== stringify(afterOptions, __, "") })
       state.operation = null
       try { self.persist(state) } finally { global._mini_a_web_release(state.uuid, token) }
+      if (global.__preparedConversations && isDef(previousOptions) && previousOptions !== stringify(afterOptions, __, "") && !state.goal && !state.cancelled && !state.closed) {
+        MiniA.prepareWebSession(state.uuid)
+      }
       if (state.goal && !state.cancelled && !state.closed) {
         var goal = state.goal
         state.goal = null

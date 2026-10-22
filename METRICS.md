@@ -526,3 +526,19 @@ MiniAEval adds current artifact assertions, independent success, incorrect autom
 Each task exposes bounded `forkPolicy` diagnostics: requested/effective policy, effective scope, source, reason, snapshot/version identity, classifier latency/cache status, bytes/token estimate, truncation, and omitted/unavailable sources. `fork_policy` trace events carry these diagnostics, without prompts, source excerpts, provider bodies, or credentials. Goals and task IDs are not aggregate metric labels.
 
 Classifier calls reuse instance `decisions` observation, including reported tokens, exactly once. MiniAEval normalizes policy counters as `fork_*` fields and includes them in comparisons. Existing core counters may cover a shared JVM, while decision counters are instance-local: `delegation_usage_scope=existing_process_counters` marks this limitation. Do not add raw child snapshots to parent counters to claim combined billed usage, or infer repeated tool calls from aggregate tool counts. Live attribution and quality/cost claims require separately instrumented runs.
+
+## Session startup (`startup`)
+
+`getStartupTimings()` and `getMetrics().startup` expose per-agent timing for the latest console/web submission. Values are milliseconds unless named otherwise; they contain no prompts or credentials.
+
+| Field | Meaning |
+|---|---|
+| `submitted_at` | Submission timestamp in epoch milliseconds. |
+| `first_provider_ms`, `first_provider_role` | Elapsed time to the first instrumented model invocation and its role (`main`, `lc`, `validator`, `decision`, `visual`, or `reflection`). Absent until invoked. |
+| `first_main_provider_ms` | Elapsed time to the first main-model invocation, including any earlier auxiliary calls. Absent until invoked. |
+| `phases_ms` | Measured memory, wiki, MCP initialization/catalog, prompt construction, goal tool selection, and skills time before the first invocation. Nested phases can overlap; these values are not additive. |
+| `preparation_ms` | Background work duration for preparation entries awaited during adoption. |
+| `preparation_wait_ms` | Foreground time waiting for those entries to finish. |
+| `wiki_reused`, `mcp_reused` | Whether wiki resources were adopted, and the number of adopted MCP transports. |
+
+These measurements end at local model invocation; they do not establish network delivery or provider processing latency. The first invocation emits a `startup` trace record. Goal hooks, attachment work, scheduling and routing contribute to elapsed time even when not listed as separate phases. `start(args)` resets timing for each run; an explicit preceding `init(args)` on the same argument object is included.

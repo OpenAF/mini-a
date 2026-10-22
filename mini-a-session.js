@@ -792,7 +792,8 @@ function MiniAInteractiveSession(args, adapter) {
     lcjsonretries  : { type: "number", default: 1, description: "Extra same-step low-cost model retries on invalid JSON before falling back to main model (0 disables)." },
     usedecide      : { type: "boolean", description: "Enable decision-assisted selection, complexity, and bounded wiki auto link repairs with modeldec or OAF_DECIDE_MODEL (false disables)." },
     llmcomplexity  : { type: "boolean", description: "Refine medium complexity with the decision model; false disables, true also enables the legacy LC check." },
-    mcplazy        : { type: "boolean", default: false, description: "Defer MCP connection initialization" },
+    sessionprewarm : { type: "boolean", default: true, description: "Prepare wiki and external MCP resources while composing a prompt" },
+    mcplazy        : { type: "boolean", default: false, description: "MCP preparation compatibility option; direct catalogs are discovered before model dispatch" },
     mcpdynamic     : { type: "boolean", default: false, description: "Select MCP tools dynamically per goal" },
     mcpproxy       : { type: "boolean", default: false, description: "Aggregate all MCP connections through a single proxy interface" },
     mcpproxythreshold: { type: "number", description: "Global byte threshold for proxy auto-spill to temporary files (0 disables)" },
@@ -1043,7 +1044,7 @@ function MiniAInteractiveSession(args, adapter) {
     { category: "Models and execution", subcategory: "Prompt and tool routing", names: "adaptiverouting promptprofile routerallow routerdeny routerorder routerproxythreshold systempromptbudget".split(" ") },
     { category: "Tools and permissions", subcategory: "Shell and sandbox", names: "checkall readwrite sandboxnonetwork sandboxprofile shell shellallow shellallowpipes shellbanextra shellbatch shellmaxbytes shellprefix shelltimeout usesandbox useshell".split(" ") },
     { category: "Tools and permissions", subcategory: "Tools and utilities", names: "capabilitylimit capabilityselection fileallow policy policyfile toolcachettl toolfallback usejsontool usestdutils usetools usetoolslc useutils utilsallow utilsdeny utilsroot".split(" ") },
-    { category: "Tools and permissions", subcategory: "MCP connections", names: "mcp mcpdynamic mcplazy mcptest nosetmcpwd".split(" ") },
+    { category: "Tools and permissions", subcategory: "MCP connections", names: "mcp mcpdynamic sessionprewarm mcplazy mcptest nosetmcpwd".split(" ") },
     { category: "Tools and permissions", subcategory: "MCP proxy and programmatic calls", names: "mcpprogcall mcpprogcallbatchmax mcpprogcallmaxbytes mcpprogcallport mcpprogcallresultttl mcpprogcalltools mcpproxy mcpproxythreshold mcpproxytoon".split(" ") },
     { category: "Tools and permissions", subcategory: "Skills and extensions", names: "extracommands extrahooks extraskills mini-a-docs miniadocs plugins pluginsroot pluginsroots skillcontextchars skillmanifestchars skillmaxautoload skillsautolimit skillsautosearch skillsmaxchars skillsmaxloaded skillwikibackend skillwikimounts skillwikiroot useskills useskillswiki".split(" ") },
     { category: "Memory and knowledge", subcategory: "Memory stores and retention", names: "memorych memorycompactevery memorydedup memoryman memorymaxentries memorymaxpersection memorypromote memoryscope memorysessionch memorysessionheader memorysessionid memorystaledays memoryuser memoryusersession usememory".split(" ") },
@@ -4088,6 +4089,7 @@ function MiniAInteractiveSession(args, adapter) {
   var lastDebugTrace = __
   var internalParameters = { goalprefix: true, usehistory: true, historykeep: true, historykeepperiod: true, historykeepcount: true, useeditor: true, editor: true }
   var activeDream = __
+  var preparedAgent = __
   var activeAgent = __
   var directDecisionMetrics = __
   var directDecisionLimiter = __, directDecisionLimits = ""
@@ -4269,6 +4271,7 @@ function MiniAInteractiveSession(args, adapter) {
     if (key === "fileallow") fileAccess = new MiniAFileAccess(value)
     invalidateWikiOption(key)
     sessionOptions[key] = value
+    if (isObject(preparedAgent)) { preparedAgent._stopAgentResources(); preparedAgent = __ }
     sessionExplicitOptions[key] = true
     if (key === "conversation") {
       lastConversationStats = __
@@ -5337,7 +5340,14 @@ function MiniAInteractiveSession(args, adapter) {
     } catch(ignorePersistError) { }
   }
 
+  function prepareNextGoal() {
+    if (adapter || isObject(preparedAgent) || toBoolean(sessionOptions.sessionprewarm) === false) return
+    preparedAgent = new MiniA()
+    preparedAgent.prepareSession(buildArgs(""))
+  }
+
   function runGoal(goalText, skillUsage, displayPrompt) {
+    var submittedAt = now()
     _streamOutputStats.totalChars = 0
     _streamOutputStats.contentChars = 0
     _lastRenderedPlanSignature = ""
@@ -5359,6 +5369,7 @@ function MiniAInteractiveSession(args, adapter) {
     lastGoalPrompt = isString(goalText) ? goalText : (isDef(goalText) ? String(goalText) : "")
     if (adapter) return adapter.goal(processFileAttachments(effectiveGoal), skillUsage, displayPrompt)
     var _args = buildArgs(effectiveGoal)
+    _args.__startupSubmittedAt = submittedAt
     if (isMap(skillUsage) && skillUsage.name) { _args.useskills = true; _args._skillHandoff = [{ ref: "local:" + skillUsage.name, args: skillUsage.args || "", required: true }] }
     clearDebugTrace()
     if (!ensureModel(_args)) return false
@@ -5375,8 +5386,10 @@ function MiniAInteractiveSession(args, adapter) {
     if (isObject(activeAgent) && isFunction(activeAgent._stopAgentResources)) {
       try { activeAgent._stopAgentResources() } catch(ignorePreviousAgentStop) {}
     }
-    var agent = new MiniA()
+    var agent = isObject(preparedAgent) ? preparedAgent : new MiniA()
+    preparedAgent = __
     activeAgent = agent
+    agent._beginStartupTiming(_args)
     agent.setInteractionFn(function(event, message) {
       agent.defaultInteractionFn(event, message, function(icon, text, id) {
         printEvent(event, icon, text, id)
@@ -5393,7 +5406,6 @@ function MiniAInteractiveSession(args, adapter) {
     var agentResult = __, agentOrigResult = __
     var stopRequested = false
     try {
-      agent.init(_args)
       logSkillUsage(agent, skillUsage)
       _startActivityCueLoop()
       $tb(function() {
@@ -5650,6 +5662,8 @@ function MiniAInteractiveSession(args, adapter) {
   function finalizeSession(reason) {
     if (shutdownHandled) return
     shutdownHandled = true
+    if (isObject(preparedAgent)) preparedAgent._stopAgentResources()
+    preparedAgent = __
 
     try { persistConversationSnapshot(activeAgent) } catch(ignorePersist) {}
     try { refreshConversationStats(activeAgent) } catch(ignoreRefresh) {}
@@ -8138,6 +8152,7 @@ function MiniAInteractiveSession(args, adapter) {
   bootstrapWorkerRegistration()
   
   while (true) {
+    prepareNextGoal()
     _miniaConReset()
     var input = toBoolean(sessionOptions.useeditor) === true ? collectEditorGoal() : con.readLinePrompt(promptLabel())
     if (isUnDef(input) || dispatchInput(input) === false) break

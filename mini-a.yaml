@@ -61,8 +61,13 @@ help:
     desc     : Optional JSON file containing centralized policy definition
     example  : "/path/to/policy.json"
     mandatory: false
+  - name     : sessionprewarm
+    desc     : Prepare wiki and external MCP resources while composing a new-session prompt (default true)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : mcplazy
-    desc     : Initialize MCP connections lazily on first use instead of during startup
+    desc     : MCP preparation compatibility option; direct tool catalogs are still discovered before model dispatch
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
@@ -1512,6 +1517,7 @@ jobs:
         mcpproxytoon   : mcpproxytoon
         mcpproxyallow  : mcpproxyallow
         mcpproxydeny   : mcpproxydeny
+        sessionprewarm : sessionprewarm
         mcplazy        : mcplazy
         mcpprogcall    : mcpprogcall
         mcpprogcallport: mcpprogcallport
@@ -1820,6 +1826,7 @@ jobs:
       mcpproxytoon   : toBoolean.isBoolean.default(false)
       mcpproxyallow  : isString.default(__)
       mcpproxydeny   : isString.default(__)
+      sessionprewarm : toBoolean.isBoolean.default(true)
       mcplazy        : toBoolean.isBoolean.default(false)
       mcpprogcall    : toBoolean.isBoolean.default(false)
       mcpprogcallport: toNumber.isNumber.default(0)

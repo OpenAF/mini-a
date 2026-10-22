@@ -2531,6 +2531,15 @@
         return sanitized;
     }
 
+    function prepareCurrentSession() {
+        const uuid = currentSessionUuid || getOrCreateSessionUuid();
+        fetch(resolveAppUrl('prepare'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json; charset=utf-8' },
+            body: JSON.stringify({ uuid })
+        }).catch(() => {}); // Submission retains the complete foreground path.
+    }
+
     function generateNewSessionUuid() {
         try {
             if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -6500,6 +6509,7 @@
         scrollResultsToBottom();
         activeHistoryId = null;
         refreshHistoryPanel();
+        prepareCurrentSession();
     }
 
     function handleScroll() {
@@ -6658,6 +6668,7 @@
         }
 
         await configureFeatureAvailability();
+        prepareCurrentSession();
         refreshHistoryPanel();
         updateCopyActionsVisibility();
     }
