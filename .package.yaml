@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20261021'
+version: '20261022'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -244,7 +244,7 @@ filesHash:
   METRICS.md: f01c6497abf6bd29e66fb4d73dce456966e4775f
   README.md: 3040af4f5d407345b888fe501274d86001527703
   RELEASE_NOTES.md: c73293147879b0288813a080a234b8a8c444447c
-  USAGE.md: e3dc86c92d305591292f52a328c062c8329295bc
+  USAGE.md: 460be97fa195ac3eac922b4530f9a918d0b6f9ae
   docs/ABSORB.md: 31bbe919b680e78b369772608d10dda78d1e015e
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/AGENT-PLUGINS.md: af8f692ac4bc690ac9df180e86bb1a1307a5aae5
@@ -333,7 +333,7 @@ filesHash:
   mcps/mcp-workiq.yaml: 10709d2dccf1032ac4826e8cb512cfb88bf4d14a
   mini-a-absorb.js: 45f96e83a8053171f1ae7abd4ac3fbc4a9c6728f
   mini-a-absorb.yaml: af9f87b3ddb0d4f13c7ed23cd6ab57fd258c2309
-  mini-a-advanced.js: a29f85604324041dd032b30843a62ddb1061a66d
+  mini-a-advanced.js: 59cc057fc326c064f255de9c45b9c64ae4cdd6e2
   mini-a-capabilities.js: 7627dbcf9cceb6cbc52178078ae54dec0cdd9665
   mini-a-common.js: 89e50b6db9a7c93c3ac7c233e9eb168f5ec24f95
   mini-a-con.js: 8953d1720b12352191542c1a002b7fece0f4e0da
@@ -360,7 +360,7 @@ filesHash:
   mini-a-response.js: 14d6bbe7dfd7cb9438624954638c8b5148b5b954
   mini-a-router.js: 381d0f2d34864fdca03d5d4f528fa0f827bbed48
   mini-a-sandbox.js: 2844520cfb6595675d7773b29af0943fcc6ed6dd
-  mini-a-session.js: 5dc75332ce6f30f71dce3e95ba0fd7bf41f9502a
+  mini-a-session.js: 60be0615dd45a14499533033808fb1517aee734c
   mini-a-skill-runtime.js: fe1ac2f5b83eb42e97d107b1a93a9fb7b2c6fcdb
   mini-a-skills.js: dc872bc2ab80de9cd48375768b642fab514bf826
   mini-a-subtask.js: 4c0eb1ab97fcbda0bcf7d9dcbe1c00a2831c615a
@@ -381,12 +381,12 @@ filesHash:
   mini-a.js: 9cf5a47aaef428a3bf1b0b38eb1e891fdaf5a902
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 4038bf123cc812540945e60017e5ecd59ebf03d5
-  public/advanced.css: 1c4f032691747f8d65d38a05ab30138d8e983c9b
-  public/advanced.js: 0bd5920798ac31528e254a7999711e6e6ec4bc52
+  public/advanced.css: 531d5c0b6252367e4234069b50b7d8061a196431
+  public/advanced.js: 5035cb582dd4dfc7bd0f86a1c2e0a2c56715f80c
   public/apple-touch-icon.png: 5e22ed6b303b377787779423b97c22f7b20b56ed
   public/data-editor.js: 1433293e0ed9f6486f14b6a91ed88684525a79b3
   public/favicon.ico: 7d62af53ff8c43ba32d022107153e6877567ba75
-  public/index.md: 5891fc5105ebd0c290e40024d886dc77485228d2
+  public/index.md: e7e3ecd57fd744a64af46950e8989c63f8ee8071
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   skills/mini-a-contract-authoring/SKILL.md: ddb6c5ccf38cd2a75a1359747e6f293d6500a9b1
   skills/mini-a-contract-authoring/references/CONTRACT.md: 58d482c7a033e0c03e7b0fe40d037bcd99e663c9
