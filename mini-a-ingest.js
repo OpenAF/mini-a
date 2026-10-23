@@ -1462,8 +1462,10 @@ MiniAIngest.prototype._describeImage = function(request) {
     var self = this
     __miniAConfigureDebugChannel(llm, this._args.debugvisualch, "__mini_a_visual_llm_debug", "Image inspection", function(level, message) { self._log(message) })
     if (!isObject(llm) || !isFunction(llm.promptImage)) throw new Error("configured model does not support promptImage")
-    if (isMap(config) && String(config.type || "").toLowerCase() === "openai" && request.mediaType === "image/png") {
-      // OpenAF's OpenAI promptImage currently labels image bytes as JPEG.
+    var imageGpt = isFunction(llm.getGPT) ? llm.getGPT() : __
+    var supportsImageMimeTypes = isObject(imageGpt) && isObject(imageGpt.model) && imageGpt.model.supportsImageMimeTypes === true
+    if (isMap(config) && String(config.type || "").toLowerCase() === "openai" && request.mediaType === "image/png" && !supportsImageMimeTypes) {
+      // Older OpenAF versions label all image bytes as JPEG.
       var source = javax.imageio.ImageIO.read(new java.io.File(request.path))
       if (source === null) throw new Error("cannot decode PNG image")
       var jpeg = new java.awt.image.BufferedImage(request.width, request.height, java.awt.image.BufferedImage.TYPE_INT_RGB)

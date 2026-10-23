@@ -11472,8 +11472,10 @@ MiniA.prototype._inspectImageWithModel = function(request) {
     if (!isObject(llm) || !isFunction(llm.promptImage)) throw new Error("Configured model does not support promptImage")
     var image = request.path
     var provider = String(config.type || "").toLowerCase()
-    if (provider === "openai" && request.mediaType === "image/png") {
-      // OpenAF's OpenAI promptImage currently labels image bytes as JPEG.
+    var imageGpt = isFunction(llm.getGPT) ? llm.getGPT() : __
+    var supportsImageMimeTypes = isObject(imageGpt) && isObject(imageGpt.model) && imageGpt.model.supportsImageMimeTypes === true
+    if (provider === "openai" && request.mediaType === "image/png" && !supportsImageMimeTypes) {
+      // Older OpenAF versions label all image bytes as JPEG.
       var source = javax.imageio.ImageIO.read(new java.io.File(request.path))
       if (source === null) throw new Error("Cannot decode PNG image")
       var jpeg = new java.awt.image.BufferedImage(request.width, request.height, java.awt.image.BufferedImage.TYPE_INT_RGB)

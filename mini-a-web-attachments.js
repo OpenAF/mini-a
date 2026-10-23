@@ -1,6 +1,20 @@
 // Binary web inputs are processed with isolated, read-only utility readers.
 var MiniAWebAttachments = {
   maxRequestChars: 29 * 1024 * 1024,
+  // Rhino regex repetition retains match states for every input character.
+  validBase64: function(value) {
+    var length = value.length
+    if (!length || length % 4) return false
+    var end = length
+    if (value.charAt(end - 1) === "=") end--
+    if (value.charAt(end - 1) === "=") end--
+    for (var i = 0; i < end; i++) {
+      var code = value.charCodeAt(i)
+      if (!((code >= 65 && code <= 90) || (code >= 97 && code <= 122) ||
+            (code >= 48 && code <= 57) || code === 43 || code === 47)) return false
+    }
+    return true
+  },
   displayPrompt: function(prompt, items) {
     return prompt + "\n\n📎 " + items.map(function(item) { return item.name }).join(", ")
   },
@@ -19,7 +33,7 @@ var MiniAWebAttachments = {
       if (!image && !/^(doc|docx|xls|xlsx|ppt|pptx|pdf)$/.test(ext)) throw new Error(name + ": unsupported file format")
       var value = item.base64
       var limit = (image ? 10 : 20) * 1024 * 1024
-      if (!value.length || value.length > Math.ceil(limit / 3) * 4 || value.length % 4 || /[^A-Za-z0-9+/=]/.test(value) || (value.indexOf("=") >= 0 && !/^[A-Za-z0-9+/]*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)$/.test(value))) throw new Error(name + ": invalid or oversized base64")
+      if (value.length > Math.ceil(limit / 3) * 4 || !MiniAWebAttachments.validBase64(value)) throw new Error(name + ": invalid or oversized base64")
       var size = value.length / 4 * 3 - (value.slice(-2) === "==" ? 2 : value.slice(-1) === "=" ? 1 : 0)
       if (size > limit) throw new Error(name + ": file exceeds size limit")
       total += size

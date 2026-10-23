@@ -4,7 +4,7 @@ global.__mini_a_ingest_lib_mode = true
 load('mini-a-ingest.js')
 function check(value, message) { if (!value) throw new Error(message) }
 var originalEnv = getEnv
-var env = {}, configs = [], paths = [], closed = 0, debugChannels = []
+var env = {}, configs = [], paths = [], closed = 0, debugChannels = [], imageMimeCapability = false
 var channel = 'visual-test-' + genUUID()
 var debugFile = String(io.createTempFile('mini-visual-debug-', '.json'))
 io.rm(debugFile)
@@ -32,7 +32,7 @@ try {
       paths.push(path)
       if (debugName) $ch(debugName).set({id:paths.length},{prompt:prompt,response:'description'})
       return 'description'
-    },getGPT:function(){return {cleanPrompt:function(){closed++}}}}
+    },getGPT:function(){return {model:{supportsImageMimeTypes:imageMimeCapability},cleanPrompt:function(){closed++}}}}
     if (debugConfig) agent._configureDebugChannel(client,debugConfig,defaultName,label)
     return client
   }
@@ -70,6 +70,24 @@ try {
   var warnings = []
   __miniAConfigureDebugChannel({}, debugFile, channel, 'Visual', function(level, message){warnings.push(message)})
   check(warnings.length === 1 && warnings[0].indexOf('setDebugCh') >= 0, 'unsupported runtime warns without failing')
+  var pngFile = String(io.createTempFile('mini-visual-png-', '.png'))
+  try {
+    var bitmap = new java.awt.image.BufferedImage(2, 2, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+    javax.imageio.ImageIO.write(bitmap, 'png', new java.io.File(pngFile))
+    bitmap.flush()
+    var pngRequest = {path:pngFile,prompt:'Describe',mediaType:'image/png',width:2,height:2}
+    agent._oaf_visual_model = main
+    ingest._args.modelvisual = main
+    ;[false, true].forEach(function(capability) {
+      imageMimeCapability = capability
+      agent._inspectImageWithModel(pngRequest)
+      var image = paths.pop()
+      check(capability ? image === pngFile : image.indexOf('/9j/') === 0, 'Inspection preserves PNG with new runtime and converts for older runtime')
+      ingest._describeImage(pngRequest)
+      image = paths.pop()
+      check(capability ? image === pngFile : image.indexOf('/9j/') === 0, 'Ingestion preserves PNG with new runtime and converts for older runtime')
+    })
+  } finally { io.rm(pngFile) }
   print('Visual model tests passed: precedence, fallback, reinitialization, provider routing and isolation.')
 } catch(e) { printErr(e); exit(1) } finally {
   try { $ch(channel).destroy() } catch(ignore) {}
