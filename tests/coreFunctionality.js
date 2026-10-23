@@ -33,6 +33,33 @@
     } finally { agent._stopAgentResources() }
   }
 
+  exports.testNativeFinalWithPrefixedAction = function() {
+    var report = '# Report\n\n| Name | Date |\n|---|---|\n| mini-a | 2026-10-23 |'
+    var response = 'I already have all the data. Let me produce the final report.\n\n' + JSON.stringify({ thought: "Done", action: "final", answer: report })
+    var agent = createAgent(), requests = 0
+    agent.fnI = function() {}
+    var args = { goal: "Generate report fixture", raw: true, maxsteps: 2, usememory: false, usetools: true, usejsontool: false, usestream: true }
+    try {
+      agent.init(args)
+      agent._use_lc = false
+      agent._supportsPromptStreamWithStatsCompat = function() { return true }
+      agent._prepareContextInvocation = function(llm, prompt) {
+        if (requests > 0) throw new Error("Final action must complete without another model call")
+        return prompt
+      }
+      agent._promptStreamWithStatsCompat = function() {
+        requests++
+        agent._useToolsActual = true
+        agent._runtime.modelToolCallDetected = true
+        return { response: response, stats: {} }
+      }
+      ow.test.assert(agent.start(merge({}, args)), report, "Prefixed final action returns Markdown with real newlines")
+      ow.test.assert(requests, 1, "Recovered final action needs no extra model call")
+      var chartReport = '# Report\n\n```json\n{"values":[1,2,3]}\n```\n\nComplete.'
+      ow.test.assert(agent._nativeToolFinalText(chartReport), chartReport, "Markdown containing a JSON chart remains plain final text")
+    } finally { agent._stopAgentResources() }
+  }
+
   exports.testMemorySnapshotLoggingOnlyChanges = function() {
     var agent = createAgent(), logs = [], resolved = { sections: { facts: [{ value: "first" }], artifacts: [] } }
     agent._memoryConfig = { enabled: true }

@@ -3073,6 +3073,12 @@ MiniA.prototype._nativeToolFinalText = function(response) {
       if (/^\{|^\[\s*\{/.test(candidate)) return __
     }
   }
+  // A native-tool follow-up can prefix an action envelope with commentary.
+  // Let the normal action parser extract it instead of saving escaped JSON as text.
+  if (/\n\s*\{/.test(candidate)) {
+    var recovered = this._parseModelJsonResponse(candidate)
+    if (isMap(recovered) && isDef(recovered.action)) return __
+  }
   return text
 }
 

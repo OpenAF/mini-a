@@ -1,4 +1,9 @@
 jobs:
+- name: MiniA Core Tests::NativeFinalWithPrefixedAction
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testNativeFinalWithPrefixedAction
+
 - name: MiniA Core Tests::SubtaskForkUtf8Budget
   from: MiniA Core Tests::Init
   to: oJob Test
@@ -1225,6 +1230,7 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Core Tests::NativeFinalWithPrefixedAction
 - MiniA Core Tests::SubtaskForkUtf8Budget
 - MiniA Core Tests::SubtaskWatchdogCancelBoundAndMetric
 - MiniA Core Tests::NativeBudgetGuardPreservesAuxiliaryAndShadow
