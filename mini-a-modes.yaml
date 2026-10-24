@@ -89,7 +89,7 @@ modes:
       usehistory       : true
       historykeep      : true
       historykeepperiod: 10080
-      orchestration    : true
+      orchestration    : auto
       memoryusersession: true
       usedelegation    : true
       autodelegation   : true
