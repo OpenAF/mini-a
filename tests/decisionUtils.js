@@ -72,24 +72,31 @@
     ow.test.assert(first.error.indexOf("state") >= 0, true, "First captured failure identifies the required evidence field")
     var invalid = [
       { value: { state: "Evidence", questions: [{ question: "Which command?" }] }, hint: "object keyed by question ID" },
-      { value: { state: 42, questions: request.questions }, hint: "state must be nonempty text" },
+      { value: { state: 42, questions: request.questions }, hint: "state: Expected nonempty text" },
       { value: { state: "Evidence", questions: {} }, hint: "at least one named question" },
-      { value: { state: "Evidence", questions: { q: { question: "Which?" } } }, hint: "type (boolean, choice or score)" },
+      { value: { state: "Evidence", questions: { q: { question: "Which?" } } }, hint: "Only type, instructions and criteria" },
       { value: { state: "Evidence", questions: { q: { type: "choice", instructions: "Choose" } } }, hint: "at least two named choices" },
       { value: { state: "Evidence", questions: { q: { type: "score", instructions: "Rate", criteria: ["Only one"] } } }, hint: "ordered array" },
-      { value: { state: "Evidence", questions: { q: { type: "boolean", instructions: "Relevant?", criteria: { yes: "Yes", no: "No" } } } }, hint: "exactly false and true" }
+      { value: { state: "Evidence", questions: { q: { type: "boolean", instructions: "Relevant?", criteria: { yes: "Yes", no: "No" } } } }, hint: "exactly false and true" },
+      { value: { state: "Evidence", questions: { q: { type: "choice", instructions: "Choose", choices: { a: "A", b: "B" } } } }, hint: "questions.q.choices: Unknown field choices; use criteria" },
+      { value: { state: "PRIVATE EVIDENCE", questions: { q: { type: "choice", instructions: "Choose", criteria: { a: { description: "PRIVATE DESCRIPTION" }, b: "B" } } } }, hint: "questions.q.criteria.a: Each choice needs a nonempty ID and a nonempty string value" }
     ]
     invalid.forEach(function(item) {
       var out = call(cfg, item.value)
       ow.test.assert(out.error.indexOf("LLM_DECISION_INVALID_REQUEST") >= 0, true, "Stable error code")
       ow.test.assert(out.error.indexOf(item.hint) >= 0, true, "Actionable validation reason survives the utility wrapper")
-      ow.test.assert(out.content[0].text.indexOf("Example:") >= 0, true, "Model receives a valid example")
+      ow.test.assert(out.error.length < 760, true, "Feedback is bounded")
+      ow.test.assert(out.error.indexOf("PRIVATE"), -1, "Feedback does not echo evidence or values")
     })
     ow.test.assert(calls, 0, "Invalid requests do not call the provider")
     var run = agent._createDecisionToolRunner({ useutils: true, usedecide: true })
     var rejected = run(invalid[0].value)
-    MiniADecision.validateConsultation(rejected.validation.example)
-    call(cfg, rejected.validation.example)
+    var corrected = { state: "Evidence", questions: rejected.validation.issues[0].example }
+    MiniADecision.validateConsultation(corrected)
+    call(cfg, corrected)
+    var choiceError = run(invalid[4].value)
+    ow.test.assert(isString(choiceError.validation.issues[0].example.first), true, "Missing choice criteria gets a choice example")
+    ow.test.assert(stringify(choiceError).indexOf('"boolean"'), -1, "Choice correction does not inject unrelated boolean examples")
     call(cfg, request)
     call(cfg, { state: "Evidence", questions: { impact: { type: "score", instructions: "Rate impact", criteria: ["Low", "High"] } } })
     ow.test.assert(calls, 3, "Corrected boolean, choice batch and score requests reach the provider")
@@ -107,6 +114,7 @@
         ow.test.assert(out.resultFormat, toon ? "toon" : "json", "Exercise both serialization formats")
         ow.test.assert(out.error.indexOf("object keyed by question ID") >= 0, true, "Proxy error retains local validation detail")
         ow.test.assert(stringify(out.content).indexOf("Example:") >= 0, true, "Inline content retains guidance under JSON/TOON")
+        ow.test.assert(out.content[0].text.split("Invalid arguments:").length, 2, "Proxy serializes feedback once")
       } finally { MiniA._destroyMcpProxyConnections(agent._id) }
     })
   }

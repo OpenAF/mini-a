@@ -847,6 +847,16 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testToolArgsPrevalidationAndRepair
 
+- name: MiniA Core Tests::TargetedSchemaDiagnostics
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testTargetedSchemaDiagnostics
+
+- name: MiniA Core Tests::EmbeddedTargetedFeedbackRoutes
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testEmbeddedTargetedFeedbackRoutes
+
 - name: MiniA Core Tests::ToolContractSurvivesGoalRewording
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -1385,6 +1395,8 @@ todo:
 - MiniA Core Tests::AgentMarkdownChannelGlobalMemoryPersistsAndReloads
 - MiniA Core Tests::ValidatedToolContractsOnly
 - MiniA Core Tests::ToolArgsPrevalidationAndRepair
+- MiniA Core Tests::TargetedSchemaDiagnostics
+- MiniA Core Tests::EmbeddedTargetedFeedbackRoutes
 - MiniA Core Tests::ToolContractSurvivesGoalRewording
 - MiniA Core Tests::MemoryWriteRecordsDurableKindWithTags
 - MiniA Core Tests::MemoryWriteRejectsInvalidKindAndEnforcesPerRunCap

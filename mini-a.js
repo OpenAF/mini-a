@@ -11679,8 +11679,9 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     }
     if (methodNames.length === 0) return __
 
-    var formatResponse = function(result, toolName) {
+    var formatResponse = function(result, toolName, schema, payload) {
       if (isString(result) && result.indexOf("[ERROR]") === 0) {
+        result = MiniA._utilsValidationFeedback(result, schema, payload)
         return {
           error  : result,
           content: [{ type: "text", text: result }]
@@ -11691,8 +11692,9 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         var errText = isString(result.error) ? result.error : stringify(result, __, "")
         if (!isString(errText) || errText.length === 0) errText = "Unknown tool error."
         if (toolName === "decide" && result.error === "LLM_DECISION_INVALID_REQUEST" && isMap(result.validation)) {
-          errText += " " + result.validation.message + " Example: " + stringify(result.validation.example, __, "")
+          errText += " " + MiniA._formatToolArgIssues(result.validation.issues)
         }
+        errText = MiniA._utilsValidationFeedback(errText, schema, payload)
         if (errText.indexOf("[ERROR]") !== 0) errText = "[ERROR] " + errText
         return {
           error  : errText,
@@ -11990,13 +11992,13 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
           if (name === "skillwiki" && isMap(result) && !result.error) {
             parent._recordSkillContent(payload.ref || payload.path, result)
           }
-          var response = formatResponse(result, name)
+          var response = formatResponse(result, name, meta.inputSchema, payload)
           if ((name === "skills" || name === "skill" || name === "skillwiki") && isMap(response) && response.error) {
             var requestedRef = name === "skillwiki" ? payload.ref || payload.path : "local:" + String(payload.name || "").replace(/^local:/, "")
             if (parent._skillRuntime.records[requestedRef] && /source|revision|budget|max.chars|max.loaded|denied|not.found|exceeds/.test(String(response.error))) parent._skillRuntime.block(requestedRef, String(response.error))
           }
           if (isMap(response) && isString(response.error) && isMap(meta.inputSchema)) {
-            var enriched = MiniA._enrichToolCallError(response.error, meta.inputSchema, payload)
+            var enriched = MiniA._utilsValidationFeedback(response.error, meta.inputSchema, payload)
             if (enriched !== response.error) {
               response.error = enriched
               response.content = [{ type: "text", text: enriched }]
@@ -12006,7 +12008,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
           return response
         } catch (err) {
           var message = "[ERROR] " + (err && err.message ? err.message : String(err))
-          message = MiniA._enrichToolCallError(message, meta.inputSchema, payload)
+          message = MiniA._utilsValidationFeedback(message, meta.inputSchema, payload)
           parent.fnI("warn", `Mini-A utils MCP '${name}' failed: ${message}`)
           var errorResponse = {
             error  : message,
@@ -13671,6 +13673,11 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
             }
 
             var resultPayload = result
+            // Keep one copy of identical error text in the serialized observation.
+            if (isMap(result) && isString(result.error) && isArray(result.content) && result.content.length === 1 && result.content[0].text === result.error) {
+              resultPayload = merge({}, result)
+              delete resultPayload.content
+            }
             // Error text (for example "[ERROR] ...") is not a serialized payload.
             // Permissive JSON/TOON parsing can otherwise reduce it to ["ERROR"].
             if (isMap(result) && isUnDef(result.error) && result.isError !== true && isArray(result.content) && isMap(result.content[0]) && isString(result.content[0].text)) {
@@ -16767,23 +16774,122 @@ MiniA._toolArgValidationDetails = function(schema, providedParams) {
   return { validParams: validParams, unrecognized: unrecognized, missing: missing }
 }
 
+// Diagnostic subset of JSON Schema, evaluated only after an existing rejection.
+// It does not decide whether a tool call is allowed or change accepted arguments.
+MiniA._toolArgIssues = function(schema, params) {
+  var issues = [], visited = 0
+  var own = function(value, key) { return Object.prototype.hasOwnProperty.call(value, key) }
+  var field = function(path, key) { return (path === "$" ? "" : path + ".") + String(key).replace(/[\r\n]/g, " ").substring(0, 64) }
+  var typeMatches = function(type, value) {
+    if (isArray(type)) return type.some(function(t) { return typeMatches(t, value) })
+    if (type === "object") return isMap(value)
+    if (type === "array") return isArray(value)
+    if (type === "string") return isString(value)
+    if (type === "boolean") return typeof value === "boolean"
+    if (type === "number" || type === "integer") return isNumber(value) && isFinite(value) && (type !== "integer" || Math.floor(value) === value)
+    if (type === "null") return value === null
+    return true
+  }
+  var matches = function(s, value) {
+    if (!isMap(s)) return true
+    if (s.not && matches(s.not, value)) return false
+    if (s.type && !typeMatches(s.type, value)) return false
+    if (isArray(s.enum) && s.enum.indexOf(value) < 0) return false
+    if (isArray(s.required) && (!isMap(value) || s.required.some(function(k) { return !own(value, k) }))) return false
+    if (isMap(value) && isMap(s.properties) && Object.keys(s.properties).some(function(k) { return own(value, k) && !matches(s.properties[k], value[k]) })) return false
+    return true
+  }
+  var add = function(path, message) {
+    if (issues.length < 3 && !issues.some(function(i) { return i.path === path && i.message === message })) issues.push({ path: path, message: message })
+  }
+  var visit = function(s, value, path, depth) {
+    if (!isMap(s) || issues.length >= 3 || depth > 8 || ++visited > 256) return
+    if (s.type && !typeMatches(s.type, value)) {
+      var actual = value === null ? "null" : isArray(value) ? "array" : isMap(value) ? "object" : typeof value
+      add(path, "Expected " + (isArray(s.type) ? s.type.join(" or ") : s.type) + "; received " + actual + ".")
+      return
+    }
+    if (isArray(s.enum) && s.enum.indexOf(value) < 0) add(path, "Use one of: " + s.enum.slice(0, 8).map(function(v) { return stringify(v, __, "").substring(0, 60) }).join(", ") + (s.enum.length > 8 ? ", ..." : "") + ".")
+    if (isString(value) && isNumber(s.minLength) && value.length < s.minLength) add(path, "Provide a string with at least " + s.minLength + " character(s).")
+    if (isNumber(value) && isNumber(s.minimum) && value < s.minimum) add(path, "Must be >= " + s.minimum + ".")
+    if (isNumber(value) && isNumber(s.maximum) && value > s.maximum) add(path, "Must be <= " + s.maximum + ".")
+    var alternatives = s.anyOf || s.oneOf
+    if (isArray(alternatives)) {
+      var candidates = alternatives.filter(function(branch) { return matches(branch, value) })
+      if (candidates.length === 1) visit(candidates[0], value, path, depth + 1)
+      else if (!candidates.length) {
+        var types = alternatives.map(function(branch) { return branch.type }).filter(function(t) { return isString(t) })
+        if (types.length) add(path, "Expected " + types.join(" or ") + ".")
+      }
+    }
+    if (isMap(value)) {
+      var props = isMap(s.properties) ? s.properties : {}
+      ;(s.required || []).forEach(function(k) {
+        if (!own(value, k)) add(field(path, k), "Required" + (isMap(props[k]) && isString(props[k].type) ? "; provide " + props[k].type : "") + ".")
+      })
+      if (isNumber(s.minProperties) && Object.keys(value).length < s.minProperties) add(path, "Provide at least " + s.minProperties + " named field(s).")
+      Object.keys(value).slice(0, 256).forEach(function(k) {
+        if (own(props, k)) visit(props[k], value[k], field(path, k), depth + 1)
+        else if (s.additionalProperties === false) {
+          var closest = MiniA.findClosestKnownArg(k, Object.keys(props))
+          add(field(path, k), "Unknown field" + (closest ? "; use " + closest.match : "") + ".")
+        } else if (isMap(s.additionalProperties)) visit(s.additionalProperties, value[k], field(path, k), depth + 1)
+      })
+    }
+    if (isArray(value)) {
+      if (isNumber(s.minItems) && value.length < s.minItems) add(path, "Provide at least " + s.minItems + " item(s).")
+      if (isMap(s.items)) value.slice(0, 256).forEach(function(v, i) { visit(s.items, v, path + "[" + i + "]", depth + 1) })
+    }
+    if (isArray(s.allOf)) s.allOf.forEach(function(branch) { visit(branch, value, path, depth + 1) })
+    if (isMap(s.if)) {
+      var selected = matches(s.if, value) ? s.then : s.else
+      if (isMap(selected)) visit(selected, value, path, depth + 1)
+    }
+  }
+  visit(schema, params, "$", 0)
+  return issues
+}
+
+MiniA._formatToolArgIssues = function(issues) {
+  if (!isArray(issues) || !issues.length) return ""
+  return "Invalid arguments: " + issues.slice(0, 3).map(function(issue) {
+    var text = String(issue.path || "$").replace(/[\r\n]/g, " ").substring(0, 140) + ": " + String(issue.message).substring(0, 240)
+    if (isDef(issue.example)) text += " Example: " + stringify(issue.example, __, "").substring(0, 200)
+    return text
+  }).join(" ").substring(0, 700)
+}
+
+MiniA._utilsValidationFeedback = function(rawError, schema, params) {
+  if (!isString(rawError) || rawError.indexOf("Invalid arguments:") >= 0) return rawError
+  // Execution, provider and permission failures must keep their original meaning.
+  if (/denied|permission|read.only|readwrite|outside|not found|does not exist|provider|timeout|cancel|not.configured/i.test(rawError)) return rawError
+  // These existing semantic diagnostics already identify the conflicting options.
+  if (/mutually exclusive|cannot be combined/i.test(rawError)) return rawError
+  if (!/required|invalid|unknown|unsupported operation|must |cannot be combined|mutually exclusive|expected/i.test(rawError)) return rawError
+  try {
+    var feedback = MiniA._formatToolArgIssues(MiniA._toolArgIssues(schema, params))
+    return feedback ? rawError + " " + feedback : rawError
+  } catch(ignoreDiagnosticError) { return rawError }
+}
+
 MiniA._toolArgValidationMessage = function(schema, providedParams, prefix) {
   var details = MiniA._toolArgValidationDetails(schema, providedParams)
   if (details.unrecognized.length === 0 && details.missing.length === 0) return prefix || ""
   var lines = []
   if (isString(prefix) && prefix.length > 0) lines.push(prefix)
-  var hints = details.unrecognized.map(function(u) {
-    var s = MiniA.findClosestKnownArg(u, details.validParams)
-    return "'" + u + "'" + (s ? " (did you mean '" + s.match + "'?)" : " (not in schema)")
+  var hints = details.unrecognized.slice(0, 3).map(function(u) {
+    var name = String(u).replace(/[\r\n]/g, " ").substring(0, 64)
+    var s = MiniA.findClosestKnownArg(name, details.validParams)
+    return "'" + name + "'" + (s ? " (did you mean '" + s.match + "'?)" : " (not in schema)")
   })
   if (hints.length > 0) lines.push("Unrecognized parameters provided: " + hints.join(", ") + ".")
-  if (details.missing.length > 0) lines.push("Still missing required: " + details.missing.map(function(k) { return "'" + k + "'" }).join(", ") + ".")
-  if (details.validParams.length > 0) lines.push("Valid parameters: " + details.validParams.join(", ") + ".")
-  return lines.join(" ")
+  if (details.missing.length > 0 && hints.length < 3) lines.push("Still missing required: " + details.missing.slice(0, 3 - hints.length).map(function(k) { return "'" + k + "'" }).join(", ") + ".")
+  return lines.join(" ").substring(0, 700)
 }
 
 MiniA._enrichToolCallError = function(rawError, schema, providedParams) {
-  if (!isString(rawError) || rawError.indexOf("Unrecognized parameters provided:") >= 0) return rawError
+  if (!isString(rawError) || rawError.indexOf("Unrecognized parameters provided:") >= 0 || rawError.indexOf("Invalid arguments:") >= 0) return rawError
+  if (/denied|permission|read.only|outside|not found|does not exist|provider|timeout|cancel|not.configured/i.test(rawError)) return rawError
   var details = MiniA._toolArgValidationDetails(schema, providedParams)
   if (details.unrecognized.length === 0) return rawError
   return MiniA._toolArgValidationMessage(schema, providedParams, rawError)
@@ -16837,7 +16943,7 @@ MiniA.prototype._prepareToolArgs = function(schema, providedParams) {
         repairs.push("parsed JSON for '" + key + "'")
       }
     })
-    if (validParams.indexOf("options") >= 0) {
+    if (validParams.indexOf("options") >= 0 && isMap(schema.properties.options) && schema.properties.options.type === "object") {
       if (!isMap(params.options)) params.options = {}
       var xLabelVal = isDef(params.xlabel) ? params.xlabel : (isDef(params.x_axis) ? params.x_axis : params.xLabel)
       if (isDef(xLabelVal) && validParams.indexOf("xlabel") < 0) {

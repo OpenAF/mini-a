@@ -4381,6 +4381,82 @@
     ow.test.assert(agent._prepareToolArgs(schema, { arguments: { path: "/tmp" } }).params.arguments.path, "/tmp", "toolargrepair=false must disable wrapper repair")
   }
 
+  exports.testTargetedSchemaDiagnostics = function() {
+    load("mini-a-utils.js")
+    var meta = MiniUtilsTool.getMetadataByFn()
+    var issues = MiniA._toolArgIssues(meta.filesystemModify.inputSchema, { operation: "edit", path: "target", pattern: "old" })
+    ow.test.assert(issues[0].path, "replacement", "Operation-specific missing field identified")
+    var nested = { state: "SECRET", questions: { rank: { type: "choice", instructions: "Choose", criteria: { a: { description: "SECRET" }, b: "B" } } } }
+    issues = MiniA._toolArgIssues(meta.decide.inputSchema, nested)
+    ow.test.assert(issues[0].path, "questions.rank.criteria.a", "Nested map reports the exact field")
+    ow.test.assert(issues[0].message, "Expected string; received object.", "Wrong shape reports expected and actual types")
+    issues = MiniA._toolArgIssues(meta.userInput.inputSchema, { operation: "choose", prompt: "Pick" })
+    ow.test.assert(issues[0].path, "options", "Conditional question requirement resolved")
+    var schema = { type: "object", additionalProperties: false, properties: { value: { type: "string" } } }
+    issues = MiniA._toolArgIssues(schema, { unexpected: "SECRET", extra: "SECRET", other: "SECRET", fourth: "SECRET" })
+    ow.test.assert(issues.length, 3, "At most three issues")
+    ow.test.assert(MiniA._formatToolArgIssues(issues).indexOf("SECRET"), -1, "Rejected values are not echoed")
+    var bounded = MiniA._formatToolArgIssues([{ path: "p".repeat(1000), message: "m".repeat(2000), example: "e".repeat(2000) }])
+    ow.test.assert(bounded.length <= 700, true, "Feedback has a fixed character bound")
+    ;["[ERROR] Permission denied", "[ERROR] File not found", "LLM_DECISION_PROVIDER_ERROR", "[ERROR] Request timeout"].forEach(function(error) {
+      ow.test.assert(MiniA._utilsValidationFeedback(error, schema, { unexpected: "SECRET" }), error, "Execution failures retain their meaning")
+    })
+    var error = "[ERROR] Invalid input"
+    var once = MiniA._utilsValidationFeedback(error, schema, { unexpected: "SECRET" })
+    ow.test.assert(once.indexOf("Invalid arguments:") >= 0, true, "Rejected call gains targeted feedback")
+    ow.test.assert(MiniA._utilsValidationFeedback(once, schema, {}), once, "Feedback is not appended twice")
+    ow.test.assert(createAgent()._prepareToolArgs(schema, { value: 123 }).ok, true, "Diagnostics do not impose new type rejections")
+    var agent = createAgent()
+    var options = agent._prepareToolArgs(meta.userInput.inputSchema, { operation: "choose", prompt: "Pick", options: ["A", "B"] })
+    ow.test.assert(options.params.options.join(","), "A,B", "Object-option repairs preserve interactive option arrays")
+    ow.test.assert(isUnDef(agent._prepareToolArgs(meta.userInput.inputSchema, { operation: "choose", prompt: "Pick" }).params.options), true, "Missing array options are not fabricated")
+  }
+
+  exports.testEmbeddedTargetedFeedbackRoutes = function() {
+    var root = String(java.io.File.createTempFile("mini-a-feedback-", "").getCanonicalPath())
+    io.rm(root); io.mkdir(root)
+    var agent = createAgent(), prompted = 0
+    agent.fnI = function() {}; agent._trace = function() {}
+    agent._supportsUserInput = function() { return true }
+    agent._userInputFn = function() { prompted++; throw new Error("Invalid input must not prompt") }
+    try {
+      io.writeFileString(root + "/source.txt", "alpha\nbeta\n")
+      ;[false, true].forEach(function(std) {
+        var cfg = agent._createUtilsMcpConfig({ useutils: true, usestdutils: std, readwrite: true, utilsroot: root, __interaction_source: "mini-a-web" })
+        var fns = cfg.options.fns
+        var readName = std ? "read" : "filesystemQuery"
+        var badRead = std ? { path: "source.txt", byteStart: "invalid" } : { operation: "read", path: "source.txt", byteStart: "invalid" }
+        var out = fns[readName](badRead)
+        ow.test.assert(out.error.indexOf("byteStart: Expected number; received string") >= 0, true, "Read failure gains field and type correction")
+        var validRead = std ? { path: "source.txt", byteStart: "0", byteLength: 5 } : { operation: "READFILE", path: "source.txt", byteStart: "0", byteLength: 5 }
+        ow.test.assert(isUnDef(fns[readName](validRead).error), true, "Existing coercion and operation aliases still succeed")
+        var mixed = merge(validRead, { lineStart: 1 })
+        ow.test.assert(fns[readName](mixed).error, "[ERROR] byte range and line range options are mutually exclusive", "Semantic range error already gives a targeted explanation")
+        var badQuestion = std ? { questions: { question: "Pick" } } : { operation: "choose", prompt: "Pick" }
+        out = fns[std ? "question" : "userInput"](badQuestion)
+        ow.test.assert(out.error.indexOf(std ? "questions: Expected array" : "options: Required") >= 0, true, "Question failure gains the appropriate shape or required field")
+        var writeName = std ? "apply_patch" : "filesystemModify"
+        var badWrite = std ? {} : { operation: "write", path: "target.txt" }
+        out = fns[writeName](badWrite)
+        ow.test.assert(isString(out.error), true, "Malformed write fails")
+        ow.test.assert(io.fileExists(root + "/target.txt"), false, "Rejected write causes no filesystem mutation")
+        ;[false, true].forEach(function(toon) {
+          var proxy = agent._createMcpProxyConfig([cfg], { mcpproxytoon: toon, mcpproxythreshold: 100000 })
+          try {
+            var dispatch = proxy.options.fns["proxy-dispatch"]
+            out = dispatch({ action: "call", tool: readName, arguments: badRead })
+            ow.test.assert(out.error.indexOf("byteStart: Expected number; received string") >= 0, true, "Both proxy formats preserve field feedback")
+            ow.test.assert(out.content[0].text.split("Invalid arguments:").length, 2, "Observation contains one feedback block")
+            ow.test.assert(out.resultFormat, toon ? "toon" : "json", "Exercise both proxy formats")
+            dispatch({ action: "call", tool: writeName, arguments: badWrite })
+            ow.test.assert(io.fileExists(root + "/target.txt"), false, "Proxy does not retry rejected writes")
+          } finally { MiniA._destroyMcpProxyConnections(agent._id) }
+        })
+      })
+      ow.test.assert(prompted, 0, "Invalid question calls never reach the user")
+    } finally { io.rm(root) }
+  }
+
   exports.testToolContractSurvivesGoalRewording = function() {
     var agent = createAgent()
     agent._agentState = {}
