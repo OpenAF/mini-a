@@ -419,6 +419,7 @@ Choose one action: {{{actionFieldValues}}}. Include only fields needed for that 
 ## MCP TOOL ACCESS ({{mcpAccessLabel}}):
 • {{{mcpToolCountLine}}}{{#if proxyToolsList}}
 • Available MCP tools via proxy-dispatch: {{{proxyToolsList}}}{{/if}}
+{{#if useMcpProxy}}• Before calling a tool whose argument structure is unknown, retrieve its schema with proxy-dispatch {"action":"search","query":"tool-name","format":"detail","includeInputSchema":true}. Reuse schemas already in context; compact names/descriptions are not input schemas. After a parameter error, inspect the schema and correct the arguments before retrying.{{/if}}
 {{#if usetoolsActual}}
 • **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
 • When no MCP tool is needed, use the JSON "action" field only for: {{{actionFieldValues}}}
@@ -11678,7 +11679,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     }
     if (methodNames.length === 0) return __
 
-    var formatResponse = function(result) {
+    var formatResponse = function(result, toolName) {
       if (isString(result) && result.indexOf("[ERROR]") === 0) {
         return {
           error  : result,
@@ -11689,6 +11690,9 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       if (isMap(result) && ((result.ok === false && isDef(result.error)) || isDef(result.error))) {
         var errText = isString(result.error) ? result.error : stringify(result, __, "")
         if (!isString(errText) || errText.length === 0) errText = "Unknown tool error."
+        if (toolName === "decide" && result.error === "LLM_DECISION_INVALID_REQUEST" && isMap(result.validation)) {
+          errText += " " + result.validation.message + " Example: " + stringify(result.validation.example, __, "")
+        }
         if (errText.indexOf("[ERROR]") !== 0) errText = "[ERROR] " + errText
         return {
           error  : errText,
@@ -11986,7 +11990,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
           if (name === "skillwiki" && isMap(result) && !result.error) {
             parent._recordSkillContent(payload.ref || payload.path, result)
           }
-          var response = formatResponse(result)
+          var response = formatResponse(result, name)
           if ((name === "skills" || name === "skill" || name === "skillwiki") && isMap(response) && response.error) {
             var requestedRef = name === "skillwiki" ? payload.ref || payload.path : "local:" + String(payload.name || "").replace(/^local:/, "")
             if (parent._skillRuntime.records[requestedRef] && /source|revision|budget|max.chars|max.loaded|denied|not.found|exceeds/.test(String(response.error))) parent._skillRuntime.block(requestedRef, String(response.error))
@@ -13667,7 +13671,9 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
             }
 
             var resultPayload = result
-            if (isMap(result) && isArray(result.content) && isMap(result.content[0]) && isString(result.content[0].text)) {
+            // Error text (for example "[ERROR] ...") is not a serialized payload.
+            // Permissive JSON/TOON parsing can otherwise reduce it to ["ERROR"].
+            if (isMap(result) && isUnDef(result.error) && result.isError !== true && isArray(result.content) && isMap(result.content[0]) && isString(result.content[0].text)) {
               var parsedPayload = jsonParse(String(result.content[0].text), __, __, true)
               if (isMap(parsedPayload) || isArray(parsedPayload)) {
                 resultPayload = parsedPayload
@@ -18244,7 +18250,7 @@ MiniA.prototype._buildRunPrompt = function(args) {
       if (toBoolean(args.usejsontool) !== true) {
         baseRules.push("Do not call a tool named 'json' unless explicitly listed in available tools; otherwise return the JSON response directly.")
       }
-      baseRules.push("'list'/'search' default to format='compact' (lowest cost); use format='detail' only for inputSchema/annotations. Use action='status' to check catalogHash before re-listing.")
+      baseRules.push("'list'/'search' default to format='compact' (lowest cost). Schema retrieval requires format='detail' and includeInputSchema=true. Use action='status' to check catalogHash before re-listing.")
       var spillThreshold = isNumber(args.mcpproxythreshold) && args.mcpproxythreshold > 0
         ? args.mcpproxythreshold : 0
       var spillToon = toBoolean(args.mcpproxytoon) === true && spillThreshold > 0

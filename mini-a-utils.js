@@ -4353,7 +4353,7 @@ MiniUtilsTool._metadataByFn = (function() {
   return {
     decide: {
       name: "decide",
-      description: "Evaluate bounded choice, boolean or ordinal score questions against supplied evidence using the configured decision model. Batch related questions; use only when this consultation adds value. Returns typed answers and available usage, never executes actions or grants permissions. Probabilities are not calibrated correctness.",
+      description: "Evaluate bounded questions using the configured decision model. Supply state as shared evidence and questions as an object keyed by question ID, each with type (choice, boolean or score) and instructions. Choice requires criteria as named choices; score requires an ordered criteria array. Batch related questions when useful. Returns typed answers and usage; never executes actions or grants permissions. Probabilities are not calibrated correctness.",
       annotations: { readOnlyHint: true, idempotentHint: false, cacheable: false, openWorldHint: true },
       inputSchema: {
         type: "object",

@@ -65,6 +65,75 @@
     ow.test.assert(agent._computeToolCacheSettings(cfg.options.fnsMeta.decide, 10000).enabled, false, "Read-only decision is explicitly noncacheable")
   }
 
+  exports.testDecisionUtilityValidationGuidanceAndRecovery = function() {
+    var calls = 0, agent = fixture(function() { calls++; return { response: { answers: {} }, stats: {} } })
+    var cfg = agent._createUtilsMcpConfig({ useutils: true, usedecide: true, utilsallow: "decide" })
+    var first = call(cfg, { question: "Which command?", evidence: "PRIVATE EVIDENCE", model: "override" })
+    ow.test.assert(first.error.indexOf("state") >= 0, true, "First captured failure identifies the required evidence field")
+    var invalid = [
+      { value: { state: "Evidence", questions: [{ question: "Which command?" }] }, hint: "object keyed by question ID" },
+      { value: { state: 42, questions: request.questions }, hint: "state must be nonempty text" },
+      { value: { state: "Evidence", questions: {} }, hint: "at least one named question" },
+      { value: { state: "Evidence", questions: { q: { question: "Which?" } } }, hint: "type (boolean, choice or score)" },
+      { value: { state: "Evidence", questions: { q: { type: "choice", instructions: "Choose" } } }, hint: "at least two named choices" },
+      { value: { state: "Evidence", questions: { q: { type: "score", instructions: "Rate", criteria: ["Only one"] } } }, hint: "ordered array" },
+      { value: { state: "Evidence", questions: { q: { type: "boolean", instructions: "Relevant?", criteria: { yes: "Yes", no: "No" } } } }, hint: "exactly false and true" }
+    ]
+    invalid.forEach(function(item) {
+      var out = call(cfg, item.value)
+      ow.test.assert(out.error.indexOf("LLM_DECISION_INVALID_REQUEST") >= 0, true, "Stable error code")
+      ow.test.assert(out.error.indexOf(item.hint) >= 0, true, "Actionable validation reason survives the utility wrapper")
+      ow.test.assert(out.content[0].text.indexOf("Example:") >= 0, true, "Model receives a valid example")
+    })
+    ow.test.assert(calls, 0, "Invalid requests do not call the provider")
+    var run = agent._createDecisionToolRunner({ useutils: true, usedecide: true })
+    var rejected = run(invalid[0].value)
+    MiniADecision.validateConsultation(rejected.validation.example)
+    call(cfg, rejected.validation.example)
+    call(cfg, request)
+    call(cfg, { state: "Evidence", questions: { impact: { type: "score", instructions: "Rate impact", criteria: ["Low", "High"] } } })
+    ow.test.assert(calls, 3, "Corrected boolean, choice batch and score requests reach the provider")
+  }
+
+  exports.testDecisionUtilityProxySchemaAndErrors = function() {
+    var agent = fixture(), cfg = agent._createUtilsMcpConfig({ useutils: true, usedecide: true, utilsallow: "decide" })
+    ;[false, true].forEach(function(toon) {
+      var proxy = agent._createMcpProxyConfig([cfg], { mcpproxytoon: toon, mcpproxythreshold: 100000 })
+      try {
+        var dispatch = proxy.options.fns["proxy-dispatch"]
+        var schema = dispatch({ action: "search", query: "decide", format: "detail", includeInputSchema: true })
+        ow.test.assert(stringify(schema).indexOf("inputSchema") >= 0, true, "Documented discovery request retrieves schema")
+        var out = dispatch({ action: "call", tool: "decide", arguments: { state: "Evidence", questions: [{ question: "Which?" }] } })
+        ow.test.assert(out.resultFormat, toon ? "toon" : "json", "Exercise both serialization formats")
+        ow.test.assert(out.error.indexOf("object keyed by question ID") >= 0, true, "Proxy error retains local validation detail")
+        ow.test.assert(stringify(out.content).indexOf("Example:") >= 0, true, "Inline content retains guidance under JSON/TOON")
+      } finally { MiniA._destroyMcpProxyConnections(agent._id) }
+    })
+  }
+
+  exports.testDecisionSkillAvailabilityAndLoading = function() {
+    ;[false, true].forEach(function(std) {
+      var agent = fixture(), settings = { useskills: true, useutils: true, usedecide: true, usestdutils: std }
+      agent._agentState = {}; agent._runtime = { context: [] }
+      agent._getPluginsDiscovery = function() { return { skillsRoots: [] } }
+      agent._resetSkillRuntime(settings)
+      agent._createUtilsMcpConfig(settings)
+      var available = function() { return agent._skillUtils._listSkills({}).some(function(s) { return s.name === "mini-a-decisions" }) }
+      ow.test.assert(available(), true, "Decision skill discovered under both utility naming modes")
+      agent._consultSkillsForRun(merge(settings, { skillsautosearch: false, goal: "$local:mini-a-decisions" }))
+      var record = agent._skillRuntime.records["local:mini-a-decisions"]
+      ow.test.assert(record.state, "active", "Explicit decision skill activation succeeds")
+      ow.test.assert(record.content.indexOf('"most_dangerous"') >= 0, true, "Rendered skill includes complete choice example")
+      agent._createUtilsMcpConfig(merge(settings, { utilsdeny: "decide" }))
+      ow.test.assert(available(), false, "Denied tool hides decision skill")
+      agent._createUtilsMcpConfig(merge(settings, { usedecide: false }))
+      ow.test.assert(available(), false, "Disabled decision utility hides skill")
+      agent._decision = new MiniADecision({ env: function() { return __ } })
+      agent._createUtilsMcpConfig(settings)
+      ow.test.assert(available(), false, "Missing decision model hides skill")
+    })
+  }
+
   exports.testDecisionUtilityBudgetsAndReset = function() {
     var calls = 0, agent = fixture(function() { calls++; return { response: { answers: {} }, stats: {} } })
     var settings = { useutils: true, usedecide: true, utilsallow: "decide" }
@@ -92,7 +161,7 @@
   }
 
   exports.testDecisionUtilityErrorsNoFallbackAndCurrentGate = function() {
-    var calls = 0, agent = fixture(function() { calls++; throw { code: "LLM_DECISION_PROVIDER_ERROR", status: 429, message: "SECRET provider payload" } })
+    var calls = 0, agent = fixture(function() { calls++; throw { code: "LLM_DECISION_PROVIDER_ERROR", status: 429, message: "SECRET provider payload", validationMessage: "SECRET forged validation" } })
     var settings = { useutils: true, usedecide: true, utilsallow: "decide" }
     var cfg = agent._createUtilsMcpConfig(settings)
     var out = call(cfg, request)

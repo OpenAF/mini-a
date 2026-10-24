@@ -1897,6 +1897,10 @@
     ow.test.assert(actionProxy.prompt.indexOf("For a proxy-dispatch call, put downstream tool inputs in params.arguments") >= 0, true, "Action-based proxy prompt should require the nested arguments envelope")
     ow.test.assert(actionProxy.prompt.indexOf("NOT \"name\"/\"arguments\"") < 0, true, "Action-based proxy prompt must not contradict its required arguments envelope")
     ow.test.assert(actionProxy.prompt.indexOf("do not wrap readresult in \"call\" or \"arguments\"") >= 0, true, "Action-based proxy prompt should distinguish readresult from downstream calls")
+    ;[balanced, verbose, actionProxy].forEach(function(rendered) {
+      ow.test.assert(rendered.prompt.indexOf('"format":"detail","includeInputSchema":true') >= 0, true, "Main/function and low-cost/action proxy prompts teach complete schema discovery")
+      ow.test.assert(rendered.prompt.indexOf("correct the arguments before retrying") >= 0, true, "Parameter failures prompt schema correction")
+    })
   }
 
   exports.testNormalizesTopLevelBuiltInActionParams = function() {

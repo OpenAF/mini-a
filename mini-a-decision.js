@@ -64,28 +64,38 @@ MiniADecision.digest = function(text) {
 
 // Shared bounded consultation contract for user commands and the agent utility.
 MiniADecision.validateConsultation = function(request) {
-  var invalid = function() { throw MiniADecision.error("LLM_DECISION_INVALID_REQUEST") }
-  if (!isMap(request) || Object.keys(request).some(function(k) { return ["state", "questions"].indexOf(k) < 0 }) ||
-      (!isString(request.state) && !isMap(request.state) && !isArray(request.state)) ||
-      (isString(request.state) && !request.state.trim()) || !isMap(request.questions)) invalid()
+  var invalid = function(message) {
+    var error = MiniADecision.error("LLM_DECISION_INVALID_REQUEST")
+    error.validationMessage = message
+    throw error
+  }
+  if (!isMap(request) || Object.keys(request).some(function(k) { return ["state", "questions"].indexOf(k) < 0 })) {
+    invalid("The decide utility accepts only state and questions. Put evidence in state; model selection uses runtime configuration.")
+  }
+  if ((!isString(request.state) && !isMap(request.state) && !isArray(request.state)) || (isString(request.state) && !request.state.trim())) {
+    invalid("state must be nonempty text or a JSON object/array containing the shared evidence.")
+  }
+  if (!isMap(request.questions)) invalid("questions must be an object keyed by question ID, not an array. Each question requires type and instructions.")
   var keys = Object.keys(request.questions)
-  if (!keys.length) invalid()
+  if (!keys.length) invalid("questions must contain at least one named question.")
   if (keys.length > 32 || af.fromString2Bytes(stringify(request, __, "")).length > 48 * 1024) {
     throw MiniADecision.error("MINI_A_DECISION_REQUEST_BUDGET")
   }
   keys.forEach(function(key) {
     var q = request.questions[key]
     if (!key.trim() || !isMap(q) || Object.keys(q).some(function(k) { return ["type", "instructions", "criteria"].indexOf(k) < 0 }) ||
-        ["boolean", "choice", "score"].indexOf(q.type) < 0 || !isString(q.instructions) || !q.instructions.trim()) invalid()
+        ["boolean", "choice", "score"].indexOf(q.type) < 0 || !isString(q.instructions) || !q.instructions.trim()) {
+      invalid("Each question needs a nonempty ID, type (boolean, choice or score), and nonempty instructions. Only type, instructions and criteria are accepted inside a question.")
+    }
     var text = function(v) { return isString(v) && v.trim().length > 0 }
     if (q.type === "boolean") {
       if (isDef(q.criteria) && (!isMap(q.criteria) || Object.keys(q.criteria).length !== 2 ||
           !Object.prototype.hasOwnProperty.call(q.criteria, "false") || !Object.prototype.hasOwnProperty.call(q.criteria, "true") ||
-          !text(q.criteria.false) || !text(q.criteria.true))) invalid()
+          !text(q.criteria.false) || !text(q.criteria.true))) invalid("Boolean criteria, when supplied, must contain exactly false and true with nonempty descriptions.")
     }
     else if (q.type === "choice") {
-      if (!isMap(q.criteria) || Object.keys(q.criteria).length < 2 || Object.keys(q.criteria).some(function(k) { return !k.trim() || !text(q.criteria[k]) })) invalid()
-    } else if (!isArray(q.criteria) || q.criteria.length < 2 || !q.criteria.every(text)) invalid()
+      if (!isMap(q.criteria) || Object.keys(q.criteria).length < 2 || Object.keys(q.criteria).some(function(k) { return !k.trim() || !text(q.criteria[k]) })) invalid("Choice criteria must be an object with at least two named choices and nonempty descriptions.")
+    } else if (!isArray(q.criteria) || q.criteria.length < 2 || !q.criteria.every(text)) invalid("Score criteria must be an ordered array of at least two nonempty descriptions, from lowest to highest.")
   })
   return request
 }
@@ -135,7 +145,18 @@ if (typeof MiniA === "function") {
     return function(request) {
       try {
         if (!parent._decision || !parent._decision._config || parent._decision._error) throw MiniADecision.error("MINI_A_DECISION_NOT_CONFIGURED")
-        MiniADecision.validateConsultation(request)
+        try { MiniADecision.validateConsultation(request) }
+        catch(validationError) {
+          var rejected = { error: MiniADecision.sanitize(validationError).code }
+          // Only local validation supplies guidance; provider errors remain sanitized.
+          if (rejected.error === "LLM_DECISION_INVALID_REQUEST" && isString(validationError.validationMessage)) {
+            rejected.validation = {
+              message: validationError.validationMessage,
+              example: { state: "Shared evidence", questions: { relevant: { type: "boolean", instructions: "Is the evidence relevant?" } } }
+            }
+          }
+          return rejected
+        }
         if (parent._decisionToolBudget.getAndIncrement() >= 32) throw MiniADecision.error("MINI_A_DECISION_TOOL_LIMIT")
         var controls = parent._decisionToolControls
         if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
