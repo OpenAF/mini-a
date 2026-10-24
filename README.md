@@ -517,7 +517,7 @@ Mini-A ships with complementary components:
 | `mcpprogcallport` | Port for the programmatic tool-calling bridge (`0` = auto-assign free port) | `0` |
 | `mcpprogcallmaxbytes` | Max inline JSON response size before storing oversized tool results under `/result/{id}` | `4096` |
 | `mcpprogcallresultttl` | Time-to-live in seconds for oversized stored results returned by `/result/{id}` | `600` |
-| `mcpprogcalltools` | Optional comma-separated allowlist of tool names exposed through the bridge | `""` |
+| `mcpprogcalltools` | Optional comma-separated allowlist for bridge discovery and execution (downstream names in proxy mode) | `""` |
 | `mcpprogcallbatchmax` | Max calls accepted per `/call-tools-batch` request | `10` |
 | `chatbotmode` | Conversational assistant mode | `false` |
 | `promptprofile` | System prompt verbosity profile (`minimal`, `balanced`, `verbose`). `balanced` omits examples/step-by-step tool-call walkthroughs and trims tool-schema descriptions to their essential clause; `verbose` restores full examples and schema detail | `minimal` in chatbot mode; `verbose` with `debug=true` outside chatbot mode; otherwise `balanced` |

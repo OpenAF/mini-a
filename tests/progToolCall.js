@@ -12,7 +12,7 @@
         { name: "list_files", description: "List files in a directory" },
         { name: "run_query",  description: "Execute SQL query" }
       ],
-      mcpToolToConnection: {},
+      mcpToolToConnection: options.mcpToolToConnection || {},
       _callMcpToolImpl: options._callMcpToolImpl || null,
       _callMcpTool: function(toolName, params) {
         if (typeof this._callMcpToolImpl === "function") return this._callMcpToolImpl(toolName, params)
@@ -140,7 +140,7 @@
         }
       }
     }
-    var t = makeAndStartServer()
+    var t = makeAndStartServer({ mcpToolToConnection: { "proxy-dispatch": "proxy" } })
     var port = t.info.port; var token = t.info.token
     try {
       var r = httpGet(port, "/list-tools", token)
@@ -552,6 +552,194 @@
     ow.test.assert(manifest3.length === 2,                           true, "Fallback should use tools array (2 tools)")
     ow.test.assert(manifest3[0].description === "Tool A",            true, "Description should be first line only")
     ow.test.assert(isUnDef(manifest3[0].connection),                 true, "No connection field without proxy state")
+  }
+
+  exports.testProxyCallsAndRestrictions = function() {
+    var saved = global.__mcpProxyState__
+    global.__mcpProxyState__ = { connections: { c1: { alias: "db", tools: [{ name: "run_query", description: "Query" }] } } }
+    var seen = []
+    var t = makeAndStartServer({
+      mcpToolToConnection: { "proxy-dispatch": "proxy" },
+      _callMcpToolImpl: function(name, params) {
+        seen.push({ name: name, params: params })
+        if (name !== "proxy-dispatch") throw new Error("Unknown tool '" + name + "'.")
+        return { normalized: { processed: { rows: [1] } }, error: false }
+      }
+    }, { allowedTools: "run_query" })
+    try {
+      var r = httpPost(t.info.port, "/call-tool", t.info.token, { name: "run_query", connection: "db", params: { sql: "select 1" } })
+      ow.test.assert(r.ok, true, "Listed downstream tool must be callable")
+      ow.test.assert(seen[0].name, "proxy-dispatch", "Dispatch through registered proxy")
+      ow.test.assert(seen[0].params.connection, "db", "Preserve connection alias for ambiguous names")
+      ow.test.assert(seen[0].params.arguments.sql, "select 1", "Preserve downstream arguments")
+      var batch = httpPost(t.info.port, "/call-tools-batch", t.info.token, { calls: [{ id: "q", name: "run_query", params: {} }] })
+      ow.test.assert(batch.results[0].ok, true, "Batch uses the same proxy resolver")
+      t.srv._allowedTools = ["proxy-dispatch"]
+      var denied = httpPost(t.info.port, "/call-tool", t.info.token, { name: "proxy-dispatch", params: { action: "call", tool: "run_query", arguments: {} } })
+      ow.test.assert(denied.ok, false, "Proxy wrapper must not bypass downstream allowlist")
+      var nested = httpPost(t.info.port, "/call-tool", t.info.token, { name: "proxy-dispatch", params: { params: { action: "call", tool: "run_query", arguments: {} } } })
+      ow.test.assert(nested.ok, false, "Nested proxy compatibility envelope retains downstream allowlist")
+      ow.test.assert(seen.length, 2, "Rejected tool must not execute")
+      ow.test.assert(httpGet(t.info.port, "/list-tools", t.info.token).tools.length, 0, "Discovery respects allowlist")
+      t.srv._allowedTools = __
+      t.agent._isMcpHandoffToolAllowed = function() { return false }
+      ow.test.assert(t.srv._getToolList(false).length, 0, "Discovery respects delegated handoff")
+      t.agent._policyDecision = function() { return { decision: "deny", reason: "fixture" } }
+      ow.test.assert(httpPost(t.info.port, "/call-tool", t.info.token, { name: "run_query", params: {} }).ok, false, "Bridge retains tool policy")
+    } finally { t.srv.stop(); global.__mcpProxyState__ = saved }
+  }
+
+  exports.testDirectCatalogIgnoresStaleProxy = function() {
+    var saved = global.__mcpProxyState__
+    global.__mcpProxyState__ = { connections: { stale: { tools: [{ name: "stale_tool" }] } } }
+    var t = makeAndStartServer({}, { allowedTools: "read_file" })
+    try {
+      var tools = httpGet(t.info.port, "/list-tools", t.info.token).tools
+      ow.test.assert(tools.length, 1, "Direct allowlisted catalog ignores unrelated proxy state")
+      ow.test.assert(tools[0].name, "read_file", "Direct registered tool remains discoverable")
+      ow.test.assert(httpPost(t.info.port, "/call-tool", t.info.token, { name: tools[0].name, params: {} }).ok, true, "Direct call remains usable")
+    } finally { t.srv.stop(); global.__mcpProxyState__ = saved }
+  }
+
+  exports.testProgrammaticGuidance = function() {
+    var srv = new MiniAProgCallServer(makeMockAgent())
+    var prompt = srv.promptSnippet()
+    ow.test.assert(prompt.indexOf("Prefer programmatic tool calling") >= 0, true, "Prefer scripts when they reduce round trips")
+    ow.test.assert(prompt.indexOf("Use direct MCP calls for one simple request") >= 0, true, "Retain direct call choice")
+    ow.test.assert(prompt.indexOf("import requests") < 0, true, "Examples do not require external Python packages")
+    ow.test.assert(prompt.indexOf('if not r.get') >= 0, true, "Example checks application errors")
+  }
+
+  exports.testRealProxyFormatsAndSpill = function() {
+    ow.loadFormat()
+    load("mini-a.js")
+    var saved = global.__mcpProxyState__
+    var savedHelpers = global.__mcpProxyHelpers__
+    try {
+      ;[false, true].forEach(function(toon) {
+        delete global.__mcpProxyState__
+        var agent = new MiniA()
+        agent.fnI = function() {}
+        agent._takeStartupMcp = function() { return {
+          listTools: function() { return { tools: [{ name: "systemInfo", inputSchema: { type: "object", properties: {} } }] } },
+          callTool: function(name, params) {
+            if (params.fail) return { isError: true, content: [{ type: "text", text: "fixture failure" }] }
+            return { content: [{ type: "text", text: '{"os":"fixture","items":[1,2]}' }] }
+          }
+        } }
+        var cfg = agent._createMcpProxyConfig([{ id: "fixture", type: "dummy" }, { id: "fixture2", type: "dummy" }], { mcpproxytoon: toon, mcpproxythreshold: 10 })
+        agent.mcpToolToConnection = { "proxy-dispatch": "proxy" }
+        agent._mcpConnections = { proxy: { callTool: function(name, params) { return cfg.options.fns[name](params) } } }
+        agent._ensureConnectionInitialized = function() {}
+        var srv = new MiniAProgCallServer(agent)
+        var info = srv.start({ maxBytes: 12 })
+        try {
+          var ambiguous = httpPost(info.port, "/call-tool", info.token, { name: "systemInfo", params: {} })
+          ow.test.assert(ambiguous.ok, false, "Duplicate tool names require a connection")
+          var r = httpPost(info.port, "/call-tool", info.token, { name: "systemInfo", connection: "c1", params: {} })
+          ow.test.assert(r.ok, true, "Real proxy call succeeds with toon=" + toon)
+          ow.test.assert(isString(r.resultId), true, "Bridge handles spill independently of the proxy threshold")
+          var full = httpGet(info.port, "/result/" + r.resultId, info.token)
+          ow.test.assert(full.result.os, "fixture", "Proxy result preserves JSON structure with toon=" + toon)
+          ow.test.assert(full.result.items.length, 2, "Arrays survive proxy format conversion")
+          var batch = httpPost(info.port, "/call-tools-batch", info.token, { calls: [{ id: "a", name: "systemInfo", connection: "c1", params: {} }, { id: "b", name: "systemInfo", connection: "c2", params: {} }] })
+          ow.test.assert(batch.results.every(function(item) { return item.ok === true }), true, "Batch supports duplicate names on explicit connections")
+          var failed = httpPost(info.port, "/call-tool", info.token, { name: "systemInfo", connection: "c1", params: { fail: true } })
+          ow.test.assert(failed.ok, false, "MCP isError must not be reported as success")
+        } finally { srv.stop() }
+      })
+    } finally { global.__mcpProxyState__ = saved; global.__mcpProxyHelpers__ = savedHelpers }
+  }
+
+  exports.testRuntimeOptionCombinations = function() {
+    ow.loadFormat()
+    load("mini-a.js")
+    ;[false, true].forEach(function(proxy) {
+      ;[false, true].forEach(function(jsonTool) {
+        ;[false, true].forEach(function(lazy) {
+          var agent = new MiniA()
+          agent.fnI = function() {}
+          agent._selectMcpToolsDynamically = function() { return ["systemInfo"] }
+          agent._createUtilsMcpConfig = function() { return { id: "progcall-fixture", type: "dummy", options: {
+            fns: { systemInfo: function() { return { content: [{ type: "text", text: '{"os":"fixture"}' }] } } },
+            fnsMeta: { systemInfo: { name: "systemInfo", description: "Fixture system info", inputSchema: { type: "object", properties: {} } } }
+          } } }
+          var args = {
+            model: { type: "ollama", model: "fixture", url: "http://127.0.0.1:1" },
+            useshell: true, readwrite: false, shellallow: "python3", usesandbox: "off",
+            usetools: true, usejsontool: jsonTool, mcplazy: lazy, mcpdynamic: lazy,
+            mcpproxy: proxy, mcpproxytoon: true, mcpproxythreshold: 10, mcpprogcall: true,
+            useutils: true, useskills: false, usememory: false, usedelegation: false,
+            historyvm: true, contextvirtualization: true, sessionprewarm: false,
+            chatbotmode: lazy, promptprofile: jsonTool ? "minimal" : "balanced"
+          }
+          try {
+            agent.init(args)
+            var srv = agent._progCallServer
+            var tools = httpGet(srv._port, "/list-tools", srv._token).tools
+            ow.test.assert(tools.some(function(t) { return t.name === "systemInfo" }), true, "Fixture remains discoverable across runtime options")
+            var r = httpPost(srv._port, "/call-tool", srv._token, { name: "systemInfo", params: {} })
+            ow.test.assert(r.ok, true, "Runtime call succeeds proxy=" + proxy + " json=" + jsonTool + " lazy=" + lazy)
+            ow.test.assert(r.result.os, "fixture", "Real registration and normalization preserve result")
+            agent._refreshRunPrompt(args)
+            ow.test.assert(agent._systemInst.split("## Programmatic Tool Calling").length, 2, "Runtime guidance appears once after prompt refresh")
+            ow.test.assert(agent._systemInst.indexOf("Prefer programmatic tool calling") >= 0, true, "Agent/chatbot and minimal profiles retain guidance")
+            ow.test.assert(String(agent._promptArgs.knowledge).indexOf("Programmatic Tool Calling"), -1, "Capability instructions are not virtualized knowledge")
+            if (!proxy && !jsonTool && !lazy) {
+              var script = 'import os,json,urllib.request\nreq=urllib.request.Request("http://127.0.0.1:"+os.environ["MINI_A_PTC_PORT"]+"/call-tool",data=json.dumps({"name":"systemInfo","params":{}}).encode(),headers={"X-Mini-A-Token":os.environ["MINI_A_PTC_TOKEN"],"Content-Type":"application/json"})\nwith urllib.request.urlopen(req) as response: print(response.read().decode())\n'
+              io.writeFileString(srv._tmpDir + "/probe.py", script)
+              var shell = agent._runCommand({ command: 'python3 "$MINI_A_PTC_DIR/probe.py"', readwrite: false })
+              ow.test.assert(jsonParse(shell.output).result.os, "fixture", "Actual generated-code subprocess receives bridge environment and calls MCP")
+            }
+          } finally { agent._stopAgentResources() }
+        })
+      })
+    })
+  }
+
+  exports.testSandboxBridgeDirectory = function() {
+    load("mini-a.js")
+    var agent = new MiniA()
+    var dir = String(java.nio.file.Files.createTempDirectory("mini-a-ptc-sandbox-").toAbsolutePath())
+    var runtime = dir + "/runtime"
+    io.mkdir(runtime)
+    agent._progCallTmpDir = dir
+    agent._getSandboxRuntimeDir = function() { return runtime }
+    agent._getSandboxHostPaths = function() { return { cwd: "/fixture-project", temp: "/tmp", home: "/home/fixture" } }
+    agent._isCommandAvailable = function() { return true }
+    try {
+      var profile = agent._createTempSandboxProfile({ readwrite: false, sandboxnonetwork: true })
+      var content = io.readFileString(profile.profile)
+      ow.test.assert(content.indexOf("(version 1)"), 0, "macOS sandbox profile has a valid version declaration")
+      ow.test.assert(content.indexOf('(subpath "' + String(new java.io.File(dir).getCanonicalPath()) + '")') >= 0, true, "macOS permits bridge temp scripts with readwrite=false")
+      ow.test.assert(content.indexOf("(allow network*)") < 0, true, "Network isolation remains enabled")
+      var linux = agent._buildLinuxSandboxConfig({ readwrite: false, sandboxnonetwork: true })
+      ow.test.assert(linux.prefix.indexOf('--bind "' + dir + '" "' + dir + '"') >= 0, true, "Linux exposes bridge temp directory after private /tmp")
+      ow.test.assert(linux.prefix.indexOf("--unshare-net") >= 0, true, "Linux network isolation remains enabled")
+    } finally { io.rm(dir) }
+  }
+
+  exports.testRuntimeShellConstraints = function() {
+    load("mini-a.js")
+    ;[false, true].forEach(function(shellEnabled) {
+      var agent = new MiniA(), warnings = []
+      agent.fnI = function(type, msg) { if (type === "warn") warnings.push(msg) }
+      agent._createUtilsMcpConfig = function() { return { id: "progcall-ping", type: "dummy", options: {
+        fns: { ping: function() { return { content: [{ type: "text", text: '{"pong":true}' }] } } },
+        fnsMeta: { ping: { name: "ping", description: "Fixture", inputSchema: { type: "object", properties: {} } } }
+      } } }
+      try {
+        agent.init({ model: { type: "ollama", model: "fixture", url: "http://127.0.0.1:1" },
+          mcpprogcall: true, useshell: shellEnabled, usetools: false, useutils: true,
+          useskills: false, usememory: false, usedelegation: false, historyvm: false,
+          contextvirtualization: false, sessionprewarm: false, usesandbox: "macos", sandboxnonetwork: shellEnabled })
+        var srv = agent._progCallServer
+        ow.test.assert(httpPost(srv._port, "/call-tool", srv._token, { name: "ping", params: {} }).result.pong, true, "Bridge works independently of native tool registration")
+        ow.test.assert(agent._systemInst.indexOf("Prefer programmatic tool calling") >= 0, shellEnabled, "Only advertise script execution with shell enabled")
+        ow.test.assert(warnings.some(function(w) { return w.indexOf(shellEnabled ? "sandboxnonetwork" : "requires useshell") >= 0 }), true, "Explain incompatible shell settings")
+        if (shellEnabled) ow.test.assert(agent._systemInst.indexOf("do not weaken the sandbox") >= 0, true, "No-network guidance preserves the restriction")
+      } finally { agent._stopAgentResources() }
+    })
   }
 
 })()

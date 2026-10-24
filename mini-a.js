@@ -18212,10 +18212,10 @@ MiniA.prototype.init = function(args) {
         this._progCallServer = _progCallSrv
         this._progCallEnv    = _progCallSrv.envVars()
         this._progCallTmpDir = _progCallSrv._tmpDir
-        args.knowledge = isString(args.knowledge) && args.knowledge.length > 0
-          ? args.knowledge + _progCallSrv.promptSnippet()
-          : _progCallSrv.promptSnippet().trim()
-        this.fnI("progcall", "Programmatic tool calling server started on port " + _progCallSrv._port + ".")
+        if (args.sandboxnonetwork === true && args.usesandbox !== "off") {
+          this.fnI("warn", "Programmatic MCP calls require localhost network access; sandboxnonetwork=true can block the bridge. Use direct MCP calls when the sandbox blocks localhost.")
+        }
+        if (args.debug) this.fnI("progcall", "Programmatic tool calling server started on port " + _progCallSrv._port + ".")
       } else {
         this.fnI("warn", "mini-a-progcall.js could not be loaded; mcpprogcall disabled.")
       }
@@ -18322,6 +18322,12 @@ MiniA.prototype._buildRunPrompt = function(args) {
     var baseRules = rules
       .map(r => isDef(r) ? String(r).trim() : "")
       .filter(r => r.length > 0)
+    // Runtime capabilities belong in instructions, not retrieved knowledge:
+    // context virtualization may page out or label knowledge as untrusted data.
+    if (args.useshell === true && isDef(this._progCallServer)) {
+      baseRules.push(this._progCallServer.promptSnippet())
+      if (args.sandboxnonetwork === true) baseRules.push("The shell sandbox may block localhost networking. If the bridge is unreachable, use direct MCP actions; do not weaken the sandbox or repeat requests to an unreachable endpoint.")
+    }
     if (this._shouldEncourageWebMarkdownImages(args)) {
       baseRules.push(
         "The answer is rendered as Markdown to HTML in a web page, which can display existing external photographs and images using standard Markdown image syntax: ![concise descriptive alt text](https://reliable-image-url). This does not require image generation; diagrams, charts, maps, and SVG are not the only supported visuals. When relevant images would materially improve an answer, include a small number; when the user asks for pictures or photos, actively try to supply them. Keep follow-up image requests tied to the current conversation topic, rather than unrelated images or a site's main page. Use available search or URL-fetch tools to find topic-relevant images from reliable sources such as Wikipedia/Wikimedia Commons when you do not already have verified URLs. Use direct image URLs found in source/tool results or supplied by the user; never invent or guess image URLs. Put image Markdown directly in the answer, outside code fences unless the user explicitly requests Markdown source. Add a short caption and source link; do not claim a license unless verified. If retrieval is unavailable or fails, explain that specific limitation and provide a relevant source-page link when known; do not claim that the web page cannot display photographs or substitute a menu of unrelated visual capabilities."

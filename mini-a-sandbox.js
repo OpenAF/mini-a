@@ -215,10 +215,11 @@ MiniA.prototype._createTempSandboxProfile = function(args) {
     } catch(ignoreSandboxDirCreateError) {}
 
     var writePaths = [runtimeTmp, runtimeHome]
+    if (isString(this._progCallTmpDir) && this._progCallTmpDir.length > 0) writePaths.push(this._progCallTmpDir)
     if (toBoolean(args.readwrite) === true && isString(hostPaths.cwd) && hostPaths.cwd.length > 0) writePaths.push(hostPaths.cwd)
 
     var profileLines = [
-      "version 1",
+      "(version 1)",
       "(deny default)",
       "(allow process-exec)",
       "(allow process-fork)",
@@ -234,6 +235,8 @@ MiniA.prototype._createTempSandboxProfile = function(args) {
     writePaths.filter(function(path, index, arr) {
       return isString(path) && path.length > 0 && arr.indexOf(path) === index
     }).forEach(function(path) {
+      // sandbox-exec checks resolved paths (/var and /tmp are symlinks on macOS).
+      try { path = String(new java.io.File(path).getCanonicalPath()) } catch(ignoreCanonicalPath) {}
       profileLines.push("(allow file-write* (subpath \"" + String(path).replace(/\\/g, "\\\\").replace(/"/g, "\\\"") + "\"))")
     })
 
@@ -329,6 +332,13 @@ MiniA.prototype._buildLinuxSandboxConfig = function(args) {
     ]
 
     if (toBoolean(args.sandboxnonetwork) === true) parts.push("--unshare-net")
+
+    // The bridge's private directory must survive the private /tmp mount and
+    // remain writable even when the rest of the host filesystem is read-only.
+    if (isString(this._progCallTmpDir) && this._progCallTmpDir.length > 0) {
+      var progCallPath = "\"" + this._escapeShellArgDoubleQuotes(this._progCallTmpDir) + "\""
+      parts.push("--bind", progCallPath, progCallPath)
+    }
 
     if (toBoolean(args.readwrite) === true) {
       if (isString(hostPaths.cwd) && hostPaths.cwd.length > 0) parts.push("--bind", "\"" + this._escapeShellArgDoubleQuotes(hostPaths.cwd) + "\"", "\"" + this._escapeShellArgDoubleQuotes(hostPaths.cwd) + "\"")

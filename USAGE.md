@@ -1227,7 +1227,13 @@ curl -s -X POST "http://127.0.0.1:$MINI_A_PTC_PORT/call-tool" \
   -d '{"name":"time-current","params":{"timezone":"UTC"}}'
 ```
 
-Use `mcpprogcalltools=toolA,toolB` to limit exposed tools when tighter boundaries are required.
+Mini-A prefers scripts when loops, conditional calls, batches, or local result processing reduce model round trips and intermediate context. Simple individual requests can still use direct MCP calls. This guidance is included in the system instructions, including with context virtualization and history VM enabled. Generated Python examples use the standard library and check the response `ok` field before reporting success.
+
+Proxy routing is automatic with `mcpproxy=true`. Use the downstream tool name from `/list-tools`; when the same name exists on multiple connections, supply a top-level `"connection": "c1"` (using the listed alias) in a single call or batch entry. Native tools, JSON tool mode, dynamic tool selection, and lazy MCP connections use the same bridge resolver. Proxy results use the bridge's `mcpprogcallmaxbytes` storage threshold rather than spilling separately at `mcpproxythreshold`.
+
+Use `mcpprogcalltools=toolA,toolB` to limit exposed tools. Both discovery and execution respect this list and delegated tool handoffs; wrapping a forbidden tool in `proxy-dispatch` does not grant access. Explicit proxy calls require both `proxy-dispatch` and its target tool to be allowed.
+
+Scripts require `useshell=true` and shell-policy permission for the chosen commands. The built-in macOS/Linux sandboxes expose only the bridge's private temporary directory for scripts even with `readwrite=false`. Custom sandbox profiles must allow that directory and localhost access. `sandboxnonetwork=true` can block the HTTP bridge; Mini-A preserves that restriction and advises direct MCP calls instead. The bridge can call registered MCP tools independently of native model tool registration (`usetools`/`usejsontool`).
 
 Tools advertise determinism via MCP metadata (e.g., `annotations.readOnlyHint`, `annotations.idempotentHint`, or explicit cache settings). When detected, Mini-A caches results keyed by tool name and parameters for the configured TTL, reusing outputs on subsequent steps to avoid redundant calls.
 

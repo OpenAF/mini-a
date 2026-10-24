@@ -112,6 +112,41 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testCompactToolManifestHelperWithProxy
 
+- name: ProgToolCall Tests::ProxyCalls
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testProxyCallsAndRestrictions
+
+- name: ProgToolCall Tests::DirectCatalog
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDirectCatalogIgnoresStaleProxy
+
+- name: ProgToolCall Tests::Guidance
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testProgrammaticGuidance
+
+- name: ProgToolCall Tests::RealProxyFormats
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testRealProxyFormatsAndSpill
+
+- name: ProgToolCall Tests::RuntimeOptions
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testRuntimeOptionCombinations
+
+- name: ProgToolCall Tests::SandboxDirectory
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSandboxBridgeDirectory
+
+- name: ProgToolCall Tests::ShellConstraints
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testRuntimeShellConstraints
+
 include:
 - oJobTest.yaml
 
@@ -141,3 +176,10 @@ todo:
 - ProgToolCall Tests::UniquePerInstance
 - ProgToolCall Tests::ResultNotFound
 - ProgToolCall Tests::CompactManifest
+- ProgToolCall Tests::ProxyCalls
+- ProgToolCall Tests::DirectCatalog
+- ProgToolCall Tests::Guidance
+- ProgToolCall Tests::RealProxyFormats
+- ProgToolCall Tests::RuntimeOptions
+- ProgToolCall Tests::SandboxDirectory
+- ProgToolCall Tests::ShellConstraints

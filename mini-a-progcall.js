@@ -129,6 +129,10 @@ MiniAProgCallServer.prototype._isToolAllowed = function(toolName) {
 MiniAProgCallServer.prototype._toJsonResult = function(normalized) {
   var processed = isObject(normalized) ? normalized.processed : __
   if (isString(processed)) {
+    if (isMap(normalized.raw) && normalized.raw.resultFormat === "toon") {
+      var decoded = af.fromTOON(processed)
+      if (isMap(decoded) || isArray(decoded)) return decoded
+    }
     // Try parsing as JSON; fall back to text wrapper
     var parsed = jsonParse(processed.trim(), __, __, false)
     if (isMap(parsed) || isArray(parsed)) return parsed
@@ -160,9 +164,54 @@ MiniAProgCallServer.prototype._makeResultResponse = function(jsonResult) {
  * Returns the compact tool list, proxy-aware if mcpproxy is active.
  */
 MiniAProgCallServer.prototype._getToolList = function(withSchema) {
-  var proxyState = isObject(global.__mcpProxyState__) ? global.__mcpProxyState__ : __
+  var mapping = this._agent.mcpToolToConnection || {}
+  var proxyState = isDef(mapping["proxy-dispatch"]) && isObject(global.__mcpProxyState__) ? global.__mcpProxyState__ : __
   var agentTools = isArray(this._agent.mcpTools) ? this._agent.mcpTools : []
-  return __miniABuildCompactToolManifest(agentTools, proxyState, withSchema)
+  var tools = __miniABuildCompactToolManifest(agentTools, proxyState, withSchema)
+  var self = this
+  return tools.filter(function(tool) {
+    return self._isToolAllowed(tool.name) &&
+      (typeof self._agent._isMcpHandoffToolAllowed !== "function" || self._agent._isMcpHandoffToolAllowed(tool.name, {}))
+  })
+}
+
+// Keep discovery and execution on the same catalog. Proxy tools are not keys in
+// mcpToolToConnection; dispatch through the registered proxy to retain its checks.
+MiniAProgCallServer.prototype._callTool = function(toolName, params, connection) {
+  var mapping = this._agent.mcpToolToConnection || {}
+  if (toolName === "proxy-dispatch" && isMap(params.params)) {
+    var outer = merge({}, params)
+    delete outer.params
+    params = merge(params.params, outer)
+  }
+  var targetName = toolName === "proxy-dispatch" && isString(params.tool) ? params.tool.trim() : toolName
+  if (!this._isToolAllowed(toolName) || !this._isToolAllowed(targetName)) throw new Error("Tool not in allowlist: " + targetName)
+  if (typeof this._agent._policyDecision === "function") {
+    var inputs = toolName === "proxy-dispatch" && isMap(params.arguments) ? params.arguments : params
+    var decision = this._agent._policyDecision({
+      type: "tool", name: targetName,
+      url: isString(inputs.url) ? inputs.url : (isString(inputs.uri) ? inputs.uri : inputs.endpoint),
+      access: /write|delete|create|update|modify|send|deploy|upload|remove/i.test(targetName) ? "write" : "read",
+      plugin: (isObject(this._agent._pluginToolNames) && this._agent._pluginToolNames[targetName] === true) || /^plugin[._:-]/i.test(targetName)
+    })
+    if (decision.decision !== "allow") throw new Error("Tool '" + targetName + "' " + decision.decision + " by policy: " + decision.reason)
+  }
+  var callResult
+  if (isDef(mapping["proxy-dispatch"]) && toolName !== "proxy-dispatch" &&
+      (isUnDef(mapping[toolName]) || (isString(connection) && connection.length > 0))) {
+    var proxyParams = { action: "call", tool: toolName, arguments: params, resultSizeThreshold: 2147483647 }
+    if (isString(connection) && connection.length > 0) proxyParams.connection = connection
+    callResult = this._agent._callMcpTool("proxy-dispatch", proxyParams)
+  } else {
+    callResult = this._agent._callMcpTool(toolName, params)
+  }
+  if (!callResult.error) {
+    var payload = this._toJsonResult(callResult.normalized)
+    if ((isMap(callResult.rawResult) && callResult.rawResult.isError === true) || (isMap(payload) && payload.isError === true)) {
+      callResult.error = true
+    }
+  }
+  return callResult
 }
 
 /**
@@ -215,7 +264,7 @@ MiniAProgCallServer.prototype._setupRoutes = function(hs) {
     if (toolName.length === 0) return _replyJSON(400, { error: "Missing required field: name" })
     if (!self._isToolAllowed(toolName)) return _replyJSON(403, { error: "Tool not in allowlist: " + toolName })
     try {
-      var callResult = self._agent._callMcpTool(toolName, params)
+      var callResult = self._callTool(toolName, params, body.connection)
       if (callResult.error) {
         return _replyJSON(200, { ok: false, error: (callResult.normalized && callResult.normalized.display) || "tool error" })
       }
@@ -243,7 +292,7 @@ MiniAProgCallServer.prototype._setupRoutes = function(hs) {
       if (toolName.length === 0) return { id: callId, ok: false, error: "Missing required field: name" }
       if (!self._isToolAllowed(toolName)) return { id: callId, ok: false, error: "Tool not in allowlist: " + toolName }
       try {
-        var callResult = self._agent._callMcpTool(toolName, params)
+        var callResult = self._callTool(toolName, params, call.connection)
         if (callResult.error) return { id: callId, ok: false, error: (callResult.normalized && callResult.normalized.display) || "tool error" }
         var envelope = self._makeResultResponse(self._toJsonResult(callResult.normalized))
         return merge({ id: callId }, envelope)
@@ -349,10 +398,18 @@ MiniAProgCallServer.prototype.promptSnippet = function() {
     "  { \"ok\": true,  \"result\": {…} }\n" +
     "  { \"ok\": true,  \"resultId\": \"…\", \"preview\": \"…\", \"size\": N }  ← result too large\n" +
     "  { \"ok\": false, \"error\": \"…\" }\n\n" +
-    "When to use programmatic tool calling:\n" +
+    "Choosing how to call tools:\n" +
+    "Prefer programmatic tool calling when it reduces model round trips or avoids sending large intermediate results to the model.\n" +
     "- When you need to call many tools in a loop or conditionally\n" +
     "- When you need to process/transform tool results with code\n" +
-    "- When a task is more naturally expressed as a script than a sequence of individual actions\n\n" +
+    "- When a task is more naturally expressed as a script than a sequence of individual actions\n" +
+    "Use direct MCP calls for one simple request or when scripting adds no benefit. Run only the calls needed for the goal.\n" +
+    "Discover exact tool names and schemas via /search-tools or /list-tools?schema=1. Proxy routing is automatic.\n" +
+    "If a name occurs on multiple connections, add a top-level connection field using the listed connection alias.\n" +
+    "Check ok on every response: HTTP 200 alone does not mean success. Stop or handle errors; never claim a failed script succeeded.\n" +
+    "Process large results inside the script using /result/{id}; print only the summary or evidence needed for the goal.\n" +
+    "Batch requests execute in order, up to the configured batch maximum of " + this._batchMax + "; split larger batches.\n" +
+    "Use installed runtimes and standard libraries; do not assume third-party Python packages are installed.\n\n" +
     "Workflow:\n" +
     "1. Write your script to $MINI_A_PTC_DIR (using shell heredoc or write_file)\n" +
     "2. Execute it via the shell action\n" +
@@ -364,12 +421,14 @@ MiniAProgCallServer.prototype.promptSnippet = function() {
     "    -d '{\"name\":\"tool_name\",\"params\":{}}'\n\n" +
     "Example (Python — multi-step):\n" +
     "  cat > $MINI_A_PTC_DIR/task.py << 'PYEOF'\n" +
-    "  import requests, os, json\n" +
+    "  import urllib.request, os, json\n" +
     "  base = f\"http://127.0.0.1:{os.environ['MINI_A_PTC_PORT']}\"\n" +
     "  hdrs = {\"X-Mini-A-Token\": os.environ[\"MINI_A_PTC_TOKEN\"],\n" +
     "          \"Content-Type\": \"application/json\"}\n" +
-    "  r = requests.post(f\"{base}/call-tool\", headers=hdrs,\n" +
-    "      json={\"name\": \"tool_name\", \"params\": {}}).json()\n" +
+    "  data = json.dumps({\"name\": \"tool_name\", \"params\": {}}).encode(\"utf-8\")\n" +
+    "  req = urllib.request.Request(f\"{base}/call-tool\", data=data, headers=hdrs)\n" +
+    "  with urllib.request.urlopen(req) as response: r = json.load(response)\n" +
+    "  if not r.get(\"ok\"): raise RuntimeError(r.get(\"error\", \"Tool failed\"))\n" +
     "  print(json.dumps(r, indent=2))\n" +
     "  PYEOF\n" +
     "  python3 $MINI_A_PTC_DIR/task.py"
