@@ -83,16 +83,24 @@ modes:
       toolcachettl     : 5000
       mcpproxythreshold: 51200
       mcpproxytoon     : true
-      mcpprogcall      : false
+      mcpprogcall      : true
+      mcpdynamic       : true
       llmcomplexity    : true
       usehistory       : true
       historykeep      : true
       historykeepperiod: 10080
-      modelstrategy    : advisor
+      orchestration    : true
       memoryusersession: true
       usedelegation    : true
       autodelegation   : true
       usestdutils      : true
+      usememory        : true
+      memorymd         : true
+      historyvm        : true
+      usedecide        : true
+      contextguard     : true
+      contextvirtualization: true
+      useasciiviz      : true
       mcp              : 
       - type   : ojob
         options:
