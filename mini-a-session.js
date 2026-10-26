@@ -756,7 +756,7 @@ function MiniAInteractiveSession(args, adapter) {
     usevectors     : { type: "boolean", default: false, description: "Enable infographic-focused vector bundle (usesvg + usediagrams)" },
     usestream      : { type: "boolean", default: false, description: "Stream LLM tokens in real-time as they arrive" },
     useplanning    : { type: "boolean", default: false, description: "Track and expose task planning" },
-    orchestration  : { type: "string", default: "manual", description: "Execution strategy mode: manual or deterministic auto." },
+    orchestration  : { type: "string", default: "manual", description: "Execution strategy mode: manual or auto with progress tracking, task acceptance and shared budget admission." },
     usememory      : { type: "boolean", default: false, description: "Enable structured working memory during execution" },
     memoryuser     : { type: "boolean", default: false, description: "Enable usememory and auto-configure ~/.openaf-mini-a file-backed global and session memory." },
     memoryusersession: { type: "boolean", default: false, description: "Enable usememory and auto-configure ~/.openaf-mini-a file-backed session memory only." },
@@ -864,6 +864,8 @@ function MiniAInteractiveSession(args, adapter) {
     rtm            : { type: "number", description: "Legacy alias for rpm (requests per minute)" },
     tpm            : { type: "number", description: "Tokens per minute limit" },
     maxsteps       : { type: "number", description: "Maximum consecutive non-success steps" },
+    runmaxtokens   : { type: "number", description: "Aggregate auto-mode model token admission cap across the agent tree (0=unlimited)." },
+    runmaxtimems   : { type: "number", description: "Aggregate auto-mode elapsed-time admission cap in milliseconds (0=unlimited)." },
     maxtotalsteps  : { type: "number", description: "Hard ceiling on total steps regardless of progress (0=disabled)" },
     maxcontext     : { type: "number", description: "Maximum allowed context tokens" },
     compressgoal   : { type: "boolean", default: false, description: "Automatically compress oversized goal text before execution" },
@@ -1092,7 +1094,7 @@ function MiniAInteractiveSession(args, adapter) {
     { category: "Session", subcategory: "Console and editor", names: "editor homedir libs mode modelman showseparator useeditor".split(" ") },
     { category: "Models and execution", subcategory: "Model selection", names: "model modeldec modellc modellock modelstrategy contractfile contractargs savecontract reusecontract modelval modelvisual secpass".split(" ") },
     { category: "Models and execution", subcategory: "Decisions and advisors", names: "advisorbudgetratio advisorcooldownsteps advisorenable advisormaxuses advisoronambiguity advisoronharddecision advisoronrisk emergencyreserve evidencegate evidencegatestrictness harddecision lcbudget lcescalatedefer lcjsonretries lcreplytool llmcomplexity usedecide".split(" ") },
-    { category: "Models and execution", subcategory: "Budgets and limits", names: "lccontextlimit maxsteps maxtotalsteps rpm rtm tpm".split(" ") },
+    { category: "Models and execution", subcategory: "Budgets and limits", names: "lccontextlimit maxsteps maxtotalsteps runmaxtokens runmaxtimems rpm rtm tpm".split(" ") },
     { category: "Models and execution", subcategory: "Planning", names: "convertplan earlystopthreshold forceplanning forceupdates orchestration plancontent planfile planformat planlog planmode planstyle resumefailed saveplannotes updatefreq updateinterval useplanning validateplan".split(" ") },
     { category: "Models and execution", subcategory: "Outer loop", names: "outerloop outerloopinstructions taskfile specfile outerloopsessionid outerloopmaxcycles outerloopmaxtime outerloopstoponrepeat outerloopmaxnochange trackchanges changetrackroot".split(" ") },
     { category: "Models and execution", subcategory: "Research and validation", names: "deepresearch maxcycles persistlearnings valgoal validationgoal validationthreshold valtools".split(" ") },
@@ -7952,7 +7954,7 @@ function MiniAInteractiveSession(args, adapter) {
             subtasks.forEach(function(st) {
               var idShort = st.id.substring(0, 8)
               var statusColor = st.status === "completed" ? successColor : (st.status === "failed" ? errorColor : hintColor)
-              print("  " + colorifyText(idShort, statusColor) + " " + colorifyText(st.status.padEnd(10), statusColor) + " " + colorifyText(st.goal.substring(0, 60), hintColor))
+              print("  " + colorifyText(idShort, statusColor) + " " + colorifyText(st.status.padEnd(10), statusColor) + (st.acceptance ? " [" + st.acceptance + "]" : "") + " " + colorifyText(st.goal.substring(0, 60), hintColor))
             })
           }
         } catch (listErr) {
@@ -8015,6 +8017,9 @@ function MiniAInteractiveSession(args, adapter) {
           if (adapter) { browserResult(status, "subtask"); continue }
           print(colorifyText("Subtask " + status.id.substring(0, 8) + ":", accentColor))
           print("  Status: " + colorifyText(status.status, status.status === "completed" ? successColor : (status.status === "failed" ? errorColor : hintColor)))
+          if (isDef(status.acceptance)) print("  Acceptance: " + colorifyText(status.acceptance, status.acceptance === "accepted" ? successColor : hintColor))
+          if (isDef(status.outcome)) print("  Outcome: " + colorifyText(status.outcome, hintColor))
+          if (isDef(status.reason)) print("  Blocker: " + colorifyText(status.reason, hintColor))
           print("  Goal: " + colorifyText(status.goal, hintColor))
           print("  Attempt: " + colorifyText(status.attempt + "/" + status.maxAttempts, numericColor))
           if (isDef(status.startedAt)) {

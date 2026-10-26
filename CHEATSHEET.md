@@ -2417,3 +2417,8 @@ These grouped tables complete the parameter entries above. `unset` means no expl
 | `wikidreambudget` | number | `not enforced` | Reserved dream-scope estimated token budget; the current dream runner does not enforce it. Use dreammaxsteps to bound model steps. |
 
 See the [wiki guide](docs/WIKI.md), [delegation guide](docs/DELEGATION.md), and [absorption guide](docs/ABSORB.md) for operation-specific examples and restrictions.
+
+| Parameter | Description | Default |
+| --- | --- | --- |
+| `runmaxtokens` | Aggregate model-token admission cap for `orchestration=auto`, including descendants and acceptance review. Provider usage is preferred; missing usage is estimated. In-flight responses may exceed estimates. | `0` (unlimited) |
+| `runmaxtimems` | Aggregate elapsed-time admission cap in milliseconds for `orchestration=auto`. Prevents new calls and dispatch after expiry; existing transport/tool timeouts govern in-flight work. | `0` (unlimited) |

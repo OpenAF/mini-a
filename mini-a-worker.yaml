@@ -5,6 +5,12 @@
 help:
   text   : Mini-A headless worker API for programmatic agent delegation between processes/containers/hosts
   expects:
+  - name     : runmaxtokens
+    desc     : "Aggregate orchestration=auto token admission cap, including children and review (0=unlimited); in-flight calls may exceed estimates"
+    mandatory: false
+  - name     : runmaxtimems
+    desc     : "Aggregate orchestration=auto elapsed-time admission cap in milliseconds (0=unlimited)"
+    mandatory: false
   - name     : agentcomms
     desc     : Opt-in communication grant ceiling (JSON/SLON); requires apitoken and a matching task declaration
     mandatory: false
@@ -417,6 +423,8 @@ todo:
           result: {
             goal: task.goal, answer: subtaskResult.answer, format: task.args.format || "md",
             metrics: subtaskResult.metrics || {}, state: subtaskResult.state || {},
+            outcome: subtaskResult.outcome, acceptance: subtaskResult.acceptance, checks: subtaskResult.checks,
+            evidence: subtaskResult.state && subtaskResult.state.executionEvidence || [],
             error: subtaskResult.error
           },
           completedAt: task.completedAt,
@@ -837,7 +845,7 @@ jobs:
         preferredTransport: "HTTP+JSON",
         limits: { forkMemory: toBoolean(wargs.usememory) === true, forkStateMaxBytes: wargs.forkstatemaxbytes || 65536, maxContextTokens: wargs.maxcontext || 0 },
         workerInstanceId: global.__worker_instanceId,
-        additionalInterfaces: ["mini-a-worker-v1", "submission-recovery-v1", "prepared-context-v1"].concat(isDef(wargs.agentcomms) && MiniAComms.enabled(MiniAComms.normalize(wargs.agentcomms)) && isString(wargs.apitoken) && wargs.apitoken.length > 0 ? ["agent-comms-v1"] : []),
+        additionalInterfaces: ["mini-a-worker-v1", "submission-recovery-v1", "prepared-context-v1"].concat(typeof MiniAExecution !== "undefined" && typeof MiniA !== "undefined" && isFunction(MiniA.prototype._prepareExecution) ? ["task-outcome-v1", "execution-budget-v1"] : []).concat(isDef(wargs.agentcomms) && MiniAComms.enabled(MiniAComms.normalize(wargs.agentcomms)) && isString(wargs.apitoken) && wargs.apitoken.length > 0 ? ["agent-comms-v1"] : []),
         capabilities: {
           streaming: false,
           pushNotifications: false,
@@ -876,7 +884,7 @@ jobs:
         description: isString(wargs.workerdesc) ? wargs.workerdesc : "Mini-A worker API",
         version: "1.0.0",
         workerInstanceId: global.__worker_instanceId,
-        capabilities: ["run-goal", "delegation", "planning", "a2a-http-json-rest", "submission-recovery-v1", "prepared-context-v1"].concat(isDef(wargs.agentcomms) && MiniAComms.enabled(MiniAComms.normalize(wargs.agentcomms)) && isString(wargs.apitoken) && wargs.apitoken.length > 0 ? ["agent-comms-v1"] : []),
+        capabilities: ["run-goal", "delegation", "planning", "a2a-http-json-rest", "submission-recovery-v1", "prepared-context-v1"].concat(typeof MiniAExecution !== "undefined" && typeof MiniA !== "undefined" && isFunction(MiniA.prototype._prepareExecution) ? ["task-outcome-v1", "execution-budget-v1"] : []).concat(isDef(wargs.agentcomms) && MiniAComms.enabled(MiniAComms.normalize(wargs.agentcomms)) && isString(wargs.apitoken) && wargs.apitoken.length > 0 ? ["agent-comms-v1"] : []),
         skills: global.__worker_getSkills().map(function(skill) {
           return {
             id: skill.id,
@@ -1002,6 +1010,7 @@ jobs:
       var taskArgs = postData.args || {}
       var allowedRemoteKeys = {
         goal: true, format: true, raw: true, chatbotmode: true, useplanning: true,
+        orchestration: true, runmaxtokens: true, runmaxtimems: true, maxtotalsteps: true,
         updatefreq: true, updateinterval: true, forceupdates: true, planlog: true,
         planmode: true, planformat: true, convertplan: true, maxsteps: true,
         usedecide: true, llmcomplexity: true, forkpolicy: true, forkdecide: true
@@ -1043,6 +1052,15 @@ jobs:
         mergedArgs._skillHandoff = taskArgs._skillHandoff.slice(0, 3).filter(function(item) {
           return isMap(item) && isString(item.ref) && item.ref.length <= 512 && /^(local:|wiki:)/.test(item.ref)
         }).map(function(item) { return { ref: item.ref, revision: isString(item.revision) ? item.revision : "", args: isString(item.args) ? item.args : "", required: true } })
+      }
+      ;["runmaxtokens", "runmaxtimems"].forEach(function(key) {
+        var requested = Number(mergedArgs[key] || 0), ceiling = Number(wargs[key] || 0)
+        if (!isFinite(requested) || requested < 0) throw new Error("Invalid execution budget")
+        mergedArgs[key] = ceiling > 0 ? (requested > 0 ? Math.min(ceiling, requested) : ceiling) : requested
+      })
+      if (mergedArgs.runmaxtokens > 0 || mergedArgs.runmaxtimems > 0) {
+        if (typeof MiniAExecution === "undefined" || typeof MiniA === "undefined" || !isFunction(MiniA.prototype._prepareExecution)) return { error: { error: "Worker runtime cannot enforce aggregate budgets" }, code: 400 }
+        mergedArgs.orchestration = "auto"
       }
       mergedArgs.goal = goalTrimmed
       var timeout = wargs.defaulttimeout

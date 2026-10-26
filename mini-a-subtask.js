@@ -95,6 +95,97 @@ var SubtaskManager = function(parentArgs, opts) {
   if (this.remoteDelegation) this._startWatchdog()
 }
 
+SubtaskManager.prototype._execution = function() { return this.parentAgent && this.parentAgent._execution }
+SubtaskManager.prototype._executionTask = function(subtask) {
+  var e = this._execution()
+  return e && e.state.tasks[subtask.taskId]
+}
+SubtaskManager.prototype._saveExecutionTasks = function() {
+  if (!this._execution()) return
+  var self = this
+  this.parentAgent._executionSync(function() {
+    Object.keys(self.subtasks).forEach(function(id) {
+      var s = self.subtasks[id], t = self._executionTask(s)
+      if (!t) return
+      t.remote = s.workerUrl ? { url: s.workerUrl, taskId: s.remoteTaskId, submissionId: s.remoteSubmissionId, instance: s.workerInstanceId } : t.remote
+      t.allocation = s.allocation || t.allocation
+    })
+  })
+  this.parentAgent._checkpointRun("execution_tasks")
+}
+SubtaskManager.prototype._restoreExecutionTasks = function() {
+  if (!this._execution()) return
+  if (this._executionRestored && Date.now() - (this._lastExecutionReconcile || 0) < 5000) return
+  this._lastExecutionReconcile = Date.now()
+  this._executionRestored = true
+  var self = this
+  if (!this._executionResumeIds) this._executionResumeIds = Object.keys(this._execution().state.tasks).filter(function(id) {
+    var t = self._execution().state.tasks[id]
+    return (t.status === "running" || t.status === "unknown") && !self.subtasks[t.owner]
+  })
+  this._executionResumeIds.forEach(function(id) {
+    var t = self._execution().state.tasks[id]
+    if (!t || (t.status !== "running" && t.status !== "unknown")) return
+    t.status = "unknown"; t.acceptance = "pending"
+    t.reason = "Prior execution must be reconciled; do not repeat mutations"
+    if (!t.remote) return
+    try {
+      if (!t.remote.taskId && t.remote.submissionId) {
+        var receipt = self._remoteRequest(t.remote.url, "/submission/status", { submissionId: t.remote.submissionId, workerInstanceId: t.remote.instance }, 5000)
+        if (receipt && receipt.workerInstanceId === t.remote.instance && receipt.taskId) t.remote.taskId = receipt.taskId
+      }
+      if (!t.remote.taskId) return
+      var remote = self._remoteRequest(t.remote.url, "/result", { taskId: t.remote.taskId }, 5000)
+      if (!remote || remote.status !== "completed" || !remote.result) return
+      var r = remote.result, outcome = r.outcome || (r.state && r.state.execution && r.state.execution.outcome) || "unknown"
+      var checks = self.parentAgent._executionCheck(t, r.answer, r.evidence || [], outcome)
+      self._execution().finish(id, checks.length && checks.every(function(k) { return k.outcome === "met" }) ? "succeeded" : outcome, checks)
+      if (t.allocation && r.state && r.state.execution && r.state.execution.usage) self._execution().settle(t.allocation, r.state.execution.usage.spent, r.state.execution.usage.estimated > 0)
+    } catch(ignoreReconcile) {}
+  })
+}
+SubtaskManager.prototype._admitExecutionTask = function(subtask) {
+  var e = this._execution(), t = this._executionTask(subtask), self = this
+  if (!e || !t) return true
+  this.parentAgent._executionRefresh()
+  return this.parentAgent._executionSync(function(e) {
+    if (!e.canStart(t.id) || e.state.budget.denied === true) return false
+    if (e.available(false) <= 0) { t.reason = "Aggregate budget exhausted"; return false }
+    if (!subtask.allocation && e.state.budget.cap > 0) {
+      var requested = Number(subtask.args.runmaxtokens) || 0
+      if (!isFinite(requested) || requested < 0) throw new Error("Invalid child token allocation")
+      var allocation = Math.floor(e.available(false) / Math.max(1, self.maxConcurrent - self.runningCount + 1))
+      if (requested > 0) allocation = Math.min(allocation, requested)
+      if (allocation < 1024 && !(requested > 0 && allocation === requested)) { t.reason = "Insufficient child allocation"; return false }
+      subtask.allocation = e.reserve(allocation, subtask.id, false)
+      subtask.args.runmaxtokens = allocation
+    }
+    if (e.state.budget.timeCap > 0) {
+      var remaining = Math.max(1, e.state.budget.timeCap - e.snapshot().budget.elapsed)
+      var requestedTime = Number(subtask.args.runmaxtimems) || 0
+      if (!isFinite(requestedTime) || requestedTime < 0) throw new Error("Invalid child elapsed-time allocation")
+      subtask.args.runmaxtimems = requestedTime > 0 ? Math.min(requestedTime, remaining) : remaining
+    }
+    t.status = "running"; t.owner = subtask.id; t.allocation = subtask.allocation
+    return true
+  })
+}
+SubtaskManager.prototype._finishExecutionTask = function(subtask, outcome, checks) {
+  var e = this._execution(), t = this._executionTask(subtask)
+  if (!e || !t) return
+  this.parentAgent._executionSync(function(e) {
+    var usage = subtask.result && subtask.result.state && subtask.result.state.execution && subtask.result.state.execution.usage
+    // Unknown usage keeps its reservation: losing a worker must not create new budget.
+    if (usage && !subtask.usageSettled) {
+      if (subtask.allocation) e.settle(subtask.allocation, usage.spent, usage.estimated > 0)
+      else { e.state.budget.spent += Number(usage.spent) || 0; e.state.budget.estimated += Number(usage.estimated) || 0 }
+      subtask.usageSettled = true
+    }
+    if (outcome === "unknown") { t.status = "unknown"; t.outcome = outcome; t.acceptance = "pending" }
+    else e.finish(t.id, outcome, checks || [])
+  })
+}
+
 SubtaskManager.prototype._touchSubtask = function(subtask, reason) {
   if (!isMap(subtask)) return false
   var now = new Date().getTime()
@@ -123,6 +214,7 @@ SubtaskManager.prototype._claimTerminal = function(subtask, newStatus, nowValue,
     subtask.status = newStatus
     if (subtask.comms) subtask.comms.broker.revoke(subtask.comms.id)
     subtask.commsExchange = __
+    if (newStatus !== "completed") parent._finishExecutionTask(subtask, /outcome.*unknown|unknown.*outcome/i.test(String(errorValue)) ? "unknown" : newStatus === "cancelled" ? "cancelled" : newStatus === "timeout" ? "partial" : "failed")
     claimed = true
   }, this._transitionLock)
   return claimed
@@ -353,6 +445,8 @@ SubtaskManager.prototype._buildChildArgs = function(subtask) {
 
   // Communication declarations never inherit through argument merging.
   mergedArgs.agentcomms = explicitArgs.agentcomms
+  if (!isDef(explicitArgs.runmaxtokens)) delete mergedArgs.runmaxtokens
+  if (!isDef(explicitArgs.runmaxtimems)) delete mergedArgs.runmaxtimems
   mergedArgs.goal = subtask.goal
   // A parent that resolved modelstrategy=auto lets each child resolve for its own goal.
   if (this.parentArgs.__modelstrategyrequested === "auto" && !isDef(explicitArgs.modelstrategy)) mergedArgs.modelstrategy = "auto"
@@ -383,6 +477,14 @@ SubtaskManager.prototype._buildChildArgs = function(subtask) {
   if (prepared && prepared.state) mergedArgs.state = prepared.state
   if (!prepared && subtask.fork === true && isMap(subtask.forkState)) mergedArgs.state = this._serializeForkState(subtask.forkState)
 
+  var task = this._executionTask(subtask)
+  if (task) {
+    var inputs = task.dependencies.map(function(id) {
+      var dependency = this._execution().state.tasks[id]
+      return { id: id, revision: dependency.revision, checks: dependency.checks, result: dependency.answer }
+    }.bind(this))
+    mergedArgs.knowledge = String(mergedArgs.knowledge || "") + "\nTask contract: " + stringify({ objective: task.objective, criteria: task.criteria, resources: task.resources, inputs: inputs }, __, "")
+  }
   return mergedArgs
 }
 
@@ -543,7 +645,7 @@ SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl, inlineCard) {
       name: inlineCard.name,
       description: inlineCard.description || "",
       workerInstanceId: inlineCard.workerInstanceId,
-      capabilities: (isArray(inlineCard.additionalInterfaces) && inlineCard.additionalInterfaces.indexOf("prepared-context-v1") >= 0 ? ["prepared-context-v1"] : []).concat(["run-goal", "delegation", "planning"]).concat(isArray(inlineCard.additionalInterfaces) && inlineCard.additionalInterfaces.indexOf("submission-recovery-v1") >= 0 ? ["submission-recovery-v1"] : []).concat(isArray(inlineCard.additionalInterfaces) && inlineCard.additionalInterfaces.indexOf("agent-comms-v1") >= 0 ? ["agent-comms-v1"] : []),
+      capabilities: (isArray(inlineCard.additionalInterfaces) ? inlineCard.additionalInterfaces.filter(function(c) { return ["task-outcome-v1", "execution-budget-v1"].indexOf(c) >= 0 }) : []).concat(isArray(inlineCard.additionalInterfaces) && inlineCard.additionalInterfaces.indexOf("prepared-context-v1") >= 0 ? ["prepared-context-v1"] : []).concat(["run-goal", "delegation", "planning"]).concat(isArray(inlineCard.additionalInterfaces) && inlineCard.additionalInterfaces.indexOf("submission-recovery-v1") >= 0 ? ["submission-recovery-v1"] : []).concat(isArray(inlineCard.additionalInterfaces) && inlineCard.additionalInterfaces.indexOf("agent-comms-v1") >= 0 ? ["agent-comms-v1"] : []),
       skills: isArray(inlineCard.skills) ? inlineCard.skills : [],
       limits: isMap(inlineCard.limits) ? inlineCard.limits : {}
     }
@@ -556,7 +658,7 @@ SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl, inlineCard) {
           name: cardResp.name,
           description: cardResp.description || "",
           workerInstanceId: cardResp.workerInstanceId,
-          capabilities: (isArray(cardResp.additionalInterfaces) && cardResp.additionalInterfaces.indexOf("prepared-context-v1") >= 0 ? ["prepared-context-v1"] : []).concat(["run-goal", "delegation", "planning", "a2a-http-json-rest"]).concat(isArray(cardResp.additionalInterfaces) && cardResp.additionalInterfaces.indexOf("submission-recovery-v1") >= 0 ? ["submission-recovery-v1"] : []).concat(isArray(cardResp.additionalInterfaces) && cardResp.additionalInterfaces.indexOf("agent-comms-v1") >= 0 ? ["agent-comms-v1"] : []),
+          capabilities: (isArray(cardResp.additionalInterfaces) ? cardResp.additionalInterfaces.filter(function(c) { return ["task-outcome-v1", "execution-budget-v1"].indexOf(c) >= 0 }) : []).concat(isArray(cardResp.additionalInterfaces) && cardResp.additionalInterfaces.indexOf("prepared-context-v1") >= 0 ? ["prepared-context-v1"] : []).concat(["run-goal", "delegation", "planning", "a2a-http-json-rest"]).concat(isArray(cardResp.additionalInterfaces) && cardResp.additionalInterfaces.indexOf("submission-recovery-v1") >= 0 ? ["submission-recovery-v1"] : []).concat(isArray(cardResp.additionalInterfaces) && cardResp.additionalInterfaces.indexOf("agent-comms-v1") >= 0 ? ["agent-comms-v1"] : []),
           skills: isArray(cardResp.skills) ? cardResp.skills : [],
           limits: isMap(cardResp.limits) ? cardResp.limits : {}
         }
@@ -823,6 +925,7 @@ SubtaskManager.prototype._buildWorkerRequirements = function(subtask, mergedArgs
     goalText: goalText,
     goalTokens: this._tokenizeWorkerText(goalText),
     requiresRunGoal: true,
+    requiresBudget: Number(args.runmaxtokens) > 0 || Number(args.runmaxtimems) > 0,
     requiresPlanning: toBoolean(args.useplanning) === true,
     requestedMaxSteps: isDef(args.maxsteps) ? Number(args.maxsteps) : __,
     requestedTimeoutMs: isDef(subtask) && isDef(subtask.deadlineMs) ? Number(subtask.deadlineMs) : __,
@@ -839,6 +942,7 @@ SubtaskManager.prototype._isWorkerProfileCompatible = function(profile, requirem
   var caps = isArray(p.capabilities) ? p.capabilities : []
   var limits = isMap(p.limits) ? p.limits : {}
   if (req.requiresComms === true && caps.indexOf("agent-comms-v1") < 0) return false
+  if (req.requiresBudget && caps.indexOf("execution-budget-v1") < 0) return false
   var hasCapsInfo = caps.length > 0
 
   if (p.status === "ok") {
@@ -1137,7 +1241,17 @@ SubtaskManager.prototype._remoteObservationTimeoutMs = function(subtask) {
 }
 
 SubtaskManager.prototype._completeSubtask = function(subtask, prefix, answer, metrics, state) {
+  if (!subtask || subtask.status !== "running") return false
   var completedAt = new Date().getTime()
+  var executionTask = this._executionTask(subtask)
+  var childExecution = state && state.execution
+  var outcome = childExecution ? childExecution.outcome : "unknown"
+  var checks = []
+  if (executionTask && (!childExecution || outcome === "succeeded")) {
+    checks = this.parentAgent._executionCheck(executionTask, answer, state && state.executionEvidence || [], childExecution ? outcome : __)
+    if (checks.length && checks.every(function(k) { return k.outcome === "met" })) outcome = "succeeded"
+    else if (outcome === "succeeded") outcome = "partial"
+  }
   if (isMap(state) && isMap(state.skills) && isArray(state.skills.blocked) && state.skills.blocked.length) {
     var reason = "Required skill blocked: " + state.skills.blocked.map(function(item) { return item.ref + " (" + item.reason + ")" }).join("; ")
     if (!this._claimTerminal(subtask, "failed", completedAt, reason, { answer: answer, state: state, metrics: metrics })) return false
@@ -1153,10 +1267,16 @@ SubtaskManager.prototype._completeSubtask = function(subtask, prefix, answer, me
   }
   if (!this._claimTerminal(subtask, "completed", completedAt, __, {
     answer: answer,
+    outcome: outcome, checks: checks,
     diagnostics_scope: diagnosticsScope,
     metrics: metrics,
     state: state
   })) return false
+  if (executionTask) {
+    executionTask.answer = String(answer || "").substring(0, 8000)
+    this._finishExecutionTask(subtask, outcome, checks)
+  }
+  this._saveExecutionTasks()
   this._touchSubtask(subtask, "completed")
 
   if (isObject(this.parentAgent) && isObject(this.parentAgent._historyVm) && this.parentAgent._historyVm.contextVirtualization) {
@@ -1229,7 +1349,9 @@ SubtaskManager.prototype._failOrRetrySubtask = function(subtask, prefix, error) 
     parent._touchSubtask(subtask, "failed")
     subtask.error = error
 
-    if (subtask.attempt < subtask.maxAttempts) {
+    var task = parent._executionTask(subtask)
+    var safeRetry = (!task || task.idempotent === true || task.resources.writes.length === 0) && !subtask.allocation
+    if (subtask.attempt < subtask.maxAttempts && safeRetry) {
       subtask.status = "pending"
       parent._touchSubtask(subtask, "retry queued")
       subtask.metadata.previousError = error
@@ -1250,8 +1372,11 @@ SubtaskManager.prototype._failOrRetrySubtask = function(subtask, prefix, error) 
     outcome = "failed"
   }, this._transitionLock)
 
+  if (outcome === "failed") { this._finishExecutionTask(subtask, "failed"); this._saveExecutionTasks() }
   if (outcome === "skipped") return outcome
   if (outcome === "retry") {
+    var retryTask = this._executionTask(subtask)
+    if (retryTask) this.parentAgent._executionSync(function() { retryTask.status = "pending" })
     this.interactionFn("delegate", prefix + " ⚠️ Failed (attempt " + subtask.attempt + "/" + subtask.maxAttempts + "), will retry: " + error)
     return outcome
   }
@@ -1318,6 +1443,10 @@ SubtaskManager.prototype._startLocalSubtask = function(subtask, prefix) {
       var childMetrics = childAgent.getMetrics()
       var childState = jsonParse(stringify(childAgent._agentState || {}, __, ""), __, __, true)
 
+      if (childAgent._execution) {
+        childState.execution = { outcome: childAgent._execution.state.outcome, reason: childAgent._execution.state.reason, usage: childAgent._execution.snapshot().budget }
+        childState.executionEvidence = childAgent._executionEvidence()
+      }
       if (subtask.status === "running") {
         parent._completeSubtask(subtask, prefix, answer, childMetrics, childState)
       }
@@ -1392,6 +1521,7 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
         subtask.remoteSubmissionId = genUUID()
         subtask.workerInstanceId = profile.workerInstanceId
       }
+      parent._saveExecutionTasks()
       var taskResponse
       try {
         if (subtask.status !== "running") return
@@ -1470,6 +1600,7 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
       }
 
       var remotePollFailures = 0
+      parent._saveExecutionTasks()
       while (subtask.status === "running") {
         sleep(parent.remotePollIntervalMs, true)
         if (subtask.status !== "running") break
@@ -1629,6 +1760,9 @@ SubtaskManager.prototype.submit = function(goal, childArgs, opts) {
   
   opts = _$(opts, "opts").isMap().default({})
   childArgs = _$(childArgs, "childArgs").isMap().default({})
+  ;["runmaxtokens", "runmaxtimems"].forEach(function(name) {
+    if (isDef(childArgs[name]) && (!isFinite(Number(childArgs[name])) || Number(childArgs[name]) < 0)) throw new Error("Invalid child " + name)
+  })
   if (isDef(childArgs.agentcomms)) {
     var declaration = MiniAComms.normalize(childArgs.agentcomms)
     if ((MiniAComms.enabled(declaration) || declaration.delegate) && !this.comms) throw new Error("Parent has no communication delegation allowance")
@@ -1657,6 +1791,7 @@ SubtaskManager.prototype.submit = function(goal, childArgs, opts) {
     metrics: __,
     agentState: __,
     createdAt: now,
+    queueOrder: this.metrics.total,
     startedAt: __,
     completedAt: __,
     deadlineMs: _$(opts.deadlineMs, "opts.deadlineMs").isNumber().default(this.defaultDeadlineMs),
@@ -1679,6 +1814,20 @@ SubtaskManager.prototype.submit = function(goal, childArgs, opts) {
   var input = MiniAForkPolicy.capture(this, goal, childArgs, opts)
   if (this._running !== true) throw new Error("Subtask manager stopped")
   subtask.args = MiniAForkPolicy.copy(childArgs)
+  if (this._execution()) {
+    var spec = isMap(opts.task) ? clone(opts.task) : {}
+    spec.id = spec.id || subtaskId
+    var oldTask = this._execution().state.tasks[spec.id]
+    if (oldTask && (oldTask.status === "running" || oldTask.status === "unknown" || oldTask.acceptance === "accepted")) throw new Error("Task is already owned or accepted")
+    spec.objective = spec.objective || goal
+    spec.criteria = spec.criteria || (oldTask && oldTask.criteria.length ? oldTask.criteria : [{ id: "complete", method: "semantic", requirement: goal }])
+    spec.dependencies = spec.dependencies || (oldTask && oldTask.dependencies) || []
+    spec.resources = spec.resources || (oldTask && oldTask.resources) || { reads: [], writes: ["*"] }
+    spec.required = true
+    spec = this.parentAgent._executionNormalizeTask(spec)
+    this.parentAgent._executionSync(function(e) { e.put(spec) })
+    subtask.taskId = spec.id
+  }
   if (isMap(subtask.forkState)) subtask.forkState = MiniAForkPolicy.copy(subtask.forkState)
   this._forkInputs[subtaskId] = input
   this._startWatchdog()
@@ -1723,6 +1872,7 @@ SubtaskManager.prototype.start = function(subtaskId) {
       return
     }
 
+    if (!manager._admitExecutionTask(subtask)) return
     subtask.status = "running"
     subtask.startedAt = new Date().getTime()
     if (isNumber(subtask.totalTimeoutMs) && subtask.totalTimeoutMs > 0 && !isNumber(subtask.totalDeadlineAt)) {
@@ -1742,6 +1892,7 @@ SubtaskManager.prototype.start = function(subtaskId) {
   }, this._transitionLock)
 
   if (!started) return
+  this._saveExecutionTasks()
   
   if (this.comms && isDef(subtask.args.agentcomms) && (MiniAComms.enabled(MiniAComms.normalize(subtask.args.agentcomms)) || MiniAComms.normalize(subtask.args.agentcomms).delegate)) {
     try {
@@ -1792,7 +1943,12 @@ SubtaskManager.prototype.status = function(subtaskId) {
   }
   
   // Return a copy to prevent external modification
-  return jsonParse(stringify(subtask, __, ""), __, __, true)
+  var publicState = {}
+  Object.keys(subtask).forEach(function(key) { if (key !== "childAgent" && key !== "_executionPromise") publicState[key] = subtask[key] })
+  var descriptor = jsonParse(stringify(publicState, __, ""), __, __, true)
+  var task = this._executionTask(subtask)
+  if (task) { descriptor.acceptance = task.acceptance; descriptor.outcome = task.outcome; descriptor.reason = task.reason }
+  return descriptor
 }
 
 /**
@@ -1813,6 +1969,9 @@ SubtaskManager.prototype.result = function(subtaskId) {
   }
   
   return {
+    outcome: subtask.result && subtask.result.outcome || (subtask.status === "cancelled" ? "cancelled" : subtask.status === "completed" ? "unknown" : "failed"),
+    acceptance: this._executionTask(subtask) ? this._executionTask(subtask).acceptance : "pending",
+    checks: subtask.result && subtask.result.checks,
     answer: isDef(subtask.result) ? subtask.result.answer : __,
     diagnostics_scope: isDef(subtask.result) ? subtask.result.diagnostics_scope : __,
     metrics: isDef(subtask.result) ? subtask.result.metrics : __,
@@ -1858,6 +2017,8 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
     parent.metrics.cancelled++
   }, this._transitionLock)
   if (!cancelled) return false
+  if (!wasRunning) this._finishExecutionTask(subtask, "cancelled")
+  this._saveExecutionTasks()
 
   if (wasRunning) this._cancelRemoteSubtask(subtask, cancelReason)
 
@@ -2004,7 +2165,7 @@ SubtaskManager.prototype.list = function(filter) {
     if (isDef(filter) && isString(filter)) {
       if (subtask.status !== filter) return
     }
-    results.push(jsonParse(stringify(subtask, __, ""), __, __, true))
+    results.push(parent.status(id))
   })
   
   return results
@@ -2085,30 +2246,43 @@ SubtaskManager.prototype.getMetrics = function() {
  * </odoc>
  */
 SubtaskManager.prototype._processQueue = function() {
-  while (this._running === true && this.runningCount < this.maxConcurrent && this.pendingQueue.length > 0) {
-    var nextId = this.pendingQueue.shift()
-    var subtask = this.subtasks[nextId]
-    if (!isDef(subtask) || subtask.status !== "pending") continue
-    try {
-      this.start(nextId)
-      if (isDef(subtask) && subtask.status === "pending" && this.pendingQueue.indexOf(nextId) < 0) {
-        this.pendingQueue.unshift(nextId)
-      }
-    } catch(e) {
-      if (isDef(subtask)) {
-        // Restore counters if start() already incremented them before throwing
+  var acquired = false, self = this, again = false
+  sync(function() {
+    if (self._queueProcessing) { self._queueAgain = true; return }
+    self._queueProcessing = true; acquired = true
+  }, this._transitionLock)
+  if (!acquired) return
+  try {
+    var inspected = 0
+    if (this._execution()) {
+      var priority = {}
+      this.pendingQueue.forEach(function(id) { priority[id] = self.subtasks[id] ? self._execution().priority(self.subtasks[id].taskId) : 0 })
+      this.pendingQueue.sort(function(a, b) { return priority[b] - priority[a] || ((self.subtasks[a] || {}).queueOrder || 0) - ((self.subtasks[b] || {}).queueOrder || 0) })
+    }
+    // A blocked dependency must not spin the queue or prevent a later ready task.
+    var scanLimit = this.pendingQueue.length
+    while (this._running === true && this.runningCount < this.maxConcurrent && this.pendingQueue.length > 0 && inspected++ < scanLimit) {
+      var nextId = this.pendingQueue.shift(), subtask = this.subtasks[nextId]
+      if (!subtask || subtask.status !== "pending") continue
+      try {
+        this.start(nextId)
+        if (subtask.status === "pending" && this.pendingQueue.indexOf(nextId) < 0) this.pendingQueue.push(nextId)
+      } catch(e) {
         if (subtask.status === "running") {
-          this.runningCount--
-          this.metrics.running--
+          this._claimTerminal(subtask, "failed", Date.now(), "Failed to start: " + String(e.message || e))
+        } else {
+          subtask.status = "failed"; subtask.error = "Failed to start: " + String(e.message || e); subtask.completedAt = Date.now()
+          this._finishExecutionTask(subtask, "failed")
         }
-        if (subtask.comms) subtask.comms.broker.revoke(subtask.comms.id)
-        subtask.status = "failed"
-        subtask.error = "Failed to start: " + (isDef(e) && isString(e.message) ? e.message : stringify(e, __, ""))
-        subtask.completedAt = new Date().getTime()
         this.metrics.failed++
       }
     }
+
+  } finally {
+    sync(function() { self._queueProcessing = false; again = self._queueAgain === true; self._queueAgain = false }, this._transitionLock)
   }
+  if (again && this._running) this._processQueue()
+
 }
 
 /**

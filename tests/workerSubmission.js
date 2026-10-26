@@ -1,4 +1,5 @@
 (function() {
+  load("mini-a.js")
   load("mini-a-subtask.js")
   ow.loadServer()
   var spec = io.readFileYAML("mini-a-worker.yaml")
@@ -126,6 +127,8 @@
           parent._workerProfiles[url] = parent._fetchWorkerProfile(url)
           ow.test.assert(parent._workerProfiles[url].workerInstanceId, global.__worker_instanceId, "HTTP discovery carries the worker process identity")
           ow.test.assert(parent._workerProfiles[url].capabilities.indexOf("submission-recovery-v1") >= 0, true, "HTTP discovery negotiates recovery")
+          ow.test.assert(parent._workerProfiles[url].capabilities.indexOf("task-outcome-v1") >= 0, true, "HTTP discovery negotiates task outcomes")
+          ow.test.assert(parent._workerProfiles[url].capabilities.indexOf("execution-budget-v1") >= 0, true, "HTTP discovery negotiates aggregate budget enforcement")
           if (scenario === "legacy") parent._workerProfiles[url].capabilities = []
           var parentId = parent.submit("fixture", {}, { maxAttempts: 2 })
           try {
@@ -151,6 +154,28 @@
           } finally { parent.destroy(); ow.server.httpd.stop(server) }
         })
       })
+    })
+  }
+  exports.testWorkerBudgetCeilingsAndOutcome = function() {
+    fixture(function(f) {
+      global.__worker_args.runmaxtokens = 2000
+      global.__worker_args.runmaxtimems = 4000
+      var payload = f.payload()
+      payload.args = { orchestration: "auto", runmaxtokens: 9000, runmaxtimems: 10000 }
+      var result = global.__worker_createTask(payload, global.__worker_args)
+      var task = global.__worker_tasks[result.taskId]
+      ow.test.assert(task.args.runmaxtokens, 2000, "Worker operator token ceiling cannot be raised remotely")
+      ow.test.assert(task.args.runmaxtimems, 4000, "Worker operator time ceiling cannot be raised remotely")
+      ow.test.assert(task.args.orchestration, "auto", "Capped worker tasks enable budget admission")
+      f.manager._startLocalSubtask = function(subtask) {
+        f.manager._completeSubtask(subtask, "fixture", "ready", {}, { execution: { outcome: "partial", usage: { spent: 2000, estimated: 0 } } })
+      }
+      f.manager.start(task.subtaskId)
+      ow.test.assert(f.manager.result(task.subtaskId).outcome, "partial", "Worker child outcome survives lifecycle completion")
+      payload = f.payload(); payload.args = { runmaxtokens: -1 }
+      var rejected = false
+      try { global.__worker_createTask(payload, global.__worker_args) } catch(e) { rejected = true }
+      ow.test.assert(rejected, true, "Invalid allocation cannot bypass worker admission")
     })
   }
 })()

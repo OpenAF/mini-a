@@ -12,7 +12,12 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/workerSubmission.js").testRemoteSubmissionRecoveryTransport
 
+- name: Worker submissions::budget ceilings and outcome
+  to: oJob Test
+  exec: args.func = require("tests/workerSubmission.js").testWorkerBudgetCeilingsAndOutcome
+
 todo:
 - Worker submissions::receipts and cleanup
 - Worker submissions::concurrent duplicates
 - Worker submissions::HTTP recovery
+- Worker submissions::budget ceilings and outcome

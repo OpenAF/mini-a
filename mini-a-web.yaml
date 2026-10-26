@@ -2,6 +2,12 @@
 help:
   text   : Mini-A web interface to interact with the Mini-A agent via HTTP. 
   expects: 
+  - name     : runmaxtokens
+    desc     : "Aggregate orchestration=auto token admission cap, including children and review (0=unlimited); in-flight calls may exceed estimates"
+    mandatory: false
+  - name     : runmaxtimems
+    desc     : "Aggregate orchestration=auto elapsed-time admission cap in milliseconds (0=unlimited)"
+    mandatory: false
   - name     : onport
     desc     : Port to run the HTTP server on
     example  : "8888"
@@ -1916,6 +1922,8 @@ jobs:
       rpm             : toNumber().isNumber().default(__)
       tpm             : toNumber().isNumber().default(__)
       maxsteps        : toNumber().isNumber().default(__)
+      runmaxtokens    : toNumber().isNumber().default(__)
+      runmaxtimems    : toNumber().isNumber().default(__)
       maxtotalsteps   : toNumber().isNumber().default(__)
       earlystopthreshold: toNumber().isNumber().default(__)
       maxcontext      : toNumber().isNumber().default(200000)

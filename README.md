@@ -847,3 +847,5 @@ with browser sign-in, SBucket credential persistence and read-only tools by defa
 ### Supervised execution
 
 Opt in with `modelstrategy=supervised` to prepare a protected contract with main and execute with LC. `savecontract=true` and `reusecontract=true` separately enable accepted-contract persistence and exact-goal reuse. See [supervised contracts](docs/SUPERVISED.md) for configuration, validation and evaluation.
+
+With `orchestration=auto`, Mini-A tracks progress independently of successful tool calls and checks task results before accepting them. Delegated work can declare dependencies, acceptance criteria, and resource scopes; optional `runmaxtokens` and `runmaxtimems` control aggregate admission across the agent tree. Durable runs reconcile prior remote work before resubmission. See [reliable automatic orchestration](USAGE.md#reliable-automatic-orchestration) for contracts, defaults, and verification commands.

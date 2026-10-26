@@ -5070,3 +5070,41 @@ Console parameters appear in `mini-a --help` and interactive `/set` completion. 
 | `modelman` | boolean | `false` | Start the model manager UI instead of the console. |
 
 See the [wiki guide](docs/WIKI.md), [delegation guide](docs/DELEGATION.md), and [absorption guide](docs/ABSORB.md) for operation-specific examples and restrictions.
+
+| Parameter | Description | Default |
+| --- | --- | --- |
+| `runmaxtokens` | Aggregate model-token admission cap for `orchestration=auto`, including descendants and acceptance review. Provider usage is preferred; missing usage is estimated. In-flight responses may exceed estimates. | `0` (unlimited) |
+| `runmaxtimems` | Aggregate elapsed-time admission cap in milliseconds for `orchestration=auto`. Prevents new calls and dispatch after expiry; existing transport/tool timeouts govern in-flight work. | `0` (unlimited) |
+
+### Reliable automatic orchestration
+
+`orchestration=auto` tracks progress from relevant new tool evidence and accepted task results. Repeating a successful call with unchanged output does not reset the progress guard. Four active steps without progress request a changed approach; two unsuccessful recovery attempts leave the goal blocked. Child waiting is excluded, while existing delegation timeouts still apply. Manual orchestration retains its existing execution behavior.
+
+Delegation accepts an optional `task` contract:
+
+```json
+{
+  "goal": "Read the revenue data and return the total",
+  "waitForResult": false,
+  "task": {
+    "id": "revenue",
+    "dependencies": [],
+    "resources": { "reads": ["reports/revenue.json"], "writes": [] },
+    "criteria": [
+      { "id": "total", "requirement": "Return the requested total", "method": "semantic" }
+    ]
+  }
+}
+```
+
+Use `delegate-subtask` with this payload. Dependencies name previously registered task IDs; they become runnable after predecessor acceptance. `execution-task` with `action=status` exposes the graph; `action=revise` registers or revises a task contract before delegation. Revisions retain existing criteria and invalidate dependent results. Running and unreconciled tasks cannot be revised. Plan hierarchy is separate from execution dependencies.
+
+Resource names are canonical local paths or exact external-resource names/URLs. Directory scopes include descendants. Overlapping writes serialize against readers and writers; an omitted scope defaults to exclusive `writes:["*"]`. These declarations coordinate work within the run; existing tool permissions remain authoritative. Parent tool access also waits for conflicting active children. Declare independent scopes to enable parallel work. Use `subtask-status` with `waitSeconds=10` for bounded waiting without repeated model polling.
+
+Lifecycle `status=completed` means the child returned. Additive `outcome` distinguishes success, partial work, blockers, failures, cancellation, and uncertain outcomes; `acceptance` is `pending`, `accepted`, or `rejected`. A dependent task requires an accepted result. Deterministic criteria use `method=answer` with the existing assertion operators for response artifacts, or `method=artifact` with a file `path`, optional `format=json|yaml`, and `assertion`. `method=schema` reuses OpenAF schema validation with `schema`, optional artifact `path`, and optional `format`. Assertions must be objects such as `{equals: "19"}`; expression strings are rejected before submission. Answer comparisons use strings unless `format=json` or `format=yaml` is declared. Answer assertions do not prove external actions. Semantic criteria use selective model review, preferring `modelval` when configured. Missing evidence remains unaccepted. Artifact fingerprints are checked again before dependent execution and final acceptance.
+
+Optional `runmaxtokens` and `runmaxtimems` require automatic orchestration. Tokens are reserved across calls and child allocations; 15% remains available for acceptance review and integration. Explicit caps default to zero/unlimited. Admission uses a prompt estimate plus a 1,024-token response allowance; provider-reported usage replaces estimates when available. Native continuation rounds without reported usage remain estimated. Responses may exceed estimates, and elapsed-time caps do not interrupt already admitted transport or tool operations. These controls are admission limits rather than exact billing limits.
+
+Remote workers advertise `task-outcome-v1` and `execution-budget-v1`. Older workers remain usable for uncapped work with parent-side acceptance; capped work requires a budget-capable worker. Worker-configured caps remain ceilings on incoming allocations. Use `durable=true` for atomic checkpoints containing task revisions, acceptance, budget reservations, and remote submission identities. Resume observes existing remote submissions before considering further work. Automatic execution failures retry only tasks declared read-only or `idempotent:true`; an unsettled capped allocation is retained instead of being granted again to a new attempt. Unknown outcomes retain ownership and reservations; an absent receipt never authorizes replay. Inspect and resolve uncertain external effects before starting replacement work.
+
+Run deterministic coverage with `ojob tests/execution.yaml`. For repeated live-provider comparisons, use `evals/orchestration.yaml` through the existing evaluation runner. Reports include verified completion, unaccepted tasks, progress/recovery counts, aggregate tokens, elapsed time, and tool-call counts. Deterministic checks do not establish provider-backed completion-quality improvements.

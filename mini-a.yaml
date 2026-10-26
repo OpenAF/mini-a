@@ -12,6 +12,12 @@ help:
       ojob mini-a.yaml goal="..." mcp="[(cmd: 'docker run --rm -i mcp/dockerhub', timeout: 5000) | (cmd: 'docker run --rm -i mcp/wikipedia-mcp', timeout: 5000)]" rpm=20
       
   expects: 
+  - name     : runmaxtokens
+    desc     : "Aggregate orchestration=auto token admission cap, including children and review (0=unlimited); in-flight calls may exceed estimates"
+    mandatory: false
+  - name     : runmaxtimems
+    desc     : "Aggregate orchestration=auto elapsed-time admission cap in milliseconds (0=unlimited)"
+    mandatory: false
   - name     : agentcomms
     desc     : Opt-in communication profiles, grants, delegation allowance and limits (JSON/SLON); see USAGE.md
     mandatory: false
@@ -1579,6 +1585,8 @@ jobs:
         rtm            : rtm
         tpm            : tpm
         maxsteps       : maxsteps
+        runmaxtokens   : runmaxtokens
+        runmaxtimems   : runmaxtimems
         maxtotalsteps  : maxtotalsteps
         maxcontext     : maxcontext
         maxcontent     : maxcontent
@@ -1884,6 +1892,8 @@ jobs:
       rtm            : toNumber.isNumber.default(__)
       tpm            : toNumber.isNumber.default(__)
       maxsteps       : toNumber.isNumber.default(15)
+      runmaxtokens   : toNumber.isNumber.default(0)
+      runmaxtimems   : toNumber.isNumber.default(0)
       maxtotalsteps  : toNumber.isNumber.default(0)
       maxcontext     : toNumber.isNumber.default(0)
       contextguard   : toBoolean.isBoolean.default(false)

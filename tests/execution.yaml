@@ -1,0 +1,19 @@
+include:
+- oJobTest.yaml
+ojob:
+  opacks:
+  - oJob-common
+  catch: |
+    logErr(exception)
+    exit(1)
+jobs:
+- name: Execution tests
+  exec: |
+    var tests = require("tests/execution.js")
+    Object.keys(tests).forEach(function(name) {
+      ow.loadTest().test("Mini-A execution::" + name, tests[name])
+    })
+    if (ow.test.getCountFail() > 0) exit(1)
+todo:
+- Execution tests
+- oJob Test Results

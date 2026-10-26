@@ -1512,9 +1512,9 @@ window.MiniAAdvancedUI = function(bridge) {
           root.append(heading, meta, details, output, cancel); list.append(root);
           card = {root, badge, goal, meta, details, detail, output, answer, cancel}; cards.set(task.id, card);
         }
-        card.root.hidden = !(filter.value === 'all' || (filter.value === 'active' ? isActive(task) : filter.value === 'issues' ? !isActive(task) && task.status !== 'completed' : task.status === filter.value));
+        card.root.hidden = !(filter.value === 'all' || (filter.value === 'active' ? isActive(task) : filter.value === 'issues' ? !isActive(task) && (task.status !== 'completed' || (task.acceptance && task.acceptance !== 'accepted')) : task.status === filter.value));
         if (!card.root.hidden) visible++;
-        card.badge.textContent = task.status === 'pending' ? 'Queued' : task.status;
+        card.badge.textContent = (task.status === 'pending' ? 'Queued' : task.status) + (task.acceptance ? ' · ' + task.acceptance : '');
         card.badge.dataset.state = task.status;
         card.goal.textContent = task.goal || task.id;
         const elapsed = task.startedAt ? Math.max(0, Math.round(((task.completedAt || Date.now()) - task.startedAt) / 1000)) + 's' : 'Not started';
@@ -1523,7 +1523,7 @@ window.MiniAAdvancedUI = function(bridge) {
         card.cancel.disabled = !!snapshot?.busy;
         card.cancel.title = snapshot?.busy ? 'Cancel is available when the parent operation finishes. Stop in the pane header stops the current operation.' : 'Cancel this task';
         // Preserve the card, focus, and open sections across status refreshes.
-        const detailData = JSON.stringify({status:task.status, goal:task.goal, startedAt:task.startedAt, completedAt:task.completedAt, lastActivityReason:task.lastActivityReason, error:task.error});
+        const detailData = JSON.stringify({status:task.status, goal:task.goal, startedAt:task.startedAt, completedAt:task.completedAt, lastActivityReason:task.lastActivityReason, outcome:task.outcome, acceptance:task.acceptance, blocker:task.reason, error:task.error});
         if (detailData !== card.detailData) {
           card.detailData = detailData;
           card.detail.replaceChildren(structuredMap(JSON.parse(detailData)));
