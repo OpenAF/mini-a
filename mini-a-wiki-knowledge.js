@@ -10,15 +10,15 @@ var MiniAWikiKnowledgeBudget = function(args, scope) {
   var total = Number(args.wikillmbudget)
   var local = Number(args[scope === "dream" ? "wikidreambudget" : "wikiingestbudget"])
   this.limit = !isNaN(local) && local >= 0 ? local : (!isNaN(total) && total >= 0 ? total : -1)
-  this.maxPrompt = !isNaN(Number(args.wikimaxprompttokens)) && Number(args.wikimaxprompttokens) > 0 ? Number(args.wikimaxprompttokens) : 24000
+  this.maxPrompt = isFinite(Number(args.wikimaxprompttokens)) && Number(args.wikimaxprompttokens) > 0 ? Number(args.wikimaxprompttokens) : 0
   this.used = 0; this.estimatedInput = 0; this.estimatedOutput = 0
   this.attempted = 0; this.executed = 0; this.deferred = []
 }
 MiniAWikiKnowledgeBudget.prototype.reserve = function(candidate, input, output) {
   input = Math.max(0, Number(input) || 0); output = Math.max(0, Number(output) || 0)
   this.attempted++; this.estimatedInput += input; this.estimatedOutput += output
-  if (input > this.maxPrompt || (this.limit >= 0 && this.used + input + output > this.limit)) {
-    this.deferred.push({ candidate: candidate, input_tokens: input, output_tokens: output, reason: input > this.maxPrompt ? "max-prompt-tokens" : "budget" })
+  if ((this.maxPrompt > 0 && input > this.maxPrompt) || (this.limit >= 0 && this.used + input + output > this.limit)) {
+    this.deferred.push({ candidate: candidate, input_tokens: input, output_tokens: output, reason: this.maxPrompt > 0 && input > this.maxPrompt ? "max-prompt-tokens" : "budget" })
     return false
   }
   this.used += input + output; this.executed++; return true

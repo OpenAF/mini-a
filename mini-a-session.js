@@ -654,6 +654,60 @@ function MiniAInteractiveSession(args, adapter) {
 
   // dataEditor opts into inline structured editing and selects the initial map/array root.
   var parameterDefinitions = {
+    agentcomms: { type: "string", description: "Opt-in communication profiles, grants, delegation allowance and limits (JSON/SLON); see USAGE.md", dataEditor: "map" },
+    contextguard: { type: "boolean", description: "Enable generic context/tool-output guardrails when maxcontext is unset (default: false)" },
+    contextguardbudget: { type: "number", description: "Explicit context ceiling when maxcontext=0; 0 uses automatic compaction and provider-overflow recovery (default: 0)" },
+    toolresultmaxinline: { type: "number", description: "Maximum bytes of tool/readresult output kept inline before spilling or truncating under contextguard" },
+    readresultmaxmatches: { type: "number", description: "Maximum matching regions returned by proxy-dispatch readresult op=grep under contextguard" },
+    outerloop: { type: "boolean", description: "Enable autonomous multi-cycle coding loop with durable per-session state" },
+    runstatus: { type: "string", description: "Inspect persisted durable run status by run identifier" },
+    outerloopinstructions: { type: "string", description: "Path to persistent outer loop instructions markdown file" },
+    taskfile: { type: "string", description: "Alias for outerloopinstructions" },
+    specfile: { type: "string", description: "Alias for outerloopinstructions" },
+    outerloopsessionid: { type: "string", description: "Existing durable outer loop session identifier to resume or continue" },
+    outerloopmaxcycles: { type: "number", description: "Maximum autonomous outer loop cycles" },
+    outerloopmaxtime: { type: "number", description: "Maximum outer loop runtime in seconds" },
+    outerloopstoponrepeat: { type: "boolean", description: "Stop when the same validation failure repeats" },
+    outerloopmaxnochange: { type: "number", description: "Stop after N cycles without meaningful change" },
+    mcpproxyallow: { type: "string", description: "Comma-separated allowlist of downstream tool names exposed through proxy-dispatch" },
+    mcpproxydeny: { type: "string", description: "Comma-separated denylist of downstream tool names hidden from proxy-dispatch" },
+    mcpproxynative: { type: "boolean", description: "Enable native function calling for proxy-dispatch (defaults to true; set to false for action-based JSON)" },
+    memoryinject: { type: "string", description: "Memory context injection mode: summary (counts only), relevant (counts + goal-relevant durable memory auto-injected into rules, default when usememory=true), or full (all compact entries every step)" },
+    memoryrelevantcap: { type: "number", description: "Maximum durable memory entries auto-injected when memoryinject=relevant" },
+    usememorywrite: { type: "boolean", description: "Let the model record durable typed memory via the memory_write action (preference, environment, procedure, pitfall, reference)" },
+    memorywritemax: { type: "number", description: "Maximum memory_write calls allowed per run" },
+    memorymd: { type: "boolean", description: "Store global memory as path-keyed markdown strings in memorych (one .md record per entry)" },
+    memoryreflect: { type: "boolean", description: "After a successful run, make one extra LLM call to extract durable memories (default true when usememory=true)" },
+    memoryreflectmodel: { type: "string", description: "Model config for the reflection pass (falls back to OAF_REFLECT_MODEL, then the low-cost model, then the main model)", dataEditor: "map" },
+    memoryreflectmin: { type: "number", description: "Minimum total tool/shell calls a run must have made to qualify for reflection" },
+    memorycandidatedays: { type: "number", description: "Expiry window for an unconfirmed model-authored global candidate before a second session confirms it" },
+    memorybudget: { type: "number", description: "Token budget for the memoryinject=relevant durable-memory block" },
+    memorysearchbudget: { type: "number", description: "Token budget for a single memory_search action's results" },
+    memorysessionmaxdays: { type: "number", description: "Session namespaces under memorysessionch older than this (and not the current session) are garbage-collected on init" },
+    memorypersistevery: { type: "number", description: "Persist the memory store every Nth mutation instead of every single append/upsert (1 = unchanged synchronous behavior)" },
+    toolargcheck: { type: "boolean", description: "Reject schema-declared missing parameters and unknown parameters when additionalProperties is false" },
+    toolargrepair: { type: "boolean", description: "Repair obvious tool argument typos, wrappers, and JSON strings before dispatch" },
+    wikiindexdir: { type: "string", description: "Local cache directory for remote wiki search and graph artifacts" },
+    wikisourceurl: { type: "string", description: "Optional Handlebars template rendering a page's canonical citation URL onto wiki retrieval results. Available: path, pathNoExt, encodedPath, backend, root, bucket, prefix, url, mount, section, anchor, title. $encodeURI/$encodeURIComponent/$encodePath helpers are registered; {{$encodePath ...}} is recommended over triple-brace escaping. A wikimounts entry may set its own wikisourceurl." },
+    wikisourcefield: { type: "string", description: "Result field name the rendered citation URL is written to" },
+    wikisourceinline: { type: "boolean", description: "Also append the rendered URL into search results' description text, for models that attend to prose more reliably than to sibling JSON keys" },
+    ingestmode: { type: "string", description: "Ingestion mode: auto (default; deterministic normalization first), normalize, distill (legacy model distillation), or raw." },
+    wikillmbudget: { type: "number", description: "Fallback estimated input-plus-output token budget per ingestion operation; -1/unset is unlimited. A nonnegative wikiingestbudget overrides it; this is not an aggregate cap across operations." },
+    wikiingestbudget: { type: "number", description: "Estimated input-plus-output token budget per ingestion operation; nonnegative values override wikillmbudget (0 defers model work)." },
+    wikiingestmaxcalls: { type: "number", description: "Maximum distillation model calls per source during wiki ingestion (default 32), including retries and synthesis; 0 disables split recovery but allows the initial call." },
+    wikimaxprompttokens: { type: "number", description: "Maximum estimated input tokens per wiki model prompt (default 0). Zero/unset tries the full source and splits on context overflow; a positive value defers oversized work." },
+    dreamwikimaxaffected: { type: "number", description: "Maximum affected pages in wiki dream plan/dry-run dirty-set previews (default 100)." },
+    memoryartifactttldays: { type: "number", description: "Expiry in days for working-memory artifacts (default 7; negative values fall back to 7)." },
+    memoryindexttldays: { type: "number", description: "Expiry in days for working-memory indexes (default 1; negative values fall back to 1)." },
+    wikimetacache: { type: "boolean", description: "Cache parsed wiki page metadata (default true; false reads metadata afresh)." },
+    wikigraphautosave: { type: "string", description: "Wiki graph persistence: always (default), debounced, or off." },
+    wikigraphsavedebouncems: { type: "number", description: "Delay in milliseconds for debounced wiki graph saves (default 5000)." },
+    lccontextlimit: { type: "number", description: "Estimated low-cost model context token threshold for escalation; 0/unset disables context-based escalation." },
+    warnunknownargs: { type: "boolean", description: "Warn about unrecognized startup arguments (default true; false disables warnings)." },
+    trackchanges: { type: "boolean", description: "Track filesystem changes in the outer loop; enabled automatically when its no-change stopping condition is active." },
+    changetrackroot: { type: "string", description: "Filesystem root inspected by outer-loop change tracking (default current working directory)." },
+    dryrun: { type: "boolean", description: "Preview dream consolidation without applying changes (default false); also accepts dreamwikidryrun for wiki dreams." },
+    maxauditrecords: { type: "number", description: "Maximum audit records included in a memory dream prompt (default 200)." },
     webadvanced: { type: "boolean", default: false, description: "Enable trusted Advanced web console APIs (generates a token and opens the browser when webtoken is omitted)." },
     webadvancedpath: { type: "string", description: "Local Advanced session journal and preset directory." },
     verbose        : { type: "boolean", default: false, description: "Print detailed interaction events" },
@@ -914,9 +968,9 @@ function MiniAInteractiveSession(args, adapter) {
     delegationhardtimeout: { type: "number", description: "Optional absolute delegated subtask timeout in milliseconds regardless of activity" },
     delegationmaxretries: { type: "number", default: 2, description: "Default retry count for failed subtasks" },
     autodelegation : { type: "boolean", default: false, description: "Enable automatic delegation based on context size and complexity." },
-    autodelegationthreshold: { type: "number", default: 8192, description: "Token threshold that triggers auto-delegation when enabled." },
+    autodelegationthreshold: { type: "number", default: 8192, description: "Tool-result text length threshold that triggers automatic summary delegation when enabled." },
     autodelegationmaxperstep: { type: "number", default: 2, description: "Maximum number of auto-delegations per step." },
-    noisytools     : { type: "string", description: "Comma-separated list of tool names that should be logged with full verbosity." },
+    noisytools     : { type: "string", description: "Comma-separated tool names whose results always trigger automatic summary delegation, regardless of size (requires autodelegation=true)." },
     subtasks       : { type: "string", dataEditor: "array", description: "Inline subtasks definition (JSON/SLON) for startup delegation." },
     subtasksfile   : { type: "string", description: "Path to a subtasks file for startup delegation." },
     subtaskssequential: { type: "boolean", default: false, description: "Run startup subtasks sequentially instead of in parallel." },
@@ -960,7 +1014,7 @@ function MiniAInteractiveSession(args, adapter) {
     dreamwikiinstructions: { type: "string", description: "Additional guidance appended to the wiki reorg objective." },
     dreamwikiapproval: { type: "string", description: "Wiki reorg approval mode: auto, ask, or never." },
     dreamwikireorg : { type: "boolean", default: false, description: "Allow structural wiki reorg operations." },
-    dreamwikiminpages: { type: "number", description: "Minimum page count required before the deterministic index fixes run." },
+    dreamwikiminpages: { type: "number", description: "Legacy compatibility option; the current dream runner ignores it and finalizes indexes regardless of page count." },
     dreamwikimaxdepth: { type: "number", description: "Maximum folder depth considered during wiki reorg planning." },
     dreamwikilintresultlimit: { type: "number", description: "Maximum lint issues returned per dream-agent request (default 25)." },
     dreamreport    : { type: "string", description: "Optional file path to write dream JSON report output." },
@@ -1031,33 +1085,35 @@ function MiniAInteractiveSession(args, adapter) {
 
   // Explicit help taxonomy; uncategorized future parameters remain visible below.
   var argumentHelpGroups = [
-    { category: "Session", subcategory: "Goals and prompts", names: "agent agentfile chatbotmode chatyouare goal goalprefix knowledge noagentsmd rules state youare".split(" ") },
+    { category: "Session", subcategory: "Goals and prompts", names: "agentcomms agent agentfile chatbotmode chatyouare goal goalprefix knowledge noagentsmd rules state youare".split(" ") },
     { category: "Session", subcategory: "History and attachments", names: "conversation historykeep historykeepcount historykeepperiod historypath historyretention historys3accesskey historys3bucket historys3ignorecertcheck historys3prefix historys3region historys3secret historys3url historys3useversion1 resume useattach usehistory".split(" ") },
-    { category: "Session", subcategory: "Context management", names: "compressgoal compressgoalchars compressgoaltokens contextvirtualization contextvirtualizationshadow historyvm historyvmmode historyvmshadow maxcontent maxcontext maxpromptchars".split(" ") },
-    { category: "Session", subcategory: "Durable runs", names: "durable resumerun runid runroot".split(" ") },
-    { category: "Session", subcategory: "Console and editor", names: "editor homedir libs mode showseparator useeditor".split(" ") },
+    { category: "Session", subcategory: "Context management", names: "contextguard contextguardbudget compressgoal compressgoalchars compressgoaltokens contextvirtualization contextvirtualizationshadow historyvm historyvmmode historyvmshadow maxcontent maxcontext maxpromptchars".split(" ") },
+    { category: "Session", subcategory: "Durable runs", names: "runstatus durable resumerun runid runroot".split(" ") },
+    { category: "Session", subcategory: "Console and editor", names: "editor homedir libs mode modelman showseparator useeditor".split(" ") },
     { category: "Models and execution", subcategory: "Model selection", names: "model modeldec modellc modellock modelstrategy contractfile contractargs savecontract reusecontract modelval modelvisual secpass".split(" ") },
     { category: "Models and execution", subcategory: "Decisions and advisors", names: "advisorbudgetratio advisorcooldownsteps advisorenable advisormaxuses advisoronambiguity advisoronharddecision advisoronrisk emergencyreserve evidencegate evidencegatestrictness harddecision lcbudget lcescalatedefer lcjsonretries lcreplytool llmcomplexity usedecide".split(" ") },
-    { category: "Models and execution", subcategory: "Budgets and limits", names: "maxsteps maxtotalsteps rpm rtm tpm".split(" ") },
+    { category: "Models and execution", subcategory: "Budgets and limits", names: "lccontextlimit maxsteps maxtotalsteps rpm rtm tpm".split(" ") },
     { category: "Models and execution", subcategory: "Planning", names: "convertplan earlystopthreshold forceplanning forceupdates orchestration plancontent planfile planformat planlog planmode planstyle resumefailed saveplannotes updatefreq updateinterval useplanning validateplan".split(" ") },
+    { category: "Models and execution", subcategory: "Outer loop", names: "outerloop outerloopinstructions taskfile specfile outerloopsessionid outerloopmaxcycles outerloopmaxtime outerloopstoponrepeat outerloopmaxnochange trackchanges changetrackroot".split(" ") },
     { category: "Models and execution", subcategory: "Research and validation", names: "deepresearch maxcycles persistlearnings valgoal validationgoal validationthreshold valtools".split(" ") },
     { category: "Models and execution", subcategory: "Prompt and tool routing", names: "adaptiverouting promptprofile routerallow routerdeny routerorder routerproxythreshold systempromptbudget".split(" ") },
     { category: "Tools and permissions", subcategory: "Shell and sandbox", names: "checkall readwrite sandboxnonetwork sandboxprofile shell shellallow shellallowpipes shellbanextra shellbatch shellmaxbytes shellprefix shelltimeout usesandbox useshell".split(" ") },
-    { category: "Tools and permissions", subcategory: "Tools and utilities", names: "capabilitylimit capabilityselection fileallow policy policyfile toolcachettl toolfallback usejsontool usestdutils usetools usetoolslc useutils utilsallow utilsdeny utilsroot".split(" ") },
+    { category: "Tools and permissions", subcategory: "Tools and utilities", names: "toolargcheck toolargrepair toolresultmaxinline readresultmaxmatches capabilitylimit capabilityselection fileallow policy policyfile toolcachettl toolfallback usejsontool usestdutils usetools usetoolslc useutils utilsallow utilsdeny utilsroot".split(" ") },
     { category: "Tools and permissions", subcategory: "MCP connections", names: "mcp mcpdynamic sessionprewarm mcplazy mcptest nosetmcpwd".split(" ") },
-    { category: "Tools and permissions", subcategory: "MCP proxy and programmatic calls", names: "mcpprogcall mcpprogcallbatchmax mcpprogcallmaxbytes mcpprogcallport mcpprogcallresultttl mcpprogcalltools mcpproxy mcpproxythreshold mcpproxytoon".split(" ") },
+    { category: "Tools and permissions", subcategory: "MCP proxy and programmatic calls", names: "mcpproxyallow mcpproxydeny mcpproxynative mcpprogcall mcpprogcallbatchmax mcpprogcallmaxbytes mcpprogcallport mcpprogcallresultttl mcpprogcalltools mcpproxy mcpproxythreshold mcpproxytoon".split(" ") },
     { category: "Tools and permissions", subcategory: "Skills and extensions", names: "extracommands extrahooks extraskills mini-a-docs miniadocs plugins pluginsroot pluginsroots skillcontextchars skillmanifestchars skillmaxautoload skillsautolimit skillsautosearch skillsmaxchars skillsmaxloaded skillwikibackend skillwikimounts skillwikiroot useskills useskillswiki".split(" ") },
-    { category: "Memory and knowledge", subcategory: "Memory stores and retention", names: "memorych memorycompactevery memorydedup memoryman memorymaxentries memorymaxpersection memorypromote memoryscope memorysessionch memorysessionheader memorysessionid memorystaledays memoryuser memoryusersession usememory".split(" ") },
-    { category: "Memory and knowledge", subcategory: "Wiki graph", names: "usewikigraph wikigraphcommunity wikigraphcross wikigraphcrosscap wikigraphcrossdepth wikigraphcrossjoin wikigraphcrossmaxdf wikigraphcrossminkeylen wikigraphfalkorgraph wikigraphfalkorhost wikigraphfalkorpass wikigraphfalkorport wikigraphfalkoruser wikigraphhintcap wikigraphmounts wikigraphsearchhints wikigraphsemantic wikimountgraphttlms".split(" ") },
-    { category: "Memory and knowledge", subcategory: "Wiki retrieval and maintenance", names: "wikilexical wikilintresultlimit wikilintstaleddays wikiretrievalconfig wikiretrievalv2 wikitarget wikitelemetry".split(" ") },
-    { category: "Memory and knowledge", subcategory: "Wiki storage and access", names: "s3artifactbundle usewiki wikiaccess wikiaccesskey wikiartifactrefreshsecs wikibackend wikibucket wikihttpindexurl wikihttptimeout wikiignorecertcheck wikiman wikimounts wikiprefix wikiregion wikiroot wikis3artifactprefix wikisecret wikiurl wikiuseversion1".split(" ") },
-    { category: "Memory and knowledge", subcategory: "Ingestion and absorption", names: "absorbmaxpages absorbmaxtokens absorboutput ingestallowemptyprune ingestchunkchars ingestconcurrency ingestdryrun ingestexclude ingestforce ingestinclude ingestindependent ingestlayout ingestledger ingestmaxfilekb ingestprune ingestsection ingestsource ingestsourceid ingesttype".split(" ") },
-    { category: "Memory and knowledge", subcategory: "Dream consolidation", names: "dream dreammaxsteps dreammemorymode dreammode dreamreport dreamwiki dreamwikiapproval dreamwikidryrun dreamwikiinstructions dreamwikilintresultlimit dreamwikillm dreamwikimaxdepth dreamwikiminpages dreamwikimode dreamwikiorganize dreamwikireorg".split(" ") },
+    { category: "Memory and knowledge", subcategory: "Memory stores and retention", names: "memoryartifactttldays memoryindexttldays memoryinject memoryrelevantcap usememorywrite memorywritemax memorymd memoryreflect memoryreflectmodel memoryreflectmin memorycandidatedays memorybudget memorysearchbudget memorysessionmaxdays memorypersistevery memorych memorycompactevery memorydedup memoryman memorymaxentries memorymaxpersection memorypromote memoryscope memorysessionch memorysessionheader memorysessionid memorystaledays memoryuser memoryusersession usememory".split(" ") },
+    { category: "Memory and knowledge", subcategory: "Wiki graph", names: "wikigraphautosave wikigraphsavedebouncems usewikigraph wikigraphcommunity wikigraphcross wikigraphcrosscap wikigraphcrossdepth wikigraphcrossjoin wikigraphcrossmaxdf wikigraphcrossminkeylen wikigraphfalkorgraph wikigraphfalkorhost wikigraphfalkorpass wikigraphfalkorport wikigraphfalkoruser wikigraphhintcap wikigraphmounts wikigraphsearchhints wikigraphsemantic wikimountgraphttlms".split(" ") },
+    { category: "Memory and knowledge", subcategory: "Wiki retrieval and maintenance", names: "wikimetacache wikisourceurl wikisourcefield wikisourceinline wikilexical wikilintresultlimit wikilintstaleddays wikiretrievalconfig wikiretrievalv2 wikitarget wikitelemetry".split(" ") },
+    { category: "Memory and knowledge", subcategory: "Wiki model budgets", names: "wikillmbudget wikiingestbudget wikiingestmaxcalls wikimaxprompttokens".split(" ") },
+    { category: "Memory and knowledge", subcategory: "Wiki storage and access", names: "wikiindexdir s3artifactbundle usewiki wikiaccess wikiaccesskey wikiartifactrefreshsecs wikibackend wikibucket wikihttpindexurl wikihttptimeout wikiignorecertcheck wikiman wikimounts wikiprefix wikiregion wikiroot wikis3artifactprefix wikisecret wikiurl wikiuseversion1".split(" ") },
+    { category: "Memory and knowledge", subcategory: "Ingestion and absorption", names: "ingestmode absorbmaxpages absorbmaxtokens absorboutput ingestallowemptyprune ingestchunkchars ingestconcurrency ingestdryrun ingestexclude ingestforce ingestinclude ingestindependent ingestlayout ingestledger ingestmaxfilekb ingestprune ingestsection ingestsource ingestsourceid ingesttype".split(" ") },
+    { category: "Memory and knowledge", subcategory: "Dream consolidation", names: "dreamwikimaxaffected dryrun maxauditrecords dream dreammaxsteps dreammemorymode dreammode dreamreport dreamwiki dreamwikiapproval dreamwikidryrun dreamwikiinstructions dreamwikilintresultlimit dreamwikillm dreamwikimaxdepth dreamwikiminpages dreamwikimode dreamwikiorganize dreamwikireorg".split(" ") },
     { category: "Delegation and servers", subcategory: "Delegation and subtasks", names: "autodelegation autodelegationmaxperstep autodelegationthreshold delegationhardtimeout delegationmaxdepth delegationmaxretries delegationstalltimeout delegationtimeout forkstatemaxbytes forkpolicy forkdecide maxconcurrent noisytools showdelegate subtasks subtasksfile subtaskssequential usea2a usedelegation".split(" ") },
     { category: "Delegation and servers", subcategory: "Worker registry", names: "workerevictionttl workermode workerreg workerreginterval workerregtoken workerregurl workers workerskills workertags".split(" ") },
     { category: "Delegation and servers", subcategory: "Web interface", names: "browsercontext onport path ssequeuetimeout web webadvanced webadvancedpath".split(" ") },
     { category: "Output and diagnostics", subcategory: "Display and visualizations", names: "format raw showexecs showthinking useascii useasciiviz usecharts usediagrams usemaps usemath usemermaid usestream usesvg usevectors".split(" ") },
-    { category: "Output and diagnostics", subcategory: "Files and logging", names: "auditch debug debugch debugdecch debugfile debuglcch debugtrace debugvalch debugvisualch logpromptheaders metricsch nologtrunc outfile outfileall outputfile toollog verbose".split(" ") }
+    { category: "Output and diagnostics", subcategory: "Files and logging", names: "warnunknownargs auditch debug debugch debugdecch debugfile debuglcch debugtrace debugvalch debugvisualch logpromptheaders metricsch nologtrunc outfile outfileall outputfile toollog verbose".split(" ") }
   ]
 
   function buildSharedArgumentRows() {
@@ -1140,6 +1196,13 @@ function MiniAInteractiveSession(args, adapter) {
       })
     }
 
+    print("")
+    print(colorifyText("Standalone job help:", "BOLD"))
+    print("  ojob mini-a.yaml -jobhelp (eval=true, evalfile, evalbaseline, evalout, evalwritebaseline)")
+    print("  ojob mini-a-worker.yaml -jobhelp")
+    print("  ojob mini-a-ingest.yaml -jobhelp")
+    print("  ojob mini-a-absorb.yaml -jobhelp")
+    print("  ojob mini-a-eval.yaml -jobhelp MiniA Eval")
     print("")
     print(colorifyText("Examples:", "BOLD") + "\n")
     const examples = [
@@ -1587,6 +1650,7 @@ function MiniAInteractiveSession(args, adapter) {
       return parsedNum
     }
     if (def.type === "string") {
+      if (isString(def.dataEditor) && (isObject(rawValue) || isArray(rawValue))) return stringify(rawValue, __, "")
       var stringValue = String(rawValue)
       if (key === "conversation") return canonicalizePath(stringValue)
       return stringValue

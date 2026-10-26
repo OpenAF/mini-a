@@ -427,6 +427,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 - **[Mini-A Toolkit](https://tk.mini-a.ai)** - Online toolkit and utilities
 - **[What's New](docs/WHATS-NEW.md)** - Latest performance improvements and migration guide
 - **[Quick Reference Cheatsheet](CHEATSHEET.md)** - Fast lookup for all parameters and common patterns
+- **[Additional Parameter Reference](USAGE.md#additional-public-parameter-reference)** - Types, defaults and entry-point-specific options; use with the main usage reference
 - **[Performance Optimizations](docs/OPTIMIZATIONS.md)** - Built-in optimizations for token reduction and cost savings
 - **[Delegation Guide](docs/DELEGATION.md)** - Hierarchical task decomposition with local and remote delegation
 - **[MCP Proxy Guide](docs/MCPPROXY-FEATURE.md)** - How to consolidate multiple MCP connections behind one `proxy-dispatch` tool
@@ -826,11 +827,19 @@ and versioned shared state for local or remote delegated agents. Isolation remai
 the default. Communication reuses OpenAF channels, worker polling, and existing
 audit/metrics outputs. See [configuration, examples, limits and guarantees](USAGE.md#opt-in-inter-agent-communication).
 
+### Local wiki ingestion
+
+Wiki ingestion uses `wikimaxprompttokens=0` by default: it tries each full source,
+then splits and synthesizes after a model context-limit error.
+`wikiingestmaxcalls=32` bounds calls per source; set it to `0` for one attempt,
+or set a positive `wikimaxprompttokens` to defer oversized prompts.
+See [wiki ingestion limits](docs/WIKI.md#model-prompt-and-operation-limits).
+
 ### Local wiki absorption
 
 Use `/absorb plan <spec.json>` to propose selected knowledge from several local wikis,
 `/absorb show <id>` to review, and `/absorb apply <id>` to apply exact saved changes.
-See [ABSORB.md](ABSORB.md) for source selection, repeat runs, job arguments and recovery.
+See [ABSORB.md](docs/ABSORB.md) for source selection, repeat runs, job arguments and recovery.
 
 Microsoft 365 work context is available through the [WorkIQ MCP connector](docs/WORKIQ.md),
 with browser sign-in, SBucket credential persistence and read-only tools by default.

@@ -11017,73 +11017,7 @@ MiniA.prototype._categorizeError = function(error, context) {
 }
 
 MiniA.prototype._isContextOverflowError = function(error) {
-  var err = isObject(error) ? error : {}
-  if (isString(error)) err = { message: error }
-  if (!isObject(err)) return false
-
-  var samples = []
-  var add = value => {
-    if (!isString(value)) return
-    var text = value.trim()
-    if (text.length === 0) return
-    samples.push(text.toLowerCase())
-  }
-
-  add(err.message)
-  add(err.error)
-  add(err.code)
-  add(err.type)
-
-  if (isObject(err.response)) {
-    add(err.response.message)
-    add(err.response.error)
-    add(err.response.code)
-    add(err.response.type)
-    if (isObject(err.response.error)) {
-      add(err.response.error.message)
-      add(err.response.error.error)
-      add(err.response.error.code)
-      add(err.response.error.type)
-      add(err.response.error.status)
-    }
-  }
-
-  var normalized = samples.join(" | ")
-  if (normalized.length === 0) return false
-
-  var directSignals = [
-    "context_length_exceeded",
-    "model_context_window_exceeded",
-    "maximum context length",
-    "max context length",
-    "context window",
-    "prompt is too long",
-    "prompt too long",
-    "input token count",
-    "input too long",
-    "too many tokens",
-    "token limit exceeded",
-    "input length and max_tokens exceed context limit",
-    "input length and `max_tokens` exceed context limit",
-    "exceeds the maximum number of tokens"
-  ]
-
-  for (var i = 0; i < directSignals.length; i++) {
-    if (normalized.indexOf(directSignals[i]) >= 0) return true
-  }
-
-  var hasSizeTarget =
-    normalized.indexOf("context") >= 0 ||
-    normalized.indexOf("token") >= 0 ||
-    normalized.indexOf("prompt") >= 0 ||
-    normalized.indexOf("input") >= 0
-  var hasOverflowSignal =
-    normalized.indexOf("exceed") >= 0 ||
-    normalized.indexOf("too long") >= 0 ||
-    normalized.indexOf("limit") >= 0 ||
-    normalized.indexOf("maximum") >= 0
-
-  return hasSizeTarget && hasOverflowSignal
+  return __miniAIsContextOverflowError(error)
 }
 
 MiniA.prototype._withExponentialBackoff = function(operation, options) {
@@ -16606,6 +16540,14 @@ MiniA.prototype._applyExplicitExternalArgs = function(args, explicitExternalArgs
 MiniA._KNOWN_ARGUMENT_NAMES = (function() {
   var known = {}
   ;[
+    "absorbmaxpages", "absorbmaxtokens", "absorboutput", "changetrackroot", "dream", "dreamwikimaxaffected", "dreamwikiorganize",
+    "dryrun", "editor", "eval", "evalbaseline", "evalfile", "evalout", "evalwritebaseline",
+    "ingestallowemptyprune", "ingestchunkchars", "ingestconcurrency", "ingestdryrun", "ingestexclude", "ingestforce", "ingestinclude",
+    "ingestindependent", "ingestlayout", "ingestledger", "ingestmaxfilekb", "ingestmode", "ingestprune", "ingestsection",
+    "ingestsource", "ingestsourceid", "ingesttype", "lccontextlimit", "maxauditrecords", "maxtotalsteps", "mcpproxyallow",
+    "mcpproxydeny", "mcpproxynative", "nologtrunc", "skillcontextchars", "skillmanifestchars", "skillmaxautoload", "specfile",
+    "taskfile", "trackchanges", "useeditor", "warnunknownargs", "wikidreambudget", "wikigraphautosave", "wikigraphsavedebouncems",
+    "wikiingestbudget", "wikiingestmaxcalls", "wikillmbudget", "wikimaxprompttokens", "wikimetacache", "wikitelemetry",
     "rpm", "tpm", "rtm", "maxsteps", "knowledge", "fileallow", "chatyouare", "youare", "homedir",
     "promptprofile", "systempromptbudget", "outfile", "outfileall", "libs", "model", "modellc", "modelval", "modeldec", "modelvisual",
     "conversation", "historyvm", "historyvmmode", "historyvmshadow", "contextvirtualization", "contextvirtualizationshadow", "shell", "usesandbox", "sandboxprofile", "sandboxnonetwork", "shellallow", "shellbanextra",
@@ -16658,6 +16600,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
   })
   return known
 })()
+
 
 MiniA._IGNORED_INTERNAL_ARGUMENT_NAMES = (function() {
   var ignored = {}

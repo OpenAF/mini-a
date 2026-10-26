@@ -35,6 +35,8 @@ export OAF_MINI_A_LCNOJSONPROMPT=true
 
 ## Command-Line Execution
 
+Use the [optional parameter reference](#optional-parameters) and the [additional public parameter reference](#additional-public-parameter-reference) together for the complete catalog. For a compact lookup, see [CHEATSHEET.md](CHEATSHEET.md).
+
 Mini-A now ships with an interactive console so you can start the agent directly from the installed oPack:
 
 - `opack exec mini-a` — launches the console; append arguments such as `goal="summarize the logs" useshell=true`, or type the goal at the prompt.
@@ -1031,12 +1033,13 @@ Embedded utility calls that fail argument validation return targeted corrections
 - **`wikiartifactrefreshsecs`** (number, default: `0`): For HTTP bundles and S3 bundles (`s3artifactbundle=true`), probe bundle metadata at most once per interval between wiki requests. A changed ETag/last-modified value downloads and atomically replaces the local cache, then reopens Lucene/graph state. `0` retains startup-only hydration. Individual S3 artifact trees are intentionally not refreshed because a partial update could mix Lucene generations.
 - **`wikirestrictprofile`** (string, default: `tight`): For `mcp-wiki-safe`, selects restricted retrieval defaults: `tight`, `moderate`, or `relaxed` (case-insensitive). `tight` preserves the previous defaults; individual `wikirestrict*` settings override profile values; hard disclosure ceilings remain enforced and the safe server stays read-only with only `search` and `read`.
 - **`wikimetacache`** (boolean, default: `true`): Enable the sharded metadata cache used by wiki search/list/read helpers.
+The following `wikisearch*` options configure direct `MiniAWikiManager` instances. The shared launcher adapter currently does not forward them from CLI arguments.
+
 - **`wikisearchscanbudget`** (number, default: `1000`) / **`wikisearchscanmaxms`** (number, default: `15000`): Cap how many pages, and how many milliseconds, `wiki search`'s scan-fallback path (triggered by `forceScan`, `regex`, a scoped `path`, or an unavailable Lucene index) may spend reading pages one at a time. The budget is shared across a search and its mount fan-out — it is not reset per mount. When either cap is hit, the search returns early with whatever results were already found; direct JS callers (not the serialized MCP tool text) can check `.truncated`/`.scanned`/`.scanBudget` on the returned array to see whether it stopped short.
 - **`wikisearchcache`** (boolean, default: `true` for `s3`/`http`/`es` backends, `false` for `fs`/archive) / **`wikisearchcachettlms`** (number, default: `15000`) / **`wikisearchcachemaxsize`** (number, default: `500`): Cache scan-fallback `backend.read()` results per `MiniAWikiManager` instance for the given TTL (capped to `wikisearchcachemaxsize` entries), so repeated searches against slow S3/HTTP backends don't re-fetch unchanged pages; `fs`/archive backends default to uncached since a local read has no latency to amortize and caching would only add staleness for pages edited outside the manager. Set `wikisearchcache` explicitly to override the default either way. On write or delete, the whole per-instance cache is invalidated and lazily rebuilt (not a per-page unset) — coarser than per-key invalidation, but writes/deletes are rare relative to reads.
 - **`wikisearchparallel`** (boolean, default: `false`): Parallelize the scan-fallback path's `backend.read()` calls via `pForEach`, opt-in. A prior `pForEach`-based read path elsewhere in the wiki manager deadlocked OpenAF's shared thread pool under repeated same-JVM runs, and that failure's root cause was never fully isolated (see `docs/WIKI.md` and the code comment above the `wikisearchparallel` branch in `mini-a-wiki.js`) — leave this off unless you've validated it against your own workload with two consecutive full test-suite runs in one JVM.
 - **`wikilintstaleddays`** (number, default: `90`): Age threshold used by wiki lint stale-page checks.
-- **`wikilintstreamthreshold`** (number, default: `2000`): Switch wiki lint into streaming mode above this many pages.
-- **`wikilintmaxpairs`** (number, default: `250000`): Cap near-duplicate comparisons during streaming lint.
+- **`wikilintstreamthreshold`** / **`wikilintmaxpairs`**: Inactive configuration plumbing; current lint does not consume either setting.
 - **`wikimounts`** (SLON/JSON, optional): Read-only wiki mounts. Array of `{name, backend, root|bucket|prefix|url|accessKey|secret|region}`. An `fs` root may be a local directory or a local `.zip`/`.okt` archive; archives expose their entry root and are always read-only. Each mount's pages appear under `@<name>/path.md` in search, read, browse, and tree. Example: `wikimounts="[{name: 'reference', backend: 'fs', root: '/shared/reference.okt'}]"`.
 - **`usewikigraph`** (boolean, default: `false`): Enable wiki knowledge-graph layer and `graph` action. Also enabled automatically when `wikigraphfalkorhost` is set.
 - **`wikigraphsemantic`** (boolean, default: `false`): Enable semantic extraction during `graph op=build`. Inside a dream pass (`dream=true`), `dreamwikimode=apply`/`plan` default this to `true` whenever `usewikigraph=true` instead of leaving it opt-in — pass `wikigraphsemantic=false` explicitly to keep those two modes structural-only. See [Wiki dream internals](#wiki-dream-internals).
@@ -3865,8 +3868,14 @@ runner._setLlm(myStubLlm)
 Use `ingestmode=auto` (the default) to normalize well-structured Markdown without model
 tokens; choose `normalize`, `raw`, or `distill` explicitly when needed. Wiki state is private
 to `.mini-a-wiki-state/manifest.json` and tracks section hashes, allowing a small edit to reuse
-unchanged chunks. `wikillmbudget`, `wikiingestbudget`, and `wikimaxprompttokens` defer
-over-budget enrichment. `/dream plan` is always zero-LLM and returns estimates.
+unchanged chunks. `wikillmbudget` and `wikiingestbudget` defer over-budget enrichment. A nonnegative `wikiingestbudget` overrides the fallback
+`wikillmbudget`; `wikimaxprompttokens=0` (the default) tries the full source first,
+then splits and synthesizes on a recognized model context-limit error. A positive
+`wikimaxprompttokens` is a hard prompt cap. `wikiingestmaxcalls=32` limits model
+calls per source; 0 permits only the first attempt. Failed recovery leaves the
+previous page intact. The current dream runner does not enforce `wikidreambudget`;
+use `dreammaxsteps` for auto/reorg steps. See [wiki limits](docs/WIKI.md#model-prompt-and-operation-limits).
+`/dream plan` is always zero-LLM and returns estimates.
 # Adaptive orchestration
 
 `orchestration=manual` is the default and preserves the current behavior.
@@ -4364,7 +4373,7 @@ interactive console.
 
 Use `/absorb plan <spec.json>` to propose selected knowledge from several local wikis,
 `/absorb show <id>` to review, and `/absorb apply <id>` to apply exact saved changes.
-See [ABSORB.md](ABSORB.md) for source selection, repeat runs, job arguments and recovery.
+See [ABSORB.md](docs/ABSORB.md) for source selection, repeat runs, job arguments and recovery.
 
 ### Microsoft WorkIQ
 
@@ -4745,3 +4754,319 @@ mini-a usedelegation=true forkpolicy=legacy goal="Keep previous inheritance beha
 Console forms: `/delegate <goal>` follows the session policy; `/delegate fork <goal>` explicitly inherits memory and history; `/delegate clean <goal>` and `/delegate auto <goal>` override one task. `/delegate -- clean the workspace` preserves a literal modifier at the start of the goal.
 
 Clean inheritance leaves independently configured knowledge and shared memory/wiki access subject to existing permissions. It is not security isolation. Automatic views/snapshots are frozen at submission and reused across retries. See [delegation policy details](docs/DELEGATION.md#automatic-inheritance-and-migration) for budgets, fallback rules, worker compatibility, and offline evaluation limits.
+
+## Additional public parameter reference
+
+These grouped tables complete the parameter entries above. `unset` means no explicit launcher/session value; the runtime selects its fallback. Defaults can depend on the entry point or mode. Types describe command-line values; map/array configurations use JSON or SLON.
+
+Console parameters appear in `mini-a --help` and interactive `/set` completion. Standalone startup and operation parameters belong to the named job: `ojob <job>.yaml -jobhelp`. Evaluation job inputs are case-sensitive (`evalArgs`, `evaluatorOptions`); inspect their job-local help with `ojob mini-a-eval.yaml -jobhelp MiniA Eval`. Worker task arguments are separate from worker startup configuration.
+
+### Session — Goals and prompts
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `exec` | string | unset | Execute one custom slash-command or skill template and exit, e.g. `exec="/my-command arg"`; built-in console commands are unsupported. |
+| `agentcomms` | string | unset | Opt-in communication profiles, grants, delegation allowance and limits (JSON/SLON); see USAGE.md |
+| `agentfile` | string | unset | Legacy alias for agent |
+| `goalprefix` | string | unset | Optional prefix automatically added to every goal |
+
+### Session — History and attachments
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `historypath` | string | unset | Directory path used to store web conversation history. |
+| `historyretention` | number | `600` | Web history retention window in seconds. |
+| `historys3accesskey` | string | unset | S3 access key for history mirroring. |
+| `historys3bucket` | string | unset | S3 bucket used by web history to mirror conversations and enabled History VM snapshots. |
+| `historys3ignorecertcheck` | boolean | `false` | Disable TLS certificate checks for history S3 access. |
+| `historys3prefix` | string | unset | S3 key prefix used for mirrored history files. |
+| `historys3region` | string | unset | S3 region for history mirroring. |
+| `historys3secret` | string | unset | S3 secret key for history mirroring. |
+| `historys3url` | string | unset | S3 endpoint URL for history mirroring. |
+| `historys3useversion1` | boolean | `false` | Use S3 signature v1 for history mirroring. |
+| `useattach` | boolean | `false` | Enable file attachments in the web UI. |
+
+### Session — Context management
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `contextvirtualization` | boolean | `false` | Enable experimental hierarchical context retrieval and active provider projection (requires historyvm) |
+| `contextvirtualizationshadow` | boolean | `false` | Measure Phase 2 projection while sending Phase 1 context (requires historyvm and contextvirtualization) |
+| `historyvm` | boolean | `false` | Enable durable bounded virtual conversation history (requires conversation path) |
+| `historyvmmode` | string | `safe` | Virtual history policy mode |
+| `historyvmshadow` | boolean | `false` | Capture and measure virtual history without changing requests |
+| `maxpromptchars` | number | `120000` | Maximum accepted web prompt size in characters. |
+
+### Session — Durable runs
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `durable` | boolean | `false` | Persist a resumable run state and redacted JSONL trace |
+| `resumerun` | string | unset | Resume an interrupted durable run by ID |
+| `runid` | string | unset | Stable identifier for a durable run |
+| `runroot` | string | unset | Optional durable-run storage root |
+| `runstatus` | string | unset | Inspect persisted durable run status by run identifier |
+
+### Session — Console and editor
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `editor` | string | unset | External editor command used when useeditor=true (overrides $EDITOR) |
+| `homedir` | string | unset | Override the home directory used to locate the .openaf-mini-a folder (default: user home) |
+| `showseparator` | boolean | `true` | Show a subtle separator line between interaction events (disable for a more compact view) |
+| `useeditor` | boolean | `false` | Compose each console goal in an external editor ($EDITOR or vi) |
+
+### Models and execution — Model selection
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `contractargs` | string | unset | Positional supervised contract inputs. |
+| `contractfile` | string | unset | Explicit supervised CONTRACT.md. |
+| `reusecontract` | boolean | `false` | Reuse applicable supervised contracts in the workspace. |
+| `savecontract` | boolean | `false` | Save accepted supervised contracts. |
+
+### Models and execution — Decisions and advisors
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `usedecide` | boolean | unset | Enable decision-assisted selection, complexity, and bounded wiki auto link repairs with modeldec or OAF_DECIDE_MODEL (false disables). |
+
+### Models and execution — Planning
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `orchestration` | string | `manual` | Execution strategy mode: manual or deterministic auto. |
+
+### Models and execution — Outer loop
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `changetrackroot` | string | `current working directory` | Filesystem root inspected by outer-loop change tracking (default current working directory). |
+| `specfile` | string | unset | Alias for outerloopinstructions |
+| `taskfile` | string | unset | Alias for outerloopinstructions |
+| `trackchanges` | boolean | `automatic with no-change stopping` | Track filesystem changes in the outer loop; enabled automatically when its no-change stopping condition is active. |
+
+### Tools and permissions — Tools and utilities
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `capabilitylimit` | number | `8` | Maximum capabilities exposed when capabilityselection=true |
+| `capabilityselection` | boolean | `false` | Select a bounded relevant subset of normalized capabilities before registering MCP tools |
+| `policy` | string | unset | SLON/JSON policy definition for shell, tools, delegation, Wiki and network |
+| `policyfile` | string | unset | JSON file containing centralized policy definition |
+| `toolfallback` | boolean | `false` | Retry in action mode when tool-calling output is malformed. |
+
+### Tools and permissions — MCP connections
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `mcptest` | boolean | `false` | Start the MCP test mode instead of the console. |
+
+### Tools and permissions — MCP proxy and programmatic calls
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `mcpproxyallow` | string | unset | Comma-separated allowlist of downstream tool names exposed through proxy-dispatch |
+| `mcpproxydeny` | string | unset | Comma-separated denylist of downstream tool names hidden from proxy-dispatch |
+| `mcpproxynative` | boolean | `true` | Enable native function calling for proxy-dispatch (defaults to true; set to false for action-based JSON) |
+| `mcpproxythreshold` | number | `0` | Global byte threshold for proxy auto-spill to temporary files (0 disables) |
+
+### Tools and permissions — Skills and extensions
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `extracommands` | string | unset | Comma-separated extra directories for custom slash commands |
+| `extrahooks` | string | unset | Comma-separated extra directories for custom hooks |
+| `extraskills` | string | unset | Comma-separated extra directories for custom skills |
+| `plugins` | string | unset | Comma-separated Agent Plugins (agent-plugins.org) directories, each containing a plugin.json |
+| `pluginsroot` | string | unset | Directory containing multiple Agent Plugins subfolders (default: .openaf-mini-a/plugins) |
+| `pluginsroots` | string | unset | Comma-separated directories, each containing multiple Agent Plugins subfolders |
+| `skillcontextchars` | number | `8000` | Maximum characters read from each auto-loaded SKILL.md. |
+| `skillmanifestchars` | number | `1536` | Approximate character budget for skill descriptions in the system prompt manifest. |
+| `skillmaxautoload` | number | `1` | Maximum number of matching skills to auto-load into runtime context. |
+| `skillsautolimit` | number | `5` | Maximum results per automatic skill search. |
+| `skillsautosearch` | boolean | unset | Automatically select skills via decide, low-cost, then main. Defaults off unless usedecide=true and a decision model (modeldec or OAF_DECIDE_MODEL) is set; false keeps model-led or explicit loading. |
+| `skillsmaxchars` | number | `12000` | Shared local/wiki skill guidance character budget per agent run. |
+| `skillsmaxloaded` | number | `3` | Maximum distinct local/wiki skills consulted per agent run. |
+| `skillwikibackend` | string | unset | Skill library backend: fs, s3, s3fs, es, or http. Defaults to fs. Only needed for a dedicated skill wiki separate from usewiki. |
+| `skillwikimounts` | string | unset | SLON/JSON array of read-only skill-library mounts, same shape as wikimounts. Only used with a dedicated skill wiki. |
+| `skillwikiroot` | string | unset | Root directory for a dedicated skill library (fs backend). Only needed when not reusing usewiki's wiki. |
+| `useskills` | boolean | `false` | Expose the skills utility tool and auto-load high-confidence matching skills. |
+| `useskillswiki` | boolean | `false` | Enable the virtual skill library (docs/VIRTUAL-SKILLS.md). Reuses usewiki's wiki when no skillwiki* config is given. |
+
+### Memory and knowledge — Memory stores and retention
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `memorysessionheader` | string | unset | Request header name used to derive a web memory session id. |
+| `memorywritemax` | number | `20` | Maximum memory_write calls allowed per run |
+| `usememorywrite` | boolean | `true` | Let the model record durable typed memory via the memory_write action (preference, environment, procedure, pitfall, reference) |
+
+### Memory and knowledge — Wiki graph
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `wikigraphcross` | boolean | `true` | Join this wiki's graph with mounted wikis' graphs at query time (explicit @-links, shared tags/aliases/concepts). Requires wikigraphmounts. |
+| `wikigraphcrosscap` | number | `5` | Maximum cross-wiki entries appended per query. |
+| `wikigraphcrossdepth` | number | `1` | Cross-wiki traversal depth: 1 resolves explicit links, 2 also pulls the target's in-mount related pages. |
+| `wikigraphcrossjoin` | string | `link,tag,alias,concept` | CSV of enabled cross-wiki join kinds: link, tag, alias, concept. |
+| `wikigraphcrossmaxdf` | number | `0.25` | Skip a shared tag/alias/concept join key present on more than this fraction of a mount's docs. |
+| `wikigraphcrossminkeylen` | number | `3` | Minimum length for a shared join key to be used for cross-wiki matching. |
+| `wikigraphfalkorpass` | string | unset | FalkorDB password for wiki graph. |
+
+### Memory and knowledge — Wiki retrieval and maintenance
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `wikilintresultlimit` | number | `0` | Default maximum lint issues returned to an agent (0 returns all; dream reorg defaults to 25). |
+| `wikiretrievalv2` | boolean | unset | Prefer V2 passage retrieval (default true); unpublished wikis use legacy retrieval with a warning until explicitly reindexed; false forces legacy. |
+| `wikitarget` | string | unset | Initial read-only mount selected by wikiman (otherwise the primary). |
+| `wikitelemetry` | boolean | unset | Record local aggregate wiki retrieval telemetry (off by default); writable managers persist it, read-only managers keep it in memory. |
+
+### Memory and knowledge — Wiki model budgets
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `wikiingestbudget` | number | `wikillmbudget` | Estimated input-plus-output token budget per ingestion operation; nonnegative values override wikillmbudget (0 defers model work). |
+| `wikillmbudget` | number | `-1 (unlimited)` | Fallback estimated input-plus-output token budget per ingestion operation; -1/unset is unlimited. A nonnegative wikiingestbudget overrides it; this is not an aggregate cap across operations. |
+| `wikimaxprompttokens` | number | `0` | Zero/unset tries the complete source, then splits on a context-limit error; positive values defer prompts exceeding that estimated input cap. |
+| `wikiingestmaxcalls` | number | `32` | Maximum distillation model calls per source, including failed attempts and synthesis; 0 disables split recovery after the first call. |
+
+### Memory and knowledge — Wiki storage and access
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `wikihttptimeout` | number | `30000` | HTTP wiki request timeout in milliseconds. |
+| `wikiman` | boolean | `false` | Start the guided wiki operations manager. |
+
+### Memory and knowledge — Ingestion and absorption
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `absorbmaxpages` | number | `100` | Maximum selected absorption pages. |
+| `absorbmaxtokens` | number | `100000` | Aggregate absorption model input token estimate limit. |
+| `absorboutput` | string | unset | External absorption plan directory (required for read-only planning). |
+| `ingestallowemptyprune` | boolean | `false` | Allow pruning a confirmed empty source folder. |
+| `ingestmode` | string | `auto` | Ingestion mode: auto (default; deterministic normalization first), normalize, distill (legacy model distillation), or raw. |
+| `ingestprune` | boolean | `false` | Remove verified missing sources within this ingestion scope. |
+| `ingestsourceid` | string | unset | Stable logical ingestion origin identity. |
+
+### Memory and knowledge — Dream consolidation
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `dream` | boolean | `false` | Run a dream (sleep) pass — LLM-powered memory and/or wiki consolidation — instead of the console. |
+| `dreammode` | string | unset | Dream mode selector for dream=true: memory, wiki, or both (default auto: memory when memory is configured, otherwise wiki). |
+| `dreamwiki` | boolean | `false` | Force wiki dream when dream=true and memory is also configured. |
+| `dreamwikilintresultlimit` | number | `25` | Maximum lint issues returned per dream-agent request (default 25). |
+| `dreamwikimaxaffected` | number | `100 (preview only)` | Maximum affected pages in wiki dream plan/dry-run dirty-set previews (default 100). |
+| `dreamwikimaxdepth` | number | `3` | Maximum folder depth considered during wiki reorg planning. |
+| `dreamwikiminpages` | number | `ignored` | Legacy compatibility option; the current dream runner ignores it and finalizes indexes regardless of page count. |
+
+### Delegation and servers — Delegation and subtasks
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `autodelegation` | boolean | `false` | Enable automatic delegation based on context size and complexity. |
+| `autodelegationmaxperstep` | number | `2` | Maximum number of auto-delegations per step. |
+| `autodelegationthreshold` | number | `8192` | Tool-result text length threshold that triggers automatic summary delegation when enabled. |
+| `forkdecide` | boolean | `true` | Allow bounded configured decision assistance for automatic inheritance. |
+| `forkpolicy` | string | `auto` | Outgoing inheritance: auto, legacy, clean, memory, context or full. |
+| `forkstatemaxbytes` | number | `65536` | Maximum serialized state size shared with delegated subtasks. |
+| `noisytools` | string | unset | Comma-separated tool names whose results always trigger automatic summary delegation, regardless of size (requires autodelegation=true). |
+| `showdelegate` | boolean | `false` | Show delegate/subtask events as separate lines (default keeps them inline) |
+| `subtasks` | string | unset | Inline subtasks definition (JSON/SLON) for startup delegation. |
+| `subtasksfile` | string | unset | Path to a subtasks file for startup delegation. |
+| `subtaskssequential` | boolean | `false` | Run startup subtasks sequentially instead of in parallel. |
+
+### Delegation and servers — Worker registry
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `workermode` | boolean | `false` | Start in worker mode for delegated agent execution. |
+
+### Delegation and servers — Web interface
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `browsercontext` | string | unset | Browser context configuration (JSSLON/JSON) or true to auto-enable when needed. |
+| `onport` | number | `8888 web / 8080 worker` | Start the web UI on the provided port. |
+| `path` | string | unset | Static asset path used by the web UI/worker modes. |
+| `ssequeuetimeout` | number | `120` | Web SSE queue timeout in seconds. |
+| `webadvanced` | boolean | `false` | Enable trusted Advanced web console APIs (generates a token and opens the browser when webtoken is omitted). |
+| `webadvancedpath` | string | unset | Local Advanced session journal and preset directory. |
+
+### Output and diagnostics — Display and visualizations
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `format` | string | unset | Final answer format (md\|json\|yaml\|toon\|slon) |
+| `showexecs` | boolean | `false` | Show shell/exec events in the interaction stream |
+| `useasciiviz` | boolean | `false` | Render oafPrintChart Markdown fences as console charts and expose printChart for interim charts. |
+
+### Output and diagnostics — Files and logging
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `logpromptheaders` | string | unset | Comma-separated request header names to log with web prompts. |
+| `warnunknownargs` | boolean | `true` | Warn about unrecognized startup arguments (default true; false disables warnings). |
+
+### Job evaluation
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `eval` | boolean | `false` | Run a native Mini-A evaluation suite instead of one agent goal |
+| `evalbaseline` | string | unset | Optional baseline JSON report for current-versus-baseline comparison |
+| `evalfile` | string | unset | Evaluation YAML/JSON file or directory containing evaluation definitions |
+| `evalout` | string | unset | Optional JSON path for the full machine-readable evaluation report |
+| `evalwritebaseline` | string | unset | Optional JSON path to write the current evaluation report as a baseline |
+
+### Evaluation test job
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `evalArgs` | map | `empty map` | Shared agent argument map; scenario args and setup.args take precedence. |
+| `evaluatorOptions` | map | `empty map` | MiniAEval constructor options; default empty map. |
+| `file` | string | unset | An existing evaluation YAML/JSON file or directory. |
+| `scenario` | map | unset | One inline scenario. Supply exactly one of scenario, scenarios or file. |
+| `scenarios` | array | unset | An array of inline scenarios using the existing eval schema. |
+
+### Worker startup
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `apiallow` | string | unset | Comma-separated IP allowlist |
+| `apitoken` | string | unset | Required bearer token for authentication |
+| `defaulttimeout` | number | `300000 ms` | Default task deadline in milliseconds |
+| `maxtimeout` | number | `600000 ms` | Maximum allowed task deadline in milliseconds |
+| `taskretention` | number | `3600 seconds` | Seconds to keep completed task results |
+| `workerdesc` | string | `Mini-A worker API` | Worker description reported by /info |
+| `workername` | string | `mini-a-worker` | Worker name reported by /info |
+
+### Web startup
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `webtoken` | string | unset | Shared secret required as an x-mini-a-token header, or ?token= for the SSE stream. Advanced mode generates a fresh token when omitted; Simple mode without a token leaves the server open to anyone who can reach the port. |
+
+### Standalone absorption
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `absorbop` | string | `status` | plan, show, apply, status, resume, delete or cancel |
+| `absorbplan` | string | unset | Saved plan ID (show/apply/resume/delete/cancel) |
+| `absorbspec` | string | unset | JSON, YAML (.yaml/.yml) or SLON (.slon) file, or inline JSON/SLON map or sources array (plan) |
+
+### Compatibility and reserved options
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `wikidreambudget` | number | `not enforced` | Reserved dream-scope estimated token budget; the current dream runner does not enforce it. Use dreammaxsteps to bound model steps. |
+
+### Other public parameters
+
+| Parameter | Type | Default / fallback | Description |
+| --- | --- | --- | --- |
+| `modelman` | boolean | `false` | Start the model manager UI instead of the console. |
+
+See the [wiki guide](docs/WIKI.md), [delegation guide](docs/DELEGATION.md), and [absorption guide](docs/ABSORB.md) for operation-specific examples and restrictions.

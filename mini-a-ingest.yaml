@@ -85,7 +85,7 @@ help:
     mandatory: false
     options  : ["flat", "source"]
   - name     : ingestmode
-    desc     : Complete-page processing mode (auto, normalize, distill, raw)
+    desc     : "Ingestion mode: auto (default; deterministic normalization first), normalize, distill (legacy model distillation), or raw."
     mandatory: false
     options  : ["auto", "normalize", "distill", "raw"]
   - name     : wikiaccess
@@ -104,6 +104,19 @@ help:
     mandatory: false
   - name     : model
     desc     : SLON/JSON model config used for distillation (defaults to OAF_MODEL)
+    mandatory: false
+
+  - name     : wikiingestbudget
+    desc     : "Estimated input-plus-output token budget per ingestion operation; nonnegative values override wikillmbudget (0 defers model work)."
+    mandatory: false
+  - name     : wikillmbudget
+    desc     : "Fallback estimated input-plus-output token budget per ingestion operation; -1/unset is unlimited. A nonnegative wikiingestbudget overrides it; this is not an aggregate cap across operations."
+    mandatory: false
+  - name     : wikiingestmaxcalls
+    desc     : "Maximum distillation model calls per source during wiki ingestion (default 32), including retries and synthesis; 0 disables split recovery but allows the initial call."
+    mandatory: false
+  - name     : wikimaxprompttokens
+    desc     : "Maximum estimated input tokens per wiki model prompt (default 0). Zero/unset tries the full source and splits on context overflow; a positive value defers oversized work."
     mandatory: false
 
 ojob:

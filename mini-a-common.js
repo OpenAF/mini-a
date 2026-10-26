@@ -58,6 +58,81 @@ function __miniAErrMsg(e) {
   return (isDef(e) && isString(e.message)) ? e.message : String(e)
 }
 
+function __miniAIsContextOverflowError(error) {
+  var err = isObject(error) ? error : {}
+  if (isString(error)) err = { message: error }
+  if (!isObject(err)) return false
+
+  var samples = []
+  var add = value => {
+    if (!isString(value)) return
+    var text = value.trim()
+    if (text.length === 0) return
+    samples.push(text.toLowerCase())
+  }
+
+  add(err.message)
+  add(err.error)
+  add(err.code)
+  add(err.type)
+  if (isObject(err.error)) {
+    add(err.error.message)
+    add(err.error.code)
+    add(err.error.type)
+  }
+
+  if (isObject(err.response)) {
+    add(err.response.message)
+    add(err.response.error)
+    add(err.response.code)
+    add(err.response.type)
+    if (isObject(err.response.error)) {
+      add(err.response.error.message)
+      add(err.response.error.error)
+      add(err.response.error.code)
+      add(err.response.error.type)
+      add(err.response.error.status)
+    }
+  }
+
+  var normalized = samples.join(" | ")
+  if (normalized.length === 0) return false
+
+  var directSignals = [
+    "context_length_exceeded",
+    "model_context_window_exceeded",
+    "maximum context length",
+    "max context length",
+    "context window",
+    "prompt is too long",
+    "prompt too long",
+    "input token count",
+    "input too long",
+    "too many tokens",
+    "token limit exceeded",
+    "input length and max_tokens exceed context limit",
+    "input length and `max_tokens` exceed context limit",
+    "exceeds the maximum number of tokens"
+  ]
+
+  for (var i = 0; i < directSignals.length; i++) {
+    if (normalized.indexOf(directSignals[i]) >= 0) return true
+  }
+
+  var hasSizeTarget =
+    normalized.indexOf("context") >= 0 ||
+    normalized.indexOf("token") >= 0 ||
+    normalized.indexOf("prompt") >= 0 ||
+    normalized.indexOf("input") >= 0
+  var hasOverflowSignal =
+    normalized.indexOf("exceed") >= 0 ||
+    normalized.indexOf("too long") >= 0 ||
+    normalized.indexOf("limit") >= 0 ||
+    normalized.indexOf("maximum") >= 0
+
+  return hasSizeTarget && hasOverflowSignal
+}
+
 // Shared by evaluation and supervised acceptance. No executable expressions.
 function __miniACompareAssertion(actual, assertion) {
   var label = assertion.name || assertion.path || "answer"

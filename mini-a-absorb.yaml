@@ -4,7 +4,7 @@ help:
     ojob mini-a-absorb.yaml absorbop=plan absorbspec=./sources.json wikiroot=./wiki wikiaccess=rw
     ojob mini-a-absorb.yaml absorbop=show absorbplan=<id> wikiroot=./wiki
     ojob mini-a-absorb.yaml absorbop=apply absorbplan=<id> wikiroot=./wiki wikiaccess=rw
-    See ABSORB.md for selection, provenance, budgets and recovery.
+    See docs/ABSORB.md for selection, provenance, budgets and recovery.
   expects:
   - name: absorbop
     desc: plan, show, apply, status, resume, delete or cancel

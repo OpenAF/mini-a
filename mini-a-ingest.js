@@ -18,6 +18,7 @@ var MiniAIngest = function(ingestArgs, logFn) {
   if (isObject(ingestArgs) && isObject(ingestArgs.wikimanager)) this._args.wikimanager = ingestArgs.wikimanager
   this._logFn = isFunction(logFn) ? logFn : log
   this._llm   = __   // injectable for tests
+  this._distillLlmLock = new java.util.concurrent.locks.ReentrantLock()
 }
 
 MiniAIngest.prototype._log = function(msg) {
@@ -27,6 +28,7 @@ MiniAIngest.prototype._log = function(msg) {
 
 MiniAIngest.prototype._setLlm = function(llmInstance) {
   this._llm = llmInstance
+  this._distillLlmFactory = __
 }
 
 MiniAIngest.prototype._getEnv = function(name) {
@@ -54,7 +56,8 @@ MiniAIngest.prototype._buildLlm = function() {
     var self = this
     __miniALoadLibraries(this._args.libs, function(msg) { self._log(msg) }, function(msg) { throw new Error(msg) })
     __miniAEnsureModelProvider(cfg)
-    return $llm(cfg)
+    this._distillLlmFactory = function() { return $llm(clone(cfg)) }
+    return this._distillLlmFactory()
   } catch(e) {
     this._log("[ingest] Could not build LLM: " + __miniAErrMsg(e))
     return __
@@ -360,9 +363,20 @@ MiniAIngest.prototype._distillPrompt = function(source, chunks, siblings) {
     "## Content\n" + chunks.join("\n\n---\n\n")
 }
 
-MiniAIngest.prototype._distill = function(llm, source, chunks, siblings) {
-  var prompt = this._distillPrompt(source, chunks, siblings)
+MiniAIngest.prototype._distill = function(llm, source, chunks, siblings, recoveryPrompt) {
+  var prompt = isString(recoveryPrompt) ? recoveryPrompt : this._distillPrompt(source, chunks, siblings)
+  var api, conversation, locked = false
   try {
+    if (isFunction(this._distillLlmFactory)) llm = this._distillLlmFactory()
+    else if (isFunction(llm.getGPT)) {
+      // Injected OpenAF instances may be shared across concurrent sources. Restore
+      // their conversation even when the provider rejects a request.
+      api = llm.getGPT()
+      if (!isFunction(api.getConversation) || !isFunction(api.setConversation)) throw new Error("Cannot isolate injected wiki model conversation")
+      this._distillLlmLock.lock(); locked = true
+      conversation = clone(api.getConversation())
+      api.setConversation(clone(conversation.filter(function(message) { return message.role === "system" || message.role === "developer" })))
+    }
     var resp = isFunction(llm.promptJSONWithStats) ? llm.promptJSONWithStats(prompt)
              : isFunction(llm.promptWithStats)     ? llm.promptWithStats(prompt)
              : { response: llm.prompt(prompt), stats: {} }
@@ -375,10 +389,19 @@ MiniAIngest.prototype._distill = function(llm, source, chunks, siblings) {
       page = raw
     }
     var err = this._validatePage(page)
-    if (isString(err)) return { ok: false, error: err }
-    return { ok: true, page: page }
+    if (!isString(err)) return { ok: true, page: page }
+    // Successful page text can itself discuss context limits. Only inspect failed
+    // response envelopes (or unparsed error text) for provider overflow signals.
+    var errorResponse = isMap(page) ? page : raw
+    if (__miniAIsContextOverflowError(errorResponse)) return { ok: false, error: isString(errorResponse) ? errorResponse : __miniAErrMsg(isDef(errorResponse.error) ? errorResponse.error : errorResponse), contextOverflow: true }
+    return { ok: false, error: err }
   } catch(e) {
-    return { ok: false, error: __miniAErrMsg(e) }
+    return { ok: false, error: __miniAErrMsg(e), contextOverflow: __miniAIsContextOverflowError(e) }
+  } finally {
+    if (locked) {
+      try { if (isArray(conversation)) api.setConversation(conversation) }
+      finally { this._distillLlmLock.unlock() }
+    }
   }
 }
 
@@ -1158,7 +1181,11 @@ MiniAIngest.prototype.run = function() {
       if (p.needs) {
         var estimate = wm.knowledgeEstimateTokens(self._distillPrompt(p.src, p.chunks.map(function(c) { return c.text }), siblings))
         result.llm_candidates++; result.estimated_input_tokens += estimate
-        if (!budget.reserve(p.src.rel, estimate, Math.ceil(estimate / 5))) { result.deferred.push({ source: p.src.rel, reason: "full document exceeds prompt/budget limit" }); p.deferred = true }
+        // Dry runs estimate the complete operation. Live token reservations happen
+        // after cache lookup; explicit positive prompt caps still gate whole sources.
+        if ((dry || budget.maxPrompt > 0 && estimate > budget.maxPrompt) && !budget.reserve(p.src.rel, estimate, Math.ceil(estimate / 5))) {
+          result.deferred.push({ source: p.src.rel, reason: "full document exceeds prompt/budget limit" }); p.deferred = true
+        }
       }
     })
     result.budget = budget.stats()
@@ -1176,10 +1203,17 @@ MiniAIngest.prototype.run = function() {
       llm = self._buildLlm()
       if (isObject(llm)) {
         self._transformContext = { root: wm._getIndexRoot() + "/.mini-a-wiki-ingest/transforms/" + scope,
-          fingerprint: sha256(fingerprint + "|" + modelRaw + "|" + String(self._resolvedModelFingerprint || "") + "|" + stringify(a.libs || [], __, "")), calls: new java.util.concurrent.atomic.AtomicInteger(0), paths: new java.util.concurrent.ConcurrentLinkedQueue() }
+          fingerprint: sha256("overflow-recovery-v2|" + fingerprint + "|" + modelRaw + "|" + String(self._resolvedModelFingerprint || "") + "|" + stringify(a.libs || [], __, "")), budget: new global.__miniAWikiKnowledge.Budget(a, "ingest"), budgetLock: new java.util.concurrent.locks.ReentrantLock(), calls: new java.util.concurrent.atomic.AtomicInteger(0), paths: new java.util.concurrent.ConcurrentLinkedQueue() }
         self._stage = "transformation"
         self._distillAll(llm, llmWork, siblings, Math.max(1, Math.round(self._num("ingestconcurrency", 4)))).forEach(function(d) { llmResults[d.key] = d })
         result.llm_calls = Number(self._transformContext.calls.get())
+        result.budget = self._transformContext.budget.stats()
+        result.estimated_input_tokens = result.budget.estimated_input_tokens
+        result.recovery = []
+        Object.keys(llmResults).forEach(function(key) {
+          var d = llmResults[key]
+          if (d.recovery) result.recovery.push(merge({ source: d.src.rel }, d.recovery))
+        })
       }
     }
     for (var i = 0; i < pending.length; i++) {
@@ -1188,7 +1222,11 @@ MiniAIngest.prototype.run = function() {
       if (p.needs) {
         d = llmResults[p.key] || { ok: false, error: "no LLM configured or distillation result missing" }
       } else d = { ok: true, page: self._normalizedPage(wm, p.src, p.content, mode) }
-      if (!d.ok) { result.failed.push({ source: p.src.rel, error: d.error }); continue }
+      if (!d.ok) {
+        if (d.deferred) result.deferred.push({ source: p.src.rel, reason: d.error })
+        else result.failed.push({ source: p.src.rel, error: d.error })
+        continue
+      }
       var meta = { title: d.page.title, description: d.page.description || "", type: d.page.type || "reference", tags: d.page.tags || [], source: p.src.rel,
         source_ref: resolved.ref || resolved.origin || "", source_hash: p.hash, ingest_scope: scope, ingest_source_key: p.key, ingested: new Date().toISOString() }
       d.page.body = self._rewriteSourceLinks(wm, p.src, p.path, d.page.body, sourcePaths, result)
@@ -1287,7 +1325,104 @@ MiniAIngest.prototype.run = function() {
   }
 }
 
-// _distillAll: one LLM call per source, run in parallel batches of `concurrency`.
+// Split only after a provider rejects the complete source. Prefer structural boundaries,
+// then use a Unicode-safe midpoint for a single oversized block.
+MiniAIngest.prototype._recoverySplit = function(text) {
+  var body = String(text || "")
+  if (body.length < 2) return []
+  var midpoint = Math.floor(body.length / 2), boundaries = [], match
+  var patterns = [/^#{1,6}\s/gm, /\n\s*\n/g, /\n/g]
+  for (var i = 0; i < patterns.length; i++) {
+    boundaries = []
+    while ((match = patterns[i].exec(body)) !== null) {
+      var at = match.index
+      if (at > body.length / 4 && at < body.length * 3 / 4) boundaries.push(at)
+      if (match[0].length === 0) patterns[i].lastIndex++
+    }
+    if (boundaries.length) break
+  }
+  var cut = boundaries.length ? boundaries.reduce(function(best, at) { return Math.abs(at - midpoint) < Math.abs(best - midpoint) ? at : best }, boundaries[0]) : midpoint
+  if (cut > 0 && cut < body.length && /[\uD800-\uDBFF]/.test(body.charAt(cut - 1)) && /[\uDC00-\uDFFF]/.test(body.charAt(cut))) cut++
+  return cut > 0 && cut < body.length ? [body.substring(0, cut), body.substring(cut)] : []
+}
+
+MiniAIngest.prototype._distillRecover = function(llm, pending, chunks, siblings) {
+  var self = this, context = this._transformContext, budget = context && context.budget
+  var rawMaxCalls = this._args.wikiingestmaxcalls
+  var configured = isUnDef(rawMaxCalls) || rawMaxCalls === null || isString(rawMaxCalls) && rawMaxCalls.trim().length === 0 ? NaN : Number(rawMaxCalls)
+  var maxCalls = isFinite(configured) && configured >= 0 ? Math.floor(configured) : 32
+  // Zero disables recovery, while still permitting the original full-source call.
+  var allowance = maxCalls === 0 ? 1 : maxCalls
+  var calls = 0, cacheHits = 0, maxDepth = 0, recovering = false
+  var source = pending.src, fullText = pending.content
+  var checkpoint = function(prompt) {
+    if (!context) return __
+    return context.root + "/" + sha256("recovery-v2|" + context.fingerprint + "|" + pending.key + "|" + pending.hash + "|" + prompt) + ".json"
+  }
+  var request = function(content, phase, depth, originalChunks) {
+    var parts = originalChunks || [content]
+    var prefix = phase === "full" ? "" : phase === "part"
+      ? "This is one ordered part of a larger source. Distill only facts supported by this part. Preserve concrete details for later synthesis.\n\n"
+      : "These are ordered distilled notes from one source. Combine all supported facts into one wiki page. Preserve details and contradictions; do not invent facts.\n\n"
+    var prompt = prefix + self._distillPrompt(source, parts, siblings)
+    var path = checkpoint(prompt), cached
+    if (path) {
+      try {
+        cached = af.fromJson(io.readFileString(path))
+        if (cached.promptHash === sha256(prompt) && isMap(cached.page) && !self._validatePage(cached.page)) {
+          cacheHits++; context.paths.add(path)
+          return { ok: true, page: cached.page }
+        }
+      } catch(ignoreCache) {}
+    }
+    if (calls >= allowance) return { ok: false, deferred: true, error: "wikiingestmaxcalls exhausted" }
+    var estimate = Math.ceil(prompt.length / 4)
+    if (budget) {
+      context.budgetLock.lock()
+      try {
+        if (!budget.reserve(source.rel, estimate, Math.ceil(estimate / 5))) return { ok: false, deferred: true, error: "wiki model prompt/budget limit reached" }
+        context.calls.incrementAndGet()
+      } finally { context.budgetLock.unlock() }
+    }
+    calls++
+    var response = self._distill(llm, source, parts, siblings, prompt)
+    if (response.ok && path) {
+      try {
+        self._atomicJson(path, { promptHash: sha256(prompt), page: response.page })
+        context.paths.add(path)
+      } catch(checkpointError) { return { ok: false, error: "transformation checkpoint failed: " + __miniAErrMsg(checkpointError) } }
+    }
+    return response
+  }
+  var noteText = function(page) {
+    return "## " + page.title + "\n" + (page.description || "") + "\n" + String(page.body || "")
+  }
+  var transform = function(text, phase, depth, originalChunks) {
+    maxDepth = Math.max(maxDepth, depth)
+    var response = request(text, phase, depth, originalChunks)
+    if (response.ok) return response
+    if (!response.contextOverflow) return response
+    if (maxCalls === 0 || isFinite(Number(self._args.wikimaxprompttokens)) && Number(self._args.wikimaxprompttokens) > 0) return { ok: false, deferred: true, error: "model context limit reached; split recovery disabled" }
+    if (depth >= 8) return { ok: false, deferred: true, error: "wiki context recovery depth exhausted" }
+    var halves = self._recoverySplit(text)
+    if (halves.length !== 2) return { ok: false, deferred: true, error: "source cannot be split further" }
+    if (!recovering) self._log("[ingest] Context limit for " + source.rel + "; splitting source...")
+    recovering = true
+    var first = transform(halves[0], phase === "full" ? "part" : phase, depth + 1, __)
+    if (!first.ok) return first
+    var second = transform(halves[1], phase === "full" ? "part" : phase, depth + 1, __)
+    if (!second.ok) return second
+    var combined = noteText(first.page) + "\n\n---\n\n" + noteText(second.page)
+    if (phase === "synthesis" && combined.length >= text.length) return { ok: false, deferred: true, error: "recovery synthesis did not shrink" }
+    return transform(combined, "synthesis", depth + 1, __)
+  }
+  var result = transform(fullText, "full", 0, chunks)
+  result.recovery = { strategy: recovering ? "split-and-synthesize" : "full-source", calls: calls, cache_hits: cacheHits, split_depth: maxDepth, status: result.ok ? "complete" : result.deferred ? "deferred" : "failed", reason: result.ok ? "" : result.error }
+  if (recovering) self._log("[ingest] Context recovery for " + source.rel + ": " + result.recovery.status + " (" + calls + " call(s)).")
+  return result
+}
+
+// _distillAll: sources run in parallel batches; overflow recovery is sequential per source.
 MiniAIngest.prototype._distillAll = function(llm, pending, siblings, concurrency) {
   var self = this
   var out = []
@@ -1305,12 +1440,14 @@ MiniAIngest.prototype._distillAll = function(llm, pending, siblings, concurrency
         cachePath = context.root + "/" + identity + ".json"
         try {
           cached = af.fromJson(io.readFileString(cachePath))
-          if (cached.identity === identity && isMap(cached.output) && cached.output.ok === true && cached.checksum === sha256(stringify(cached.output, __, ""))) output = cached.output
+          if (cached.identity === identity && isMap(cached.output) && cached.output.ok === true && cached.checksum === sha256(stringify(cached.output, __, "")) && !self._validatePage(cached.output.page)) {
+            output = cached.output
+            if (output.recovery) output.recovery = merge(output.recovery, { calls: 0, cache_hits: 1 })
+          }
         } catch(ignoreCache) {}
       }
       if (!output) {
-        if (context) context.calls.incrementAndGet()
-        output = self._distill(llm, p.src, chunks, siblings)
+        output = self._distillRecover(llm, p, chunks, siblings)
         if (cachePath && output.ok === true) {
           try { self._atomicJson(cachePath, { identity: identity, output: output, checksum: sha256(stringify(output, __, "")) }) }
           catch(cacheError) { output = { ok: false, error: "transformation checkpoint failed: " + __miniAErrMsg(cacheError) } }

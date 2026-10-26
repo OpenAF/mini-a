@@ -72,6 +72,11 @@ When `mcpproxy=true` is set:
 | `mcplazy` | boolean | `false` | Defer MCP connection setup until first tool use |
 | `mcpproxythreshold` | number (bytes) | `0` | Global auto-spill threshold. When > 0, any `call` result whose serialized size exceeds this value is automatically written to a temporary file instead of being returned inline. `0` = disabled |
 | `mcpproxytoon` | boolean | `false` | When `mcpproxythreshold > 0`, serialize object/array results with `af.toTOON(...)` before size checks/spill previews, improving readability and searchability for partial reads |
+| `mcpproxyallow` | string | unset | Comma-separated allowlist of downstream tool names exposed by the proxy |
+| `mcpproxydeny` | string | unset | Comma-separated denylist applied after the allowlist |
+| `mcpproxynative` | boolean | `true` | Register native function calling for proxy-dispatch; false uses action-based JSON |
+
+These options also appear in console, agent-job and web-job help. For argument validation and context guard limits, see the [additional parameter reference](../USAGE.md#additional-public-parameter-reference).
 
 ## The proxy-dispatch Tool
 

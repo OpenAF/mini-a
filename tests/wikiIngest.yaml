@@ -211,6 +211,50 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wikiIngestReconcile.js").testDeterministicModes
 
+- name: MiniA Wiki Ingest Tests::ValidPageTextDoesNotSignalOverflow
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testValidPageTextDoesNotSignalOverflow
+
+- name: MiniA Wiki Ingest Tests::OpenAFRecoveryRequestsAreIsolated
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testOpenAFRecoveryRequestsAreIsolated
+
+- name: MiniA Wiki Ingest Tests::CachedTransformationNeedsNoTokenBudget
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testCachedTransformationNeedsNoTokenBudget
+
+- name: MiniA Wiki Ingest Tests::ContextOverflowSplitsAndSynthesizes
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testContextOverflowSplitsAndSynthesizes
+
+- name: MiniA Wiki Ingest Tests::ContextOverflowDefersSafely
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testContextOverflowDefersSafely
+
+- name: MiniA Wiki Ingest Tests::OverflowCallLimitAndPartCheckpoint
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testOverflowCallLimitAndPartCheckpoint
+
+- name: MiniA Wiki Ingest Tests::SynthesisOverflowReducesNotes
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testSynthesisOverflowReducesNotes
+
+- name: MiniA Wiki Ingest Tests::OverflowBudgetAcrossParallelSources
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testOverflowBudgetAcrossParallelSources
+
+- name: MiniA Wiki Ingest Tests::RecoverySplitKeepsSurrogatePair
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testRecoverySplitKeepsSurrogatePair
+
+- name: MiniA Wiki Ingest Tests::StructuredContextOverflowResponse
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testStructuredContextOverflowResponse
+
+- name: MiniA Wiki Ingest Tests::OtherModelErrorsNeverSplit
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testOtherModelErrorsNeverSplit
+
 - name: MiniA Wiki Ingest Tests::BudgetDeferral
   to  : oJob Test
   exec: args.func = require("tests/wikiIngestReconcile.js").testBudgetDeferral
@@ -416,6 +460,17 @@ todo:
 - MiniA Wiki Ingest Tests::IngestRequiresASource
 - MiniA Wiki Ingest Tests::FullDistillation
 - MiniA Wiki Ingest Tests::DeterministicModes
+- MiniA Wiki Ingest Tests::ValidPageTextDoesNotSignalOverflow
+- MiniA Wiki Ingest Tests::OpenAFRecoveryRequestsAreIsolated
+- MiniA Wiki Ingest Tests::CachedTransformationNeedsNoTokenBudget
+- MiniA Wiki Ingest Tests::ContextOverflowSplitsAndSynthesizes
+- MiniA Wiki Ingest Tests::ContextOverflowDefersSafely
+- MiniA Wiki Ingest Tests::OverflowCallLimitAndPartCheckpoint
+- MiniA Wiki Ingest Tests::SynthesisOverflowReducesNotes
+- MiniA Wiki Ingest Tests::OverflowBudgetAcrossParallelSources
+- MiniA Wiki Ingest Tests::RecoverySplitKeepsSurrogatePair
+- MiniA Wiki Ingest Tests::StructuredContextOverflowResponse
+- MiniA Wiki Ingest Tests::OtherModelErrorsNeverSplit
 - MiniA Wiki Ingest Tests::BudgetDeferral
 - MiniA Wiki Ingest Tests::MissingPageAndFingerprintRepair
 - MiniA Wiki Ingest Tests::PruneAndRemovalFinalization

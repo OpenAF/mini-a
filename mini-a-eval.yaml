@@ -24,6 +24,8 @@ jobs:
       desc: OpenAF test suite name (defaults to Mini-A evaluations).
     - name: evalArgs
       desc: Shared Mini-A arguments; scenario args and setup.args take precedence.
+    - name: evaluatorOptions
+      desc: Optional MiniAEval constructor options map (defaults to an empty map).
     - name: baseline
       desc: Optional baseline report JSON filename.
     - name: output

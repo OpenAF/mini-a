@@ -1211,33 +1211,32 @@ help:
     mandatory: false
     options  : ["flat", "source"]
   - name     : ingestmode
-    desc     : "Wiki ingestion mode: auto (deterministic first), normalize, distill or raw"
+    desc     : "Ingestion mode: auto (default; deterministic normalization first), normalize, distill (legacy model distillation), or raw."
     example  : "auto"
     mandatory: false
     options  : ["auto", "normalize", "distill", "raw"]
   - name     : wikillmbudget
-    desc     : Maximum estimated tokens for all Wiki LLM work (-1/unset is unlimited)
+    desc     : "Fallback estimated input-plus-output token budget per ingestion operation; -1/unset is unlimited. A nonnegative wikiingestbudget overrides it; this is not an aggregate cap across operations."
     example  : "20000"
     mandatory: false
   - name     : wikiingestbudget
-    desc     : Maximum estimated tokens used by wiki ingestion LLM work
+    desc     : "Estimated input-plus-output token budget per ingestion operation; nonnegative values override wikillmbudget (0 defers model work)."
     example  : "10000"
     mandatory: false
   - name     : wikidreambudget
-    desc     : Maximum estimated tokens used by wiki dream LLM work
+    desc     : "Reserved dream-scope estimated token budget; the current dream runner does not enforce it. Use dreammaxsteps to bound model steps."
     example  : "10000"
     mandatory: false
+  - name     : wikiingestmaxcalls
+    desc     : "Maximum distillation model calls per source during wiki ingestion (default 32), including retries and synthesis; 0 disables split recovery but allows the initial call."
+    mandatory: false
   - name     : wikimaxprompttokens
-    desc     : Maximum estimated tokens in one Wiki LLM prompt
-    example  : "24000"
+    desc     : "Maximum estimated input tokens per wiki model prompt (default 0). Zero/unset tries the full source and splits on context overflow; a positive value defers oversized work."
+    example  : "0"
     mandatory: false
   - name     : dreamwikimaxaffected
-    desc     : Bound Wiki dream affected-set propagation
+    desc     : "Maximum affected pages in wiki dream plan/dry-run dirty-set previews (default 100)."
     example  : "100"
-    mandatory: false
-  - name     : dreamwikilevel
-    desc     : Dream level 0 housekeeping, 1 structural, 2 semantic, 3 reorganisation
-    example  : "1"
     mandatory: false
   - name     : wikitelemetry
     desc     : Record local aggregate retrieval telemetry (off by default); writable managers persist it, read-only managers keep it in memory
@@ -1368,6 +1367,170 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+
+  - name     : changetrackroot
+    desc     : "Filesystem root inspected by outer-loop change tracking (default current working directory)."
+    mandatory: false
+  - name     : debugfile
+    desc     : "Write debug output to this file instead of screen (implies debug=true)"
+    mandatory: false
+  - name     : extracommands
+    desc     : "Comma-separated extra directories for custom slash commands"
+    mandatory: false
+  - name     : goalprefix
+    desc     : "Optional prefix automatically added to every goal"
+    mandatory: false
+  - name     : historys3accesskey
+    desc     : "S3 access key for history mirroring."
+    mandatory: false
+  - name     : historys3bucket
+    desc     : "S3 bucket used by web history to mirror conversations and enabled History VM snapshots."
+    mandatory: false
+  - name     : historys3ignorecertcheck
+    desc     : "Disable TLS certificate checks for history S3 access."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : historys3prefix
+    desc     : "S3 key prefix used for mirrored history files."
+    mandatory: false
+  - name     : historys3region
+    desc     : "S3 region for history mirroring."
+    mandatory: false
+  - name     : historys3secret
+    desc     : "S3 secret key for history mirroring."
+    mandatory: false
+  - name     : historys3url
+    desc     : "S3 endpoint URL for history mirroring."
+    mandatory: false
+  - name     : historys3useversion1
+    desc     : "Use S3 signature v1 for history mirroring."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : homedir
+    desc     : "Override the home directory used to locate the .openaf-mini-a folder (default: user home)"
+    mandatory: false
+  - name     : lccontextlimit
+    desc     : "Estimated low-cost model context token threshold for escalation; 0/unset disables context-based escalation."
+    mandatory: false
+  - name     : logpromptheaders
+    desc     : "Comma-separated request header names to log with web prompts."
+    mandatory: false
+  - name     : maxpromptchars
+    desc     : "Maximum accepted web prompt size in characters."
+    mandatory: false
+  - name     : memoryartifactttldays
+    desc     : "Expiry in days for working-memory artifacts (default 7; negative values fall back to 7)."
+    mandatory: false
+  - name     : memoryindexttldays
+    desc     : "Expiry in days for working-memory indexes (default 1; negative values fall back to 1)."
+    mandatory: false
+  - name     : memorysessionheader
+    desc     : "Request header name used to derive a web memory session id."
+    mandatory: false
+  - name     : noagentsmd
+    desc     : "Disable automatically reading and injecting the nearest AGENTS.md file as rules"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : plugins
+    desc     : "Comma-separated Agent Plugins (agent-plugins.org) directories, each containing a plugin.json"
+    mandatory: false
+  - name     : pluginsroot
+    desc     : "Directory containing multiple Agent Plugins subfolders (default: .openaf-mini-a/plugins)"
+    mandatory: false
+  - name     : pluginsroots
+    desc     : "Comma-separated directories, each containing multiple Agent Plugins subfolders"
+    mandatory: false
+  - name     : ssequeuetimeout
+    desc     : "Web SSE queue timeout in seconds."
+    mandatory: false
+  - name     : trackchanges
+    desc     : "Track filesystem changes in the outer loop; enabled automatically when its no-change stopping condition is active."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : useattach
+    desc     : "Enable file attachments in the web UI."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : usewikigraph
+    desc     : "Enable the wiki knowledge graph for structural and semantic page relationships."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : valtools
+    desc     : "Give the validator read-only tool access (read_file, fetch_url) so it can inspect files/URLs referenced in the valgoal"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : warnunknownargs
+    desc     : "Warn about unrecognized startup arguments (default true; false disables warnings)."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikigraphautosave
+    desc     : "Wiki graph persistence: always (default), debounced, or off."
+    mandatory: false
+  - name     : wikigraphcommunity
+    desc     : "Community detection algorithm for the wiki graph (louvain|leiden)."
+    mandatory: false
+  - name     : wikigraphcross
+    desc     : "Join this wiki's graph with mounted wikis' graphs at query time (explicit @-links, shared tags/aliases/concepts). Requires wikigraphmounts."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikigraphcrosscap
+    desc     : "Maximum cross-wiki entries appended per query."
+    mandatory: false
+  - name     : wikigraphcrossdepth
+    desc     : "Cross-wiki traversal depth: 1 resolves explicit links, 2 also pulls the target's in-mount related pages."
+    mandatory: false
+  - name     : wikigraphcrossjoin
+    desc     : "CSV of enabled cross-wiki join kinds: link, tag, alias, concept."
+    mandatory: false
+  - name     : wikigraphcrossmaxdf
+    desc     : "Skip a shared tag/alias/concept join key present on more than this fraction of a mount's docs."
+    mandatory: false
+  - name     : wikigraphcrossminkeylen
+    desc     : "Minimum length for a shared join key to be used for cross-wiki matching."
+    mandatory: false
+  - name     : wikigraphfalkorgraph
+    desc     : "FalkorDB graph name for wiki graph."
+    mandatory: false
+  - name     : wikigraphfalkorhost
+    desc     : "FalkorDB host for wiki graph."
+    mandatory: false
+  - name     : wikigraphfalkorpass
+    desc     : "FalkorDB password for wiki graph."
+    mandatory: false
+  - name     : wikigraphfalkorport
+    desc     : "FalkorDB port for wiki graph."
+    mandatory: false
+  - name     : wikigraphfalkoruser
+    desc     : "FalkorDB username for wiki graph."
+    mandatory: false
+  - name     : wikigraphhintcap
+    desc     : "Maximum graph-hint pages appended to search results."
+    mandatory: false
+  - name     : wikigraphmounts
+    desc     : "Expand graph hints into mounted wikis' graphs."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikigraphsavedebouncems
+    desc     : "Delay in milliseconds for debounced wiki graph saves (default 5000)."
+    mandatory: false
+  - name     : wikigraphsearchhints
+    desc     : "Append graph-related pages to wiki search results."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikigraphsemantic
+    desc     : "Build semantic (embedding-based) edges in addition to structural links when running /graph build."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikilintresultlimit
+    desc     : "Default maximum lint issues returned to an agent (0 returns all; dream reorg defaults to 25)."
+    mandatory: false
+  - name     : wikimetacache
+    desc     : "Cache parsed wiki page metadata (default true; false reads metadata afresh)."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikimountgraphttlms
+    desc     : "Cache TTL in milliseconds for a mounted wiki's read-only graph handle."
+    mandatory: false
 
 todo:
 - MiniAgent

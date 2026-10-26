@@ -76,6 +76,30 @@ help:
     example  : "30000"
     mandatory: false
 
+  - name     : delegationmaxdepth
+    desc     : "Maximum delegation nesting depth"
+    mandatory: false
+  - name     : delegationmaxretries
+    desc     : "Default retry count for failed subtasks"
+    mandatory: false
+  - name     : maxcontext
+    desc     : "Maximum allowed context tokens"
+    mandatory: false
+  - name     : maxsteps
+    desc     : "Maximum consecutive non-success steps"
+    mandatory: false
+  - name     : shellworker
+    desc     : "Enable useshell and advertise a shell worker skill (default false)."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : usememory
+    desc     : "Enable structured working memory during execution"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : workerspecialties
+    desc     : "Comma-separated specialty tags appended to the default run-goal worker skill."
+    mandatory: false
+
 include:
 - oJobHTTPd.yaml
 

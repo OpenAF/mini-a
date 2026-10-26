@@ -1039,3 +1039,14 @@ Mini-A delegation enables:
 ✅ **Rewind with cleanup** — `/rewind [n]` undoes the last n exchanges and automatically cancels any pending/running subtasks
 
 Combine local, remote, and forked delegation to build sophisticated multi-agent workflows!
+
+
+## Startup parameter reference
+
+Worker startup settings are listed by `ojob mini-a-worker.yaml -jobhelp` and in the
+[worker startup reference](../USAGE.md#worker-startup). `defaulttimeout` (300000)
+and `maxtimeout` (600000) are milliseconds; `taskretention` (3600) is seconds.
+`workerspecialties` adds routing tags and `shellworker=true` enables shell access
+and advertises the shell skill. `apiallow` configures the worker IP allowlist.
+Shared parent-side settings, including automatic delegation, fork policy and
+subtask scheduling, are covered by the [additional reference](../USAGE.md#additional-public-parameter-reference).

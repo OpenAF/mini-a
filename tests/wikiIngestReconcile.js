@@ -143,6 +143,187 @@
     f.write('a.md', '# A\n\n## One\n\nFIRST'); assert(f.run({ ingestmode: 'raw' }).ok, true, 'raw deletion-only update')
     assert(f.body('docs/a.md').indexOf('SECOND') < 0, true, 'raw removes deleted content')
   }) }
+  exports.testValidPageTextDoesNotSignalOverflow = function() {
+    var runner = new MiniAIngest({}, function() {})
+    var page = { title: 'Model limits', body: '# Limits\nThe maximum context length and context window depend on the model.' }
+    ;[page, stringify(page), '```json\n' + stringify(page) + '\n```'].forEach(function(value) {
+      var result = runner._distill({ promptWithStats: function() { return { response: value } } }, { rel: 'a.md' }, [], [], 'test')
+      assert(result.ok, true, 'valid object, JSON string and fenced page accepted')
+      assert(result.page.body, page.body, 'page content preserved')
+    })
+  }
+  exports.testOpenAFRecoveryRequestsAreIsolated = function() {
+    ow.loadAI()
+    ;[false, true].forEach(function(injected) { fixture(function(f) {
+      f.write('a.md', '# A\n\n## One\n\nFIRST_DETAIL\n\n## Two\n\nSECOND_DETAIL')
+      f.write('b.md', '# B\n\n## One\n\nFIRST_DETAIL\n\n## Two\n\nSECOND_DETAIL')
+      var realFactory = $llm, requests = new java.util.concurrent.ConcurrentLinkedQueue(), shared, original
+      var makeProvider = function(config) {
+        var provider = realFactory(config)
+        provider.getGPT().model._request = function(route, body) {
+          var users = body.messages.filter(function(m) { return m.role === 'user' })
+          requests.add(stringify(users))
+          var prompt = String(users[users.length - 1].content)
+          if (prompt.indexOf('You are distilling') === 0) throw new Error('maximum context length exceeded')
+          var markers = ['FIRST_DETAIL', 'SECOND_DETAIL'].filter(function(marker) { return prompt.indexOf(marker) >= 0 }).join(' ')
+          var page = { title: 'Combined', description: 'Facts', tags: [], type: 'reference', body: '# Combined\n\n' + markers }
+          return { choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: stringify(page) } }] }
+        }
+        return provider
+      }
+      var runner = f.runner({ ingestmode: 'distill', ingestconcurrency: 2, model: '(type: openai, model: fixture, key: fixture)' })
+      try {
+        if (injected) {
+          shared = makeProvider({ type: 'openai', model: 'fixture', key: 'fixture' })
+          original = [{ role: 'system', content: 'Configured policy' }, { role: 'user', content: 'Unrelated prior history' }]
+          shared.getGPT().setConversation(clone(original)); original = clone(shared.getGPT().getConversation()); runner._setLlm(shared)
+        } else {
+          runner._setLlm(__)
+          runner._buildLlm = function() {
+            this._distillLlmFactory = function() { return makeProvider({ type: 'openai', model: 'fixture', key: 'fixture' }) }
+            return this._distillLlmFactory()
+          }
+        }
+        var result = runner.run()
+        assert(result.ok, true, stringify(result))
+        assert(result.llm_calls, 8, 'each source rejects once, maps two parts and synthesizes')
+        var entries = requests.iterator(), count = 0
+        while (entries.hasNext()) {
+          var users = af.fromJson(String(entries.next())); count++
+          assert(users.length, 1, 'outgoing request contains only its own user prompt')
+          assert(String(users[0].content).indexOf('Unrelated prior history') < 0, true, 'prior history excluded')
+        }
+        assert(count, 8, 'real adapter requests observed without network')
+        if (injected) assert(stringify(shared.getGPT().getConversation()), stringify(original), 'injected conversation restored after failures and successes')
+      } finally { $llm = realFactory }
+    }) })
+  }
+  exports.testCachedTransformationNeedsNoTokenBudget = function() { fixture(function(f) {
+    f.write('a.md', '# A\n\nCached complete source')
+    var runner = f.runner({ ingestmode: 'distill' }), atomic = runner._atomicJson
+    runner._atomicJson = function(path, value) { if (/\/journal\.json$/.test(path)) throw new Error('injected journal failure'); return atomic.call(this, path, value) }
+    assert(runner.run().ok, false, 'transformation cached before journal failure')
+    var resumed = f.run({ ingestmode: 'distill', wikiingestbudget: 0 })
+    assert(resumed.ok, true, stringify(resumed))
+    assert(resumed.llm_calls, 0, 'no model call needed for cached output')
+    assert(resumed.budget.estimated_input_tokens, 0, 'cache reuse reserves no model tokens')
+    assert(f.prompts.length, 1, 'provider not called again')
+    assert(f.body('docs/a.md').indexOf('Cached complete source') >= 0, true, 'cached result published')
+  }) }
+  exports.testContextOverflowSplitsAndSynthesizes = function() { fixture(function(f) {
+    f.write('a.md', '# A\n\n## One\n\nFIRST_DETAIL\n\n## Two\n\nSECOND_DETAIL')
+    var runner = f.runner({ ingestmode: 'distill' }), prompts = []
+    runner._setLlm({ promptJSONWithStats: function(prompt) {
+      prompts.push(prompt)
+      if (prompt.indexOf('This is one ordered part') !== 0 && prompt.indexOf('These are ordered distilled notes') !== 0) {
+        var overflow = new Error('maximum context length exceeded'); overflow.code = 'context_length_exceeded'; throw overflow
+      }
+      var body = ['FIRST_DETAIL', 'SECOND_DETAIL'].filter(function(marker) { return prompt.indexOf(marker) >= 0 }).join(' ')
+      return { response: { title: 'Combined', description: 'Combined facts', tags: [], type: 'reference', body: '# Combined\n\n' + body } }
+    } })
+    var r = runner.run()
+    assert(r.ok, true, stringify(r)); assert(r.llm_calls, 4, 'one rejection, two parts, one synthesis')
+    assert(f.body('docs/a.md').indexOf('FIRST_DETAIL') >= 0, true, 'first detail retained')
+    assert(f.body('docs/a.md').indexOf('SECOND_DETAIL') >= 0, true, 'last detail retained')
+    assert(r.recovery[0].strategy, 'split-and-synthesize', 'recovery reported')
+    assert(prompts.length, 4, 'each provider attempt counted')
+  }) }
+  exports.testContextOverflowDefersSafely = function() { fixture(function(f) {
+    f.initial(); var prior = f.body('docs/a.md'), state = stringify(f.state())
+    f.write('a.md', '# A\n\n## One\n\nNEW_FIRST\n\n## Two\n\nNEW_LAST')
+    ;[{ wikiingestmaxcalls: 0 }, { wikimaxprompttokens: 10000 }].forEach(function(options) {
+      var calls = 0, runner = f.runner(merge({ ingestmode: 'distill', ingestinclude: 'a.md' }, options))
+      runner._setLlm({ promptJSONWithStats: function() { calls++; var error = new Error('maximum context length exceeded'); error.code = 'context_length_exceeded'; throw error } })
+      var r = runner.run()
+      assert(r.ok, false, 'overflow is deferred'); assert(r.deferred.length > 0, true, 'deferral is reported')
+      assert(calls, 1, 'no split call when recovery disabled or positive cap')
+      assert(f.body('docs/a.md'), prior, 'previous page preserved')
+      assert(stringify(f.state()), state, 'manifest unchanged')
+    })
+  }) }
+  exports.testOverflowCallLimitAndPartCheckpoint = function() { fixture(function(f) {
+    f.write('a.md', '# A\n\n## One\n\nFIRST_DETAIL\n\n## Two\n\nSECOND_DETAIL')
+    var makeProvider = function(counter) { return { promptJSONWithStats: function(prompt) {
+      counter.calls++
+      if (prompt.indexOf('This is one ordered part') !== 0 && prompt.indexOf('These are ordered distilled notes') !== 0) {
+        var overflow = new Error('maximum context length exceeded'); overflow.code = 'context_length_exceeded'; throw overflow
+      }
+      var body = ['FIRST_DETAIL', 'SECOND_DETAIL'].filter(function(marker) { return prompt.indexOf(marker) >= 0 }).join(' ')
+      return { response: { title: 'Combined', description: 'Combined facts', tags: [], type: 'reference', body: '# Combined\n\n' + body } }
+    } } }
+    var firstCalls = { calls: 0 }, first = f.runner({ ingestmode: 'distill', wikiingestmaxcalls: 2 })
+    first._setLlm(makeProvider(firstCalls))
+    var blocked = first.run()
+    assert(blocked.ok, false, 'call limit safely defers source')
+    assert(firstCalls.calls, 2, 'original attempt and first part consume allowance')
+    assert(blocked.deferred.length > 0, true, 'limit reason reported')
+    assert(io.fileExists(f.wiki + '/docs/a.md'), false, 'no partial page')
+    var resumedCalls = { calls: 0 }, resumed = f.runner({ ingestmode: 'distill', wikiingestmaxcalls: 4 })
+    resumed._setLlm(makeProvider(resumedCalls))
+    var complete = resumed.run()
+    assert(complete.ok, true, stringify(complete))
+    assert(resumedCalls.calls, 3, 'successful first part reused on retry')
+    assert(complete.recovery[0].cache_hits >= 1, true, 'checkpoint reuse reported')
+    assert(f.body('docs/a.md').indexOf('SECOND_DETAIL') >= 0, true, 'full page published')
+  }) }
+  exports.testSynthesisOverflowReducesNotes = function() { fixture(function(f) {
+    f.write('a.md', '# A\n\n## One\n\nFIRST_DETAIL\n\n## Two\n\nSECOND_DETAIL')
+    var calls = 0, synthesis = 0, runner = f.runner({ ingestmode: 'distill' })
+    runner._setLlm({ promptJSONWithStats: function(prompt) {
+      calls++
+      var isPart = prompt.indexOf('This is one ordered part') === 0
+      var isSynthesis = prompt.indexOf('These are ordered distilled notes') === 0
+      if (!isPart && !isSynthesis || isSynthesis && ++synthesis === 1) {
+        var overflow = new Error('maximum context length exceeded'); overflow.code = 'context_length_exceeded'; throw overflow
+      }
+      var markers = ['FIRST_DETAIL', 'SECOND_DETAIL'].filter(function(marker) { return prompt.indexOf(marker) >= 0 }).join(' ')
+      var filler = isPart ? repeat(20, 'part detail ') : ''
+      return { response: { title: 'Combined', description: 'Facts', tags: [], type: 'reference', body: '# Combined\n\n' + markers + filler } }
+    } })
+    var r = runner.run()
+    assert(r.ok, true, stringify(r))
+    assert(synthesis >= 4, true, 'synthesis overflow led to smaller reductions and final synthesis')
+    assert(calls <= 32, true, 'bounded call allowance respected')
+    assert(f.body('docs/a.md').indexOf('FIRST_DETAIL') >= 0, true, 'first source part retained')
+    assert(f.body('docs/a.md').indexOf('SECOND_DETAIL') >= 0, true, 'second source part retained')
+  }) }
+  exports.testOverflowBudgetAcrossParallelSources = function() {
+    var root = String(io.createTempDir('ingest_budget_'))
+    try {
+      var runner = new MiniAIngest({}, function() {}), sources = [
+        { src: { rel: 'a.md' }, key: 'a', hash: 'a', content: '# Same\n\nContent' },
+        { src: { rel: 'b.md' }, key: 'b', hash: 'b', content: '# Same\n\nContent' }
+      ]
+      var estimate = Math.ceil(runner._distillPrompt(sources[0].src, [sources[0].content], []).length / 4)
+      var limit = Math.floor((estimate + Math.ceil(estimate / 5)) * 1.5)
+      runner._transformContext = { root: root, fingerprint: 'test', budget: new global.__miniAWikiKnowledge.Budget({ wikiingestbudget: limit }, 'ingest'),
+        budgetLock: new java.util.concurrent.locks.ReentrantLock(), calls: new java.util.concurrent.atomic.AtomicInteger(0), paths: new java.util.concurrent.ConcurrentLinkedQueue() }
+      var provider = { promptJSONWithStats: function() { java.lang.Thread.sleep(30); return { response: { title: 'Same', body: '# Same\n\nContent' } } } }
+      var results = parallel4Array(sources, function(p) { return runner._distillRecover(provider, p, [p.content], []) })
+      assert(results.filter(function(r) { return r.ok }).length, 1, 'only one request fits shared budget')
+      assert(results.filter(function(r) { return r.deferred }).length, 1, 'other source deferred')
+      assert(Number(runner._transformContext.calls.get()), 1, 'only reserved call reaches provider')
+    } finally { io.rm(root) }
+  }
+  exports.testRecoverySplitKeepsSurrogatePair = function() {
+    var runner = new MiniAIngest({}, function() {})
+    var source = 'abc😀def', parts = runner._recoverySplit(source)
+    assert(parts.join(''), source, 'all Unicode content retained')
+    assert(/^[\uDC00-\uDFFF]/.test(parts[1]), false, 'right part never begins with low surrogate')
+  }
+  exports.testStructuredContextOverflowResponse = function() {
+    var runner = new MiniAIngest({}, function() {})
+    var response = runner._distill({ promptJSONWithStats: function() { return { response: { error: { code: 'context_length_exceeded', message: 'maximum context length exceeded' } } } } }, { rel: 'a.md' }, ['# A'], [])
+    assert(response.contextOverflow, true, 'structured provider error is classified before page validation')
+  }
+  exports.testOtherModelErrorsNeverSplit = function() { fixture(function(f) {
+    f.write('a.md', '# A\n\n## One\n\nFIRST\n\n## Two\n\nSECOND')
+    var calls = 0, runner = f.runner({ ingestmode: 'distill' })
+    runner._setLlm({ promptJSONWithStats: function() { calls++; throw new Error('authentication failed') } })
+    var r = runner.run()
+    assert(r.ok, false, 'model failure blocks source'); assert(calls, 1, 'no split on unrelated error')
+    assert(r.failed.length > 0, true, 'ordinary failure reported')
+  }) }
   exports.testBudgetDeferral = function() { fixture(function(f) {
     f.initial(); var before = f.body('docs/a.md'), state = stringify(f.state())
     f.write('a.md', '# A\n\n' + repeat(10000, 'oversized '))

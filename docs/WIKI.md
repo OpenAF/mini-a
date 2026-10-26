@@ -416,6 +416,8 @@ S3 continues to support `wikis3artifactprefix` containing individual Lucene and 
 
 ## Search scan budget, read cache, and parallel scan
 
+The `wikisearch*` settings in this section configure direct `MiniAWikiManager` instances. They are currently not forwarded by the shared CLI configuration adapter.
+
 `wiki search` normally answers from the Lucene index (no per-page backend reads). It falls back to scanning pages one at a time whenever `forceScan` is set, `regex` is used, a scoped `path` is given, or no usable index exists — and that scan reads every candidate page via `backend.read()` until it finds enough matches or runs out of pages. For a local filesystem that's cheap; for `s3` or `http` backends each read is a network round-trip, individually capped by `wikihttptimeout` but with no cap on the total number of reads a rare-match query might trigger.
 
 Two settings bound that cost, and apply across a search **and** its mount fan-out as one shared budget, not one per mount:
@@ -517,7 +519,9 @@ attempt to create it.
 `ingestmode=auto` is deterministic-first and is the default: well-structured Markdown is
 normalized without a model call. Use `normalize` or `raw` to avoid distillation calls, and
 `distill` to preserve legacy LLM distillation. `wikillmbudget`, `wikiingestbudget`,
-`wikidreambudget`, and `wikimaxprompttokens` defer work rather than dropping it.
+and a positive `wikimaxprompttokens` defer over-budget ingestion work. With the default
+`wikimaxprompttokens=0`, a context-limit error triggers bounded split-and-synthesize
+recovery, controlled by `wikiingestmaxcalls` (default 32; 0 disables recovery).
 The ingest source reader also extracts text from DOCX/DOC, XLSX/XLS, PPTX/PPT and PDF
 through Tika, and describes PNG/JPEG through the configured vision model. Extraction
 failures and truncated documents leave their source pages untouched. The default
@@ -597,8 +601,9 @@ filesystem an atomic snapshot. Do not modify the source during reconciliation.
 All modes rebuild complete pages. `normalize`, `raw`, and structured `auto` use no
 model. Distillation receives every current source chunk, including after section
 removals or `ingestforce=true`. Prompt overhead counts toward `wikimaxprompttokens`
-and `wikiingestbudget`/`wikillmbudget`; oversized complete sources are deferred,
-never silently truncated. Force does not authorize deletion, bypass read-only
+and `wikiingestbudget`/`wikillmbudget`. By default, a context-limit error
+triggers split-and-synthesize recovery; if recovery cannot finish, ingestion
+defers the source without replacing its page. Force does not authorize deletion, bypass read-only
 access, override edits, or waive budgets.
 
 Mappings and meaningful page signatures protect manual edits and dream changes.
@@ -731,3 +736,41 @@ S3 existence checks use metadata-only HEAD requests when the installed S3 client
 supports them, with GET compatibility for older clients. Direct page reads still
 fetch the current body before slicing; the scan cache described above does not
 change that freshness contract.
+
+
+## Model prompt and operation limits
+
+These settings appear in console help and in `ojob mini-a-ingest.yaml -jobhelp`.
+They bound ingestion distillation estimates, including prompt overhead and estimated
+output. They do not cap vision extraction calls or all model activity in a session.
+
+| Parameter | Type | Default | Behavior |
+| --- | --- | --- | --- |
+| `wikimaxprompttokens` | number | `0` | Zero/unset tries the complete source then splits on provider context overflow. Positive values impose a hard estimated input cap and defer oversized sources. |
+| `wikiingestmaxcalls` | number | `32` | Maximum distillation model calls per source, including failed attempts and synthesis. `0` disables recovery after the initial call. |
+| `wikillmbudget` | number | `-1` | Fallback estimated input-plus-output token budget for one ingestion invocation; negative/unset means unlimited. |
+| `wikiingestbudget` | number | fallback | A nonnegative value overrides `wikillmbudget` for ingestion; `0` defers distillation work. Negative/unset values use the fallback. |
+| `wikidreambudget` | number | not enforced | Reserved by the budget helper; the current dream runner does not use it. Use `dreammaxsteps` for the auto/reorg step budget. |
+| `dreamwikimaxaffected` | number | `100` | Bounds the affected-page set in dream plan/dry-run previews. |
+| `wikimetacache` | boolean | `true` | Cache parsed page metadata; `false` reads metadata afresh. |
+| `wikigraphautosave` | string | `always` | Graph persistence policy: `always`, `debounced`, or `off`. |
+| `wikigraphsavedebouncems` | number | `5000` | Delay in milliseconds for debounced graph saves. |
+
+These examples run ingestion with automatic recovery, an explicit prompt cap, or
+recovery disabled. Add `ingestdryrun=true` to preview without model calls or page writes:
+
+```sh
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=./wiki ingestmode=distill wikimaxprompttokens=0 wikiingestmaxcalls=32
+# Enforce a hard prompt cap instead:
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=./wiki ingestmode=distill wikimaxprompttokens=12000
+# Try the complete source once with recovery disabled:
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=./wiki ingestmode=distill wikiingestmaxcalls=0
+```
+
+The budget is local to each ingestion invocation, rather than shared across
+independent ingestion or dream operations. `ingestforce=true` does not bypass it.
+The source contains `wikilintstreamthreshold` and `wikilintmaxpairs` configuration
+plumbing, but current lint does not consume those values. They are not supported
+lint tuning controls. `dreamwikilevel` has no implementation; select supported
+operations with `dreamwikimode`. The legacy `dreamwikiminpages` option is ignored;
+index finalization runs regardless of page count.

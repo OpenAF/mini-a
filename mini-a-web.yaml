@@ -1106,6 +1106,221 @@ help:
     desc     : Comma-separated extra directories for custom hooks
     example  : "/opt/mini-a/hooks"
     mandatory: false
+  - name     : agentcomms
+    desc     : "Opt-in communication profiles, grants, delegation allowance and limits (JSON/SLON); see USAGE.md"
+    mandatory: false
+  - name     : capabilitylimit
+    desc     : "Maximum capabilities exposed when capabilityselection=true"
+    mandatory: false
+  - name     : capabilityselection
+    desc     : "Select a bounded relevant subset of normalized capabilities before registering MCP tools"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : conversation
+    desc     : "Conversation history file"
+    mandatory: false
+  - name     : convertplan
+    desc     : "Convert plan to requested format and exit"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : durable
+    desc     : "Persist a resumable run state and redacted JSONL trace"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : goal
+    desc     : "Goal text to execute."
+    mandatory: false
+  - name     : lccontextlimit
+    desc     : "Estimated low-cost model context token threshold for escalation; 0/unset disables context-based escalation."
+    mandatory: false
+  - name     : lcreplytool
+    desc     : "Use a capture-only MCP tool for LC JSON retries (OpenAI-compatible/Ollama)."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : maxcontent
+    desc     : "Alias for maxcontext."
+    mandatory: false
+  - name     : mcpproxyallow
+    desc     : "Comma-separated allowlist of downstream tool names exposed through proxy-dispatch"
+    mandatory: false
+  - name     : mcpproxydeny
+    desc     : "Comma-separated denylist of downstream tool names hidden from proxy-dispatch"
+    mandatory: false
+  - name     : mcpproxynative
+    desc     : "Enable native function calling for proxy-dispatch (defaults to true; set to false for action-based JSON)"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : memoryartifactttldays
+    desc     : "Expiry in days for working-memory artifacts (default 7; negative values fall back to 7)."
+    mandatory: false
+  - name     : memoryindexttldays
+    desc     : "Expiry in days for working-memory indexes (default 1; negative values fall back to 1)."
+    mandatory: false
+  - name     : noagentsmd
+    desc     : "Disable automatically reading and injecting the nearest AGENTS.md file as rules"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : nosetmcpwd
+    desc     : "Prevent automatic MCP working directory configuration"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : orchestration
+    desc     : "Execution strategy mode: manual or deterministic auto."
+    mandatory: false
+  - name     : outfile
+    desc     : "Save final answer to file"
+    mandatory: false
+  - name     : outfileall
+    desc     : "Write the full deep-research output payload to file."
+    mandatory: false
+  - name     : outputfile
+    desc     : "Alias for outfile for plan conversions"
+    mandatory: false
+  - name     : planmode
+    desc     : "Run in plan-only mode without executing actions"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : policy
+    desc     : "SLON/JSON policy definition for shell, tools, delegation, Wiki and network"
+    mandatory: false
+  - name     : policyfile
+    desc     : "JSON file containing centralized policy definition"
+    mandatory: false
+  - name     : raw
+    desc     : "Return raw LLM output without formatting adjustments"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : resumerun
+    desc     : "Resume an interrupted durable run by ID"
+    mandatory: false
+  - name     : rtm
+    desc     : "Legacy alias for rpm (requests per minute)"
+    mandatory: false
+  - name     : runid
+    desc     : "Stable identifier for a durable run"
+    mandatory: false
+  - name     : runroot
+    desc     : "Optional durable-run storage root"
+    mandatory: false
+  - name     : state
+    desc     : "Initial agent state (JSON or SLON)"
+    mandatory: false
+  - name     : toolargcheck
+    desc     : "Reject schema-declared missing parameters and unknown parameters when additionalProperties is false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : toolargrepair
+    desc     : "Repair obvious tool argument typos, wrappers, and JSON strings before dispatch"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : useasciiviz
+    desc     : "Render oafPrintChart Markdown fences as console charts and expose printChart for interim charts."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : usestdutils
+    desc     : "Enable standard-utils compatibility aliases (question, skill, todowrite, etc.)."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : usewikigraph
+    desc     : "Enable the wiki knowledge graph for structural and semantic page relationships."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : validateplan
+    desc     : "Validate a plan using LLM-based critique and structure validation"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : valtools
+    desc     : "Give the validator read-only tool access (read_file, fetch_url) so it can inspect files/URLs referenced in the valgoal"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : warnunknownargs
+    desc     : "Warn about unrecognized startup arguments (default true; false disables warnings)."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikidreambudget
+    desc     : "Reserved dream-scope estimated token budget; the current dream runner does not enforce it. Use dreammaxsteps to bound model steps."
+    mandatory: false
+  - name     : wikigraphautosave
+    desc     : "Wiki graph persistence: always (default), debounced, or off."
+    mandatory: false
+  - name     : wikigraphcommunity
+    desc     : "Community detection algorithm for the wiki graph (louvain|leiden)."
+    mandatory: false
+  - name     : wikigraphcross
+    desc     : "Join this wiki's graph with mounted wikis' graphs at query time (explicit @-links, shared tags/aliases/concepts). Requires wikigraphmounts."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikigraphcrosscap
+    desc     : "Maximum cross-wiki entries appended per query."
+    mandatory: false
+  - name     : wikigraphcrossdepth
+    desc     : "Cross-wiki traversal depth: 1 resolves explicit links, 2 also pulls the target's in-mount related pages."
+    mandatory: false
+  - name     : wikigraphcrossjoin
+    desc     : "CSV of enabled cross-wiki join kinds: link, tag, alias, concept."
+    mandatory: false
+  - name     : wikigraphcrossmaxdf
+    desc     : "Skip a shared tag/alias/concept join key present on more than this fraction of a mount's docs."
+    mandatory: false
+  - name     : wikigraphcrossminkeylen
+    desc     : "Minimum length for a shared join key to be used for cross-wiki matching."
+    mandatory: false
+  - name     : wikigraphfalkorgraph
+    desc     : "FalkorDB graph name for wiki graph."
+    mandatory: false
+  - name     : wikigraphfalkorhost
+    desc     : "FalkorDB host for wiki graph."
+    mandatory: false
+  - name     : wikigraphfalkorpass
+    desc     : "FalkorDB password for wiki graph."
+    mandatory: false
+  - name     : wikigraphfalkorport
+    desc     : "FalkorDB port for wiki graph."
+    mandatory: false
+  - name     : wikigraphfalkoruser
+    desc     : "FalkorDB username for wiki graph."
+    mandatory: false
+  - name     : wikigraphhintcap
+    desc     : "Maximum graph-hint pages appended to search results."
+    mandatory: false
+  - name     : wikigraphmounts
+    desc     : "Expand graph hints into mounted wikis' graphs."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikigraphsavedebouncems
+    desc     : "Delay in milliseconds for debounced wiki graph saves (default 5000)."
+    mandatory: false
+  - name     : wikigraphsearchhints
+    desc     : "Append graph-related pages to wiki search results."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikigraphsemantic
+    desc     : "Build semantic (embedding-based) edges in addition to structural links when running /graph build."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikiingestbudget
+    desc     : "Estimated input-plus-output token budget per ingestion operation; nonnegative values override wikillmbudget (0 defers model work)."
+    mandatory: false
+  - name     : wikilintresultlimit
+    desc     : "Default maximum lint issues returned to an agent (0 returns all; dream reorg defaults to 25)."
+    mandatory: false
+  - name     : wikillmbudget
+    desc     : "Fallback estimated input-plus-output token budget per ingestion operation; -1/unset is unlimited. A nonnegative wikiingestbudget overrides it; this is not an aggregate cap across operations."
+    mandatory: false
+  - name     : wikiingestmaxcalls
+    desc     : "Maximum distillation model calls per source during wiki ingestion (default 32), including retries and synthesis; 0 disables split recovery but allows the initial call."
+    mandatory: false
+  - name     : wikimaxprompttokens
+    desc     : "Maximum estimated input tokens per wiki model prompt (default 0). Zero/unset tries the full source and splits on context overflow; a positive value defers oversized work."
+    mandatory: false
+  - name     : wikimetacache
+    desc     : "Cache parsed wiki page metadata (default true; false reads metadata afresh)."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikimountgraphttlms
+    desc     : "Cache TTL in milliseconds for a mounted wiki's read-only graph handle."
+    mandatory: false
+
 include:
 - oJobHTTPd.yaml
 
