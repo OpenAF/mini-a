@@ -238,23 +238,23 @@ filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENT-CHEATSHEET.md: 38a09d995d38b824a4c68397162040b15c425996
   AGENTS.md: 108ea2ac09a8fa0f5b1f72bf9511082f619c2a43
-  CHEATSHEET.md: 98e81b9c8924015a6a4fec4ed75001611d79bc1a
+  CHEATSHEET.md: 896c597de2a89328914cd3c7d6fb0e58baf81e11
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   METRICS.md: 7dd872f40105f3c2156a64f15bdf0bfa8ac5661b
-  README.md: c05c7eba5394cc6dce2919e9a609079dcd4a07e4
+  README.md: a6a7da73b2a72a33d152b1a7b4e1d7aab0fc6834
   RELEASE_NOTES.md: c73293147879b0288813a080a234b8a8c444447c
-  USAGE.md: 7e8f49e30c13b19ecff267873a886f801470222a
+  USAGE.md: 4afe6c2c7b376bedf02352b2277d68dbe816a138
   docs/ABSORB.md: 31bbe919b680e78b369772608d10dda78d1e015e
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/AGENT-PLUGINS.md: af8f692ac4bc690ac9df180e86bb1a1307a5aae5
   docs/BACKEND-ENDPOINTS.md: 6e8e9693f28e24e8d8def4136901805e8bc864a8
   docs/DECISIONS.md: b7fba587b79a3186c75ae23fcecfe6a66d8949ba
-  docs/DELEGATION.md: 35278bd12df5470801241dd72b0c60bf13cad8e5
+  docs/DELEGATION.md: 1eeb7426009d94c369763aa363db0bd0428051d1
   docs/ENTRY-POINT-PARITY.md: f7930f9f07ce49dededd30280dcc5eccf4397917
   docs/LEARN.md: d61c674318b0655a2cdade7a2102339ac5fa4d75
-  docs/MCPPROXY-FEATURE.md: 95dccab604c97f07a561f193e4727dd7796d0e0a
+  docs/MCPPROXY-FEATURE.md: 247465832f303e7e197caf7be1874fe100b7c942
   docs/OPTIMIZATIONS.md: 0f90df64489bf66e3f284d2f3992014f0a5b37a3
   docs/PATH-INPUT-AUDIT.md: 3a874f9300b85f41beccd20332a3d4c04b16fcc3
   docs/REPLY-JSON.md: 9dd6747356eb044924928dd08737a01e162e5f5c
@@ -263,7 +263,7 @@ filesHash:
   docs/VIRTUAL-SKILLS.md: 42a62ce95a0310fb72f1af1115401891423f17e5
   docs/WHATS-NEW.md: 651a11a3d9c22dfefd2bc1bfb7df6e7cc6d08ece
   docs/WIKI-RETRIEVAL-V2.md: 4fe8883850461e4dd8ea717ef95f3281ccb36c77
-  docs/WIKI.md: 819335521b553717b3f34f54b6be9050fefcfb3d
+  docs/WIKI.md: 19f1d68eb71c4724d62f544ae08c23a37a0eb45b
   docs/WORKIQ.md: 9d2a64d6e06e148775a77b8c4df40427ffb16524
   evals/context-virtualization.yaml: 3a58466efa06dbf3dfc028d6a4b59bfc3dcb80a6
   evals/core.yaml: 5bd4c7f5b1fc650e1b656a09f169fbaf2610a9ad
@@ -333,27 +333,27 @@ filesHash:
   mcps/mcp-wiki.yaml: cbd718d898c5861e989b253820ebd61f969afe89
   mcps/mcp-workiq.yaml: 10709d2dccf1032ac4826e8cb512cfb88bf4d14a
   mini-a-absorb.js: 45f96e83a8053171f1ae7abd4ac3fbc4a9c6728f
-  mini-a-absorb.yaml: af9f87b3ddb0d4f13c7ed23cd6ab57fd258c2309
+  mini-a-absorb.yaml: 30929d15adaef1aba45c47336dbdd109c6a8a201
   mini-a-advanced.js: fa769acccdebcf40dee066911d8000d2180046ca
   mini-a-capabilities.js: 7627dbcf9cceb6cbc52178078ae54dec0cdd9665
-  mini-a-common.js: 89e50b6db9a7c93c3ac7c233e9eb168f5ec24f95
+  mini-a-common.js: 0d8aaeb050d2ae28a399256916995d25cccb5b96
   mini-a-con.js: 8953d1720b12352191542c1a002b7fece0f4e0da
   mini-a-decision.js: 0b446ad0726c35640cabc5b6f395c8d415bae54e
   mini-a-dreams.js: d4946f6f388f592f5587138ba693596ddeb34a63
   mini-a-eval.js: 05bb4c4f2bf082c6e30740666422720b0bea3093
-  mini-a-eval.yaml: 03938780f7fdb9f3a1ed0d3e5fbdfd58f76fe853
+  mini-a-eval.yaml: 657c9cc6751213f326c46276c2ecaead7186acb5
   mini-a-fork-policy.js: 5da8a44ba71493fe0dfacfe1baf6fcd1973c53cd
   mini-a-graph.js: 4e93499f09dd85057a74094c6d605f1d74777f8c
   mini-a-history-vm.js: 1c0a55aa80a417612d42cf6b4d557149f8a55601
-  mini-a-ingest.js: 8635a74df8b98737035beab5f3983b5ac6b851b8
-  mini-a-ingest.yaml: 44224cdc6d1776e51dc6e59c082e49b39c4e9c10
+  mini-a-ingest.js: c60e1fbd0a0dbb6b2f05ffd8edfca63933e6d607
+  mini-a-ingest.yaml: 1b19747a3dc9de89278eda273d53f1bdb25502cc
   mini-a-mcp-skills.js: 6835e75f88fd3791444cca547eea943faf08a48f
   mini-a-mcp-wiki.js: 89e61853ca08183b5c5a70f3095d503356f5d694
   mini-a-mcptest.js: dc9ca2dbb5c070eac462c8efc0a83c408712d489
   mini-a-memory.js: 0d35042c9ac24a6f277bbaa4422374a168fd8116
   mini-a-memoryman.js: a943c4a3f946140f3585940d53eda148fc47e4ab
   mini-a-modelman.js: 893127cfdbd0c007a090e4aa193129155828bc95
-  mini-a-modes.yaml: d98ba758a5031e611a7c6c2e5d740edb61612a2d
+  mini-a-modes.yaml: eaecb40c2ad9db90727b50a2ecfeb10c1b44d8bc
   mini-a-orchestration.js: f1df95d9b04df9862a74421f9048534eb1c4b097
   mini-a-plugins.js: db97218e8b99efdf940d1d309ca99d1a6aec8b2c
   mini-a-policy.js: 39767cc38f00de6725344b1e1eca1000dedaee54
@@ -361,7 +361,7 @@ filesHash:
   mini-a-response.js: 14d6bbe7dfd7cb9438624954638c8b5148b5b954
   mini-a-router.js: 381d0f2d34864fdca03d5d4f528fa0f827bbed48
   mini-a-sandbox.js: d2cb513e2bcde93fe9b9ba235e6fd5d7fb3743f5
-  mini-a-session.js: a32b971722861105d9cb6c9fa8d868ea9906f8c7
+  mini-a-session.js: cede99cce19c869ac25d2a946c14bddad87f9fb5
   mini-a-skill-runtime.js: fe1ac2f5b83eb42e97d107b1a93a9fb7b2c6fcdb
   mini-a-skills.js: dc872bc2ab80de9cd48375768b642fab514bf826
   mini-a-subtask.js: 4c0eb1ab97fcbda0bcf7d9dcbe1c00a2831c615a
@@ -371,17 +371,17 @@ filesHash:
   mini-a-web-attachments.js: db5231df27e2e3a98eaaf09c28c0ee46e3b8c636
   mini-a-web-session.js: b2b5decf86800e75aa67d29f028fe2dc2f0b6ec9
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: 8fa01f425c63122de6d6eab0d8b521f83e858e11
-  mini-a-wiki-knowledge.js: 761d3b090b377937284a809d251d720020e0f786
+  mini-a-web.yaml: c58d61f1a9b196e5ef84971b2a937b3de0cf1a02
+  mini-a-wiki-knowledge.js: e610424bc39c3acce8f67ce3c8595a6213b28834
   mini-a-wiki-maintenance.js: c4eb53388a3674092c0a722e7631de09df759c8a
   mini-a-wiki-retrieval.js: 8bdd6a99e9eb67eaae62b0ac1fa73085beb26dd7
   mini-a-wiki.js: 3635b52faa854f5a9a87b64e67363ee68531e4e8
   mini-a-wikiman.js: d3893459789696a0ab68e3fd7a7fb29f24c45255
   mini-a-wikiops.js: 8319cc308dca129e8b953ab621e07df961694d9a
-  mini-a-worker.yaml: 61db1be4bd04386b3d55b7461c842174f4de3f07
-  mini-a.js: 62b6b0cc972e1b6074ff3269d7b6d01cd24e81d2
+  mini-a-worker.yaml: 79fb5dd2a55789e6ee2d14c55e7576c9ff1c8737
+  mini-a.js: bad6b6eb0876d163509bd3881063d8d8363e111e
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
-  mini-a.yaml: a6235df816781f13fe54b62e4a949378cff706f3
+  mini-a.yaml: 3b99209cb461b6c29d6e70cf475cdb0adb2326c1
   public/advanced.css: 531d5c0b6252367e4234069b50b7d8061a196431
   public/advanced.js: 5035cb582dd4dfc7bd0f86a1c2e0a2c56715f80c
   public/apple-touch-icon.png: 5e22ed6b303b377787779423b97c22f7b20b56ed
