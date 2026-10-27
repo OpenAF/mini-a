@@ -1001,6 +1001,12 @@ The `start()` method accepts various configuration options:
 - **`toolargrepair`** (boolean, default: true): Before checking, repairs an unambiguous near-typo, unwraps a sole `arguments`/`params`/`input` object, and parses JSON strings for object/array parameters. Repairs are traced so they remain visible to diagnostics.
 
 Embedded utility calls that fail argument validation return targeted corrections for the offending fields. Feedback includes up to three issues, with nested field paths, expected types or allowed values, and small examples where needed. This guidance is returned after a rejected call and adds no standing prompt instructions or mandatory skill loading. Existing accepted argument coercions and aliases remain supported. Permission, file-access and provider failures retain their original meaning; failed writes are not automatically retried.
+
+Tool policy is checked at the shared direct-call boundary, including the target
+of a `proxy-dispatch` call. When a restrictive policy is active, pass proxy call
+arguments inline: `argumentsFile` is rejected because its contents cannot be
+classified at that boundary. Calls without a restrictive policy retain the file
+handoff behavior.
 - **`usewiki`** (boolean, default: `false`): Enable the persistent Markdown wiki knowledge base.
 - **`wikiaccess`** (string, default: `ro`): Wiki access mode, `ro` or `rw`.
 - **`wikibackend`** (string, default: `fs`): Wiki backend, one of `fs`, `s3`, `s3fs`, `es` (Elasticsearch/OpenSearch), or read-only `http` (`https` is accepted as an alias).
@@ -1081,7 +1087,7 @@ For the Elasticsearch/OpenSearch wiki backend, there is no separate top-level `e
 - **`deescalate`** (number, default: 3): Number of consecutive successful steps required after an escalation before Mini-A automatically reverts to the low-cost model. Set to a higher value for more conservative de-escalation or `0` to disable de-escalation entirely.
 - **`lccontextlimit`** (number, default: 0 = disabled): Maximum context token count before escalating to the main model. When the estimated context size reaches this threshold, Mini-A switches to the main model for that step. Useful when the low-cost model has a smaller context window than the main model. Set to `0` to disable context-based escalation.
 - **`modellock`** (string, one of `"main"`, `"lc"`, or `"auto"` = default): Select a model tier for normal steps, bypassing score-based escalation and de-escalation. Recovery paths (including invalid-JSON fallback) can still call the main model, so this is not a strict spending or provider-isolation boundary. Use `modellock=main` to select the main model (`OAF_MODEL`), `modellock=lc` to select the low-cost model (`OAF_LC_MODEL`), or leave unset/`auto` for the default adaptive behaviour. A one-time info message is logged at startup when a lock is active.
-- **`modelstrategy`** (string, one of `"default"`, `"advisor"`, `"delegate"`, `"supervised"` or `"auto"`, default: `"default"`): Select the model orchestration profile. `auto` resolves once per run (in `init()`, before the system prompt is built) to a concrete strategy: resumed runs keep theirs, contract options pick `supervised`, no LC model or `modellock=main|lc` picks `default`, complex goals with a verification requirement (`test`/`validate`/`verify`/`ensure` words or `outfile`) pick `supervised` when no supervised-conflicting option is set, other complex goals pick `advisor`, medium low-risk goals with `lcbudget>0` pick `delegate`, otherwise `default`. Medium goals are refined by the decision model when configured. `orchestration=auto` uses the same resolver when `modelstrategy` is not set explicitly. Subtasks of an `auto` run resolve for their own goal. `default` keeps current LC-first behavior with escalation. `advisor` keeps LC as the executor and selectively calls the main model as an internal advisor for difficult steps.
+- **`modelstrategy`** (string, one of `"default"`, `"advisor"`, `"delegate"`, `"supervised"` or `"auto"`, default: `"default"`): Select the model orchestration profile. `auto` resolves once per run (in `init()`, before the system prompt is built) to a concrete strategy: resumed runs keep theirs, contract options pick `supervised`, no LC model or `modellock=main|lc` picks `default`, eligible complex batch execution goals with a deliverable and verification signal pick `supervised`, while interactive and other complex goals pick `advisor`, medium low-risk goals with `lcbudget>0` pick `delegate`, otherwise `default`. Medium goals are refined by the decision model when configured. `orchestration=auto` uses the same resolver when `modelstrategy` is not set explicitly. Subtasks of an `auto` run resolve for their own goal. `default` keeps current LC-first behavior with escalation. `advisor` keeps LC as the executor and selectively calls the main model as an internal advisor for difficult steps.
 - **`advisormaxuses`** (number, default: `2`): Maximum advisor consultations per run when `modelstrategy=advisor`.
 - **`advisorenable`** (boolean, default: `true`): Master toggle for advisor consultations inside `modelstrategy=advisor` runs.
 - **`advisoronrisk`** (boolean, default: `true`): Allow advisor consults on risk signals.
@@ -3879,12 +3885,19 @@ use `dreammaxsteps` for auto/reorg steps. See [wiki limits](docs/WIKI.md#model-p
 # Adaptive orchestration
 
 `orchestration=manual` is the default and preserves the current behavior.
-`orchestration=auto` applies deterministic goal-complexity and risk heuristics
-to the existing planning, advisor/model-strategy, and evidence-gate controls.
+`orchestration=auto` applies goal-complexity and risk heuristics to the existing
+planning, advisor/model-strategy, and evidence-gate controls. A configured decision
+model may refine ambiguous complexity and assist bounded execution decisions.
 Explicit flags such as `useplanning=false`, `modelstrategy=default`, and
 `evidencegate=false` always win. Auto decisions are available through the
-existing trace sink as structured `orchestration_decision` records; no extra
-LLM routing call is made.
+existing trace sink as structured `orchestration_decision` records.
+
+`orchestrationcontext=auto` treats console and web sessions as interactive and
+direct jobs and workers as batch. Set it to `interactive` or `batch` to override
+this. Automatic strategy selection does not select supervised for interactive
+sessions; batch selection requires a complex execution goal, a deliverable and
+a verification signal. An explicit supervised strategy or contract and a resumed
+supervised run still take precedence.
 
 # Evaluation suites
 
@@ -5079,6 +5092,43 @@ See the [wiki guide](docs/WIKI.md), [delegation guide](docs/DELEGATION.md), and 
 ### Reliable automatic orchestration
 
 `orchestration=auto` tracks progress from relevant new tool evidence and accepted task results. Repeating a successful call with unchanged output does not reset the progress guard. Four active steps without progress request a changed approach; two unsuccessful recovery attempts leave the goal blocked. Child waiting is excluded, while existing delegation timeouts still apply. Manual orchestration retains its existing execution behavior.
+
+With `usedecide=true` and a configured decision model, automatic execution may
+use bounded decision calls to recommend a recovery, skip a low-value automatic
+summary delegation, or review eligible read-only evidence. The acceptance fast
+path requires recognized read-only tools, complete evidence and a supported
+verdict for each criterion; otherwise it uses the existing reviewer. Decisions do
+not alter permissions or reset the progress guard. New optional calls are limited
+to eight per run, five seconds per call and fifteen seconds of cumulative call
+time, with two consecutive failures disabling them. Unsupported transports and
+exhausted allowances fall back to the existing behavior.
+
+When delegation is already enabled, automatic mode can propose a task
+breakdown for a multi-step execution goal with no existing plan or task graph. It first asks
+the decision model whether delegation is worthwhile, then asks the main model for
+two to five task contracts. The complete graph is validated and checkpointed
+before scheduling; conflicting scopes still serialize. The original goal remains
+the final acceptance requirement. A negative, unavailable, invalid or unaffordable
+proposal falls back to normal execution. There is at most one attempt per unchanged
+goal, and children do not recursively decompose. This does not enable delegation
+or supervised mode. On durable resume, pending undispatched tasks are requeued;
+previously running tasks remain subject to reconciliation rather than replay.
+Remote automatic decomposition requires workers advertising `compute-only-v1`,
+`prepared-context-v1`, and `task-outcome-v1`. Tasks without file scopes use the
+compute-only profile. File-bearing tasks additionally require `scoped-files-v1`,
+an API token, and a shared utility root at the same canonical path on parent and
+worker. The parent checks its permissions and asks each eligible worker to
+validate the task's existing read and write scopes against its own permissions;
+the task is pinned to an admitted worker instance. Workers repeat validation at
+admission and child startup. Scoped tasks expose only built-in `read` and, when
+permitted, `apply_patch`, with separate read and write ceilings and both policy
+authorities enforced. Shell, external MCP servers, skills, and recursive
+delegation are disabled. These application-level restrictions are not an operating
+system sandbox. Model provider calls and normal worker administration still occur. A proposal that
+needs unsupported access or cannot pass preflight falls back to the parent's existing execution path. Older
+workers remain usable for explicit delegation but not this automatic path.
+Decision ranking may reorder equally ready tasks; dependency priority, resource
+ownership and FIFO fallback remain authoritative.
 
 Automatic acceptance reviews display a progress message and elapsed time. Their model transport timeout is capped at 30 seconds, preserving a shorter `timeout` from the validation model (or main model fallback). A timed-out or failed review leaves acceptance incomplete; disabling `memoryreflect` does not disable acceptance. The timeout applies to the provider transport, rather than imposing a wall-clock deadline on all finalization work.
 

@@ -26,6 +26,75 @@
     for (var i = 0; i < 3; i++) e.tick()
     assert(e.tick(), "blocked", "Two recoveries bound an unchanged blocker")
   }
+  exports.testDecisionAcceptanceAndFallback = function() { fixture(function(a) {
+    var calls = 0, mode = "met"
+    a._lastStartArgs = { goal: "Explain the documentation", orchestration: "auto", usedecide: true }
+    a._runtime.toolsUsed = { readFile: 1 }
+    a._runtime.executionReadEvidence = ["Documentation content"]
+    a._decision = { _config: { type: "test", model: "test" }, bounded: function() { return { decide: function(state, questions) {
+      calls++
+      return { response: { answers: { v0: { type: "choice", value: mode }, e0: { type: "choice", value: "e0" } } }, stats: {} }
+    } } } }
+    var criterion = [{ id: "complete", method: "semantic", requirement: "Explain the documentation" }]
+    var spec = { objective: a._lastStartArgs.goal, criteria: criterion }
+    var checks = a._executionDecisionAcceptance(spec, "An explanation", ["[OBS 1] Documentation content"], criterion)
+    assert(checks[0].outcome, "met", "Supported read-only result uses decision")
+    a._executionDecisionAcceptance(spec, "An explanation", ["[OBS 1] Documentation content"], criterion)
+    assert(calls, 1, "Unchanged decision is cached")
+    mode = "insufficient"
+    assert(a._executionDecisionAcceptance(spec, "Another answer", ["[OBS 1] Documentation content"], criterion), __, "Insufficient evidence falls back")
+    a._runtime.executionReadEvidence = ["[TRUNCATED]"]
+    assert(a._executionDecisionAcceptance(spec, "Another answer", ["[OBS 1] [TRUNCATED]"], criterion), __, "Truncated evidence is ineligible")
+    a._runtime.toolsUsed = { shell: 1 }
+    assert(a._executionDecisionAcceptance(spec, "Another answer", ["[OBS 1] Documentation content"], criterion), __, "Unknown or mutating tools are ineligible")
+  }) }
+  exports.testAcceptanceDecisionRequestHasValidSingleEvidenceChoice = function() { fixture(function(a) {
+    a._lastStartArgs = { goal: "Explain the documentation", orchestration: "auto", usedecide: true }
+    a._runtime.toolsUsed = { read: 1 }; a._runtime.executionReadEvidence = ["Documentation content"]
+    a._decision = { _config: { type: "ollama", model: "fixture" } }
+    a._orchestrationDecision = function(operation, args, state, questions, validate) {
+      ow.loadAI()
+      ow.ai.__decision.request(state, questions, {}, "fixture", "ollama")
+      assert(Object.keys(questions.e0.criteria).length, 2, "One evidence item still has a valid abstention choice")
+      var answers = { v0: { type: "choice", value: "met" }, e0: { type: "choice", value: "none" } }
+      assert(validate(answers), true, "Abstention is a valid response")
+      return answers
+    }
+    var criteria = [{ id: "complete", method: "semantic", requirement: "Explain the documentation" }]
+    assert(a._executionDecisionAcceptance({ objective: a._lastStartArgs.goal }, "An explanation", [], criteria), __, "No-evidence choice falls back")
+  }) }
+  exports.testDecisionGateBudgetAndFailedCache = function() { fixture(function(a) {
+    var calls = 0
+    a._decision = { _config: { type: "test", model: "test" }, bounded: function() { return { decide: function() { calls++; throw new Error("failure") } } } }
+    var args = { usedecide: true }, q = { x: { type: "boolean", instructions: "test" } }
+    a._orchestrationDecision("test", args, { v: 1 }, q)
+    a._orchestrationDecision("test", args, { v: 1 }, q)
+    assert(calls, 1, "A failed identical decision is not retried")
+    a._orchestrationDecision("test", args, { v: 2 }, q)
+    a._orchestrationDecision("test", args, { v: 3 }, q)
+    assert(calls, 2, "Two failures disable the optional decisions")
+    a._orchestrationGateState = __
+    a._execution = new MiniAExecution({ tokens: 100 })
+    a._orchestrationDecision("test", args, { v: 4 }, q)
+    assert(calls, 2, "Budget admission avoids dispatch")
+  }) }
+  exports.testBoundedDecisionUsesFinalizationReserve = function() { fixture(function(a) {
+    var receivedTimeout, calls = 0
+    a._execution = new MiniAExecution({ tokens: 10000 })
+    a._execution.state.budget.spent = 8000
+    a._decision = new MiniADecision({ modeldec: { type: "fixture", model: "fixture", timeout: 2000 }, supportsBoundedRequests: true,
+      clientFactory: function(config) { receivedTimeout = config.timeout; return {
+        getCapabilities: function() { return {} },
+        decideWithStats: function() { calls++; return { response: { answers: { x: { type: "boolean", value: true } } }, stats: { tokens: { total: 23 } } } }
+      } } })
+    var q = { x: { type: "boolean", instructions: "test" } }, args = { usedecide: true }
+    assert(a._orchestrationDecision("normal", args, {}, q), __, "Normal work cannot use reserve")
+    var result = a._orchestrationDecision("acceptance", args, {}, q, function(v) { return v.x.value === true }, true)
+    assert(result.x.value, true, "Acceptance may use reserve")
+    assert(receivedTimeout, 2000, "Shorter configured timeout is preserved")
+    assert(calls, 1, "Only admitted request reaches provider")
+    assert(a._execution.state.budget.spent, 8023, "Provider usage is settled once")
+  }) }
   exports.testBudgetReservationAndSettlement = function() {
     var time = 0, e = new MiniAExecution({ tokens: 10000, time: 100, clock: function() { return time } })
     var id = e.reserve(6000, "child")
@@ -74,6 +143,217 @@
     m._processQueue()
     assert(m.subtasks[second].status, "running", "Accepted result releases dependency")
   }) }
+  exports.testDecisionRanksOnlyReadyTies = function() { fixture(function(a, m) {
+    a._lastStartArgs.usedecide = true; m.maxConcurrent = 1
+    var first = m.submit("First", {}, { task: task("first", [], ["/first"]) })
+    var second = m.submit("Second", {}, { task: task("second", [], ["/second"]) })
+    a._orchestrationDecision = function() { return { task_0: { type: "score", level: 0 }, task_1: { type: "score", level: 2 } } }
+    m._processQueue()
+    assert(m.subtasks[second].status, "running", "Decision can rank equally ready tasks")
+    assert(m.subtasks[first].status, "pending", "Remaining task waits for a slot")
+  }) }
+  exports.testDecisionQueueRankingDiscardedOnRevision = function() { fixture(function(a, m) {
+    a._lastStartArgs.usedecide = true
+    m.submit("First", {}, { task: task("first", [], ["/first"]) })
+    m.submit("Second", {}, { task: task("second", [], ["/second"]) })
+    a._orchestrationDecision = function() {
+      a._execution.state.revision++
+      return { task_0: { type: "score", level: 0 }, task_1: { type: "score", level: 2 } }
+    }
+    assert(Object.keys(m._decisionQueueRanks()).length, 0, "Stale ranking cannot be applied")
+  }) }
+  exports.testAutomaticBatchIsAtomic = function() { fixture(function(a, m) {
+    a._execution.state.decomposition = { status: "planning" }
+    var one = task("one", [], ["/repo/a"]), two = task("two", ["one"], ["/repo/b"])
+    var ids = m.submitExecutionBatch([two, one], a._execution.state.revision)
+    assert(ids.length, 2, "Forward dependency graph is registered")
+    assert(a._execution.state.tasks.two.owner, ids[0], "Pending task has its owner")
+    assert(m.subtasks[ids[0]].args.modelstrategy, "default", "Generated work does not automatically enable supervised strategy")
+    m._processQueue()
+    assert(m.subtasks[ids[0]].status, "pending", "Dependent waits for acceptance")
+    assert(m.subtasks[ids[1]].status, "running", "Ready task starts")
+  }) }
+  exports.testAutomaticBatchRejectsCyclesAndDuplicates = function() { fixture(function(a, m) {
+    a._execution.state.decomposition = { status: "planning" }
+    throws(function() { m.submitExecutionBatch([task("a", ["b"]), task("b", ["a"])], 0) })
+    assert(Object.keys(a._execution.state.tasks).length, 0, "Rejected graph leaves no tasks")
+    assert(m.pendingQueue.length, 0, "Rejected graph leaves no queued work")
+    throws(function() { m.submitExecutionBatch([task("a"), task("a")], 0) })
+    assert(Object.keys(a._execution.state.tasks).length, 0, "Duplicate IDs leave no tasks")
+  }) }
+  exports.testAutomaticBatchRollsBackSubmissionFailure = function() { fixture(function(a, m) {
+    a._execution.state.decomposition = { status: "attempted" }
+    var submit = m.submit, calls = 0
+    m.submit = function() { if (++calls === 2) throw new Error("injected submission failure"); return submit.apply(this, arguments) }
+    throws(function() { m.submitExecutionBatch([task("a"), task("b", ["a"])], 0) })
+    assert(Object.keys(a._execution.state.tasks).length, 0, "Failed submission rolls back the whole graph")
+    assert(m.pendingQueue.length, 0, "Failed submission leaves no queued task")
+    assert(Object.keys(m.subtasks).length, 0, "Failed submission removes staged subtask")
+    assert(a._execution.state.decomposition.status, "attempted", "The one-attempt marker is retained")
+  }) }
+  exports.testAutomaticBatchResumeDoesNotReplayRunningTask = function() { fixture(function(a, m) {
+    a._execution.state.decomposition = { status: "planning" }
+    var ids = m.submitExecutionBatch([task("one"), task("two", ["one"])], a._execution.state.revision)
+    m._processQueue()
+    var saved = a._execution.snapshot()
+    assert(m.subtasks[ids[0]].status, "running", "First task was handed off")
+    a._execution = new MiniAExecution({}, saved)
+    var resumed = new SubtaskManager(a._lastStartArgs, { parentAgent: a, maxConcurrent: 3 })
+    resumed._startWatchdog = function() {}; resumed._startLocalSubtask = function() {}
+    try {
+      a._subtaskManager = resumed
+      resumed._restoreExecutionTasks()
+      assert(a._execution.state.tasks.one.status, "unknown", "Running task requires reconciliation")
+      assert(a._execution.state.tasks.two.status, "pending", "Undispatched dependent remains pending")
+      assert(resumed.pendingQueue.length, 1, "Only the undispatched task is requeued")
+      resumed._processQueue()
+      assert(resumed.subtasks[resumed.pendingQueue[0]].taskId, "two", "Dependent cannot bypass unknown prerequisite")
+    } finally { resumed.destroy(); a._subtaskManager = m }
+  }) }
+  exports.testAutomaticDecompositionStagesAndFallsBack = function() { fixture(function(a, m) {
+    var calls = 0, decisions = 0, goal = "Create a report and update the project files"
+    a._oaf_model = { type: "fixture", model: "main" }
+    a._decision = { _config: { type: "fixture", model: "decision" } }
+    a._assessGoalComplexity = function() { return { level: "complex", signals: [] } }
+    a._orchestrationDecision = function() { decisions++; return { useful: { type: "boolean", value: true } } }
+    a._orchestrationPlannerFactory = function() { return { promptJSONWithStats: function() {
+      calls++
+      var first = task("first", [], ["/report"]), second = task("second", ["first"], ["/project"])
+      first.covers = ["goal"]; second.covers = []
+      return { response: { tasks: [first, second] }, stats: { tokens: { total: 5 } } }
+    } } }
+    var args = { goal: goal, usedecide: true, usedelegation: true, modelstrategy: "default" }
+    assert(a._tryAutomaticDecomposition(merge(args, { goal: "Explain how to create a report and update files" })), __, "Question bypasses decomposition")
+    var result = a._tryAutomaticDecomposition(args)
+    assert(result.ids.length, 2, "Decision and main planner create a batch")
+    assert(a._execution.state.decomposition.status, "scheduled", "Scheduled marker is durable state")
+    assert(a._tryAutomaticDecomposition(args), __, "Unchanged goal is not planned twice")
+    assert(decisions, 1, "One decision attempt")
+    assert(calls, 1, "One main planning call")
+    assert(a._execution.state.budget.spent, 5, "Planning usage enters aggregate accounting")
+  }) }
+  exports.testAutomaticDecompositionInvalidProposalLeavesNoTasks = function() { fixture(function(a, m) {
+    a._oaf_model = { type: "fixture", model: "main" }; a._decision = { _config: { type: "fixture", model: "decision" } }
+    a._assessGoalComplexity = function() { return { level: "complex", signals: [] } }
+    a._orchestrationDecision = function() { return { useful: { type: "boolean", value: true } } }
+    a._orchestrationPlannerFactory = function() { return { promptJSONWithStats: function() {
+      var first = task("first", ["second"]), second = task("second", ["first"])
+      first.covers = ["goal"]; second.covers = []
+      return { response: { tasks: [first, second] }, stats: {} }
+    } } }
+    var args = { goal: "Create a report and update the project", usedecide: true, usedelegation: true, modelstrategy: "default" }
+    assert(a._tryAutomaticDecomposition(args), __, "Cycle falls back")
+    assert(Object.keys(a._execution.state.tasks).length, 0, "No partial graph")
+    assert(m.pendingQueue.length, 0, "No queued tasks")
+    assert(a._execution.state.decomposition.status, "attempted", "Attempt remains recorded")
+  }) }
+  exports.testAutomaticDecompositionGuardsAndBudget = function() { fixture(function(a, m) {
+    var calls = 0
+    a._oaf_model = { type: "fixture", model: "main" }; a._decision = { _config: { type: "fixture", model: "decision" } }
+    a._assessGoalComplexity = function() { return { level: "complex", signals: [] } }
+    a._orchestrationDecision = function() { calls++; return { useful: { type: "boolean", value: true } } }
+    a._orchestrationPlannerFactory = function() { throw new Error("Planner must not be started") }
+    var args = { goal: "Create a report and update the project", usedecide: true, usedelegation: true, modelstrategy: "default" }
+    assert(a._tryAutomaticDecomposition(merge(args, { usedelegation: false })), __, "Delegation opt-out wins")
+    assert(a._tryAutomaticDecomposition(merge(args, { usedecide: false })), __, "Decision opt-out wins")
+    assert(a._tryAutomaticDecomposition(merge(args, { _delegationDepth: 1 })), __, "Child cannot recursively decompose")
+    m.remoteDelegation = true
+    assert(a._tryAutomaticDecomposition(args), __, "Unnegotiated remote workers cannot run generated work")
+    m.remoteDelegation = false
+    assert(calls, 0, "Ineligible runs make no decision calls")
+    a._execution = new MiniAExecution({ tokens: 100 })
+    assert(a._tryAutomaticDecomposition(args), __, "Insufficient planning budget falls back")
+    assert(Object.keys(a._execution.state.tasks).length, 0, "No tasks are registered on budget failure")
+  }) }
+  exports.testAutomaticDecompositionRequiresGoalCoverage = function() { fixture(function(a, m) {
+    a._oaf_model = { type: "fixture", model: "main" }; a._decision = { _config: { type: "fixture", model: "decision" } }
+    a._assessGoalComplexity = function() { return { level: "complex", signals: [] } }
+    a._orchestrationDecision = function() { return { useful: { type: "boolean", value: true } } }
+    a._orchestrationPlannerFactory = function() { return { promptJSONWithStats: function() {
+      var first = task("first"), second = task("second"); first.covers = []; second.covers = []
+      return { response: { tasks: [first, second] }, stats: {} }
+    } } }
+    var args = { goal: "Create a report and update the project", usedecide: true, usedelegation: true, modelstrategy: "default" }
+    assert(a._tryAutomaticDecomposition(args), __, "Missing root coverage falls back")
+    assert(Object.keys(a._execution.state.tasks).length, 0, "Root coverage failure leaves graph unchanged")
+  }) }
+  exports.testRemoteAutomaticDecompositionRequiresComputeOnlyGraph = function() { fixture(function(a, m) {
+    a._oaf_model = { type: "fixture", model: "main" }; a._decision = { _config: { type: "fixture", model: "decision" } }
+    a._assessGoalComplexity = function() { return { level: "complex", signals: [] } }
+    a._orchestrationDecision = function() { return { useful: { type: "boolean", value: true } } }
+    a._skillHandoffForGoal = function() { return [] }
+    m.remoteDelegation = true; m.workers = ["http://worker.invalid"]
+    m._workerProfiles[m.workers[0]] = { status: "ok", capabilities: ["run-goal", "compute-only-v1", "prepared-context-v1", "task-outcome-v1"] }
+    var writes = true
+    a._orchestrationPlannerFactory = function() { return { promptJSONWithStats: function() {
+      var first = task("first", [], writes ? ["/forbidden"] : []), second = task("second", ["first"], [])
+      first.covers = ["goal"]; second.covers = []
+      return { response: { tasks: [first, second] }, stats: {} }
+    } } }
+    var args = { goal: "Create calculations and combine the results", usedecide: true, usedelegation: true, modelstrategy: "default" }
+    assert(a._tryAutomaticDecomposition(args), __, "A remote graph requesting resources is rejected")
+    assert(m.pendingQueue.length, 0, "No remote resource access is scheduled")
+    writes = false; args.goal += " again"
+    var result = a._tryAutomaticDecomposition(args)
+    assert(result.ids.length, 2, "A supported compute-only graph is scheduled")
+    var req = m._buildWorkerRequirements(m.subtasks[result.ids[0]], {})
+    assert(req.requiresComputeOnly, true, "Generated task requires the negotiated worker contract")
+  }) }
+  exports.testCappedRemoteDecompositionRequiresBudgetCapability = function() { fixture(function(a, m) {
+    a._execution = new MiniAExecution({ tokens: 10000 })
+    a._decision = { _config: { type: "fixture", model: "decision" } }
+    a._assessGoalComplexity = function() { return { level: "complex", signals: [] } }
+    var decisions = 0; a._orchestrationDecision = function() { decisions++; return __ }
+    m.remoteDelegation = true; m.workers = ["http://worker.invalid"]
+    m._workerProfiles[m.workers[0]] = { status: "ok", capabilities: ["run-goal", "compute-only-v1", "prepared-context-v1", "task-outcome-v1"] }
+    var args = { goal: "Create calculations and combine the results", usedecide: true, usedelegation: true, modelstrategy: "default" }
+    assert(a._tryAutomaticDecomposition(args), __, "Capped run skips a worker without budget enforcement")
+    assert(decisions, 0, "Capability rejection precedes planning")
+  }) }
+  exports.testRemoteScopedFilePreflightAndResume = function() { fixture(function(a, m) {
+    var root = String(java.nio.file.Files.createTempDirectory("mini-a-preflight-").toFile().getCanonicalPath())
+    var read = root + "/read", write = root + "/write"
+    io.mkdir(read); io.mkdir(write)
+    try {
+      var args = { goal: "Update a report", apitoken: "fixture-token", useutils: true, usestdutils: true, usetools: true, readwrite: true, utilsroot: root, fileallow: [root] }
+      m.parentArgs.apitoken = args.apitoken
+      a._lastStartArgs = args; a._configureFileAccess(args); a._initPolicyRuntime({ policy: { shell: "deny" } }); a._utilsToolNames = ["read", "apply_patch"]
+      m.remoteDelegation = true; m.workers = ["http://worker.invalid"]
+      m._workerProfiles[m.workers[0]] = { status: "ok", workerInstanceId: "instance-1", capabilities: ["scoped-files-v1", "task-outcome-v1", "prepared-context-v1"] }
+      var calls = 0
+      m._remoteRequest = function(url, path, scope) { calls++; assert(path, "/execution-scope", "Preflight uses the worker endpoint"); assert(scope.policies[0].shell, "deny", "Parent policy is transmitted"); return { ok: true, workerInstanceId: "instance-1" } }
+      var first = task("first", [], [write]), second = task("second", ["first"], [])
+      first.resources.reads = [read]
+      var prepared = a._prepareRemoteScopedTasks(args, [first, second])
+      assert(calls, 1, "Only file-bearing task needs preflight")
+      assert(prepared[0].allowedWorkers[0].instance, "instance-1", "Task is pinned to the verified instance")
+      a._execution.state.decomposition = { status: "attempted" }
+      var ids = m.submitExecutionBatch(prepared, a._execution.state.revision)
+      assert(m.subtasks[ids[0]].metadata.remoteScope.root, root, "Contract reaches the subtask")
+      var saved = a._execution.snapshot(); a._execution = new MiniAExecution({}, saved)
+      var resumed = new SubtaskManager(args, { parentAgent: a }); resumed._startWatchdog = function() {}; resumed._startLocalSubtask = function() {}
+      try {
+        a._subtaskManager = resumed; resumed._restoreExecutionTasks()
+        assert(a._execution.state.tasks.first.auto_remote_scope.root, root, "Contract persists through resume")
+        assert(resumed.subtasks[a._execution.state.tasks.first.owner].metadata.allowedWorkers[0].instance, "instance-1", "Worker pin persists through resume")
+      } finally { resumed.destroy(); a._subtaskManager = m }
+      m._remoteRequest = function() { return { ok: true, workerInstanceId: "other" } }
+      var failed = false; try { a._prepareRemoteScopedTasks(args, [first, second]) } catch(e) { failed = true }
+      assert(failed, true, "Changed worker instance cannot authorize the contract")
+    } finally { io.rm(root) }
+  }) }
+  exports.testAutomaticDecompositionPlannerFailureIsNotRetried = function() { fixture(function(a, m) {
+    var calls = 0
+    a._oaf_model = { type: "fixture", model: "main" }; a._decision = { _config: { type: "fixture", model: "decision" } }
+    a._assessGoalComplexity = function() { return { level: "complex", signals: [] } }
+    a._orchestrationDecision = function() { return { useful: { type: "boolean", value: true } } }
+    a._orchestrationPlannerFactory = function() { return { promptJSONWithStats: function() { calls++; throw new Error("fixture failure") } } }
+    var args = { goal: "Create a report and update the project", usedecide: true, usedelegation: true, modelstrategy: "default" }
+    assert(a._tryAutomaticDecomposition(args), __, "Planner failure falls back")
+    assert(a._tryAutomaticDecomposition(args), __, "Unchanged failed attempt is not repeated")
+    assert(calls, 1, "Only one planner request is made")
+    assert(Object.keys(a._execution.state.tasks).length, 0, "Failure leaves no graph")
+  }) }
   exports.testChildPartialAndAcceptance = function() { fixture(function(a, m) {
     var id = m.submitAndRun("Return ready", {}, { task: task("a") })
     m._completeSubtask(m.subtasks[id], "test", "ready", {}, { execution: { outcome: "partial" } })
@@ -90,6 +370,8 @@
   exports.testUnknownWorkerCannotEnforceCap = function() { fixture(function(a, m) {
     assert(m._isWorkerProfileCompatible({ status: "ok", capabilities: ["run-goal"] }, { requiresBudget: true }), false, "Legacy worker excluded for capped work")
     assert(m._isWorkerProfileCompatible({ status: "ok", capabilities: ["run-goal", "execution-budget-v1"] }, { requiresBudget: true }), true, "Capable worker allowed")
+    assert(m._isWorkerProfileCompatible({ status: "ok", capabilities: ["run-goal", "task-outcome-v1", "prepared-context-v1"] }, { requiresComputeOnly: true }), false, "Legacy worker cannot run generated task")
+    assert(m._isWorkerProfileCompatible({ status: "ok", capabilities: ["run-goal", "task-outcome-v1", "prepared-context-v1", "compute-only-v1"] }, { requiresComputeOnly: true }), true, "Worker must explicitly support confinement")
   }) }
   exports.testProviderAccountingAndAdmission = function() { fixture(function(a) {
     a._execution = new MiniAExecution({ tokens: 5000 })

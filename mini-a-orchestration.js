@@ -26,6 +26,12 @@ MiniAOrchestrator.prototype._decision = function(name, selected, signals, reason
 // Word-boundary match on purpose: the complexity assessment's keyword signals use indexOf
 // ("latest" contains "test"), which would send unrelated goals to supervised execution.
 MiniAOrchestrator.VERIFICATION_PATTERN = /\b(test|tests|testing|validate|validates|validation|verify|verifies|verification|ensure)\b/i
+MiniAOrchestrator.goalIntent = function(goal, input) {
+  var question = /^\s*(what|why|how|when|where|who|which|can you explain|explain|describe)\b/i.test(goal)
+  var execution = !question && /\b(implement|create|build|write|generate|update|change|fix|refactor|migrate|deploy|produce|modify|run|test)\b/i.test(goal)
+  var deliverable = (isString(input.outfile) && input.outfile.length > 0) || /\b(file|files|report|code|implementation|service|services|pipeline|artifact|output|application|app|project|test|tests)\b/i.test(goal)
+  return { question: question, execution: execution, deliverable: deliverable, ambiguous: !question && (!execution || !deliverable) }
+}
 
 // Resolve modelstrategy=auto to a concrete strategy. First matching rule wins. Pure: all
 // runtime facts (low-cost model, resume state, supervised eligibility) arrive through ctx.
@@ -37,9 +43,15 @@ MiniAOrchestrator.prototype.resolveModelStrategy = function(assessment, args, ct
   var risk = signalList.some(function(signal) { return String(signal).indexOf("domain:security") === 0 || signal === "lookup" })
   var goal = isString(input.goal) ? input.goal : ""
   var verification = MiniAOrchestrator.VERIFICATION_PATTERN.test(goal) || (isString(input.outfile) && input.outfile.length > 0)
+  var context = String(input.orchestrationcontext || "auto").toLowerCase().trim()
+  if (context !== "interactive" && context !== "batch") context = /^(mini-a-con|mini-a-web)$/.test(String(input.__interaction_source || "")) ? "interactive" : "batch"
+  // A question mentioning verification is not itself an execution request.
+  var intent = MiniAOrchestrator.goalIntent(goal, input)
+  var execution = intent.execution, deliverable = intent.deliverable
+  if (intent.ambiguous && isMap(a.decisionIntent)) { execution = a.decisionIntent.execution === true; deliverable = a.decisionIntent.deliverable === true }
   var lcBudget = Number(input.lcbudget)
   var signals = { complexity: a.level, complexity_score: a.score, goal_signals: signalList, risk: risk, verification: verification,
-    low_cost_model: c.lowCostModel === true, complexity_source: a.source || "heuristic" }
+    low_cost_model: c.lowCostModel === true, complexity_source: a.source || "heuristic", interaction_context: context, execution_intent: execution, deliverable: deliverable }
   var pick = function(selected, reason, rule) {
     signals.rule = rule
     return this._decision("model_strategy", selected, signals, reason, { lc_budget: isNumber(lcBudget) && !isNaN(lcBudget) ? lcBudget : 0 })
@@ -56,7 +68,7 @@ MiniAOrchestrator.prototype.resolveModelStrategy = function(assessment, args, ct
   var lock = isString(input.modellock) ? input.modellock.trim().toLowerCase() : "auto"
   if (c.lowCostModel !== true || lock === "main" || lock === "lc") return pick("default", c.lowCostModel !== true ? "no low-cost executor available" : "model lock selected", 4)
 
-  if (a.level === "complex" && c.supervisedEligible === true && verification) return pick("supervised", "complex goal with a verification requirement", 5)
+  if (a.level === "complex" && context === "batch" && c.supervisedEligible === true && verification && execution && deliverable) return pick("supervised", "complex batch execution with a deliverable and verification requirement", 5)
   if (a.level === "complex") return pick("advisor", "complex goal with low-cost executor", 6)
   if (a.level === "medium" && !risk && isNumber(lcBudget) && lcBudget > 0) return pick("delegate", "medium low-risk goal under an explicit low-cost budget", 7)
   return pick("default", "no strategy-specific signal", 8)

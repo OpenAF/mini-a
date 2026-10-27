@@ -17,6 +17,16 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testPolicyDefaultsToAllowForCompatibility
 
+- name: MiniA Capability and Policy Tests::IndependentPoliciesIntersect
+  from: MiniA Capability and Policy Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testIndependentPoliciesIntersect
+
+- name: MiniA Capability and Policy Tests::PolicyProtectsDirectAndProxyToolCalls
+  from: MiniA Capability and Policy Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPolicyProtectsDirectAndProxyToolCalls
+
 - name: MiniA Capability and Policy Tests::PolicyCoversPluginMcpAndDelegationBoundaries
   from: MiniA Capability and Policy Tests::Init
   to  : oJob Test
@@ -30,6 +40,8 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Capability and Policy Tests::IndependentPoliciesIntersect
+- MiniA Capability and Policy Tests::PolicyProtectsDirectAndProxyToolCalls
 - MiniA Capability and Policy Tests::RegistrySelectsBoundedRelevantSubset
 - MiniA Capability and Policy Tests::PolicyDeniesShellAndCapabilityAndNetwork
 - MiniA Capability and Policy Tests::PolicyDefaultsToAllowForCompatibility

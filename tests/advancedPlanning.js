@@ -108,6 +108,33 @@
     ow.test.assert(picked, "advisor", "Words merely containing 'test' must not select supervised")
   }
 
+  exports.testAutomaticStrategyInteractionContext = function() {
+    var complex = { level: "complex", score: 6, signals: [] }, lc = { lowCostModel: true, supervisedEligible: true }
+    var goal = "Refactor and validate the security pipeline across 20 services"
+    ;["mini-a-con", "mini-a-web"].forEach(function(source) {
+      ow.test.assert(resolveStrategy(complex, { goal: goal, __interaction_source: source }, lc).selected, "advisor", "Interactive sessions do not automatically use supervised")
+    })
+    ow.test.assert(resolveStrategy(complex, { goal: "Explain how to test the security pipeline" }, lc).selected, "advisor", "Batch questions do not become supervised")
+    ow.test.assert(resolveStrategy(complex, { goal: goal, orchestrationcontext: "batch", __interaction_source: "mini-a-con" }, lc).selected, "supervised", "Explicit batch context wins")
+    ow.test.assert(resolveStrategy(complex, { goal: goal, orchestrationcontext: "interactive", contractargs: "x" }, lc).selected, "supervised", "Explicit contract wins")
+    ow.test.assert(resolveStrategy(complex, { goal: goal, orchestrationcontext: "interactive" }, { lowCostModel: true, resumeState: { supervised: {} } }).selected, "supervised", "Supervised resume wins")
+  }
+
+  exports.testAutomaticStrategyAmbiguousIntentDecision = function() {
+    var agent = createAgent(), calls = 0
+    agent.fnI = function() {}; agent._use_lc = true
+    agent._assessGoalComplexity = function() { return { level: "complex", score: 6, signals: [] } }
+    agent._orchestrationDecision = function() { calls++; return { execution: { type: "boolean", value: true }, deliverable: { type: "boolean", value: true } } }
+    var args = { goal: "Validate the rollout with a deployment checklist", modelstrategy: "auto", usedecide: true }
+    agent._resolveModelStrategy(args, { goal: args.goal, modelstrategy: "auto" })
+    ow.test.assert(args.modelstrategy, "supervised", "Decision can resolve ambiguous batch execution intent")
+    ow.test.assert(calls, 1, "Ambiguous intent receives one decision")
+    var interactive = { goal: "Validate the rollout with a deployment checklist", modelstrategy: "auto", usedecide: true, __interaction_source: "mini-a-con" }
+    agent._resolveModelStrategy(interactive, { goal: interactive.goal, modelstrategy: "auto" })
+    ow.test.assert(interactive.modelstrategy, "advisor", "Interactive context keeps the supervised preference disabled")
+    ow.test.assert(calls, 1, "Interactive selection does not need intent decision")
+  }
+
   exports.testModelStrategyAutoResolvesDuringInit = function() {
     var agent = createAgent()
     agent.fnI = function() {}

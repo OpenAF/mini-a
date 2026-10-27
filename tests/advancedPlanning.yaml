@@ -47,6 +47,16 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testModelStrategyAutoVerificationUsesWordBoundaries
 
+- name: MiniA Tests::AutomaticStrategyInteractionContext
+  from: MiniA Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAutomaticStrategyInteractionContext
+
+- name: MiniA Tests::AutomaticStrategyAmbiguousIntentDecision
+  from: MiniA Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAutomaticStrategyAmbiguousIntentDecision
+
 - name: MiniA Tests::ModelStrategyAutoInit
   from: MiniA Tests::Init
   to  : oJob Test
@@ -104,6 +114,8 @@ todo:
 - MiniA Tests::AutoOrchestrationRespectsModeOverrides
 - MiniA Tests::ModelStrategyAutoRules
 - MiniA Tests::ModelStrategyAutoWordBoundaries
+- MiniA Tests::AutomaticStrategyInteractionContext
+- MiniA Tests::AutomaticStrategyAmbiguousIntentDecision
 - MiniA Tests::ModelStrategyAutoInit
 - MiniA Tests::ModelStrategyAutoOrchestration
 - MiniA Tests::PlanningWithoutExternalPlan

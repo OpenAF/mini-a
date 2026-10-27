@@ -15,6 +15,9 @@ help:
   - name     : runmaxtokens
     desc     : "Aggregate orchestration=auto token admission cap, including children and review (0=unlimited); in-flight calls may exceed estimates"
     mandatory: false
+  - name     : orchestrationcontext
+    desc     : "Automatic strategy context: auto, interactive, or batch"
+    mandatory: false
   - name     : runmaxtimems
     desc     : "Aggregate orchestration=auto elapsed-time admission cap in milliseconds (0=unlimited)"
     mandatory: false
@@ -1698,6 +1701,7 @@ jobs:
         mcpprogcallbatchmax: mcpprogcallbatchmax
         useplanning    : useplanning
         orchestration  : orchestration
+        orchestrationcontext: orchestrationcontext
         forceplanning  : forceplanning
         planstyle      : planstyle
         earlystopthreshold: earlystopthreshold
@@ -2009,6 +2013,7 @@ jobs:
       mcpprogcallbatchmax: toNumber.isNumber.default(10)
       useplanning    : toBoolean.isBoolean.default(false)
       orchestration  : isString.default("manual")
+      orchestrationcontext: isString.default("auto")
       forceplanning  : toBoolean.isBoolean.default(false)
       planstyle      : isString.default(__)
       earlystopthreshold: toNumber.isNumber.default(__)

@@ -28,7 +28,15 @@ Decision requests use a fresh bare client, sharing neither tools nor conversatio
 
 ## Verdict gates
 
-With an explicit `usedecide=true` and a configured decision model, selected internal verdicts consult the decision model first. A gate may only **skip an expensive call**; it never replaces output that other code consumes. Whenever the decision is unavailable, fails, returns an invalid answer, exceeds the 48 KiB / 32-question budget, or does not give a confident "all clear", the original code path runs unchanged. Each fallback is counted in the decision metrics (`fallbacks`, `reasons`) and traced as `decision_fallback`. Uncached gate requests use the run's `rpm`/`tpm` limiter; cached answers consume no additional requests or tokens. Failed dispatched requests count toward `rpm`. A configuration or runtime-support error disables further gate attempts for the rest of the run.
+With an explicit `usedecide=true` and a configured decision model, the selected internal verdicts in the table below consult the decision model first. These gates can skip an expensive call; they do not replace output that other code consumes. Whenever the decision is unavailable, fails, returns an invalid answer, exceeds the 48 KiB / 32-question budget, or does not give a confident "all clear", the original code path runs unchanged. Each fallback is counted in the decision metrics (`fallbacks`, `reasons`) and traced as `decision_fallback`. Uncached gate requests use the run's `rpm`/`tpm` limiter; cached answers consume no additional requests or tokens. Failed dispatched requests count toward `rpm`. A configuration or runtime-support error disables further gate attempts for the rest of the run.
+
+Automatic orchestration has additional bounded decisions for read-only acceptance,
+stall recovery, local task decomposition, and priority among equally ready tasks.
+These use the same explicit opt-in, preserve deterministic permission, dependency,
+resource and budget checks, and fall back when a decision is unavailable. A
+supported read-only acceptance verdict can replace a generative review; the other
+decisions advise or select among work already permitted. See
+[Reliable automatic orchestration](../USAGE.md#reliable-automatic-orchestration).
 
 | Site | Decision question | Decide skips the call when | Otherwise |
 |------|-------------------|----------------------------|-----------|

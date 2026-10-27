@@ -29,6 +29,45 @@ function MiniAFileAccess(allowed) {
   })
 }
 
+// A remote generated task can opt into this strictly narrower execution profile.
+// Apply it again after child argument merging so worker defaults cannot widen it.
+function __miniARemoteComputeConfine(args) {
+  ;["useshell", "readwrite", "useutils", "usestdutils", "usetools", "usetoolslc", "usejsontool", "mcpproxy", "mcpprogcall",
+    "usedelegation", "autodelegation", "usewiki", "useskills", "useskillswiki", "usememory", "memorymd", "memoryreflect",
+    "usehistory", "historyvm", "historyvmshadow", "contextvirtualization", "contextvirtualizationshadow", "useplanning",
+    "planmode", "validateplan", "deepresearch", "outerloop"].forEach(function(k) { args[k] = false })
+  ;["agent", "agentfile", "plugins", "pluginsroot", "pluginsroots", "mcp", "mcpconfig", "workerreg", "workerregurl", "workerregtoken",
+    "outfile", "outfileall", "outputfile", "planfile", "plancontent", "contractfile", "contractargs", "libs", "agentcomms", "_skillHandoff"].forEach(function(k) { delete args[k] })
+  args.workers = []
+  args.fileallow = []
+  args.noagentsmd = true
+  args.modelstrategy = "default"
+  args._autoDecompose = false
+  args._autoDelegate = false
+  return args
+}
+
+// The worker admission path supplies a validated intersection of parent,
+// worker and task scopes. Reapply it after all inherited argument merges.
+function __miniARemoteScopedFileConfine(args, scope) {
+  if (!isMap(scope) || !isString(scope.root) || !isArray(scope.reads) || !isArray(scope.writes) || !isArray(scope.policies)) throw new Error("Invalid scoped file contract")
+  __miniARemoteComputeConfine(args)
+  args._remoteScopedFiles = clone(scope)
+  args._inheritedPolicies = clone(scope.policies)
+  args.policy = {}
+  delete args.policyfile
+  args.utilsroot = scope.root
+  args.fileallow = clone(scope.reads)
+  args._remoteWriteAllow = clone(scope.writes)
+  args.usetools = true
+  args.useutils = true
+  args.usestdutils = true
+  args.readwrite = scope.writes.length > 0
+  args.utilsallow = args.readwrite ? "read,apply_patch" : "read"
+  delete args.utilsdeny
+  return args
+}
+
 MiniAFileAccess.prototype.assert = function(path) {
   if (!this.enabled) return path
   var canonical = new java.io.File(String(path)).getCanonicalFile().toPath()
@@ -41,6 +80,26 @@ MiniAFileAccess.prototype.assert = function(path) {
 }
 MiniAFileAccess.prototype.allows = function(path) {
   try { this.assert(path); return true } catch(e) { return false }
+}
+
+// Compute the narrower canonical roots shared by two independent policies.
+// An omitted policy is unrestricted; an empty list denies all access.
+MiniAFileAccess.intersection = function(first, second) {
+  var a = new MiniAFileAccess(first), b = new MiniAFileAccess(second)
+  if (!a.enabled && !b.enabled) return __
+  var roots = [], seen = Object.create(null)
+  var add = function(root) {
+    var path = String(root.path)
+    if (!seen[path]) { seen[path] = true; roots.push(path) }
+  }
+  if (!a.enabled) { b.roots.forEach(add); return roots }
+  if (!b.enabled) { a.roots.forEach(add); return roots }
+  a.roots.forEach(function(left) { b.roots.forEach(function(right) {
+    if (left.path.equals(right.path)) add(left)
+    else if (left.directory && right.path.startsWith(left.path)) add(right)
+    else if (right.directory && left.path.startsWith(right.path)) add(left)
+  }) })
+  return roots
 }
 MiniAFileAccess.prototype.url = function(url) {
   if (!this.enabled) return url

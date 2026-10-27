@@ -159,6 +159,22 @@
     ow.test.assert(a._assessComplexityByDecision("goal", "medium", {}), __, "Opt-out survives agent reuse")
   }
 
+  exports.testComplexityBatchesIntentAndTracksModel = function() {
+    var calls = 0, a = agent(function(state, questions) {
+      calls++
+      ow.test.assert(isMap(questions.complexity) && isMap(questions.execution) && isMap(questions.deliverable), true, "One request includes complexity and intent")
+      return { response: { answers: { complexity: { type: "choice", value: "complex" }, execution: { type: "boolean", value: true }, deliverable: { type: "boolean", value: true } } } }
+    })
+    var goal = "Validate a rollout"
+    a._assessComplexityByDecision(goal, "medium", { usedecide: true }, true)
+    ow.test.assert(a._decisionComplexity.intent.execution, true, "Execution intent retained")
+    a._assessComplexityByDecision(goal, "medium", { usedecide: true }, true)
+    ow.test.assert(calls, 1, "Unchanged decision is reused")
+    a._decision._config.model = "another-model"
+    a._assessComplexityByDecision(goal, "medium", { usedecide: true }, true)
+    ow.test.assert(calls, 2, "Changing the decision model invalidates complexity cache")
+  }
+
   exports.testRequestIsolationAndOptions = function() {
     var created = new java.util.concurrent.atomic.AtomicInteger(0), reports = new ow.obj.syncArray()
     var d = manager(function() {}, { clientFactory: function() {

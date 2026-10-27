@@ -36,6 +36,49 @@ try {
   var exact = new MiniAFileAccess(JSON.stringify([allowed + '/ok.md']))
   denied(function() { exact.assert(allowed + '/another.md') }, 'exact file only')
   check(!new MiniAFileAccess([outside]).allows(allowed + '/ok.md') && access.allows(allowed + '/ok.md'), 'instance isolation')
+  var nested = allowed + '/nested'; io.mkdir(nested)
+  check(isUnDef(MiniAFileAccess.intersection(__, __)), 'unrestricted intersection stays unrestricted')
+  check(MiniAFileAccess.intersection([allowed], __)[0] === allowed, 'unrestricted worker retains parent restriction')
+  check(MiniAFileAccess.intersection(__, [nested])[0] === nested, 'unrestricted parent retains worker restriction')
+  check(MiniAFileAccess.intersection([allowed], [nested])[0] === nested, 'intersection keeps narrower directory')
+  check(MiniAFileAccess.intersection([nested], [allowed])[0] === nested, 'intersection is symmetric')
+  check(MiniAFileAccess.intersection([allowed], [outside]).length === 0, 'disjoint roots deny all')
+  check(MiniAFileAccess.intersection([], [allowed]).length === 0, 'deny-all survives intersection')
+  check(MiniAFileAccess.intersection([allowed], [allowed + '/ok.md'])[0] === allowed + '/ok.md', 'exact file stays exact')
+  check(MiniAFileAccess.intersection([allowed], [allowed + '/ok.md', allowed + '/ok.md']).length === 1, 'duplicate roots are deduplicated')
+  denied(function() { new MiniAFileAccess(MiniAFileAccess.intersection([allowed], [nested])).assert(nested + '/../ok.md') }, 'intersection blocks parent traversal')
+  var scopedUtils = new MiniUtilsTool({ root: allowed, readwrite: true, fileallow: [allowed], writeallow: [nested] })
+  check(scopedUtils.readFile({ path: 'ok.md' }).content === 'ALLOWED CONTENT', 'write ceiling does not block permitted reads')
+  check(String(scopedUtils.writeFile({ path: 'ok.md', content: 'FORBIDDEN' })).indexOf('[ERROR]') === 0, 'write outside write ceiling denied')
+  check(!io.fileExists(nested + '/new.md'), 'patch test starts without target')
+  var patchDenied = false
+  try { scopedUtils.apply_patch({ patchText: '*** Begin Patch\n*** Add File: nested/new.md\n+new\n*** Update File: ok.md\n@@\n-ALLOWED CONTENT\n+FORBIDDEN\n*** End Patch' }) } catch(e) { patchDenied = true }
+  check(patchDenied && !io.fileExists(nested + '/new.md') && io.readFileString(allowed + '/ok.md') === 'ALLOWED CONTENT', 'mixed patch is rejected atomically')
+  check(scopedUtils.apply_patch({ patchText: '*** Begin Patch\n*** Add File: nested/new.md\n+permitted\n*** End Patch' }).ok === true, 'write inside write ceiling succeeds')
+  var scopedArgs = __miniARemoteScopedFileConfine({ useshell: true, readwrite: true, mcp: 'unsafe', plugins: outside },
+    { root: allowed, reads: [allowed], writes: [nested], policies: [{ shell: 'deny' }] })
+  check(scopedArgs.useutils && scopedArgs.usetools && scopedArgs.usestdutils, 'scoped file profile exposes built-in tools')
+  check(!scopedArgs.useshell && isUnDef(scopedArgs.mcp), 'scoped file profile disables shell and external MCP')
+  check(scopedArgs.fileallow[0] === allowed && scopedArgs._remoteWriteAllow[0] === nested, 'read and write ceilings stay separate')
+  check(scopedArgs.utilsallow === 'read,apply_patch' && scopedArgs._inheritedPolicies.length === 1, 'profile applies restricted tool list and inherited policy')
+  var scopedAgent = new MiniA(); scopedAgent.fnI = function() {}
+  check(scopedAgent._getPluginsDiscovery(scopedArgs).mcpConfigs.length === 0, 'scoped profile does not discover plugin MCPs')
+  var workerCfg = { apitoken: 'fixture-token', useutils: true, usestdutils: true, usetools: true, readwrite: true, utilsroot: allowed, fileallow: [allowed] }
+  var scopeRequest = { version: 1, root: allowed, reads: [allowed + '/ok.md'], writes: [nested], parentFileallow: [allowed], policies: [{ shell: 'deny' }] }
+  var admitted = __miniARemoteScopedFileValidate(scopeRequest, workerCfg)
+  var noTokenRejected = false; try { __miniARemoteScopedFileValidate(scopeRequest, merge(workerCfg, { apitoken: '' })) } catch(e) { noTokenRejected = true }
+  check(noTokenRejected, 'worker rejects scoped access without authentication')
+  check(admitted.reads.length === 2 && admitted.writes.length === 1 && admitted.writes[0] === nested, 'worker admits intersection of parent, task and worker scopes')
+  var badScope = clone(scopeRequest); badScope.writes = [outside]
+  var rejected = false; try { __miniARemoteScopedFileValidate(badScope, workerCfg) } catch(e) { rejected = true }
+  check(rejected, 'worker rejects scopes outside shared root and permissions')
+  var readOnlyWorker = merge(workerCfg, { readwrite: false })
+  rejected = false; try { __miniARemoteScopedFileValidate(scopeRequest, readOnlyWorker) } catch(e) { rejected = true }
+  check(rejected, 'worker read-only setting cannot be widened')
+  rejected = false; try { __miniARemoteScopedFileValidate(merge(scopeRequest, { policies: [{ filesystem: { write: 'deny' } }] }), workerCfg) } catch(e) { rejected = true }
+  check(rejected, 'parent policy denial survives worker admission')
+  rejected = false; try { __miniARemoteScopedFileValidate(scopeRequest, merge(workerCfg, { policy: { filesystem: { read: 'deny' } } })) } catch(e) { rejected = true }
+  check(rejected, 'worker policy denial survives parent admission')
   var agent = new MiniA(); agent.fnI = function() {}
   var args = { fileallow: [allowed] }; agent._configureFileAccess(args)
   check(agent._readPromptFile(allowed + '/ok.md', args) === 'ALLOWED CONTENT', 'prompt control')
