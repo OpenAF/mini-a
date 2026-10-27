@@ -5080,6 +5080,10 @@ See the [wiki guide](docs/WIKI.md), [delegation guide](docs/DELEGATION.md), and 
 
 `orchestration=auto` tracks progress from relevant new tool evidence and accepted task results. Repeating a successful call with unchanged output does not reset the progress guard. Four active steps without progress request a changed approach; two unsuccessful recovery attempts leave the goal blocked. Child waiting is excluded, while existing delegation timeouts still apply. Manual orchestration retains its existing execution behavior.
 
+Automatic acceptance reviews display a progress message and elapsed time. Their model transport timeout is capped at 30 seconds, preserving a shorter `timeout` from the validation model (or main model fallback). A timed-out or failed review leaves acceptance incomplete; disabling `memoryreflect` does not disable acceptance. The timeout applies to the provider transport, rather than imposing a wall-clock deadline on all finalization work.
+
+An unchanged answer, goal, execution revision and supporting evidence reuse the final acceptance verdict. Artifact freshness is checked by content, with each shared path hashed once per pass outside the execution lock; changed evidence or task revisions require fresh acceptance. With `debug=true` or `verbose=true`, automatic mode reports starts and elapsed times for artifact checks, conversation saves, checkpoints and cleanup. Slow stages (at least one second) also report their elapsed time without those flags. Debug traces and durable run traces include `execution_timing` events; lock waits of at least 100 ms are recorded separately. These timings help distinguish acceptance requests from persistence and cleanup before the final “Conversation saved” message.
+
 Delegation accepts an optional `task` contract:
 
 ```json

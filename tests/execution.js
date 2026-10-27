@@ -126,9 +126,11 @@
       var checks = a._executionCheck(t, "done", [], "succeeded")
       assert(checks[0].outcome, "met", "Existing bounded artifact reader and assertion certify the file")
       a._execution.finish("artifact", "succeeded", checks)
-      io.writeFileString(path, '{"ok":false}')
+      var timestamp = new java.io.File(path).lastModified()
+      io.writeFileString(path, '{"ok":null}')
+      new java.io.File(path).setLastModified(timestamp)
       a._executionRefresh()
-      assert(a._execution.state.tasks.artifact.acceptance, "pending", "Changed artifact invalidates acceptance")
+      assert(a._execution.state.tasks.artifact.acceptance, "pending", "Same-size edit with preserved mtime invalidates acceptance")
       assert(a._execution.ready("dependent"), false, "Dependent cannot use stale artifact")
     } finally { io.rm(path) }
   }) }
@@ -147,6 +149,108 @@
     assert(a._execution.state.tasks["parent-work"].acceptance, "accepted", "Plan step acceptance verified")
     assert(a._executionFinal("ready", { goal: "Return ready", useplanning: true }), true, "Same final result reuses acceptance")
     assert(calls, 1, "Unchanged final result is not reviewed twice")
+  }) }
+  exports.testAcceptanceTimeoutAndProgress = function() { fixture(function(a) {
+    var configs = [], events = [], messages = []
+    a._oaf_model = { type: "openai", timeout: 900000 }
+    a.fnI = function(level, message) { messages.push(message) }
+    a._trace = function(kind, payload) { events.push({ kind: kind, payload: payload }) }
+    a._supervisedClientFactory = function(config) {
+      configs.push(config)
+      return { promptJSONWithStats: function() { throw new Error("Transport timed out") } }
+    }
+    var spec = { objective: "Return ready", criteria: [{ id: "review", method: "semantic", requirement: "Return ready" }] }
+    var checks = a._executionCheck(spec, "ready", [], "succeeded")
+    assert(configs[0].timeout, 30000, "Acceptance transport has a thirty-second cap")
+    assert(a._oaf_model.timeout, 900000, "Main model configuration is unchanged")
+    assert(checks[0].outcome, "insufficient_evidence", "A timeout cannot certify acceptance")
+    assert(messages.some(function(m) { return m.indexOf("Reviewing task acceptance") >= 0 }), true, "Review start is visible")
+    assert(events.some(function(e) { return e.payload.operation === "acceptance_review" && e.payload.phase === "finish" && e.payload.succeeded === false }), true, "Failed review timing is recorded")
+    a._oaf_model.timeout = 1200
+    a._executionCheck(spec, "ready", [], "succeeded")
+    assert(configs[1].timeout, 1200, "Shorter caller timeout remains authoritative")
+  }) }
+  exports.testTimingCannotInterruptCleanup = function() { fixture(function(a) {
+    a._lastStartArgs.debug = true
+    a._trace = function() { throw new Error("Trace unavailable") }
+    a.fnI = function() { throw new Error("Output unavailable") }
+    assert(a._timeExecution("cleanup", function() { return "closed" }), "closed", "Diagnostics preserve the operation's result")
+    var failure = new Error("Original failure"), caught
+    try { a._timeExecution("cleanup", function() { throw failure }) } catch(e) { caught = e }
+    assert(caught === failure, true, "Diagnostics preserve the original failure")
+  }) }
+  exports.testAutomaticCleanupRecordsStagesOnce = function() { fixture(function(a) {
+    var destroyed = 0, closed = 0, stages = []
+    a._traceFn = function(kind, payload) {
+      if (kind === "execution_timing" && payload.phase === "finish") stages.push(payload.operation)
+    }
+    a._mcpConnections = { test: { destroy: function() { destroyed++ } } }
+    a._wikiManager = { close: function() { closed++ } }
+    a._stopAgentResources()
+    a._stopAgentResources()
+    assert(destroyed, 1, "Timed MCP teardown remains once-only")
+    assert(closed, 1, "Timed wiki teardown remains once-only")
+    assert(stages.indexOf("mcp_cleanup") >= 0, true, "MCP cleanup has a timing event")
+    assert(stages.indexOf("wiki_cleanup") >= 0, true, "Wiki cleanup has a timing event")
+  }) }
+  exports.testAcceptanceCacheTracksEvidence = function() { fixture(function(a) {
+    var calls = 0, evidence = ["first result"]
+    a._executionEvidence = function() { return evidence }
+    a._supervisedClientFactory = function() { return { promptJSONWithStats: function(prompt) {
+      calls++
+      var input = af.fromJson(prompt.substring(prompt.indexOf("\n") + 1))
+      return { response: { checks: input.criteria.map(function(c) { return { id: c.id, outcome: "met" } }) } }
+    } } }
+    var args = { goal: "Return ready", useplanning: true }
+    assert(a._executionFinal("ready", args), true, "Initial evidence reviewed")
+    assert(a._executionFinal("ready", args), true, "Unchanged evidence reuses verdict")
+    assert(calls, 1, "No repeated review for identical evidence")
+    evidence = ["changed result"]
+    assert(a._executionFinal("ready", args), true, "Changed evidence reviewed")
+    assert(calls, 2, "Evidence change invalidates cached verdict even without ledger progress")
+  }) }
+  exports.testInFlightReviewCannotAcceptRevisedTask = function() { fixture(function(a) {
+    a._execution.put(task("changing"))
+    a._supervisedClientFactory = function() { return { promptJSONWithStats: function(prompt) {
+      var revised = task("changing")
+      revised.objective = "Return ready using the revised approach"
+      a._execution.put(revised)
+      var input = af.fromJson(prompt.substring(prompt.indexOf("\n") + 1))
+      return { response: { checks: input.criteria.map(function(c) { return { id: c.id, outcome: "met" } }) } }
+    } } }
+    assert(a._executionFinal("ready", { goal: "Return ready", useplanning: true }), false, "Review for old revision cannot certify new revision")
+    assert(a._execution.state.tasks.changing.acceptance, "pending", "Revised task remains pending")
+    assert(a._autoFinalCheck, __, "Stale verdict is not cached")
+  }) }
+  exports.testArtifactHashingOutsideLockAndDeduplicated = function() { fixture(function(a) {
+    var original = MiniASupervised.prototype.fingerprint, hashes = 0, locked = false
+    var sync = a._executionSync
+    a._executionSync = function(fn) { return sync.call(a, function(e) { locked = true; try { return fn(e) } finally { locked = false } }) }
+    ;["one", "two"].forEach(function(id) {
+      var t = task(id)
+      t.criteria = [{ id: "file", method: "artifact", requirement: "File is current", path: "/shared", assertion: { equals: "ready" } }]
+      a._execution.put(t)
+      a._execution.finish(id, "succeeded", [{ id: "file", outcome: "met", path: "/shared", evidence: "current" }])
+    })
+    MiniASupervised.prototype.fingerprint = function() {
+      assert(locked, false, "File hashing never holds the execution monitor")
+      hashes++
+      return { fingerprint: "current" }
+    }
+    try {
+      a._executionRefresh()
+      assert(hashes, 1, "Shared path is hashed once per refresh")
+      MiniASupervised.prototype.fingerprint = function() {
+        var revised = clone(a._execution.state.tasks.one)
+        revised.objective = "Revised approach"
+        a._execution.put(revised)
+        a._execution.finish("one", "succeeded", [{ id: "file", outcome: "met", path: "/shared", evidence: "changed" }])
+        return { fingerprint: "changed" }
+      }
+      a._executionRefresh()
+      assert(a._execution.state.tasks.one.acceptance, "accepted", "Old fingerprint cannot invalidate a replacement task")
+      assert(a._execution.state.tasks.two.acceptance, "pending", "Unchanged revision with stale evidence is invalidated")
+    } finally { MiniASupervised.prototype.fingerprint = original }
   }) }
   exports.testInvalidReviewCannotCertifyChild = function() { fixture(function(a, m) {
     a._supervisedClientFactory = function() { return { promptJSONWithStats: function() { return { response: { checks: [] }, stats: {} } } } }

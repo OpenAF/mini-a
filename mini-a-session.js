@@ -5728,19 +5728,23 @@ function MiniAInteractiveSession(args, adapter) {
   function finalizeSession(reason) {
     if (shutdownHandled) return
     shutdownHandled = true
-    if (isObject(preparedAgent)) preparedAgent._stopAgentResources()
+    function finishStep(name, fn) {
+      if (isObject(activeAgent) && activeAgent._execution && isFunction(activeAgent._timeExecution)) return activeAgent._timeExecution(name, fn)
+      return fn()
+    }
+    if (isObject(preparedAgent)) finishStep("prepared_agent_cleanup", function() { preparedAgent._stopAgentResources() })
     preparedAgent = __
 
-    try { persistConversationSnapshot(activeAgent) } catch(ignorePersist) {}
-    try { refreshConversationStats(activeAgent) } catch(ignoreRefresh) {}
-    clearDebugTrace()
+    try { finishStep("session_snapshot", function() { persistConversationSnapshot(activeAgent) }) } catch(ignorePersist) {}
+    try { finishStep("conversation_stats", function() { refreshConversationStats(activeAgent) }) } catch(ignoreRefresh) {}
     try {
-      if (isObject(activeAgent) && isFunction(activeAgent._stopAgentResources)) activeAgent._stopAgentResources()
+      if (isObject(activeAgent) && isFunction(activeAgent._stopAgentResources)) finishStep("agent_cleanup", function() { activeAgent._stopAgentResources() })
     } catch(ignoreAgentStop) {}
 
     if (commandHistory && typeof commandHistory.flush === "function") {
-      try { commandHistory.flush() } catch(ignoreFlushError) {}
+      try { finishStep("command_history_flush", function() { commandHistory.flush() }) } catch(ignoreFlushError) {}
     }
+    clearDebugTrace()
 
     var exitStats = isObject(lastConversationStats) ? lastConversationStats : __
     if (isObject(exitStats) && isNumber(exitStats.messageCount) && exitStats.messageCount > 0) {
