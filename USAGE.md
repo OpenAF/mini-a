@@ -183,7 +183,7 @@ mini-a ➤ /my-command repo-a --fast "include docs"
 Notes:
 - Built-in commands take precedence, so custom files cannot override `/help`, `/show`, etc.
 - If a referenced command file is missing or unreadable, Mini-A reports a hard error and does not execute a goal.
-- Discovered command and skill templates appear in `/help` and Tab completion.
+- In the TUI console, `/help` shows regular help; `/help custom` lists discovered commands, skills, and hooks. Command and skill templates also appear in Tab completion.
 - Skill packs downloaded from catalogs such as `skillsmp.com` can be copied directly as folders under `~/.openaf-mini-a/skills/` as long as each skill folder contains `SKILL.md` (or `skill.md`).
 - Append `.disabled` to a skill folder name to keep it installed but excluded from discovery (for example `reviewer.disabled/`).
 - Alternative self-contained skill formats are supported via `SKILL.yaml|yml|json` (metadata, `body` markdown, and embedded refs/children), alongside existing markdown skill templates.

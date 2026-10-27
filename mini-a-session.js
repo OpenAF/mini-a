@@ -2563,6 +2563,13 @@ function MiniAInteractiveSession(args, adapter) {
             return candidates.isEmpty() ? -1 : Number(debugInsertionPoint)
           }
 
+          if (lookupName === "help") {
+            var helpRemainder = uptoCursor.substring(firstSpace + 1).replace(/^\s*/, "").toLowerCase()
+            if (/\s/.test(helpRemainder)) return -1
+            if ("custom".indexOf(helpRemainder) === 0) candidates.add("custom")
+            return candidates.isEmpty() ? -1 : Number(cursor - helpRemainder.length)
+          }
+
           if (lookupName === "decide") {
             var decideRemainder = uptoCursor.substring(firstSpace + 1).replace(/^\s*/, "").toLowerCase()
             if (/\s/.test(decideRemainder)) return -1
@@ -6535,7 +6542,7 @@ function MiniAInteractiveSession(args, adapter) {
 
   function commandHelpRows() {
     var helpCommands = [
-      { command: "/help", description: "Show this help message" },
+      { command: "/help [custom]", description: "Show regular help, or custom commands, skills and hooks" },
       { command: "/set <key> <value>", description: "Update a Mini-A parameter (use '\"\"\"' for multi-line values)" },
       { command: "/toggle <key>", description: "Toggle boolean parameter" },
       { command: "/unset <key>", description: "Clear a parameter" },
@@ -6652,7 +6659,7 @@ function MiniAInteractiveSession(args, adapter) {
     }
   }
 
-  function printHelp() {
+  function printHelp(custom) {
     if (adapter) { browserResult(commandMetadata(), "help"); return }
     function wrapHelpText(text, maxWidth) {
       var normalized = isString(text) ? text : String(text)
@@ -6766,61 +6773,70 @@ function MiniAInteractiveSession(args, adapter) {
       "",
       "Commands (prefix with '/'):"
     ]
-    var helpCommands = commandHelpRows()
-    appendAlignedHelpRows(lines, helpCommands)
-    var commandNames = Object.keys(customSlashCommands).sort()
-    if (commandNames.length > 0) {
-      lines.push("")
-      lines.push("Custom commands from " + colorifyText(customCommandsDirPath, accentColor) + ":")
-      var customCommandRows = []
-      commandNames.forEach(function(name) {
-        var commandEntry = customSlashCommands[name]
-        var commandHelpText = "Execute instructions from " + customSlashCommands[name].file
-        if (isObject(commandEntry) && isString(commandEntry.description) && commandEntry.description.trim().length > 0) {
-          commandHelpText = commandEntry.description.replace(/\s+/g, " ").trim()
-        }
-        customCommandRows.push({
-          command: "/" + name + " [args]",
-          description: commandHelpText
-        })
-      })
-      appendAlignedHelpRows(lines, customCommandRows)
+    if (!custom) {
+      var helpCommands = commandHelpRows()
+      appendAlignedHelpRows(lines, helpCommands)
+    } else {
+      lines = ["Custom help (commands, skills and hooks):"]
     }
-    var skillNames = Object.keys(customSkillSlashCommands).sort()
-    if (skillNames.length > 0) {
-      lines.push("")
-      lines.push("Skills from " + colorifyText(customSkillsDirPath, accentColor) + " (skills also support $<name>):")
-      var skillRows = []
-      skillNames.forEach(function(name) {
-        var skillEntry = customSkillSlashCommands[name]
-        var sourceHint = (isObject(skillEntry) && skillEntry.sourceType === "folder") ? "folder skill" : "template skill"
-        var fallbackHelp = "Execute " + sourceHint + " from " + customSkillSlashCommands[name].file
-        var skillHelpText = fallbackHelp
-        if (isObject(skillEntry) && isString(skillEntry.description) && skillEntry.description.trim().length > 0) {
-          skillHelpText = skillEntry.description.replace(/\s+/g, " ").trim()
-        }
-        skillRows.push({
-          command: "/" + name + " [args]",
-          description: skillHelpText
+    if (custom) {
+      var commandNames = Object.keys(customSlashCommands).sort()
+      if (commandNames.length > 0) {
+        lines.push("")
+        lines.push("Custom commands from " + colorifyText(customCommandsDirPath, accentColor) + ":")
+        var customCommandRows = []
+        commandNames.forEach(function(name) {
+          var commandEntry = customSlashCommands[name]
+          var commandHelpText = "Execute instructions from " + customSlashCommands[name].file
+          if (isObject(commandEntry) && isString(commandEntry.description) && commandEntry.description.trim().length > 0) {
+            commandHelpText = commandEntry.description.replace(/\s+/g, " ").trim()
+          }
+          customCommandRows.push({
+            command: "/" + name + " [args]",
+            description: commandHelpText
+          })
         })
-      })
-      appendAlignedHelpRows(lines, skillRows)
-    }
-    var totalHooks = 0
-    Object.keys(loadedHooks).forEach(function(ev) { totalHooks += loadedHooks[ev].length })
-    if (totalHooks > 0) {
-      lines.push("")
-      lines.push("Hooks from " + colorifyText(hooksDirPath, accentColor) + ":")
-      var hookRows = []
-      Object.keys(loadedHooks).sort().forEach(function(eventName) {
-        var hookCount = isArray(loadedHooks[eventName]) ? loadedHooks[eventName].length : 0
-        if (hookCount <= 0) return
-        hookRows.push({
-          command: eventName,
-          description: String(hookCount) + " hook(s) loaded"
+        appendAlignedHelpRows(lines, customCommandRows)
+      }
+      var skillNames = Object.keys(customSkillSlashCommands).sort()
+      if (skillNames.length > 0) {
+        lines.push("")
+        lines.push("Skills from " + colorifyText(customSkillsDirPath, accentColor) + " (skills also support $<name>):")
+        var skillRows = []
+        skillNames.forEach(function(name) {
+          var skillEntry = customSkillSlashCommands[name]
+          var sourceHint = (isObject(skillEntry) && skillEntry.sourceType === "folder") ? "folder skill" : "template skill"
+          var fallbackHelp = "Execute " + sourceHint + " from " + customSkillSlashCommands[name].file
+          var skillHelpText = fallbackHelp
+          if (isObject(skillEntry) && isString(skillEntry.description) && skillEntry.description.trim().length > 0) {
+            skillHelpText = skillEntry.description.replace(/\s+/g, " ").trim()
+          }
+          skillRows.push({
+            command: "/" + name + " [args]",
+            description: skillHelpText
+          })
         })
-      })
-      appendAlignedHelpRows(lines, hookRows)
+        appendAlignedHelpRows(lines, skillRows)
+      }
+      var totalHooks = 0
+      Object.keys(loadedHooks).forEach(function(ev) { totalHooks += loadedHooks[ev].length })
+      if (totalHooks > 0) {
+        lines.push("")
+        lines.push("Hooks from " + colorifyText(hooksDirPath, accentColor) + ":")
+        var hookRows = []
+        Object.keys(loadedHooks).sort().forEach(function(eventName) {
+          var hookCount = isArray(loadedHooks[eventName]) ? loadedHooks[eventName].length : 0
+          if (hookCount <= 0) return
+          hookRows.push({
+            command: eventName,
+            description: String(hookCount) + " hook(s) loaded"
+          })
+        })
+        appendAlignedHelpRows(lines, hookRows)
+      }
+      if (commandNames.length === 0 && skillNames.length === 0 && totalHooks === 0) {
+        lines.push("No custom commands, skills or hooks loaded.")
+      }
     }
     print( ow.format.withSideLine( lines.join("\n"), __, promptColor, hintColor, ow.format.withSideLineThemes().openCurvedRect) )
   }
@@ -7552,8 +7568,13 @@ function MiniAInteractiveSession(args, adapter) {
         runDecision(parsedSlashCommand.argsRaw)
         continue
       }
-      if (commandLower === "help") {
-        printHelp()
+      if (parsedSlashCommand.name === "help") {
+        var helpTopic = parsedSlashCommand.argsRaw.toLowerCase().trim()
+        if (helpTopic.length > 0 && helpTopic !== "custom") {
+          print(colorifyText("Usage: /help [custom]", errorColor))
+          continue
+        }
+        printHelp(helpTopic === "custom")
         continue
       }
       if (parsedSlashCommand.name === "edit" || parsedSlashCommand.name === "editor") {
