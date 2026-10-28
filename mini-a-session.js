@@ -4,6 +4,54 @@
 
 var __miniASessionBundleRoot = String(new java.io.File(String(__loadedfrom)).getCanonicalFile().getParent())
 
+// Keep concurrent agent deltas separate. Prefixes are removed one level at a
+// time without trimming the actual delta (whitespace can be significant).
+function __miniAConsoleStreams(limit) {
+  var streams = {}, order = ["main"], selected = "main", closed = false
+  streams.main = { text: "", type: "stream" }
+  function route(message) {
+    var text = String(message || ""), path = [], match
+    while ((match = text.match(/^\[subtask:([^\]]+)\] /))) {
+      path.push(match[1]); text = text.substring(match[0].length)
+    }
+    return { id: path.length ? path.join("/") : "main", text: text }
+  }
+  return {
+    route: route,
+    push: function(type, message) {
+      if (closed) return
+      var part = route(message)
+      if (!streams[part.id]) { streams[part.id] = { text: "", type: type }; order.push(part.id) }
+      var stream = streams[part.id]
+      stream.text = (stream.text + part.text).slice(-(limit || 131072))
+      stream.type = type
+      return { text: part.text, visible: part.id === selected, added: order.length > 1, id: part.id }
+    },
+    snapshot: function() { return { id: selected, text: streams[selected].text, type: streams[selected].type, count: order.length } },
+    next: function(direction) {
+      selected = order[(order.indexOf(selected) + (direction === -1 ? -1 : 1) + order.length) % order.length]
+      return { id: selected, text: streams[selected].text, type: streams[selected].type, count: order.length }
+    },
+    multiple: function() { return order.length > 1 },
+    isClosed: function() { return closed },
+    close: function() { closed = true }
+  }
+}
+
+// A complete viewport frame: replacing it never appends another agent's text
+// to terminal history. The terminal's normal screen is preserved separately.
+function __miniAConsoleStreamFrame(view, content, width, height, notices) {
+  width = Math.max(1, width); height = Math.max(2, height)
+  var heading = "Stream: " + view.id + " [" + view.count + "] | Tab/Shift-Tab: switch | Esc: stop"
+  var alerts = (notices || []).slice(-Math.min(3, height - 2)).map(function(line) { return String(line).slice(0, width) })
+  var available = Math.max(1, height - 1 - alerts.length)
+  var lines = String(content || "Waiting for output...").split("\n")
+  var rows = [heading.slice(0, width)].concat(lines.slice(-available))
+  while (rows.length < height - alerts.length) rows.push("")
+  rows = rows.concat(alerts)
+  return "\x1b[H" + rows.map(function(row) { return "\x1b[2K" + row }).join("\r\n") + "\x1b[J"
+}
+
 function MiniAInteractiveSession(args, adapter) {
   var host = MiniAInteractiveSession.host
   var commandResult
@@ -678,6 +726,10 @@ function MiniAInteractiveSession(args, adapter) {
     memorywritemax: { type: "number", description: "Maximum memory_write calls allowed per run" },
     memorymd: { type: "boolean", description: "Store global memory as path-keyed markdown strings in memorych (one .md record per entry)" },
     memoryreflect: { type: "boolean", description: "After a successful run, make one extra LLM call to extract durable memories (default true when usememory=true)" },
+    memoryreflectmode: { type: "string", description: "Reflection scheduling: background (default) or sync" },
+    acceptancereview: { type: "boolean", description: "Review final answers before acceptance (default false)" },
+    acceptanceoptimization: { type: "boolean", description: "Enable deterministic acceptance optimizations" },
+    proxyargrepair: { type: "boolean", description: "Repair unambiguous read-only proxy operation aliases" },
     memoryreflectmodel: { type: "string", description: "Model config for the reflection pass (falls back to OAF_REFLECT_MODEL, then the low-cost model, then the main model)", dataEditor: "map" },
     memoryreflectmin: { type: "number", description: "Minimum total tool/shell calls a run must have made to qualify for reflection" },
     memorycandidatedays: { type: "number", description: "Expiry window for an unconfirmed model-authored global candidate before a second session confirms it" },
@@ -982,6 +1034,7 @@ function MiniAInteractiveSession(args, adapter) {
     forkstatemaxbytes: { type: "number", default: 65536, description: "Maximum serialized state size shared with delegated subtasks." },
     showdelegate   : { type: "boolean", default: false, description: "Show delegate/subtask events as separate lines (default keeps them inline)" },
     toolfallback   : { type: "boolean", default: false, description: "Retry in action mode when tool-calling output is malformed." },
+    usejsonschema : { type: "string", description: "Schema responses: auto (default) or off." },
     usejsontool    : { type: "boolean", description: "Use JSON action dispatch instead of native tools on both model tiers." },
     useskills      : { type: "boolean", default: false, description: "Expose the skills utility tool and auto-load high-confidence matching skills." },
     usestdutils    : { type: "boolean", default: false, description: "Enable standard-utils compatibility aliases (question, skill, todowrite, etc.)." },
@@ -1101,11 +1154,11 @@ function MiniAInteractiveSession(args, adapter) {
     { category: "Models and execution", subcategory: "Research and validation", names: "deepresearch maxcycles persistlearnings valgoal validationgoal validationthreshold valtools".split(" ") },
     { category: "Models and execution", subcategory: "Prompt and tool routing", names: "adaptiverouting promptprofile routerallow routerdeny routerorder routerproxythreshold systempromptbudget".split(" ") },
     { category: "Tools and permissions", subcategory: "Shell and sandbox", names: "checkall readwrite sandboxnonetwork sandboxprofile shell shellallow shellallowpipes shellbanextra shellbatch shellmaxbytes shellprefix shelltimeout usesandbox useshell".split(" ") },
-    { category: "Tools and permissions", subcategory: "Tools and utilities", names: "toolargcheck toolargrepair toolresultmaxinline readresultmaxmatches capabilitylimit capabilityselection fileallow policy policyfile toolcachettl toolfallback usejsontool usestdutils usetools usetoolslc useutils utilsallow utilsdeny utilsroot".split(" ") },
+    { category: "Tools and permissions", subcategory: "Tools and utilities", names: "toolargcheck toolargrepair toolresultmaxinline readresultmaxmatches capabilitylimit capabilityselection fileallow policy policyfile toolcachettl toolfallback usejsonschema usejsontool usestdutils usetools usetoolslc useutils utilsallow utilsdeny utilsroot".split(" ") },
     { category: "Tools and permissions", subcategory: "MCP connections", names: "mcp mcpdynamic sessionprewarm mcplazy mcptest nosetmcpwd".split(" ") },
     { category: "Tools and permissions", subcategory: "MCP proxy and programmatic calls", names: "mcpproxyallow mcpproxydeny mcpproxynative mcpprogcall mcpprogcallbatchmax mcpprogcallmaxbytes mcpprogcallport mcpprogcallresultttl mcpprogcalltools mcpproxy mcpproxythreshold mcpproxytoon".split(" ") },
     { category: "Tools and permissions", subcategory: "Skills and extensions", names: "extracommands extrahooks extraskills mini-a-docs miniadocs plugins pluginsroot pluginsroots skillcontextchars skillmanifestchars skillmaxautoload skillsautolimit skillsautosearch skillsmaxchars skillsmaxloaded skillwikibackend skillwikimounts skillwikiroot useskills useskillswiki".split(" ") },
-    { category: "Memory and knowledge", subcategory: "Memory stores and retention", names: "memoryartifactttldays memoryindexttldays memoryinject memoryrelevantcap usememorywrite memorywritemax memorymd memoryreflect memoryreflectmodel memoryreflectmin memorycandidatedays memorybudget memorysearchbudget memorysessionmaxdays memorypersistevery memorych memorycompactevery memorydedup memoryman memorymaxentries memorymaxpersection memorypromote memoryscope memorysessionch memorysessionheader memorysessionid memorystaledays memoryuser memoryusersession usememory".split(" ") },
+    { category: "Memory and knowledge", subcategory: "Memory stores and retention", names: "memoryartifactttldays memoryindexttldays memoryinject memoryrelevantcap usememorywrite memorywritemax memorymd memoryreflect memoryreflectmode acceptancereview acceptanceoptimization proxyargrepair memoryreflectmodel memoryreflectmin memorycandidatedays memorybudget memorysearchbudget memorysessionmaxdays memorypersistevery memorych memorycompactevery memorydedup memoryman memorymaxentries memorymaxpersection memorypromote memoryscope memorysessionch memorysessionheader memorysessionid memorystaledays memoryuser memoryusersession usememory".split(" ") },
     { category: "Memory and knowledge", subcategory: "Wiki graph", names: "wikigraphautosave wikigraphsavedebouncems usewikigraph wikigraphcommunity wikigraphcross wikigraphcrosscap wikigraphcrossdepth wikigraphcrossjoin wikigraphcrossmaxdf wikigraphcrossminkeylen wikigraphfalkorgraph wikigraphfalkorhost wikigraphfalkorpass wikigraphfalkorport wikigraphfalkoruser wikigraphhintcap wikigraphmounts wikigraphsearchhints wikigraphsemantic wikimountgraphttlms".split(" ") },
     { category: "Memory and knowledge", subcategory: "Wiki retrieval and maintenance", names: "wikimetacache wikisourceurl wikisourcefield wikisourceinline wikilexical wikilintresultlimit wikilintstaleddays wikiretrievalconfig wikiretrievalv2 wikitarget wikitelemetry".split(" ") },
     { category: "Memory and knowledge", subcategory: "Wiki model budgets", names: "wikillmbudget wikiingestbudget wikiingestmaxcalls wikimaxprompttokens".split(" ") },
@@ -4727,6 +4780,13 @@ function MiniAInteractiveSession(args, adapter) {
     totalChars: 0,
     contentChars: 0
   }
+  var _consoleStreams = __
+  var _consoleStreamLock = "mini_a_console_stream_" + genUUID()
+  var _consoleStreamHint = false
+  var _consoleScreenActive = false
+  var _consoleScreenDrawnAt = 0
+  var _consoleScreenSignature = ""
+  var _consoleScreenNotices = []
   var _streamHasRendered = false
   var _stringifyFinalResult = function(v, pretty) {
     return stringify(v, __, pretty ? "  " : "")
@@ -4742,8 +4802,8 @@ function MiniAInteractiveSession(args, adapter) {
       (!isString(sessionOptions.format) || sessionOptions.format === "md")
   }
 
-  function _renderConsoleAnswerMarkdown(text, kind) {
-    return __miniAMarkdownRender(text, _getConsoleRenderWidth(), {
+  function _renderConsoleAnswerMarkdown(text, kind, width) {
+    return __miniAMarkdownRender(text, isNumber(width) ? width : _getConsoleRenderWidth(), {
       ansi: __conAnsi === true, kind: kind,
       useasciiviz: _consoleChartsEnabled(),
       renderChart: function(params) {
@@ -4805,6 +4865,58 @@ function MiniAInteractiveSession(args, adapter) {
     }
     _streamRenderer.feed(streamText)
   }
+  function _drawConsoleStreamScreen(force) {
+    if (!_consoleScreenActive || !_consoleStreams) return
+    if (!force && now() - _consoleScreenDrawnAt < 100) return
+    var view = _consoleStreams.snapshot()
+    var width = Math.max(1, _getConsoleRenderWidth() - 1)
+    var height = Math.max(2, Number(__con.getTerminal().getHeight()) || 24)
+    var signature = view.id + "|" + view.count + "|" + width + "|" + height + "|" + view.text + "|" + _consoleScreenNotices.join("\n")
+    if (!force && signature === _consoleScreenSignature) return
+    var rendered = _renderConsoleAnswerMarkdown(view.text, __, width)
+    rendered = ow.format.string.wordWrap(rendered, width)
+    printnl(__miniAConsoleStreamFrame(view, rendered, width, height, _consoleScreenNotices))
+    _consoleScreenSignature = signature
+    _consoleScreenDrawnAt = now()
+  }
+
+  function _openConsoleStreamScreen() {
+    if (__conAnsi !== true || _consoleScreenActive) return
+    _flushStreamRemainder()
+    _resetStreamRenderState()
+    _prevEventRenderLines = __
+    _prevEventAnimatedRenderer = __
+    printnl("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H")
+    _consoleScreenActive = true
+    _drawConsoleStreamScreen(true)
+  }
+
+  function _closeConsoleStreamScreen() {
+    if (!_consoleScreenActive) return
+    _consoleScreenActive = false
+    printnl("\x1b[?25h\x1b[?1049l")
+    _streamRenderer = __
+    _streamPreviewLines = 0
+    _streamNeedsTerminator = false
+    _prevEventRenderLines = __
+    _prevEventAnimatedRenderer = __
+    _consoleScreenNotices.forEach(function(line) { print(line) })
+  }
+
+  function _nextConsoleStream(direction) {
+    if (!_consoleStreams || !_consoleStreams.multiple()) return
+    sync(function() {
+      var selected = _consoleStreams.next(direction)
+      if (_consoleScreenActive) { _drawConsoleStreamScreen(true); return }
+      _flushStreamRemainder()
+      _resetStreamRenderState()
+      _prevEventRenderLines = __
+      _prevEventAnimatedRenderer = __
+      print("\n[Stream: " + selected.id + " · Tab/Shift-Tab: next/previous stream · Esc: stop]")
+      _renderStreamChunk(selected.text, selected.type)
+    }, _consoleStreamLock)
+  }
+
   function _parseDelegateSubtaskMessage(message) {
     if (!isString(message)) return __
     var match = message.match(/^\[subtask:([^\]]+)\]\s*(.*)$/)
@@ -5422,6 +5534,11 @@ function MiniAInteractiveSession(args, adapter) {
 
   function runGoal(goalText, skillUsage, displayPrompt) {
     var submittedAt = now()
+    _consoleStreams = adapter ? __ : __miniAConsoleStreams()
+    var goalStreams = _consoleStreams
+    _consoleStreamHint = false
+    _consoleScreenSignature = ""
+    _consoleScreenNotices = []
     _streamOutputStats.totalChars = 0
     _streamOutputStats.contentChars = 0
     _lastRenderedPlanSignature = ""
@@ -5465,9 +5582,39 @@ function MiniAInteractiveSession(args, adapter) {
     activeAgent = agent
     agent._beginStartupTiming(_args)
     agent.setInteractionFn(function(event, message) {
-      agent.defaultInteractionFn(event, message, function(icon, text, id) {
-        printEvent(event, icon, text, id)
-      })
+      sync(function() {
+        if (goalStreams && (goalStreams !== _consoleStreams || goalStreams.isClosed())) return
+        if (_consoleStreams && (event === "stream" || event === "planner_stream")) {
+          var part = _consoleStreams.push(event, message)
+          if (!part) return
+          if (_activityCueActive) _stopActivityCueLoop()
+          if (part.added && !_consoleStreamHint) {
+            _consoleStreamHint = true
+            if (__conAnsi === true) _openConsoleStreamScreen()
+            else {
+              _flushStreamRemainder()
+              print("\n[Multiple streams · viewing main · Tab/Shift-Tab: next/previous stream · Esc: stop]")
+              _prevEventRenderLines = __
+              _prevEventAnimatedRenderer = __
+            }
+          }
+          if (_consoleScreenActive) return // Input poll redraws at most ten times/second.
+          if (part.visible) printEvent(event, "", part.text, part.id)
+          return
+        }
+        if (_consoleScreenActive && (event === "warn" || event === "error")) {
+          _consoleScreenNotices.push(event.toUpperCase() + ": " + String(message).replace(/[\r\n\x1b]/g, " "))
+          _consoleScreenNotices = _consoleScreenNotices.slice(-3)
+          _drawConsoleStreamScreen(true)
+          return
+        }
+        // Background status chatter must not interrupt the selected answer.
+        // Full diagnostics remain available in the audit/trace logs.
+        if (_consoleStreams && _consoleStreams.multiple() && event !== "error" && event !== "warn") return
+        agent.defaultInteractionFn(event, message, function(icon, text, id) {
+          printEvent(event, icon, text, id)
+        })
+      }, _consoleStreamLock)
     })
     if (isFunction(agent.setTraceFn) && isFunction(traceSink)) agent.setTraceFn(traceSink)
     if (isFunction(agent.setAnsiLogging)) agent.setAnsiLogging(__conAnsi === true)
@@ -5488,9 +5635,11 @@ function MiniAInteractiveSession(args, adapter) {
       }).stopWhen(function(done) {
         if (done === true) return true
         if (stopRequested) return true
+        sync(function() { _drawConsoleStreamScreen(false) }, _consoleStreamLock)
         var rawCode = con.readCharNB()
         var code = isDef(rawCode) ? Number(rawCode) : NaN
         if (!isNaN(code) && code > 0) {
+          if (code === 9) _nextConsoleStream()
           if (code === 27) {
             sleep(40)
             var followRaw = con.readCharNB()
@@ -5513,6 +5662,18 @@ function MiniAInteractiveSession(args, adapter) {
               printEvent("warn", "🛑", "Esc pressed. Requesting Mini-A to stop...")
               return true
             } else if (!isNaN(followCode) && followCode > 0) {
+              // Shift-Tab is CSI Z. Consume it before draining other escape keys.
+              if (followCode === 91) {
+                var sequenceCode = con.readCharNB()
+                if (isUnDef(sequenceCode) || Number(sequenceCode) <= 0) {
+                  sleep(40)
+                  sequenceCode = con.readCharNB()
+                }
+                if (Number(sequenceCode) === 90) {
+                  _nextConsoleStream(-1)
+                  return false
+                }
+              }
               // Not a lone ESC: this is an escape sequence (e.g. an arrow key, ESC [ A).
               // Drain the remaining buffered bytes so the sequence's tail doesn't leak
               // into the next poll as a stray character.
@@ -5528,6 +5689,10 @@ function MiniAInteractiveSession(args, adapter) {
         return false
       }).exec()
       _stopActivityCueLoop()
+      sync(function() {
+        if (_consoleStreams) _consoleStreams.close()
+        _closeConsoleStreamScreen()
+      }, _consoleStreamLock)
       if (stopRequested) {
         if (isObject(lastDebugTrace)) lastDebugTrace.status = "stopped"
         _prevEventRenderLines = __
@@ -5553,7 +5718,9 @@ function MiniAInteractiveSession(args, adapter) {
       runHooks("after_goal", { MINI_A_GOAL: isString(goalText) ? goalText : "", MINI_A_RESULT: resultPreview })
       if (isUnDef(_args.outfile)) {
         // Skip duplicate output if streaming was used - content already displayed
-        if (!_args.usestream) {
+        if (!_args.usestream || (_consoleStreams && _consoleStreams.multiple())) {
+          _flushStreamRemainder()
+          _clearStreamPreview()
           //print(colorifyText("\n🏁 Final answer", successColor))
           print()
           if (isObject(displayResult) || isArray(displayResult)) {
@@ -5597,8 +5764,15 @@ function MiniAInteractiveSession(args, adapter) {
       _prevEventRenderLines = __
       _prevEventLastUpdate = 0
       _prevEventAnimatedRenderer = __
+      if (isFunction(agent._scheduleReflectionQueue)) {
+        try { agent._scheduleReflectionQueue(_args, now() + 1) } catch(ignoreReflectionSchedule) {}
+      }
       return true
     } catch (e) {
+      sync(function() {
+        if (_consoleStreams) _consoleStreams.close()
+        _closeConsoleStreamScreen()
+      }, _consoleStreamLock)
       _stopActivityCueLoop()
       _prevEventRenderLines = __
       _prevEventLastUpdate = 0
@@ -5607,6 +5781,8 @@ function MiniAInteractiveSession(args, adapter) {
       if (isObject(lastDebugTrace)) lastDebugTrace.status = "failed"
       printErr(colorifyText("!!", "ITALIC," + errorColor) + " " + colorifyText("Mini-A execution failed: " + errMsg, errorColor))
       return false
+    } finally {
+      sync(function() { _closeConsoleStreamScreen() }, _consoleStreamLock)
     }
   }
 

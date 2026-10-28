@@ -14,6 +14,70 @@
     m._startWatchdog = function() {}; m._startLocalSubtask = function() {}
     try { fn(a, m) } finally { m.destroy() }
   }
+  exports.testParentWaitsWithoutModelTurnsAndResumesAfterChild = function() { fixture(function(a, m) {
+    var id = m.submitAndRun("Return ready", {}, { task: task("wait-child") })
+    a._runtime.successfulActionDetected = true
+    for (var i = 0; i < 6; i++) assert(a._executionStep(a._runtime, 1), "wait", "Active child parks the executor before model dispatch")
+    assert(a._execution.state.recoveries, 0, "Waiting does not consume recovery attempts")
+    assert(a._execution.state.budget.spent, 0, "Waiting consumes no tokens")
+    m._completeSubtask(m.subtasks[id], "fixture", "ready", {}, { execution: { outcome: "succeeded" } })
+    assert(a._execution.state.tasks["wait-child"].acceptance, "accepted", "Child result is accepted")
+    assert(a._executionStep(a._runtime, 1), true, "Parent resumes to integrate the accepted result")
+    assert(a._runtime.executionWaiting, false, "Waiting state clears")
+    var results = a._runtime.context.filter(function(line) { return line.indexOf("[OBS DELEGATION RESULT]") === 0 })
+    assert(results.length, 1, "Settled child result is injected into the parent prompt")
+    assert(results[0].indexOf('"result":"ready"') >= 0, true, "Parent receives actual child evidence")
+    a._executionStep(a._runtime, 1)
+    assert(a._runtime.context.filter(function(line) { return line.indexOf("[OBS DELEGATION RESULT]") === 0 }).length, 1, "Repeated checks do not duplicate result context")
+  }) }
+  exports.testWaitingStillHonorsElapsedBudget = function() { fixture(function(a, m) {
+    m.submitAndRun("Return ready", {}, { task: task("wait-budget") })
+    a._execution.state.budget.timeCap = 1
+    a._execution.state.budget.elapsed = 2
+    assert(a._executionStep(a._runtime, 1), false, "Expired elapsed budget exits the wait")
+    assert(a._execution.state.outcome, "partial", "Budget exhaustion cannot claim success")
+  }) }
+  exports.testDynamicSelectionRetainsCoordinationTools = function() { fixture(function(a) {
+    a._useTools = a._useToolsMain = a._useToolsLC = a._use_lc = true
+    a._oaf_model = a._oaf_lc_model = { type: "ollama", model: "fixture" }
+    var connection = md5("mini-a-mcp-proxy")
+    a.mcpTools = ["result_head", "proxy-dispatch", "subtask-status", "execution-task", "bash"].map(function(name) { return { name: name, inputSchema: { type: "object" } } })
+    a.mcpToolNames = a.mcpTools.map(function(t) { return t.name })
+    a.mcpToolToConnection = {}; a._mcpConnections = {}; a._mcpConnections[connection] = {}
+    a.mcpToolNames.forEach(function(name) { a.mcpToolToConnection[name] = connection })
+    a._selectMcpToolsDynamically = function() { return ["result_head"] }
+    a._applySystemInstructions = function() {}
+    a._createBareLlmInstance = function() {
+      var conversation = []
+      return {
+        tools: [],
+        getGPT: function() { return { getConversation: function() { return conversation }, setConversation: function(c) { conversation = c } } },
+        withMcpTools: function(client, names) { this.tools = names; return this },
+        withInstructions: function() { return this }
+      }
+    }
+    a.llm = a._createBareLlmInstance(); a.lc_llm = a._createBareLlmInstance()
+    a._registerMcpToolsForGoal({ goal: "Read report", mcpdynamic: true, mcpproxy: true, mcpproxynative: true })
+    ;[a.llm, a.lc_llm].forEach(function(client) {
+      assert(client.tools.sort(), ["execution-task", "proxy-dispatch", "result_head", "subtask-status"], "Both tiers retain configured controls without adding unrelated tools")
+      assert(client.__miniAProxyDispatchRegistered, true, "Proxy marker reflects actual registration")
+    })
+  }) }
+  exports.testUndispatchedNativeCallsHaveSpecificBoundedRecovery = function() { fixture(function(a) {
+    a.mcpToolNames = ["proxy-dispatch", "result_head"]
+    var payload = { response: { content: "", events: [{ message: { tool_calls: [{ function: { name: "subtask-status", arguments: { subtaskId: "child" } } }] } }] } }
+    assert(a._handleUndispatchedToolResponse(a._runtime, payload, 1), true, "Streaming tool envelope is recognized")
+    assert(a._runtime.context[0].indexOf("proxy-dispatch") >= 0, true, "Recovery explains the available transport")
+    assert(a._runtime.earlyStopTriggered, __, "First response is recoverable")
+    a._handleUndispatchedToolResponse(a._runtime, payload, 2)
+    a._handleUndispatchedToolResponse(a._runtime, payload, 3)
+    assert(a._runtime.earlyStopTriggered, true, "Repeated undispatched calls are bounded")
+    assert(a._runtime.earlyStopReason.indexOf("subtask-status") >= 0, true, "Final reason names the failed tool")
+    a._runtime.modelToolCallDetected = true
+    assert(a._handleUndispatchedToolResponse(a._runtime, payload, 4), false, "Already executed native calls are never replayed or diagnosed as unexecuted")
+    a._runtime.modelToolCallDetected = false
+    assert(a._handleUndispatchedToolResponse(a._runtime, { response: { action: "final", answer: "ready" } }, 4), false, "Normal answers remain unchanged")
+  }) }
   exports.testProgressDeduplicatesAndBoundsRecovery = function() {
     var e = new MiniAExecution()
     assert(e.observe("tool", "read", "digest"), true, "New evidence progresses")
@@ -432,6 +496,393 @@
     assert(a._executionFinal("ready", { goal: "Return ready", useplanning: true }), true, "Same final result reuses acceptance")
     assert(calls, 1, "Unchanged final result is not reviewed twice")
   }) }
+  exports.testFailedEnqueueRetainsOriginalSnapshot = function() { fixture(function(a) {
+    var root = io.createTempFile("mini-a-enqueue-retry-", ".home")
+    io.rm(root); io.mkdir(root)
+    a._getMiniAHomeDir = function() { return "" }
+    a._memoryConfig = { enabled: true }; a._memoryScope = "session"
+    a._runtime = { toolsUsed: { read: 2 }, context: [] }
+    a._lastRunOutcome = { status: "succeeded", answerPreview: "original answer" }
+    a._runMemoryOutcomeRecorded = true
+    a._persistWorkingMemory = a._persistSessionMemory = a._autoPromoteSessionToGlobal = function() {}
+    try {
+      a._finalizeRunMemory({ memoryreflect: true, goal: "original goal" }, { reflect: true })
+      assert(a._runMemoryFinalized, false, "Failed enqueue is not finalized")
+      assert(a._pendingReflectionJob.snapshot.goal, "original goal", "Original snapshot is retained")
+      a._getMiniAHomeDir = function() { return root }
+      a._lastRunOutcome.answerPreview = "changed"
+      a._finalizeRunMemory({ memoryreflect: true, goal: "different" })
+      assert(a._runMemoryFinalized, true, "Retry finalizes after durable enqueue")
+      var files = io.listFiles(root + "/reflection-queue").files.filter(function(f) { return /\.json$/.test(f.filename) })
+      assert(io.readFileJSON(files[0].canonicalPath).snapshot.outcome.answerPreview, "original answer", "Retry persists original data")
+    } finally { io.rm(root) }
+  }) }
+  exports.testBackgroundFinalizationQueuesWithoutModelCall = function() { fixture(function(a) {
+    var queued = 0, called = 0
+    a._memoryConfig = { enabled: true }
+    a._runMemoryOutcomeRecorded = true
+    a._enqueueReflection = function() { queued++ }
+    a._reflectRunMemory = function() { called++ }
+    a._persistWorkingMemory = a._persistSessionMemory = a._autoPromoteSessionToGlobal = function() {}
+    a._finalizeRunMemory({ memoryreflect: true }, { reflect: true })
+    assert(queued, 1, "Default finalization queues reflection")
+    assert(called, 0, "Default finalization does not wait for model")
+    a._runMemoryFinalized = false
+    a._finalizeRunMemory({ memoryreflect: true, memoryreflectmode: "sync" }, { reflect: true })
+    assert(called, 1, "Synchronous compatibility mode remains available")
+  }) }
+  exports.testQueuedReflectionRetriesPreparedResponse = function() { fixture(function(a) {
+    var root = io.createTempFile("mini-a-reflection-replay-", ".home")
+    io.rm(root); io.mkdir(root)
+    a._getMiniAHomeDir = function() { return root }
+    a._memoryConfig = { enabled: true }; a._memoryScope = "session"
+    var args = { memoryreflect: true }, requests = 0, writes = 0
+    var Queue = require("mini-a-reflection-queue.js").MiniAReflectionQueue
+    var q = new Queue(root + "/reflection-queue")
+    var id = q.enqueue(a._reflectionDestination(args), { runId: "run", sessionId: "session", scope: "session" })
+    var factory = function() {
+      return { _sessionMemoryId: "session", _memoryScope: "session",
+        _reflectRunMemory: function() { requests++; this._reflectionPersistCandidates({ accepted: [], rejected: 0 }); throw new Error("Interrupted after prepare") },
+        _applyReflectionEntries: function() { writes++; return true },
+        _persistSessionMemory: function() {}, _persistWorkingMemory: function() {}, _autoPromoteSessionToGlobal: function() {} }
+    }
+    try {
+      a._consumeReflectionJob(args, now() + 1, factory)
+      a._consumeReflectionJob(args, now() + 1, factory)
+      assert(requests, 1, "Prepared replay avoids a second model call")
+      assert(writes, 1, "Prepared response is applied on retry")
+      assert(io.readFileJSON(q._path(id)).status, "completed", "Job completes only after prepared writes")
+    } finally { io.rm(root) }
+  }) }
+  exports.testReflectionQueueBoundsRetainedJobs = function() {
+    var Queue = require("mini-a-reflection-queue.js").MiniAReflectionQueue
+    var root = io.createTempFile("mini-a-reflection-bound-", ".queue")
+    io.rm(root)
+    var q = new Queue(root)
+    q.maxJobs = 2
+    try {
+      var first = q.enqueue("destination", { runId: "first" })
+      q.enqueue("destination", { runId: "second" })
+      throws(function() { q.enqueue("destination", { runId: "third" }) })
+      assert(q.enqueue("destination", { runId: "first" }), first, "Existing jobs remain idempotent at capacity")
+      var claim = q.claim("destination", now() + 1)
+      q.finish(claim, true)
+      q.enqueue("destination", { runId: "third" })
+      assert(io.fileExists(q._path(claim.id)), false, "Reclaim terminal jobs first")
+      assert(io.listFiles(root).files.filter(function(f) { return /\.json$/.test(f.filename) }).length, 2, "Queue stays bounded")
+    } finally { io.rm(root) }
+  }
+  exports.testReflectionOwnerReusesLiveMemory = function() { fixture(function(a) {
+    a._agentState = {}
+    a._initWorkingMemory({ usememory: true, memoryscope: "session", memorysessionid: "original-session" }, {})
+    var snapshot = { runId: "original", sessionId: "original-session", scope: "session", outcome: { status: "succeeded" } }
+    var owner = a._createReflectionOwner({ usememory: true }, snapshot)
+    assert(owner._sessionMemoryManager === a._sessionMemoryManager, true, "Live in-memory destination is shared")
+    assert(owner._reflectionUnavailable === true, false, "Live destination is available")
+    snapshot.sessionId = "missing-session"
+    var missing = a._createReflectionOwner({ usememory: true }, snapshot)
+    assert(missing._reflectionUnavailable, true, "Unavailable in-memory destination is deferred")
+  }) }
+  exports.testReflectionQueueClaimsAndRetries = function() {
+    var Queue = require("mini-a-reflection-queue.js").MiniAReflectionQueue
+    var root = io.createTempFile("mini-a-reflection-", ".queue")
+    io.rm(root)
+    var q = new Queue(root)
+    try {
+      var id = q.enqueue("scope-a", { runId: "run-1" })
+      assert(q.enqueue("scope-a", { runId: "run-1" }), id, "Enqueue is idempotent")
+      assert(isUnDef(q.claim("scope-b", now() + 1)), true, "Other destinations cannot claim")
+      var claim = q.claim("scope-a", now() + 1)
+      assert(claim.attempts, 1, "First claim increments attempt")
+      q.defer(claim)
+      claim = q.claim("scope-a", now() + 1)
+      assert(claim.attempts, 1, "Deferred configuration does not consume retry allowance")
+      assert(isUnDef(q.claim("scope-a", now() + 1)), true, "Live lease cannot be claimed twice")
+      assert(q.finish(merge(claim, { owner: "wrong" }), true), false, "Wrong owner cannot finish")
+      assert(q.prepare(claim, { accepted: [], rejected: 0 }), true, "Validated candidates persist before writes")
+      q.finish(claim, false)
+      claim = q.claim("scope-a", now() + 1)
+      assert(isArray(claim.prepared.accepted), true, "Retry reuses prepared response without another inference")
+      assert(claim.attempts, 2, "Failed attempt is retried")
+      q.finish(claim, true)
+      assert(isUnDef(q.claim("scope-a", now() + 1)), true, "Completed job is not replayed")
+    } finally { io.rm(root) }
+  }
+  exports.testReflectionQueueRecoversExpiredClaims = function() {
+    var Queue = require("mini-a-reflection-queue.js").MiniAReflectionQueue
+    var root = io.createTempFile("mini-a-reflection-", ".queue")
+    io.rm(root)
+    var q = new Queue(root)
+    try {
+      io.writeFileString(root + "/" + sha256("corrupt") + ".json", "broken json")
+      var id = q.enqueue("scope", { runId: "expired-run" })
+      var old = q.claim("scope", now() + 1)
+      var job = io.readFileJSON(q._path(id))
+      job.leaseUntil = now() - 1
+      q._write(job)
+      assert(q.finish(old, true), false, "Expired worker cannot finish")
+      var current = q.claim("scope", now() + 1)
+      assert(current.attempts, 2, "Expired claim is recovered")
+      assert(q.finish(old, true), false, "Replaced worker cannot finish")
+      q.finish(current, false)
+      current = q.claim("scope", now() + 1)
+      q.finish(current, false)
+      assert(isUnDef(q.claim("scope", now() + 1)), true, "Retry limit stops repeated failures")
+      assert(io.readFileJSON(q._path(id)).status, "failed", "Failed job remains inspectable")
+    } finally { io.rm(root) }
+  }
+  exports.testPersistentMemoryLockIsReentrantAndDefers = function() { fixture(function(a) {
+    var root = io.createTempFile("mini-a-memory-lock-", ".home")
+    io.rm(root); io.mkdir(root)
+    a._getMiniAHomeDir = function() { return root }
+    var args = { usememory: true, memorych: "(type: file, options: (file: '/tmp/unused-fixture.json'))" }
+    try {
+      assert(a._withMemoryProcessLock(args, true, function() {
+        return a._withMemoryProcessLock(args, true, function() { return "nested" })
+      }), "nested", "Same-thread nested memory initialization is reentrant")
+      var file = new java.io.RandomAccessFile(root + "/reflection-queue/memory.lock", "rw")
+      var held = file.getChannel().lock()
+      try {
+        assert(a._withMemoryProcessLock(args, false, function() { throw new Error("Must defer") }), false, "External lock prevents background processing")
+      } finally { held.release(); file.close() }
+      assert(a._withMemoryProcessLock(args, false, function() { return true }), true, "Released store can be acquired")
+    } finally { io.rm(root) }
+  }) }
+  exports.testPersistentMemoryAvailableToDelegatedThread = function() { fixture(function(a) {
+    var root = io.createTempFile("mini-a-delegated-memory-", ".tmp")
+    io.rm(root); io.mkdir(root)
+    var args = { memorymd: true }, child = new MiniA(), acquired = false, failure
+    a._getMiniAHomeDir = child._getMiniAHomeDir = function() { return root }
+    child._initWorkingMemoryUnlocked = function() {
+      assert(String(global.__miniAMemoryProcessOwner.get()), "true", "Loading holds the process lock")
+    }
+    child._persistWorkingMemoryNowUnlocked = child._persistSessionMemoryNowUnlocked = function() {
+      assert(String(global.__miniAMemoryProcessOwner.get()), "true", "Persistence holds the process lock")
+    }
+    a.startUnlocked = function() {
+      var delegated = new java.lang.Thread(new JavaAdapter(java.lang.Runnable, { run: function() {
+        try {
+          acquired = child._withMemoryProcessLock(args, false, function() { return true })
+          if (acquired) {
+            child._initWorkingMemory(args, {})
+            child._persistWorkingMemoryNow("test")
+            child._persistSessionMemoryNow("test")
+          }
+        } catch(e) { failure = String(e) }
+      } }))
+      delegated.start(); delegated.join(5000)
+      assert(delegated.isAlive(), false, "Delegated memory work completes during the parent run")
+      return "done"
+    }
+    try {
+      assert(a.start(args), "done", "Parent completes")
+      assert(failure, __, "Child memory operations succeed")
+      assert(acquired, true, "Parent does not retain the process lock during execution")
+      assert(a._withMemoryProcessLock(args, false, function() { return true }), true, "Memory operations release the lock")
+    } finally { io.rm(root) }
+  }) }
+  exports.testSchemaRequestsRespectAggregateBudgets = function() { fixture(function(a) {
+    var calls = 0
+    var client = a._instrumentStartupLlm({ jsonSchemaPromptWithStats: function() {
+      calls++
+      return { response: { answer: "ready" }, stats: { tokens: { total: 100 } } }
+    } }, "main")
+    a._execution = new MiniAExecution({ tokens: 10 })
+    throws(function() { client.jsonSchemaPromptWithStats("hello", {}) })
+    assert(calls, 0, "Token admission rejects schema requests before dispatch")
+    a._execution = new MiniAExecution({ tokens: 5000 })
+    client.jsonSchemaPromptWithStats("hello", {})
+    assert(a._execution.state.budget.spent, 100, "Schema usage is settled")
+    assert(Object.keys(a._execution.state.budget.reservations).length, 0, "Schema reservation is released")
+    a._execution.state.budget.timeCap = 1
+    a._execution.state.budget.elapsed = 2
+    throws(function() { client.jsonSchemaPromptWithStats("hello", {}) })
+    assert(calls, 1, "Elapsed-time admission rejects schema requests before dispatch")
+  }) }
+  exports.testReflectionDefersDuringForegroundRun = function() { fixture(function(a) {
+    var entered = new java.util.concurrent.CountDownLatch(1)
+    var release = new java.util.concurrent.CountDownLatch(1)
+    var consumed = false
+    a.startUnlocked = function() { entered.countDown(); release.await(5, java.util.concurrent.TimeUnit.SECONDS); return "done" }
+    a._consumeReflectionJobUnlocked = function() { consumed = true; return true }
+    var foreground = new java.lang.Thread(new JavaAdapter(java.lang.Runnable, { run: function() { a.start({}) } }))
+    foreground.start()
+    try {
+      assert(entered.await(5, java.util.concurrent.TimeUnit.SECONDS), true, "Foreground starts")
+      assert(a._consumeReflectionJob({}, now(), function() {}), false, "Reflection defers while foreground owns memory")
+      assert(consumed, false, "Deferred reflection never claims a job")
+      assert(a._reflectionQueueBusy, true, "Scheduler can distinguish contention from an empty queue")
+    } finally { release.countDown(); foreground.join(5000) }
+    assert(a._consumeReflectionJob({}, now(), function() {}), true, "Idle process can consume reflection")
+  }) }
+  exports.testReflectionSchedulerUsesIsolatedOwner = function() { fixture(function(a) {
+    var signal = new java.util.concurrent.CountDownLatch(1), seen = {}, visits = 0
+    a._memoryConfig = { enabled: true }
+    a._consumeReflectionJob = function(args, before, factory) {
+      visits++
+      seen.goal = args.goal; seen.before = before
+      seen.owner = factory({ sessionId: "original" })
+      signal.countDown()
+      return visits < 3
+    }
+    a._createReflectionOwner = function(args, snapshot) { return snapshot.sessionId }
+    assert(a._scheduleReflectionQueue({ memoryreflect: true, goal: "original goal" }, 123), true, "Worker scheduled")
+    assert(signal.await(5, java.util.concurrent.TimeUnit.SECONDS), true, "Worker executes consumer")
+    global.__miniAReflectionThread.join(1000)
+    assert(seen.owner, "original", "Scheduler supplies isolated owner factory")
+    assert(visits, 3, "Persistent worker drains until no eligible job remains")
+    assert(seen.before, 123, "Scheduler preserves enqueue cutoff")
+    assert(a._scheduleReflectionQueue({ memoryreflect: false }, 123), false, "Disabled reflection cannot start worker")
+  }) }
+  exports.testReflectionSchedulerRetriesBusyMemory = function() { fixture(function(a) {
+    var attempts = 0
+    a._memoryConfig = { enabled: true }
+    a._consumeReflectionJob = function() {
+      attempts++
+      a._reflectionQueueBusy = attempts < 2
+      return false
+    }
+    assert(a._scheduleReflectionQueue({ memoryreflect: true }, 10), true, "Idle worker scheduled")
+    global.__miniAReflectionThread.join(2000)
+    assert(attempts, 2, "Worker retries contention without another foreground run")
+    assert(global.__miniAReflectionAdmission.get(), false, "Empty queue releases worker")
+  }) }
+  exports.testReflectionSchedulerRetainsOtherSessionRequests = function() { fixture(function(a) {
+    var entered = new java.util.concurrent.CountDownLatch(1)
+    var release = new java.util.concurrent.CountDownLatch(1)
+    var secondDone = new java.util.concurrent.CountDownLatch(1)
+    a._memoryConfig = { enabled: true }
+    a._consumeReflectionJob = function() { entered.countDown(); release.await(5, java.util.concurrent.TimeUnit.SECONDS); return false }
+    var second = new MiniA(), secondCutoff
+    second._memoryConfig = { enabled: true }
+    second._consumeReflectionJob = function(args, before) { secondCutoff = before; secondDone.countDown(); return false }
+    try {
+      assert(a._scheduleReflectionQueue({ memoryreflect: true }, 10), true, "First session starts worker")
+      assert(entered.await(5, java.util.concurrent.TimeUnit.SECONDS), true, "First consumer is active")
+      assert(second._scheduleReflectionQueue({ memoryreflect: true }, 20), true, "Other session request is retained")
+      second._scheduleReflectionQueue({ memoryreflect: true }, 30)
+      release.countDown()
+      assert(secondDone.await(5, java.util.concurrent.TimeUnit.SECONDS), true, "Existing worker services other session")
+      global.__miniAReflectionThread.join(1000)
+      assert(secondCutoff, 30, "Coalesced request retains latest cutoff")
+      assert(global.__miniAReflectionAdmission.get(), false, "Worker releases admission after all requests")
+    } finally { release.countDown(); second._stopAgentResources() }
+  }) }
+  exports.testQueuedReflectionReplayDoesNotRewriteMemory = function() { fixture(function(a) {
+    a._agentState = {}
+    var args = { usememory: true, memoryscope: "session", memorysessionid: "original-session" }
+    a._initWorkingMemory(args, {})
+    var opts = { event: "reflection", bypassRunCap: true, reflectionJob: "job-1" }
+    var first = a._memoryWrite({ kind: "procedure", key: "stable", value: "Use the verified procedure for repeat work." }, args, opts)
+    var second = a._memoryWrite({ kind: "procedure", key: "stable", value: "A replay must not overwrite the original result." }, args, opts)
+    assert(first.ok, true, "Initial reflection entry writes")
+    assert(second.replayed, true, "Replay is detected by original job provenance")
+    assert(a._sessionMemoryManager.getSectionEntries("decisions").filter(function(e) { return e.key === "stable" })[0].value,
+      "Use the verified procedure for repeat work.", "Replay preserves original entry")
+  }) }
+  exports.testReflectionOwnerPreservesOriginalSession = function() { fixture(function(a) {
+    a._oaf_model = { type: "openai", model: "fixture", key: "not-persisted" }
+    a._memoryScope = "session"
+    var snapshot = { runId: "original", sessionId: "original-session", scope: "session", outcome: { status: "succeeded" }, toolsUsed: { read: 2 }, context: [], errorHistory: [] }
+    var owner = a._createReflectionOwner({ usememory: true, memoryscope: "both", memorysessionid: "new-session" }, snapshot)
+    assert(owner._sessionMemoryId, "original-session", "Worker uses original session")
+    assert(owner._memoryScope, "session", "Worker uses original scope")
+    assert(owner._id, "original", "Worker retains original run provenance")
+    owner._oaf_model.model = "changed"
+    assert(a._oaf_model.model, "fixture", "Worker model config is detached")
+    assert(isUnDef(owner._reflectLlm), true, "Worker creates its own model client")
+  }) }
+  exports.testReusedAgentGetsDistinctReflectionRunIds = function() { fixture(function(a) {
+    a._agentState = {}
+    a._initWorkingMemory({ usememory: true, memoryscope: "session", memorysessionid: "same-session" }, {})
+    var first = a._reflectionSnapshot({ goal: "same goal" })
+    a._initWorkingMemory({ usememory: true, memoryscope: "session", memorysessionid: "same-session" }, {})
+    var second = a._reflectionSnapshot({ goal: "same goal" })
+    assert(first.runId !== second.runId, true, "Repeated goals on reused agent enqueue distinct jobs")
+    assert(first.sessionId, second.sessionId, "Conversation identity remains stable")
+  }) }
+  exports.testProxyReadOnlyArgumentRepair = function() { fixture(function(a) {
+    var cfg = a._createUtilsMcpConfig({ useutils: true })
+    var proxy = a._createMcpProxyConfig([cfg], {})
+    var dispatch = proxy.options.fns["proxy-dispatch"]
+    var input = { operation: "list" }
+    assert(dispatch(input).action, "list", "Read-only operation alias repairs missing action")
+    assert(isUnDef(input.action), true, "Repair does not mutate caller input")
+    assert(dispatch({ action: "status", operation: "list" }).action, "status", "Explicit action wins")
+    assert(isString(dispatch({ operation: "call" }).error), true, "Call aliases are not inferred")
+    var strict = a._createMcpProxyConfig([cfg], { proxyargrepair: false })
+    assert(isString(strict.options.fns["proxy-dispatch"]({ operation: "list" }).error), true, "Opt-out preserves validation failure")
+  }) }
+  exports.testReflectionSnapshotIsBoundedAndDetached = function() { fixture(function(a) {
+    a._runtime = { toolsUsed: { read: 2 }, context: ["[ACT 1] read", "private unrelated context"], errorHistory: [] }
+    a._lastRunOutcome = { status: "succeeded", answerPreview: "ready" }
+    var snapshot = a._reflectionSnapshot({ goal: "Read a result", model: { key: "credential" } })
+    a._runtime.toolsUsed.read = 9
+    a._lastRunOutcome.answerPreview = "changed"
+    assert(snapshot.toolsUsed.read, 2, "Snapshot detaches tool counters")
+    assert(snapshot.outcome.answerPreview, "ready", "Snapshot preserves original outcome")
+    assert(snapshot.context.length, 1, "Only bounded action context is retained")
+    assert(isUnDef(snapshot.model), true, "Model credentials are excluded")
+  }) }
+  exports.testBoundAnswerFinalAcceptanceAvoidsModelAndInvalidates = function() { fixture(function(a) {
+    var calls = 0, value = [1, 2]
+    var evidence = { e: { value: value, complete: true, fingerprint: sha256(stringify(value, __, "")) } }
+    var args = { goal: "Return count", useplanning: true }
+    a._supervisedClientFactory = function() { calls++; throw new Error("Review unavailable") }
+    a.setAcceptanceContract({ goal: args.goal, bindings: [{ name: "count", evidence: "e", transform: "length" }] }, function() { return evidence })
+    assert(a._executionFinal('{"count":2}', args), true, "Complete trusted contract accepts without semantic review")
+    assert(calls, 0, "No model request for deterministic final acceptance")
+    evidence.e.complete = false
+    assert(a._executionFinal('{"count":2}', args), false, "Changed coverage invalidates cached acceptance")
+    assert(calls, 1, "Incomplete coverage falls back to validation")
+  }) }
+  exports.testTrustedAnswerContractRequiresExactGoalAndAnswer = function() { fixture(function(a) {
+    var value = [1, 2], evidence = { e: { value: value, complete: true, fingerprint: sha256(stringify(value, __, "")) } }
+    a.setAcceptanceContract({ goal: "Return count", bindings: [{ name: "count", evidence: "e", transform: "length" }] }, function() { return evidence })
+    assert(a._executionBoundCriteria('{"count":2}', { goal: "Return count" }).length, 1, "Trusted exact contract covers answer")
+    assert(isUnDef(a._executionBoundCriteria('{"count":2}', { goal: "Different goal" })), true, "Goal mismatch retains semantic review")
+    assert(isUnDef(a._executionBoundCriteria('{"count":2} extra claims', { goal: "Return count" })), true, "Extra claims retain semantic review")
+    evidence.e.complete = false
+    assert(isUnDef(a._executionBoundCriteria('{"count":2}', { goal: "Return count" })), true, "Incomplete evidence invalidates contract")
+  }) }
+  exports.testAnswerBindingsUseCompleteRecordedEvidence = function() { fixture(function(a) {
+    var value = { items: [1, 2, 3] }
+    var evidence = { e1: { value: value, complete: true, fingerprint: sha256(stringify(value, __, "")) } }
+    var bindings = [{ name: "count", evidence: "e1", path: "items", transform: "length" }]
+    assert(af.fromJson(a._executionRenderBindings(bindings, evidence)).count, 3, "Length is derived from recorded evidence")
+    bindings[0].transform = "sum"
+    assert(af.fromJson(a._executionRenderBindings(bindings, evidence)).count, 6, "Allowlisted sum is evaluated")
+    bindings[0].transform = "execute"
+    assert(isUnDef(a._executionRenderBindings(bindings, evidence)), true, "Unknown transforms cannot execute")
+    bindings[0].transform = "identity"
+    evidence.e1.complete = false
+    assert(isUnDef(a._executionRenderBindings(bindings, evidence)), true, "Incomplete evidence falls back")
+    evidence.e1.complete = true
+    value.items.push(4)
+    assert(isUnDef(a._executionRenderBindings(bindings, evidence)), true, "Changed evidence invalidates binding")
+  }) }
+  exports.testDeterministicEvaluationRequiresCompleteCoverage = function() { fixture(function(a) {
+    var criteria = [{ id: "a", method: "answer" }]
+    assert(a._executionEvaluateChecks(criteria, [{ id: "a", outcome: "met" }]).outcome, "accepted", "Complete deterministic checks pass")
+    assert(a._executionEvaluateChecks(criteria, []).outcome, "undetermined", "Missing checks require review")
+    assert(a._executionEvaluateChecks([], []).outcome, "undetermined", "Empty coverage cannot certify acceptance")
+    assert(a._executionEvaluateChecks(criteria, [{ id: "a", outcome: "unmet" }]).outcome, "rejected", "Failed deterministic checks reject")
+    assert(a._executionEvaluateChecks([{ id: "a", method: "semantic" }], [{ id: "a", outcome: "met" }]).outcome, "undetermined", "Semantic verdict is not deterministic proof")
+    assert(a._executionEvaluateChecks(criteria.concat(criteria), [{ id: "a", outcome: "met" }]).outcome, "undetermined", "Duplicate criterion IDs cannot establish coverage")
+  }) }
+  exports.testFailedDeterministicCheckSkipsReview = function() { fixture(function(a) {
+    var calls = 0
+    a._supervisedClientFactory = function() { calls++; throw new Error("Unexpected review") }
+    var task = { objective: "Return ready", criteria: [
+      { id: "answer", method: "answer", assertion: { equals: "ready" } },
+      { id: "semantic", method: "semantic", requirement: "Return ready" }
+    ] }
+    var checks = a._executionCheck(task, "wrong", [], "succeeded")
+    assert(checks[0].outcome, "unmet", "Actual answer assertion fails")
+    assert(calls, 0, "Failed deterministic criterion avoids model review")
+    assert(checks.length, 2, "Skipped semantic criterion remains represented")
+    assert(checks[1].outcome, "insufficient_evidence", "Skipped review cannot certify acceptance")
+  }) }
   exports.testAcceptanceTimeoutAndProgress = function() { fixture(function(a) {
     var configs = [], events = [], messages = []
     a._oaf_model = { type: "openai", timeout: 900000 }
@@ -613,6 +1064,47 @@
     assert(metrics.verified_completion, 0, "Incomplete answers are not counted as verified completion")
     assert(metrics.unaccepted_tasks, 1, "Unaccepted work visible to evaluation")
     assert(metrics.aggregate_tokens, 99, "Tree usage reported separately from shared process counters")
+  }
+  exports.testRealExecutorWaitsThenIntegratesChildAnswer = function() {
+    var agent = new MiniA(), requests = 0, waits = 0, childId, manager
+    agent.fnI = function() {}
+    var args = { goal: "Return ready", raw: true, format: "raw", maxsteps: 2, maxtotalsteps: 3,
+      orchestration: "auto", useplanning: false, evidencegate: false, usememory: false,
+      usedecide: false, llmcomplexity: false, useskills: false, useutils: false,
+      usetools: true, usejsontool: false, usestream: true }
+    try {
+      agent.init(args)
+      agent._use_lc = false
+      agent._executionBoundCriteria = function() { return task("root").criteria }
+      agent._tryAutomaticDecomposition = function() {
+        manager = new SubtaskManager(args, { parentAgent: agent })
+        agent._subtaskManager = manager
+        manager._startWatchdog = function() {}; manager._startLocalSubtask = function() {}
+        childId = manager.submitAndRun("Return ready", {}, { task: task("integration-child") })
+      }
+      var executionStep = agent._executionStep
+      agent._executionStep = function(runtime, step) {
+        var result = executionStep.call(agent, runtime, step)
+        if (result === "wait") {
+          waits++
+          assert(requests, 0, "No provider call while child owns resources")
+          manager._completeSubtask(manager.subtasks[childId], "fixture", "ready", {}, { execution: { outcome: "succeeded" } })
+        }
+        return result
+      }
+      agent._supportsPromptStreamWithStatsCompat = function() { return true }
+      agent._prepareContextInvocation = function(llm, prompt) { return prompt }
+      agent._promptStreamWithStatsCompat = function() {
+        requests++
+        assert(agent._runtime.context.join("\n").indexOf('"result":"ready"') >= 0, true, "Integration call sees child answer")
+        agent._useToolsActual = true; agent._runtime.modelToolCallDetected = true
+        return { response: "ready", stats: {} }
+      }
+      assert(agent.start(merge({}, args)), "ready", "Executor returns integrated answer instead of generic partial fallback")
+      assert(waits, 1, "Runtime performed a wait")
+      assert(requests, 1, "Only the integration provider call was needed")
+      assert(agent._execution.state.outcome, "succeeded", "Integration passed acceptance")
+    } finally { agent._stopAgentResources() }
   }
   exports.testAutomaticNativeFinalThroughRealExecutor = function() {
     var agent = new MiniA(), requests = 0

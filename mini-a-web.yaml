@@ -540,6 +540,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usejsonschema
+    desc     : Prefer compatible schema responses (auto or off)
+    example  : "auto"
+    mandatory: false
+    options  : ["auto", "off"]
   - name     : usejsontool
     desc     : Use JSON action dispatch instead of native tools on both model tiers
     example  : "true"
@@ -784,6 +789,17 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : memoryreflectmode
+    desc     : "Reflection scheduling: background (default) or sync"
+    example  : background
+  - name     : acceptancereview
+    desc     : "Review final answers before acceptance (default false)"
+  - name     : acceptanceoptimization
+    desc     : "Enable deterministic acceptance optimizations (default true)"
+    example  : true
+  - name     : proxyargrepair
+    desc     : "Repair unambiguous read-only proxy operation aliases (default true)"
+    example  : true
   - name     : memoryreflectmodel
     desc     : "Model config for the reflection pass (falls back to OAF_REFLECT_MODEL, then the low-cost model, then the main model)"
     mandatory: false
@@ -2022,6 +2038,7 @@ jobs:
       mcp             : isString().default(__)
       usetools        : toBoolean().isBoolean().default(false)
       usetoolslc      : toBoolean().isBoolean().default(false)
+      usejsonschema : isString().default("auto")
       usejsontool     : toBoolean().isBoolean().default(__)
       toolfallback    : toBoolean().isBoolean().default(false)
       usediagrams     : toBoolean().isBoolean().default(false)
@@ -2086,6 +2103,10 @@ jobs:
       memorywritemax : toNumber().isNumber().default(__)
       memorymd       : toBoolean().isBoolean().default(false)
       memoryreflect  : toBoolean().isBoolean().default(__)
+      memoryreflectmode: isString().default(__)
+      acceptancereview: toBoolean().isBoolean().default(__)
+      acceptanceoptimization: toBoolean().isBoolean().default(__)
+      proxyargrepair: toBoolean().isBoolean().default(__)
       memoryreflectmodel: isString().default(__)
       memoryreflectmin: toNumber().isNumber().default(__)
       memorycandidatedays: toNumber().isNumber().default(__)

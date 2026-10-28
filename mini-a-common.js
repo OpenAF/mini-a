@@ -383,11 +383,11 @@ function __miniAMarkdownRender(text, width, opts) {
   if (/<\?xml\b/i.test(value) || /^\s*<\/?[A-Za-z_][A-Za-z0-9_.:-]*(?:\s+[^<>]*?)?>\s*$/m.test(value)) return restore(value)
   // OpenAF's second withMD argument is an ANSI style, not a render width.
   // Passing a number here throws "defaultAnsi is not a string" mid-stream.
-  if (!isObject(__flags) || !isObject(__flags.WITHMD)) return restore(ow.format.withMD(value))
+  if (!isObject(__flags) || !isObject(__flags.WITHMD)) return restore(ow.format.withMD(value, __, width))
   var oldHtmlFilter = __flags.WITHMD.htmlFilter
   try {
     __flags.WITHMD.htmlFilter = false
-    return restore(ow.format.withMD(value))
+    return restore(ow.format.withMD(value, __, width))
   } finally {
     __flags.WITHMD.htmlFilter = oldHtmlFilter
   }

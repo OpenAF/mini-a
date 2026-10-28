@@ -399,6 +399,11 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usejsonschema
+    desc     : Prefer compatible schema responses (auto or off)
+    example  : "auto"
+    mandatory: false
+    options  : ["auto", "off"]
   - name     : usejsontool
     desc     : Use JSON action dispatch instead of native tools on both model tiers
     example  : "false"
@@ -1061,6 +1066,17 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : memoryreflectmode
+    desc     : "Reflection scheduling: background (default) or sync"
+    example  : background
+  - name     : acceptancereview
+    desc     : "Review final answers before acceptance (default false)"
+  - name     : acceptanceoptimization
+    desc     : "Enable deterministic acceptance optimizations (default true)"
+    example  : true
+  - name     : proxyargrepair
+    desc     : "Repair unambiguous read-only proxy operation aliases (default true)"
+    example  : true
   - name     : memoryreflectmodel
     desc     : "Model config for the reflection pass (falls back to OAF_REFLECT_MODEL, then the low-cost model, then the main model)"
     example  : "(type: openai, model: gpt-4o-mini)"
@@ -1662,6 +1678,7 @@ jobs:
         persistlearnings: persistlearnings
         usetools       : usetools
         usetoolslc     : usetoolslc
+        usejsonschema : usejsonschema
         usejsontool    : usejsontool
         toolfallback   : toolfallback
         useutils       : useutils
@@ -1814,6 +1831,10 @@ jobs:
         memorywritemax : memorywritemax
         memorymd       : memorymd
         memoryreflect  : memoryreflect
+        memoryreflectmode: memoryreflectmode
+        acceptancereview: acceptancereview
+        acceptanceoptimization: acceptanceoptimization
+        proxyargrepair: proxyargrepair
         memoryreflectmodel: memoryreflectmodel
         memoryreflectmin: memoryreflectmin
         memorycandidatedays: memorycandidatedays
@@ -1974,6 +1995,7 @@ jobs:
       persistlearnings: toBoolean.isBoolean.default(__)
       usetools       : toBoolean.isBoolean.default(__)
       usetoolslc     : toBoolean.isBoolean.default(__)
+      usejsonschema : isString.default("auto")
       usejsontool    : toBoolean.isBoolean.default(__)
       toolfallback   : toBoolean.isBoolean.default(false)
       useutils       : toBoolean.isBoolean.default(__)
@@ -2126,6 +2148,10 @@ jobs:
       memorywritemax : toNumber.isNumber.default(__)
       memorymd       : toBoolean.isBoolean.default(false)
       memoryreflect  : toBoolean.isBoolean.default(__)
+      memoryreflectmode: isString.default(__)
+      acceptancereview: toBoolean.isBoolean.default(__)
+      acceptanceoptimization: toBoolean.isBoolean.default(__)
+      proxyargrepair: toBoolean.isBoolean.default(__)
       memoryreflectmodel: isString.default(__)
       memoryreflectmin: toNumber.isNumber.default(__)
       memorycandidatedays: toNumber.isNumber.default(__)
@@ -2286,6 +2312,7 @@ jobs:
         return runHooks(event, contextVars)
       })
     }
+    var _reflectionCutoff = now()
     var _r = __
     try {
       // Keep token streaming interactive only. Piped stdout receives the final
@@ -2305,6 +2332,17 @@ jobs:
           ow.oJob.output(_r, args)
         else
           print(_r)
+      }
+      // One-shot processes enqueue this run and process at most one older job.
+      // Output is already available; no detached worker is left behind on exit.
+      if (args.memoryreflect === true && args.memoryreflectmode !== "sync" && isFunction(_ma._consumeReflectionJob)) {
+        try {
+          _ma._consumeReflectionJob(args, _reflectionCutoff, function(snapshot) {
+            return _ma._createReflectionOwner(args, snapshot)
+          })
+        } catch(reflectionDrainError) {
+          if (args.debug) logWarn("Deferred reflection remains queued: " + reflectionDrainError)
+        }
       }
     } finally {
       try {
