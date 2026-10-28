@@ -98,7 +98,7 @@ modes:
       memorymd         : true
       historyvm        : true
       usedecide        : true
-      contextguard     : true
+      contextguard     : false
       contextvirtualization: true
       useasciiviz      : true
       mcp              : 
@@ -120,7 +120,7 @@ modes:
       useattach        : true
       historyvm        : true
       contextvirtualization: true
-      contextguard     : true
+      contextguard     : false
       orchestration    : auto
       mcpproxy         : true
       mcpproxythreshold: 51200
@@ -156,7 +156,7 @@ modes:
       usedelegation        : true
       autodelegation       : true
       usestdutils          : true
-      contextguard         : true
+      contextguard         : false
       orchestration        : auto
 
   web    :
