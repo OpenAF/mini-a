@@ -15,8 +15,17 @@ var MiniAWebAttachments = {
     }
     return true
   },
+  previewSource: function(content) {
+    if (!isString(content)) return ""
+    var prefix = "mini-a-image-preview:"
+    if (content.indexOf(prefix) !== 0) return ""
+    var source = content.substring(prefix.length).trim()
+    return source.length <= 350000 && source.indexOf("data:image/jpeg;base64,") === 0 && MiniAWebAttachments.validBase64(source.substring(23)) ? source : ""
+  },
   displayPrompt: function(prompt, items) {
-    return prompt + "\n\n📎 " + items.map(function(item) { return item.name }).join(", ")
+    return prompt + "\n\n" + items.map(function(item) {
+      return item.preview ? "```attachment " + item.name.replace(/```/g, "`") + "\nmini-a-image-preview:" + item.preview + "\n```" : "📎 " + item.name
+    }).join(" ")
   },
   validate: function(items, prompt) {
     if (isUnDef(items)) return []
@@ -38,7 +47,12 @@ var MiniAWebAttachments = {
       if (size > limit) throw new Error(name + ": file exceeds size limit")
       total += size
       if (total > 20 * 1024 * 1024) throw new Error("Attachments exceed the combined 20 MiB limit")
-      return { name: name, ext: ext, image: image, base64: value, size: size }
+      var preview
+      if (isDef(item.preview)) {
+        if (!image || !isString(item.preview) || item.preview.length > 350000 || item.preview.indexOf("data:image/jpeg;base64,") !== 0 || !MiniAWebAttachments.validBase64(item.preview.substring(23))) throw new Error(name + ": invalid image preview")
+        preview = item.preview
+      }
+      return { name: name, ext: ext, image: image, base64: value, size: size, preview: preview }
     })
   },
   // A lock prevents startup recovery from removing another server's active files.

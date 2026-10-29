@@ -172,8 +172,31 @@ MiniA.prototype._selectToolsByKeywordMatch = function(goal, allTools) {
   return scoredTools.filter(function(st) { return st.score > 0 }).sort(function(a, b) { return b.score - a.score }).map(function(st) { return st.tool.name })
 }
 
+// Selection is an isolated maintenance request, never an executor conversation turn.
+MiniA.prototype._promptToolSelector = function(prompt, executor) {
+  var lowCost = executor === this.lc_llm
+  var role = lowCost ? "lc" : "main"
+  var client = this._createBareLlmInstance(
+    clone(lowCost ? this._oaf_lc_model : this._oaf_model),
+    lowCost ? this._debuglcchConfig : this._debugchConfig,
+    lowCost ? "__mini_a_lc_llm_debug" : "__mini_a_llm_debug",
+    lowCost ? "Low-cost tool selector" : "Tool selector")
+  if (isUnDef(client)) throw new Error("Could not create isolated tool selector")
+  var controls = this._decisionToolControls, response, invoked = false
+  try {
+    if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
+    invoked = true
+    response = client.promptWithStats(prompt)
+    this._recordLlmStatsMetrics(response.stats || {}, role, this._estimateTokens(prompt))
+    return response.response
+  } finally {
+    if (invoked && controls && isFunction(controls.afterCall)) controls.afterCall(this._getTotalTokens(response && response.stats || {}))
+    this._flushAllDebugChannelsToFiles()
+  }
+}
+
 MiniA.prototype._selectToolsByLLM = function(goal, allTools, llmInstance) {
-  if (!isString(goal) || !isArray(allTools) || allTools.length === 0 || isUnDef(llmInstance)) return []
+  if (!isString(goal) || !isArray(allTools) || allTools.length === 0 || isUnDef(llmInstance)) return { success: false, names: [] }
 
   try {
     var toolsList = allTools.map(function(tool, idx) {
@@ -181,8 +204,8 @@ MiniA.prototype._selectToolsByLLM = function(goal, allTools, llmInstance) {
     }).join("\n")
 
     var prompt = "You are a tool selection assistant. Given a user goal and a list of available tools, select which tools are most relevant to achieve the goal.\n\nUser Goal: " + goal + "\n\nAvailable Tools:\n" + toolsList + "\n\nInstructions:\n- Analyze the goal and identify which tools would be helpful\n- Only select tools that are clearly relevant to the goal\n- If the goal is simple and doesn't need any tools, return an empty list\n- Return ONLY a JSON array of tool names, nothing else\n- Format: [\"tool_name1\", \"tool_name2\"]\n- If no tools are relevant, return: []\n\nSelected tools (JSON array only):"
-    var response = llmInstance.prompt(prompt)
-    if (!isString(response)) return []
+    var response = this._promptToolSelector(prompt, llmInstance)
+    if (!isString(response)) return { success: false, names: [] }
 
     response = response.trim()
     var jsonMatch = response.match(/```(?:json)?\s*(\[[^\]]*\])\s*```/)
@@ -195,12 +218,13 @@ MiniA.prototype._selectToolsByLLM = function(goal, allTools, llmInstance) {
     }
 
     var selectedTools = JSON.parse(response)
-    if (!isArray(selectedTools)) return []
+    if (!isArray(selectedTools)) return { success: false, names: [] }
     var validToolNames = allTools.map(function(t) { return t.name })
-    return selectedTools.filter(function(name) { return validToolNames.indexOf(name) >= 0 })
+    var names = selectedTools.filter(function(name) { return validToolNames.indexOf(name) >= 0 })
+    return { success: selectedTools.length === 0 || names.length > 0, names: names }
   } catch (e) {
     this.fnI("warn", "LLM tool selection failed: " + __miniAErrMsg(e))
-    return []
+    return { success: false, names: [] }
   }
 }
 
@@ -265,103 +289,110 @@ MiniA.prototype._describeMcpConnection = function(config) {
 }
 
 MiniA.prototype._selectConnectionAndToolsByLLM = function(goal, allTools, llmInstance) {
-  if (!isString(goal) || goal.trim().length === 0 || !isArray(allTools) || allTools.length === 0 || isUnDef(llmInstance)) return []
+  if (!isString(goal) || goal.trim().length === 0 || !isArray(allTools) || allTools.length === 0 || isUnDef(llmInstance)) return { success: false, names: [] }
 
-  var parent = this
-  var groupedByConnection = {}
-  var connectionOrder = []
-
-  allTools.forEach(function(tool) {
-    var connectionId = parent.mcpToolToConnection[tool.name]
-    if (!isString(connectionId) || connectionId.length === 0) return
-    if (isUnDef(groupedByConnection[connectionId])) {
-      groupedByConnection[connectionId] = []
-      connectionOrder.push(connectionId)
-    }
-    groupedByConnection[connectionId].push(tool)
-  })
-
-  if (connectionOrder.length === 0) return []
-
-  var connectionSummaries = connectionOrder.map(function(connectionId, idx) {
-    var info = isObject(parent._mcpConnectionInfo) ? parent._mcpConnectionInfo[connectionId] : {}
-    var alias = isString(info.alias) && info.alias.length > 0
-      ? info.alias
-      : (isObject(parent._mcpConnectionAliases) && isString(parent._mcpConnectionAliases[connectionId]) ? parent._mcpConnectionAliases[connectionId] : connectionId.substring(0, 8))
-    var label = isString(info.label) && info.label.length > 0 ? info.label : "Connection #" + (idx + 1)
-    var description = isString(info.description) && info.description.length > 0 ? info.description : ""
-
-    var header = (idx + 1) + ". Connection " + alias + " — " + label + " (id: " + connectionId.substring(0, 8) + ")"
-    var lines = [header]
-    if (description.length > 0) lines.push("   Summary: " + description)
-    lines.push("   Tools:")
-    groupedByConnection[connectionId].forEach(function(tool) {
-      var toolDesc = isString(tool.description) && tool.description.trim().length > 0 ? tool.description.trim() : "No description provided"
-      lines.push("   - " + tool.name + ": " + toolDesc)
-    })
-    return lines.join("\n")
-  }).join("\n\n")
-
-  var prompt = "You are helping Mini-A choose which MCP connection and tool(s) to register for a user's goal.\n\nGoal:\n" + goal + "\n\nAvailable connections and tools:\n" + connectionSummaries + "\n\nInstructions:\n- Choose the single connection that best supports the goal.\n- Only include tools that belong to the selected connection.\n- If no connection is useful, respond with connection set to null and tools as [].\n- Respond ONLY with valid JSON following this schema:\n{\n  \"connection\": \"<connection alias or id>\",\n  \"tools\": [\"tool_name1\", \"tool_name2\"]\n}\n\nJSON response:"
-  var response = llmInstance.prompt(prompt)
-  if (!isString(response)) return []
-
-  response = response.trim()
-  var jsonMatch = response.match(/```(?:json)?\s*({[\s\S]*})\s*```/)
-  if (jsonMatch) {
-    response = jsonMatch[1]
-  } else {
-    var startIdx = response.indexOf("{")
-    var endIdx = response.lastIndexOf("}")
-    if (startIdx >= 0 && endIdx > startIdx) response = response.substring(startIdx, endIdx + 1)
-  }
-
-  var parsed
   try {
-    parsed = JSON.parse(response)
-  } catch (e) {
-    this.fnI("warn", "Connection-level LLM selection returned invalid JSON: " + __miniAErrMsg(e))
-    return []
-  }
-  if (!isMap(parsed)) return []
+    var parent = this
+    var groupedByConnection = {}
+    var connectionOrder = []
 
-  var selectedConnectionKey = parsed.connection
-  var selectedConnectionId = __
+    allTools.forEach(function(tool) {
+      var connectionId = parent.mcpToolToConnection[tool.name]
+      if (!isString(connectionId) || connectionId.length === 0) return
+      if (isUnDef(groupedByConnection[connectionId])) {
+        groupedByConnection[connectionId] = []
+        connectionOrder.push(connectionId)
+      }
+      groupedByConnection[connectionId].push(tool)
+    })
 
-  if (isString(selectedConnectionKey) && selectedConnectionKey.trim().length > 0) {
-    var normalized = selectedConnectionKey.trim()
-    if (isObject(this._mcpConnectionAliasToId) && isString(this._mcpConnectionAliasToId[normalized])) selectedConnectionId = this._mcpConnectionAliasToId[normalized]
-    if (isUnDef(selectedConnectionId) && isDef(groupedByConnection[normalized])) selectedConnectionId = normalized
+    if (connectionOrder.length === 0) return { success: false, names: [] }
 
-    if (isUnDef(selectedConnectionId)) {
-      normalized = normalized.toLowerCase()
-      connectionOrder.some(function(connectionId) {
-        if (isDef(selectedConnectionId)) return true
-        if (connectionId.toLowerCase() === normalized || connectionId.substring(0, normalized.length).toLowerCase() === normalized) {
-          selectedConnectionId = connectionId
-          return true
-        }
-        var info = isObject(parent._mcpConnectionInfo) ? parent._mcpConnectionInfo[connectionId] : {}
-        if (isString(info.alias) && info.alias.toLowerCase() === normalized) {
-          selectedConnectionId = connectionId
-          return true
-        }
-        if (isString(info.label) && info.label.toLowerCase() === normalized) {
-          selectedConnectionId = connectionId
-          return true
-        }
-        return false
+    var connectionSummaries = connectionOrder.map(function(connectionId, idx) {
+      var info = isObject(parent._mcpConnectionInfo) ? parent._mcpConnectionInfo[connectionId] : {}
+      var alias = isString(info.alias) && info.alias.length > 0
+        ? info.alias
+        : (isObject(parent._mcpConnectionAliases) && isString(parent._mcpConnectionAliases[connectionId]) ? parent._mcpConnectionAliases[connectionId] : connectionId.substring(0, 8))
+      var label = isString(info.label) && info.label.length > 0 ? info.label : "Connection #" + (idx + 1)
+      var description = isString(info.description) && info.description.length > 0 ? info.description : ""
+
+      var header = (idx + 1) + ". Connection " + alias + " — " + label + " (id: " + connectionId.substring(0, 8) + ")"
+      var lines = [header]
+      if (description.length > 0) lines.push("   Summary: " + description)
+      lines.push("   Tools:")
+      groupedByConnection[connectionId].forEach(function(tool) {
+        var toolDesc = isString(tool.description) && tool.description.trim().length > 0 ? tool.description.trim() : "No description provided"
+        lines.push("   - " + tool.name + ": " + toolDesc)
       })
+      return lines.join("\n")
+    }).join("\n\n")
+
+    var prompt = "You are helping Mini-A choose which MCP connection and tool(s) to register for a user's goal.\n\nGoal:\n" + goal + "\n\nAvailable connections and tools:\n" + connectionSummaries + "\n\nInstructions:\n- Choose the single connection that best supports the goal.\n- Only include tools that belong to the selected connection.\n- If no connection is useful, respond with connection set to null and tools as [].\n- Respond ONLY with valid JSON following this schema:\n{\n  \"connection\": \"<connection alias or id>\",\n  \"tools\": [\"tool_name1\", \"tool_name2\"]\n}\n\nJSON response:"
+    var response = this._promptToolSelector(prompt, llmInstance)
+    if (!isString(response)) return { success: false, names: [] }
+
+    response = response.trim()
+    var jsonMatch = response.match(/```(?:json)?\s*({[\s\S]*})\s*```/)
+    if (jsonMatch) {
+      response = jsonMatch[1]
+    } else {
+      var startIdx = response.indexOf("{")
+      var endIdx = response.lastIndexOf("}")
+      if (startIdx >= 0 && endIdx > startIdx) response = response.substring(startIdx, endIdx + 1)
     }
+
+    var parsed
+    try {
+      parsed = JSON.parse(response)
+    } catch (e) {
+      this.fnI("warn", "Connection-level LLM selection returned invalid JSON: " + __miniAErrMsg(e))
+      return { success: false, names: [] }
+    }
+    if (!isMap(parsed)) return { success: false, names: [] }
+
+    if (parsed.connection === null && isArray(parsed.tools) && parsed.tools.length === 0) return { success: true, names: [] }
+    if (!isArray(parsed.tools)) return { success: false, names: [] }
+
+    var selectedConnectionKey = parsed.connection
+    var selectedConnectionId = __
+
+    if (isString(selectedConnectionKey) && selectedConnectionKey.trim().length > 0) {
+      var normalized = selectedConnectionKey.trim()
+      if (isObject(this._mcpConnectionAliasToId) && isString(this._mcpConnectionAliasToId[normalized])) selectedConnectionId = this._mcpConnectionAliasToId[normalized]
+      if (isUnDef(selectedConnectionId) && isDef(groupedByConnection[normalized])) selectedConnectionId = normalized
+
+      if (isUnDef(selectedConnectionId)) {
+        normalized = normalized.toLowerCase()
+        connectionOrder.some(function(connectionId) {
+          if (isDef(selectedConnectionId)) return true
+          if (connectionId.toLowerCase() === normalized || connectionId.substring(0, normalized.length).toLowerCase() === normalized) {
+            selectedConnectionId = connectionId
+            return true
+          }
+          var info = isObject(parent._mcpConnectionInfo) ? parent._mcpConnectionInfo[connectionId] : {}
+          if (isString(info.alias) && info.alias.toLowerCase() === normalized) {
+            selectedConnectionId = connectionId
+            return true
+          }
+          if (isString(info.label) && info.label.toLowerCase() === normalized) {
+            selectedConnectionId = connectionId
+            return true
+          }
+          return false
+        })
+      }
+    }
+
+    if (isUnDef(selectedConnectionId) || isUnDef(groupedByConnection[selectedConnectionId])) return { success: false, names: [] }
+
+    var candidateTools = isArray(parsed.tools) ? parsed.tools : []
+    var validToolNames = groupedByConnection[selectedConnectionId].map(function(tool) { return tool.name })
+    var filteredTools = candidateTools.filter(function(name) { return validToolNames.indexOf(name) >= 0 })
+    return { success: candidateTools.length === 0 || filteredTools.length > 0, names: filteredTools }
+  } catch (e) {
+    this.fnI("warn", "Connection-level LLM selection failed: " + __miniAErrMsg(e))
+    return { success: false, names: [] }
   }
-
-  if (isUnDef(selectedConnectionId) || isUnDef(groupedByConnection[selectedConnectionId])) return []
-
-  var candidateTools = isArray(parsed.tools) ? parsed.tools : []
-  var validToolNames = groupedByConnection[selectedConnectionId].map(function(tool) { return tool.name })
-  var filteredTools = candidateTools.filter(function(name) { return validToolNames.indexOf(name) >= 0 })
-  if (filteredTools.length === 0) filteredTools = validToolNames
-  return filteredTools
 }
 
 MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
@@ -385,10 +416,10 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
   if (this._use_lc && isDef(this.lc_llm)) {
     try {
       var lcSelected = this._selectToolsByLLM(goal, allTools, this.lc_llm)
-      if (lcSelected.length > 0) {
+      if (lcSelected.success === true) {
         if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_llm_lc)) global.__mini_a_metrics.tool_selection_llm_lc.inc()
-        this.fnI("done", "Selected " + lcSelected.length + " tool(s) via low-cost LLM: " + lcSelected.join(", "))
-        return lcSelected
+        this.fnI("done", "Selected " + lcSelected.names.length + " tool(s) via low-cost LLM: " + lcSelected.names.join(", "))
+        return lcSelected.names
       }
     } catch (e) {
       this.fnI("warn", "Low-cost LLM tool selection failed: " + __miniAErrMsg(e))
@@ -398,27 +429,27 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
   if (isDef(this.llm)) {
     try {
       var llmSelected = this._selectToolsByLLM(goal, allTools, this.llm)
-      if (llmSelected.length > 0) {
+      if (llmSelected.success === true) {
         if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_llm_main)) global.__mini_a_metrics.tool_selection_llm_main.inc()
-        this.fnI("done", "Selected " + llmSelected.length + " tool(s) via main LLM: " + llmSelected.join(", "))
-        return llmSelected
+        this.fnI("done", "Selected " + llmSelected.names.length + " tool(s) via main LLM: " + llmSelected.names.join(", "))
+        return llmSelected.names
       }
     } catch (e) {
       this.fnI("warn", "Main LLM tool selection failed: " + __miniAErrMsg(e))
     }
   }
 
-  this.fnI("mcp", "LLM tool shortlist is empty, evaluating connection-level fallback...")
+  this.fnI("mcp", "LLM tool selection failed, evaluating connection-level fallback...")
   var connectionFallbackSelection = []
 
   if (this._use_lc && isDef(this.lc_llm)) {
     try {
       this.fnI("mcp", "Requesting low-cost LLM to choose the best MCP connection and tools...")
       connectionFallbackSelection = this._selectConnectionAndToolsByLLM(goal, allTools, this.lc_llm)
-      if (connectionFallbackSelection.length > 0) {
+      if (connectionFallbackSelection.success === true) {
         if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_connection_chooser_lc)) global.__mini_a_metrics.tool_selection_connection_chooser_lc.inc()
-        this.fnI("done", "Selected " + connectionFallbackSelection.length + " tool(s) via low-cost connection chooser: " + connectionFallbackSelection.join(", "))
-        return connectionFallbackSelection
+        this.fnI("done", "Selected " + connectionFallbackSelection.names.length + " tool(s) via low-cost connection chooser: " + connectionFallbackSelection.names.join(", "))
+        return connectionFallbackSelection.names
       }
     } catch (e) {
       this.fnI("warn", "Low-cost LLM connection chooser failed: " + __miniAErrMsg(e))
@@ -429,10 +460,10 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
     try {
       this.fnI("mcp", "Requesting primary LLM to choose the best MCP connection and tools...")
       connectionFallbackSelection = this._selectConnectionAndToolsByLLM(goal, allTools, this.llm)
-      if (connectionFallbackSelection.length > 0) {
+      if (connectionFallbackSelection.success === true) {
         if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_connection_chooser_main)) global.__mini_a_metrics.tool_selection_connection_chooser_main.inc()
-        this.fnI("done", "Selected " + connectionFallbackSelection.length + " tool(s) via connection chooser: " + connectionFallbackSelection.join(", "))
-        return connectionFallbackSelection
+        this.fnI("done", "Selected " + connectionFallbackSelection.names.length + " tool(s) via connection chooser: " + connectionFallbackSelection.names.join(", "))
+        return connectionFallbackSelection.names
       }
     } catch (e) {
       this.fnI("warn", "Primary LLM connection chooser failed: " + __miniAErrMsg(e))
@@ -440,7 +471,7 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
   }
 
   if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_fallback_all)) global.__mini_a_metrics.tool_selection_fallback_all.inc()
-  this.fnI("warn", "Dynamic tool selection returned no results, registering all " + allTools.length + " tools as fallback")
+  this.fnI("warn", "Dynamic tool selection failed, registering all " + allTools.length + " tools as fallback")
   return allTools.map(function(t) { return t.name })
 }
 

@@ -4185,7 +4185,7 @@ MiniA.prototype._logLcCostSummary = function() {
   var valPart    = valTokens > 0 ? ` | Val: ${valTokens} tokens (in: ${valIn}, out: ${valOut}${valCache})` : ""
   if (!this._use_lc) {
     if (mainTokens > 0) {
-      this.fnI("info", `[cost] Main: ${mainTokens} tokens (in: ${mainIn}, out: ${mainOut}${mainCache})${valPart}`)
+      this.fnI("info", `[cost: cumulative session usage] Main: ${mainTokens} tokens (in: ${mainIn}, out: ${mainOut}${mainCache})${valPart}`)
     }
     return
   }
@@ -4196,7 +4196,7 @@ MiniA.prototype._logLcCostSummary = function() {
     var lcIn    = global.__mini_a_metrics.llm_lc_input_tokens.get()
     var lcOut   = global.__mini_a_metrics.llm_lc_output_tokens.get()
     var lcCache = this._formatTierCacheTokens("lc")
-    this.fnI("info", `[cost] Main: ${mainTokens} tokens (in: ${mainIn}, out: ${mainOut}${mainCache}) | LC: ${lcTokens} tokens (in: ${lcIn}, out: ${lcOut}${lcCache}) | LC share: ${lcShare}%${valPart}`)
+    this.fnI("info", `[cost: cumulative session usage] Main: ${mainTokens} tokens (in: ${mainIn}, out: ${mainOut}${mainCache}) | LC: ${lcTokens} tokens (in: ${lcIn}, out: ${lcOut}${lcCache}) | LC share: ${lcShare}%${valPart}`)
   }
 }
 
@@ -4428,7 +4428,7 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
     var fieldName = isString(opts.fieldName) && opts.fieldName.length > 0 ? opts.fieldName : "answer"
     var eventName = isString(opts.eventName) && opts.eventName.length > 0 ? opts.eventName : "stream"
     var allowPlainTextFallback = opts.allowPlainTextFallback !== false
-    var decodeUnicodeEscapes = toBoolean(isObject(args) ? args.useascii : false) === true
+    var decodeUnicodeEscapes = true // JSON escapes describe content regardless of ASCII output preference
     var jsonBuffer = ""         // Buffer for finding "answer" field
     var contentBuffer = ""      // Buffer for decoded content
     var streamingAnswer = false
@@ -17006,6 +17006,7 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
   var useCapabilitySelection = toBoolean(args.capabilityselection) === true
   var useDynamicSelection = toBoolean(args.mcpdynamic) || useCapabilitySelection
   var selectedToolNames = []
+  var selectionResolved = false
   this._useToolsActualMain = false
   this._useToolsActualLC = false
 
@@ -17016,6 +17017,7 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
       } else {
         selectedToolNames = this._selectMcpToolsDynamically(args.goal, this.mcpTools)
       }
+      selectionResolved = true
     }
 
     // Selection ranks task tools; it must not remove the transport or the
@@ -17030,6 +17032,7 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
     var registerMcpTools = function(llmInstance, modelName) {
       var normalizedModel = modelName === "lc" ? "lc" : "main"
       if (!parent._isToolInterfaceEnabledForModel(normalizedModel)) return llmInstance
+      if (selectionResolved && selectedToolNames.length === 0) return llmInstance
 
       // When usejsontool=true, don't register tools natively. The model responds with JSON actions instead.
       if (toBoolean(args.usejsontool) === true) {
@@ -17103,7 +17106,7 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
             .filter(function(tool) { return parent.mcpToolToConnection[tool.name] === connectionId })
             .map(function(tool) { return tool.name })
 
-          var hasDynamicSelection = useDynamicSelection && (selectedToolNames.length > 0 || useCapabilitySelection)
+          var hasDynamicSelection = selectionResolved
           if (hasDynamicSelection) {
             var toolsForThisConnection = selectedToolNames.filter(function(name) {
               return connectionToolNames.indexOf(name) >= 0
@@ -18998,6 +19001,7 @@ MiniA.prototype.init = function(args) {
     applyPromptCachingDefault(this._oaf_val_model)
     applyPromptCachingDefault(this._oaf_reflect_model)
 
+    this.fnI("info", "Mode preset: " + (args.mode || "default") + " | Provider: " + this._oaf_model.type + " | Model: " + this._oaf_model.model)
     this.llm = this._instrumentStartupLlm($llm(this._oaf_model), "main")
     if (this._use_lc) this.lc_llm = this._instrumentStartupLlm($llm(this._oaf_lc_model), "lc")
     if (this._use_val) this.val_llm = this._instrumentStartupLlm($llm(this._oaf_val_model), "validator")
@@ -22191,7 +22195,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
       }
       
-      this.fnI("input", `Interacting with ${llmType} model (context ~${contextTokens} tokens)...`)
+      this.fnI("input", `Interacting with ${llmType} model (working context only ~${contextTokens} tokens)...`)
       this._trace("llm_prompt", { label: "STEP_PROMPT", model: llmType, step: step + 1, content: prompt })
       // Get model response and parse as JSON
       if (args.debug) {
@@ -22228,19 +22232,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var _streamThinkingBuf = []
       var _streamRawChunks = []
       if (args.usestream) {
-        // When JSON output is expected, always route streaming through the JSON-aware
-        // chunk processor. This prevents raw JSON deltas from being rendered directly.
-        // The content shape (JSON envelope vs. plain text) is governed by the system
-        // prompt (noJsonPromptFlag), not by the wire-level jsonFlag passed to the LLM -
-        // Ollama tool-call turns still emit the JSON envelope even when streamed with
-        // jsonFlag=false to avoid the tools/format:json conflict.
-        var _baseOnDelta = !noJsonPromptFlag
-          ? this._createStreamDeltaHandler(args, {
-              fieldName: "answer",
-              eventName: "stream",
-              allowPlainTextFallback: false
-            })
-          : this._createPlainStreamDeltaHandler("stream")
+        // The executor contract is an action envelope even when the provider
+        // disables wire-level JSON mode (notably Gemini and Ollama tool turns).
+        var _baseOnDelta = this._createStreamDeltaHandler(args, {
+          fieldName: "answer",
+          eventName: "stream",
+          allowPlainTextFallback: false
+        })
         onDelta = function(chunk, payload) {
           if (isString(chunk) && chunk.length > 0) _streamRawChunks.push(chunk)
           _baseOnDelta(chunk, payload)
@@ -24156,7 +24154,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       global.__mini_a_metrics.llm_estimated_tokens.getAdd(promptTokens)
 
       var contextEstimate = conversationTokens + promptTokens
-      this.fnI("input", `Interacting with main model (chatbot) (context ~${contextEstimate} tokens, step ${step + 1}/${maxSteps})...`)
+      this.fnI("input", `Interacting with main model (chatbot) (working context only ~${contextEstimate} tokens, step ${step + 1}/${maxSteps})...`)
 
       this._refreshConfiguredLlmChannels()
       var chatbotDebugSnapshot = this._snapshotDebugChannel(args.debugch, "__mini_a_llm_debug")
@@ -24174,7 +24172,8 @@ MiniA.prototype._runChatbotMode = function(options) {
       var responseWithStats
       pendingPrompt = this._prepareContextInvocation(this.llm, pendingPrompt, "executor")
       var chatbotNoJsonPromptFlag = runtime.forceNoJson === true || this._noJsonPrompt
-      var chatbotStructuredOutput = !chatbotNoJsonPromptFlag && this._isStructuredOutputFormat(args.format)
+      var chatbotStructuredResponse = this._isStructuredOutputFormat(args.format)
+      var chatbotStructuredOutput = !chatbotNoJsonPromptFlag && chatbotStructuredResponse
       var canStream = args.usestream && runtime.forceNoStream !== true && this._supportsPromptStreamWithStatsCompat(this.llm, false)
       var canStreamJson = args.usestream && runtime.forceNoStream !== true && this._supportsPromptStreamWithStatsCompat(this.llm, true)
       var chatbotOllamaToolCallMode = this._shouldDisableStreamingForOllamaToolCallTurn(
@@ -24190,7 +24189,7 @@ MiniA.prototype._runChatbotMode = function(options) {
         // shape is governed by chatbotStructuredOutput (the system prompt), not by the
         // wire-level jsonFlag - Ollama tool-call turns still emit the JSON envelope even
         // when streamed with jsonFlag=false to avoid the tools/format:json conflict.
-        onDelta = chatbotStructuredOutput
+        onDelta = chatbotStructuredResponse
           ? this._createStreamDeltaHandler(args)
           : this._createPlainStreamDeltaHandler()
       }

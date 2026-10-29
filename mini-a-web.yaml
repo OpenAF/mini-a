@@ -1567,6 +1567,8 @@ todo:
           var encoded = af.fromBytes2String(af.toBase64Bytes(att.content || ''))
           var language = __detectAttachmentLang(att.name)
           var button = '<button class="user-attachment" type="button" data-name="' + attrName + '" data-language="' + __escapeAttr(language) + '" data-content="' + __escapeAttr(encoded) + '">📎 ' + safeNameHtml + '</button>'
+          var preview = MiniAWebAttachments.previewSource(att.content)
+          if (preview) button = '<button class="user-attachment user-image-attachment" type="button" data-name="' + attrName + '" aria-label="Preview ' + attrName + '"><img src="' + preview + '" alt=""><span>' + safeNameHtml + '</span></button>'
           html = html.replace(placeholder, button)
         }
 

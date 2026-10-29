@@ -1263,4 +1263,105 @@
     assert(m._failOrRetrySubtask(m.subtasks[id], "fixture", "Startup outcome unavailable"), "failed", "Unsettled capped allowance cannot be replayed as a fresh full allowance")
     assert(Object.keys(a._execution.state.budget.reservations).length, 1, "Unknown usage retains its allocation")
   }) }
+
+  exports.testGeminiRecordedExecutorStreams = function() {
+    var recorded = [["{\"thought", "\":\"Provide information about who built me.\",\"action\":\"final\",\"answer\":\"I was built as", " an AI assistant within the Mini-A agent framework, utilizing OpenAF and associated toolings.\"}", ""], ["{\"thought\":\"Calculate 2+2\",\"action\":\"final\",\"", "answer\":\"2 + 2 = 4\"}", ""]]
+    recorded.concat([[JSON.stringify({action:"final", answer:'A "quote"\nOlá 😀'})], ['{"ans','wer":"\\u0041\\nB","action":"final"}']]).forEach(function(chunks) {
+      var expected = JSON.parse(chunks.join("")).answer
+      ;[true, false, "empty", "native"].forEach(function(streaming) {
+        var a = new MiniA(), visible = "", calls = 0
+        var args = { goal: "Return an answer", raw: true, format: "raw", maxsteps: 1,
+          useplanning: false, evidencegate: false, usememory: false, usedecide: false,
+          llmcomplexity: false, useskills: false, useutils: false, usetools: false,
+          usejsontool: false, usestream: streaming !== false, __interaction_source: "mini-a-con" }
+        a.fnI = function(event, text) { if (event === "stream") visible += text }
+        try {
+          a.init(args); a._use_lc = false; a._noJsonPrompt = true
+          a._prepareContextInvocation = function(llm, prompt) { return prompt }
+          a.llm.promptWithStats = function() { calls++; return {response: chunks.join(""), stats:{}} }
+          a.llm.promptStreamWithStats = function() {}
+          a._promptStreamWithStatsCompat = function(llm, prompt, jsonFlag, onDelta) {
+            calls++; assert(jsonFlag, false, "Gemini workaround remains active")
+            if (streaming === "native") { a._runtime.modelToolCallDetected = true; a._useToolsActual = true; onDelta("", {functionCall:{name:"fixture-read"}}) }
+            if (streaming !== "empty") chunks.forEach(function(chunk) { onDelta(chunk) })
+            return {response: chunks.join(""), stats:{}}
+          }
+          assert(a.start(merge({}, args)), expected, "Final result is the answer")
+          assert(visible, (streaming === true || streaming === "native") ? expected : "", "Only the answer streams once")
+          assert(calls, 1, "One executor call")
+        } finally { a._stopAgentResources() }
+      })
+    })
+  }
+  exports.testSelectorIsolationAndOutcomes = function() { fixture(function(a) {
+    a.llm = { history: ["private executor history"], tools: ["dangerous"] }
+    a.lc_llm = { history: ["private low-cost history"] }; a._use_lc = true
+    a._oaf_model = {type:"gemini",model:"main"}; a._oaf_lc_model = {type:"gemini",model:"lc"}
+    var before = 0, after = 0, usage = 0, clients = 0, response = "[]", fail = false, configs = []
+    var original = stringify([a.llm, a.lc_llm])
+    a._decisionToolControls = {beforeCall:function() { before++ }, afterCall:function(tokens) { after++; assert(tokens, fail ? 0 : 9, "Provider usage goes to limiter") }}
+    a._recordLlmStatsMetrics = function(stats) { usage++; assert(stats.tokens.total,9,"Provider usage recorded") }
+    a._createBareLlmInstance = function(config) {
+      clients++; configs.push(config.model)
+      return {promptWithStats:function(prompt) {
+        assert(prompt.indexOf("private"),-1,"No executor history or instructions")
+        if (fail) throw new Error("fixture provider failure")
+        return {response:response,stats:{tokens:{total:9}}}
+      }}
+    }
+    a._selectByDecision = function() {}; a._selectToolsByKeywordMatch = function() { return [] }
+    var tools = [{name:"read"}]
+    assert(a._selectMcpToolsDynamically("hello",tools),[],"Empty success stops fallback")
+    assert(clients,1,"No main or connection fallback after empty success")
+    response='["read"]'; assert(a._selectToolsByLLM("hello",tools,a.llm),{success:true,names:["read"]},"Valid subset")
+    ;['oops','["unknown"]','{}'].forEach(function(value) { response=value; assert(a._selectToolsByLLM("hello",tools,a.llm).success,false,"Invalid selection fails") })
+    a.mcpToolToConnection={read:"conn"}; a._mcpConnectionInfo={conn:{alias:"conn1"}}
+    response='{"connection":null,"tools":[]}'
+    assert(a._selectConnectionAndToolsByLLM("hello",tools,a.llm),{success:true,names:[]},"Empty connection success")
+    response='{"connection":"conn","tools":["unknown"]}'
+    assert(a._selectConnectionAndToolsByLLM("hello",tools,a.llm).success,false,"Unknown connection tool fails")
+    response='{"connection":"conn","tools":["read"]}'
+    assert(a._selectMcpToolsDynamically("hello",tools),["read"],"Connection fallback succeeds")
+    fail=true; assert(a._selectMcpToolsDynamically("hello",tools),["read"],"Provider failures fall back to all tools")
+    assert(before,clients,"All selector calls rate limited"); assert(after,before,"Failures settle limiter")
+    assert(usage,clients-4,"Successful requests accounted")
+    assert(configs[0],"lc","Corresponding model config used")
+    assert(stringify([a.llm,a.lc_llm]),original,"Executor clients unchanged even on failure")
+  }) }
+  exports.testEmptySelectionRegistration = function() { fixture(function(a) {
+    a._useTools = a._useToolsMain = a._useToolsLC = a._use_lc = true
+    a._oaf_model = a._oaf_lc_model = {type:"gemini",model:"fixture"}
+    var connection=md5("mini-a-mcp-proxy"), registrations=0, selections=0
+    a.mcpTools=[{name:"proxy-dispatch"}]; a.mcpToolNames=["proxy-dispatch"]
+    a.mcpToolToConnection={}; a.mcpToolToConnection["proxy-dispatch"]=connection
+    a._mcpConnections={}; a._mcpConnections[connection]={}
+    a._selectMcpToolsDynamically=function() { selections++; return [] }
+    a._applySystemInstructions=function() {}
+    a._createBareLlmInstance=function() { var history=[]; return {
+      getGPT:function() { return {getConversation:function(){return history},setConversation:function(c){history=c}} },
+      withMcpTools:function() {registrations++; return this}, withInstructions:function(){return this}
+    } }
+    a.llm=a._createBareLlmInstance(); a.lc_llm=a._createBareLlmInstance()
+    a._registerMcpToolsForGoal({goal:"hello",mcpdynamic:true,mcpproxy:true,mcpproxynative:true})
+    assert(registrations,0,"Empty selection registers no proxy tools on either tier")
+    assert(a._useToolsActualMain,false,"Main has no native tools"); assert(a._useToolsActualLC,false,"LC has no native tools")
+    a._registerMcpToolsForGoal({goal:"hello",mcpdynamic:false,mcpproxy:true,mcpproxynative:true})
+    assert(registrations,2,"Disabled dynamic selection registers both tiers")
+    assert(selections,1,"Disabled selection never invokes selector")
+  }) }
+
+  exports.testStreamContractAndDiagnosticLabels = function() {
+    var a=new MiniA(), visible=""
+    a.fnI=function(event,text) {if(event==="stream") visible+=text}
+    var plain=a._createPlainStreamDeltaHandler()
+    plain("Plain "); plain("chatbot reply")
+    assert(visible.trim(),"Plain chatbot reply","Plain text remains visible")
+    assert(a._shouldDisableStreamingForOllamaToolCallTurn({type:"ollama"},true,true),true,"Ollama tools still disable wire JSON")
+    var source=io.readFileString("mini-a.js")
+    assert(source.indexOf('onDelta = chatbotStructuredResponse')>=0,true,"Chatbot renderer follows contract")
+    assert(source.indexOf('var _baseOnDelta = this._createStreamDeltaHandler')>=0,true,"Executor always parses envelope")
+    assert(source.indexOf('Mode preset: ')>=0 && source.indexOf(' | Provider: ')>=0 && source.indexOf(' | Model: ')>=0,true,"Resolved provider and mode labeled")
+    assert(source.indexOf('working context only ~')>=0,true,"Working context estimate labeled")
+    assert(source.indexOf('[cost: cumulative session usage]')>=0,true,"Cumulative usage labeled")
+  }
 })()

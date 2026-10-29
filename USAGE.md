@@ -906,6 +906,7 @@ Adapt the examples above by changing the `OAF_MODEL` tuple to match your provide
 - Every attachment appears above the prompt as a rounded chip showing the file name; remove any file before sending by selecting the **✕** icon.
 - When you submit the prompt, Mini-A automatically appends the file name and contents as Markdown code blocks. In the conversation stream the files show up as collapsible buttons—click one to open a preview modal with syntax highlighting.
 - Both Simple and Advanced modes also accept PNG/JPEG images, Word (`.doc`, `.docx`), Excel (`.xls`, `.xlsx`), PowerPoint (`.ppt`, `.pptx`) and PDF files. Enter a question or instruction before submitting binary files; Advanced slash and skill commands do not accept them.
+- Submitted images keep a small clickable thumbnail below your prompt in the answer pane in both modes. The larger preview uses a reduced JPEG copy (up to 768 pixels on its longest side), retained with saved conversation history. Older conversations without saved previews continue to show filenames.
 - Binary attachments allow **four files**, **10 MiB per image**, **20 MiB per document**, and **20 MiB combined**. Unsupported or oversized files are skipped with a warning. Images retain the existing 25-megapixel limit.
 - Upload validation scans base64 without allocating regex match states for the full payload. With an OpenAF OpenAI provider advertising `supportsImageMimeTypes`, PNG attachments are sent unchanged with the correct media type; older runtimes retain JPEG conversion. Update both Mini-A and OpenAF in your web container, rebuild it and restart it to receive both memory improvements.
 - `useattach=true` enables isolated, read-only processing without requiring `useutils=true`, `useshell=true` or `readwrite=true`. Office/PDF files use the existing Tika `readDocument` reader (30,000 extracted characters per document); images use `inspectImage` with your question and `modelvisual` / `OAF_VISUAL_MODEL` (falling back to the main model). A vision-capable provider/model is required for images. See [Reading documents and images](#reading-documents-and-images) for Tika installation and runtime requirements; preinstall Tika for offline use.
@@ -5170,3 +5171,17 @@ Optional `runmaxtokens` and `runmaxtimems` require automatic orchestration. Toke
 Remote workers advertise `task-outcome-v1` and `execution-budget-v1`. Older workers remain usable for uncapped work with parent-side acceptance; capped work requires a budget-capable worker. Worker-configured caps remain ceilings on incoming allocations. Use `durable=true` for atomic checkpoints containing task revisions, acceptance, budget reservations, and remote submission identities. Resume observes existing remote submissions before considering further work. Automatic execution failures retry only tasks declared read-only or `idempotent:true`; an unsettled capped allocation is retained instead of being granted again to a new attempt. Unknown outcomes retain ownership and reservations; an absent receipt never authorizes replay. Inspect and resolve uncertain external effects before starting replacement work.
 
 Run deterministic coverage with `ojob tests/execution.yaml`. For repeated live-provider comparisons, use `evals/orchestration.yaml` through the existing evaluation runner. Reports include verified completion, unaccepted tasks, progress/recovery counts, aggregate tokens, elapsed time, and tool-call counts. Deterministic checks do not establish provider-backed completion-quality improvements.
+
+### Mode, provider, and stream diagnostics
+
+`mode` selects a behavior preset; it does not identify the provider. For example,
+`mode=ollama` can run with Gemini configured through `OAF_MODEL` or `model`.
+Startup reports the resolved provider and model alongside the mode preset.
+The executor renders the action envelope's `answer` field even when provider
+JSON mode is disabled. Plain chatbot responses continue to render as plain text.
+
+The pre-request **working context only** estimate excludes other request content
+(such as instructions and tool schemas). Per-call usage comes from provider
+statistics when available; the cost line reports **cumulative session usage**.
+Dynamic tool selection uses isolated, tool-free requests. A valid empty selection
+means no tools are needed; selection failures retain the existing fallback sequence.

@@ -36,13 +36,42 @@ const text = c.buildPromptWithAttachments('Question',[{name:'a.txt',content:'tex
 assert.match(text,/a.txt/);assert.doesNotMatch(text,/picture.png|iVBOR/);
 console.log('Web attachment payload and prompt checks passed.');
 
+// Previews travel only in the display prompt, survive history, and render safely.
+const preview = 'data:image/jpeg;base64,/9j/';
+const validated = a.validate([{...upload,preview}], 'Inspect');
+assert.equal(validated[0].preview,preview);
+for (const value of ['https://example.com/image.jpg','data:image/svg+xml;base64,AAAA',preview+'" onerror="bad','data:image/jpeg;base64,'+'A'.repeat(350000)]) {
+  assert.throws(()=>a.validate([{...upload,preview:value}],'Inspect'),/preview/);
+}
+assert.throws(()=>a.validate([{name:'a.pdf',base64:'AAAA',preview}],'Inspect'),/preview/);
+const display = a.displayPrompt('Inspect',validated);
+assert.match(display,/mini-a-image-preview/);
+Object.assign(c,{btoa:s=>Buffer.from(s,'binary').toString('base64'),unescape,encodeURIComponent});
+vm.runInContext(fn('escapeHtml'),c);
+vm.runInContext(fn('buildAttachmentDisplayPrompt'),c);
+vm.runInContext(fn('formatUserPromptHtml'),c);
+assert.equal(c.buildAttachmentDisplayPrompt('Inspect',validated),display);
+const html=c.formatUserPromptHtml(display);
+assert.match(html,/user-image-attachment/);assert.match(html,/<img src="data:image\/jpeg;base64,/);
+assert.ok(html.indexOf('Inspect')<html.indexOf('<img'));
+assert.doesNotMatch(c.formatUserPromptHtml('```attachment x.png\nmini-a-image-preview:https://example.com/x\n```'),/<img/);
+const server=fs.readFileSync('mini-a-web.yaml','utf8');
+const serverStart=server.indexOf('      function __formatUserMessage(');
+const serverEnd=server.indexOf('      if (isDef(global.__res',serverStart);
+Object.assign(c,{__escapeHtml:c.escapeHtml,__escapeAttr:c.escapeHtml,__detectAttachmentLang:()=> 'png',af:{fromBytes2String:x=>x,toBase64Bytes:s=>Buffer.from(s).toString('base64')}});
+vm.runInContext(server.slice(serverStart,serverEnd),c);
+assert.equal(c.__formatUserMessage(display),html);
+assert.equal(a.previewSource('mini-a-image-preview:'+preview),preview);
+assert.equal(a.previewSource('mini-a-image-preview:data:image/jpeg;base64,AA=A'),'');
+console.log('Image preview validation and client/server rendering checks passed.');
+
 // Exercise actual browser submission logic for acceptance and rejection in both modes.
 const submitStart = page.indexOf('    async function handleSubmit()');
 const submitEnd = page.indexOf('    async function pollOnce()',submitStart);
 async function browser(advanced, response) {
   let sent, cleared=0, started=0, warning, optimistic;
   const b = vm.createContext({
-    isProcessing:false,attachmentsEnabled:true,attachments:[{...upload,binary:true},{name:'notes.txt',content:'notes'}],
+    isProcessing:false,attachmentsEnabled:true,attachments:[{...upload,preview,binary:true},{name:'notes.txt',content:'notes'}],
     promptInput:{value:'Inspect'},advancedUI:advanced?{enabled:()=>true,submit:async(prompt,attachments)=>{sent={prompt,attachments};if(response.error)throw Error(response.error);}}:null,
     currentSessionUuid:'session',lastRawContent:'',lastKnownHistory:[],lastSubmittedPrompt:'',lastFinishedPrompt:'',activeHistoryId:null,
     activeSubmissionStartedAt:0,sawNonFinishedForActiveSubmission:false,lastRenderedRaw:'',streamEnabled:false,
@@ -56,9 +85,9 @@ async function browser(advanced, response) {
   vm.runInContext(fn('sanitizeAttachmentName'),b);vm.runInContext(fn('buildPromptWithAttachments'),b);vm.runInContext(fn('buildAttachmentDisplayPrompt'),b);
   vm.runInContext(page.slice(submitStart,submitEnd),b);
   await b.handleSubmit();
-  assert.equal(sent.attachments.length,1);assert.equal(sent.attachments[0].base64,upload.base64);
+  assert.equal(sent.attachments.length,1);assert.equal(sent.attachments[0].base64,upload.base64);assert.equal(sent.attachments[0].preview,preview);
   assert.match(sent.prompt,/notes.txt/);assert.doesNotMatch(sent.prompt,/iVBOR/);
-  if (!advanced) { assert.match(optimistic,/📎 picture.png/);assert.doesNotMatch(optimistic,/iVBOR/); }
+  if (!advanced) { assert.match(optimistic,/mini-a-image-preview:data:image\/jpeg/);assert.doesNotMatch(optimistic,/iVBOR/); }
   assert.equal(cleared,response.error||response.busy?0:1);
   if (!advanced) assert.equal(started,response.error||response.busy?0:1);
   if (response.error) assert.match(warning,/rejected/);
@@ -74,7 +103,7 @@ async function historyDisplay() {
   const start=page.indexOf('    async function sendHistoryToServer(');
   const end=page.indexOf('    async function loadConversationEntry(',start);
   vm.runInContext(page.slice(start,end),c);
-  const source={event:'👤',message:'Inspect\nExtracted content',displayMessage:'Inspect\n\n📎 picture.png'};
+  const source={event:'👤',message:'Inspect\nExtracted content',displayMessage:a.displayPrompt('Inspect',a.validate([{...upload,preview:'data:image/jpeg;base64,/9j/'}],'Inspect'))};
   const events=c.sanitizeHistoryEvents([source,{event:'final',message:'Answer'}]);
   assert.equal(events[0].displayMessage,source.displayMessage);
   assert.equal(c.extractLastUserPromptFromEvents(events),source.displayMessage);
@@ -88,7 +117,7 @@ async function historyDisplay() {
 async function picker() {
   const warnings=[];
   Object.assign(c,{attachmentsEnabled:true,attachments:[],MAX_ATTACHMENT_SIZE:512*1024,TEXT_FILE_EXTENSIONS:new Set(['txt']),
-    notifyAttachmentWarning:message=>warnings.push(message),renderAttachments(){},detectAttachmentLanguage:()=> 'text',
+    createAttachmentPreview:async()=> 'data:image/jpeg;base64,/9j/',notifyAttachmentWarning:message=>warnings.push(message),renderAttachments(){},detectAttachmentLanguage:()=> 'text',
     FileReader:class {readAsDataURL(file){this.result='data:image/png;base64,'+file.base64;this.onload();}}
   });
   vm.runInContext(fn('isAllowedTextFile'),c);

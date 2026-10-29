@@ -798,6 +798,12 @@
         box-shadow: 0 3px 8px rgba(0,123,255,0.25);
     }
 
+    .user-image-attachment { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; margin: 4px 8px 4px 0; font-style: normal; }
+    .user-image-attachment img { width: 48px; height: 48px; object-fit: contain; }
+    .user-image-attachment span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .attachment-image-preview[hidden] { display: none; }
+    .attachment-image-preview { max-width: 100%; max-height: 65vh; object-fit: contain; display: block; margin: auto; }
+
     .attachment-modal {
         position: fixed;
         inset: 0;
@@ -1866,6 +1872,7 @@
             <button id="attachmentModalClose" class="attachment-modal-close" type="button" aria-label="Close attachment preview">✕</button>
         </div>
         <div class="attachment-modal-body">
+            <img id="attachmentModalImage" class="attachment-image-preview" hidden alt="">
             <pre><code id="attachmentModalCode" class="hljs"></code></pre>
         </div>
     </div>
@@ -2119,6 +2126,7 @@
     let attachmentsEnabled = false;
     let attachments = [];
     let attachmentModalKeyListenerBound = false;
+    let attachmentModalReturnFocus = null;
     let lastPlanDigest = '';
     let lastSubagentDigest = '';
     let chartResizeTimer = null;
@@ -2168,6 +2176,7 @@
     const attachmentModal = document.getElementById('attachmentModal');
     const attachmentModalTitle = document.getElementById('attachmentModalTitle');
     const attachmentModalCode = document.getElementById('attachmentModalCode');
+    const attachmentModalImage = document.getElementById('attachmentModalImage');
     const attachmentModalClose = document.getElementById('attachmentModalClose');
     const planPanel = document.getElementById('planPanel');
     const planSummaryText = document.getElementById('planSummaryText');
@@ -3413,6 +3422,28 @@
         if (fileInput) fileInput.value = '';
     }
 
+    async function createAttachmentPreview(dataUrl) {
+        const picture = new Image();
+        await new Promise((resolve, reject) => {
+            picture.onload = resolve;
+            picture.onerror = () => reject(new Error('Cannot decode image preview'));
+            picture.src = dataUrl;
+        });
+        const scale = Math.min(1, 768 / Math.max(picture.naturalWidth, picture.naturalHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(picture.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(picture.naturalHeight * scale));
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(picture, 0, 0, canvas.width, canvas.height);
+        for (const quality of [0.8, 0.6, 0.4]) {
+            const preview = canvas.toDataURL('image/jpeg', quality);
+            if (preview.length <= 350000) return preview;
+        }
+        throw new Error('Image preview exceeds size limit');
+    }
+
     async function handleFileInputChange(event) {
         if (attachmentsEnabled === false) return;
         if (!event || !event.target) return;
@@ -3435,7 +3466,8 @@
                         reader.onerror = () => reject(new Error('Cannot read ' + file.name));
                         reader.readAsDataURL(file);
                     });
-                    attachments.push({ id: 'att-' + Date.now() + '-' + Math.random().toString(16).slice(2), name: sanitizeAttachmentName(file.name), binary: true, size: file.size, mediaType: file.type, base64: dataUrl.slice(dataUrl.indexOf(',') + 1) });
+                    const preview = image ? await createAttachmentPreview(dataUrl) : undefined;
+                    attachments.push({ preview, id: 'att-' + Date.now() + '-' + Math.random().toString(16).slice(2), name: sanitizeAttachmentName(file.name), binary: true, size: file.size, mediaType: file.type, base64: dataUrl.slice(dataUrl.indexOf(',') + 1) });
                 } catch (error) { notifyAttachmentWarning(error.message); }
                 continue;
             }
@@ -3506,7 +3538,9 @@
 
     function buildAttachmentDisplayPrompt(prompt, items) {
         if (!items || !items.length) return prompt;
-        return prompt + '\n\n📎 ' + items.map(item => sanitizeAttachmentName(item.name)).join(', ');
+        return prompt + '\n\n' + items.map(item => item.preview
+            ? '```attachment ' + sanitizeAttachmentName(item.name).replace(/```/g, '`') + '\nmini-a-image-preview:' + item.preview + '\n```'
+            : '📎 ' + sanitizeAttachmentName(item.name)).join(' ');
     }
 
     function stripAttachmentBlocks(text) {
@@ -3548,8 +3582,14 @@
     function openAttachmentModal(name, content, language) {
         if (!attachmentModal || !attachmentModalTitle || !attachmentModalCode) return;
 
+        attachmentModalReturnFocus = document.activeElement;
         attachmentModalTitle.textContent = sanitizeAttachmentName(name);
-        attachmentModalCode.textContent = content || '';
+        const image = language === 'image-preview' && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(content) && content.length <= 350000;
+        attachmentModalImage.hidden = !image;
+        attachmentModalCode.parentElement.hidden = image;
+        if (image) { attachmentModalImage.src = content; attachmentModalImage.alt = name; }
+        else attachmentModalImage.removeAttribute('src');
+        attachmentModalCode.textContent = image ? '' : (content || '');
         attachmentModalCode.className = 'hljs';
 
         const safeLanguage = sanitizeLanguageToken(language);
@@ -3569,6 +3609,7 @@
 
         attachmentModal.classList.add('open');
         attachmentModal.setAttribute('aria-hidden', 'false');
+        attachmentModalClose.focus();
 
         setTimeout(() => {
             try { hljs.highlightElement(attachmentModalCode); } catch (e) { /* ignore */ }
@@ -3579,8 +3620,13 @@
         if (!attachmentModal || !attachmentModalCode) return;
         attachmentModal.classList.remove('open');
         attachmentModal.setAttribute('aria-hidden', 'true');
+        attachmentModalImage.removeAttribute('src');
+        attachmentModalImage.hidden = true;
+        attachmentModalCode.parentElement.hidden = false;
         attachmentModalCode.textContent = '';
         attachmentModalCode.className = 'hljs';
+        if (attachmentModalReturnFocus && attachmentModalReturnFocus.isConnected) attachmentModalReturnFocus.focus();
+        attachmentModalReturnFocus = null;
     }
 
     function bindUserAttachmentPreviews() {
@@ -3590,6 +3636,11 @@
             if (node.dataset.bound === 'true') return;
             node.dataset.bound = 'true';
             node.addEventListener('click', () => {
+                const image = node.querySelector('img');
+                if (image && node.classList.contains('user-image-attachment')) {
+                    openAttachmentModal(node.getAttribute('data-name') || 'Image', image.getAttribute('src'), 'image-preview');
+                    return;
+                }
                 const encoded = node.getAttribute('data-content') || '';
                 const name = node.getAttribute('data-name') || 'Attachment';
                 const language = node.getAttribute('data-language') || 'text';
@@ -4822,6 +4873,10 @@
 
         if (!attachmentModalKeyListenerBound) {
             document.addEventListener('keydown', (event) => {
+                if (event.key === 'Tab' && attachmentModal && attachmentModal.classList.contains('open')) {
+                    event.preventDefault();
+                    attachmentModalClose.focus();
+                }
                 if (event.key === 'Escape' && attachmentModal && attachmentModal.classList.contains('open')) {
                     closeAttachmentModal();
                 }
@@ -5936,7 +5991,10 @@
             const safeNameHtml = escapeHtml(safeName);
             const encoded = btoa(unescape(encodeURIComponent(att.content || '')));
             const language = safeName.includes('.') ? safeName.split('.').pop() : 'text';
-            const button = `<button class="user-attachment" type="button" data-name="${escapeHtml(safeName)}" data-language="${escapeHtml(language)}" data-content="${escapeHtml(encoded)}">📎 ${safeNameHtml}</button>`;
+            const preview = /^mini-a-image-preview:(data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2})\s*$/.exec(att.content || '');
+            const button = preview && preview[1].length <= 350000
+                ? `<button class="user-attachment user-image-attachment" type="button" data-name="${escapeHtml(safeName)}" aria-label="Preview ${escapeHtml(safeName)}"><img src="${preview[1]}" alt=""><span>${safeNameHtml}</span></button>`
+                : `<button class="user-attachment" type="button" data-name="${escapeHtml(safeName)}" data-language="${escapeHtml(language)}" data-content="${escapeHtml(encoded)}">📎 ${safeNameHtml}</button>`;
             html = html.replace(placeholder, button);
         });
 
@@ -5988,7 +6046,7 @@
 
         composerNotice('');
         const rawPrompt = promptInput.value || '';
-        const binaryAttachments = attachmentsEnabled ? attachments.filter(item => item.binary).map(({name, mediaType, base64}) => ({name, mediaType, base64})) : [];
+        const binaryAttachments = attachmentsEnabled ? attachments.filter(item => item.binary).map(({name, mediaType, base64, preview}) => ({name, mediaType, base64, preview})) : [];
         if (binaryAttachments.length && !rawPrompt.trim()) { notifyAttachmentWarning('Enter a question or instruction for the attached files.'); composerNotice('Enter a question or instruction for the attached files.'); return; }
         if (advancedUI && advancedUI.enabled()) {
             if (!rawPrompt.trim()) return;
