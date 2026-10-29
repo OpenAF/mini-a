@@ -121,10 +121,7 @@
     mermaidLib.initialize({ 
         startOnLoad: false,
         securityLevel: 'strict',
-        theme: initialDark ? 'dark' : 'default',
-        themeVariables: {
-            darkMode: initialDark
-        }
+        theme: initialDark ? 'dark' : 'default'
     });
     window.mermaid = mermaidLib;
 </script>
@@ -3910,9 +3907,6 @@
             await window.mermaid.initialize({
                 startOnLoad: false,
                 theme: isDark ? 'dark' : 'default',
-                themeVariables: {
-                    darkMode: isDark
-                },
                 suppressErrorRendering: true  // Suppress error messages in rendered output
             });
 
@@ -3976,9 +3970,6 @@
             await window.mermaid.initialize({
                 startOnLoad: false,
                 theme: isDark ? 'dark' : 'default',
-                themeVariables: {
-                    darkMode: isDark
-                },
                 suppressErrorRendering: true
             });
 
