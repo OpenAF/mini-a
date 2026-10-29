@@ -228,7 +228,7 @@ mini-a goal="generate summaries for 50 documents" \
 
 | Provider   | Model                   | Example |
 |------------|-------------------------|---------|
-| Anthropic  | claude-haiku-4.5        | ```export OAF_MODEL="(type: anthropic, key: '...', model: claude-haiku-4-5-20251001, timeout: 900000, temperature: 0, params: (max_tokens: 64000))" ``` |
+| Anthropic  | claude-haiku-5.5        | ```export OAF_MODEL="(type: anthropic, key: '...', model: claude-haiku-5-5, timeout: 900000, params: (max_tokens: 64000))" ``` |
 | Anthropic  | claude-opus-4.5         | ```export OAF_MODEL="(type: anthropic, key: '...', model: claude-opus-4-5-20251101, timeout: 900000, temperature: 0, params: (max_tokens: 64000))" ``` |
 | Anthropic  | claude-sonnet-4.5       | ```export OAF_MODEL="(type: anthropic, key: '...', model: claude-sonnet-4-5-20250929, timeout: 900000, temperature: 0, params: (max_tokens: 64000))" ``` |
 | Bedrock    | claude-haiku-4.5        | ```export OAF_MODEL="(type: bedrock, options: (region: eu-west-1, model: 'global.anthropic.claude-haiku-4-5-20251001-v1:0', temperature: 0, params: (max_tokens: 65535)), timeout: 900000)"``` |
