@@ -15,7 +15,7 @@ function validation(value) {
   return v;
 }
 const context = {
-  MiniA, __: undefined, now: () => clock,
+  MiniA, __: undefined, now: () => clock, genUUID: () => crypto.randomUUID(), sync: fn => fn(),
   isDef: v => v !== undefined && v !== null, isUnDef: v => v === undefined || v === null,
   isObject: v => !!v && typeof v === 'object', isMap: v => !!v && typeof v === 'object' && !Array.isArray(v),
   isArray: Array.isArray, isFunction: v => typeof v === 'function', isString: v => typeof v === 'string', isNumber: v => typeof v === 'number',
@@ -24,7 +24,7 @@ const context = {
   sha384: value => crypto.createHash('sha384').update(value).digest('hex'), _$: validation,
   getEnv() {}, getOPackPath: () => '/bundle',
   af: { fromJSSLON: v => typeof v === 'string' ? JSON.parse(v) : v },
-  java: { io: { File }, util: { concurrent: { CountDownLatch: Latch, TimeUnit: { MILLISECONDS: 1 }, atomic: { AtomicBoolean: Atomic } } } },
+  java: { io: { File }, util: { concurrent: { CountDownLatch: Latch, TimeUnit: { MILLISECONDS: 1 }, atomic: { AtomicBoolean: Atomic, AtomicInteger: function(value) { this.getAndIncrement = () => value++; } } } } },
   $doV(fn) { pending.push(fn); },
   $mcp(config) {
     const c = { config, initialized: 0, closed: 0, catalogs: 0,
@@ -93,8 +93,11 @@ assert.equal(disabled._startupEntries, undefined);
 const local = new MiniA(); local.prepareSession({ mcp: JSON.stringify([{type:'ojob',options:{job:'tools.yaml'}}, {type:'dummy'}, {type:'remote',url:'interactive',auth:{grantType:'authorization_code'}}]) });
 assert.equal(pending.length, 0, 'local/session-bound and interactive-auth MCPs keep foreground setup');
 const failure = new MiniA(); failure.prepareSession({mcp: JSON.stringify({type:'remote',url:'fail'})}); drain();
+const failedCount = clients.length;
+assert.throws(() => failure._startupMcpClient({type:'remote',url:'fail'}, {}), /MCP preparation failed/);
+assert.equal(clients.length, failedCount, 'failed preparation is not immediately retried');
 const retry = failure._startupMcpClient({type:'remote',url:'fail'}, {});
-assert.equal(retry.initialized, 0, 'failed preparation creates a fresh foreground client');
+assert.equal(retry.initialized, 0, 'a subsequent submission may create a fresh client');
 failure._closeStartupPreparation(); retry.destroy();
 const different = new MiniA(); different.prepareSession({mcp:JSON.stringify(config)});
 const fresh = different._startupMcpClient({...config,url:'new-endpoint'}, {});
@@ -131,3 +134,13 @@ timing._beginStartupTiming({__startupSubmittedAt:clock}); clock += 7; main.promp
 assert.equal(timing.getStartupTimings().first_provider_ms, 7);
 assert.equal(timing.getStartupTimings().first_provider_role, 'main');
 console.log('Startup preparation ownership, freshness, failure, cancellation and timing checks passed.');
+
+// Adoption of a ready connection never waits for unrelated batch completion.
+const independent = new MiniA(); independent._startupEntries = [];
+const ready = { key: independent._startupKey(config), client: { __miniAStartupHooks: {} }, done: new Latch(0) };
+independent._startupEntries.push({ kind: 'mcp', entries: [ready], done: { await() { throw Error('batch must not be awaited'); } } });
+assert.ok(independent._takeStartupMcp(config));
+const parallel = new MiniA(); parallel.prepareSession({mcp:JSON.stringify([config,{...config,id:'two',url:'two'},{...config,id:'three',url:'three'}])});
+assert.equal(pending.length, 2, 'only two workers are scheduled');
+drain(); parallel._closeStartupPreparation();
+console.log('PASS independent MCP readiness and bounded worker scheduling');

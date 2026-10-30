@@ -5,7 +5,7 @@
   var config = { type: "gemini", model: "fixture", key: "private-fixture" }
   var caps = { structured: { implemented: true, contract: "verified", availability: "unknown", questionTypes: ["score", "choice", "boolean"], probabilities: false } }
   var manager = function(handler, options) {
-    var settings = { env: function() { return config }, clientFactory: function(c) {
+    var settings = { supportsBoundedRequests: true, env: function() { return config }, clientFactory: function(c) {
       c.key = "mutated-client-key"
       return { getCapabilities: function() { return clone(caps) }, decideWithStats: handler }
     } }
@@ -497,5 +497,26 @@
     ow.test.assert(third.worth.value, false, "Cached answers are copies, not shared state")
     a._initDecisionRuntime({})
     ow.test.assert(isUnDef(a._decisionGateCache), true, "A new run clears the cache")
+  }
+  exports.testComplexityFailureIsBoundedAndMemoized = function() {
+    var timeouts = [], calls = 0, a = new MiniA()
+    a.fnI = function() {}; a._trace = function() {}; a._decisionFallback = function() {}
+    var setup = function(timeout) {
+      a._decision = new MiniADecision({ modeldec: {type:"openai",model:"fixture",timeout:timeout}, supportsBoundedRequests:true,
+        clientFactory:function(config) {
+          timeouts.push(config.timeout)
+          return {getCapabilities:function() { return {} }, decideWithStats:function() { calls++; throw new Error("timeout") }}
+        } })
+    }
+    setup(30000)
+    for (var i=0;i<3;i++) ow.test.assert(a._assessComplexityByDecision("goal", "medium", {}), __, "Heuristic fallback")
+    ow.test.assert(calls, 1, "Failed assessment runs only once for the goal")
+    ow.test.assert(timeouts, [5000], "Optional decision is capped at five seconds")
+    setup(1000)
+    a._assessComplexityByDecision("goal", "medium", {})
+    ow.test.assert(timeouts, [5000,1000], "Shorter configured timeout wins and model config invalidates cache")
+    a._assessComplexityByDecision("next goal", "medium", {})
+    ow.test.assert(calls, 3, "New goal can retry")
+    a._stopAgentResources()
   }
 })()

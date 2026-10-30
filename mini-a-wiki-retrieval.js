@@ -1103,7 +1103,8 @@ MiniAWikiRetrievalV2.prototype._stamp = function(path, canonicalRoot) {
 MiniAWikiRetrievalV2.prototype._backendCall = function(method, path, deadline, used) {
   var started = Number(java.lang.System.nanoTime()), result, failed = true
   try {
-    result = this.manager._backend[method](path, isNumber(deadline) ? {maxMillis:Math.max(1,deadline-Date.now())} : __)
+    if (isNumber(deadline) && Date.now() >= deadline) throw new Error("request-deadline-exhausted")
+    result = this.manager._backend[method](path, isNumber(deadline) ? {maxMillis:Math.max(1,deadline-Date.now()),__deadline:deadline} : __)
     failed = false
     return result
   } finally {
@@ -2579,27 +2580,27 @@ MiniAWikiRetrievalV2.prototype._validatePageMetadata = function(snapshot, page) 
   this._guard(function() { self._cachePut(key,{page:page},MiniAWikiRetrievalV2.bytes(key + stringify(page,__,""))) })
 }
 MiniAWikiRetrievalV2.prototype.open = function(path, options) {
-  var snapshot, self = this
+  var snapshot, self = this, deadline = options && options.__deadline
   try {
-    snapshot = this.acquire(); var page = this.lookupPage(snapshot,path)
+    snapshot = this.acquire(deadline); var page = this.lookupPage(snapshot,path)
     if (!page) return { path: path, error: "page-not-found" }
     if (page.path !== path) throw new Error("invalid-page-record")
-    if (!this._active(page, this._pending(), __, __, __, __, snapshot)) return { path: path, error: "stale-evidence", restart: true }
+    if (!this._active(page, this._pending(), __, deadline, __, __, snapshot)) return { path: path, error: "stale-evidence", restart: true }
     this._validatePageMetadata(snapshot,page)
-    if (!this._active(page, this._pending(), __, __, __, __, snapshot)) return { path: path, error: "stale-evidence", restart: true }
+    if (!this._active(page, this._pending(), __, deadline, __, __, snapshot)) return { path: path, error: "stale-evidence", restart: true }
     var limit = Math.min(100, Math.max(1, Number(options && options.maxHeadings) || 40))
     return { path: path, ref: this.manager._agenticRef(path), title: page.title, description: page.description, revision: page.revision, generation: snapshot.generation, frontmatter: clone(page.metadata), headings: clone(page.outline.slice(0, limit)), headingsTruncated: page.outline.length > limit, links: page.links.map(function(l) { return l.resolved }), size: page.stamp.size }
   } catch(e) { return { path: path, error: __miniAErrMsg(e), bindingFailure: e.bindingFailure } }
   finally { if (snapshot) this.release(snapshot) }
 }
-MiniAWikiRetrievalV2.prototype.backlinks = function(path) {
-  var snapshot
+MiniAWikiRetrievalV2.prototype.backlinks = function(path, options) {
+  var snapshot, deadline = options && options.__deadline
   try {
-    snapshot = this.acquire(); var pending = this._pending(), self = this
+    snapshot = this.acquire(deadline); var pending = this._pending(), self = this
     var root = ["fs", "s3fs"].indexOf(this.manager._backendType) >= 0 && !this.manager._archiveRoot ? String(new java.io.File(this.manager._backend.root).getCanonicalPath()) : __
     var links = this.lookupBacklinks(snapshot,path).filter(function(link) {
       if (!isMap(link.stamp) || !isString(link.path) || !isArray(link.links)) throw new Error("reindex-required")
-      return self._active({path:link.path,stamp:link.stamp},pending,__,__,__,root,snapshot)
+      return self._active({path:link.path,stamp:link.stamp},pending,__,deadline,__,root,snapshot)
     })
     return { target: path, count: links.length, backlinks: links.map(function(link) { return {path:link.path,title:link.title,links:clone(link.links)} }), generation: snapshot.generation }
   } catch(e) { return { target: path, error: __miniAErrMsg(e), backlinks: [], count: 0 } }

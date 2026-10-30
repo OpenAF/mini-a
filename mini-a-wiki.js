@@ -3265,6 +3265,8 @@ MiniAWikiManager.prototype._makeHttpBackend = function(cfg) {
     else if (isString(secret) && secret.length > 0) connection.setRequestProperty("Authorization", "Bearer " + secret)
   }
   var open = function(path, method, options) {
+    options = __miniAWikiDeadlineOptions(options)
+    if (isNumber(options.__deadline) && options.maxMillis <= 0) throw new Error("request-deadline-exhausted")
     var connection = new java.net.URL(__miniAWikiUrlJoin(base, path)).openConnection()
     var effectiveTimeout = isMap(options) && isFinite(Number(options.maxMillis)) && Number(options.maxMillis) > 0 ? Math.max(1, Math.min(timeout, Math.floor(Number(options.maxMillis)))) : timeout
     connection.setConnectTimeout(effectiveTimeout); connection.setReadTimeout(effectiveTimeout)
@@ -3277,22 +3279,44 @@ MiniAWikiManager.prototype._makeHttpBackend = function(cfg) {
     url: base,
     list: function(prefix) { return parent._luceneListAllReadOnly(prefix) },
     read: function(path, options) {
+      options = __miniAWikiDeadlineOptions(options)
       var identifier = __miniAWikiUrlJoin(base, path)
       var conn = __, started = Number(java.lang.System.nanoTime())
       try {
         conn = open(path, "GET", options)
+        if (isNumber(options.__deadline)) {
+          conn.connect()
+          var headerBudget = options.__deadline - Date.now()
+          if (headerBudget <= 0) throw new Error("request-deadline-exhausted")
+          conn.setReadTimeout(Math.max(1, Math.min(timeout, Math.floor(headerBudget))))
+        }
         var code = Number(conn.getResponseCode())
         if (code < 200 || code >= 300) {
           try {
             var errStream = conn.getErrorStream()
-            if (isDef(errStream) && errStream != null) { af.fromInputStream2String(errStream); errStream.close() }
+            if (isDef(errStream) && errStream != null) { errStream.close() }
           } catch(ignoreErrStream) {}
           parent._auditRetrieval("http", identifier, path, false, 0, { operation: "read", protocol: "http", method: "GET", status: code, totalMillis: __miniAWikiAuditMillis(started) })
           return __
         }
+        if (isNumber(options.__deadline) && Date.now() >= options.__deadline) throw new Error("request-deadline-exhausted")
         var stream = conn.getInputStream()
         try {
-          var content = af.fromInputStream2String(stream)
+          var content
+          if (isNumber(options.__deadline)) {
+            var bytes = new java.io.ByteArrayOutputStream()
+            var buffer = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 8192), count
+            while (true) {
+              var remaining = options.__deadline - Date.now()
+              if (remaining <= 0) throw new Error("request-deadline-exhausted")
+              conn.setReadTimeout(Math.max(1, Math.min(timeout, Math.floor(remaining))))
+              count = stream.read(buffer)
+              if (count < 0) break
+              bytes.write(buffer, 0, count)
+            }
+            if (Date.now() >= options.__deadline) throw new Error("request-deadline-exhausted")
+            content = String(bytes.toString("UTF-8"))
+          } else content = af.fromInputStream2String(stream)
           parent._auditRetrieval("http", identifier, path, true, __miniAWikiAuditBytes(content), { operation: "read", protocol: "http", method: "GET", status: code, totalMillis: __miniAWikiAuditMillis(started) })
           return content
         } finally { try { stream.close() } catch(ignoreClose) {} }
@@ -3304,9 +3328,16 @@ MiniAWikiManager.prototype._makeHttpBackend = function(cfg) {
       }
     },
     exists: function(path, options) {
+      options = __miniAWikiDeadlineOptions(options)
       var conn = __, identifier = __miniAWikiUrlJoin(base, path), started = Number(java.lang.System.nanoTime())
       try {
         conn = open(path, "HEAD", options)
+        if (isNumber(options.__deadline)) {
+          conn.connect()
+          var headerBudget = options.__deadline - Date.now()
+          if (headerBudget <= 0) throw new Error("request-deadline-exhausted")
+          conn.setReadTimeout(Math.max(1, Math.min(timeout, Math.floor(headerBudget))))
+        }
         var code = Number(conn.getResponseCode())
         var exists = code >= 200 && code < 300
         parent._auditRetrieval("http", identifier, path, exists, 0, { operation: "exists", protocol: "http", method: "HEAD", status: code, totalMillis: __miniAWikiAuditMillis(started) })
@@ -3691,7 +3722,17 @@ MiniAWikiManager.prototype._sliceLines = function(lines, options) {
   }
 }
 
+// Preserve one absolute deadline across mount and transport boundaries.
+function __miniAWikiDeadlineOptions(options) {
+  var opts = isObject(options) ? merge({}, options) : {}
+  if (!isNumber(opts.__deadline) && isNumber(opts.maxMillis) && opts.maxMillis > 0) opts.__deadline = Date.now() + opts.maxMillis
+  if (isNumber(opts.__deadline)) opts.maxMillis = Math.max(0, opts.__deadline - Date.now())
+  return opts
+}
+
 MiniAWikiManager.prototype.read = function(path, options) {
+  options = __miniAWikiDeadlineOptions(options)
+  if (isNumber(options.__deadline) && options.maxMillis <= 0) return __
   if (!isString(path) || path.trim().length === 0) return __
   this._maybeRefreshArtifactBundle()
   var trimmed = path.trim()
@@ -3704,7 +3745,9 @@ MiniAWikiManager.prototype.read = function(path, options) {
     return mountedPage
   }
   try { path = __miniAWikiNormalizePath(path, { requireMarkdown: true }) } catch(e) { return __ }
-  var raw = this._backend.read(path)
+  options = __miniAWikiDeadlineOptions(options)
+  if (isNumber(options.__deadline) && options.maxMillis <= 0) return __
+  var raw = this._backend.read(path, options)
   if (isUnDef(raw)) return __
   var parsed = this.parseFrontmatter(raw)
 
@@ -3832,6 +3875,8 @@ MiniAWikiManager.prototype.presentSearch = function(result) {
 }
 
 MiniAWikiManager.prototype.open = function(pathOrRef, options) {
+  options = __miniAWikiDeadlineOptions(options)
+  if (isNumber(options.__deadline) && options.maxMillis <= 0) return { error: "request-deadline-exhausted" }
   var path = this._agenticPath(pathOrRef)
   this._refreshRetrievalMode()
   if (path.startsWith("@")) {
@@ -3844,7 +3889,7 @@ MiniAWikiManager.prototype.open = function(pathOrRef, options) {
   if (this._retrievalV2 && !this._isControlPage(path)) {
     return this._decorateEntry(this._retrievalV2.open(path, options))
   }
-  var page = this.read(path)
+  var page = this.read(path, { __deadline: options.__deadline })
   if (!isObject(page)) return __
   var opts = isObject(options) ? options : {}
   var maxHeadings = isNumber(opts.maxHeadings) && opts.maxHeadings > 0 ? Math.min(Math.floor(opts.maxHeadings), 100) : 40
@@ -3888,7 +3933,8 @@ MiniAWikiManager.prototype.navigate = function(pathOrRef, options) {
 }
 
 MiniAWikiManager.prototype.agenticRead = function(pathOrRef, options) {
-  var path = this._agenticPath(pathOrRef), opts = isObject(options) ? options : {}
+  var path = this._agenticPath(pathOrRef), opts = __miniAWikiDeadlineOptions(options)
+  if (isNumber(opts.__deadline) && opts.maxMillis <= 0) return { error: "request-deadline-exhausted" }
   this._refreshRetrievalMode()
   if (path.startsWith("@") && (this._catalog || this._retrievalV2 || this._legacyRetrievalV2)) {
     var mountedRead = this._resolveMountPath(path)
@@ -3902,10 +3948,10 @@ MiniAWikiManager.prototype.agenticRead = function(pathOrRef, options) {
   }
   var pinnedDescriptor
   if (this._retrievalV2 && !this._isControlPage(path)) {
-    pinnedDescriptor = this.open(path)
+    pinnedDescriptor = this.open(path, opts)
     if (!pinnedDescriptor || pinnedDescriptor.error) return pinnedDescriptor
   }
-  var page = this.read(path)
+  var page = this.read(path, { __deadline: opts.__deadline })
   if (!isObject(page)) return __
   var revision = sha1(String(page.raw || ""))
   if (pinnedDescriptor && revision !== pinnedDescriptor.revision) return { path: path, error: "stale-evidence", restart: true }
@@ -4036,14 +4082,19 @@ MiniAWikiManager.prototype.grep = function(pathOrRef, pattern, options) {
 }
 
 MiniAWikiManager.prototype.related = function(pathOrRef, options) {
-  var path = this._agenticPath(pathOrRef), links = this.backlinks(path)
+  options = __miniAWikiDeadlineOptions(options)
+  var expired = function() { return isNumber(options.__deadline) && Date.now() >= options.__deadline }
+  if (expired()) return { backlinks: [], graph: [], outcome: "partial" }
+  var path = this._agenticPath(pathOrRef), links = this.backlinks(path, options)
   var limit = isNumber(options && options.limit) ? options.limit : 10
   var out = { path: path, backlinks: links.backlinks.map(function(b) { return { ref: this._agenticRef(b.path), path: b.path, title: b.title } }.bind(this)), graph: [] }
   this._decorateEntries(out.backlinks)
+  if (expired()) { out.outcome = "partial"; return out }
   try {
     var neighbors = this.graph("neighbors", { path: path })
     if (isArray(neighbors)) out.graph = neighbors.slice(0, limit)
   } catch(e) { out.graphAvailable = false }
+  if (expired()) { out.outcome = "partial"; return out }
   try {
     if (isObject(this._graph) && isArray(this._mounts) && this._mounts.length > 0) {
       var cross = this._crossWikiExpand([path], { cap: limit })
@@ -4091,7 +4142,7 @@ MiniAWikiManager.prototype.retrieve = function(query, options) {
     bytes: isNumber(opts.maxBytes) ? Math.max(512, Math.min(64000, Math.floor(opts.maxBytes))) : 16000
   }
   var retrievalDeadline=Date.now()+Math.min(15000,Math.max(1,Number(opts.maxMillis)||15000))
-  var search = this.agenticSearch(query, merge(opts, { limit: budgets.candidatePages, maxQueries:budgets.queries, maxCandidates:budgets.candidatePages }))
+  var search = this.agenticSearch(query, merge(opts, { maxMillis: Math.max(1, retrievalDeadline - Date.now()), __deadline: retrievalDeadline, limit: budgets.candidatePages, maxQueries:budgets.queries, maxCandidates:budgets.candidatePages }))
   if (!isObject(search) || !isArray(search.results)) return search
   var ranked = this._rankRetrievalCandidates(search.results, query)
   var graphExpansion = []
@@ -4101,8 +4152,8 @@ MiniAWikiManager.prototype.retrieve = function(query, options) {
   if (opts.expandGraph === true && budgets.graphExpansion > 0 && ranked.length > 0) {
     var knownPaths = {}
     ranked.forEach(function(item) { knownPaths[item.candidate.path] = true })
-    for (var seed = 0; seed < ranked.length && graphExpansion.length < budgets.graphExpansion; seed++) {
-      var related = this.related(ranked[seed].candidate.ref, { limit: budgets.graphExpansion - graphExpansion.length })
+    for (var seed = 0; seed < ranked.length && graphExpansion.length < budgets.graphExpansion && Date.now() < retrievalDeadline; seed++) {
+      var related = this.related(ranked[seed].candidate.ref, { limit: budgets.graphExpansion - graphExpansion.length, __deadline: retrievalDeadline })
       var addGraphCandidate = function(path, relation) {
         if (!isString(path) || path.length === 0 || knownPaths[path] === true || graphExpansion.length >= budgets.graphExpansion) return
         knownPaths[path] = true
@@ -4124,7 +4175,7 @@ MiniAWikiManager.prototype.retrieve = function(query, options) {
   for (var i = 0; i < ranked.length && evidence.length < budgets.inspectedPages && usedBytes < budgets.bytes; i++) {
     if(Date.now()>=retrievalDeadline) {search.outcome="partial";search.stopReasons=(search.stopReasons || []).concat(["request-deadline-exhausted"]);break}
     var remaining = budgets.bytes - usedBytes
-    var read = this.agenticRead(ranked[i].candidate.ref, merge({ maxChars: Math.min(6000, remaining) }, ranked[i].candidate.passage ? {charStart:ranked[i].candidate.passage.charStart,charEnd:ranked[i].candidate.passage.charEnd,revision:ranked[i].candidate.passage.revision} : {}))
+    var read = this.agenticRead(ranked[i].candidate.ref, merge({ maxChars: Math.min(6000, remaining), __deadline: retrievalDeadline, maxMillis: Math.max(1, retrievalDeadline - Date.now()) }, ranked[i].candidate.passage ? {charStart:ranked[i].candidate.passage.charStart,charEnd:ranked[i].candidate.passage.charEnd,revision:ranked[i].candidate.passage.revision} : {}))
     if (!isObject(read) || !isString(read.body) || read.body.length === 0) continue
     var bodyBytes = new java.lang.String(read.body).getBytes("UTF-8").length
     // maxChars is intentionally a compatibility-preserving character limit;
@@ -4146,6 +4197,11 @@ MiniAWikiManager.prototype.retrieve = function(query, options) {
     if (isDef(source)) { item.citation = source; citations.push(source) }
     if (read.truncated === true) item.next = read.next
     evidence.push(item)
+  }
+  if (Date.now() >= retrievalDeadline) {
+    search.outcome = "partial"
+    search.stopReasons = search.stopReasons || []
+    if (search.stopReasons.indexOf("request-deadline-exhausted") < 0) search.stopReasons.push("request-deadline-exhausted")
   }
   var out = {
     query: query,
@@ -4921,15 +4977,19 @@ MiniAWikiManager.prototype.browse = function(path) {
   }
 }
 
-MiniAWikiManager.prototype.backlinks = function(path) {
+MiniAWikiManager.prototype.backlinks = function(path, options) {
+  options = __miniAWikiDeadlineOptions(options)
+  if (isNumber(options.__deadline) && options.maxMillis <= 0) return { target: path, count: 0, backlinks: [] }
   this._refreshRetrievalMode()
-  if (this._retrievalV2) return this._retrievalV2.backlinks(path)
+  if (this._retrievalV2) return this._retrievalV2.backlinks(path, options)
   var target
   try { target = __miniAWikiNormalizePath(path, { requireMarkdown: true }) } catch(e) { return { target: path, count: 0, backlinks: [] } }
   var self = this
   var results = []
   this.list("").forEach(function(p) {
-    var raw = self._backend.read(p)
+    var remaining = __miniAWikiDeadlineOptions(options)
+    if (isNumber(remaining.__deadline) && remaining.maxMillis <= 0) return
+    var raw = self._backend.read(p, remaining)
     if (!isString(raw)) return
     var parsed = self.parseFrontmatter(raw)
     var entries = self._extractLinkEntries(parsed.body)

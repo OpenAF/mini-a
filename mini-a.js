@@ -7093,22 +7093,16 @@ MiniA.prototype._collectPlanningInsights = function(args, controls) {
         `\n${args.goal}` +
         (insights.knowledge.length > 0 ? `\n\nExtra knowledge:\n${insights.knowledge.slice(0, 1500)}` : "")
       this.fnI("input", `Interacting with ${analyzerLLM === this.lc_llm ? "low-cost" : "main"} model (plan analysis)...`)
-      var analysisResponse = this._withExponentialBackoff(() => {
-        if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
+      var analysisResponse = this._withExponentialBackoff(() => this._withRateLimitedCall(() => {
         analysisPrompt = this._prepareContextInvocation(analyzerLLM, analysisPrompt, "planner")
         if (isFunction(analyzerLLM.promptWithStats)) return analyzerLLM.promptWithStats(analysisPrompt)
         return analyzerLLM.prompt(analysisPrompt)
-      }, this._llmRetryOptions("Plan analysis", { operation: "plan-analysis" }, { maxAttempts: 2, maxDelay: 2000 }))
+      }, controls, analyzerLLM === this.lc_llm ? "lc" : "main"), this._llmRetryOptions("Plan analysis", { operation: "plan-analysis" }, { maxAttempts: 2, maxDelay: 2000 }))
 
       if (isObject(analysisResponse)) {
-        if (isFunction(controls && controls.afterCall)) {
-          var statTokens = this._getTotalTokens(analysisResponse.stats)
-          if (statTokens > 0) controls.afterCall(statTokens, analyzerLLM === this.lc_llm ? "lc" : "main")
-        }
         var analysisText = isString(analysisResponse.response) ? analysisResponse.response : stringify(analysisResponse, __, "")
         if (isString(analysisText)) insights.summary = this._cleanCodeBlocks(analysisText).trim()
       } else if (isString(analysisResponse)) {
-        if (controls && isFunction(controls.afterCall)) controls.afterCall(0, analyzerLLM === this.lc_llm ? "lc" : "main")
         insights.summary = this._cleanCodeBlocks(analysisResponse).trim()
       }
     } catch(e) {
@@ -7161,17 +7155,15 @@ MiniA.prototype._critiquePlanWithLLM = function(payload, args, controls) {
     var critique = decideCritique
     if (!isObject(critique)) {
       this.fnI("input", `Interacting with ${validatorLLM === this.lc_llm ? "low-cost" : "main"} model (plan critique)...`)
-      var responseWithStats = this._withExponentialBackoff(() => {
-        if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
+      var responseWithStats = this._withExponentialBackoff(() => this._withRateLimitedCall(() => {
         if (!this._noJsonPrompt && isFunction(validatorLLM.promptJSONWithStats)) {
           return validatorLLM.promptJSONWithStats(this._prepareContextInvocation(validatorLLM, critiquePrompt, "validator"))
         }
         return validatorLLM.promptWithStats(this._prepareContextInvocation(validatorLLM, critiquePrompt, "validator"))
-      }, this._llmRetryOptions("Plan critique", { operation: "plan-critique" }, { initialDelay: 400 }))
+      }, controls, "main"), this._llmRetryOptions("Plan critique", { operation: "plan-critique" }, { initialDelay: 400 }))
 
       var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
       var totalTokens = this._getTotalTokens(stats)
-      if (controls && isFunction(controls.afterCall)) controls.afterCall(totalTokens, "main")
 
       var critiqueContent = isObject(responseWithStats) ? responseWithStats.response : responseWithStats
       if (isObject(critiqueContent) && isString(critiqueContent.response)) critiqueContent = critiqueContent.response
@@ -7496,8 +7488,7 @@ MiniA.prototype._runPlanningMode = function(args, controls) {
   var plannerLLM = this.llm
 
   this.fnI("input", "Interacting with main model (plan generation)...")
-  var responseWithStats = this._withExponentialBackoff(() => {
-    if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
+  var responseWithStats = this._withExponentialBackoff(() => this._withRateLimitedCall(() => {
     prompt = this._prepareContextInvocation(plannerLLM, prompt, "planner")
     // Use JSON prompt for both json and yaml formats (yaml uses same structure as json)
     if (!this._noJsonPrompt && (targetFormat === "json" || targetFormat === "yaml") && isFunction(plannerLLM.promptJSONWithStats)) {
@@ -7506,11 +7497,10 @@ MiniA.prototype._runPlanningMode = function(args, controls) {
     if (isFunction(plannerLLM.promptWithStats)) return plannerLLM.promptWithStats(prompt)
     var result = plannerLLM.prompt(prompt)
     return { response: result, stats: {} }
-  }, this._llmRetryOptions("Plan generation", { operation: "plan-generate" }, { initialDelay: 500 }))
+  }, controls, "main"), this._llmRetryOptions("Plan generation", { operation: "plan-generate" }, { initialDelay: 500 }))
 
   var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
   var totalTokens = this._getTotalTokens(stats)
-  if (isFunction(controls && controls.afterCall)) controls.afterCall(totalTokens, "main")
 
   var planContent = isObject(responseWithStats) ? responseWithStats.response : responseWithStats
   if (!isString(planContent)) planContent = stringify(planContent, __, "")
@@ -9310,9 +9300,17 @@ MiniA.prototype._closeStartupEntry = function(entry) {
   if (entry.done.getCount() !== 0) return // the worker closes its eventual result
   if (!entry.disposeOnce.compareAndSet(false, true)) return
   entry.disposed = true
-  ;(entry.entries || []).forEach(function(item) {
-    if (item.client && isFunction(item.client.destroy)) { try { item.client.destroy() } catch(ignoreClose) {} }
-    item.client = __
+  var clients = []
+  var takeClients = function() {
+    ;(entry.entries || []).forEach(function(item) {
+      if (item.client) clients.push(item.client)
+      item.client = __
+    })
+  }
+  if (entry.lock) sync(takeClients, entry.lock)
+  else takeClients()
+  clients.forEach(function(client) {
+    if (isFunction(client.destroy)) { try { client.destroy() } catch(ignoreClose) {} }
   })
   if (entry.client && isFunction(entry.client.destroy)) {
     try { entry.client.destroy() } catch(ignoreClientClose) {}
@@ -9352,9 +9350,11 @@ MiniA.prototype._scheduleStartupEntry = function(entry, operation) {
 
 MiniA.prototype._awaitStartupEntry = function(entry) {
   var started = now()
+  if (this._resourcesStopped || this._stopRequested) throw new Error("Session preparation cancelled")
   while (!entry.done.await(100, java.util.concurrent.TimeUnit.MILLISECONDS)) {
     if (this._resourcesStopped || this._stopRequested) throw new Error("Session preparation cancelled")
   }
+  if (this._resourcesStopped || this._stopRequested) throw new Error("Session preparation cancelled")
   if (this._startupTimings) {
     this._startupTimings.preparation_wait_ms += now() - started
     this._startupTimings.preparation_ms += entry.millis || 0
@@ -9413,21 +9413,54 @@ MiniA.prototype.prepareSession = function(args) {
       mcp.entries.push({ key: parent._startupKey(config), config: transportConfig,
         defaultDir: type === "stdio" && !isString(config.pwd) ? (preparationDir || ".") : __ })
     })
-    if (mcp.entries.length) this._scheduleStartupEntry(mcp, function() {
-      mcp.entries.forEach(function(entry) {
-        if (mcp.closed || parent._resourcesStopped) return
+    if (mcp.entries.length) this._scheduleStartupMcp(mcp)
+
+  } catch(ignoreMcpPreparation) { /* foreground init retains its normal errors */ }
+}
+
+// Each connection publishes readiness independently; at most two workers own
+// transports. The batch latch exists only for cleanup, never for adoption.
+MiniA.prototype._scheduleStartupMcp = function(batch) {
+  var parent = this, workers = Math.min(2, batch.entries.length)
+  batch.lock = "mini_a_startup_" + genUUID()
+  var next = new java.util.concurrent.atomic.AtomicInteger(0)
+  batch.done = new java.util.concurrent.CountDownLatch(workers)
+  batch.disposeOnce = new java.util.concurrent.atomic.AtomicBoolean(false)
+  batch.entries.forEach(function(entry) { entry.done = new java.util.concurrent.CountDownLatch(1) })
+  this._startupEntries.push(batch)
+  var work = function() {
+    try {
+      var index
+      while ((index = next.getAndIncrement()) < batch.entries.length) {
+        var entry = batch.entries[index], started = now()
         try {
+          if (batch.closed || parent._resourcesStopped) { entry.closed = true; continue }
           entry.hooks = {}
           entry.client = parent._newStartupMcpClient(entry.config, entry.hooks)
           entry.client.initialize()
           entry.client.__miniAPreinitialized = true
         } catch(e) {
+          entry.failed = true
+          entry.error = String(e.message || e)
           if (entry.client && isFunction(entry.client.destroy)) { try { entry.client.destroy() } catch(ignoreDestroy) {} }
-          entry.client = __ // retry through the ordinary foreground path
+          entry.client = __
+        } finally {
+          entry.millis = now() - started
+          entry.done.countDown()
         }
-      })
-    })
-  } catch(ignoreMcpPreparation) { /* foreground init retains its normal errors */ }
+      }
+    } finally {
+      batch.done.countDown()
+      if (batch.closed || parent._resourcesStopped) parent._closeStartupEntry(batch)
+    }
+  }
+  for (var i = 0; i < workers; i++) {
+    try { $doV(work) } catch(scheduleError) {
+      // Drain this worker's slots so no adoption can wait on an unscheduled job.
+      batch.closed = true
+      work()
+    }
+  }
 }
 
 MiniA.prototype._newStartupMcpClient = function(config, hooks) {
@@ -9452,10 +9485,20 @@ MiniA.prototype._takeStartupMcp = function(config, hooks) {
     var currentDefaultDir = typeof __flags !== "undefined" && __flags.JSONRPC && __flags.JSONRPC.cmd ? __flags.JSONRPC.cmd.defaultDir : __
     if (entry.defaultDir !== (currentDefaultDir || ".")) return __
   }
-  if (!this._awaitStartupEntry(batch) || !entry.client) return __
-  entry.adopted = true
-  var client = entry.client
-  entry.client = __ // ownership transfers to the agent/proxy cleanup paths
+  var ready = this._awaitStartupEntry(entry)
+  if (entry.failed) {
+    entry.adopted = true // consume this attempt; a later submission may retry
+    throw new Error("MCP preparation failed: " + (entry.error || "handshake failed"))
+  }
+  if (!ready) return __
+  var client
+  sync(function() {
+    if (batch.closed || entry.adopted || !entry.client) return
+    entry.adopted = true
+    client = entry.client
+    entry.client = __ // ownership transfers to the agent/proxy cleanup paths
+  }, batch.lock)
+  if (!client) return __
   if (hooks) {
     client.__miniAStartupHooks.preFn = hooks.preFn
     client.__miniAStartupHooks.posFn = hooks.posFn
@@ -12071,10 +12114,13 @@ MiniA.prototype._categorizeError = function(error, context) {
     }
   }
 
+  // These require recovery/correction, not another identical transport request.
+  if (/tool call validation failed|tool_use_failed|attempted to call tool 'json'/.test(normalized)) {
+    return { type: "permanent", reason: message }
+  }
   var transientSignals = [
     "timeout", "temporar", "rate limit", "throttle", "econnreset", "econnrefused", "unreachable",
-    "network", "backoff", "retry", "429", "503", "504", "connection closed", "circuit open",
-    "tool call validation failed", "tool_use_failed", "attempted to call tool 'json'"
+    "network", "backoff", "retry", "429", "503", "504", "connection closed", "circuit open"
   ]
   var permanentSignals = ["invalid", "syntax", "parse", "unknown action", "not found", "missing", "denied"]
 
@@ -12103,6 +12149,31 @@ MiniA.prototype._categorizeError = function(error, context) {
 
 MiniA.prototype._isContextOverflowError = function(error) {
   return __miniAIsContextOverflowError(error)
+}
+
+// Pair admission with completion for every attempt, even if preparation or the
+// provider throws. Callers must not account for the same response a second time.
+MiniA.prototype._withRateLimitedCall = function(operation, controls, tier) {
+  var admitted = false, response
+  try {
+    if (controls && isFunction(controls.beforeCall)) {
+      if (controls.beforeCall() === false) {
+        var denied = new Error("Operation cancelled due to stop request.")
+        denied.miniAStop = denied.permanent = true
+        throw denied
+      }
+      admitted = true
+    }
+    if (this.state === "stop" || this._stopRequested === true) {
+      var stopped = new Error("Operation cancelled due to stop request.")
+      stopped.miniAStop = stopped.permanent = true
+      throw stopped
+    }
+    response = operation()
+    return response
+  } finally {
+    if (admitted && isFunction(controls.afterCall)) controls.afterCall(this._getTotalTokens(response && response.stats || {}), tier)
+  }
 }
 
 MiniA.prototype._withExponentialBackoff = function(operation, options) {
@@ -18225,6 +18296,10 @@ MiniA.prototype.init = function(args) {
   this._normalizeWikiArgs(args)
   this._prepareExecution(args)
   this._forkPolicyRun = genUUID()
+  if (this._decisionComplexityArgs !== args) {
+    this._decisionComplexity = __
+    this._decisionComplexityArgs = args
+  }
   this._initDecisionRuntime(args)
   this._validateSupervisedArgs(args)
   if (MiniA.shouldWarnUnknownArgs(args)) this._warnUnknownArgs(args)
@@ -19831,6 +19906,11 @@ MiniA.prototype.start = function(args) {
   try { return this.startUnlocked(args) } finally { lock.unlock() }
 }
 MiniA.prototype.startUnlocked = function(args) {
+    // Preserve an embedder's init(args) assessment for this submission, but
+    // retry optional assessment on a subsequent run even with the same args.
+    if (this._decisionComplexityArgs !== args || this._decisionComplexityRunComplete === true) this._decisionComplexity = __
+    this._decisionComplexityArgs = args
+    this._decisionComplexityRunComplete = false
     if (!this._startupTimingPending || this._startupTimingArgs !== args) this._beginStartupTiming(args)
     this._startupTimingPending = false
     this._supervised = __
@@ -19946,6 +20026,7 @@ MiniA.prototype.startUnlocked = function(args) {
         }
         return
     } finally {
+        this._decisionComplexityRunComplete = true
         try { this._finishRun(runStatus, runResult) } catch(ignoreFinishRunError) {}
         try { this._finalizeRunMemory(args) } catch(ignoreFinalizeErr) {}
     }
@@ -20366,7 +20447,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var rateLimiter = this._forkDecisionRuntime.rateLimiter || this._createRateLimiter(args)
     this._forkDecisionRuntime.rateLimiter = rateLimiter
     this._decisionControlsRun = this._forkPolicyRun
-    var addCall = () => rateLimiter.beforeCall()
+    var addCall = () => {
+      if (!rateLimiter.beforeCall(() => this.state === "stop" || this._stopRequested === true)) {
+        var stopped = new Error("Operation cancelled due to stop request.")
+        stopped.miniAStop = stopped.permanent = true
+        throw stopped
+      }
+      return true
+    }
     var registerCallUsage = tokens => rateLimiter.afterCall(tokens)
     this._decisionToolControls = { beforeCall: addCall, afterCall: registerCallUsage, tryBeforeCall: rateLimiter.tryBeforeCall, afterReservedCall: rateLimiter.afterReservedCall }
 
@@ -20374,9 +20462,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       beforeCall: () => addCall(),
       afterCall : (tokens, tier) => {
         var normalizedTokens = isNumber(tokens) ? tokens : 0
-        if (normalizedTokens > 0) {
-          registerCallUsage(normalizedTokens)
-        }
+        registerCallUsage(normalizedTokens)
         this._recordLlmStatsMetrics({
           total_tokens: normalizedTokens
         }, tier)
@@ -20461,10 +20547,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var summaryResponseWithStats
         try {
           self.fnI("input", `Interacting with ${llmType} model (summarizing)...`)
-          summaryResponseWithStats = self._withExponentialBackoff(function() {
-            addCall()
+          summaryResponseWithStats = self._withExponentialBackoff(function() { return self._withRateLimitedCall(function() {
             return self._promptIsolatedSummary(text, isString(customInstructionText) ? customInstructionText : instructionText, summarizeLLM === self.lc_llm)
-          }, self._llmRetryOptions("Summarization", { operation: "summarize" }))
+          }, self._decisionToolControls) }, self._llmRetryOptions("Summarization", { operation: "summarize" }))
         } catch (e) {
           var summaryError = self._categorizeError(e, { source: "llm", operation: "summarize" })
           self.fnI("warn", `Summarization failed: ${summaryError.reason || e}`)
@@ -20486,7 +20571,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
         var summaryStats = isObject(summaryResponseWithStats) ? summaryResponseWithStats.stats : {}
         var summaryTokenTotal = self._getTotalTokens(summaryStats)
-        registerCallUsage(summaryTokenTotal)
+
         self._recordLlmStatsMetrics(summaryStats, summarizeLLM === self.lc_llm ? "lc" : "main", originalTokens)
         global.__mini_a_metrics.summaries_made.inc()
 
@@ -21315,15 +21400,18 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (isDef(decisionComplexityLevel)) goalComplexityLevel = decisionComplexityLevel
 
     // Issue 6: LLM-assisted complexity assessment for ambiguous medium results
-    if (isUnDef(decisionComplexityLevel) && toBoolean(args.llmcomplexity) && goalComplexityLevel === "medium" && this._use_lc && isObject(this.lc_llm)) {
+    if (isUnDef(decisionComplexityLevel) && !(this._decisionComplexity && this._decisionComplexity.goal === args.goal && this._decisionComplexity.failed) && toBoolean(args.llmcomplexity) && goalComplexityLevel === "medium" && this._use_lc && isObject(this.lc_llm)) {
       try {
         // Use a fixed instruction prefix; include the goal as a quoted, sanitized string
         // to reduce prompt-injection risk from adversarial goal text.
         var safeGoalText = (args.goal || "").replace(/[`"\\]/g, function(c) { return "\\" + c })
         var lcComplexityPrompt = `Rate the complexity of this task as "simple", "medium", or "complex". Respond with JSON only: {"complexity": "<level>"}\n\nTask: "${safeGoalText}"`
-        var lcComplexityResp = isFunction(this.lc_llm.promptJSONWithStats)
-          ? this.lc_llm.promptJSONWithStats(lcComplexityPrompt)
-          : this.lc_llm.promptWithStats(lcComplexityPrompt)
+        var lcComplexityConfig = clone(this._oaf_lc_model)
+        lcComplexityConfig.timeout = Math.min(5000, isNumber(lcComplexityConfig.timeout) && lcComplexityConfig.timeout > 0 ? lcComplexityConfig.timeout : 5000)
+        var lcComplexityClient = this._instrumentStartupLlm($llm(lcComplexityConfig), "lc")
+        var lcComplexityResp = isFunction(lcComplexityClient.promptJSONWithStats)
+          ? lcComplexityClient.promptJSONWithStats(lcComplexityPrompt)
+          : lcComplexityClient.promptWithStats(lcComplexityPrompt)
         this._recordLlmStatsMetrics(isObject(lcComplexityResp) ? lcComplexityResp.stats : {}, "lc", this._estimateTokens(lcComplexityPrompt))
         var lcComplexityParsed = isObject(lcComplexityResp) ? lcComplexityResp.response : lcComplexityResp
         if (isString(lcComplexityParsed)) {
@@ -21762,19 +21850,18 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var advisorResp = __
       try {
         this.fnI("input", "Interacting with main model (advisor consult)...")
-        advisorResp = this._withExponentialBackoff(() => {
-          addCall()
+        advisorResp = this._withExponentialBackoff(() => this._withRateLimitedCall(() => {
           advisorPrompt = this._prepareContextInvocation(this.llm, advisorPrompt, "advisor")
           if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats)) return this.llm.promptJSONWithStats(advisorPrompt)
           return this.llm.promptWithStats(advisorPrompt)
-        }, this._llmRetryOptions("Advisor model", { llmType: "advisor", step: runtime.currentStepNumber }, { maxDelay: 4000 }))
+        }, this._decisionToolControls), this._llmRetryOptions("Advisor model", { llmType: "advisor", step: runtime.currentStepNumber }, { maxDelay: 4000 }))
       } catch (advisorErr) {
         if (args.debug || args.verbose) this.fnI("warn", `Advisor call failed: ${advisorErr && advisorErr.message ? advisorErr.message : advisorErr}`)
       }
       if (isObject(advisorResp)) {
         var advisorStats = advisorResp.stats || {}
         var advisorTokenTotal = this._getTotalTokens(advisorStats)
-        registerCallUsage(advisorTokenTotal)
+
         this._recordLlmStatsMetrics(advisorStats, "advisor", this._estimateTokens(advisorPrompt))
         if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.advisor_calls)) global.__mini_a_metrics.advisor_calls.inc()
         if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.advisor_tokens)) global.__mini_a_metrics.advisor_tokens.getAdd(advisorTokenTotal)
@@ -22252,8 +22339,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var responseWithStats
       var llmWaitStart = now()
       try {
-        responseWithStats = this._withExponentialBackoff(() => {
-          addCall()
+        responseWithStats = this._withExponentialBackoff(() => this._withRateLimitedCall(() => {
           prompt = this._prepareContextInvocation(currentLLM, prompt, "executor", stepRecovery)
           if (this._supervised) this._supervised.executionCall(useLowCost ? "lc" : "main")
           var jsonFlag = !noJsonPromptFlag && !isOllamaToolJsonConflict
@@ -22285,7 +22371,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             return this._promptStructuredWithStats(currentLLM, prompt, this._actionResponseSchema(), args, this._useToolsActual === true)
           }
           return currentLLM.promptWithStats(prompt)
-        }, this._llmRetryOptions(llmType + " model", { llmType: llmType, step: step + 1 }, {
+        }, this._decisionToolControls), this._llmRetryOptions(llmType + " model", { llmType: llmType, step: step + 1 }, {
           maxDelay  : 6000,
           onFailure : (err, attempts, category) => {
             if (isObject(category) && category.type === "transient") {
@@ -22370,7 +22456,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
       var estimatedPromptTokens = this._estimateTokens(prompt)
       var responseTokenTotal = this._getTotalTokens(stats)
-      registerCallUsage(responseTokenTotal)
+
       var trackedResponseTokens = this._recordLlmStatsMetrics(stats, useLowCost ? "lc" : "main", estimatedPromptTokens)
       if (this._supervised) { this._supervised.recordUsage(useLowCost ? "lc" : "main", stats); this._supervised.executionTime(useLowCost ? "lc" : "main", now() - llmWaitStart) }
       global.__mini_a_metrics.llm_estimated_tokens.getAdd(estimatedPromptTokens)
@@ -22505,15 +22591,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
             var lcRetryResponseWithStats
             try {
-              lcRetryResponseWithStats = this._withExponentialBackoff(() => {
-                addCall()
+              lcRetryResponseWithStats = this._withExponentialBackoff(() => this._withRateLimitedCall(() => {
                 if (this._supervised) this._supervised.executionCall("lc")
                 if (toBoolean(args.lcreplytool) === true) {
                   var toolRetry = this._promptLcReplyTool(lcRetryPrompt, args, currentModelConfig)
                   if (isDef(toolRetry)) return toolRetry
                 }
                 return this._promptJsonRecovery(currentLLM, lcRetryPrompt, args, currentModelConfig, noJsonPromptFlag)
-              }, this._llmRetryOptions("Low-cost JSON-retry model", { llmType: "low-cost", step: step + 1, reason: "json-retry" }, { maxDelay: 6000 }))
+              }, this._decisionToolControls), this._llmRetryOptions("Low-cost JSON-retry model", { llmType: "low-cost", step: step + 1, reason: "json-retry" }, { maxDelay: 6000 }))
             } catch (lcRetryErr) {
               if (isObject(lcRetryErr) && lcRetryErr.code === "MINIA_CONTEXT_BUDGET") throw lcRetryErr
               if (this.state == "stop" || (isObject(lcRetryErr) && lcRetryErr.miniAStop === true)) {
@@ -22528,7 +22613,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
             var lcRetryStats = isObject(lcRetryResponseWithStats) ? lcRetryResponseWithStats.stats : {}
             var lcRetryEstimatedPromptTokens = this._estimateTokens(lcRetryPrompt)
-            registerCallUsage(this._getTotalTokens(lcRetryStats))
+
             var lcRetryTrackedTokens = this._recordLlmStatsMetrics(lcRetryStats, "lc", lcRetryEstimatedPromptTokens)
             if (this._supervised) { this._supervised.recordUsage("lc", lcRetryStats) }
             global.__mini_a_metrics.llm_estimated_tokens.getAdd(lcRetryEstimatedPromptTokens)
@@ -22598,10 +22683,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           var fallbackPrompt = this._buildJsonRetryPrompt(prompt)
           var fallbackResponseWithStats
           try {
-            fallbackResponseWithStats = this._withExponentialBackoff(() => {
-              addCall()
+            fallbackResponseWithStats = this._withExponentialBackoff(() => this._withRateLimitedCall(() => {
               return this._promptJsonRecovery(this.llm, fallbackPrompt, args, this._oaf_model, runtime.forceNoJson === true || this._noJsonPrompt)
-            }, this._llmRetryOptions("Main fallback model", { llmType: "main", reason: "fallback" }, { maxDelay: 6000 }))
+            }, this._decisionToolControls), this._llmRetryOptions("Main fallback model", { llmType: "main", reason: "fallback" }, { maxDelay: 6000 }))
           } catch (fallbackErr) {
             if (isObject(fallbackErr) && fallbackErr.code === "MINIA_CONTEXT_BUDGET") throw fallbackErr
             if (this.state == "stop" || (isObject(fallbackErr) && fallbackErr.miniAStop === true)) {
@@ -22668,7 +22752,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           this._trace("llm_response", { label: "FALLBACK_RESPONSE", model: "main", step: step + 1, response: fallbackResponseWithStats })
           var fallbackStats = isObject(fallbackResponseWithStats) ? fallbackResponseWithStats.stats : {}
           var fallbackTokenTotal = this._getTotalTokens(fallbackStats)
-          registerCallUsage(fallbackTokenTotal)
+
           this._recordLlmStatsMetrics(fallbackStats, "main", this._estimateTokens(fallbackPrompt))
 
           // Attach actual token stats to conversation message for later accurate analysis
@@ -24017,8 +24101,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     try {
       this.fnI("input", "Interacting with main model (final answer)...")
       this._trace("llm_prompt", { label: "FINAL_PROMPT", model: "main", content: finalPrompt })
-      finalResponseWithStats = this._withExponentialBackoff(() => {
-        addCall()
+      finalResponseWithStats = this._withExponentialBackoff(() => this._withRateLimitedCall(() => {
         finalPrompt = this._prepareContextInvocation(finalLLM, finalPrompt, "executor", finalRecovery)
         var jsonFlag = runtime.forceNoJson !== true && !this._noJsonPrompt
         if (args.showthinking) {
@@ -24032,7 +24115,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           return this._promptStructuredWithStats(finalLLM, finalPrompt, this._actionResponseSchema(), args, false)
         }
         return finalLLM.promptWithStats(finalPrompt)
-      }, this._llmRetryOptions("Final answer", { operation: "final" }, { maxDelay: 6000 }))
+      }, this._decisionToolControls), this._llmRetryOptions("Final answer", { operation: "final" }, { maxDelay: 6000 }))
     } catch (finalErr) {
       if (isObject(finalErr) && finalErr.code === "MINIA_CONTEXT_BUDGET") throw finalErr
       var finalErrorInfo = this._categorizeError(finalErr, { source: "llm", operation: "final" })
@@ -24054,7 +24137,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
     var finalStats = isObject(finalResponseWithStats) ? finalResponseWithStats.stats : {}
     var finalTokenTotal = this._getTotalTokens(finalStats)
-    registerCallUsage(finalTokenTotal)
+
     this._recordLlmStatsMetrics(finalStats, "main", this._estimateTokens(finalPrompt))
     
     if (args.showthinking) {
@@ -24159,7 +24242,6 @@ MiniA.prototype._runChatbotMode = function(options) {
       this._refreshConfiguredLlmChannels()
       var chatbotDebugSnapshot = this._snapshotDebugChannel(args.debugch, "__mini_a_llm_debug")
 
-      beforeCall()
       this._trace("llm_prompt", { label: "CHATBOT_PROMPT", model: "main", step: step + 1, content: pendingPrompt })
       if (args.debug) {
         if (this._debugFile) {
@@ -24169,51 +24251,54 @@ MiniA.prototype._runChatbotMode = function(options) {
         }
       }
 
-      var responseWithStats
-      pendingPrompt = this._prepareContextInvocation(this.llm, pendingPrompt, "executor")
-      var chatbotNoJsonPromptFlag = runtime.forceNoJson === true || this._noJsonPrompt
-      var chatbotStructuredResponse = this._isStructuredOutputFormat(args.format)
-      var chatbotStructuredOutput = !chatbotNoJsonPromptFlag && chatbotStructuredResponse
-      var canStream = args.usestream && runtime.forceNoStream !== true && this._supportsPromptStreamWithStatsCompat(this.llm, false)
-      var canStreamJson = args.usestream && runtime.forceNoStream !== true && this._supportsPromptStreamWithStatsCompat(this.llm, true)
-      var chatbotOllamaToolCallMode = this._shouldDisableStreamingForOllamaToolCallTurn(
-        this._oaf_model,
-        this._useToolsActual === true,
-        chatbotStructuredOutput
-      )
-      // Create the right streaming delta handler based on the streaming API used.
-      var onDelta = null
-      if (args.usestream) {
-        // Keep JSON-based chatbot output behind the chunk processor so we only render
-        // user-visible fields (e.g. "answer") instead of every raw JSON delta. The content
-        // shape is governed by chatbotStructuredOutput (the system prompt), not by the
-        // wire-level jsonFlag - Ollama tool-call turns still emit the JSON envelope even
-        // when streamed with jsonFlag=false to avoid the tools/format:json conflict.
-        onDelta = chatbotStructuredResponse
-          ? this._createStreamDeltaHandler(args)
-          : this._createPlainStreamDeltaHandler()
-      }
+      var responseWithStats = this._withRateLimitedCall(() => {
+        var responseWithStats
+        pendingPrompt = this._prepareContextInvocation(this.llm, pendingPrompt, "executor")
+        var chatbotNoJsonPromptFlag = runtime.forceNoJson === true || this._noJsonPrompt
+        var chatbotStructuredResponse = this._isStructuredOutputFormat(args.format)
+        var chatbotStructuredOutput = !chatbotNoJsonPromptFlag && chatbotStructuredResponse
+        var canStream = args.usestream && runtime.forceNoStream !== true && this._supportsPromptStreamWithStatsCompat(this.llm, false)
+        var canStreamJson = args.usestream && runtime.forceNoStream !== true && this._supportsPromptStreamWithStatsCompat(this.llm, true)
+        var chatbotOllamaToolCallMode = this._shouldDisableStreamingForOllamaToolCallTurn(
+          this._oaf_model,
+          this._useToolsActual === true,
+          chatbotStructuredOutput
+        )
+        // Create the right streaming delta handler based on the streaming API used.
+        var onDelta = null
+        if (args.usestream) {
+          // Keep JSON-based chatbot output behind the chunk processor so we only render
+          // user-visible fields (e.g. "answer") instead of every raw JSON delta. The content
+          // shape is governed by chatbotStructuredOutput (the system prompt), not by the
+          // wire-level jsonFlag - Ollama tool-call turns still emit the JSON envelope even
+          // when streamed with jsonFlag=false to avoid the tools/format:json conflict.
+          onDelta = chatbotStructuredResponse
+            ? this._createStreamDeltaHandler(args)
+            : this._createPlainStreamDeltaHandler()
+        }
 
-      // Use new promptJSONWithStatsRaw if available for showthinking
-      if (args.showthinking) {
-        // Streaming not compatible with showthinking - use regular prompts
-        var jsonFlag = chatbotStructuredOutput
-        if (jsonFlag && isDef(this.llm.promptJSONWithStatsRaw)) {
-          responseWithStats = this.llm.promptJSONWithStatsRaw(pendingPrompt)
-        } else if (isDef(this.llm.rawPromptWithStats)) {
-          responseWithStats = this.llm.rawPromptWithStats(pendingPrompt, __, __, jsonFlag)
+        // Use new promptJSONWithStatsRaw if available for showthinking
+        if (args.showthinking) {
+          // Streaming not compatible with showthinking - use regular prompts
+          var jsonFlag = chatbotStructuredOutput
+          if (jsonFlag && isDef(this.llm.promptJSONWithStatsRaw)) {
+            responseWithStats = this.llm.promptJSONWithStatsRaw(pendingPrompt)
+          } else if (isDef(this.llm.rawPromptWithStats)) {
+            responseWithStats = this.llm.rawPromptWithStats(pendingPrompt, __, __, jsonFlag)
+          } else {
+            responseWithStats = this.llm.promptWithStats(pendingPrompt)
+          }
+        } else if (canStreamJson && chatbotStructuredOutput && this._useToolsActual !== true && !chatbotOllamaToolCallMode) {
+          responseWithStats = this.llm.promptStreamJSONWithStats(pendingPrompt, __, __, __, __, onDelta)
+        } else if (canStream) {
+          responseWithStats = this.llm.promptStreamWithStats(pendingPrompt, __, __, __, __, __, onDelta)
+        } else if (chatbotStructuredOutput && isDef(this.llm.promptJSONWithStats)) {
+          responseWithStats = this.llm.promptJSONWithStats(pendingPrompt)
         } else {
           responseWithStats = this.llm.promptWithStats(pendingPrompt)
         }
-      } else if (canStreamJson && chatbotStructuredOutput && this._useToolsActual !== true && !chatbotOllamaToolCallMode) {
-        responseWithStats = this.llm.promptStreamJSONWithStats(pendingPrompt, __, __, __, __, onDelta)
-      } else if (canStream) {
-        responseWithStats = this.llm.promptStreamWithStats(pendingPrompt, __, __, __, __, __, onDelta)
-      } else if (chatbotStructuredOutput && isDef(this.llm.promptJSONWithStats)) {
-        responseWithStats = this.llm.promptJSONWithStats(pendingPrompt)
-      } else {
-        responseWithStats = this.llm.promptWithStats(pendingPrompt)
-      }
+        return responseWithStats
+      }, { beforeCall: beforeCall, afterCall: afterCall }, "main")
       this._trace("llm_response", { label: "CHATBOT_RESPONSE", model: "main", step: step + 1, response: responseWithStats })
       if (args.debug) {
         if (this._debugFile) {
@@ -24224,7 +24309,6 @@ MiniA.prototype._runChatbotMode = function(options) {
       }
       var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
       var chatbotTokenTotal = this._getTotalTokens(stats)
-      afterCall(chatbotTokenTotal)
 
       // Attach actual token stats to conversation message for later accurate analysis
       this._attachTokenStatsToConversation(stats, this.llm)
@@ -24714,15 +24798,17 @@ MiniA.prototype._runChatbotMode = function(options) {
     if (isUnDef(finalAnswer)) {
       this.fnI("warn", `Chatbot mode reached ${maxSteps} step${maxSteps == 1 ? "" : "s"} without a final answer. Requesting best effort response...`)
       var fallbackPrompt = "Please provide your best possible answer to the user's last request now."
-      beforeCall()
       this._trace("llm_prompt", { label: "CHATBOT_FALLBACK_PROMPT", model: "main", content: fallbackPrompt })
-      var fallbackResponseWithStats
-      fallbackPrompt = this._prepareContextInvocation(this.llm, fallbackPrompt, "executor")
-      if (!(runtime.forceNoJson === true || this._noJsonPrompt) && isDef(this.llm.promptJSONWithStats) && this._isStructuredOutputFormat(args.format)) {
-        fallbackResponseWithStats = this.llm.promptJSONWithStats(fallbackPrompt)
-      } else {
-        fallbackResponseWithStats = this.llm.promptWithStats(fallbackPrompt)
-      }
+      var fallbackResponseWithStats = this._withRateLimitedCall(() => {
+        var fallbackResponseWithStats
+        fallbackPrompt = this._prepareContextInvocation(this.llm, fallbackPrompt, "executor")
+        if (!(runtime.forceNoJson === true || this._noJsonPrompt) && isDef(this.llm.promptJSONWithStats) && this._isStructuredOutputFormat(args.format)) {
+          fallbackResponseWithStats = this.llm.promptJSONWithStats(fallbackPrompt)
+        } else {
+          fallbackResponseWithStats = this.llm.promptWithStats(fallbackPrompt)
+        }
+        return fallbackResponseWithStats
+      }, { beforeCall: beforeCall, afterCall: afterCall }, "main")
       this._trace("llm_response", { label: "CHATBOT_FALLBACK_RESPONSE", model: "main", response: fallbackResponseWithStats })
       if (args.debug) {
         if (this._debugFile) {
@@ -24733,7 +24819,6 @@ MiniA.prototype._runChatbotMode = function(options) {
       }
       var fallbackStats = isObject(fallbackResponseWithStats) ? fallbackResponseWithStats.stats : {}
       var fallbackTokenTotal = this._getTotalTokens(fallbackStats)
-      afterCall(fallbackTokenTotal)
       global.__mini_a_metrics.llm_estimated_tokens.getAdd(this._estimateTokens(fallbackPrompt))
       this._recordLlmStatsMetrics(fallbackStats, "main", this._estimateTokens(fallbackPrompt))
       var fallbackTokenStatsMsg = this._formatTokenStats(fallbackStats)
