@@ -1,0 +1,24 @@
+include:
+- oJobTest.yaml
+
+ojob:
+  opacks:
+  - oJob-common
+  catch: |
+    logErr(exception)
+    exit(1)
+
+jobs:
+- name: Shell guard tests
+  exec: |
+    var tests = require("tests/shellGuard.js")
+    var failed = 0
+    Object.keys(tests).forEach(function(name) {
+      ow.loadTest().test("Mini-A shell guard::" + name, function() {
+        try { tests[name]() } catch(e) { failed++; throw e }
+      })
+    })
+    if (failed > 0) exit(1)
+
+todo:
+- Shell guard tests

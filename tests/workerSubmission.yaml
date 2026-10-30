@@ -22,7 +22,12 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/workerSubmission.js").testWorkerBudgetCeilingsAndOutcome
 
+- name: Worker submissions::shell guard admission
+  to: oJob Test
+  exec: args.func = require("tests/workerSubmission.js").testShellGuardAdmission
+
 todo:
+- Worker submissions::shell guard admission
 - Worker submissions::compute-only restrictions
 - Worker submissions::scoped file restrictions
 - Worker submissions::receipts and cleanup

@@ -468,6 +468,16 @@ SubtaskManager.prototype._buildChildArgs = function(subtask) {
 
   if (isDef(this.parentArgs.fileallow)) mergedArgs.fileallow = this.parentArgs.fileallow
   this._stripInheritedParentOnlyArgs(mergedArgs, explicitArgs)
+  var parentGuard = MiniAShellGuard.resolve(this.parentArgs)
+  if (parentGuard.enabled) {
+    // A generated child cannot replace or disable the parent's risk assessor.
+    mergedArgs.usedecide = this.parentArgs.usedecide
+    if (isDef(this.parentArgs.modeldec)) mergedArgs.modeldec = this.parentArgs.modeldec
+    else delete mergedArgs.modeldec
+  }
+  if (isDef(explicitArgs._shellGuardRequired)) parentGuard = MiniAShellGuard.intersect(parentGuard, explicitArgs._shellGuardRequired)
+  delete mergedArgs._shellGuardRequired
+  if (parentGuard.enabled) mergedArgs._shellGuardRequired = clone(parentGuard)
 
   // Communication declarations never inherit through argument merging.
   mergedArgs.agentcomms = explicitArgs.agentcomms

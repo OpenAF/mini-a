@@ -496,6 +496,22 @@ help:
     desc     : Comma-separated shell allow list
     example  : "curl,wget"
     mandatory: false
+  - name     : shellguard
+    desc     : "Shell decision guard: auto (configured decision model), off, or decide (required model)"
+    example  : auto
+
+  - name     : shellguardask
+    desc     : "Minimum shell risk requiring approval: low, medium, high, critical"
+    example  : medium
+
+  - name     : shellguarddeny
+    desc     : "Minimum shell risk denied without approval: low, medium, high, critical"
+    example  : critical
+
+  - name     : shellguardtimeout
+    desc     : "Shell decision request timeout in milliseconds"
+    example  : 5000
+
   - name     : shellbanextra
     desc     : Comma-separated extra banned shell commands
     example  : "rm,mkfs"
@@ -2031,6 +2047,10 @@ jobs:
       shellprefix     : isString().default(__)
       shellallow      : isString().default(__)
       shellbanextra   : isString().default(__)
+      shellguard      : isString().default("auto")
+      shellguardask   : isString().default("medium")
+      shellguarddeny  : isString().default("critical")
+      shellguardtimeout: toNumber().isNumber().default(5000)
       shellallowpipes : toBoolean().isBoolean().default(false)
       shelltimeout    : toNumber().isNumber().default(__)
       shellmaxbytes   : toNumber().isNumber().default(__)

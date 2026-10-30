@@ -1045,6 +1045,13 @@ jobs:
         if (["usedecide", "llmcomplexity", "forkdecide"].indexOf(key) >= 0 && isDef(wargs[key]) && toBoolean(wargs[key]) === false && toBoolean(taskArgs[key]) === true) return
         if (allowedRemoteKeys[key] === true) { mergedArgs[key] = taskArgs[key] }
       })
+      // Require the parent's guard without importing its decision credentials or weakening worker policy.
+      try {
+        var workerGuard = MiniAShellGuard.resolve(wargs)
+        if (isDef(taskArgs._shellGuardRequired)) workerGuard = MiniAShellGuard.intersect(workerGuard, taskArgs._shellGuardRequired)
+        if (workerGuard.enabled) mergedArgs._shellGuardRequired = workerGuard
+      } catch(guardError) { return { error: { error: "Invalid inherited shell guard" }, code: 400 } }
+      mergedArgs.shellbatch = true
       // A prepared incoming handoff is data, independent of the child's outgoing policy.
       var incoming = postData.forkContext
       if (isDef(incoming)) {

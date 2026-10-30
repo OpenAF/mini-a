@@ -42,6 +42,29 @@
     }
   }
 
+  exports.testShellGuardAdmission = function() {
+    fixture(function(f) {
+      var required = { enabled: true, ask: "medium", deny: "critical", timeout: 5000 }
+      var payload = f.payload()
+      payload.args = { _shellGuardRequired: required, shellguard: "off", shellbatch: false, modeldec: { type: "fixture", model: "untrusted" } }
+      var result = global.__worker_submitTask(payload, global.__worker_args)
+      var args = global.__worker_tasks[result.taskId].args
+      ow.test.assert(args._shellGuardRequired, required, "Parent requirement survives admission")
+      ow.test.assert(args.shellbatch, true, "Worker approvals are headless")
+      ow.test.assert(isUnDef(args.modeldec), true, "Remote credentials not imported")
+      var task = Object.keys(f.manager.subtasks).map(function(id) { return f.manager.subtasks[id] })[0]
+      ow.test.assert(f.manager._buildChildArgs(task)._shellGuardRequired, required, "Requirement survives actual worker child merge")
+      global.__worker_args.modeldec = { type: "fixture", model: "worker" }
+      global.__worker_args.shellguardask = "low"
+      payload = f.payload(); payload.args.usedecide = false
+      result = global.__worker_submitTask(payload, global.__worker_args)
+      args = global.__worker_tasks[result.taskId].args
+      ow.test.assert(MiniAShellGuard.resolve(args).ask, "low", "Task opt-out cannot weaken worker guard")
+      payload = f.payload(); payload.args._shellGuardRequired = { enabled: false }
+      ow.test.assert(global.__worker_submitTask(payload, global.__worker_args).code, 400, "Invalid contract rejected")
+    })
+  }
+
   exports.testWorkerReceiptsAndUnpolledCleanup = function() {
     fixture(function(f) {
       var payload = f.payload()

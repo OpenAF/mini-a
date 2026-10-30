@@ -9,6 +9,7 @@ include:
 - tests/eval.yaml
 - tests/execution.yaml
 - tests/forkPolicy.yaml
+- tests/shellGuard.yaml
 - tests/graph.yaml
 - tests/historyVM.yaml
 - tests/mcpAuth.yaml

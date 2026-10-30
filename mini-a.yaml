@@ -154,6 +154,22 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : shellguard
+    desc     : "Shell decision guard: auto (configured decision model), off, or decide (required model)"
+    example  : auto
+
+  - name     : shellguardask
+    desc     : "Minimum shell risk requiring approval: low, medium, high, critical"
+    example  : medium
+
+  - name     : shellguarddeny
+    desc     : "Minimum shell risk denied without approval: low, medium, high, critical"
+    example  : critical
+
+  - name     : shellguardtimeout
+    desc     : "Shell decision request timeout in milliseconds"
+    example  : 5000
+
   - name     : shellbanextra
     desc     : Additional comma-separated commands to ban
     example  : "lsblk,ifconfig"
@@ -1650,6 +1666,10 @@ jobs:
         showthinking   : showthinking
         shellallow     : shellallow
         shellbanextra  : shellbanextra
+        shellguard     : shellguard
+        shellguardask  : shellguardask
+        shellguarddeny : shellguarddeny
+        shellguardtimeout: shellguardtimeout
         shellallowpipes: shellallowpipes
         shellbatch     : shellbatch
         shellprefix    : shellprefix
@@ -1967,6 +1987,10 @@ jobs:
       showthinking   : toBoolean.isBoolean.default(false)
       shellallow     : isString.default(__)
       shellbanextra  : isString.default(__)
+      shellguard      : isString.default("auto")
+      shellguardask   : isString.default("medium")
+      shellguarddeny  : isString.default("critical")
+      shellguardtimeout: toNumber.isNumber.default(5000)
       shellallowpipes: toBoolean.isBoolean.default(false)
       shellbatch     : toBoolean.isBoolean.default(false)
       shellprefix    : isString.default(__)

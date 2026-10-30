@@ -16636,7 +16636,7 @@ MiniA.prototype._runCommand = function(args) {
     }
     _$(args.command, "args.command").isString().$_()
     args.readwrite  = _$(args.readwrite, "args.readwrite").isBoolean().default(false)
-    args.checkall   = _$(args.checkall,  "args.checkall").isBoolean().default(false)
+    args.checkall   = _$(args.checkall,  "args.checkall").isBoolean().default(false) || this._shellCheckAll === true
     args.shellbatch = _$(args.shellbatch, "args.shellbatch").isBoolean().default(false)
 
     var shellPolicy = this._policyDecision({ type: "shell", name: "shell", command: args.command })
@@ -16708,31 +16708,49 @@ MiniA.prototype._runCommand = function(args) {
       global.__mini_a_metrics.shell_commands_blocked.inc()
       global.__mini_a_metrics.shell_commands_denied.inc()
       exec = false
-    } else if (!this._alwaysExec && (hasBannedToken || hasRedirectionOrPipe || args.checkall)) {
-      var note = detected.length ? " Detected: " + detected.join(", ") : ""
-      var _r
-      if (!this._shellBatch) {
-        var _ac = this._useAnsiLogging ? ansiColor : function(_, t) { return t }
-        _r = (isFunction(this._confirmFn) ? this._confirmFn : askChoose)("Can I execute '" + _ac("italic,red,bold", args.command) + "'? " + (note.length > 0 ? _ac("faint","(" + note + " )") : ""), ["No", "Yes", "Always"])
-      } else {
-        _r = 0 // No prompt in batch mode; default to "No"
-      }
-      if (_r == 2) {
-        exec = true
-        this._alwaysExec = true
-        global.__mini_a_metrics.shell_commands_approved.inc()
-      } else {
-        if (_r == 1) {
+    } else {
+      var guardResult = this._assessShellCommand(args, detected)
+      var requiresApproval = args.checkall || guardResult.action === "ask" || (!this._alwaysExec && (hasBannedToken || hasRedirectionOrPipe))
+      if (guardResult.action === "deny") {
+        args.output = "[blocked] Shell guard denied " + guardResult.risk + " risk command"
+        global.__mini_a_metrics.shell_commands_blocked.inc()
+        global.__mini_a_metrics.shell_commands_denied.inc()
+      } else if (requiresApproval) {
+        var note = detected.length ? " Detected: " + detected.join(", ") : ""
+        var _r
+        var singleApproval = args.checkall || guardResult.enabled
+        var interactive = isFunction(this._confirmFn) || java.lang.System.console() !== null
+        if (!this._shellBatch && !args.shellbatch && interactive) {
+          var _ac = this._useAnsiLogging ? ansiColor : function(_, t) { return t }
+          if (guardResult.enabled) note += " Guard: " + guardResult.risk + " (" + guardResult.reason + "); directory: " + String(new java.io.File(".").getCanonicalPath()) + "; prefix: " + (args.shellprefix || this._shellPrefix || "(none)")
+          _r = (isFunction(this._confirmFn) ? this._confirmFn : askChoose)("Can I execute '" + _ac("italic,red,bold", args.command) + "'? " + (note.length > 0 ? _ac("faint","(" + note + " )") : ""), singleApproval ? ["Deny", "Allow once"] : ["No", "Yes", "Always"])
+        } else {
+          _r = 0 // No prompt in batch mode; default to "No"
+        }
+        if (_r == 2 && !singleApproval) {
           exec = true
+          this._alwaysExec = true
           global.__mini_a_metrics.shell_commands_approved.inc()
         } else {
-          args.output = `[blocked] Command contains banned operation${note}: ${args.command}`
-          global.__mini_a_metrics.shell_commands_blocked.inc()
-          global.__mini_a_metrics.shell_commands_denied.inc()
+          if (_r == 1) {
+            exec = true
+            global.__mini_a_metrics.shell_commands_approved.inc()
+          } else {
+            args.output = `[blocked] Command approval denied or unavailable${note}: ${args.command}`
+            global.__mini_a_metrics.shell_commands_blocked.inc()
+            global.__mini_a_metrics.shell_commands_denied.inc()
+          }
         }
+      } else {
+        exec = true
       }
-    } else {
-      exec = true
+      if (guardResult.enabled) {
+        var approvalRecord = { risk: guardResult.risk, action: guardResult.action,
+          required: requiresApproval && guardResult.action !== "deny", approved: exec, reason: guardResult.reason }
+        this._trace("shell_guard_approval", approvalRecord)
+        this._queueAuditMeta({ shell_guard_approval: approvalRecord })
+        this.fnI("shell_guard_approval", exec ? "Shell gate passed" : "Shell gate blocked execution")
+      }
     }
 
     var finalCommand = args.command
@@ -17779,7 +17797,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "rpm", "tpm", "rtm", "maxsteps", "knowledge", "fileallow", "chatyouare", "youare", "homedir",
     "promptprofile", "systempromptbudget", "outfile", "outfileall", "libs", "model", "modellc", "modelval", "modeldec", "modelvisual",
     "conversation", "historyvm", "historyvmmode", "historyvmshadow", "contextvirtualization", "contextvirtualizationshadow", "shell", "usesandbox", "sandboxprofile", "sandboxnonetwork", "shellallow", "shellbanextra",
-    "shelltimeout", "shellmaxbytes", "toolcachettl", "sessionprewarm", "mcplazy", "mcpdynamic", "mcpproxy", "mcpproxythreshold", "toolargcheck", "toolargrepair",
+    "shellguard", "shellguardask", "shellguarddeny", "shellguardtimeout", "shelltimeout", "shellmaxbytes", "toolcachettl", "sessionprewarm", "mcplazy", "mcpdynamic", "mcpproxy", "mcpproxythreshold", "toolargcheck", "toolargrepair",
     "mcpproxytoon", "contextguard", "contextguardbudget", "toolresultmaxinline", "readresultmaxmatches",
     "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugdecch", "debugvalch", "debugvisualch", "capabilityselection", "capabilitylimit", "policy", "policyfile", "planfile",
     "planformat", "plancontent", "planstyle", "forceplanning", "saveplannotes", "outputfile", "updatefreq",
@@ -18413,6 +18431,10 @@ MiniA.prototype.init = function(args) {
       { name: "sandboxnonetwork", type: "boolean", default: false },
       { name: "shellallow", type: "string", default: "" },
       { name: "shellbanextra", type: "string", default: "" },
+      { name: "shellguard", type: "string", default: "auto" },
+      { name: "shellguardask", type: "string", default: "medium" },
+      { name: "shellguarddeny", type: "string", default: "critical" },
+      { name: "shellguardtimeout", type: "number", default: 5000 },
       { name: "shelltimeout", type: "number", default: __ },
       { name: "shellmaxbytes", type: "number", default: __ },
       { name: "toolcachettl", type: "number", default: __ },
@@ -18796,6 +18818,8 @@ MiniA.prototype.init = function(args) {
       __flags.JSONRPC.cmd.defaultDir = mcpDefaultDir
     }
 
+    this._shellCheckAll = args.checkall
+    this._shellBatch = args.shellbatch
     this._shellAllowlist = this._parseListOption(args.shellallow)
     this._shellExtraBanned = this._parseListOption(args.shellbanextra)
     this._shellAllowPipes = args.shellallowpipes
@@ -20137,6 +20161,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "sandboxnonetwork", type: "boolean", default: false },
       { name: "shellallow", type: "string", default: __ },
       { name: "shellbanextra", type: "string", default: __ },
+      { name: "shellguard", type: "string", default: "auto" },
+      { name: "shellguardask", type: "string", default: "medium" },
+      { name: "shellguarddeny", type: "string", default: "critical" },
+      { name: "shellguardtimeout", type: "number", default: 5000 },
       { name: "shelltimeout", type: "number", default: __ },
       { name: "shellmaxbytes", type: "number", default: __ },
       { name: "planfile", type: "string", default: __ },
@@ -20405,10 +20433,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._planCounter = 0
     this._lastPlanSnapshot = ""
 
+    this._shellCheckAll = args.checkall
+    this._shellBatch = args.shellbatch
     this._shellAllowlist = this._parseListOption(args.shellallow)
     this._shellExtraBanned = this._parseListOption(args.shellbanextra)
     this._shellAllowPipes = args.shellallowpipes
-    this._shellBatch = args.shellbatch
     this._shellPrefix = isString(args.shellprefix) ? args.shellprefix.trim() : ""
     this._shellSandboxMode = isString(args.usesandbox) ? args.usesandbox.trim() : ""
     this._shellSandboxProfile = isString(args.sandboxprofile) ? args.sandboxprofile.trim() : ""
@@ -20529,7 +20558,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     // With no external plan, planning normally falls back to automatic generation.
     if (this._normalizeModelStrategy(args.modelstrategy) !== "supervised") this._preparePreloadedPlan(preloadedPlan, args)
 
-    this._alwaysExec = args.readwrite
+    this._alwaysExec = args.readwrite // Explicit checkall, policy and decision approvals still take precedence.
     if (isDef(args.outfile) && isUnDef(args.format)) args.format = "json"
     if (isUnDef(args.format)) args.format = "md"
     //if (args.__format == "md") args.knowledge = "give final answer in markdown without mentioning it\n\n" + args.knowledge

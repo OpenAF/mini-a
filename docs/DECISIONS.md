@@ -260,3 +260,9 @@ and its structured editor; inspect answers, full response, previous results,
 `/stats`, and `debugdecch`. Confirm `/last` still shows the previous agent answer.
 The automated command/form tests use injected clients and DOM fixtures; they do
 not establish live provider support or manual browser/terminal layout quality.
+
+## Shell execution guard
+
+Configured decision models automatically assess built-in shell commands (`shellguard=auto`), unless `usedecide=false`. `shellguard=off` opts out; `shellguard=decide` requires an enabled model. Low risk runs, medium/high risk needs approval once, and critical risk is denied. Configure thresholds with `shellguardask` and `shellguarddeny`; the default transport timeout is `shellguardtimeout=5000` milliseconds. Assessment failure or unknown effects require approval, and headless execution blocks when approval is needed. Existing hard restrictions always win. See [Shell and File System Access](../USAGE.md#shell-and-file-system-access).
+
+Validation: `ojob tests/shellGuard.yaml` runs deterministic fixtures without a provider. For an optional live-provider check, configure `OAF_DECIDE_MODEL` and run `oaf -f tests/shellGuardLive.js`; this assesses and, only when allowed, executes a fixed harmless echo command.

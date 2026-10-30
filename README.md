@@ -477,6 +477,9 @@ Mini-A ships with complementary components:
 | `youare` | Override the opening persona sentence in the system prompt (inline text or `@file` path) to craft specialized agents | `"You are a goal-oriented agent running in background."` (Mini-A still appends the step-by-step directive, and adds the no-feedback remark for `mini-a-con`/`mini-a-web`) |
 | `chatyouare` | Override the chatbot persona sentence when `chatbotmode=true` (inline text or `@file` path) | `"You are a helpful conversational AI assistant."` |
 | `useshell` | Allow shell command execution | `false` |
+| `shellguard` | Decision-based shell risk guard: `auto`, `off`, or `decide`; auto activates with a configured decision model unless `usedecide=false` | `auto` |
+| `shellguardask` / `shellguarddeny` | Minimum risk requiring approval / denial (`low`, `medium`, `high`, `critical`); hard restrictions still win | `medium` / `critical` |
+| `shellguardtimeout` | Decision transport timeout in milliseconds; failed assessment asks interactively or blocks headlessly | `5000` |
 | `usesandbox` | Apply built-in OS sandbox presets for shell commands (`off`,`auto`,`linux`,`macos`,`windows`); warns and may degrade when the backend is unavailable | `off` |
 | `sandboxprofile` | Optional macOS profile path for `sandbox-exec`; when omitted, Mini-A generates a restrictive temporary `.sb` profile | - |
 | `sandboxnonetwork` | Disable network inside the built-in sandbox when supported; Windows remains best-effort | `false` |
