@@ -5634,7 +5634,7 @@ function MiniAInteractiveSession(args, adapter) {
     if (!adapter) agent._terminalInputLock = terminalInputLock
     if (!adapter && isFunction(agent.setConfirmFn)) {
       agent.setConfirmFn(function(label, choices) {
-        return sync(function() {
+        return syncFn(function() {
           return askChoose(label, choices)
         }, terminalInputLock)
       })
@@ -5651,7 +5651,7 @@ function MiniAInteractiveSession(args, adapter) {
         if (done === true) return true
         if (stopRequested) return true
         sync(function() { _drawConsoleStreamScreen(false) }, _consoleStreamLock)
-        var inputStopped = sync(function() {
+        var inputStopped = syncFn(function() {
           var rawCode = con.readCharNB()
           var code = isDef(rawCode) ? Number(rawCode) : NaN
           if (!isNaN(code) && code > 0) {

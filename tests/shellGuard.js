@@ -3,6 +3,24 @@
   load("mini-a-subtask.js")
   var check = function(value, expected, message) { ow.test.assert(value, expected, message) }
   var config = { type: "fixture", model: "risk" }
+  exports.terminalApprovalReturnValue = function() {
+    var source = io.readFileString("mini-a-session.js")
+    var start = source.indexOf("agent.setConfirmFn(function(label, choices) {")
+    var end = source.indexOf("\n      })", start)
+    check(start >= 0 && end > start, true, "Session approval callback exists")
+    var selected = 1, confirmation
+    var agent = { setConfirmFn: function(fn) { confirmation = fn } }
+    var askChoose = function() { return selected }
+    var terminalInputLock = "mini-a-approval-test-" + genUUID()
+    eval(source.substring(start, end) + "\n      })")
+    check(confirmation("Approve?", ["Deny", "Allow once"]), 1, "Allow once reaches shell gate")
+    selected = 0
+    check(confirmation("Approve?", ["Deny", "Allow once"]), 0, "Deny reaches shell gate")
+    var expected = new Error("Prompt failed"), caught
+    askChoose = function() { throw expected }
+    try { confirmation("Approve?", ["Deny", "Allow once"]) } catch(e) { caught = e }
+    check(caught === expected, true, "Prompt errors propagate")
+  }
   var fixture = function(risk, options) {
     var a = new MiniA(), seen = { calls: 0, prompts: 0, execution: 0, traces: [] }
     a.fnI = function() {}
@@ -41,6 +59,29 @@
     f.a._initPolicyRuntime({ policy: { shell: "deny" } })
     f.a._runCommand({ command: "echo fixture", readwrite: true })
     check(f.seen.calls, 0, "policy denial precedes assessment")
+  }
+  exports.readWriteSkipsBuiltInHeuristics = function() {
+    ;["echo fixture && echo next", "echo fixture | cat", "echo fixture > output", "rm fixture"].forEach(function(command) {
+      var f = fixture("low")
+      f.a._alwaysExec = false
+      f.a._runCommand({ command: command, readwrite: true })
+      check(f.seen.calls, 1, "Write-enabled command still assessed")
+      check(f.seen.prompts, 0, "Low risk command skips deterministic approval")
+      check(f.seen.execution, 1, "Allowed command reaches execution hook")
+    })
+    ;["medium", "critical"].forEach(function(risk) {
+      var f = fixture(risk)
+      f.a._alwaysExec = false
+      f.a._runCommand({ command: "rm fixture && echo next", readwrite: true })
+      check(f.seen.calls, 1, "Dangerous commands still assessed")
+      check(f.seen.prompts, risk === "medium" ? 1 : 0, "Risk thresholds still apply")
+      check(f.seen.execution, 0, "Unapproved or denied command stays blocked")
+    })
+    var explicit = fixture("low")
+    explicit.a._alwaysExec = false
+    explicit.a._runCommand({ command: "rm fixture", readwrite: true, shellbanextra: "rm" })
+    check(explicit.seen.prompts, 1, "Explicit extra bans still require approval")
+    check(explicit.seen.execution, 0, "Explicit extra ban remains effective")
   }
   exports.approvalPrecedence = function() {
     var f = fixture("low")

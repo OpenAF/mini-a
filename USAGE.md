@@ -1146,7 +1146,7 @@ Default behavior note:
 - **`readwrite`** (boolean, default: false): Allow read/write operations on filesystem
 - **`checkall`** (boolean, default: false): Ask for confirmation before executing any shell command
 - **`shellallow`** (string): Comma-separated list of banned commands that should be explicitly allowed
-- **`shellallowpipes`** (boolean, default: false): Allow pipes, redirection, and shell control operators in commands
+- **`shellallowpipes`** (boolean, default: false): Allow pipes, redirection, and shell control operators in commands when `readwrite=false`; `readwrite=true` already skips this deterministic check.
 - **`shellbanextra`** (string): Additional comma-separated commands to ban
 - **`shellbatch`** (boolean, default: false): If true, runs in batch mode without prompting for command execution approval; commands requiring approval are blocked.
 - **`shellguard`** (`auto|off|decide`, default: `auto`): Add decision-based shell risk assessment. Auto activates with `modeldec` or `OAF_DECIDE_MODEL` unless `usedecide=false`. Explicit `decide` requires an enabled configured model. Use `off` to opt out locally; inherited guard requirements still apply.
@@ -1157,6 +1157,8 @@ Default behavior note:
 The guard allows low-risk inspection, asks for scoped reversible changes (medium) and destructive/privileged/external effects (high), and denies broad irreversible damage or credential disclosure (critical). Unknown effects, oversized assessment input, invalid answers, and provider failures require approval; headless/batch execution blocks them. Approvals apply once and are never cached. Referenced scripts whose effects cannot be established should be classified unknown.
 
 Assessment supplements deterministic restrictions and sandbox enforcement; a model answer does not guarantee safety. `shellallow` exempts banned tokens, not an exclusive command allowlist. `readwrite=true` and legacy “Always” approvals cannot bypass `checkall`, policy-required approval, or decision-required approval. The guard covers built-in shell execution, not arbitrary external MCP tool effects.
+
+With `readwrite=true`, built-in command-token and redirection/pipe checks are skipped. Decision-based assessment still applies according to `shellguard`, `shellguardask`, and `shellguarddeny`. Explicit `shellbanextra` entries still require approval unless exempted by `shellallow`.
 
 **Compatibility:** sessions with a configured decision model now assess shell commands automatically. Assessment sends command and execution context to that configured provider. Local children inherit restrictions; remote workers use their own decision credentials and block required approvals without a UI. Audit events `shell_guard` and `shell_guard_approval` record risk, action, reason and timing/outcome without adding raw command fields.
 

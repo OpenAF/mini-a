@@ -16678,7 +16678,8 @@ MiniA.prototype._runCommand = function(args) {
 
     var allowlist = this._parseListOption(allowValue)
     var extraBanned = this._parseListOption(extraBanValue)
-    var banned = baseBanned.concat(extraBanned).filter(b => allowlist.indexOf(b) < 0)
+    // Write access bypasses built-in token heuristics; explicit extra bans remain.
+    var banned = (args.readwrite ? [] : baseBanned).concat(extraBanned).filter(b => allowlist.indexOf(b) < 0)
 
     var exec = false
     var lcCmd = (args.command || "").toString().toLowerCase()
@@ -16693,7 +16694,7 @@ MiniA.prototype._runCommand = function(args) {
     var hasBannedToken = bannedTokens.length > 0
 
     // detect redirections, pipes or shell control operators which can perform write/replace operations
-    var hasRedirectionOrPipe = !args.shellallowpipes && /[<>|&;]/.test(lcCmd)
+    var hasRedirectionOrPipe = !args.readwrite && !args.shellallowpipes && /[<>|&;]/.test(lcCmd)
     var hasWriteFlag = !args.readwrite && /\b(sed|perl|awk)\s+-i(\b|$)/.test(lcCmd)
 
     // collect what was detected to show to user
