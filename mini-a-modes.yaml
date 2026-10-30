@@ -11,6 +11,7 @@ modes:
     params     :
       useutils       : true
       readwrite      : true
+      shellguardask  : high
       shellallowpipes: true
       shellbatch     : true
       showexecs      : true
