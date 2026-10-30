@@ -425,6 +425,7 @@ window.MiniAAdvancedUI = function(bridge) {
   // Keep agent event emojis aligned with MiniA.fnI's console mapping.
   const activityEventEmojis = {
     user: '👤', exec: '⚙️', shell: '🖥️', think: '💡', final: '🏁',
+    shell_guard: '🛡️', shell_guard_approval: '🚦',
     input: '➡️', output: '⬅️', thought: '💭', size: '📏', rate: '⏳',
     mcp: '🤖', plan: '🗺️', deepresearch: '🔍', done: '✅', error: '❌',
     libs: '📚', info: 'ℹ️', skill: '🧩', load: '📂', warn: '⚠️',

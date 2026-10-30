@@ -20,6 +20,7 @@ var MiniUtilsTool = function(options) {
   this._chartRenderer = __
   // Mini-A supplies this to route display-only output to its console. Without
   // it, direct MiniUtilsTool users retain the historical print() behavior.
+  this._terminalInputLock = __
   this._inputFn = __
   this._displayEventFn = __
   this._separator = String(java.io.File.separator)
@@ -72,6 +73,7 @@ MiniUtilsTool.prototype.init = function(options) {
     this._readWrite = options.readwrite === true
     this._visualizationsEnabled = options.useasciiviz === true
     this._chartRenderer = isFunction(options.chartRenderer) ? options.chartRenderer : __
+    if (isString(options.terminalInputLock)) this._terminalInputLock = options.terminalInputLock
     if (isFunction(options.inputFn)) this._inputFn = options.inputFn
     this._displayEventFn = isFunction(options.displayEventFn) ? options.displayEventFn : __
     this._skillsRoots = this._resolveSkillsRoots(options)
@@ -3589,35 +3591,40 @@ MiniUtilsTool.prototype._browserInput = function(questions) {
   })
 }
 
+// Foreground questions share terminal ownership with the session stop listener.
+MiniUtilsTool.prototype._withTerminalInput = function(fn) {
+  return isString(this._terminalInputLock) ? syncFn(fn, this._terminalInputLock) : fn()
+}
+
 MiniUtilsTool.prototype._ask = function(prompt, mask) {
   if (isFunction(this._inputFn)) return this._browserInput([{ name: "answer", prompt: prompt, mask: mask }])[0].answer
-  return ask(prompt, mask)
+  return this._withTerminalInput(function() { return ask(prompt, mask) })
 }
 
 MiniUtilsTool.prototype._askEncrypt = function(prompt) {
   if (isFunction(this._inputFn)) return this._browserInput([{ name: "answer", prompt: prompt, type: "secret" }])[0].answer
-  return askEncrypt(prompt)
+  return this._withTerminalInput(function() { return askEncrypt(prompt) })
 }
 
 MiniUtilsTool.prototype._ask1 = function(prompt, options) {
   if (isFunction(this._inputFn)) return this._browserInput([{ name: "answer", prompt: prompt, type: "char", options: options }])[0].answer
-  return ask1(prompt, options)
+  return this._withTerminalInput(function() { return ask1(prompt, options) })
 }
 
 MiniUtilsTool.prototype._askChoose = function(prompt, options, max, help) {
   if (isFunction(this._inputFn)) return this._browserInput([{ name: "answer", prompt: prompt, type: "choose", options: options, max: max, help: help, output: "index" }])[0].answer
-  return askChoose(prompt, options, max, help)
+  return this._withTerminalInput(function() { return askChoose(prompt, options, max, help) })
 }
 
 MiniUtilsTool.prototype._askChooseMultiple = function(prompt, options, max, help) {
   if (isFunction(this._inputFn)) return this._browserInput([{ name: "answer", prompt: prompt, type: "multiple", options: options, max: max, help: help }])[0].answer
-  var result = askChooseMultiple(prompt, options, max, help)
+  var result = this._withTerminalInput(function() { return askChooseMultiple(prompt, options, max, help) })
   return isArray(result) ? result : []
 }
 
 MiniUtilsTool.prototype._askStruct = function(questions) {
   if (isFunction(this._inputFn)) return this._browserInput(questions)
-  return askStruct(questions)
+  return this._withTerminalInput(function() { return askStruct(questions) })
 }
 
 /**

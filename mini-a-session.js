@@ -5628,6 +5628,17 @@ function MiniAInteractiveSession(args, adapter) {
         return runHooks(event, contextVars)
       })
     }
+    // Serialize terminal reads: the stop/stream listener must not steal escape
+    // sequence bytes from the foreground approval menu.
+    var terminalInputLock = "mini-a-terminal-input-" + genUUID()
+    if (!adapter) agent._terminalInputLock = terminalInputLock
+    if (!adapter && isFunction(agent.setConfirmFn)) {
+      agent.setConfirmFn(function(label, choices) {
+        return sync(function() {
+          return askChoose(label, choices)
+        }, terminalInputLock)
+      })
+    }
     var agentResult = __, agentOrigResult = __
     var stopRequested = false
     try {
@@ -5640,55 +5651,58 @@ function MiniAInteractiveSession(args, adapter) {
         if (done === true) return true
         if (stopRequested) return true
         sync(function() { _drawConsoleStreamScreen(false) }, _consoleStreamLock)
-        var rawCode = con.readCharNB()
-        var code = isDef(rawCode) ? Number(rawCode) : NaN
-        if (!isNaN(code) && code > 0) {
-          if (code === 9) _nextConsoleStream()
-          if (code === 27) {
-            sleep(40)
-            var followRaw = con.readCharNB()
-            var followCode = isDef(followRaw) ? Number(followRaw) : NaN
-            if (isNaN(followCode) || followCode <= 0) {
+        var inputStopped = sync(function() {
+          var rawCode = con.readCharNB()
+          var code = isDef(rawCode) ? Number(rawCode) : NaN
+          if (!isNaN(code) && code > 0) {
+            if (code === 9) _nextConsoleStream()
+            if (code === 27) {
               sleep(40)
-              followRaw = con.readCharNB()
-              followCode = isDef(followRaw) ? Number(followRaw) : NaN
-            }
-            if ((isNaN(followCode) || followCode <= 0) && !stopRequested) {
-              stopRequested = true
-              if (isFunction(agent.requestStop)) {
-                agent.requestStop("Esc pressed. Requesting Mini-A to stop...", { quiet: true })
-              } else {
-                agent.state = "stop"
+              var followRaw = con.readCharNB()
+              var followCode = isDef(followRaw) ? Number(followRaw) : NaN
+              if (isNaN(followCode) || followCode <= 0) {
+                sleep(40)
+                followRaw = con.readCharNB()
+                followCode = isDef(followRaw) ? Number(followRaw) : NaN
               }
-              if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.goals_stopped) && isFunction(global.__mini_a_metrics.goals_stopped.inc)) {
-                try { global.__mini_a_metrics.goals_stopped.inc() } catch(ignoreInc) {}
-              }
-              printEvent("warn", "🛑", "Esc pressed. Requesting Mini-A to stop...")
-              return true
-            } else if (!isNaN(followCode) && followCode > 0) {
-              // Shift-Tab is CSI Z. Consume it before draining other escape keys.
-              if (followCode === 91) {
-                var sequenceCode = con.readCharNB()
-                if (isUnDef(sequenceCode) || Number(sequenceCode) <= 0) {
-                  sleep(40)
-                  sequenceCode = con.readCharNB()
+              if ((isNaN(followCode) || followCode <= 0) && !stopRequested) {
+                stopRequested = true
+                if (isFunction(agent.requestStop)) {
+                  agent.requestStop("Esc pressed. Requesting Mini-A to stop...", { quiet: true })
+                } else {
+                  agent.state = "stop"
                 }
-                if (Number(sequenceCode) === 90) {
-                  _nextConsoleStream(-1)
-                  return false
+                if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.goals_stopped) && isFunction(global.__mini_a_metrics.goals_stopped.inc)) {
+                  try { global.__mini_a_metrics.goals_stopped.inc() } catch(ignoreInc) {}
                 }
-              }
-              // Not a lone ESC: this is an escape sequence (e.g. an arrow key, ESC [ A).
-              // Drain the remaining buffered bytes so the sequence's tail doesn't leak
-              // into the next poll as a stray character.
-              for (var _drainI = 0; _drainI < 8; _drainI++) {
-                var _drainRaw = con.readCharNB()
-                if (isUnDef(_drainRaw)) break
+                printEvent("warn", "🛑", "Esc pressed. Requesting Mini-A to stop...")
+                return true
+              } else if (!isNaN(followCode) && followCode > 0) {
+                // Shift-Tab is CSI Z. Consume it before draining other escape keys.
+                if (followCode === 91) {
+                  var sequenceCode = con.readCharNB()
+                  if (isUnDef(sequenceCode) || Number(sequenceCode) <= 0) {
+                    sleep(40)
+                    sequenceCode = con.readCharNB()
+                  }
+                  if (Number(sequenceCode) === 90) {
+                    _nextConsoleStream(-1)
+                    return false
+                  }
+                }
+                // Not a lone ESC: this is an escape sequence (e.g. an arrow key, ESC [ A).
+                // Drain the remaining buffered bytes so the sequence's tail doesn't leak
+                // into the next poll as a stray character.
+                for (var _drainI = 0; _drainI < 8; _drainI++) {
+                  var _drainRaw = con.readCharNB()
+                  if (isUnDef(_drainRaw)) break
+                }
               }
             }
           }
-        }
-        if (stopRequested) return true
+          return stopRequested
+        }, terminalInputLock)
+        if (inputStopped) return true
         sleep(75)
         return false
       }).exec()

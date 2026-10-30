@@ -1589,6 +1589,8 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   case "user"     : _e = "👤"; break
   case "exec"     : _e = "⚙️ "; break
   case "shell"    : _e = "🖥️ "; break
+  case "shell_guard": _e = "🛡️"; break
+  case "shell_guard_approval": _e = "🚦"; break
   case "think"    : _e = "💡"; break
   case "final"    : _e = "🏁"; break
   case "input"    : _e = "➡️"; break
@@ -12629,6 +12631,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     }
 
     var toolOptions = { fileallow: args.fileallow, bundledskillsroot: __miniABundleRoot + "/skills" }
+    if (isString(this._terminalInputLock)) toolOptions.terminalInputLock = this._terminalInputLock
     if (isDef(args._remoteWriteAllow)) toolOptions.writeallow = args._remoteWriteAllow
     if (args.readwrite === true) toolOptions.readwrite = true
     if (args.__interaction_source === "mini-a-web" && this._supportsUserInput(args) && isFunction(this._userInputFn)) {
