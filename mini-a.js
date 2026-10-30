@@ -19906,6 +19906,9 @@ MiniA.prototype.start = function(args) {
   try { return this.startUnlocked(args) } finally { lock.unlock() }
 }
 MiniA.prototype.startUnlocked = function(args) {
+    // Completion also uses "stop". Reopen a completed conversation before
+    // startup model calls, without clearing an explicit cancellation request.
+    if (this.state === "stop" && this._stopRequested !== true) this.state = "idle"
     // Preserve an embedder's init(args) assessment for this submission, but
     // retry optional assessment on a subsequent run even with the same args.
     if (this._decisionComplexityArgs !== args || this._decisionComplexityRunComplete === true) this._decisionComplexity = __

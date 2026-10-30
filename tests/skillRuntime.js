@@ -385,25 +385,42 @@
       writeSkill(root, "report", "Include VERIFIED_REPORT in your final response.")
       var agent = new MiniA(), selections = 0, turns = 0
       agent.fnI = function() {}
-      agent._selectSkillCandidates = function(candidates) { selections++; return [candidates[0]] }
+      agent._selectSkillCandidates = function(candidates, options, controls) {
+        return agent._withRateLimitedCall(function() { selections++; return [candidates[0]] }, controls, "main")
+      }
       // Explicit synthetic model configuration; initialization does not contact it.
-      var args = { model: "(type: openai, model: fixture, key: fixture)", usedecide: false, useskills: true, skillsautosearch: true, extraskills: root, useutils: false, usetools: false, usejsontool: true, usememory: false, useplanning: false, goal: "Generate test reports", raw: true, maxsteps: 3 }
+      var args = { model: "(type: openai, model: fixture, key: fixture)", usejsonschema: "off", usestream: false, usedecide: false, useskills: true, skillsautosearch: true, extraskills: root, useutils: false, usetools: false, usejsontool: true, usememory: false, useplanning: false, goal: "Generate test reports", raw: true, maxsteps: 3 }
       try {
-        agent.init(args)
-        agent.llm.promptJSONWithStats = agent.llm.promptWithStats = function(prompt) {
-          turns++
-          ow.test.assert(agent._skillGuidanceContext().indexOf("VERIFIED_REPORT") >= 0, true, "Instructions active before first execution call")
-          ow.test.assert(prompt.indexOf("VERIFIED_REPORT") >= 0 || stringify(agent.llm.getGPT().getConversation()).indexOf("VERIFIED_REPORT") >= 0, true, "Actual model request includes skill guidance")
-          return { response: { action: "final", answer: "VERIFIED_REPORT" }, stats: {} }
+        var originalInit = agent.init
+        agent.init = function(options) {
+          originalInit.call(agent, options)
+          // Reinitialization must keep every run on the offline fixture model.
+          agent._use_lc = false
+          agent.llm.promptJSONWithStatsRaw = agent.llm.rawPromptWithStats = agent.llm.promptJSONWithStats = agent.llm.promptWithStats = function(prompt) {
+            turns++
+            ow.test.assert(agent._skillGuidanceContext().indexOf("VERIFIED_REPORT") >= 0, true, "Instructions active before first execution call")
+            ow.test.assert(prompt.indexOf("VERIFIED_REPORT") >= 0 || stringify(agent.llm.getGPT().getConversation()).indexOf("VERIFIED_REPORT") >= 0, true, "Actual model request includes skill guidance")
+            return { response: { action: "final", answer: "VERIFIED_REPORT" }, stats: {} }
+          }
         }
         ow.test.assert(agent.start(merge({}, args)), "VERIFIED_REPORT", "Actual agent run completes")
         ow.test.assert(selections, 1, "One selection before execution")
         ow.test.assert(turns, 1, "One execution turn")
+        ow.test.assert(agent.state, "stop", "Normal completion leaves the agent stopped")
+        ow.test.assert(agent.start(merge({}, args)), "VERIFIED_REPORT", "Follow-up on the same instance completes")
+        ow.test.assert(selections, 2, "Follow-up admits skill selection before execution")
+        ow.test.assert(turns, 2, "Follow-up reaches the execution model")
         var blocked = agent.start(merge(args, { goal: "$missing-report", _skillHandoff: [{ ref: "local:missing-report", required: true }] }))
         ow.test.assert(blocked.indexOf("blocked") >= 0, true, "Missing required handoff returns actionable blocked result")
-        ow.test.assert(turns, 1, "Blocked run does not call execution model")
+        ow.test.assert(turns, 2, "Blocked run does not call execution model")
         ow.test.assert(agent.start(merge(args, { goal: "$missing-report", _skillHandoff: [] })), "VERIFIED_REPORT", "Unknown goal mention permits normal task execution")
-        ow.test.assert(turns, 2, "Ignored unknown reference does not prevent execution")
+        ow.test.assert(turns, 3, "Ignored unknown reference does not prevent execution")
+        agent.requestStop("fixture cancellation", { quiet: true, releaseResources: false })
+        var cancelled = agent.start(merge({}, args))
+        ow.test.assert(isUnDef(cancelled), true, "Explicit cancellation is preserved across startup")
+        ow.test.assert(agent._stopRequested, true, "Startup does not clear an explicit stop request")
+        ow.test.assert(agent._skillRuntime.blocked.length, 0, "Cancellation is not reported as missing skill guidance")
+        ow.test.assert(turns, 3, "Cancelled startup does not call execution model")
       } finally { agent._stopAgentResources() }
     })
   }

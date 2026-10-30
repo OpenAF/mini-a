@@ -339,7 +339,10 @@ function __miniAInstallSkillRuntime() {
     var selected = explicit
     if (!selected.length && args.skillsautosearch !== false && combined.length && !runtime.blocked.length) {
       try { selected = this._selectSkillCandidates(combined, args, controls) }
-      catch(e) { runtime.block("selection", __miniAErrMsg(e)) }
+      catch(e) {
+        if (e && e.miniAStop === true) throw e
+        runtime.block("selection", __miniAErrMsg(e))
+      }
     }
     else runtime.event("selection_skipped", { reason: selected.length ? "explicit-request-or-handoff" : runtime.blocked.length ? "required-skill-blocked" : args.skillsautosearch === false ? "automatic-search-disabled" : "no-eligible-candidates" })
     selected.forEach(function(item) {
