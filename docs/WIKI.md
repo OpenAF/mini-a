@@ -489,6 +489,32 @@ node tests/wikiGraphUI.js /tmp/my-wiki.html
 
 The first command tests real oJob exports, output locations, graph filtering, safe JSON embedding, Markdown fallback, and empty/invalid input. The second uses DOM/canvas stubs to smoke-test interaction handlers; it is not visual browser verification. For manual QA, open the export, zoom/pan/drag, search and jump between connections, toggle filters and neighborhood focus, use Back, pause/resume, save a PNG, and check a narrow/mobile viewport.
 
+
+### `utils/wikiHydrate.yaml` and `utils/wikiDream.yaml`
+
+Unlike the read-only utilities above, these two jobs **write** to a local filesystem wiki. They wrap the full ingestion and dream pipelines, followed by an offline compaction of the serving index, so the only required parameters are the wiki root and, for hydration, the source folder. Stop other readers and writers of the wiki before running them.
+
+```sh
+# Ingest ./docs into okts/docs (created when missing), then compact
+ojob utils/wikiHydrate.yaml wikiroot=okts/docs source=./docs
+ojob utils/wikiHydrate.yaml wikiroot=okts/docs source=./docs prune=true dream=true
+
+# Reorganize an existing wiki (zip backup first), then compact
+ojob utils/wikiDream.yaml wikiroot=okts/docs
+ojob utils/wikiDream.yaml wikiroot=okts/docs semantic=true mode=ollama organize=topics
+ojob utils/wikiDream.yaml wikiroot=okts/docs dreamwikimode=plan
+```
+
+- **Model**: `mode=` applies a mode preset (default `poweruser`; `mode=none` skips it), resolved exactly as the console does, from `mini-a-modes.yaml` plus `~/.openaf-mini-a_modes.yaml` and `~/.openaf-mini-a/modes.yaml`. An explicit `model=` overrides the preset, and `OAF_MODEL` is the fallback.
+- **Semantic graph**: off unless `semantic=true`. Both jobs always pass an explicit `wikigraphsemantic`, because dream `apply`/`plan` would otherwise enable it implicitly. On hydrate, `semantic` applies to the graph build at ingestion finalization, and `dreamsemantic=` overrides it for a chained `dream=true`.
+- **Dream modes**: `dreamwikimode` defaults to `reorg`, with `dreamwikireorg=true` and `dreamwikiapproval=auto`. `auto`, `plan`, `apply`, `repair`, `reindex`, `graph` and `indexes` are also accepted. `plan` skips compaction.
+- **Backup**: before a mutating dream (`reorg`, `apply`, `repair`, `auto`), the whole wiki, including its hidden index and state folders, is zipped to `<wikiroot>.predream-<timestamp>.zip` beside it. If the backup fails, the dream does not start. Use `backup=false` to skip it.
+- **Defaults**: `usewikigraph=true`, `wikiretrievalv2=true`, `wikitelemetry=true`, and `wikilexical` from `OAF_MINI_A_WIKI_LEXICAL` (otherwise English with ngrams, shingles, query expansion and pseudo-relevance feedback). `wikiretrievalconfig` comes from `OAF_MINI_A_WIKI_RETRIEVAL_CONFIG`. Hydrate also defaults to `ingestmode=auto`, `ingestlayout=source` and `wikimaxprompttokens=200000`.
+- Other `mini-a-ingest` and Mini-A wiki/dream arguments (`ingestinclude`, `dreammaxsteps`, `dreamreport`, ...) pass through. `wikiaccess=rw` and `wikibackend=fs` are enforced. `dryrun=true` previews without writing, backing up or compacting. `compact=false` leaves the serving index as it is.
+- The jobs load the `mini-a-*.js` libraries from the copy that contains them, so `ojob /path/to/mini-a/utils/wikiDream.yaml ...` uses that checkout from any working directory.
+- Readers must use the same `wikiretrievalv2=true` and `wikilexical` settings; the jobs print a reminder.
+
+Validation: `ojob tests/wikiUtilsJobs.yaml`.
 ## Examples
 
 ```sh

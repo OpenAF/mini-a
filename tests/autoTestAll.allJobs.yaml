@@ -22,3 +22,4 @@ include:
 - tests/wiki.yaml
 - tests/wikiCross.yaml
 - tests/wikiIngest.yaml
+- tests/wikiUtilsJobs.yaml

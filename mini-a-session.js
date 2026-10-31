@@ -204,165 +204,22 @@ function MiniAInteractiveSession(args, adapter) {
       var modeName = args.mode.trim()
       if (modeName.length === 0) return
 
-      var modesPath = miniABasePath + "/mini-a-modes.yaml"
-      var presets = {}
+      if (typeof __miniAResolveModePreset === "undefined") load(miniABasePath + "/mini-a-common.js")
+      var resolvedPreset
       try {
-        var loaded = io.readFileYAML(modesPath)
-        if (isMap(loaded) && isMap(loaded.modes)) {
-          presets = loaded.modes
-        } else if (isMap(loaded)) {
-          presets = loaded
-        } else {
-          presets = {}
-        }
-      } catch(e) {
-        var errMsg = (isDef(e) && isString(e.message)) ? e.message : e
-        logWarn(`Failed to load mode presets for '${modeName}': ${errMsg}`)
-        args.__modeApplied = true
-        return
-      }
-
-      // Load custom modes from user's home directory
-      function resolveCanonicalPath(basePath, fileName) {
-        return io.fileInfo((basePath || ".") + "/" + fileName).canonicalPath
-      }
-      var modesHome = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
-      ;[
-        resolveCanonicalPath(modesHome, ".openaf-mini-a_modes.yaml"),
-        resolveCanonicalPath(modesHome, ".openaf-mini-a/modes.yaml")
-      ].forEach(function(customModesPath) {
-        if (io.fileExists(customModesPath)) {
-          try {
-            var customLoaded = io.readFileYAML(customModesPath)
-            var customPresets = {}
-            if (isMap(customLoaded) && isMap(customLoaded.modes)) {
-              customPresets = customLoaded.modes
-            } else if (isMap(customLoaded)) {
-              customPresets = customLoaded
-            }
-            // Merge custom modes with default modes (later custom files override earlier ones)
-            if (isMap(customPresets) && Object.keys(customPresets).length > 0) {
-              presets = merge(presets, customPresets)
-            }
-          } catch(e) {
-            var errMsg = (isDef(e) && isString(e.message)) ? e.message : e
-            logWarn(`Failed to load custom mode presets from '${customModesPath}': ${errMsg}`)
-          }
-        }
-      })
-
-      if (!isMap(presets) || Object.keys(presets).length === 0) {
-        logWarn(`Mode '${modeName}' requested but no presets are defined.`)
-        args.__modeApplied = true
-        return
-      }
-
-      function resolveModeKey(name) {
-        if (!isString(name)) return __
-        var target = name.trim()
-        if (target.length === 0) return __
-        var presetKeys = Object.keys(presets)
-        for (var j = 0; j < presetKeys.length; j++) {
-          var candidate = presetKeys[j]
-          if (candidate === target || candidate.toLowerCase() === target.toLowerCase()) return candidate
-        }
-        return __
-      }
-
-      function getModeParams(modeKey, modePreset) {
-        if (!isMap(modePreset)) return __
-        if (isDef(modePreset.params)) return modePreset.params
-        var inlineParams = {}
-        Object.keys(modePreset).forEach(function(paramKey) {
-          if (paramKey === "description" || paramKey === "include" || paramKey === "_include") return
-          inlineParams[paramKey] = modePreset[paramKey]
-        })
-        if (Object.keys(inlineParams).length > 0) return inlineParams
-        return __
-      }
-
-      function normalizeIncludeList(value) {
-        if (isArray(value)) return value
-        if (isString(value)) {
-          var trimmed = value.trim()
-          if (trimmed.length === 0) return []
-          if (trimmed.indexOf(",") >= 0) {
-            return trimmed.split(",").map(function(part) { return String(part || "").trim() }).filter(function(part) { return part.length > 0 })
-          }
-          return [ trimmed ]
-        }
-        return []
-      }
-
-      function resolveModeDefinition(modeKey, stack) {
-        if (!isString(modeKey) || modeKey.length === 0) throw "Invalid mode name."
-        var cycleStack = isArray(stack) ? stack.slice(0) : []
-        if (cycleStack.indexOf(modeKey) >= 0) {
-          cycleStack.push(modeKey)
-          throw "Circular mode include detected: " + cycleStack.join(" -> ")
-        }
-        cycleStack.push(modeKey)
-
-        var modePreset = presets[modeKey]
-        if (!isMap(modePreset)) throw "Mode '" + modeKey + "' preset is invalid."
-
-        var includeValue = isDef(modePreset.include) ? modePreset.include : modePreset._include
-        var includeList = normalizeIncludeList(includeValue)
-        var mergedParams = {}
-        includeList.forEach(function(includeName) {
-          var includeKey = resolveModeKey(includeName)
-          if (isUnDef(includeKey)) throw "Mode '" + modeKey + "' includes unknown mode '" + includeName + "'."
-          var includeResolved = resolveModeDefinition(includeKey, cycleStack)
-          mergedParams = merge(mergedParams, includeResolved.params)
-        })
-
-        var ownParams = getModeParams(modeKey, modePreset)
-        if (isArray(ownParams)) {
-          ownParams.forEach(function(entry) {
-            if (!isMap(entry)) return
-            mergedParams = merge(mergedParams, entry)
-          })
-        } else if (isMap(ownParams)) {
-          mergedParams = merge(mergedParams, ownParams)
-        } else if (isDef(ownParams)) {
-          throw "Mode '" + modeKey + "' has unsupported params definition."
-        }
-
-        return {
-          key        : modeKey,
-          description: isString(modePreset.description) ? modePreset.description : "",
-          params     : mergedParams,
-          includes   : includeList
-        }
-      }
-
-      var keys = Object.keys(presets)
-      var modeNames = normalizeIncludeList(modeName)
-      if (modeNames.length === 0) {
-        args.__modeApplied = true
-        return
-      }
-      var resolvedKeys = []
-      var resolvedPreset = { params: {}, description: "", includes: [] }
-      try {
-        modeNames.forEach(function(name) {
-          var modeKey = resolveModeKey(name)
-          if (isUnDef(modeKey)) throw "Mode '" + name + "' not found. Available modes: " + keys.join(", ")
-          var preset = resolveModeDefinition(modeKey, [])
-          resolvedKeys.push(modeKey)
-          resolvedPreset.params = merge(resolvedPreset.params, preset.params)
-          if (modeNames.length === 1) {
-            resolvedPreset.description = preset.description
-            resolvedPreset.includes = preset.includes
-          }
-        })
+        resolvedPreset = __miniAResolveModePreset(modeName, { basePath: miniABasePath, homeDir: isDef(__gHDir) ? __gHDir() : __ })
       } catch(e) {
         var modeErr = (isDef(e) && isString(e.message)) ? e.message : e
         logWarn(`Failed to resolve mode '${modeName}': ${modeErr}`)
         args.__modeApplied = true
         return
       }
-      var resolvedKey = resolvedKeys.join(",")
+      resolvedPreset.warnings.forEach(function(w) { logWarn(w) })
+      if (resolvedPreset.key.length === 0) {
+        args.__modeApplied = true
+        return
+      }
+      var resolvedKey = resolvedPreset.key
 
       var applied = []
       var skipped = []

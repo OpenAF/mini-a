@@ -1,0 +1,82 @@
+# Author: Nuno Aguiar
+help:
+  text: |
+    Run a wiki dream (reorganization by default) on a local Mini-A wiki, then compact it.
+    Stop other readers and writers of the wiki first: reorg can move, merge and delete
+    pages, and compaction rebuilds the serving index offline. Mutating modes (reorg,
+    apply, repair, auto) first zip the wiki to <wikiroot>.predream-<timestamp>.zip.
+
+    ojob utils/wikiDream.yaml wikiroot=okts/docs
+    ojob utils/wikiDream.yaml wikiroot=okts/docs semantic=true
+    ojob utils/wikiDream.yaml wikiroot=okts/docs dreamwikimode=plan
+    ojob utils/wikiDream.yaml wikiroot=okts/docs organize=topics mode=ollama
+
+    Defaults: mode=poweruser, dreamwikimode=reorg (with dreamwikireorg=true and
+    dreamwikiapproval=auto), usewikigraph=true, wikiretrievalv2=true, wikitelemetry=true
+    and wikilexical from OAF_MINI_A_WIKI_LEXICAL. Other Mini-A dream/wiki arguments
+    (dreammaxsteps, dreamreport, model, ...) are passed through.
+  expects:
+  - name: wikiroot
+    desc: Existing local wiki directory
+    mandatory: true
+  - name: mode
+    desc: "Mode preset for model and settings (default poweruser; none to skip)"
+    mandatory: false
+  - name: model
+    desc: SLON/JSON model config (overrides the mode preset, then OAF_MODEL)
+    mandatory: false
+  - name: dreamwikimode
+    desc: "Wiki dream mode (default reorg): auto, plan, apply, reorg, repair, reindex, graph, indexes"
+    mandatory: false
+  - name: semantic
+    desc: "Opt-in LLM semantic graph extraction (default false)"
+    mandatory: false
+  - name: backup
+    desc: "Zip the wiki next to it before a mutating dream (default true)"
+    mandatory: false
+  - name: dryrun
+    desc: "Propose changes without writing; skips backup and compaction (default false)"
+    mandatory: false
+  - name: compact
+    desc: "Compact the serving index afterwards (default true)"
+    mandatory: false
+  - name: organize
+    desc: "Reorg organization: none (default) or topics"
+    mandatory: false
+  - name: instructions
+    desc: Additional guidance appended to the reorg objective
+    mandatory: false
+  - name: dreammaxsteps
+    desc: Total model step budget for reorg/auto (default 40)
+    mandatory: false
+
+ojob:
+  logToConsole: false
+  catch: |
+    logErr("❌ " + (isMap(exception) && isDef(exception.stage) ? exception.stage + " failed: " + stringify(exception.result, __, "") : exception))
+    exit(1)
+todo:
+- Dream wiki
+jobs:
+- name: Dream wiki
+  exec: | #js
+    load(String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent()) + "/wikiJobsLib.js")
+    var logFn = wikiJobsLog
+    var prepared = wikiJobsPrepare(args, { kind: "dream", log: logFn, createRoot: false })
+    var dreamArgs = wikiJobsDreamArgs(prepared, args)
+    // plan only previews; nothing changes, so there is nothing to compact
+    if (dreamArgs.dreamwikimode === "plan") prepared.compact = false
+
+    var dream = wikiJobsDreamStage(prepared, dreamArgs, logFn)
+    if (dream.ok === false) wikiJobsFail("Dream (compaction skipped)", dream.reason || dream.error || (isMap(dream.wiki) ? dream.wiki.reason || dream.wiki.error : __), dream.backup)
+
+    try {
+      var compact = wikiJobsCompactStage(prepared, logFn)
+      if (isDef(compact)) log("Compaction result: " + stringify(compact, __, ""))
+    } catch(e) {
+      wikiJobsFail("Dream succeeded, but compaction (check the output before reopening the wiki)", isMap(e) && isDef(e.result) ? e.result : String(e), dream.backup)
+    }
+
+    logFn("✅ Wiki dream (" + dreamArgs.dreamwikimode + ") complete: " + prepared.root)
+    if (isDef(dream.backup)) logFn("🗄️  Pre-dream backup: " + dream.backup)
+    wikiJobsReaderHint(prepared, logFn)

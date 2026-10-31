@@ -1442,3 +1442,135 @@ function __miniAParseDelegate(text) {
   }
   return { goal: goal, options: options }
 }
+
+// ─────────────────────────────────────────────────────────────
+// Mode presets
+// ─────────────────────────────────────────────────────────────
+
+// __miniAResolveModePreset: resolve one or more comma-separated mode names into a merged
+// parameter map. Presets come from <basePath>/mini-a-modes.yaml, overridden by
+// ~/.openaf-mini-a_modes.yaml then ~/.openaf-mini-a/modes.yaml. Names match case-insensitively,
+// `include`/`_include` chains are merged first (cycles throw), and `params` may be a map, an
+// array of maps or inline keys. Returns { key, description, params, includes, warnings };
+// throws on an unknown/invalid mode. A preset file that fails to load is reported in warnings
+// (the bundled file failing also throws, as no presets can be resolved).
+// opts: { basePath: bundle root (required), homeDir: home directory override }
+var __miniAResolveModePreset = function(modeName, opts) {
+  opts = isMap(opts) ? opts : {}
+  var errText = function(e) { return (isDef(e) && isString(e.message)) ? e.message : String(e) }
+  var normalizeIncludeList = function(value) {
+    if (isArray(value)) return value
+    if (isString(value)) {
+      var trimmed = value.trim()
+      if (trimmed.length === 0) return []
+      if (trimmed.indexOf(",") >= 0) {
+        return trimmed.split(",").map(function(part) { return String(part || "").trim() }).filter(function(part) { return part.length > 0 })
+      }
+      return [ trimmed ]
+    }
+    return []
+  }
+  var unwrap = function(loaded) {
+    if (isMap(loaded) && isMap(loaded.modes)) return loaded.modes
+    if (isMap(loaded)) return loaded
+    return {}
+  }
+
+  var warnings = []
+  var basePath = isDef(opts.basePath) ? String(opts.basePath) : "."
+  var presets
+  try {
+    presets = unwrap(io.readFileYAML(basePath + "/mini-a-modes.yaml"))
+  } catch(e) {
+    throw "Failed to load mode presets: " + errText(e)
+  }
+
+  var homeDir = isDef(opts.homeDir) ? String(opts.homeDir)
+    : (typeof __gHDir === "function" ? __gHDir() : String(java.lang.System.getProperty("user.home")))
+  ;[".openaf-mini-a_modes.yaml", ".openaf-mini-a/modes.yaml"].forEach(function(fileName) {
+    var customPath = io.fileInfo((homeDir || ".") + "/" + fileName).canonicalPath
+    if (!io.fileExists(customPath)) return
+    try {
+      var customPresets = unwrap(io.readFileYAML(customPath))
+      // later custom files override earlier ones
+      if (Object.keys(customPresets).length > 0) presets = merge(presets, customPresets)
+    } catch(e) {
+      warnings.push("Failed to load custom mode presets from '" + customPath + "': " + errText(e))
+    }
+  })
+
+  if (!isMap(presets) || Object.keys(presets).length === 0) throw "Mode '" + modeName + "' requested but no presets are defined."
+
+  var resolveModeKey = function(name) {
+    if (!isString(name)) return __
+    var target = name.trim()
+    if (target.length === 0) return __
+    var presetKeys = Object.keys(presets)
+    for (var j = 0; j < presetKeys.length; j++) {
+      if (presetKeys[j] === target || presetKeys[j].toLowerCase() === target.toLowerCase()) return presetKeys[j]
+    }
+    return __
+  }
+  var getModeParams = function(modePreset) {
+    if (!isMap(modePreset)) return __
+    if (isDef(modePreset.params)) return modePreset.params
+    var inlineParams = {}
+    Object.keys(modePreset).forEach(function(paramKey) {
+      if (paramKey === "description" || paramKey === "include" || paramKey === "_include") return
+      inlineParams[paramKey] = modePreset[paramKey]
+    })
+    return Object.keys(inlineParams).length > 0 ? inlineParams : __
+  }
+  var resolveModeDefinition = function(modeKey, stack) {
+    if (!isString(modeKey) || modeKey.length === 0) throw "Invalid mode name."
+    var cycleStack = isArray(stack) ? stack.slice(0) : []
+    if (cycleStack.indexOf(modeKey) >= 0) {
+      cycleStack.push(modeKey)
+      throw "Circular mode include detected: " + cycleStack.join(" -> ")
+    }
+    cycleStack.push(modeKey)
+
+    var modePreset = presets[modeKey]
+    if (!isMap(modePreset)) throw "Mode '" + modeKey + "' preset is invalid."
+
+    var includeList = normalizeIncludeList(isDef(modePreset.include) ? modePreset.include : modePreset._include)
+    var mergedParams = {}
+    includeList.forEach(function(includeName) {
+      var includeKey = resolveModeKey(includeName)
+      if (isUnDef(includeKey)) throw "Mode '" + modeKey + "' includes unknown mode '" + includeName + "'."
+      mergedParams = merge(mergedParams, resolveModeDefinition(includeKey, cycleStack).params)
+    })
+
+    var ownParams = getModeParams(modePreset)
+    if (isArray(ownParams)) {
+      ownParams.forEach(function(entry) { if (isMap(entry)) mergedParams = merge(mergedParams, entry) })
+    } else if (isMap(ownParams)) {
+      mergedParams = merge(mergedParams, ownParams)
+    } else if (isDef(ownParams)) {
+      throw "Mode '" + modeKey + "' has unsupported params definition."
+    }
+    return {
+      key        : modeKey,
+      description: isString(modePreset.description) ? modePreset.description : "",
+      params     : mergedParams,
+      includes   : includeList
+    }
+  }
+
+  var modeNames = normalizeIncludeList(isString(modeName) ? modeName : "")
+  var resolvedKeys = []
+  var resolved = { params: {}, description: "", includes: [], warnings: warnings }
+  modeNames.forEach(function(name) {
+    var modeKey = resolveModeKey(name)
+    if (isUnDef(modeKey)) throw "Mode '" + name + "' not found. Available modes: " + Object.keys(presets).join(", ")
+    var preset = resolveModeDefinition(modeKey, [])
+    resolvedKeys.push(modeKey)
+    resolved.params = merge(resolved.params, preset.params)
+    if (modeNames.length === 1) {
+      resolved.description = preset.description
+      resolved.includes = preset.includes
+    }
+  })
+  resolved.key = resolvedKeys.join(",")
+  return resolved
+}
