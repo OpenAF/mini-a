@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20261026'
+version: '20261101'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -85,6 +85,7 @@ files:
 - docs/SUPERVISED.md
 - docs/VIRTUAL-SKILLS.md
 - docs/WHATS-NEW.md
+- docs/WIKI-QUICKSTART.md
 - docs/WIKI-RETRIEVAL-V2.md
 - docs/WIKI.md
 - docs/WORKIQ.md
@@ -95,6 +96,8 @@ files:
 - evals/fixtures/decision-catalog.yaml
 - evals/fixtures/skill-runtime/local/ledger-report/SKILL.md
 - evals/fixtures/skill-runtime/wiki/incident-review.md
+- evals/orchestration-decisions.yaml
+- evals/orchestration.yaml
 - evals/skills.yaml
 - evals/supervised.yaml
 - examples/CONTRACT.md
@@ -181,6 +184,7 @@ files:
 - mini-a-plugins.js
 - mini-a-policy.js
 - mini-a-progcall.js
+- mini-a-reflection-queue.js
 - mini-a-response.js
 - mini-a-router.js
 - mini-a-sandbox.js
@@ -231,26 +235,30 @@ files:
 - utils/graphStats.yaml
 - utils/indexStats.yaml
 - utils/wikiCompact.yaml
+- utils/wikiDream.yaml
 - utils/wikiGraph.yaml
+- utils/wikiHydrate.yaml
+- utils/wikiJobsLib.js
 - utils/wikiOps.yaml
+- utils/wikiQuery.yaml
 filesHash:
   .gitignore: b2f52bb5498ed71251fa0d2e76d32a9b9a1a0019
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENT-CHEATSHEET.md: 38a09d995d38b824a4c68397162040b15c425996
   AGENTS.md: 108ea2ac09a8fa0f5b1f72bf9511082f619c2a43
-  CHEATSHEET.md: 896c597de2a89328914cd3c7d6fb0e58baf81e11
+  CHEATSHEET.md: fc9d9b9d4d1e72f3cc384e675d5adba396430f19
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   METRICS.md: 7dd872f40105f3c2156a64f15bdf0bfa8ac5661b
-  README.md: a6a7da73b2a72a33d152b1a7b4e1d7aab0fc6834
+  README.md: 42fa5aebf9e8217994b8755a97b0d3744540599c
   RELEASE_NOTES.md: c73293147879b0288813a080a234b8a8c444447c
-  USAGE.md: 4afe6c2c7b376bedf02352b2277d68dbe816a138
+  USAGE.md: dae67891f57c265fc5f3c047ac7b28e33ac33355
   docs/ABSORB.md: 31bbe919b680e78b369772608d10dda78d1e015e
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/AGENT-PLUGINS.md: af8f692ac4bc690ac9df180e86bb1a1307a5aae5
   docs/BACKEND-ENDPOINTS.md: 6e8e9693f28e24e8d8def4136901805e8bc864a8
-  docs/DECISIONS.md: b7fba587b79a3186c75ae23fcecfe6a66d8949ba
+  docs/DECISIONS.md: bd9fea09c7d0ffb1f97ee762e8413d52251dd22a
   docs/DELEGATION.md: 1eeb7426009d94c369763aa363db0bd0428051d1
   docs/ENTRY-POINT-PARITY.md: f7930f9f07ce49dededd30280dcc5eccf4397917
   docs/LEARN.md: d61c674318b0655a2cdade7a2102339ac5fa4d75
@@ -261,9 +269,10 @@ filesHash:
   docs/SKILLS-YAML-FORMAT.md: 7457c1d133dea0e6ba860826339b2e8f7a23db94
   docs/SUPERVISED.md: 30d6a276f66d4319d3c66f7ad066a2df54c088a8
   docs/VIRTUAL-SKILLS.md: 42a62ce95a0310fb72f1af1115401891423f17e5
-  docs/WHATS-NEW.md: 651a11a3d9c22dfefd2bc1bfb7df6e7cc6d08ece
+  docs/WHATS-NEW.md: 71b8adb7db251baf8b37aad810053a6a3bf46bf7
+  docs/WIKI-QUICKSTART.md: a7bdd10a557bc722a676ec62542a119fc01be63c
   docs/WIKI-RETRIEVAL-V2.md: 4fe8883850461e4dd8ea717ef95f3281ccb36c77
-  docs/WIKI.md: 19f1d68eb71c4724d62f544ae08c23a37a0eb45b
+  docs/WIKI.md: fb949cf4283cf6833bc8d0030313519749539465
   docs/WORKIQ.md: 9d2a64d6e06e148775a77b8c4df40427ffb16524
   evals/context-virtualization.yaml: 3a58466efa06dbf3dfc028d6a4b59bfc3dcb80a6
   evals/core.yaml: 5bd4c7f5b1fc650e1b656a09f169fbaf2610a9ad
@@ -272,6 +281,8 @@ filesHash:
   evals/fixtures/decision-catalog.yaml: 0759cf787a5d91c2ac79ca4cd53e96a616feb659
   evals/fixtures/skill-runtime/local/ledger-report/SKILL.md: 2a37d73279b1f213108db6046bc089ad4b0329ca
   evals/fixtures/skill-runtime/wiki/incident-review.md: 1882292831ca2bad77bfd1ad3d18de05fb607049
+  evals/orchestration-decisions.yaml: b088d68bad5ee9bac479434030b8d7fcb0c178bd
+  evals/orchestration.yaml: 1f293c99e87a84285b62560b79ca0f7b45018bd3
   evals/skills.yaml: 719498fb101f605b62ffadcad6addd0639e51cbc
   evals/supervised.yaml: ba2e894c201ebb64dbfa6f320d45b88c492339e7
   examples/CONTRACT.md: 58d482c7a033e0c03e7b0fe40d037bcd99e663c9
@@ -336,11 +347,11 @@ filesHash:
   mini-a-absorb.yaml: 30929d15adaef1aba45c47336dbdd109c6a8a201
   mini-a-advanced.js: fa769acccdebcf40dee066911d8000d2180046ca
   mini-a-capabilities.js: 7627dbcf9cceb6cbc52178078ae54dec0cdd9665
-  mini-a-common.js: 0d8aaeb050d2ae28a399256916995d25cccb5b96
+  mini-a-common.js: d8d1ba3ee21f4bac6b73a36f6233c0adff5dbffd
   mini-a-con.js: 8953d1720b12352191542c1a002b7fece0f4e0da
-  mini-a-decision.js: 0b446ad0726c35640cabc5b6f395c8d415bae54e
+  mini-a-decision.js: 8ea3a49c2e7af5e05886add649dbe25c823bcf35
   mini-a-dreams.js: d4946f6f388f592f5587138ba693596ddeb34a63
-  mini-a-eval.js: 05bb4c4f2bf082c6e30740666422720b0bea3093
+  mini-a-eval.js: cf4810443fe36214305ab4682130d399bbcc5d1b
   mini-a-eval.yaml: 657c9cc6751213f326c46276c2ecaead7186acb5
   mini-a-fork-policy.js: 5da8a44ba71493fe0dfacfe1baf6fcd1973c53cd
   mini-a-graph.js: 4e93499f09dd85057a74094c6d605f1d74777f8c
@@ -353,41 +364,42 @@ filesHash:
   mini-a-memory.js: 0d35042c9ac24a6f277bbaa4422374a168fd8116
   mini-a-memoryman.js: a943c4a3f946140f3585940d53eda148fc47e4ab
   mini-a-modelman.js: 893127cfdbd0c007a090e4aa193129155828bc95
-  mini-a-modes.yaml: eaecb40c2ad9db90727b50a2ecfeb10c1b44d8bc
-  mini-a-orchestration.js: f1df95d9b04df9862a74421f9048534eb1c4b097
+  mini-a-modes.yaml: 754cc2598ee619e2f7d77845cc194a7bfa5cbda9
+  mini-a-orchestration.js: 0ef0ca1893bcdfd7cdcba66ff9d2dfb120fe24b1
   mini-a-plugins.js: db97218e8b99efdf940d1d309ca99d1a6aec8b2c
-  mini-a-policy.js: 39767cc38f00de6725344b1e1eca1000dedaee54
+  mini-a-policy.js: d763df1cf0d7fb1a75d38408a4064f55b556da29
   mini-a-progcall.js: 8b4986415b10c0c9bd0f5a20fe5a61c3eeb1b541
-  mini-a-response.js: 14d6bbe7dfd7cb9438624954638c8b5148b5b954
+  mini-a-reflection-queue.js: 207c26239123305b482eb051b05f537dc420d437
+  mini-a-response.js: 8670172ba964e0a30d70ed0458889b2dc3b81967
   mini-a-router.js: 381d0f2d34864fdca03d5d4f528fa0f827bbed48
   mini-a-sandbox.js: d2cb513e2bcde93fe9b9ba235e6fd5d7fb3743f5
-  mini-a-session.js: cede99cce19c869ac25d2a946c14bddad87f9fb5
-  mini-a-skill-runtime.js: fe1ac2f5b83eb42e97d107b1a93a9fb7b2c6fcdb
+  mini-a-session.js: 724dd4afd03884b263549899ff0751d1fd0d98ab
+  mini-a-skill-runtime.js: f0c28dcdee6651f48a87dbc2a3da03e1832aa9c4
   mini-a-skills.js: dc872bc2ab80de9cd48375768b642fab514bf826
-  mini-a-subtask.js: 4c0eb1ab97fcbda0bcf7d9dcbe1c00a2831c615a
-  mini-a-supervised.js: e9a0496adc01ef23336b3ed2d2770595e1e49dda
-  mini-a-tool-selection.js: b04e0f5b6f69e0e54b5aeb4d8ea444c12c1e0cfb
-  mini-a-utils.js: d69cb3065c9069ca7ed4e478356785ae3c07f69c
-  mini-a-web-attachments.js: db5231df27e2e3a98eaaf09c28c0ee46e3b8c636
-  mini-a-web-session.js: b2b5decf86800e75aa67d29f028fe2dc2f0b6ec9
+  mini-a-subtask.js: 77e7c31e5122a0457e64c1fcecdda1d5d8b436e9
+  mini-a-supervised.js: f7aee934432fc16da7dcf9c9372afb0c5acbe11c
+  mini-a-tool-selection.js: 4402d1831b821a43d9f7741752860543ff286e7d
+  mini-a-utils.js: fcaf6329fee45adb300a590c70e01f9e2cd81533
+  mini-a-web-attachments.js: f8a7c78c833b81f2f96b9833da464867655c0bc2
+  mini-a-web-session.js: ca1e7132056e33dff01483a2aea81517f8603764
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: c58d61f1a9b196e5ef84971b2a937b3de0cf1a02
+  mini-a-web.yaml: 874bcc56a6a4fe5763d4f877bae21f9918132ba7
   mini-a-wiki-knowledge.js: e610424bc39c3acce8f67ce3c8595a6213b28834
   mini-a-wiki-maintenance.js: c4eb53388a3674092c0a722e7631de09df759c8a
-  mini-a-wiki-retrieval.js: 8bdd6a99e9eb67eaae62b0ac1fa73085beb26dd7
-  mini-a-wiki.js: 3635b52faa854f5a9a87b64e67363ee68531e4e8
+  mini-a-wiki-retrieval.js: fe4f654f7831a26a31174f45514861ec0a4757a5
+  mini-a-wiki.js: b129e75d09193bfb2d64bf12d2f6f4eac4bbc8a6
   mini-a-wikiman.js: d3893459789696a0ab68e3fd7a7fb29f24c45255
   mini-a-wikiops.js: 8319cc308dca129e8b953ab621e07df961694d9a
-  mini-a-worker.yaml: 79fb5dd2a55789e6ee2d14c55e7576c9ff1c8737
-  mini-a.js: bad6b6eb0876d163509bd3881063d8d8363e111e
+  mini-a-worker.yaml: c4515b667c22fe6f41149e5858a29fa20a5798fc
+  mini-a.js: c8a5b2138cb3ff817201da7dfa65053761bd314b
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
-  mini-a.yaml: 3b99209cb461b6c29d6e70cf475cdb0adb2326c1
+  mini-a.yaml: 4b662d0cf3fe2bf9e5bb0d7390f02a7b26343aad
   public/advanced.css: 531d5c0b6252367e4234069b50b7d8061a196431
-  public/advanced.js: 5035cb582dd4dfc7bd0f86a1c2e0a2c56715f80c
+  public/advanced.js: cb6842cd678a5a44e1c0636bd30a72f88eda9cc8
   public/apple-touch-icon.png: 5e22ed6b303b377787779423b97c22f7b20b56ed
   public/data-editor.js: 1433293e0ed9f6486f14b6a91ed88684525a79b3
   public/favicon.ico: 7d62af53ff8c43ba32d022107153e6877567ba75
-  public/index.md: f03f629d420c5507b4f9636c42ced5adacdbf4d4
+  public/index.md: 51b0be5b3c7adea08e3992acace2a5019cf18e7e
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   skills/mini-a-contract-authoring/SKILL.md: ddb6c5ccf38cd2a75a1359747e6f293d6500a9b1
   skills/mini-a-contract-authoring/references/CONTRACT.md: 58d482c7a033e0c03e7b0fe40d037bcd99e663c9
@@ -408,5 +420,9 @@ filesHash:
   utils/graphStats.yaml: ce32169c30db09d0e74dfffdbba7d70c27db24bc
   utils/indexStats.yaml: 7fc4b114655146b3b3f94813949867485917bacd
   utils/wikiCompact.yaml: 9ed9b7842cd43d045c7b556539e15ed7ba392b06
+  utils/wikiDream.yaml: a25d05740d89f515ac2a0cb144f1763ce4b2c04f
   utils/wikiGraph.yaml: 2f80cb21d90fd6623833e52c8572beb4a5060cbc
+  utils/wikiHydrate.yaml: 5089022c0c3ee5a56c942ac95ed7f37dfe48251b
+  utils/wikiJobsLib.js: e47872b4473c632cde1f18b02767ab6e80754c68
   utils/wikiOps.yaml: fce153acf503c7a93b035ed87fb9296711cae91c
+  utils/wikiQuery.yaml: 4584642aee4ef7d37f88d092febd37026c25f9a9
