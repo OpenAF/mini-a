@@ -465,7 +465,7 @@ Mini-A ships with complementary components:
 - **`mini-a-web.sh` / `mini-a-web.yaml`** - Lightweight HTTP server for browser UI — launched via `mini-a web=true` or `mini-a onport=<port>` (or directly with `./mini-a-web.sh onport=<port>`)
 - **`mini-a-worker.yaml`** - Headless HTTP API server for programmatic agent delegation (launch with `mini-a workermode=true`)
 - **`mini-a-modes.yaml`** - Built-in configuration presets for common use cases (can be extended with `~/.openaf-mini-a_modes.yaml` or `~/.openaf-mini-a/modes.yaml`)
-- **`utils/`** - Standalone oJobs for offline constellation HTML exports (`ojob utils/wikiGraph.yaml dir=... output=atlas.html`) and wiki index/graph statistics (`ojob utils/indexStats.yaml dir=...`, `ojob utils/graphStats.yaml file=...`) — see [Wiki Guide](docs/WIKI.md#utility-ojobs-utils)
+- **`utils/`** - Standalone oJobs for offline constellation HTML exports (`ojob utils/wikiGraph.yaml dir=... output=atlas.html`), wiki index/graph statistics (`ojob utils/indexStats.yaml dir=...`, `ojob utils/graphStats.yaml file=...`), and wiki hydration and dream reorganization with compaction (`ojob utils/wikiHydrate.yaml wikiroot=... source=...`, `ojob utils/wikiDream.yaml wikiroot=...`) — see [Wiki Guide](docs/WIKI.md#utility-ojobs-utils) and the [wiki quickstart](docs/WIKI-QUICKSTART.md) (also `mini-a wikihydrate=true|wikidream=true|wikiquery=true`)
 - **`public/`** - Browser interface assets
 
 ## Common Configuration Options
@@ -477,6 +477,9 @@ Mini-A ships with complementary components:
 | `youare` | Override the opening persona sentence in the system prompt (inline text or `@file` path) to craft specialized agents | `"You are a goal-oriented agent running in background."` (Mini-A still appends the step-by-step directive, and adds the no-feedback remark for `mini-a-con`/`mini-a-web`) |
 | `chatyouare` | Override the chatbot persona sentence when `chatbotmode=true` (inline text or `@file` path) | `"You are a helpful conversational AI assistant."` |
 | `useshell` | Allow shell command execution | `false` |
+| `shellguard` | Decision-based shell risk guard: `auto`, `off`, or `decide`; auto activates with a configured decision model unless `usedecide=false` | `auto` |
+| `shellguardask` / `shellguarddeny` | Minimum risk requiring approval / denial (`low`, `medium`, `high`, `critical`); hard restrictions still win | `medium` / `critical` |
+| `shellguardtimeout` | Decision transport timeout in milliseconds; failed assessment asks interactively or blocks headlessly | `5000` |
 | `usesandbox` | Apply built-in OS sandbox presets for shell commands (`off`,`auto`,`linux`,`macos`,`windows`); warns and may degrade when the backend is unavailable | `off` |
 | `sandboxprofile` | Optional macOS profile path for `sandbox-exec`; when omitted, Mini-A generates a restrictive temporary `.sb` profile | - |
 | `sandboxnonetwork` | Disable network inside the built-in sandbox when supported; Windows remains best-effort | `false` |
@@ -847,3 +850,5 @@ with browser sign-in, SBucket credential persistence and read-only tools by defa
 ### Supervised execution
 
 Opt in with `modelstrategy=supervised` to prepare a protected contract with main and execute with LC. `savecontract=true` and `reusecontract=true` separately enable accepted-contract persistence and exact-goal reuse. See [supervised contracts](docs/SUPERVISED.md) for configuration, validation and evaluation.
+
+With `orchestration=auto`, Mini-A tracks progress independently of successful tool calls and checks task results before accepting them. Delegated work can declare dependencies, acceptance criteria, and resource scopes; optional `runmaxtokens` and `runmaxtimems` control aggregate admission across the agent tree. Durable runs reconcile prior remote work before resubmission. See [reliable automatic orchestration](USAGE.md#reliable-automatic-orchestration) for contracts, defaults, and verification commands.

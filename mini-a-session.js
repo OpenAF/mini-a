@@ -4,6 +4,84 @@
 
 var __miniASessionBundleRoot = String(new java.io.File(String(__loadedfrom)).getCanonicalFile().getParent())
 
+// Keep concurrent agent deltas separate. Prefixes are removed one level at a
+// time without trimming the actual delta (whitespace can be significant).
+function __miniAConsoleStreams(limit) {
+  var streams = {}, order = ["main"], selected = "main", closed = false
+  streams.main = { text: "", type: "stream" }
+  function route(message) {
+    var text = String(message || ""), path = [], match
+    while ((match = text.match(/^\[subtask:([^\]]+)\] /))) {
+      path.push(match[1]); text = text.substring(match[0].length)
+    }
+    return { id: path.length ? path.join("/") : "main", text: text }
+  }
+  return {
+    route: route,
+    push: function(type, message) {
+      if (closed) return
+      var part = route(message)
+      if (!streams[part.id]) { streams[part.id] = { text: "", type: type }; order.push(part.id) }
+      var stream = streams[part.id]
+      stream.text = (stream.text + part.text).slice(-(limit || 131072))
+      stream.type = type
+      return { text: part.text, visible: part.id === selected, added: order.length > 1, id: part.id }
+    },
+    snapshot: function() { return { id: selected, text: streams[selected].text, type: streams[selected].type, count: order.length } },
+    next: function(direction) {
+      selected = order[(order.indexOf(selected) + (direction === -1 ? -1 : 1) + order.length) % order.length]
+      return { id: selected, text: streams[selected].text, type: streams[selected].type, count: order.length }
+    },
+    multiple: function() { return order.length > 1 },
+    isClosed: function() { return closed },
+    close: function() { closed = true }
+  }
+}
+
+// A complete viewport frame: replacing it never appends another agent's text
+// to terminal history. The terminal's normal screen is preserved separately.
+function __miniAConsoleStreamFrame(view, content, width, height, notices) {
+  width = Math.max(1, width); height = Math.max(2, height)
+  var heading = "Stream: " + view.id + " [" + view.count + "] | Tab/Shift-Tab: switch | Esc: stop"
+  var alerts = (notices || []).slice(-Math.min(3, height - 2)).map(function(line) { return String(line).slice(0, width) })
+  var available = Math.max(1, height - 1 - alerts.length)
+  var lines = String(content || "Waiting for output...").split("\n")
+  var rows = [heading.slice(0, width)].concat(lines.slice(-available))
+  while (rows.length < height - alerts.length) rows.push("")
+  rows = rows.concat(alerts)
+  return "\x1b[H" + rows.map(function(row) { return "\x1b[2K" + row }).join("\r\n") + "\x1b[J"
+}
+
+// Wiki lifecycle shortcuts: mini-a wikihydrate=true|wikidream=true|wikiquery=true (or --wiki-hydrate, ...).
+// Returns { kind, job, args, error } with kind undefined when no shortcut was requested. The jobs under
+// utils/ own the behavior; this only picks one, normalizes the --alias form and rejects mixed modes.
+var MINIA_WIKI_SHORTCUTS = { hydrate: "utils/wikiHydrate.yaml", dream: "utils/wikiDream.yaml", query: "utils/wikiQuery.yaml" }
+function MiniAWikiShortcut(args) {
+  var result = {}
+  if (!isObject(args)) return result
+  var out = {}
+  var requested = []
+  Object.keys(args).forEach(function(key) {
+    var lower = String(key || "").toLowerCase()
+    var kind = Object.keys(MINIA_WIKI_SHORTCUTS).filter(function(k) { return lower === "wiki" + k || lower === "--wiki-" + k })[0]
+    if (isDef(kind)) {
+      var v = args[key]
+      // "--wiki-query" with no value arrives as true/"" ; an explicit false disables it
+      if (!(v === false || String(v).toLowerCase() === "false")) { if (requested.indexOf(kind) < 0) requested.push(kind) }
+      return
+    }
+    out[key] = args[key]
+  })
+  if (requested.length === 0) return result
+  if (requested.length > 1) return { error: "Only one of wikihydrate, wikidream and wikiquery can be used at a time (got " + requested.join(", ") + ")" }
+  var kind = requested[0]
+  var conflicts = ["wikiman", "modelman", "mcptest", "memoryman", "dream", "workermode"].filter(function(key) { return toBoolean(out[key]) === true })
+  if (kind !== "query") ["web", "onport", "goal"].forEach(function(key) { if (isDef(out[key])) conflicts.push(key) })
+  ;["exec", "agent", "agentfile"].forEach(function(key) { if (isDef(out[key]) && String(out[key]).trim().length > 0) conflicts.push(key) })
+  if (conflicts.length > 0) return { error: "wiki" + kind + " conflicts with " + conflicts.join(", ") }
+  return { kind: kind, job: MINIA_WIKI_SHORTCUTS[kind], args: out }
+}
+
 function MiniAInteractiveSession(args, adapter) {
   var host = MiniAInteractiveSession.host
   var commandResult
@@ -127,6 +205,16 @@ function MiniAInteractiveSession(args, adapter) {
     })
   }
 
+  // Wiki lifecycle shortcuts run the utils/ jobs before any mode or launcher defaults are applied
+  if (!adapter && !helpRequested && !cheatsheetRequested && isUnDef(requestedTemplateKind)) {
+    var wikiShortcut = MiniAWikiShortcut(args)
+    if (isString(wikiShortcut.error)) { logErr(wikiShortcut.error); exit(1, true) }
+    if (isString(wikiShortcut.kind)) {
+      oJobRunFile(miniABasePath + "/" + wikiShortcut.job, wikiShortcut.args, genUUID(), __, false)
+      exit(0, true)
+    }
+  }
+
   // Init
   MiniA.applyLauncherEnvDefaults(args)
 
@@ -156,165 +244,22 @@ function MiniAInteractiveSession(args, adapter) {
       var modeName = args.mode.trim()
       if (modeName.length === 0) return
 
-      var modesPath = miniABasePath + "/mini-a-modes.yaml"
-      var presets = {}
+      if (typeof __miniAResolveModePreset === "undefined") load(miniABasePath + "/mini-a-common.js")
+      var resolvedPreset
       try {
-        var loaded = io.readFileYAML(modesPath)
-        if (isMap(loaded) && isMap(loaded.modes)) {
-          presets = loaded.modes
-        } else if (isMap(loaded)) {
-          presets = loaded
-        } else {
-          presets = {}
-        }
-      } catch(e) {
-        var errMsg = (isDef(e) && isString(e.message)) ? e.message : e
-        logWarn(`Failed to load mode presets for '${modeName}': ${errMsg}`)
-        args.__modeApplied = true
-        return
-      }
-
-      // Load custom modes from user's home directory
-      function resolveCanonicalPath(basePath, fileName) {
-        return io.fileInfo((basePath || ".") + "/" + fileName).canonicalPath
-      }
-      var modesHome = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
-      ;[
-        resolveCanonicalPath(modesHome, ".openaf-mini-a_modes.yaml"),
-        resolveCanonicalPath(modesHome, ".openaf-mini-a/modes.yaml")
-      ].forEach(function(customModesPath) {
-        if (io.fileExists(customModesPath)) {
-          try {
-            var customLoaded = io.readFileYAML(customModesPath)
-            var customPresets = {}
-            if (isMap(customLoaded) && isMap(customLoaded.modes)) {
-              customPresets = customLoaded.modes
-            } else if (isMap(customLoaded)) {
-              customPresets = customLoaded
-            }
-            // Merge custom modes with default modes (later custom files override earlier ones)
-            if (isMap(customPresets) && Object.keys(customPresets).length > 0) {
-              presets = merge(presets, customPresets)
-            }
-          } catch(e) {
-            var errMsg = (isDef(e) && isString(e.message)) ? e.message : e
-            logWarn(`Failed to load custom mode presets from '${customModesPath}': ${errMsg}`)
-          }
-        }
-      })
-
-      if (!isMap(presets) || Object.keys(presets).length === 0) {
-        logWarn(`Mode '${modeName}' requested but no presets are defined.`)
-        args.__modeApplied = true
-        return
-      }
-
-      function resolveModeKey(name) {
-        if (!isString(name)) return __
-        var target = name.trim()
-        if (target.length === 0) return __
-        var presetKeys = Object.keys(presets)
-        for (var j = 0; j < presetKeys.length; j++) {
-          var candidate = presetKeys[j]
-          if (candidate === target || candidate.toLowerCase() === target.toLowerCase()) return candidate
-        }
-        return __
-      }
-
-      function getModeParams(modeKey, modePreset) {
-        if (!isMap(modePreset)) return __
-        if (isDef(modePreset.params)) return modePreset.params
-        var inlineParams = {}
-        Object.keys(modePreset).forEach(function(paramKey) {
-          if (paramKey === "description" || paramKey === "include" || paramKey === "_include") return
-          inlineParams[paramKey] = modePreset[paramKey]
-        })
-        if (Object.keys(inlineParams).length > 0) return inlineParams
-        return __
-      }
-
-      function normalizeIncludeList(value) {
-        if (isArray(value)) return value
-        if (isString(value)) {
-          var trimmed = value.trim()
-          if (trimmed.length === 0) return []
-          if (trimmed.indexOf(",") >= 0) {
-            return trimmed.split(",").map(function(part) { return String(part || "").trim() }).filter(function(part) { return part.length > 0 })
-          }
-          return [ trimmed ]
-        }
-        return []
-      }
-
-      function resolveModeDefinition(modeKey, stack) {
-        if (!isString(modeKey) || modeKey.length === 0) throw "Invalid mode name."
-        var cycleStack = isArray(stack) ? stack.slice(0) : []
-        if (cycleStack.indexOf(modeKey) >= 0) {
-          cycleStack.push(modeKey)
-          throw "Circular mode include detected: " + cycleStack.join(" -> ")
-        }
-        cycleStack.push(modeKey)
-
-        var modePreset = presets[modeKey]
-        if (!isMap(modePreset)) throw "Mode '" + modeKey + "' preset is invalid."
-
-        var includeValue = isDef(modePreset.include) ? modePreset.include : modePreset._include
-        var includeList = normalizeIncludeList(includeValue)
-        var mergedParams = {}
-        includeList.forEach(function(includeName) {
-          var includeKey = resolveModeKey(includeName)
-          if (isUnDef(includeKey)) throw "Mode '" + modeKey + "' includes unknown mode '" + includeName + "'."
-          var includeResolved = resolveModeDefinition(includeKey, cycleStack)
-          mergedParams = merge(mergedParams, includeResolved.params)
-        })
-
-        var ownParams = getModeParams(modeKey, modePreset)
-        if (isArray(ownParams)) {
-          ownParams.forEach(function(entry) {
-            if (!isMap(entry)) return
-            mergedParams = merge(mergedParams, entry)
-          })
-        } else if (isMap(ownParams)) {
-          mergedParams = merge(mergedParams, ownParams)
-        } else if (isDef(ownParams)) {
-          throw "Mode '" + modeKey + "' has unsupported params definition."
-        }
-
-        return {
-          key        : modeKey,
-          description: isString(modePreset.description) ? modePreset.description : "",
-          params     : mergedParams,
-          includes   : includeList
-        }
-      }
-
-      var keys = Object.keys(presets)
-      var modeNames = normalizeIncludeList(modeName)
-      if (modeNames.length === 0) {
-        args.__modeApplied = true
-        return
-      }
-      var resolvedKeys = []
-      var resolvedPreset = { params: {}, description: "", includes: [] }
-      try {
-        modeNames.forEach(function(name) {
-          var modeKey = resolveModeKey(name)
-          if (isUnDef(modeKey)) throw "Mode '" + name + "' not found. Available modes: " + keys.join(", ")
-          var preset = resolveModeDefinition(modeKey, [])
-          resolvedKeys.push(modeKey)
-          resolvedPreset.params = merge(resolvedPreset.params, preset.params)
-          if (modeNames.length === 1) {
-            resolvedPreset.description = preset.description
-            resolvedPreset.includes = preset.includes
-          }
-        })
+        resolvedPreset = __miniAResolveModePreset(modeName, { basePath: miniABasePath, homeDir: isDef(__gHDir) ? __gHDir() : __ })
       } catch(e) {
         var modeErr = (isDef(e) && isString(e.message)) ? e.message : e
         logWarn(`Failed to resolve mode '${modeName}': ${modeErr}`)
         args.__modeApplied = true
         return
       }
-      var resolvedKey = resolvedKeys.join(",")
+      resolvedPreset.warnings.forEach(function(w) { logWarn(w) })
+      if (resolvedPreset.key.length === 0) {
+        args.__modeApplied = true
+        return
+      }
+      var resolvedKey = resolvedPreset.key
 
       var applied = []
       var skipped = []
@@ -678,6 +623,10 @@ function MiniAInteractiveSession(args, adapter) {
     memorywritemax: { type: "number", description: "Maximum memory_write calls allowed per run" },
     memorymd: { type: "boolean", description: "Store global memory as path-keyed markdown strings in memorych (one .md record per entry)" },
     memoryreflect: { type: "boolean", description: "After a successful run, make one extra LLM call to extract durable memories (default true when usememory=true)" },
+    memoryreflectmode: { type: "string", description: "Reflection scheduling: background (default) or sync" },
+    acceptancereview: { type: "boolean", description: "Review final answers before acceptance (default false)" },
+    acceptanceoptimization: { type: "boolean", description: "Enable deterministic acceptance optimizations" },
+    proxyargrepair: { type: "boolean", description: "Repair unambiguous read-only proxy operation aliases" },
     memoryreflectmodel: { type: "string", description: "Model config for the reflection pass (falls back to OAF_REFLECT_MODEL, then the low-cost model, then the main model)", dataEditor: "map" },
     memoryreflectmin: { type: "number", description: "Minimum total tool/shell calls a run must have made to qualify for reflection" },
     memorycandidatedays: { type: "number", description: "Expiry window for an unconfirmed model-authored global candidate before a second session confirms it" },
@@ -756,7 +705,8 @@ function MiniAInteractiveSession(args, adapter) {
     usevectors     : { type: "boolean", default: false, description: "Enable infographic-focused vector bundle (usesvg + usediagrams)" },
     usestream      : { type: "boolean", default: false, description: "Stream LLM tokens in real-time as they arrive" },
     useplanning    : { type: "boolean", default: false, description: "Track and expose task planning" },
-    orchestration  : { type: "string", default: "manual", description: "Execution strategy mode: manual or deterministic auto." },
+    orchestration  : { type: "string", default: "manual", description: "Execution strategy mode: manual or auto with progress tracking, task acceptance and shared budget admission." },
+    orchestrationcontext: { type: "string", default: "auto", description: "Automatic strategy context: auto, interactive, or batch." },
     usememory      : { type: "boolean", default: false, description: "Enable structured working memory during execution" },
     memoryuser     : { type: "boolean", default: false, description: "Enable usememory and auto-configure ~/.openaf-mini-a file-backed global and session memory." },
     memoryusersession: { type: "boolean", default: false, description: "Enable usememory and auto-configure ~/.openaf-mini-a file-backed session memory only." },
@@ -864,6 +814,8 @@ function MiniAInteractiveSession(args, adapter) {
     rtm            : { type: "number", description: "Legacy alias for rpm (requests per minute)" },
     tpm            : { type: "number", description: "Tokens per minute limit" },
     maxsteps       : { type: "number", description: "Maximum consecutive non-success steps" },
+    runmaxtokens   : { type: "number", description: "Aggregate auto-mode model token admission cap across the agent tree (0=unlimited)." },
+    runmaxtimems   : { type: "number", description: "Aggregate auto-mode elapsed-time admission cap in milliseconds (0=unlimited)." },
     maxtotalsteps  : { type: "number", description: "Hard ceiling on total steps regardless of progress (0=disabled)" },
     maxcontext     : { type: "number", description: "Maximum allowed context tokens" },
     compressgoal   : { type: "boolean", default: false, description: "Automatically compress oversized goal text before execution" },
@@ -876,6 +828,10 @@ function MiniAInteractiveSession(args, adapter) {
     shellprefix    : { type: "string", description: "Prefix applied to each shell command" },
     shellallow     : { type: "string", description: "Comma-separated shell allow list" },
     shellbanextra  : { type: "string", description: "Comma-separated extra banned commands" },
+    shellguard : { type: "string", default: "auto", description: "Shell decision guard: auto (configured decision model), off, or decide (required model)" },
+    shellguardask : { type: "string", default: "medium", description: "Minimum shell risk requiring approval: low, medium, high, critical" },
+    shellguarddeny : { type: "string", default: "critical", description: "Minimum shell risk denied without approval: low, medium, high, critical" },
+    shellguardtimeout : { type: "number", default: 5000, description: "Shell decision request timeout in milliseconds" },
     browsercontext : { type: "string", dataEditor: "map", description: "Browser context configuration (JSSLON/JSON) or true to auto-enable when needed." },
     mcp            : { type: "string", dataEditor: "map", description: "MCP connection definition (SLON/JSON)" },
     agent          : { type: "string", description: "Markdown agent profile path or inline content with YAML metadata to prefill args" },
@@ -979,6 +935,7 @@ function MiniAInteractiveSession(args, adapter) {
     forkstatemaxbytes: { type: "number", default: 65536, description: "Maximum serialized state size shared with delegated subtasks." },
     showdelegate   : { type: "boolean", default: false, description: "Show delegate/subtask events as separate lines (default keeps them inline)" },
     toolfallback   : { type: "boolean", default: false, description: "Retry in action mode when tool-calling output is malformed." },
+    usejsonschema : { type: "string", description: "Schema responses: auto (default) or off." },
     usejsontool    : { type: "boolean", description: "Use JSON action dispatch instead of native tools on both model tiers." },
     useskills      : { type: "boolean", default: false, description: "Expose the skills utility tool and auto-load high-confidence matching skills." },
     usestdutils    : { type: "boolean", default: false, description: "Enable standard-utils compatibility aliases (question, skill, todowrite, etc.)." },
@@ -999,6 +956,9 @@ function MiniAInteractiveSession(args, adapter) {
     onport         : { type: "number", description: "Start the web UI on the provided port." },
     web            : { type: "boolean", default: false, description: "Start in web UI mode." },
     wikiman        : { type: "boolean", default: false, description: "Start the guided wiki operations manager." },
+    wikihydrate    : { type: "boolean", default: false, description: "Create/update a local wiki from source=<folder> (runs utils/wikiHydrate.yaml; alias --wiki-hydrate)." },
+    wikidream      : { type: "boolean", default: false, description: "Reorganize a local wiki (runs utils/wikiDream.yaml; alias --wiki-dream). Not the memory dream=true." },
+    wikiquery      : { type: "boolean", default: false, description: "Query a local wiki read-only in the console, with onport=/web=true or goal= (runs utils/wikiQuery.yaml; alias --wiki-query)." },
     modelman       : { type: "boolean", default: false, description: "Start the model manager UI instead of the console." },
     mcptest        : { type: "boolean", default: false, description: "Start the MCP test mode instead of the console." },
     memoryman      : { type: "boolean", default: false, description: "Start the memory manager UI instead of the console." },
@@ -1060,6 +1020,9 @@ function MiniAInteractiveSession(args, adapter) {
     onport: true,
     web: true,
     wikiman: true,
+    wikihydrate: true,
+    wikidream: true,
+    wikiquery: true,
     modelman: true,
     mcptest: true,
     memoryman: true,
@@ -1092,21 +1055,21 @@ function MiniAInteractiveSession(args, adapter) {
     { category: "Session", subcategory: "Console and editor", names: "editor homedir libs mode modelman showseparator useeditor".split(" ") },
     { category: "Models and execution", subcategory: "Model selection", names: "model modeldec modellc modellock modelstrategy contractfile contractargs savecontract reusecontract modelval modelvisual secpass".split(" ") },
     { category: "Models and execution", subcategory: "Decisions and advisors", names: "advisorbudgetratio advisorcooldownsteps advisorenable advisormaxuses advisoronambiguity advisoronharddecision advisoronrisk emergencyreserve evidencegate evidencegatestrictness harddecision lcbudget lcescalatedefer lcjsonretries lcreplytool llmcomplexity usedecide".split(" ") },
-    { category: "Models and execution", subcategory: "Budgets and limits", names: "lccontextlimit maxsteps maxtotalsteps rpm rtm tpm".split(" ") },
-    { category: "Models and execution", subcategory: "Planning", names: "convertplan earlystopthreshold forceplanning forceupdates orchestration plancontent planfile planformat planlog planmode planstyle resumefailed saveplannotes updatefreq updateinterval useplanning validateplan".split(" ") },
+    { category: "Models and execution", subcategory: "Budgets and limits", names: "lccontextlimit maxsteps maxtotalsteps runmaxtokens runmaxtimems rpm rtm tpm".split(" ") },
+    { category: "Models and execution", subcategory: "Planning", names: "convertplan earlystopthreshold forceplanning forceupdates orchestration orchestrationcontext plancontent planfile planformat planlog planmode planstyle resumefailed saveplannotes updatefreq updateinterval useplanning validateplan".split(" ") },
     { category: "Models and execution", subcategory: "Outer loop", names: "outerloop outerloopinstructions taskfile specfile outerloopsessionid outerloopmaxcycles outerloopmaxtime outerloopstoponrepeat outerloopmaxnochange trackchanges changetrackroot".split(" ") },
     { category: "Models and execution", subcategory: "Research and validation", names: "deepresearch maxcycles persistlearnings valgoal validationgoal validationthreshold valtools".split(" ") },
     { category: "Models and execution", subcategory: "Prompt and tool routing", names: "adaptiverouting promptprofile routerallow routerdeny routerorder routerproxythreshold systempromptbudget".split(" ") },
-    { category: "Tools and permissions", subcategory: "Shell and sandbox", names: "checkall readwrite sandboxnonetwork sandboxprofile shell shellallow shellallowpipes shellbanextra shellbatch shellmaxbytes shellprefix shelltimeout usesandbox useshell".split(" ") },
-    { category: "Tools and permissions", subcategory: "Tools and utilities", names: "toolargcheck toolargrepair toolresultmaxinline readresultmaxmatches capabilitylimit capabilityselection fileallow policy policyfile toolcachettl toolfallback usejsontool usestdutils usetools usetoolslc useutils utilsallow utilsdeny utilsroot".split(" ") },
+    { category: "Tools and permissions", subcategory: "Shell and sandbox", names: "checkall readwrite sandboxnonetwork sandboxprofile shell shellallow shellallowpipes shellbanextra shellguard shellguardask shellguarddeny shellguardtimeout shellbatch shellmaxbytes shellprefix shelltimeout usesandbox useshell".split(" ") },
+    { category: "Tools and permissions", subcategory: "Tools and utilities", names: "toolargcheck toolargrepair toolresultmaxinline readresultmaxmatches capabilitylimit capabilityselection fileallow policy policyfile toolcachettl toolfallback usejsonschema usejsontool usestdutils usetools usetoolslc useutils utilsallow utilsdeny utilsroot".split(" ") },
     { category: "Tools and permissions", subcategory: "MCP connections", names: "mcp mcpdynamic sessionprewarm mcplazy mcptest nosetmcpwd".split(" ") },
     { category: "Tools and permissions", subcategory: "MCP proxy and programmatic calls", names: "mcpproxyallow mcpproxydeny mcpproxynative mcpprogcall mcpprogcallbatchmax mcpprogcallmaxbytes mcpprogcallport mcpprogcallresultttl mcpprogcalltools mcpproxy mcpproxythreshold mcpproxytoon".split(" ") },
     { category: "Tools and permissions", subcategory: "Skills and extensions", names: "extracommands extrahooks extraskills mini-a-docs miniadocs plugins pluginsroot pluginsroots skillcontextchars skillmanifestchars skillmaxautoload skillsautolimit skillsautosearch skillsmaxchars skillsmaxloaded skillwikibackend skillwikimounts skillwikiroot useskills useskillswiki".split(" ") },
-    { category: "Memory and knowledge", subcategory: "Memory stores and retention", names: "memoryartifactttldays memoryindexttldays memoryinject memoryrelevantcap usememorywrite memorywritemax memorymd memoryreflect memoryreflectmodel memoryreflectmin memorycandidatedays memorybudget memorysearchbudget memorysessionmaxdays memorypersistevery memorych memorycompactevery memorydedup memoryman memorymaxentries memorymaxpersection memorypromote memoryscope memorysessionch memorysessionheader memorysessionid memorystaledays memoryuser memoryusersession usememory".split(" ") },
+    { category: "Memory and knowledge", subcategory: "Memory stores and retention", names: "memoryartifactttldays memoryindexttldays memoryinject memoryrelevantcap usememorywrite memorywritemax memorymd memoryreflect memoryreflectmode acceptancereview acceptanceoptimization proxyargrepair memoryreflectmodel memoryreflectmin memorycandidatedays memorybudget memorysearchbudget memorysessionmaxdays memorypersistevery memorych memorycompactevery memorydedup memoryman memorymaxentries memorymaxpersection memorypromote memoryscope memorysessionch memorysessionheader memorysessionid memorystaledays memoryuser memoryusersession usememory".split(" ") },
     { category: "Memory and knowledge", subcategory: "Wiki graph", names: "wikigraphautosave wikigraphsavedebouncems usewikigraph wikigraphcommunity wikigraphcross wikigraphcrosscap wikigraphcrossdepth wikigraphcrossjoin wikigraphcrossmaxdf wikigraphcrossminkeylen wikigraphfalkorgraph wikigraphfalkorhost wikigraphfalkorpass wikigraphfalkorport wikigraphfalkoruser wikigraphhintcap wikigraphmounts wikigraphsearchhints wikigraphsemantic wikimountgraphttlms".split(" ") },
     { category: "Memory and knowledge", subcategory: "Wiki retrieval and maintenance", names: "wikimetacache wikisourceurl wikisourcefield wikisourceinline wikilexical wikilintresultlimit wikilintstaleddays wikiretrievalconfig wikiretrievalv2 wikitarget wikitelemetry".split(" ") },
     { category: "Memory and knowledge", subcategory: "Wiki model budgets", names: "wikillmbudget wikiingestbudget wikiingestmaxcalls wikimaxprompttokens".split(" ") },
-    { category: "Memory and knowledge", subcategory: "Wiki storage and access", names: "wikiindexdir s3artifactbundle usewiki wikiaccess wikiaccesskey wikiartifactrefreshsecs wikibackend wikibucket wikihttpindexurl wikihttptimeout wikiignorecertcheck wikiman wikimounts wikiprefix wikiregion wikiroot wikis3artifactprefix wikisecret wikiurl wikiuseversion1".split(" ") },
+    { category: "Memory and knowledge", subcategory: "Wiki storage and access", names: "wikiindexdir s3artifactbundle usewiki wikiaccess wikiaccesskey wikiartifactrefreshsecs wikibackend wikibucket wikihttpindexurl wikihttptimeout wikiignorecertcheck wikidream wikihydrate wikiman wikimounts wikiprefix wikiquery wikiregion wikiroot wikis3artifactprefix wikisecret wikiurl wikiuseversion1".split(" ") },
     { category: "Memory and knowledge", subcategory: "Ingestion and absorption", names: "ingestmode absorbmaxpages absorbmaxtokens absorboutput ingestallowemptyprune ingestchunkchars ingestconcurrency ingestdryrun ingestexclude ingestforce ingestinclude ingestindependent ingestlayout ingestledger ingestmaxfilekb ingestprune ingestsection ingestsource ingestsourceid ingesttype".split(" ") },
     { category: "Memory and knowledge", subcategory: "Dream consolidation", names: "dreamwikimaxaffected dryrun maxauditrecords dream dreammaxsteps dreammemorymode dreammode dreamreport dreamwiki dreamwikiapproval dreamwikidryrun dreamwikiinstructions dreamwikilintresultlimit dreamwikillm dreamwikimaxdepth dreamwikiminpages dreamwikimode dreamwikiorganize dreamwikireorg".split(" ") },
     { category: "Delegation and servers", subcategory: "Delegation and subtasks", names: "autodelegation autodelegationmaxperstep autodelegationthreshold delegationhardtimeout delegationmaxdepth delegationmaxretries delegationstalltimeout delegationtimeout forkstatemaxbytes forkpolicy forkdecide maxconcurrent noisytools showdelegate subtasks subtasksfile subtaskssequential usea2a usedelegation".split(" ") },
@@ -1147,6 +1110,9 @@ function MiniAInteractiveSession(args, adapter) {
       { option: "exec=\"/<cmd> ...args\"", description: "Execute one custom command/skill template and exit (use /cmd or $skill)." },
       { option: "onport=<port>", description: "Start the Mini-A web UI on the provided port (alias for web mode)." },
       { option: "wikiman=true", description: "Start the guided wiki operations manager; prints replayable CLI commands." },
+      { option: "wikihydrate=true", description: "Create/update a local wiki: wikiroot=<dir> source=<folder> (also --wiki-hydrate)." },
+      { option: "wikidream=true", description: "Reorganize a local wiki: wikiroot=<dir> (also --wiki-dream; not the memory dream=true)." },
+      { option: "wikiquery=true", description: "Query a local wiki read-only: wikiroot=<dir> [onport=<port>|goal=<text>] (also --wiki-query)." },
       { option: "modelman=true", description: "Start the model manager instead of the console experience." },
       { option: "mcptest=true", description: "Start the MCP test client instead of the console experience." },
       { option: "memoryman=true", description: "Start the memory manager UI for global/session stores." },
@@ -1209,6 +1175,8 @@ function MiniAInteractiveSession(args, adapter) {
       { cmd: "mini-a mode=research goal=\"Summarize the project plan.\"", desc: "# Load research mode and run a goal." },
       { cmd: "mini-a onport=9090", desc: "# Start web chat on port 9090." },
       { cmd: "mini-a wikiman=true wikiroot=/path/to/wiki", desc: "# Launch wiki operations manager (read-only by default)." },
+      { cmd: "mini-a wikihydrate=true wikiroot=./wiki source=./docs", desc: "# Build a wiki from a folder (creates it if missing)." },
+      { cmd: "mini-a wikiquery=true wikiroot=./wiki onport=8888", desc: "# Browse and ask questions of a wiki in the web UI." },
       { cmd: "mini-a modelman=true", desc: "# Launch model manager UI." },
       { cmd: "mini-a mcptest=true", desc: "# Launch MCP test client." },
       { cmd: "mini-a memoryman=true usememory=true memoryuser=true", desc: "# Launch memory manager with user channels." },
@@ -2558,6 +2526,13 @@ function MiniAInteractiveSession(args, adapter) {
               if (filter.indexOf(debugFilterLower) === 0) candidates.add(filter)
             })
             return candidates.isEmpty() ? -1 : Number(debugInsertionPoint)
+          }
+
+          if (lookupName === "help") {
+            var helpRemainder = uptoCursor.substring(firstSpace + 1).replace(/^\s*/, "").toLowerCase()
+            if (/\s/.test(helpRemainder)) return -1
+            if ("custom".indexOf(helpRemainder) === 0) candidates.add("custom")
+            return candidates.isEmpty() ? -1 : Number(cursor - helpRemainder.length)
           }
 
           if (lookupName === "decide") {
@@ -4717,6 +4692,13 @@ function MiniAInteractiveSession(args, adapter) {
     totalChars: 0,
     contentChars: 0
   }
+  var _consoleStreams = __
+  var _consoleStreamLock = "mini_a_console_stream_" + genUUID()
+  var _consoleStreamHint = false
+  var _consoleScreenActive = false
+  var _consoleScreenDrawnAt = 0
+  var _consoleScreenSignature = ""
+  var _consoleScreenNotices = []
   var _streamHasRendered = false
   var _stringifyFinalResult = function(v, pretty) {
     return stringify(v, __, pretty ? "  " : "")
@@ -4732,8 +4714,8 @@ function MiniAInteractiveSession(args, adapter) {
       (!isString(sessionOptions.format) || sessionOptions.format === "md")
   }
 
-  function _renderConsoleAnswerMarkdown(text, kind) {
-    return __miniAMarkdownRender(text, _getConsoleRenderWidth(), {
+  function _renderConsoleAnswerMarkdown(text, kind, width) {
+    return __miniAMarkdownRender(text, isNumber(width) ? width : _getConsoleRenderWidth(), {
       ansi: __conAnsi === true, kind: kind,
       useasciiviz: _consoleChartsEnabled(),
       renderChart: function(params) {
@@ -4795,6 +4777,58 @@ function MiniAInteractiveSession(args, adapter) {
     }
     _streamRenderer.feed(streamText)
   }
+  function _drawConsoleStreamScreen(force) {
+    if (!_consoleScreenActive || !_consoleStreams) return
+    if (!force && now() - _consoleScreenDrawnAt < 100) return
+    var view = _consoleStreams.snapshot()
+    var width = Math.max(1, _getConsoleRenderWidth() - 1)
+    var height = Math.max(2, Number(__con.getTerminal().getHeight()) || 24)
+    var signature = view.id + "|" + view.count + "|" + width + "|" + height + "|" + view.text + "|" + _consoleScreenNotices.join("\n")
+    if (!force && signature === _consoleScreenSignature) return
+    var rendered = _renderConsoleAnswerMarkdown(view.text, __, width)
+    rendered = ow.format.string.wordWrap(rendered, width)
+    printnl(__miniAConsoleStreamFrame(view, rendered, width, height, _consoleScreenNotices))
+    _consoleScreenSignature = signature
+    _consoleScreenDrawnAt = now()
+  }
+
+  function _openConsoleStreamScreen() {
+    if (__conAnsi !== true || _consoleScreenActive) return
+    _flushStreamRemainder()
+    _resetStreamRenderState()
+    _prevEventRenderLines = __
+    _prevEventAnimatedRenderer = __
+    printnl("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H")
+    _consoleScreenActive = true
+    _drawConsoleStreamScreen(true)
+  }
+
+  function _closeConsoleStreamScreen() {
+    if (!_consoleScreenActive) return
+    _consoleScreenActive = false
+    printnl("\x1b[?25h\x1b[?1049l")
+    _streamRenderer = __
+    _streamPreviewLines = 0
+    _streamNeedsTerminator = false
+    _prevEventRenderLines = __
+    _prevEventAnimatedRenderer = __
+    _consoleScreenNotices.forEach(function(line) { print(line) })
+  }
+
+  function _nextConsoleStream(direction) {
+    if (!_consoleStreams || !_consoleStreams.multiple()) return
+    sync(function() {
+      var selected = _consoleStreams.next(direction)
+      if (_consoleScreenActive) { _drawConsoleStreamScreen(true); return }
+      _flushStreamRemainder()
+      _resetStreamRenderState()
+      _prevEventRenderLines = __
+      _prevEventAnimatedRenderer = __
+      print("\n[Stream: " + selected.id + " · Tab/Shift-Tab: next/previous stream · Esc: stop]")
+      _renderStreamChunk(selected.text, selected.type)
+    }, _consoleStreamLock)
+  }
+
   function _parseDelegateSubtaskMessage(message) {
     if (!isString(message)) return __
     var match = message.match(/^\[subtask:([^\]]+)\]\s*(.*)$/)
@@ -5412,6 +5446,11 @@ function MiniAInteractiveSession(args, adapter) {
 
   function runGoal(goalText, skillUsage, displayPrompt) {
     var submittedAt = now()
+    _consoleStreams = adapter ? __ : __miniAConsoleStreams()
+    var goalStreams = _consoleStreams
+    _consoleStreamHint = false
+    _consoleScreenSignature = ""
+    _consoleScreenNotices = []
     _streamOutputStats.totalChars = 0
     _streamOutputStats.contentChars = 0
     _lastRenderedPlanSignature = ""
@@ -5455,9 +5494,39 @@ function MiniAInteractiveSession(args, adapter) {
     activeAgent = agent
     agent._beginStartupTiming(_args)
     agent.setInteractionFn(function(event, message) {
-      agent.defaultInteractionFn(event, message, function(icon, text, id) {
-        printEvent(event, icon, text, id)
-      })
+      sync(function() {
+        if (goalStreams && (goalStreams !== _consoleStreams || goalStreams.isClosed())) return
+        if (_consoleStreams && (event === "stream" || event === "planner_stream")) {
+          var part = _consoleStreams.push(event, message)
+          if (!part) return
+          if (_activityCueActive) _stopActivityCueLoop()
+          if (part.added && !_consoleStreamHint) {
+            _consoleStreamHint = true
+            if (__conAnsi === true) _openConsoleStreamScreen()
+            else {
+              _flushStreamRemainder()
+              print("\n[Multiple streams · viewing main · Tab/Shift-Tab: next/previous stream · Esc: stop]")
+              _prevEventRenderLines = __
+              _prevEventAnimatedRenderer = __
+            }
+          }
+          if (_consoleScreenActive) return // Input poll redraws at most ten times/second.
+          if (part.visible) printEvent(event, "", part.text, part.id)
+          return
+        }
+        if (_consoleScreenActive && (event === "warn" || event === "error")) {
+          _consoleScreenNotices.push(event.toUpperCase() + ": " + String(message).replace(/[\r\n\x1b]/g, " "))
+          _consoleScreenNotices = _consoleScreenNotices.slice(-3)
+          _drawConsoleStreamScreen(true)
+          return
+        }
+        // Background status chatter must not interrupt the selected answer.
+        // Full diagnostics remain available in the audit/trace logs.
+        if (_consoleStreams && _consoleStreams.multiple() && event !== "error" && event !== "warn") return
+        agent.defaultInteractionFn(event, message, function(icon, text, id) {
+          printEvent(event, icon, text, id)
+        })
+      }, _consoleStreamLock)
     })
     if (isFunction(agent.setTraceFn) && isFunction(traceSink)) agent.setTraceFn(traceSink)
     if (isFunction(agent.setAnsiLogging)) agent.setAnsiLogging(__conAnsi === true)
@@ -5465,6 +5534,17 @@ function MiniAInteractiveSession(args, adapter) {
     if (isFunction(agent.setHookFn)) {
       agent.setHookFn(function(event, contextVars) {
         return runHooks(event, contextVars)
+      })
+    }
+    // Serialize terminal reads: the stop/stream listener must not steal escape
+    // sequence bytes from the foreground approval menu.
+    var terminalInputLock = "mini-a-terminal-input-" + genUUID()
+    if (!adapter) agent._terminalInputLock = terminalInputLock
+    if (!adapter && isFunction(agent.setConfirmFn)) {
+      agent.setConfirmFn(function(label, choices) {
+        return syncFn(function() {
+          return askChoose(label, choices)
+        }, terminalInputLock)
       })
     }
     var agentResult = __, agentOrigResult = __
@@ -5478,46 +5558,67 @@ function MiniAInteractiveSession(args, adapter) {
       }).stopWhen(function(done) {
         if (done === true) return true
         if (stopRequested) return true
-        var rawCode = con.readCharNB()
-        var code = isDef(rawCode) ? Number(rawCode) : NaN
-        if (!isNaN(code) && code > 0) {
-          if (code === 27) {
-            sleep(40)
-            var followRaw = con.readCharNB()
-            var followCode = isDef(followRaw) ? Number(followRaw) : NaN
-            if (isNaN(followCode) || followCode <= 0) {
+        sync(function() { _drawConsoleStreamScreen(false) }, _consoleStreamLock)
+        var inputStopped = syncFn(function() {
+          var rawCode = con.readCharNB()
+          var code = isDef(rawCode) ? Number(rawCode) : NaN
+          if (!isNaN(code) && code > 0) {
+            if (code === 9) _nextConsoleStream()
+            if (code === 27) {
               sleep(40)
-              followRaw = con.readCharNB()
-              followCode = isDef(followRaw) ? Number(followRaw) : NaN
-            }
-            if ((isNaN(followCode) || followCode <= 0) && !stopRequested) {
-              stopRequested = true
-              if (isFunction(agent.requestStop)) {
-                agent.requestStop("Esc pressed. Requesting Mini-A to stop...", { quiet: true })
-              } else {
-                agent.state = "stop"
+              var followRaw = con.readCharNB()
+              var followCode = isDef(followRaw) ? Number(followRaw) : NaN
+              if (isNaN(followCode) || followCode <= 0) {
+                sleep(40)
+                followRaw = con.readCharNB()
+                followCode = isDef(followRaw) ? Number(followRaw) : NaN
               }
-              if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.goals_stopped) && isFunction(global.__mini_a_metrics.goals_stopped.inc)) {
-                try { global.__mini_a_metrics.goals_stopped.inc() } catch(ignoreInc) {}
-              }
-              printEvent("warn", "🛑", "Esc pressed. Requesting Mini-A to stop...")
-              return true
-            } else if (!isNaN(followCode) && followCode > 0) {
-              // Not a lone ESC: this is an escape sequence (e.g. an arrow key, ESC [ A).
-              // Drain the remaining buffered bytes so the sequence's tail doesn't leak
-              // into the next poll as a stray character.
-              for (var _drainI = 0; _drainI < 8; _drainI++) {
-                var _drainRaw = con.readCharNB()
-                if (isUnDef(_drainRaw)) break
+              if ((isNaN(followCode) || followCode <= 0) && !stopRequested) {
+                stopRequested = true
+                if (isFunction(agent.requestStop)) {
+                  agent.requestStop("Esc pressed. Requesting Mini-A to stop...", { quiet: true })
+                } else {
+                  agent.state = "stop"
+                }
+                if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.goals_stopped) && isFunction(global.__mini_a_metrics.goals_stopped.inc)) {
+                  try { global.__mini_a_metrics.goals_stopped.inc() } catch(ignoreInc) {}
+                }
+                printEvent("warn", "🛑", "Esc pressed. Requesting Mini-A to stop...")
+                return true
+              } else if (!isNaN(followCode) && followCode > 0) {
+                // Shift-Tab is CSI Z. Consume it before draining other escape keys.
+                if (followCode === 91) {
+                  var sequenceCode = con.readCharNB()
+                  if (isUnDef(sequenceCode) || Number(sequenceCode) <= 0) {
+                    sleep(40)
+                    sequenceCode = con.readCharNB()
+                  }
+                  if (Number(sequenceCode) === 90) {
+                    _nextConsoleStream(-1)
+                    return false
+                  }
+                }
+                // Not a lone ESC: this is an escape sequence (e.g. an arrow key, ESC [ A).
+                // Drain the remaining buffered bytes so the sequence's tail doesn't leak
+                // into the next poll as a stray character.
+                for (var _drainI = 0; _drainI < 8; _drainI++) {
+                  var _drainRaw = con.readCharNB()
+                  if (isUnDef(_drainRaw)) break
+                }
               }
             }
           }
-        }
-        if (stopRequested) return true
+          return stopRequested
+        }, terminalInputLock)
+        if (inputStopped) return true
         sleep(75)
         return false
       }).exec()
       _stopActivityCueLoop()
+      sync(function() {
+        if (_consoleStreams) _consoleStreams.close()
+        _closeConsoleStreamScreen()
+      }, _consoleStreamLock)
       if (stopRequested) {
         if (isObject(lastDebugTrace)) lastDebugTrace.status = "stopped"
         _prevEventRenderLines = __
@@ -5543,7 +5644,9 @@ function MiniAInteractiveSession(args, adapter) {
       runHooks("after_goal", { MINI_A_GOAL: isString(goalText) ? goalText : "", MINI_A_RESULT: resultPreview })
       if (isUnDef(_args.outfile)) {
         // Skip duplicate output if streaming was used - content already displayed
-        if (!_args.usestream) {
+        if (!_args.usestream || (_consoleStreams && _consoleStreams.multiple())) {
+          _flushStreamRemainder()
+          _clearStreamPreview()
           //print(colorifyText("\n🏁 Final answer", successColor))
           print()
           if (isObject(displayResult) || isArray(displayResult)) {
@@ -5587,8 +5690,15 @@ function MiniAInteractiveSession(args, adapter) {
       _prevEventRenderLines = __
       _prevEventLastUpdate = 0
       _prevEventAnimatedRenderer = __
+      if (isFunction(agent._scheduleReflectionQueue)) {
+        try { agent._scheduleReflectionQueue(_args, now() + 1) } catch(ignoreReflectionSchedule) {}
+      }
       return true
     } catch (e) {
+      sync(function() {
+        if (_consoleStreams) _consoleStreams.close()
+        _closeConsoleStreamScreen()
+      }, _consoleStreamLock)
       _stopActivityCueLoop()
       _prevEventRenderLines = __
       _prevEventLastUpdate = 0
@@ -5597,6 +5707,8 @@ function MiniAInteractiveSession(args, adapter) {
       if (isObject(lastDebugTrace)) lastDebugTrace.status = "failed"
       printErr(colorifyText("!!", "ITALIC," + errorColor) + " " + colorifyText("Mini-A execution failed: " + errMsg, errorColor))
       return false
+    } finally {
+      sync(function() { _closeConsoleStreamScreen() }, _consoleStreamLock)
     }
   }
 
@@ -5726,19 +5838,23 @@ function MiniAInteractiveSession(args, adapter) {
   function finalizeSession(reason) {
     if (shutdownHandled) return
     shutdownHandled = true
-    if (isObject(preparedAgent)) preparedAgent._stopAgentResources()
+    function finishStep(name, fn) {
+      if (isObject(activeAgent) && activeAgent._execution && isFunction(activeAgent._timeExecution)) return activeAgent._timeExecution(name, fn)
+      return fn()
+    }
+    if (isObject(preparedAgent)) finishStep("prepared_agent_cleanup", function() { preparedAgent._stopAgentResources() })
     preparedAgent = __
 
-    try { persistConversationSnapshot(activeAgent) } catch(ignorePersist) {}
-    try { refreshConversationStats(activeAgent) } catch(ignoreRefresh) {}
-    clearDebugTrace()
+    try { finishStep("session_snapshot", function() { persistConversationSnapshot(activeAgent) }) } catch(ignorePersist) {}
+    try { finishStep("conversation_stats", function() { refreshConversationStats(activeAgent) }) } catch(ignoreRefresh) {}
     try {
-      if (isObject(activeAgent) && isFunction(activeAgent._stopAgentResources)) activeAgent._stopAgentResources()
+      if (isObject(activeAgent) && isFunction(activeAgent._stopAgentResources)) finishStep("agent_cleanup", function() { activeAgent._stopAgentResources() })
     } catch(ignoreAgentStop) {}
 
     if (commandHistory && typeof commandHistory.flush === "function") {
-      try { commandHistory.flush() } catch(ignoreFlushError) {}
+      try { finishStep("command_history_flush", function() { commandHistory.flush() }) } catch(ignoreFlushError) {}
     }
+    clearDebugTrace()
 
     var exitStats = isObject(lastConversationStats) ? lastConversationStats : __
     if (isObject(exitStats) && isNumber(exitStats.messageCount) && exitStats.messageCount > 0) {
@@ -6528,7 +6644,7 @@ function MiniAInteractiveSession(args, adapter) {
 
   function commandHelpRows() {
     var helpCommands = [
-      { command: "/help", description: "Show this help message" },
+      { command: "/help [custom]", description: "Show regular help, or custom commands, skills and hooks" },
       { command: "/set <key> <value>", description: "Update a Mini-A parameter (use '\"\"\"' for multi-line values)" },
       { command: "/toggle <key>", description: "Toggle boolean parameter" },
       { command: "/unset <key>", description: "Clear a parameter" },
@@ -6645,7 +6761,7 @@ function MiniAInteractiveSession(args, adapter) {
     }
   }
 
-  function printHelp() {
+  function printHelp(custom) {
     if (adapter) { browserResult(commandMetadata(), "help"); return }
     function wrapHelpText(text, maxWidth) {
       var normalized = isString(text) ? text : String(text)
@@ -6759,61 +6875,70 @@ function MiniAInteractiveSession(args, adapter) {
       "",
       "Commands (prefix with '/'):"
     ]
-    var helpCommands = commandHelpRows()
-    appendAlignedHelpRows(lines, helpCommands)
-    var commandNames = Object.keys(customSlashCommands).sort()
-    if (commandNames.length > 0) {
-      lines.push("")
-      lines.push("Custom commands from " + colorifyText(customCommandsDirPath, accentColor) + ":")
-      var customCommandRows = []
-      commandNames.forEach(function(name) {
-        var commandEntry = customSlashCommands[name]
-        var commandHelpText = "Execute instructions from " + customSlashCommands[name].file
-        if (isObject(commandEntry) && isString(commandEntry.description) && commandEntry.description.trim().length > 0) {
-          commandHelpText = commandEntry.description.replace(/\s+/g, " ").trim()
-        }
-        customCommandRows.push({
-          command: "/" + name + " [args]",
-          description: commandHelpText
-        })
-      })
-      appendAlignedHelpRows(lines, customCommandRows)
+    if (!custom) {
+      var helpCommands = commandHelpRows()
+      appendAlignedHelpRows(lines, helpCommands)
+    } else {
+      lines = ["Custom help (commands, skills and hooks):"]
     }
-    var skillNames = Object.keys(customSkillSlashCommands).sort()
-    if (skillNames.length > 0) {
-      lines.push("")
-      lines.push("Skills from " + colorifyText(customSkillsDirPath, accentColor) + " (skills also support $<name>):")
-      var skillRows = []
-      skillNames.forEach(function(name) {
-        var skillEntry = customSkillSlashCommands[name]
-        var sourceHint = (isObject(skillEntry) && skillEntry.sourceType === "folder") ? "folder skill" : "template skill"
-        var fallbackHelp = "Execute " + sourceHint + " from " + customSkillSlashCommands[name].file
-        var skillHelpText = fallbackHelp
-        if (isObject(skillEntry) && isString(skillEntry.description) && skillEntry.description.trim().length > 0) {
-          skillHelpText = skillEntry.description.replace(/\s+/g, " ").trim()
-        }
-        skillRows.push({
-          command: "/" + name + " [args]",
-          description: skillHelpText
+    if (custom) {
+      var commandNames = Object.keys(customSlashCommands).sort()
+      if (commandNames.length > 0) {
+        lines.push("")
+        lines.push("Custom commands from " + colorifyText(customCommandsDirPath, accentColor) + ":")
+        var customCommandRows = []
+        commandNames.forEach(function(name) {
+          var commandEntry = customSlashCommands[name]
+          var commandHelpText = "Execute instructions from " + customSlashCommands[name].file
+          if (isObject(commandEntry) && isString(commandEntry.description) && commandEntry.description.trim().length > 0) {
+            commandHelpText = commandEntry.description.replace(/\s+/g, " ").trim()
+          }
+          customCommandRows.push({
+            command: "/" + name + " [args]",
+            description: commandHelpText
+          })
         })
-      })
-      appendAlignedHelpRows(lines, skillRows)
-    }
-    var totalHooks = 0
-    Object.keys(loadedHooks).forEach(function(ev) { totalHooks += loadedHooks[ev].length })
-    if (totalHooks > 0) {
-      lines.push("")
-      lines.push("Hooks from " + colorifyText(hooksDirPath, accentColor) + ":")
-      var hookRows = []
-      Object.keys(loadedHooks).sort().forEach(function(eventName) {
-        var hookCount = isArray(loadedHooks[eventName]) ? loadedHooks[eventName].length : 0
-        if (hookCount <= 0) return
-        hookRows.push({
-          command: eventName,
-          description: String(hookCount) + " hook(s) loaded"
+        appendAlignedHelpRows(lines, customCommandRows)
+      }
+      var skillNames = Object.keys(customSkillSlashCommands).sort()
+      if (skillNames.length > 0) {
+        lines.push("")
+        lines.push("Skills from " + colorifyText(customSkillsDirPath, accentColor) + " (skills also support $<name>):")
+        var skillRows = []
+        skillNames.forEach(function(name) {
+          var skillEntry = customSkillSlashCommands[name]
+          var sourceHint = (isObject(skillEntry) && skillEntry.sourceType === "folder") ? "folder skill" : "template skill"
+          var fallbackHelp = "Execute " + sourceHint + " from " + customSkillSlashCommands[name].file
+          var skillHelpText = fallbackHelp
+          if (isObject(skillEntry) && isString(skillEntry.description) && skillEntry.description.trim().length > 0) {
+            skillHelpText = skillEntry.description.replace(/\s+/g, " ").trim()
+          }
+          skillRows.push({
+            command: "/" + name + " [args]",
+            description: skillHelpText
+          })
         })
-      })
-      appendAlignedHelpRows(lines, hookRows)
+        appendAlignedHelpRows(lines, skillRows)
+      }
+      var totalHooks = 0
+      Object.keys(loadedHooks).forEach(function(ev) { totalHooks += loadedHooks[ev].length })
+      if (totalHooks > 0) {
+        lines.push("")
+        lines.push("Hooks from " + colorifyText(hooksDirPath, accentColor) + ":")
+        var hookRows = []
+        Object.keys(loadedHooks).sort().forEach(function(eventName) {
+          var hookCount = isArray(loadedHooks[eventName]) ? loadedHooks[eventName].length : 0
+          if (hookCount <= 0) return
+          hookRows.push({
+            command: eventName,
+            description: String(hookCount) + " hook(s) loaded"
+          })
+        })
+        appendAlignedHelpRows(lines, hookRows)
+      }
+      if (commandNames.length === 0 && skillNames.length === 0 && totalHooks === 0) {
+        lines.push("No custom commands, skills or hooks loaded.")
+      }
     }
     print( ow.format.withSideLine( lines.join("\n"), __, promptColor, hintColor, ow.format.withSideLineThemes().openCurvedRect) )
   }
@@ -7545,8 +7670,13 @@ function MiniAInteractiveSession(args, adapter) {
         runDecision(parsedSlashCommand.argsRaw)
         continue
       }
-      if (commandLower === "help") {
-        printHelp()
+      if (parsedSlashCommand.name === "help") {
+        var helpTopic = parsedSlashCommand.argsRaw.toLowerCase().trim()
+        if (helpTopic.length > 0 && helpTopic !== "custom") {
+          print(colorifyText("Usage: /help [custom]", errorColor))
+          continue
+        }
+        printHelp(helpTopic === "custom")
         continue
       }
       if (parsedSlashCommand.name === "edit" || parsedSlashCommand.name === "editor") {
@@ -7952,7 +8082,7 @@ function MiniAInteractiveSession(args, adapter) {
             subtasks.forEach(function(st) {
               var idShort = st.id.substring(0, 8)
               var statusColor = st.status === "completed" ? successColor : (st.status === "failed" ? errorColor : hintColor)
-              print("  " + colorifyText(idShort, statusColor) + " " + colorifyText(st.status.padEnd(10), statusColor) + " " + colorifyText(st.goal.substring(0, 60), hintColor))
+              print("  " + colorifyText(idShort, statusColor) + " " + colorifyText(st.status.padEnd(10), statusColor) + (st.acceptance ? " [" + st.acceptance + "]" : "") + " " + colorifyText(st.goal.substring(0, 60), hintColor))
             })
           }
         } catch (listErr) {
@@ -8015,6 +8145,9 @@ function MiniAInteractiveSession(args, adapter) {
           if (adapter) { browserResult(status, "subtask"); continue }
           print(colorifyText("Subtask " + status.id.substring(0, 8) + ":", accentColor))
           print("  Status: " + colorifyText(status.status, status.status === "completed" ? successColor : (status.status === "failed" ? errorColor : hintColor)))
+          if (isDef(status.acceptance)) print("  Acceptance: " + colorifyText(status.acceptance, status.acceptance === "accepted" ? successColor : hintColor))
+          if (isDef(status.outcome)) print("  Outcome: " + colorifyText(status.outcome, hintColor))
+          if (isDef(status.reason)) print("  Blocker: " + colorifyText(status.reason, hintColor))
           print("  Goal: " + colorifyText(status.goal, hintColor))
           print("  Attempt: " + colorifyText(status.attempt + "/" + status.maxAttempts, numericColor))
           if (isDef(status.startedAt)) {

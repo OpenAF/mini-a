@@ -28,7 +28,15 @@ Decision requests use a fresh bare client, sharing neither tools nor conversatio
 
 ## Verdict gates
 
-With an explicit `usedecide=true` and a configured decision model, selected internal verdicts consult the decision model first. A gate may only **skip an expensive call**; it never replaces output that other code consumes. Whenever the decision is unavailable, fails, returns an invalid answer, exceeds the 48 KiB / 32-question budget, or does not give a confident "all clear", the original code path runs unchanged. Each fallback is counted in the decision metrics (`fallbacks`, `reasons`) and traced as `decision_fallback`. Uncached gate requests use the run's `rpm`/`tpm` limiter; cached answers consume no additional requests or tokens. Failed dispatched requests count toward `rpm`. A configuration or runtime-support error disables further gate attempts for the rest of the run.
+With an explicit `usedecide=true` and a configured decision model, the selected internal verdicts in the table below consult the decision model first. These gates can skip an expensive call; they do not replace output that other code consumes. Whenever the decision is unavailable, fails, returns an invalid answer, exceeds the 48 KiB / 32-question budget, or does not give a confident "all clear", the original code path runs unchanged. Each fallback is counted in the decision metrics (`fallbacks`, `reasons`) and traced as `decision_fallback`. Uncached gate requests use the run's `rpm`/`tpm` limiter; cached answers consume no additional requests or tokens. Failed dispatched requests count toward `rpm`. A configuration or runtime-support error disables further gate attempts for the rest of the run.
+
+Automatic orchestration has additional bounded decisions for read-only acceptance,
+stall recovery, local task decomposition, and priority among equally ready tasks.
+These use the same explicit opt-in, preserve deterministic permission, dependency,
+resource and budget checks, and fall back when a decision is unavailable. A
+supported read-only acceptance verdict can replace a generative review; the other
+decisions advise or select among work already permitted. See
+[Reliable automatic orchestration](../USAGE.md#reliable-automatic-orchestration).
 
 | Site | Decision question | Decide skips the call when | Otherwise |
 |------|-------------------|----------------------------|-----------|
@@ -252,3 +260,9 @@ and its structured editor; inspect answers, full response, previous results,
 `/stats`, and `debugdecch`. Confirm `/last` still shows the previous agent answer.
 The automated command/form tests use injected clients and DOM fixtures; they do
 not establish live provider support or manual browser/terminal layout quality.
+
+## Shell execution guard
+
+Configured decision models automatically assess built-in shell commands (`shellguard=auto`), unless `usedecide=false`. `shellguard=off` opts out; `shellguard=decide` requires an enabled model. Low risk runs, medium/high risk needs approval once, and critical risk is denied. Configure thresholds with `shellguardask` and `shellguarddeny`; the default transport timeout is `shellguardtimeout=5000` milliseconds. Assessment failure or unknown effects require approval, and headless execution blocks when approval is needed. Existing hard restrictions always win. See [Shell and File System Access](../USAGE.md#shell-and-file-system-access).
+
+Validation: `ojob tests/shellGuard.yaml` runs deterministic fixtures without a provider. For an optional live-provider check, configure `OAF_DECIDE_MODEL` and run `oaf -f tests/shellGuardLive.js`; this assesses and, only when allowed, executes a fixed harmless echo command.

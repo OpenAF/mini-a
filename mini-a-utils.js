@@ -20,6 +20,7 @@ var MiniUtilsTool = function(options) {
   this._chartRenderer = __
   // Mini-A supplies this to route display-only output to its console. Without
   // it, direct MiniUtilsTool users retain the historical print() behavior.
+  this._terminalInputLock = __
   this._inputFn = __
   this._displayEventFn = __
   this._separator = String(java.io.File.separator)
@@ -51,6 +52,8 @@ MiniUtilsTool.prototype.init = function(options) {
     if (isUnDef(options)) options = {}
     if (isString(options) || options instanceof java.lang.String) options = { root: options }
     this._fileAccess = new MiniAFileAccess(options.fileallow)
+    // Optional independent write ceiling for scoped remote execution.
+    this._writeAccess = isDef(options.writeallow) ? new MiniAFileAccess(options.writeallow) : __
     var rootPath = options.root || "."
     var rootFile = io.fileInfo(rootPath)
     var canonicalRoot = rootFile.canonicalPath
@@ -70,6 +73,7 @@ MiniUtilsTool.prototype.init = function(options) {
     this._readWrite = options.readwrite === true
     this._visualizationsEnabled = options.useasciiviz === true
     this._chartRenderer = isFunction(options.chartRenderer) ? options.chartRenderer : __
+    if (isString(options.terminalInputLock)) this._terminalInputLock = options.terminalInputLock
     if (isFunction(options.inputFn)) this._inputFn = options.inputFn
     this._displayEventFn = isFunction(options.displayEventFn) ? options.displayEventFn : __
     this._skillsRoots = this._resolveSkillsRoots(options)
@@ -132,6 +136,11 @@ MiniUtilsTool.prototype._resolve = function(target, readOnly) {
     throw new Error("Path outside of allowed root: " + target)
   }
   return this._fileAccess ? this._fileAccess.assert(resolved) : resolved
+}
+
+MiniUtilsTool.prototype._resolveForWrite = function(target) {
+  var resolved = this._resolve(target)
+  return this._writeAccess ? this._writeAccess.assert(resolved) : resolved
 }
 
 MiniUtilsTool.prototype._ensureWritable = function(operation) {
@@ -2143,7 +2152,7 @@ MiniUtilsTool.prototype.writeFile = function(params) {
   try {
     this._ensureInitialized()
     this._ensureWritable("write operations")
-    var filePath = this._resolve(params.path)
+    var filePath = this._resolveForWrite(params.path)
     var targetFile = new java.io.File(filePath)
     var parent = targetFile.getParentFile()
     if (params.createMissingDirs !== false && parent !== null && !parent.exists()) {
@@ -2179,7 +2188,7 @@ MiniUtilsTool.prototype.editFile = function(params) {
   try {
     this._ensureInitialized()
     this._ensureWritable("edit operations")
-    var filePath = this._resolve(params.path)
+    var filePath = this._resolveForWrite(params.path)
     if (!io.fileExists(filePath)) {
       return "[ERROR] File not found: " + params.path
     }
@@ -2256,7 +2265,7 @@ MiniUtilsTool.prototype._deleteRecursive = function(targetPath) {
   })
   entries.forEach(function(entry) {
     try {
-      var entryPath = self._resolve(entry.relativePath)
+      var entryPath = self._resolveForWrite(entry.relativePath)
       io.rm(entryPath)
     } catch (err) {
     }
@@ -2291,7 +2300,7 @@ MiniUtilsTool.prototype.deleteFile = function(params) {
     if (params.confirm !== true) {
       return "[ERROR] Deletion blocked: confirm=true is required"
     }
-    var targetPath = this._resolve(params.path)
+    var targetPath = this._resolveForWrite(params.path)
     if (!io.fileExists(targetPath)) {
       return "[ERROR] Path not found: " + params.path
     }
@@ -3582,35 +3591,40 @@ MiniUtilsTool.prototype._browserInput = function(questions) {
   })
 }
 
+// Foreground questions share terminal ownership with the session stop listener.
+MiniUtilsTool.prototype._withTerminalInput = function(fn) {
+  return isString(this._terminalInputLock) ? syncFn(fn, this._terminalInputLock) : fn()
+}
+
 MiniUtilsTool.prototype._ask = function(prompt, mask) {
   if (isFunction(this._inputFn)) return this._browserInput([{ name: "answer", prompt: prompt, mask: mask }])[0].answer
-  return ask(prompt, mask)
+  return this._withTerminalInput(function() { return ask(prompt, mask) })
 }
 
 MiniUtilsTool.prototype._askEncrypt = function(prompt) {
   if (isFunction(this._inputFn)) return this._browserInput([{ name: "answer", prompt: prompt, type: "secret" }])[0].answer
-  return askEncrypt(prompt)
+  return this._withTerminalInput(function() { return askEncrypt(prompt) })
 }
 
 MiniUtilsTool.prototype._ask1 = function(prompt, options) {
   if (isFunction(this._inputFn)) return this._browserInput([{ name: "answer", prompt: prompt, type: "char", options: options }])[0].answer
-  return ask1(prompt, options)
+  return this._withTerminalInput(function() { return ask1(prompt, options) })
 }
 
 MiniUtilsTool.prototype._askChoose = function(prompt, options, max, help) {
   if (isFunction(this._inputFn)) return this._browserInput([{ name: "answer", prompt: prompt, type: "choose", options: options, max: max, help: help, output: "index" }])[0].answer
-  return askChoose(prompt, options, max, help)
+  return this._withTerminalInput(function() { return askChoose(prompt, options, max, help) })
 }
 
 MiniUtilsTool.prototype._askChooseMultiple = function(prompt, options, max, help) {
   if (isFunction(this._inputFn)) return this._browserInput([{ name: "answer", prompt: prompt, type: "multiple", options: options, max: max, help: help }])[0].answer
-  var result = askChooseMultiple(prompt, options, max, help)
+  var result = this._withTerminalInput(function() { return askChooseMultiple(prompt, options, max, help) })
   return isArray(result) ? result : []
 }
 
 MiniUtilsTool.prototype._askStruct = function(questions) {
   if (isFunction(this._inputFn)) return this._browserInput(questions)
-  return askStruct(questions)
+  return this._withTerminalInput(function() { return askStruct(questions) })
 }
 
 /**
@@ -4241,7 +4255,7 @@ MiniUtilsTool.prototype.apply_patch = function(params) {
   for (var oi = 0; oi < ops.length; oi++) {
     var op = ops[oi], idx = oi + 1
     if (op.type === "add") {
-      var addAbs = this._resolve(op.path)
+      var addAbs = this._resolveForWrite(op.path)
       var addContent = op.content.join("\n")
       if (existsInStaged(addAbs) && addContent.length > 0) return "[ERROR] apply_patch: operation " + idx + " (Add File: " + op.path + "): file already exists"
       staged[addAbs] = addContent
@@ -4249,7 +4263,7 @@ MiniUtilsTool.prototype.apply_patch = function(params) {
     }
 
     if (op.type === "delete") {
-      var delAbs = this._resolve(op.path)
+      var delAbs = this._resolveForWrite(op.path)
       if (!existsInStaged(delAbs)) return "[ERROR] apply_patch: operation " + idx + " (Delete File: " + op.path + "): file not found"
       staged[delAbs] = null
       continue
@@ -4259,7 +4273,7 @@ MiniUtilsTool.prototype.apply_patch = function(params) {
       var parts = op.spec.split("->")
       if (parts.length !== 2) return "[ERROR] apply_patch: operation " + idx + " (Move File): invalid syntax"
       var fromRel = parts[0].trim(), toRel = parts[1].trim()
-      var fromAbs = this._resolve(fromRel), toAbs = this._resolve(toRel)
+      var fromAbs = this._resolveForWrite(fromRel), toAbs = this._resolveForWrite(toRel)
       if (!existsInStaged(fromAbs)) return "[ERROR] apply_patch: operation " + idx + " (Move File: " + op.spec + "): source not found"
       if (existsInStaged(toAbs)) return "[ERROR] apply_patch: operation " + idx + " (Move File: " + op.spec + "): destination exists"
       staged[toAbs] = readInStaged(fromAbs)
@@ -4268,7 +4282,7 @@ MiniUtilsTool.prototype.apply_patch = function(params) {
     }
 
     if (op.type === "update") {
-      var updAbs = this._resolve(op.path)
+      var updAbs = this._resolveForWrite(op.path)
       if (!existsInStaged(updAbs)) return "[ERROR] apply_patch: operation " + idx + " (Update File: " + op.path + "): file not found"
       var srcText = String(readInStaged(updAbs) || "")
       var src = srcText.length > 0 ? srcText.split(/\r?\n/) : []

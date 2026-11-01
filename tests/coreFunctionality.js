@@ -119,10 +119,10 @@
     agent.fnI = function() {}
     agent._oaf_model = { type: "ollama", model: "fixture" }
     var first = { usetools: true, mcpproxy: true }
-    ow.test.assert(agent._resolveJsonToolMode(first), true, "Proxy defaults to JSON action dispatch")
+    ow.test.assert(agent._resolveJsonToolMode(first), false, "Proxy does not enable JSON action dispatch")
     var separate = {}
-    ow.test.assert(agent._resolveJsonToolMode(separate), true, "Separate start arguments inherit session mode")
-    ow.test.assert(agent._resolveJsonToolMode(separate), true, "Second init call retains inherited resolved mode")
+    ow.test.assert(agent._resolveJsonToolMode(separate), false, "Separate start arguments inherit session mode")
+    ow.test.assert(agent._resolveJsonToolMode(separate), false, "Second init call retains inherited resolved mode")
     ow.test.assert(agent._shouldUseNativeMcpProxyTools({ usejsontool: true, mcpproxy: true, mcpproxynative: true }), false, "JSON overrides proxy native default")
     ow.test.assert(agent._resolveJsonToolMode({ usejsontool: false }), false, "Explicit false wins")
     ow.test.assert(agent._resolveJsonToolMode({ mcpproxy: true, usetools: true }), false, "Explicit session false survives reuse")

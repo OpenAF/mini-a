@@ -5,6 +5,12 @@
 help:
   text   : Mini-A headless worker API for programmatic agent delegation between processes/containers/hosts
   expects:
+  - name     : runmaxtokens
+    desc     : "Aggregate orchestration=auto token admission cap, including children and review (0=unlimited); in-flight calls may exceed estimates"
+    mandatory: false
+  - name     : runmaxtimems
+    desc     : "Aggregate orchestration=auto elapsed-time admission cap in milliseconds (0=unlimited)"
+    mandatory: false
   - name     : agentcomms
     desc     : Opt-in communication grant ceiling (JSON/SLON); requires apitoken and a matching task declaration
     mandatory: false
@@ -162,6 +168,19 @@ todo:
     }
   ((error    )): true
 
+
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /execution-scope
+  ((execPre   )): *authCheck
+  ((execURI   )): | #js
+    try {
+      var payload = jsonParse(request.files.postData);
+      __miniARemoteScopedFileValidate(payload, global.__worker_args);
+      return ow.server.httpd.reply(stringify({ ok: true, workerInstanceId: global.__worker_instanceId }, __, ""), __, ow.server.httpd.mimes.JSON);
+    } catch(e) {
+      return ow.server.httpd.reply(stringify({ error: "Scoped file contract rejected" }, __, ""), 403, ow.server.httpd.mimes.JSON);
+    }
+  ((error    )): true
 
 - (httpdService): "${onport:-8888}"
   ((uri       )): /submission/status
@@ -417,6 +436,8 @@ todo:
           result: {
             goal: task.goal, answer: subtaskResult.answer, format: task.args.format || "md",
             metrics: subtaskResult.metrics || {}, state: subtaskResult.state || {},
+            outcome: subtaskResult.outcome, acceptance: subtaskResult.acceptance, checks: subtaskResult.checks,
+            evidence: subtaskResult.state && subtaskResult.state.executionEvidence || [],
             error: subtaskResult.error
           },
           completedAt: task.completedAt,
@@ -837,7 +858,7 @@ jobs:
         preferredTransport: "HTTP+JSON",
         limits: { forkMemory: toBoolean(wargs.usememory) === true, forkStateMaxBytes: wargs.forkstatemaxbytes || 65536, maxContextTokens: wargs.maxcontext || 0 },
         workerInstanceId: global.__worker_instanceId,
-        additionalInterfaces: ["mini-a-worker-v1", "submission-recovery-v1", "prepared-context-v1"].concat(isDef(wargs.agentcomms) && MiniAComms.enabled(MiniAComms.normalize(wargs.agentcomms)) && isString(wargs.apitoken) && wargs.apitoken.length > 0 ? ["agent-comms-v1"] : []),
+        additionalInterfaces: ["mini-a-worker-v1", "submission-recovery-v1", "prepared-context-v1"].concat(typeof MiniAExecution !== "undefined" && typeof MiniA !== "undefined" && isFunction(MiniA.prototype._prepareExecution) && typeof __miniARemoteComputeConfine === "function" ? ["task-outcome-v1", "execution-budget-v1", "compute-only-v1"] : []).concat(typeof __miniARemoteScopedFileValidate === "function" && typeof __miniARemoteScopedFileConfine === "function" ? ["scoped-files-v1"] : []).concat(isDef(wargs.agentcomms) && MiniAComms.enabled(MiniAComms.normalize(wargs.agentcomms)) && isString(wargs.apitoken) && wargs.apitoken.length > 0 ? ["agent-comms-v1"] : []),
         capabilities: {
           streaming: false,
           pushNotifications: false,
@@ -876,7 +897,7 @@ jobs:
         description: isString(wargs.workerdesc) ? wargs.workerdesc : "Mini-A worker API",
         version: "1.0.0",
         workerInstanceId: global.__worker_instanceId,
-        capabilities: ["run-goal", "delegation", "planning", "a2a-http-json-rest", "submission-recovery-v1", "prepared-context-v1"].concat(isDef(wargs.agentcomms) && MiniAComms.enabled(MiniAComms.normalize(wargs.agentcomms)) && isString(wargs.apitoken) && wargs.apitoken.length > 0 ? ["agent-comms-v1"] : []),
+        capabilities: ["run-goal", "delegation", "planning", "a2a-http-json-rest", "submission-recovery-v1", "prepared-context-v1"].concat(typeof MiniAExecution !== "undefined" && typeof MiniA !== "undefined" && isFunction(MiniA.prototype._prepareExecution) && typeof __miniARemoteComputeConfine === "function" ? ["task-outcome-v1", "execution-budget-v1", "compute-only-v1"] : []).concat(typeof __miniARemoteScopedFileValidate === "function" && typeof __miniARemoteScopedFileConfine === "function" ? ["scoped-files-v1"] : []).concat(isDef(wargs.agentcomms) && MiniAComms.enabled(MiniAComms.normalize(wargs.agentcomms)) && isString(wargs.apitoken) && wargs.apitoken.length > 0 ? ["agent-comms-v1"] : []),
         skills: global.__worker_getSkills().map(function(skill) {
           return {
             id: skill.id,
@@ -1000,19 +1021,37 @@ jobs:
         } catch(e) { return { error: { error: "Communication declaration rejected" }, code: 403 } }
       }
       var taskArgs = postData.args || {}
+      var computeOnly = isDef(taskArgs._remoteComputeOnly)
+      var scopedRequest = taskArgs._remoteScopedFilesV1, scopedFiles = isDef(scopedRequest), scopedResult
+      if (computeOnly && scopedFiles) return { error: { error: "Conflicting remote contracts" }, code: 400 }
+      if (scopedFiles) {
+        try { scopedResult = __miniARemoteScopedFileValidate(scopedRequest, wargs) }
+        catch(scopeError) { return { error: { error: "Scoped file contract rejected" }, code: 403 } }
+      }
+      if (computeOnly && (!isMap(taskArgs._remoteComputeOnly) || taskArgs._remoteComputeOnly.version !== 1 || Object.keys(taskArgs._remoteComputeOnly).length !== 1 ||
+          typeof __miniARemoteComputeConfine !== "function")) return { error: { error: "Invalid or unsupported compute-only contract" }, code: 400 }
       var allowedRemoteKeys = {
         goal: true, format: true, raw: true, chatbotmode: true, useplanning: true,
+        orchestration: true, orchestrationcontext: true, runmaxtokens: true, runmaxtimems: true, maxtotalsteps: true,
         updatefreq: true, updateinterval: true, forceupdates: true, planlog: true,
         planmode: true, planformat: true, convertplan: true, maxsteps: true,
         usedecide: true, llmcomplexity: true, forkpolicy: true, forkdecide: true
       }
       var mergedArgs = merge({}, wargs)
+      mergedArgs._autoDecompose = false
       delete mergedArgs.agentcomms
       Object.keys(taskArgs).forEach(function(key) {
         // Remote tasks may opt out, but cannot undo an operator decision opt-out.
         if (["usedecide", "llmcomplexity", "forkdecide"].indexOf(key) >= 0 && isDef(wargs[key]) && toBoolean(wargs[key]) === false && toBoolean(taskArgs[key]) === true) return
         if (allowedRemoteKeys[key] === true) { mergedArgs[key] = taskArgs[key] }
       })
+      // Require the parent's guard without importing its decision credentials or weakening worker policy.
+      try {
+        var workerGuard = MiniAShellGuard.resolve(wargs)
+        if (isDef(taskArgs._shellGuardRequired)) workerGuard = MiniAShellGuard.intersect(workerGuard, taskArgs._shellGuardRequired)
+        if (workerGuard.enabled) mergedArgs._shellGuardRequired = workerGuard
+      } catch(guardError) { return { error: { error: "Invalid inherited shell guard" }, code: 400 } }
+      mergedArgs.shellbatch = true
       // A prepared incoming handoff is data, independent of the child's outgoing policy.
       var incoming = postData.forkContext
       if (isDef(incoming)) {
@@ -1043,6 +1082,25 @@ jobs:
         mergedArgs._skillHandoff = taskArgs._skillHandoff.slice(0, 3).filter(function(item) {
           return isMap(item) && isString(item.ref) && item.ref.length <= 512 && /^(local:|wiki:)/.test(item.ref)
         }).map(function(item) { return { ref: item.ref, revision: isString(item.revision) ? item.revision : "", args: isString(item.args) ? item.args : "", required: true } })
+      }
+      if (computeOnly) {
+        if (communication || (isArray(taskArgs._skillHandoff) && taskArgs._skillHandoff.length)) return { error: { error: "Compute-only tasks cannot request skills or communications" }, code: 400 }
+        __miniARemoteComputeConfine(mergedArgs)
+        mergedArgs._remoteComputeOnly = true
+      }
+      if (scopedFiles) {
+        if (communication || (isArray(taskArgs._skillHandoff) && taskArgs._skillHandoff.length)) return { error: { error: "Scoped file tasks cannot request skills or communications" }, code: 400 }
+        __miniARemoteScopedFileConfine(mergedArgs, scopedResult)
+        mergedArgs._remoteScopeRequest = clone(scopedRequest)
+      }
+      ;["runmaxtokens", "runmaxtimems"].forEach(function(key) {
+        var requested = Number(mergedArgs[key] || 0), ceiling = Number(wargs[key] || 0)
+        if (!isFinite(requested) || requested < 0) throw new Error("Invalid execution budget")
+        mergedArgs[key] = ceiling > 0 ? (requested > 0 ? Math.min(ceiling, requested) : ceiling) : requested
+      })
+      if (mergedArgs.runmaxtokens > 0 || mergedArgs.runmaxtimems > 0) {
+        if (typeof MiniAExecution === "undefined" || typeof MiniA === "undefined" || !isFunction(MiniA.prototype._prepareExecution)) return { error: { error: "Worker runtime cannot enforce aggregate budgets" }, code: 400 }
+        mergedArgs.orchestration = "auto"
       }
       mergedArgs.goal = goalTrimmed
       var timeout = wargs.defaulttimeout

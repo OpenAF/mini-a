@@ -11,6 +11,7 @@ modes:
     params     :
       useutils       : true
       readwrite      : true
+      shellguardask  : high
       shellallowpipes: true
       shellbatch     : true
       showexecs      : true
@@ -98,9 +99,10 @@ modes:
       memorymd         : true
       historyvm        : true
       usedecide        : true
-      contextguard     : true
+      contextguard     : false
       contextvirtualization: true
       useasciiviz      : true
+      shellguardask    : high
       mcp              : 
       - type   : ojob
         options:
@@ -120,7 +122,7 @@ modes:
       useattach        : true
       historyvm        : true
       contextvirtualization: true
-      contextguard     : true
+      contextguard     : false
       orchestration    : auto
       mcpproxy         : true
       mcpproxythreshold: 51200
@@ -130,6 +132,20 @@ modes:
       autodelegation   : true
       usestdutils      : true
       webadvanced      : true
+
+  wiki:
+    description: "Read-only wiki Q&A (use with wikiroot=<dir>)"
+    params     :
+      usewiki             : true
+      wikiaccess          : ro
+      wikiretrievalv2     : true
+      usewikigraph        : true
+      wikigraphsearchhints: true
+      usetools            : true
+      usestream           : true
+      useshell            : false
+      readwrite           : false
+      usedelegation       : false
 
   chatbot:
     description: "Chatbot mode"
@@ -156,7 +172,7 @@ modes:
       usedelegation        : true
       autodelegation       : true
       usestdutils          : true
-      contextguard         : true
+      contextguard         : false
       orchestration        : auto
 
   web    :

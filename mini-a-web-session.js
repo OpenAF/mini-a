@@ -456,6 +456,9 @@ function MiniAWebPrompt(request) {
         }
       }
       log("[" + uuid + "] " + (isObject(_rma) ? af.toSLON(_rma) : _rma))
+      if (isFunction(lma._scheduleReflectionQueue)) {
+        try { lma._scheduleReflectionQueue(startArgs, now() + 1) } catch(ignoreReflectionSchedule) {}
+      }
       } catch(eee) {
         logErr(eee)
         if (isDef(advancedState)) global.__advanced.emit(advancedState, "error", __miniAErrMsg(eee))

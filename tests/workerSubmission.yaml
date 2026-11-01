@@ -2,6 +2,12 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: Worker submissions::compute-only restrictions
+  to: oJob Test
+  exec: args.func = require("tests/workerSubmission.js").testComputeOnlyWorkerRestriction
+- name: Worker submissions::scoped file restrictions
+  to: oJob Test
+  exec: args.func = require("tests/workerSubmission.js").testScopedFileWorkerRestriction
 - name: Worker submissions::receipts and cleanup
   to: oJob Test
   exec: args.func = require("tests/workerSubmission.js").testWorkerReceiptsAndUnpolledCleanup
@@ -12,7 +18,19 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/workerSubmission.js").testRemoteSubmissionRecoveryTransport
 
+- name: Worker submissions::budget ceilings and outcome
+  to: oJob Test
+  exec: args.func = require("tests/workerSubmission.js").testWorkerBudgetCeilingsAndOutcome
+
+- name: Worker submissions::shell guard admission
+  to: oJob Test
+  exec: args.func = require("tests/workerSubmission.js").testShellGuardAdmission
+
 todo:
+- Worker submissions::shell guard admission
+- Worker submissions::compute-only restrictions
+- Worker submissions::scoped file restrictions
 - Worker submissions::receipts and cleanup
 - Worker submissions::concurrent duplicates
 - Worker submissions::HTTP recovery
+- Worker submissions::budget ceilings and outcome

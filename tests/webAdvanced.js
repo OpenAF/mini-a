@@ -192,7 +192,7 @@ try {
   check(first.sequence === traceJournalSequence && jobs.length === 0, 'debug inspection emits no activity or commands')
   var confirmationAgent = new MiniA(), confirmationCount = 0
   confirmationAgent.setInteractionFn(function() {})
-  confirmationAgent.setConfirmFn(function(label, choices) { confirmationCount++; check(choices[0] === 'No', 'confirmation defaults to refusal'); return 0 })
+  confirmationAgent.setConfirmFn(function(label, choices) { confirmationCount++; check(choices[0] === 'Deny', 'confirmation defaults to refusal'); return 0 })
   var denied = confirmationAgent._runCommand({command:'echo fixture',checkall:true})
   check(confirmationCount === 1 && denied.output.indexOf('[blocked]') === 0, 'browser callback controls shell approval')
   confirmationAgent._shellBatch = true

@@ -12,6 +12,15 @@ help:
       ojob mini-a.yaml goal="..." mcp="[(cmd: 'docker run --rm -i mcp/dockerhub', timeout: 5000) | (cmd: 'docker run --rm -i mcp/wikipedia-mcp', timeout: 5000)]" rpm=20
       
   expects: 
+  - name     : runmaxtokens
+    desc     : "Aggregate orchestration=auto token admission cap, including children and review (0=unlimited); in-flight calls may exceed estimates"
+    mandatory: false
+  - name     : orchestrationcontext
+    desc     : "Automatic strategy context: auto, interactive, or batch"
+    mandatory: false
+  - name     : runmaxtimems
+    desc     : "Aggregate orchestration=auto elapsed-time admission cap in milliseconds (0=unlimited)"
+    mandatory: false
   - name     : agentcomms
     desc     : Opt-in communication profiles, grants, delegation allowance and limits (JSON/SLON); see USAGE.md
     mandatory: false
@@ -145,6 +154,22 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : shellguard
+    desc     : "Shell decision guard: auto (configured decision model), off, or decide (required model)"
+    example  : auto
+
+  - name     : shellguardask
+    desc     : "Minimum shell risk requiring approval: low, medium, high, critical"
+    example  : medium
+
+  - name     : shellguarddeny
+    desc     : "Minimum shell risk denied without approval: low, medium, high, critical"
+    example  : critical
+
+  - name     : shellguardtimeout
+    desc     : "Shell decision request timeout in milliseconds"
+    example  : 5000
+
   - name     : shellbanextra
     desc     : Additional comma-separated commands to ban
     example  : "lsblk,ifconfig"
@@ -390,6 +415,11 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usejsonschema
+    desc     : Prefer compatible schema responses (auto or off)
+    example  : "auto"
+    mandatory: false
+    options  : ["auto", "off"]
   - name     : usejsontool
     desc     : Use JSON action dispatch instead of native tools on both model tiers
     example  : "false"
@@ -1052,6 +1082,17 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : memoryreflectmode
+    desc     : "Reflection scheduling: background (default) or sync"
+    example  : background
+  - name     : acceptancereview
+    desc     : "Review final answers before acceptance (default false)"
+  - name     : acceptanceoptimization
+    desc     : "Enable deterministic acceptance optimizations (default true)"
+    example  : true
+  - name     : proxyargrepair
+    desc     : "Repair unambiguous read-only proxy operation aliases (default true)"
+    example  : true
   - name     : memoryreflectmodel
     desc     : "Model config for the reflection pass (falls back to OAF_REFLECT_MODEL, then the low-cost model, then the main model)"
     example  : "(type: openai, model: gpt-4o-mini)"
@@ -1579,6 +1620,8 @@ jobs:
         rtm            : rtm
         tpm            : tpm
         maxsteps       : maxsteps
+        runmaxtokens   : runmaxtokens
+        runmaxtimems   : runmaxtimems
         maxtotalsteps  : maxtotalsteps
         maxcontext     : maxcontext
         maxcontent     : maxcontent
@@ -1623,6 +1666,10 @@ jobs:
         showthinking   : showthinking
         shellallow     : shellallow
         shellbanextra  : shellbanextra
+        shellguard     : shellguard
+        shellguardask  : shellguardask
+        shellguarddeny : shellguarddeny
+        shellguardtimeout: shellguardtimeout
         shellallowpipes: shellallowpipes
         shellbatch     : shellbatch
         shellprefix    : shellprefix
@@ -1651,6 +1698,7 @@ jobs:
         persistlearnings: persistlearnings
         usetools       : usetools
         usetoolslc     : usetoolslc
+        usejsonschema : usejsonschema
         usejsontool    : usejsontool
         toolfallback   : toolfallback
         useutils       : useutils
@@ -1690,6 +1738,7 @@ jobs:
         mcpprogcallbatchmax: mcpprogcallbatchmax
         useplanning    : useplanning
         orchestration  : orchestration
+        orchestrationcontext: orchestrationcontext
         forceplanning  : forceplanning
         planstyle      : planstyle
         earlystopthreshold: earlystopthreshold
@@ -1802,6 +1851,10 @@ jobs:
         memorywritemax : memorywritemax
         memorymd       : memorymd
         memoryreflect  : memoryreflect
+        memoryreflectmode: memoryreflectmode
+        acceptancereview: acceptancereview
+        acceptanceoptimization: acceptanceoptimization
+        proxyargrepair: proxyargrepair
         memoryreflectmodel: memoryreflectmodel
         memoryreflectmin: memoryreflectmin
         memorycandidatedays: memorycandidatedays
@@ -1884,6 +1937,8 @@ jobs:
       rtm            : toNumber.isNumber.default(__)
       tpm            : toNumber.isNumber.default(__)
       maxsteps       : toNumber.isNumber.default(15)
+      runmaxtokens   : toNumber.isNumber.default(0)
+      runmaxtimems   : toNumber.isNumber.default(0)
       maxtotalsteps  : toNumber.isNumber.default(0)
       maxcontext     : toNumber.isNumber.default(0)
       contextguard   : toBoolean.isBoolean.default(false)
@@ -1932,6 +1987,10 @@ jobs:
       showthinking   : toBoolean.isBoolean.default(false)
       shellallow     : isString.default(__)
       shellbanextra  : isString.default(__)
+      shellguard      : isString.default("auto")
+      shellguardask   : isString.default("medium")
+      shellguarddeny  : isString.default("critical")
+      shellguardtimeout: toNumber.isNumber.default(5000)
       shellallowpipes: toBoolean.isBoolean.default(false)
       shellbatch     : toBoolean.isBoolean.default(false)
       shellprefix    : isString.default(__)
@@ -1960,6 +2019,7 @@ jobs:
       persistlearnings: toBoolean.isBoolean.default(__)
       usetools       : toBoolean.isBoolean.default(__)
       usetoolslc     : toBoolean.isBoolean.default(__)
+      usejsonschema : isString.default("auto")
       usejsontool    : toBoolean.isBoolean.default(__)
       toolfallback   : toBoolean.isBoolean.default(false)
       useutils       : toBoolean.isBoolean.default(__)
@@ -1999,6 +2059,7 @@ jobs:
       mcpprogcallbatchmax: toNumber.isNumber.default(10)
       useplanning    : toBoolean.isBoolean.default(false)
       orchestration  : isString.default("manual")
+      orchestrationcontext: isString.default("auto")
       forceplanning  : toBoolean.isBoolean.default(false)
       planstyle      : isString.default(__)
       earlystopthreshold: toNumber.isNumber.default(__)
@@ -2111,6 +2172,10 @@ jobs:
       memorywritemax : toNumber.isNumber.default(__)
       memorymd       : toBoolean.isBoolean.default(false)
       memoryreflect  : toBoolean.isBoolean.default(__)
+      memoryreflectmode: isString.default(__)
+      acceptancereview: toBoolean.isBoolean.default(__)
+      acceptanceoptimization: toBoolean.isBoolean.default(__)
+      proxyargrepair: toBoolean.isBoolean.default(__)
       memoryreflectmodel: isString.default(__)
       memoryreflectmin: toNumber.isNumber.default(__)
       memorycandidatedays: toNumber.isNumber.default(__)
@@ -2271,6 +2336,7 @@ jobs:
         return runHooks(event, contextVars)
       })
     }
+    var _reflectionCutoff = now()
     var _r = __
     try {
       // Keep token streaming interactive only. Piped stdout receives the final
@@ -2290,6 +2356,17 @@ jobs:
           ow.oJob.output(_r, args)
         else
           print(_r)
+      }
+      // One-shot processes enqueue this run and process at most one older job.
+      // Output is already available; no detached worker is left behind on exit.
+      if (args.memoryreflect === true && args.memoryreflectmode !== "sync" && isFunction(_ma._consumeReflectionJob)) {
+        try {
+          _ma._consumeReflectionJob(args, _reflectionCutoff, function(snapshot) {
+            return _ma._createReflectionOwner(args, snapshot)
+          })
+        } catch(reflectionDrainError) {
+          if (args.debug) logWarn("Deferred reflection remains queued: " + reflectionDrainError)
+        }
       }
     } finally {
       try {

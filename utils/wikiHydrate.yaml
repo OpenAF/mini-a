@@ -1,0 +1,91 @@
+# Author: Nuno Aguiar
+help:
+  text: |
+    Hydrate a local Mini-A wiki from a source folder, then compact its serving index.
+    Stop other readers and writers of the wiki first: compaction rebuilds the
+    serving index offline and reclaims unreachable artifacts.
+
+    ojob utils/wikiHydrate.yaml wikiroot=okts/docs source=./docs
+    ojob utils/wikiHydrate.yaml wikiroot=okts/docs source=./docs prune=true
+    ojob utils/wikiHydrate.yaml wikiroot=okts/docs source=./docs dream=true
+    ojob utils/wikiHydrate.yaml wikiroot=okts/docs source=./docs semantic=true mode=ollama
+
+    Defaults: mode=poweruser, ingestmode=auto, ingestlayout=source, usewikigraph=true,
+    wikiretrievalv2=true, wikitelemetry=true, wikimaxprompttokens=200000 and
+    wikilexical from OAF_MINI_A_WIKI_LEXICAL (else English with ngrams and shingles).
+    OAF_MINI_A_WIKI_RETRIEVAL_CONFIG supplies wikiretrievalconfig. Any other mini-a-ingest
+    or Mini-A wiki argument (ingestinclude, ingestexclude, model, ...) is passed through.
+  expects:
+  - name: wikiroot
+    desc: Local wiki directory (created when missing)
+    mandatory: true
+  - name: source
+    desc: Folder to ingest (a git repository or page URL also works)
+    mandatory: true
+  - name: mode
+    desc: "Mode preset for model and settings (default poweruser; none to skip)"
+    mandatory: false
+  - name: model
+    desc: SLON/JSON model config (overrides the mode preset, then OAF_MODEL)
+    mandatory: false
+  - name: semantic
+    desc: "Opt-in LLM semantic graph extraction while finalizing (default false)"
+    mandatory: false
+  - name: prune
+    desc: "Remove previously ingested content missing from the source (default false)"
+    mandatory: false
+  - name: dryrun
+    desc: "Report what would be ingested without writing (default false)"
+    mandatory: false
+  - name: compact
+    desc: "Compact the serving index afterwards (default true)"
+    mandatory: false
+  - name: dream
+    desc: "Run a wiki dream after ingestion and before compaction (default false)"
+    mandatory: false
+  - name: dreamwikimode
+    desc: "Dream mode when dream=true (default reorg): auto, plan, apply, reorg, repair, reindex, graph, indexes"
+    mandatory: false
+  - name: dreamsemantic
+    desc: "Semantic graph extraction for the chained dream (default: same as semantic)"
+    mandatory: false
+  - name: backup
+    desc: "Zip the wiki next to it before a mutating dream (default true)"
+    mandatory: false
+
+ojob:
+  logToConsole: false
+  catch: |
+    logErr("❌ " + (isMap(exception) && isDef(exception.stage) ? exception.stage + " failed: " + stringify(exception.result, __, "") : exception))
+    exit(1)
+todo:
+- Hydrate wiki
+jobs:
+- name: Hydrate wiki
+  exec: | #js
+    load(String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent()) + "/wikiJobsLib.js")
+    var logFn = wikiJobsLog
+    var prepared = wikiJobsPrepare(args, { kind: "hydrate", log: logFn, createRoot: true })
+    var ingestArgs = wikiJobsIngestArgs(prepared, args)
+
+    logFn("🌊 Hydrating " + prepared.root + " from " + ingestArgs.ingestsource + (prepared.semantic ? " (semantic graph)" : "") + (prepared.dryrun ? " (dry-run)" : ""))
+    var ingest = wikiJobsRunIngest(ingestArgs, logFn)
+    log("Ingestion result:\n" + af.toYAML(ingest))
+    if (ingest.ok === false) wikiJobsFail("Ingestion", ingest.error || ingest.reason)
+
+    var backup
+    if (wikiJobsBool(args.dream, false)) {
+      var dream = wikiJobsDreamStage(prepared, wikiJobsDreamArgs(prepared, args, prepared.semantic), logFn)
+      backup = dream.backup
+      if (dream.ok === false) wikiJobsFail("Ingestion succeeded, but the dream", dream.reason || dream.error || (isMap(dream.wiki) ? dream.wiki.reason : __), backup)
+    }
+
+    try {
+      var compact = wikiJobsCompactStage(prepared, logFn)
+      if (isDef(compact)) log("Compaction result: " + stringify(compact, __, ""))
+    } catch(e) {
+      wikiJobsFail("Compaction (check the output before reopening the wiki)", isMap(e) && isDef(e.result) ? e.result : String(e), backup)
+    }
+
+    logFn("✅ Wiki hydrated" + (isDef(backup) ? " and dreamed" : "") + ": " + prepared.root)
+    wikiJobsReaderHint(prepared, logFn)

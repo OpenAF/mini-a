@@ -142,6 +142,48 @@ MiniA.prototype._extractEmbeddedFinalAction = function(answerPayload) {
     return __miniAExtractEmbeddedFinalAction(answerPayload, this._cleanCodeBlocks.bind(this))
 }
 
+// Schema mode is optional on older OpenAF installations. Never restart a native
+// tool turn through another API: a tool may already have executed.
+MiniA.prototype._promptStructuredWithStats = function(llm, prompt, descriptor, args, nativeTools) {
+  args = args || {}
+  var mode = isDef(args.usejsonschema) ? String(args.usejsonschema) : "auto"
+  if (mode !== "auto" && mode !== "off") throw new Error("usejsonschema must be auto or off")
+  var caps = isFunction(llm.getCapabilities) ? llm.getCapabilities() : {}
+  var structured = caps && caps.structuredOutput
+  var compatible = !structured || structured.implemented !== false
+  // The portable OpenAF subset cannot express the flexible action envelope.
+  if (structured && structured.schemaProfile === "openaf-subset") compatible = false
+  if (nativeTools && (!structured || structured.nativeTools !== true)) compatible = false
+  var cached = this._schemaUnsupportedClients || []
+  if (mode === "auto" && !args.showthinking && compatible && cached.indexOf(llm) < 0 && isFunction(llm.jsonSchemaPromptWithStats)) {
+    try {
+      return llm.jsonSchemaPromptWithStats(prompt, descriptor, __, __, nativeTools ? __ : [])
+    } catch (err) {
+      if (!err || err.code !== "LLM_DECISION_UNSUPPORTED" || err.toolsExecuted === true || (nativeTools && err.safeToRetry !== true)) throw err
+      cached.push(llm)
+      this._schemaUnsupportedClients = cached
+      if (isFunction(this._trace)) this._trace("schema_fallback", { reason: "unsupported", nativeTools: nativeTools === true })
+    }
+  }
+  return llm.promptJSONWithStats(prompt)
+}
+
+MiniA.prototype._actionResponseSchema = function() {
+  return {
+    name: "MiniAAction", strict: false,
+    schema: {
+      type: "object",
+      properties: {
+        thought: { type: "string" },
+        action: { anyOf: [{ type: "string" }, { type: "array", items: { type: "object" } }] },
+        answer: {}, params: { type: "object" }, state: { type: "object" },
+        command: { type: "string" }, parallel: { type: "boolean" }
+      },
+      additionalProperties: true
+    }
+  }
+}
+
 // Keep recovery calls consistent with the initial turn's provider constraints.
 MiniA.prototype._promptJsonRecovery = function(llm, prompt, args, modelConfig, noJsonPrompt) {
   var jsonFlag = !noJsonPrompt && !this._shouldDisableStreamingForOllamaToolCallTurn(modelConfig, this._useToolsActual === true, !noJsonPrompt)
@@ -149,7 +191,7 @@ MiniA.prototype._promptJsonRecovery = function(llm, prompt, args, modelConfig, n
     if (jsonFlag && isFunction(llm.promptJSONWithStatsRaw)) return llm.promptJSONWithStatsRaw(prompt)
     if (isFunction(llm.rawPromptWithStats)) return llm.rawPromptWithStats(prompt, __, __, jsonFlag)
   }
-  if (jsonFlag && isFunction(llm.promptJSONWithStats)) return llm.promptJSONWithStats(prompt)
+  if (jsonFlag && isFunction(llm.promptJSONWithStats)) return this._promptStructuredWithStats(llm, prompt, this._actionResponseSchema(), args, this._useToolsActual === true)
   return llm.promptWithStats(prompt)
 }
 

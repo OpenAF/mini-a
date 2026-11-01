@@ -1,4 +1,5 @@
 (function() {
+  load("mini-a.js")
   load("mini-a-subtask.js")
   ow.loadServer()
   var spec = io.readFileYAML("mini-a-worker.yaml")
@@ -41,6 +42,29 @@
     }
   }
 
+  exports.testShellGuardAdmission = function() {
+    fixture(function(f) {
+      var required = { enabled: true, ask: "medium", deny: "critical", timeout: 5000 }
+      var payload = f.payload()
+      payload.args = { _shellGuardRequired: required, shellguard: "off", shellbatch: false, modeldec: { type: "fixture", model: "untrusted" } }
+      var result = global.__worker_submitTask(payload, global.__worker_args)
+      var args = global.__worker_tasks[result.taskId].args
+      ow.test.assert(args._shellGuardRequired, required, "Parent requirement survives admission")
+      ow.test.assert(args.shellbatch, true, "Worker approvals are headless")
+      ow.test.assert(isUnDef(args.modeldec), true, "Remote credentials not imported")
+      var task = Object.keys(f.manager.subtasks).map(function(id) { return f.manager.subtasks[id] })[0]
+      ow.test.assert(f.manager._buildChildArgs(task)._shellGuardRequired, required, "Requirement survives actual worker child merge")
+      global.__worker_args.modeldec = { type: "fixture", model: "worker" }
+      global.__worker_args.shellguardask = "low"
+      payload = f.payload(); payload.args.usedecide = false
+      result = global.__worker_submitTask(payload, global.__worker_args)
+      args = global.__worker_tasks[result.taskId].args
+      ow.test.assert(MiniAShellGuard.resolve(args).ask, "low", "Task opt-out cannot weaken worker guard")
+      payload = f.payload(); payload.args._shellGuardRequired = { enabled: false }
+      ow.test.assert(global.__worker_submitTask(payload, global.__worker_args).code, 400, "Invalid contract rejected")
+    })
+  }
+
   exports.testWorkerReceiptsAndUnpolledCleanup = function() {
     fixture(function(f) {
       var payload = f.payload()
@@ -52,6 +76,7 @@
       var duplicate = global.__worker_submitTask(reordered, global.__worker_args)
       ow.test.assert(duplicate.taskId, first.taskId, "Duplicate requests return the same task")
       ow.test.assert(f.executions(), 1, "Exactly one execution")
+      ow.test.assert(global.__worker_tasks[first.taskId].args._autoDecompose, false, "Worker tasks cannot recursively auto-decompose")
       ow.test.assert(global.__worker_tasks[first.taskId].args._skillHandoff[0].args, "customer-42", "Remote handoff preserves invocation arguments")
       var changed = clone(payload); changed.goal = "different"
       ow.test.assert(global.__worker_submitTask(changed, global.__worker_args).code, 409, "Payload conflicts are rejected")
@@ -70,6 +95,66 @@
       ow.test.assert(global.__worker_submissionStatus(lookup).code, 404, "Receipts expire with tasks")
       global.__worker_instanceId = genUUID()
       ow.test.assert(global.__worker_submissionStatus(lookup).code, 409, "Restart cannot authorize replay")
+    })
+  }
+
+  exports.testComputeOnlyWorkerRestriction = function() {
+    fixture(function(f) {
+      global.__worker_args.useshell = true; global.__worker_args.readwrite = true; global.__worker_args.useutils = true
+      global.__worker_args.usetools = true; global.__worker_args.usedelegation = true; global.__worker_args.workers = ["http://example.invalid"]
+      global.__worker_args.mcp = "(cmd: 'unsafe')"; global.__worker_args.fileallow = ["/tmp"]
+      f.manager.parentArgs = merge({}, global.__worker_args)
+      var payload = f.payload(); payload.args = { _remoteComputeOnly: { version: 1 }, useplanning: true }
+      var result = global.__worker_submitTask(payload, global.__worker_args)
+      ow.test.assert(isString(result.taskId), true, "Compute-only request admitted")
+      var submitted = global.__worker_tasks[result.taskId], child = f.manager._buildChildArgs(f.manager.subtasks[submitted.subtaskId])
+      ;["useshell", "readwrite", "useutils", "usetools", "usedelegation", "useplanning", "usememory"].forEach(function(k) {
+        ow.test.assert(child[k], false, "Worker configuration cannot widen " + k)
+      })
+      ow.test.assert(child.fileallow.length, 0, "Worker file access is deny-all after parent merge")
+      ow.test.assert(isUnDef(child.mcp), true, "Configured external MCP cannot be started")
+      ow.test.assert(child.workers.length, 0, "Recursive workers are disabled")
+      ow.test.assert(child._autoDecompose, false, "Recursive decomposition is disabled")
+      var bad = f.payload(); bad.args = { _remoteComputeOnly: { version: 2 } }
+      ow.test.assert(global.__worker_submitTask(bad, global.__worker_args).code, 400, "Unknown contract fails closed")
+      bad = f.payload(); bad.args = { _remoteComputeOnly: { version: 1 }, _skillHandoff: [{ ref: "local:x", required: true }] }
+      ow.test.assert(global.__worker_submitTask(bad, global.__worker_args).code, 400, "Required skills are not silently dropped")
+      ow.test.assert(global.__worker_getInfoResponse().capabilities.indexOf("compute-only-v1") >= 0, true, "Info advertises the contract")
+      ow.test.assert(global.__worker_getAgentCard().additionalInterfaces.indexOf("compute-only-v1") >= 0, true, "Agent card advertises the contract")
+    })
+  }
+
+  exports.testScopedFileWorkerRestriction = function() {
+    fixture(function(f) {
+      var root = String(java.nio.file.Files.createTempDirectory("mini-a-worker-scope-").toFile().getCanonicalPath())
+      var readDir = root + "/read", writeDir = root + "/write"
+      io.mkdir(readDir); io.mkdir(writeDir)
+      try {
+        global.__worker_args = merge(global.__worker_args, { useutils: true, usestdutils: true, usetools: true, readwrite: true,
+          useshell: true, utilsroot: root, fileallow: [root], policy: { shell: "deny" } })
+        f.manager.parentArgs = merge({}, global.__worker_args)
+        var contract = { version: 1, root: root, reads: [readDir], writes: [writeDir], parentFileallow: [root], policies: [{ deniedTools: ["other"] }] }
+        var payload = f.payload(); payload.args = { _remoteScopedFilesV1: contract }
+        var result = global.__worker_submitTask(payload, global.__worker_args)
+        ow.test.assert(isString(result.taskId), true, "Scoped request admitted")
+        var stored = global.__worker_tasks[result.taskId], child = f.manager._buildChildArgs(f.manager.subtasks[stored.subtaskId])
+        ow.test.assert(child.fileallow.length, 2, "Read access is limited to declared scopes")
+        ow.test.assert(child._remoteWriteAllow, [writeDir], "Write access uses its separate scope")
+        ow.test.assert(child.utilsallow, "read,apply_patch", "Only scoped file tools are exposed")
+        ow.test.assert(child.useshell, false, "Shell remains disabled")
+        ow.test.assert(child._inheritedPolicies.length, 2, "Both worker and parent policy are retained")
+        io.writeFileString(readDir + "/source.txt", "source")
+        var agent = new MiniA(); agent.fnI = function() {}; agent._configureFileAccess(child); agent._initPolicyRuntime(child)
+        var tools = agent._createUtilsMcpConfig(child).options.fns
+        ow.test.assert(isDef(tools.read) && isDef(tools.apply_patch) && isUnDef(tools.webfetch), true, "Only admitted utility tools are exposed")
+        var badPatch = tools.apply_patch({ patchText: "*** Begin Patch\n*** Add File: read/forbidden.txt\n+no\n*** End Patch" })
+        ow.test.assert(isDef(badPatch.error) && !io.fileExists(readDir + "/forbidden.txt"), true, "Read-only scope cannot be written")
+        var goodPatch = tools.apply_patch({ patchText: "*** Begin Patch\n*** Add File: write/allowed.txt\n+yes\n*** End Patch" })
+        ow.test.assert(isUnDef(goodPatch.error) && io.fileExists(writeDir + "/allowed.txt"), true, "Declared write scope is usable")
+        var bad = f.payload(); bad.args = { _remoteScopedFilesV1: merge(contract, { writes: ["/tmp"] }) }
+        ow.test.assert(global.__worker_submitTask(bad, global.__worker_args).code, 403, "Scope outside the shared root is rejected")
+        ow.test.assert(global.__worker_getInfoResponse().capabilities.indexOf("scoped-files-v1") >= 0, true, "Scoped protocol is advertised")
+      } finally { io.rm(root) }
     })
   }
 
@@ -126,6 +211,8 @@
           parent._workerProfiles[url] = parent._fetchWorkerProfile(url)
           ow.test.assert(parent._workerProfiles[url].workerInstanceId, global.__worker_instanceId, "HTTP discovery carries the worker process identity")
           ow.test.assert(parent._workerProfiles[url].capabilities.indexOf("submission-recovery-v1") >= 0, true, "HTTP discovery negotiates recovery")
+          ow.test.assert(parent._workerProfiles[url].capabilities.indexOf("task-outcome-v1") >= 0, true, "HTTP discovery negotiates task outcomes")
+          ow.test.assert(parent._workerProfiles[url].capabilities.indexOf("execution-budget-v1") >= 0, true, "HTTP discovery negotiates aggregate budget enforcement")
           if (scenario === "legacy") parent._workerProfiles[url].capabilities = []
           var parentId = parent.submit("fixture", {}, { maxAttempts: 2 })
           try {
@@ -151,6 +238,28 @@
           } finally { parent.destroy(); ow.server.httpd.stop(server) }
         })
       })
+    })
+  }
+  exports.testWorkerBudgetCeilingsAndOutcome = function() {
+    fixture(function(f) {
+      global.__worker_args.runmaxtokens = 2000
+      global.__worker_args.runmaxtimems = 4000
+      var payload = f.payload()
+      payload.args = { orchestration: "auto", runmaxtokens: 9000, runmaxtimems: 10000 }
+      var result = global.__worker_createTask(payload, global.__worker_args)
+      var task = global.__worker_tasks[result.taskId]
+      ow.test.assert(task.args.runmaxtokens, 2000, "Worker operator token ceiling cannot be raised remotely")
+      ow.test.assert(task.args.runmaxtimems, 4000, "Worker operator time ceiling cannot be raised remotely")
+      ow.test.assert(task.args.orchestration, "auto", "Capped worker tasks enable budget admission")
+      f.manager._startLocalSubtask = function(subtask) {
+        f.manager._completeSubtask(subtask, "fixture", "ready", {}, { execution: { outcome: "partial", usage: { spent: 2000, estimated: 0 } } })
+      }
+      f.manager.start(task.subtaskId)
+      ow.test.assert(f.manager.result(task.subtaskId).outcome, "partial", "Worker child outcome survives lifecycle completion")
+      payload = f.payload(); payload.args = { runmaxtokens: -1 }
+      var rejected = false
+      try { global.__worker_createTask(payload, global.__worker_args) } catch(e) { rejected = true }
+      ow.test.assert(rejected, true, "Invalid allocation cannot bypass worker admission")
     })
   }
 })()

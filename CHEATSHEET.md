@@ -228,7 +228,7 @@ mini-a goal="generate summaries for 50 documents" \
 
 | Provider   | Model                   | Example |
 |------------|-------------------------|---------|
-| Anthropic  | claude-haiku-4.5        | ```export OAF_MODEL="(type: anthropic, key: '...', model: claude-haiku-4-5-20251001, timeout: 900000, temperature: 0, params: (max_tokens: 64000))" ``` |
+| Anthropic  | claude-haiku-5.5        | ```export OAF_MODEL="(type: anthropic, key: '...', model: claude-haiku-5-5, timeout: 900000, params: (max_tokens: 64000))" ``` |
 | Anthropic  | claude-opus-4.5         | ```export OAF_MODEL="(type: anthropic, key: '...', model: claude-opus-4-5-20251101, timeout: 900000, temperature: 0, params: (max_tokens: 64000))" ``` |
 | Anthropic  | claude-sonnet-4.5       | ```export OAF_MODEL="(type: anthropic, key: '...', model: claude-sonnet-4-5-20250929, timeout: 900000, temperature: 0, params: (max_tokens: 64000))" ``` |
 | Bedrock    | claude-haiku-4.5        | ```export OAF_MODEL="(type: bedrock, options: (region: eu-west-1, model: 'global.anthropic.claude-haiku-4-5-20251001-v1:0', temperature: 0, params: (max_tokens: 65535)), timeout: 900000)"``` |
@@ -259,7 +259,7 @@ mini-a goal="generate summaries for 50 documents" \
 | Ollama     | qwen3-coder:480b-cloud  | ```export OAF_MODEL="(type: ollama, model: 'qwen3-coder:480b-cloud', url: 'http://localhost:11434', timeout: 900000)"``` |
 | Ollama     | ministral-3:14b-cloud   | ```export OAF_MODEL="(type: ollama, model: 'ministral-3:14b-cloud', url: 'http://localhost:11434', timeout: 900000)"``` |
 | OpenAI     | gpt-5-mini              | ```export OAF_MODEL="(type: openai, model: gpt-5-mini, key: 'sk-...', timeout: 900000, temperature: 1)"``` |
-| OpenAI     | gpt-5.2                 | ```export OAF_MODEL="(type: openai, key: 'sk-...', model: gpt-5.2, timeout: 900000, temperature: 1)"``` |
+| OpenAI     | gpt-6-luna              | ```export OAF_MODEL="(type: openai, key: 'sk-...', model: gpt-6-luna, timeout: 900000, temperature: 1, param: (reasoning_effort: none))"``` |
 | Scaleway   | gpt-oss-120b            | ```export OAF_MODEL="(type: openai, url: 'https://api.scaleway.ai', key: '123-abc-xyz', model: gpt-oss-120b)"``` |
 
 **Dual-Model (Cost Optimization):**
@@ -2417,3 +2417,8 @@ These grouped tables complete the parameter entries above. `unset` means no expl
 | `wikidreambudget` | number | `not enforced` | Reserved dream-scope estimated token budget; the current dream runner does not enforce it. Use dreammaxsteps to bound model steps. |
 
 See the [wiki guide](docs/WIKI.md), [delegation guide](docs/DELEGATION.md), and [absorption guide](docs/ABSORB.md) for operation-specific examples and restrictions.
+
+| Parameter | Description | Default |
+| --- | --- | --- |
+| `runmaxtokens` | Aggregate model-token admission cap for `orchestration=auto`, including descendants and acceptance review. Provider usage is preferred; missing usage is estimated. In-flight responses may exceed estimates. | `0` (unlimited) |
+| `runmaxtimems` | Aggregate elapsed-time admission cap in milliseconds for `orchestration=auto`. Prevents new calls and dispatch after expiry; existing transport/tool timeouts govern in-flight work. | `0` (unlimited) |

@@ -696,6 +696,13 @@
 
   exports.testUserInput = function() {
     var tool = new MiniUtilsTool()
+    tool._terminalInputLock = "mini-a-utils-input-test-" + genUUID()
+    ;[0, false, "", "yes", ["yes"], { answer: "yes" }].forEach(function(value) {
+      ow.test.assert(tool._withTerminalInput(function() { return value }) === value, true, "Terminal lock should preserve the input result")
+    })
+    var inputError = new Error("Input failed"), caughtError
+    try { tool._withTerminalInput(function() { throw inputError }) } catch(e) { caughtError = e }
+    ow.test.assert(caughtError === inputError, true, "Terminal lock should propagate input errors")
     var originals = {
       _ask              : tool._ask,
       _askEncrypt       : tool._askEncrypt,
@@ -706,6 +713,11 @@
     }
 
     try {
+      tool._askChoose = function() {
+        return tool._withTerminalInput(function() { return 0 })
+      }
+      var confirmation = tool.question({ questions: [{ question: "Commit?", options: ["yes", "edit", "cancel"] }] })
+      ow.test.assert(stringify(confirmation, __, ""), '{"answers":{"q1":"yes"}}', "First terminal choice should reach the model as yes")
       tool._ask = function(prompt, mask) {
         return "plain:" + prompt + ":" + (isDef(mask) ? mask : "")
       }

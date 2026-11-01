@@ -130,7 +130,16 @@ loadLib("mini-a-common.js")
     var historyVmAfter = isMap(after) && isMap(after.history_vm) ? after.history_vm : {}
     var historyVmMetrics = isMap(historyVmAfter.metrics) ? historyVmAfter.metrics : {}
     var historyVmRehydrations = (historyVmDelta.reads || 0) + (historyVmDelta.context_expansions || 0)
+    var execution = isMap(after) && isMap(after.execution) ? after.execution : null
+    var executionTasks = execution ? Object.keys(execution.tasks || {}).map(function(id) { return execution.tasks[id] }) : []
     return {
+      execution_outcome: execution ? execution.outcome : "untracked",
+      verified_completion: execution ? (execution.outcome === "succeeded" ? 1 : 0) : null,
+      execution_progress: execution ? execution.progress : 0,
+      execution_recoveries: execution ? execution.recoveries : 0,
+      aggregate_tokens: execution ? execution.budget.spent : null,
+      aggregate_estimated_tokens: execution ? execution.budget.estimated : null,
+      unaccepted_tasks: executionTasks.filter(function(t) { return t.required !== false && t.acceptance !== "accepted" }).length,
       elapsed_ms: elapsedMs,
       total_steps: perf.steps_taken,
       llm_calls: llm.total,
@@ -147,6 +156,7 @@ loadLib("mini-a-common.js")
       // Local core counters can include concurrent children; never add child snapshots
       // to these totals or claim independent parent/child usage from shared counters.
       delegation_usage_scope: "existing_process_counters",
+      delegated_tasks: delegation.owned_total || 0,
       decision_calls: decisions.calls || 0,
       decision_failures: decisions.failures || 0,
       decision_fallbacks: decisions.fallbacks || 0,
@@ -506,6 +516,9 @@ loadLib("mini-a-common.js")
     }
     var skillMetrics = this._skillMetrics(before.skills, after.skills, skillRuntimeBefore !== agent._skillRuntime)
     var delta = this._metricDelta(before, after)
+    if (isMap(after.delegation) && isNumber(after.delegation.owned_total) && (!isMap(before.delegation) || before.delegation.manager_id !== after.delegation.manager_id)) {
+      delta.delegation.owned_total = after.delegation.owned_total
+    }
     if (isMap(after.skills)) {
       // Preserve the raw skill snapshot shape, but only difference counters.
       delta.skills = clone(after.skills)

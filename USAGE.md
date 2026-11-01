@@ -183,7 +183,7 @@ mini-a ➤ /my-command repo-a --fast "include docs"
 Notes:
 - Built-in commands take precedence, so custom files cannot override `/help`, `/show`, etc.
 - If a referenced command file is missing or unreadable, Mini-A reports a hard error and does not execute a goal.
-- Discovered command and skill templates appear in `/help` and Tab completion.
+- In the TUI console, `/help` shows regular help; `/help custom` lists discovered commands, skills, and hooks. Command and skill templates also appear in Tab completion.
 - Skill packs downloaded from catalogs such as `skillsmp.com` can be copied directly as folders under `~/.openaf-mini-a/skills/` as long as each skill folder contains `SKILL.md` (or `skill.md`).
 - Append `.disabled` to a skill folder name to keep it installed but excluded from discovery (for example `reviewer.disabled/`).
 - Alternative self-contained skill formats are supported via `SKILL.yaml|yml|json` (metadata, `body` markdown, and embedded refs/children), alongside existing markdown skill templates.
@@ -508,6 +508,7 @@ Modes can now inherit from other modes using `include`. Use `include: <mode>` (o
 - **`internet`** – Tool mode with web-access MCP presets (time, web, weather, net) plus docs-aware utils (`usetools=true mini-a-docs=true mcpproxy=true mcp=...`).
 - **`news`** – News from the internet mode, inheriting `internet` with time, web, and RSS MCP tools (`mcpproxy=true mcp=...`).
 - **`poweruser`** – Power user mode enabling shell read-write, utils, skills, streaming, MCP proxying, history retention, advisor strategy, delegation, and standard utils (`useshell=true readwrite=true useutils=true useskills=true usestream=true ...`).
+- **`wiki`** – Read-only wiki Q&A (`usewiki=true wikiaccess=ro wikiretrievalv2=true usewikigraph=true`, no shell, writes or delegation); used by `mini-a wikiquery=true`. See the [wiki quickstart](docs/WIKI-QUICKSTART.md).
 - **`chatbot`** – Lightweight conversational mode (`chatbotmode=true usestream=true`).
 - **`web`** – Browser UI with tools, diagrams, charts, maps, vectors, math, history, attachments, and MCP proxying (`usetools=true usediagrams=true usecharts=true usemaps=true usevectors=true usemath=true usehistory=true useattach=true mcpproxy=true mcp=...`).
 - **`webfull`** – Web UI inheriting `web`, adding streaming, extended history retention, complexity estimation, and expanded MCPs (`rss`, `fin`, `oaf`, `oafp`), with planning and ASCII sketches explicitly disabled (`useplanning=false useascii=false usestream=true historykeep=true ...`).
@@ -906,6 +907,7 @@ Adapt the examples above by changing the `OAF_MODEL` tuple to match your provide
 - Every attachment appears above the prompt as a rounded chip showing the file name; remove any file before sending by selecting the **✕** icon.
 - When you submit the prompt, Mini-A automatically appends the file name and contents as Markdown code blocks. In the conversation stream the files show up as collapsible buttons—click one to open a preview modal with syntax highlighting.
 - Both Simple and Advanced modes also accept PNG/JPEG images, Word (`.doc`, `.docx`), Excel (`.xls`, `.xlsx`), PowerPoint (`.ppt`, `.pptx`) and PDF files. Enter a question or instruction before submitting binary files; Advanced slash and skill commands do not accept them.
+- Submitted images keep a small clickable thumbnail below your prompt in the answer pane in both modes. The larger preview uses a reduced JPEG copy (up to 768 pixels on its longest side), retained with saved conversation history. Older conversations without saved previews continue to show filenames.
 - Binary attachments allow **four files**, **10 MiB per image**, **20 MiB per document**, and **20 MiB combined**. Unsupported or oversized files are skipped with a warning. Images retain the existing 25-megapixel limit.
 - Upload validation scans base64 without allocating regex match states for the full payload. With an OpenAF OpenAI provider advertising `supportsImageMimeTypes`, PNG attachments are sent unchanged with the correct media type; older runtimes retain JPEG conversion. Update both Mini-A and OpenAF in your web container, rebuild it and restart it to receive both memory improvements.
 - `useattach=true` enables isolated, read-only processing without requiring `useutils=true`, `useshell=true` or `readwrite=true`. Office/PDF files use the existing Tika `readDocument` reader (30,000 extracted characters per document); images use `inspectImage` with your question and `modelvisual` / `OAF_VISUAL_MODEL` (falling back to the main model). A vision-capable provider/model is required for images. See [Reading documents and images](#reading-documents-and-images) for Tika installation and runtime requirements; preinstall Tika for offline use.
@@ -1001,6 +1003,12 @@ The `start()` method accepts various configuration options:
 - **`toolargrepair`** (boolean, default: true): Before checking, repairs an unambiguous near-typo, unwraps a sole `arguments`/`params`/`input` object, and parses JSON strings for object/array parameters. Repairs are traced so they remain visible to diagnostics.
 
 Embedded utility calls that fail argument validation return targeted corrections for the offending fields. Feedback includes up to three issues, with nested field paths, expected types or allowed values, and small examples where needed. This guidance is returned after a rejected call and adds no standing prompt instructions or mandatory skill loading. Existing accepted argument coercions and aliases remain supported. Permission, file-access and provider failures retain their original meaning; failed writes are not automatically retried.
+
+Tool policy is checked at the shared direct-call boundary, including the target
+of a `proxy-dispatch` call. When a restrictive policy is active, pass proxy call
+arguments inline: `argumentsFile` is rejected because its contents cannot be
+classified at that boundary. Calls without a restrictive policy retain the file
+handoff behavior.
 - **`usewiki`** (boolean, default: `false`): Enable the persistent Markdown wiki knowledge base.
 - **`wikiaccess`** (string, default: `ro`): Wiki access mode, `ro` or `rw`.
 - **`wikibackend`** (string, default: `fs`): Wiki backend, one of `fs`, `s3`, `s3fs`, `es` (Elasticsearch/OpenSearch), or read-only `http` (`https` is accepted as an alias).
@@ -1081,7 +1089,7 @@ For the Elasticsearch/OpenSearch wiki backend, there is no separate top-level `e
 - **`deescalate`** (number, default: 3): Number of consecutive successful steps required after an escalation before Mini-A automatically reverts to the low-cost model. Set to a higher value for more conservative de-escalation or `0` to disable de-escalation entirely.
 - **`lccontextlimit`** (number, default: 0 = disabled): Maximum context token count before escalating to the main model. When the estimated context size reaches this threshold, Mini-A switches to the main model for that step. Useful when the low-cost model has a smaller context window than the main model. Set to `0` to disable context-based escalation.
 - **`modellock`** (string, one of `"main"`, `"lc"`, or `"auto"` = default): Select a model tier for normal steps, bypassing score-based escalation and de-escalation. Recovery paths (including invalid-JSON fallback) can still call the main model, so this is not a strict spending or provider-isolation boundary. Use `modellock=main` to select the main model (`OAF_MODEL`), `modellock=lc` to select the low-cost model (`OAF_LC_MODEL`), or leave unset/`auto` for the default adaptive behaviour. A one-time info message is logged at startup when a lock is active.
-- **`modelstrategy`** (string, one of `"default"`, `"advisor"`, `"delegate"`, `"supervised"` or `"auto"`, default: `"default"`): Select the model orchestration profile. `auto` resolves once per run (in `init()`, before the system prompt is built) to a concrete strategy: resumed runs keep theirs, contract options pick `supervised`, no LC model or `modellock=main|lc` picks `default`, complex goals with a verification requirement (`test`/`validate`/`verify`/`ensure` words or `outfile`) pick `supervised` when no supervised-conflicting option is set, other complex goals pick `advisor`, medium low-risk goals with `lcbudget>0` pick `delegate`, otherwise `default`. Medium goals are refined by the decision model when configured. `orchestration=auto` uses the same resolver when `modelstrategy` is not set explicitly. Subtasks of an `auto` run resolve for their own goal. `default` keeps current LC-first behavior with escalation. `advisor` keeps LC as the executor and selectively calls the main model as an internal advisor for difficult steps.
+- **`modelstrategy`** (string, one of `"default"`, `"advisor"`, `"delegate"`, `"supervised"` or `"auto"`, default: `"default"`): Select the model orchestration profile. `auto` resolves once per run (in `init()`, before the system prompt is built) to a concrete strategy: resumed runs keep theirs, contract options pick `supervised`, no LC model or `modellock=main|lc` picks `default`, eligible complex batch execution goals with a deliverable and verification signal pick `supervised`, while interactive and other complex goals pick `advisor`, medium low-risk goals with `lcbudget>0` pick `delegate`, otherwise `default`. Medium goals are refined by the decision model when configured. `orchestration=auto` uses the same resolver when `modelstrategy` is not set explicitly. Subtasks of an `auto` run resolve for their own goal. `default` keeps current LC-first behavior with escalation. `advisor` keeps LC as the executor and selectively calls the main model as an internal advisor for difficult steps.
 - **`advisormaxuses`** (number, default: `2`): Maximum advisor consultations per run when `modelstrategy=advisor`.
 - **`advisorenable`** (boolean, default: `true`): Master toggle for advisor consultations inside `modelstrategy=advisor` runs.
 - **`advisoronrisk`** (boolean, default: `true`): Allow advisor consults on risk signals.
@@ -1099,6 +1107,7 @@ For the Elasticsearch/OpenSearch wiki backend, there is no separate top-level `e
 
 - **`lcjsonretries`** (number, default: `1`): Number of extra same-step attempts to give the low-cost model when its response fails to parse as valid JSON, before falling back to the main model. Each retry re-prompts the low-cost model with a concrete response example and formatting instructions and does not consume a step from `maxsteps`. It does consume tokens and counts toward `lcbudget` and call/token limits. Text, already-parsed objects, and arrays are accepted; retries preserve provider JSON-mode compatibility settings. Set to `0` to restore the previous behavior of falling back to the main model immediately on the first invalid-JSON response.
 - **`llmcomplexity`** (boolean, default: `false`): When enabled, if the static heuristic assessment returns `"medium"` complexity, Mini-A fires a single short LC model call to validate the result before selecting escalation thresholds. This adds a small upfront cost but may improve threshold accuracy for ambiguous goals.
+  Optional complexity requests are capped at five seconds (shorter model timeouts win). Decision-model failures reuse the heuristic for the rest of that goal instead of retrying during later startup phases or invoking a second model; a new submission may try again.
 - **`secpass`** (string): Password used to unlock OpenAF sBucket model secrets when loading saved model definitions (for example, encrypted entries managed through `modelman=true`).
 - **`memoryman`** (boolean, default: false): Launch the interactive working-memory manager TUI (`mini-a-memoryman.js`) instead of the normal console. Designed for operators using `usememory=true` with `memorych`/`memorysessionch`.
 
@@ -1138,15 +1147,30 @@ Default behavior note:
 - **`readwrite`** (boolean, default: false): Allow read/write operations on filesystem
 - **`checkall`** (boolean, default: false): Ask for confirmation before executing any shell command
 - **`shellallow`** (string): Comma-separated list of banned commands that should be explicitly allowed
-- **`shellallowpipes`** (boolean, default: false): Allow pipes, redirection, and shell control operators in commands
+- **`shellallowpipes`** (boolean, default: false): Allow pipes, redirection, and shell control operators in commands when `readwrite=false`; `readwrite=true` already skips this deterministic check.
 - **`shellbanextra`** (string): Additional comma-separated commands to ban
-- **`shellbatch`** (boolean, default: false): If true, runs in batch mode without prompting for command execution approval
+- **`shellbatch`** (boolean, default: false): If true, runs in batch mode without prompting for command execution approval; commands requiring approval are blocked.
+- **`shellguard`** (`auto|off|decide`, default: `auto`): Add decision-based shell risk assessment. Auto activates with `modeldec` or `OAF_DECIDE_MODEL` unless `usedecide=false`. Explicit `decide` requires an enabled configured model. Use `off` to opt out locally; inherited guard requirements still apply.
+- **`shellguardask`** (`low|medium|high|critical`, default: `medium`): Minimum assessed risk requiring one-command approval.
+- **`shellguarddeny`** (same levels, default: `critical`): Minimum risk blocked outright. Denial takes precedence over approval.
+- **`shellguardtimeout`** (milliseconds, default: `5000`): Maximum decision transport timeout.
+
+The guard allows low-risk inspection, asks for scoped reversible changes (medium) and destructive/privileged/external effects (high), and denies broad irreversible damage or credential disclosure (critical). Unknown effects, oversized assessment input, invalid answers, and provider failures require approval; headless/batch execution blocks them. Approvals apply once and are never cached. Referenced scripts whose effects cannot be established should be classified unknown.
+
+Assessment supplements deterministic restrictions and sandbox enforcement; a model answer does not guarantee safety. `shellallow` exempts banned tokens, not an exclusive command allowlist. `readwrite=true` and legacy “Always” approvals cannot bypass `checkall`, policy-required approval, or decision-required approval. The guard covers built-in shell execution, not arbitrary external MCP tool effects.
+
+With `readwrite=true`, built-in command-token and redirection/pipe checks are skipped. Decision-based assessment still applies according to `shellguard`, `shellguardask`, and `shellguarddeny`. Explicit `shellbanextra` entries still require approval unless exempted by `shellallow`.
+
+**Compatibility:** sessions with a configured decision model now assess shell commands automatically. Assessment sends command and execution context to that configured provider. Local children inherit restrictions; remote workers use their own decision credentials and block required approvals without a UI. Audit events `shell_guard` and `shell_guard_approval` record risk, action, reason and timing/outcome without adding raw command fields.
+
+Example: `useshell=true readwrite=true shellguard=auto shellguardask=medium shellguarddeny=critical`.
+
 
 #### MCP (Model Context Protocol) Integration
 - **`mcp`** (string): MCP configuration in JSON format (single object or array for multiple connections)
 - **`usetools`** (boolean, default: false): Register MCP tools directly on the model instead of expanding the system prompt with tool schemas
 - **`usetoolslc`** (boolean, default: false): Register MCP tools directly only on the low-cost model (`OAF_LC_MODEL` / `modellc`). Useful when you want native tool calling on the cheaper tier without enabling it on the main model.
-- **`usejsontool`** (boolean, normally `false`): Uses Mini-A's JSON action loop and disables native tool registration on both model tiers, including when `mcpproxynative=true`. Automatically enabled for GPT-OSS models and for `usetools=true mcpproxy=true` unless explicitly overridden. An explicit run value takes precedence over the resolved session value; `usejsontool=false` retains native behavior. JSON-encoded action arrays are accepted as batches; malformed batches return corrective errors.
+- **`usejsontool`** (boolean, normally `false`): Uses Mini-A's JSON action loop and disables native tool registration on both model tiers, including when `mcpproxynative=true`. Automatically enabled for GPT-OSS models unless explicitly overridden. An explicit run value takes precedence over the resolved session value; `usejsontool=false` retains native behavior. JSON-encoded action arrays are accepted as batches; malformed batches return corrective errors.
 - **`mcpdynamic`** (boolean, default: false): When `usetools=true`, analyze the goal and only register the MCP tools that appear relevant, consulting the available LLMs to pick a promising connection when heuristics fail and only falling back to all tools if no confident choice is produced
 - **`sessionprewarm`** (boolean, default: true): Prepare read-only wiki resources and configured external MCP transports while composing a console or web prompt. Use `false` to keep setup at submission.
 - **`mcplazy`** (boolean, default: false): Compatibility setting for MCP preparation. Direct connections still initialize and list tools before the first model request; this is not a guarantee of deferred networking.
@@ -2052,6 +2076,8 @@ Mini-A includes several advanced capabilities to optimize performance and resour
 
 Enable `usestream=true` to display LLM responses as they are generated, providing immediate feedback and reducing perceived latency.
 
+In the interactive console, concurrent main-agent and delegated-agent streams are kept separate. Press **Tab** to view the next stream or **Shift-Tab** to view the previous stream; **Esc** still stops the run. ANSI terminals use a separate screen for stream viewing: switching restores the selected stream’s own viewport without appending other streams to it. Each view retains up to 131,072 characters and follows its latest output; warnings remain visible. Completion, cancellation, or errors restore the normal terminal screen and cursor. The final answer is displayed there regardless of the selected stream. Non-ANSI terminals retain the labeled, append-only stream view.
+
 **How it works:**
 - Tokens are streamed from the LLM as they arrive
 - Markdown elements are buffered intelligently to prevent visual artifacts
@@ -2156,7 +2182,7 @@ Console sessions and both web views prepare resources in the background while yo
 
 Read-only primary wikis, mounts, and dedicated skill wikis are prepared together. Submission checks configuration, file-access boundaries, local graph/publication stamps, and remote artifacts before adoption. Changed resources follow ordinary initialization. Writable wiki setup stays at submission because it can create wiki files.
 
-Configured external stdio and HTTP MCP transports can negotiate their connection early. Tool catalogs are always fetched at submission. Local `type=ojob` and dummy tools, plugin-discovered connections, and interactive OAuth flows retain foreground initialization. Existing proxy reuse and fresh local oJob clients remain in effect. Failed or cancelled preparation falls back to ordinary setup, and unused resources close on session cleanup. The web server retains at most 16 prepared sessions, with normal idle-session expiry.
+Configured external stdio and HTTP MCP transports can negotiate their connection early. Tool catalogs are always fetched at submission. Local `type=ojob` and dummy tools, plugin-discovered connections, and interactive OAuth flows retain foreground initialization. Existing proxy reuse and fresh local oJob clients remain in effect. Up to two independent external transports prepare concurrently, while submission still requires all configured catalogs. A failed preparation attempt is reported once without an immediate duplicate handshake; a later goal or reconnect can retry. Unused resources close on session cleanup. The web server retains at most 16 prepared sessions, with normal idle-session expiry.
 
 To disable background resource preparation:
 
@@ -3314,7 +3340,7 @@ Mini-A then updates memory incrementally after:
 
 ### Reflection
 
-The model rarely calls `memory_write` on its own mid-task, so a cold `usememory` store tends to stay cold. `memoryreflect` (default `true` under `usememory=true`) closes that gap: at the end of a **successful** run that made at least `memoryreflectmin` (default `2`) tool/shell calls, Mini-A makes one extra LLM call — using `memoryreflectmodel`/`OAF_REFLECT_MODEL` if configured, else the low-cost model if one is set, else the main model, always as a bare instance with no conversation history attached — asking it to extract 0-5 durable memories (same `kind`s as `memory_write`) from the goal, final answer, tools used, errors seen, and recent actions. Each candidate entry is validated before it can reach memory: kind must be one of the five `memory_write` kinds, value length 10-400 chars, no near-duplicate of the goal or final answer (so it can't just restate the task), no obvious secret pattern, and an optional `supersedes` key is honored only when it names a durable-memory key that was actually shown to the model in the prompt (never a tool-contract key). Accepted entries are written through the same `memory_write` path (provenance `event:"reflection"`, bypassing `memorywritemax`) and therefore follow the same session→candidate→active promotion described above. Reflection never runs on a missing-final-answer, error, or shutdown exit, and a failure in the reflection call itself is always swallowed — it never fails or delays the run.
+The model rarely calls `memory_write` on its own mid-task, so a cold `usememory` store tends to stay cold. `memoryreflect` (default `true` under `usememory=true`) closes that gap: at the end of a **successful** run that made at least `memoryreflectmin` (default `2`) tool/shell calls, Mini-A makes one extra LLM call — using `memoryreflectmodel`/`OAF_REFLECT_MODEL` if configured, else the low-cost model if one is set, else the main model, always as a bare instance with no conversation history attached — asking it to extract 0-5 durable memories (same `kind`s as `memory_write`) from the goal, final answer, tools used, errors seen, and recent actions. Each candidate entry is validated before it can reach memory: kind must be one of the five `memory_write` kinds, value length 10-400 chars, no near-duplicate of the goal or final answer (so it can't just restate the task), no obvious secret pattern, and an optional `supersedes` key is honored only when it names a durable-memory key that was actually shown to the model in the prompt (never a tool-contract key). Accepted entries are written through the same `memory_write` path (provenance `event:"reflection"`, bypassing `memorywritemax`) and therefore follow the same session→candidate→active promotion described above. Reflection never runs on a missing-final-answer, error, or shutdown exit, and a failure in the reflection call itself is always swallowed — it never fails the goal; synchronous reflection can delay completion.
 
 ### Context Injection and `memory_search`
 
@@ -3879,12 +3905,19 @@ use `dreammaxsteps` for auto/reorg steps. See [wiki limits](docs/WIKI.md#model-p
 # Adaptive orchestration
 
 `orchestration=manual` is the default and preserves the current behavior.
-`orchestration=auto` applies deterministic goal-complexity and risk heuristics
-to the existing planning, advisor/model-strategy, and evidence-gate controls.
+`orchestration=auto` applies goal-complexity and risk heuristics to the existing
+planning, advisor/model-strategy, and evidence-gate controls. A configured decision
+model may refine ambiguous complexity and assist bounded execution decisions.
 Explicit flags such as `useplanning=false`, `modelstrategy=default`, and
 `evidencegate=false` always win. Auto decisions are available through the
-existing trace sink as structured `orchestration_decision` records; no extra
-LLM routing call is made.
+existing trace sink as structured `orchestration_decision` records.
+
+`orchestrationcontext=auto` treats console and web sessions as interactive and
+direct jobs and workers as batch. Set it to `interactive` or `batch` to override
+this. Automatic strategy selection does not select supervised for interactive
+sessions; batch selection requires a complex execution goal, a deliverable and
+a verification signal. An explicit supervised strategy or contract and a resumed
+supervised run still take precedence.
 
 # Evaluation suites
 
@@ -5070,3 +5103,102 @@ Console parameters appear in `mini-a --help` and interactive `/set` completion. 
 | `modelman` | boolean | `false` | Start the model manager UI instead of the console. |
 
 See the [wiki guide](docs/WIKI.md), [delegation guide](docs/DELEGATION.md), and [absorption guide](docs/ABSORB.md) for operation-specific examples and restrictions.
+
+| Parameter | Description | Default |
+| --- | --- | --- |
+| `runmaxtokens` | Aggregate model-token admission cap for `orchestration=auto`, including descendants and acceptance review. Provider usage is preferred; missing usage is estimated. In-flight responses may exceed estimates. | `0` (unlimited) |
+| `runmaxtimems` | Aggregate elapsed-time admission cap in milliseconds for `orchestration=auto`. Prevents new calls and dispatch after expiry; existing transport/tool timeouts govern in-flight work. | `0` (unlimited) |
+
+### Reliable automatic orchestration
+
+`orchestration=auto` tracks progress from relevant new tool evidence and accepted task results. Repeating a successful call with unchanged output does not reset the progress guard. Four active steps without progress request a changed approach; two unsuccessful recovery attempts leave the goal blocked. Child waiting is excluded, while existing delegation timeouts still apply. Manual orchestration retains its existing execution behavior.
+
+With `usedecide=true` and a configured decision model, automatic execution may
+use bounded decision calls to recommend a recovery, skip a low-value automatic
+summary delegation, or review eligible read-only evidence. The acceptance fast
+path requires recognized read-only tools, complete evidence and a supported
+verdict for each criterion; otherwise it uses the existing reviewer. Decisions do
+not alter permissions or reset the progress guard. New optional calls are limited
+to eight per run, five seconds per call and fifteen seconds of cumulative call
+time, with two consecutive failures disabling them. Unsupported transports and
+exhausted allowances fall back to the existing behavior.
+
+When delegation is already enabled, automatic mode can propose a task
+breakdown for a multi-step execution goal with no existing plan or task graph. It first asks
+the decision model whether delegation is worthwhile, then asks the main model for
+two to five task contracts. The complete graph is validated and checkpointed
+before scheduling; conflicting scopes still serialize. The original goal remains
+the final acceptance requirement. A negative, unavailable, invalid or unaffordable
+proposal falls back to normal execution. There is at most one attempt per unchanged
+goal, and children do not recursively decompose. This does not enable delegation
+or supervised mode. On durable resume, pending undispatched tasks are requeued;
+previously running tasks remain subject to reconciliation rather than replay.
+Remote automatic decomposition requires workers advertising `compute-only-v1`,
+`prepared-context-v1`, and `task-outcome-v1`. Tasks without file scopes use the
+compute-only profile. File-bearing tasks additionally require `scoped-files-v1`,
+an API token, and a shared utility root at the same canonical path on parent and
+worker. The parent checks its permissions and asks each eligible worker to
+validate the task's existing read and write scopes against its own permissions;
+the task is pinned to an admitted worker instance. Workers repeat validation at
+admission and child startup. Scoped tasks expose only built-in `read` and, when
+permitted, `apply_patch`, with separate read and write ceilings and both policy
+authorities enforced. Shell, external MCP servers, skills, and recursive
+delegation are disabled. These application-level restrictions are not an operating
+system sandbox. Model provider calls and normal worker administration still occur. A proposal that
+needs unsupported access or cannot pass preflight falls back to the parent's existing execution path. Older
+workers remain usable for explicit delegation but not this automatic path.
+Decision ranking may reorder equally ready tasks; dependency priority, resource
+ownership and FIFO fallback remain authoritative.
+
+`acceptanceoptimization=true` skips semantic review when a required deterministic check has already failed. `proxyargrepair=true` repairs a missing proxy `action` from an exact `operation: status|list|search` only when no downstream tool is specified. Both settings can be disabled independently.
+
+Applications embedding Mini-A can register a complete answer contract with `agent.setAcceptanceContract({ goal, bindings }, evidenceProvider)`. Each binding has `name`, `evidence`, optional `path`, and `transform` (`identity`, `length`, or `sum`). The provider returns evidence records containing `value`, `complete: true`, and `fingerprint: sha256(stringify(value, __, ""))`. Registration asserts application-owned coverage of the exact goal; it is not exposed as a model tool. Only an exact JSON answer derived from those bindings can replace the root semantic check. Extra prose, missing evidence, or a different goal retains semantic review. Supervised acceptance remains authoritative.
+
+`memoryreflectmode=background` queues eligible reflection snapshots under `~/.openaf-mini-a/reflection-queue`. Console and web sessions schedule a daemon consumer after publishing the answer. The consumer retains notifications from other sessions and retries temporary memory-lock contention until foreground work becomes idle. A one-shot CLI invocation processes at most one older job after output and leaves its current job queued. `memoryreflectmode=sync` restores synchronous reflection; `memoryreflect=false` disables both enqueueing and consumption. Jobs retain their original session and destination. Failed jobs remain inspectable after three attempts; malformed files are renamed with `.invalid`. The queue retains at most 256 job files, reclaiming the oldest completed or failed jobs at capacity; pending jobs are never evicted. If full, the current snapshot remains in memory for retry and a warning is logged. In-memory destinations can only be consumed while their original store is available; use persistent memory channels for reflection across CLI invocations. Background reflection starts only when foreground runs are idle; a new foreground run waits if reflection already owns the memory lifecycle lock.
+
+Final-answer acceptance review is opt-in with `acceptancereview=true` (default `false`). When enabled, reviews display progress, elapsed time, and an accepted/not accepted result in the console log. Streamed answers remain provisional until accepted; a rejected answer can be followed by a revised answer. Explicit delegated-task contracts and supervised acceptance remain mandatory. Their model transport timeout is capped at 30 seconds, preserving a shorter `timeout` from the validation model (or main model fallback). A timed-out or failed review leaves acceptance incomplete; disabling `memoryreflect` does not disable acceptance. The timeout applies to the provider transport, rather than imposing a wall-clock deadline on all finalization work.
+
+An unchanged answer, goal, execution revision and supporting evidence reuse the final acceptance verdict. Artifact freshness is checked by content, with each shared path hashed once per pass outside the execution lock; changed evidence or task revisions require fresh acceptance. With `debug=true` or `verbose=true`, automatic mode reports starts and elapsed times for artifact checks, conversation saves, checkpoints and cleanup. Slow stages (at least one second) also report their elapsed time without those flags. Debug traces and durable run traces include `execution_timing` events; lock waits of at least 100 ms are recorded separately. These timings help distinguish acceptance requests from persistence and cleanup before the final “Conversation saved” message.
+
+Delegation accepts an optional `task` contract:
+
+```json
+{
+  "goal": "Read the revenue data and return the total",
+  "waitForResult": false,
+  "task": {
+    "id": "revenue",
+    "dependencies": [],
+    "resources": { "reads": ["reports/revenue.json"], "writes": [] },
+    "criteria": [
+      { "id": "total", "requirement": "Return the requested total", "method": "semantic" }
+    ]
+  }
+}
+```
+
+Use `delegate-subtask` with this payload. Dependencies name previously registered task IDs; they become runnable after predecessor acceptance. `execution-task` with `action=status` exposes the graph; `action=revise` registers or revises a task contract before delegation. Revisions retain existing criteria and invalidate dependent results. Running and unreconciled tasks cannot be revised. Plan hierarchy is separate from execution dependencies.
+
+Resource names are canonical local paths or exact external-resource names/URLs. Directory scopes include descendants. Overlapping writes serialize against readers and writers; an omitted scope defaults to exclusive `writes:["*"]`. These declarations coordinate work within the run; existing tool permissions remain authoritative. Parent tool access also waits for conflicting active children. Declare independent scopes to enable parallel work. Use `subtask-status` with `waitSeconds=10` for bounded waiting without repeated model polling.
+
+Lifecycle `status=completed` means the child returned. Additive `outcome` distinguishes success, partial work, blockers, failures, cancellation, and uncertain outcomes; `acceptance` is `pending`, `accepted`, or `rejected`. A dependent task requires an accepted result. Deterministic criteria use `method=answer` with the existing assertion operators for response artifacts, or `method=artifact` with a file `path`, optional `format=json|yaml`, and `assertion`. `method=schema` reuses OpenAF schema validation with `schema`, optional artifact `path`, and optional `format`. Assertions must be objects such as `{equals: "19"}`; expression strings are rejected before submission. Answer comparisons use strings unless `format=json` or `format=yaml` is declared. Answer assertions do not prove external actions. Semantic criteria use selective model review, preferring `modelval` when configured. Missing evidence remains unaccepted. Artifact fingerprints are checked again before dependent execution and final acceptance.
+
+Optional `runmaxtokens` and `runmaxtimems` require automatic orchestration. Tokens are reserved across calls and child allocations; 15% remains available for acceptance review and integration. Explicit caps default to zero/unlimited. Admission uses a prompt estimate plus a 1,024-token response allowance; provider-reported usage replaces estimates when available. Native continuation rounds without reported usage remain estimated. Responses may exceed estimates, and elapsed-time caps do not interrupt already admitted transport or tool operations. These controls are admission limits rather than exact billing limits.
+
+Remote workers advertise `task-outcome-v1` and `execution-budget-v1`. Older workers remain usable for uncapped work with parent-side acceptance; capped work requires a budget-capable worker. Worker-configured caps remain ceilings on incoming allocations. Use `durable=true` for atomic checkpoints containing task revisions, acceptance, budget reservations, and remote submission identities. Resume observes existing remote submissions before considering further work. Automatic execution failures retry only tasks declared read-only or `idempotent:true`; an unsettled capped allocation is retained instead of being granted again to a new attempt. Unknown outcomes retain ownership and reservations; an absent receipt never authorizes replay. Inspect and resolve uncertain external effects before starting replacement work.
+
+Run deterministic coverage with `ojob tests/execution.yaml`. For repeated live-provider comparisons, use `evals/orchestration.yaml` through the existing evaluation runner. Reports include verified completion, unaccepted tasks, progress/recovery counts, aggregate tokens, elapsed time, and tool-call counts. Deterministic checks do not establish provider-backed completion-quality improvements.
+
+### Mode, provider, and stream diagnostics
+
+`mode` selects a behavior preset; it does not identify the provider. For example,
+`mode=ollama` can run with Gemini configured through `OAF_MODEL` or `model`.
+Startup reports the resolved provider and model alongside the mode preset.
+The executor renders the action envelope's `answer` field even when provider
+JSON mode is disabled. Plain chatbot responses continue to render as plain text.
+
+The pre-request **working context only** estimate excludes other request content
+(such as instructions and tool schemas). Per-call usage comes from provider
+statistics when available; the cost line reports **cumulative session usage**.
+Dynamic tool selection uses isolated, tool-free requests. A valid empty selection
+means no tools are needed; selection failures retain the existing fallback sequence.
