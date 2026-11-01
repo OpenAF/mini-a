@@ -186,4 +186,62 @@
       ow.test.assert(io.fileExists(base + "/missing"), false, "a missing wiki is not created")
     } finally { rmTree(src); rmTree(base) }
   }
+
+  exports.testQueryArgs = function() {
+    var home = emptyHome(), root = mkTmp()
+    try {
+      var q = wikiJobsPrepare({ wikiroot: root, model: "(type: x)", wikimounts: "m" }, { kind: "query", log: quiet, homeDir: home })
+      ow.test.assert(q.args.wikiaccess + "/" + q.args.wikibackend + "/" + q.args.usewiki, "ro/fs/true", "query args force read-only fs wiki")
+      ow.test.assert(q.args.mode, "wiki", "query defaults to the wiki preset")
+      ow.test.assert(q.args.useshell, false, "wiki preset keeps shell off")
+      ow.test.assert(q.args.wikiretrievalv2, true, "query keeps the retrieval defaults of the publisher jobs")
+      ow.test.assert(isUnDef(q.args.wikigraphsemantic), true, "query does not set the semantic graph flag")
+      ow.test.assert(q.args.model + "/" + q.args.wikimounts, "(type: x)/m", "other args pass through")
+      ow.test.assert(isUnDef(q.args.useascii), true, "console query leaves useascii to the user")
+      var w = wikiJobsPrepare({ wikiroot: root, onport: 8888, mode: "none" }, { kind: "query", log: quiet, homeDir: home })
+      ow.test.assert(w.args.useascii + "/" + w.args.onport, "false/8888", "web query disables ascii output")
+      ow.test.assert(isUnDef(w.args.mode), true, "mode=none skips the preset")
+      throwsLike(function() { wikiJobsPrepare({ wikiroot: root + "/missing" }, { kind: "query", log: quiet, homeDir: home }) }, /Hydrate it first/, "query never creates the wiki")
+      // hydrate/dream are unchanged
+      var h = wikiJobsPrepare({ wikiroot: root, mode: "none" }, { kind: "hydrate", log: quiet, homeDir: home })
+      ow.test.assert(h.args.wikiaccess + "/" + h.args.wikigraphsemantic, "rw/false", "hydrate/dream stay writable")
+
+      var ready = wikiJobsQueryReadiness(root)
+      ow.test.assert(ready.ok, false, "an empty wiki is not ready")
+      io.writeFileString(root + "/a.md", "# A\n")
+      ready = wikiJobsQueryReadiness(root)
+      ow.test.assert(ready.ok + "/" + ready.v2 + "/" + ready.warnings.length, "true/false/1", "pages without a serving index warn")
+      io.mkdir(root + "/.mini-a-wiki-serving")
+      ow.test.assert(wikiJobsQueryReadiness(root).warnings.length, 0, "a published wiki has no warnings")
+    } finally { rmTree(home); rmTree(root) }
+  }
+
+  exports.testQueryJobFailures = function() {
+    var base = mkTmp()
+    try {
+      var r = runJob("wikiQuery.yaml", { wikiroot: base + "/missing", mode: "none" })
+      ow.test.assert(r.exitcode, 1, "querying a missing wiki fails")
+      ow.test.assert(io.fileExists(base + "/missing"), false, "query does not create the wiki")
+      io.mkdir(base + "/empty")
+      r = runJob("wikiQuery.yaml", { wikiroot: base + "/empty", mode: "none" })
+      ow.test.assert(r.exitcode, 1, "querying a wiki without pages fails")
+    } finally { rmTree(base) }
+  }
+
+  exports.testSessionShortcuts = function() {
+    load("mini-a-session.js")
+    var r = MiniAWikiShortcut({ wikihydrate: true, wikiroot: "w", source: "s" })
+    ow.test.assert(r.kind + "/" + r.job, "hydrate/utils/wikiHydrate.yaml", "key=value routes to the hydrate job")
+    ow.test.assert(isUnDef(r.args.wikihydrate) && r.args.wikiroot === "w" && r.args.source === "s", true, "the shortcut key is removed and other args are kept")
+    r = MiniAWikiShortcut({ "--wiki-dream": true, wikiroot: "w" })
+    ow.test.assert(r.kind, "dream", "--wiki-dream alias routes to the dream job")
+    r = MiniAWikiShortcut({ "--wiki-query": "", wikiroot: "w", onport: 8888, goal: "q" })
+    ow.test.assert(r.kind + "/" + r.args.onport, "query/8888", "query keeps onport and goal")
+    ow.test.assert(isUnDef(MiniAWikiShortcut({ wikiquery: false, wikiroot: "w" }).kind), true, "an explicit false disables the shortcut")
+    ow.test.assert(isUnDef(MiniAWikiShortcut({ goal: "x", wikiroot: "w" }).kind), true, "no shortcut leaves normal startup alone")
+    ow.test.assert(/only one/i.test(MiniAWikiShortcut({ wikihydrate: true, wikidream: true }).error), true, "two shortcuts conflict")
+    ow.test.assert(/conflicts with wikiman/.test(MiniAWikiShortcut({ wikiquery: true, wikiman: true }).error), true, "wikiman conflicts")
+    ow.test.assert(/conflicts with .*onport/.test(MiniAWikiShortcut({ wikidream: true, onport: 1 }).error), true, "dream rejects onport")
+    ow.test.assert(/conflicts with .*exec/.test(MiniAWikiShortcut({ wikiquery: true, exec: "/x" }).error), true, "exec conflicts")
+  }
 })()

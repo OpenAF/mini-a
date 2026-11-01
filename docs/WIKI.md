@@ -8,6 +8,8 @@ Unpublished wikis keep legacy retrieval with a warning until V2 artifacts are pu
 local backends, migration, budget differences and [measured validation](https://github.com/openaf/mini-a/blob/main/development/docs/WIKI-RETRIEVAL-V2-VALIDATION.md).
 Flag-off behavior retains the existing page engine with compatible contract repairs.
 
+New to wikis? Start with the [quickstart](WIKI-QUICKSTART.md): create, hydrate, dream and query a wiki in a few commands.
+
 ## Choose how to use your wiki
 
 | Entry point | Use it for | Access |
@@ -513,6 +515,18 @@ ojob utils/wikiDream.yaml wikiroot=okts/docs dreamwikimode=plan
 - Other `mini-a-ingest` and Mini-A wiki/dream arguments (`ingestinclude`, `dreammaxsteps`, `dreamreport`, ...) pass through. `wikiaccess=rw` and `wikibackend=fs` are enforced. `dryrun=true` previews without writing, backing up or compacting. `compact=false` leaves the serving index as it is.
 - The jobs load the `mini-a-*.js` libraries from the copy that contains them, so `ojob /path/to/mini-a/utils/wikiDream.yaml ...` uses that checkout from any working directory.
 - Readers must use the same `wikiretrievalv2=true` and `wikilexical` settings; the jobs print a reminder.
+
+### `utils/wikiQuery.yaml`
+
+The read side of the same lifecycle (see the [quickstart](WIKI-QUICKSTART.md)). It opens an existing wiki **read-only** with the `wiki` mode preset and the retrieval defaults the two jobs above publish with, then starts the console, the web UI (`web=true` or `onport=`) or a one-shot `goal=`. It never creates a wiki and refuses an empty one.
+
+```sh
+ojob utils/wikiQuery.yaml wikiroot=okts/docs
+ojob utils/wikiQuery.yaml wikiroot=okts/docs web=true onport=8888
+ojob utils/wikiQuery.yaml wikiroot=okts/docs goal="How does compaction work?"
+```
+
+All three jobs are also reachable from the `mini-a` command: `mini-a wikihydrate=true ...`, `mini-a wikidream=true ...` and `mini-a wikiquery=true ...` (aliases `--wiki-hydrate`, `--wiki-dream`, `--wiki-query`). They take the same arguments, and cannot be combined with each other or with `wikiman`, `modelman`, `memoryman`, `dream`, `workermode`, `exec` or `agent`; `web`, `onport` and `goal` are accepted only by `wikiquery`.
 
 Validation: `ojob tests/wikiUtilsJobs.yaml`.
 ## Examples

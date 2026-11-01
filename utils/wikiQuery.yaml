@@ -1,0 +1,57 @@
+# Author: Nuno Aguiar
+help:
+  text: |
+    Query a local Mini-A wiki (read-only) from the console, the web UI or as a one-shot goal.
+    Build the wiki first with utils/wikiHydrate.yaml (and optionally utils/wikiDream.yaml).
+
+    ojob utils/wikiQuery.yaml wikiroot=okts/docs
+    ojob utils/wikiQuery.yaml wikiroot=okts/docs web=true onport=8888
+    ojob utils/wikiQuery.yaml wikiroot=okts/docs goal="How does compaction work?"
+    ojob utils/wikiQuery.yaml wikiroot=okts/docs mode=poweruser
+
+    Defaults: mode=wiki, wikiaccess=ro, usewikigraph=true,
+    wikiretrievalv2=true and wikilexical from OAF_MINI_A_WIKI_LEXICAL (else English with
+    ngrams and shingles). Any other Mini-A argument (model, wikimounts, wikisourceurl, ...)
+    is passed through.
+  expects:
+  - name: wikiroot
+    desc: Existing local wiki directory
+    mandatory: true
+  - name: mode
+    desc: "Mode preset (default wiki; none to skip)"
+    mandatory: false
+  - name: model
+    desc: SLON/JSON model config (overrides the mode preset, then OAF_MODEL)
+    mandatory: false
+  - name: web
+    desc: "Open the web UI instead of the console (default false)"
+    mandatory: false
+  - name: onport
+    desc: Web UI port (implies web mode)
+    mandatory: false
+  - name: goal
+    desc: Ask one question, print the answer and exit
+    mandatory: false
+
+ojob:
+  logToConsole: false
+  catch: |
+    logErr("❌ " + (isMap(exception) && isDef(exception.stage) ? exception.stage + " failed: " + stringify(exception.result, __, "") : exception))
+    exit(1)
+todo:
+- Query wiki
+jobs:
+- name: Query wiki
+  exec: | #js
+    load(String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent()) + "/wikiJobsLib.js")
+    var logFn = wikiJobsLog
+    var prepared = wikiJobsPrepare(args, { kind: "query", log: logFn, createRoot: false })
+    var ready = wikiJobsQueryReadiness(prepared.root)
+    ready.warnings.forEach(function(w) { logWarn(w) })
+    if (ready.ok !== true) wikiJobsFail("Query", "wiki has no pages: " + prepared.root)
+
+    var queryArgs = merge({}, prepared.args)
+    if (isDef(queryArgs.goal) && !isString(queryArgs.goal)) queryArgs.goal = String(queryArgs.goal)
+    wikiJobsLoadLibs(["mini-a-common.js"])
+    load(__wikiJobsRoot + "/mini-a-session.js")
+    MiniAInteractiveSession(queryArgs)

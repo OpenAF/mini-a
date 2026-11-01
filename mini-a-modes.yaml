@@ -102,6 +102,7 @@ modes:
       contextguard     : false
       contextvirtualization: true
       useasciiviz      : true
+      shellguardask    : high
       mcp              : 
       - type   : ojob
         options:
@@ -131,6 +132,20 @@ modes:
       autodelegation   : true
       usestdutils      : true
       webadvanced      : true
+
+  wiki:
+    description: "Read-only wiki Q&A (use with wikiroot=<dir>)"
+    params     :
+      usewiki             : true
+      wikiaccess          : ro
+      wikiretrievalv2     : true
+      usewikigraph        : true
+      wikigraphsearchhints: true
+      usetools            : true
+      usestream           : true
+      useshell            : false
+      readwrite           : false
+      usedelegation       : false
 
   chatbot:
     description: "Chatbot mode"

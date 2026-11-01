@@ -35,6 +35,21 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testHydrateAndDreamJobs
 
+- name: MiniA Wiki Utils Jobs Tests::QueryArgs
+  from: MiniA Wiki Utils Jobs Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testQueryArgs
+
+- name: MiniA Wiki Utils Jobs Tests::QueryJobFailures
+  from: MiniA Wiki Utils Jobs Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testQueryJobFailures
+
+- name: MiniA Wiki Utils Jobs Tests::SessionShortcuts
+  from: MiniA Wiki Utils Jobs Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSessionShortcuts
+
 todo:
 - MiniA Wiki Utils Jobs Tests::ResolveModePreset
 - MiniA Wiki Utils Jobs Tests::PrepareSemanticAndLayers
@@ -42,3 +57,6 @@ todo:
 - MiniA Wiki Utils Jobs Tests::DreamArgs
 - MiniA Wiki Utils Jobs Tests::BackupZip
 - MiniA Wiki Utils Jobs Tests::HydrateAndDreamJobs
+- MiniA Wiki Utils Jobs Tests::QueryArgs
+- MiniA Wiki Utils Jobs Tests::QueryJobFailures
+- MiniA Wiki Utils Jobs Tests::SessionShortcuts

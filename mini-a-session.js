@@ -52,6 +52,36 @@ function __miniAConsoleStreamFrame(view, content, width, height, notices) {
   return "\x1b[H" + rows.map(function(row) { return "\x1b[2K" + row }).join("\r\n") + "\x1b[J"
 }
 
+// Wiki lifecycle shortcuts: mini-a wikihydrate=true|wikidream=true|wikiquery=true (or --wiki-hydrate, ...).
+// Returns { kind, job, args, error } with kind undefined when no shortcut was requested. The jobs under
+// utils/ own the behavior; this only picks one, normalizes the --alias form and rejects mixed modes.
+var MINIA_WIKI_SHORTCUTS = { hydrate: "utils/wikiHydrate.yaml", dream: "utils/wikiDream.yaml", query: "utils/wikiQuery.yaml" }
+function MiniAWikiShortcut(args) {
+  var result = {}
+  if (!isObject(args)) return result
+  var out = {}
+  var requested = []
+  Object.keys(args).forEach(function(key) {
+    var lower = String(key || "").toLowerCase()
+    var kind = Object.keys(MINIA_WIKI_SHORTCUTS).filter(function(k) { return lower === "wiki" + k || lower === "--wiki-" + k })[0]
+    if (isDef(kind)) {
+      var v = args[key]
+      // "--wiki-query" with no value arrives as true/"" ; an explicit false disables it
+      if (!(v === false || String(v).toLowerCase() === "false")) { if (requested.indexOf(kind) < 0) requested.push(kind) }
+      return
+    }
+    out[key] = args[key]
+  })
+  if (requested.length === 0) return result
+  if (requested.length > 1) return { error: "Only one of wikihydrate, wikidream and wikiquery can be used at a time (got " + requested.join(", ") + ")" }
+  var kind = requested[0]
+  var conflicts = ["wikiman", "modelman", "mcptest", "memoryman", "dream", "workermode"].filter(function(key) { return toBoolean(out[key]) === true })
+  if (kind !== "query") ["web", "onport", "goal"].forEach(function(key) { if (isDef(out[key])) conflicts.push(key) })
+  ;["exec", "agent", "agentfile"].forEach(function(key) { if (isDef(out[key]) && String(out[key]).trim().length > 0) conflicts.push(key) })
+  if (conflicts.length > 0) return { error: "wiki" + kind + " conflicts with " + conflicts.join(", ") }
+  return { kind: kind, job: MINIA_WIKI_SHORTCUTS[kind], args: out }
+}
+
 function MiniAInteractiveSession(args, adapter) {
   var host = MiniAInteractiveSession.host
   var commandResult
@@ -173,6 +203,16 @@ function MiniAInteractiveSession(args, adapter) {
       virtualSkillTemplateRequested = isString(args[key]) && args[key].toLowerCase().trim() === "virtual"
       return true
     })
+  }
+
+  // Wiki lifecycle shortcuts run the utils/ jobs before any mode or launcher defaults are applied
+  if (!adapter && !helpRequested && !cheatsheetRequested && isUnDef(requestedTemplateKind)) {
+    var wikiShortcut = MiniAWikiShortcut(args)
+    if (isString(wikiShortcut.error)) { logErr(wikiShortcut.error); exit(1, true) }
+    if (isString(wikiShortcut.kind)) {
+      oJobRunFile(miniABasePath + "/" + wikiShortcut.job, wikiShortcut.args, genUUID(), __, false)
+      exit(0, true)
+    }
   }
 
   // Init
@@ -916,6 +956,9 @@ function MiniAInteractiveSession(args, adapter) {
     onport         : { type: "number", description: "Start the web UI on the provided port." },
     web            : { type: "boolean", default: false, description: "Start in web UI mode." },
     wikiman        : { type: "boolean", default: false, description: "Start the guided wiki operations manager." },
+    wikihydrate    : { type: "boolean", default: false, description: "Create/update a local wiki from source=<folder> (runs utils/wikiHydrate.yaml; alias --wiki-hydrate)." },
+    wikidream      : { type: "boolean", default: false, description: "Reorganize a local wiki (runs utils/wikiDream.yaml; alias --wiki-dream). Not the memory dream=true." },
+    wikiquery      : { type: "boolean", default: false, description: "Query a local wiki read-only in the console, with onport=/web=true or goal= (runs utils/wikiQuery.yaml; alias --wiki-query)." },
     modelman       : { type: "boolean", default: false, description: "Start the model manager UI instead of the console." },
     mcptest        : { type: "boolean", default: false, description: "Start the MCP test mode instead of the console." },
     memoryman      : { type: "boolean", default: false, description: "Start the memory manager UI instead of the console." },
@@ -977,6 +1020,9 @@ function MiniAInteractiveSession(args, adapter) {
     onport: true,
     web: true,
     wikiman: true,
+    wikihydrate: true,
+    wikidream: true,
+    wikiquery: true,
     modelman: true,
     mcptest: true,
     memoryman: true,
@@ -1023,7 +1069,7 @@ function MiniAInteractiveSession(args, adapter) {
     { category: "Memory and knowledge", subcategory: "Wiki graph", names: "wikigraphautosave wikigraphsavedebouncems usewikigraph wikigraphcommunity wikigraphcross wikigraphcrosscap wikigraphcrossdepth wikigraphcrossjoin wikigraphcrossmaxdf wikigraphcrossminkeylen wikigraphfalkorgraph wikigraphfalkorhost wikigraphfalkorpass wikigraphfalkorport wikigraphfalkoruser wikigraphhintcap wikigraphmounts wikigraphsearchhints wikigraphsemantic wikimountgraphttlms".split(" ") },
     { category: "Memory and knowledge", subcategory: "Wiki retrieval and maintenance", names: "wikimetacache wikisourceurl wikisourcefield wikisourceinline wikilexical wikilintresultlimit wikilintstaleddays wikiretrievalconfig wikiretrievalv2 wikitarget wikitelemetry".split(" ") },
     { category: "Memory and knowledge", subcategory: "Wiki model budgets", names: "wikillmbudget wikiingestbudget wikiingestmaxcalls wikimaxprompttokens".split(" ") },
-    { category: "Memory and knowledge", subcategory: "Wiki storage and access", names: "wikiindexdir s3artifactbundle usewiki wikiaccess wikiaccesskey wikiartifactrefreshsecs wikibackend wikibucket wikihttpindexurl wikihttptimeout wikiignorecertcheck wikiman wikimounts wikiprefix wikiregion wikiroot wikis3artifactprefix wikisecret wikiurl wikiuseversion1".split(" ") },
+    { category: "Memory and knowledge", subcategory: "Wiki storage and access", names: "wikiindexdir s3artifactbundle usewiki wikiaccess wikiaccesskey wikiartifactrefreshsecs wikibackend wikibucket wikihttpindexurl wikihttptimeout wikiignorecertcheck wikidream wikihydrate wikiman wikimounts wikiprefix wikiquery wikiregion wikiroot wikis3artifactprefix wikisecret wikiurl wikiuseversion1".split(" ") },
     { category: "Memory and knowledge", subcategory: "Ingestion and absorption", names: "ingestmode absorbmaxpages absorbmaxtokens absorboutput ingestallowemptyprune ingestchunkchars ingestconcurrency ingestdryrun ingestexclude ingestforce ingestinclude ingestindependent ingestlayout ingestledger ingestmaxfilekb ingestprune ingestsection ingestsource ingestsourceid ingesttype".split(" ") },
     { category: "Memory and knowledge", subcategory: "Dream consolidation", names: "dreamwikimaxaffected dryrun maxauditrecords dream dreammaxsteps dreammemorymode dreammode dreamreport dreamwiki dreamwikiapproval dreamwikidryrun dreamwikiinstructions dreamwikilintresultlimit dreamwikillm dreamwikimaxdepth dreamwikiminpages dreamwikimode dreamwikiorganize dreamwikireorg".split(" ") },
     { category: "Delegation and servers", subcategory: "Delegation and subtasks", names: "autodelegation autodelegationmaxperstep autodelegationthreshold delegationhardtimeout delegationmaxdepth delegationmaxretries delegationstalltimeout delegationtimeout forkstatemaxbytes forkpolicy forkdecide maxconcurrent noisytools showdelegate subtasks subtasksfile subtaskssequential usea2a usedelegation".split(" ") },
@@ -1064,6 +1110,9 @@ function MiniAInteractiveSession(args, adapter) {
       { option: "exec=\"/<cmd> ...args\"", description: "Execute one custom command/skill template and exit (use /cmd or $skill)." },
       { option: "onport=<port>", description: "Start the Mini-A web UI on the provided port (alias for web mode)." },
       { option: "wikiman=true", description: "Start the guided wiki operations manager; prints replayable CLI commands." },
+      { option: "wikihydrate=true", description: "Create/update a local wiki: wikiroot=<dir> source=<folder> (also --wiki-hydrate)." },
+      { option: "wikidream=true", description: "Reorganize a local wiki: wikiroot=<dir> (also --wiki-dream; not the memory dream=true)." },
+      { option: "wikiquery=true", description: "Query a local wiki read-only: wikiroot=<dir> [onport=<port>|goal=<text>] (also --wiki-query)." },
       { option: "modelman=true", description: "Start the model manager instead of the console experience." },
       { option: "mcptest=true", description: "Start the MCP test client instead of the console experience." },
       { option: "memoryman=true", description: "Start the memory manager UI for global/session stores." },
@@ -1126,6 +1175,8 @@ function MiniAInteractiveSession(args, adapter) {
       { cmd: "mini-a mode=research goal=\"Summarize the project plan.\"", desc: "# Load research mode and run a goal." },
       { cmd: "mini-a onport=9090", desc: "# Start web chat on port 9090." },
       { cmd: "mini-a wikiman=true wikiroot=/path/to/wiki", desc: "# Launch wiki operations manager (read-only by default)." },
+      { cmd: "mini-a wikihydrate=true wikiroot=./wiki source=./docs", desc: "# Build a wiki from a folder (creates it if missing)." },
+      { cmd: "mini-a wikiquery=true wikiroot=./wiki onport=8888", desc: "# Browse and ask questions of a wiki in the web UI." },
       { cmd: "mini-a modelman=true", desc: "# Launch model manager UI." },
       { cmd: "mini-a mcptest=true", desc: "# Launch MCP test client." },
       { cmd: "mini-a memoryman=true usememory=true memoryuser=true", desc: "# Launch memory manager with user channels." },

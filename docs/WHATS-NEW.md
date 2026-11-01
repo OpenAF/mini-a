@@ -2,6 +2,10 @@
 
 ## Recent Updates
 
+### Wiki lifecycle in three commands
+
+`mini-a wikihydrate=true wikiroot=... source=...`, `mini-a wikidream=true wikiroot=...` and the new `mini-a wikiquery=true wikiroot=... [onport=8888|goal=...]` (also `--wiki-hydrate`, `--wiki-dream`, `--wiki-query`, or `ojob utils/wikiQuery.yaml`) create, reorganize and query a local wiki. Querying is read-only and uses the new `wiki` mode preset. A new [wiki quickstart](WIKI-QUICKSTART.md) walks through the whole flow.
+
 ### Durable runs and unified trace events
 
 `durable=true` adds stable run IDs, resumable state, safe checkpoints, and a redacted JSONL trace without changing ordinary one-shot or `resume=true` conversation behaviour. The trace is built on Mini-A's existing trace/hooks seam and records lifecycle, planning, validation, replan, model/tool/shell/wiki, and orchestration events for durable runs. Use `resumerun=<runid>` to continue an interrupted run and `runstatus=<runid>` to inspect it.

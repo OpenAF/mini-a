@@ -508,6 +508,7 @@ Modes can now inherit from other modes using `include`. Use `include: <mode>` (o
 - **`internet`** – Tool mode with web-access MCP presets (time, web, weather, net) plus docs-aware utils (`usetools=true mini-a-docs=true mcpproxy=true mcp=...`).
 - **`news`** – News from the internet mode, inheriting `internet` with time, web, and RSS MCP tools (`mcpproxy=true mcp=...`).
 - **`poweruser`** – Power user mode enabling shell read-write, utils, skills, streaming, MCP proxying, history retention, advisor strategy, delegation, and standard utils (`useshell=true readwrite=true useutils=true useskills=true usestream=true ...`).
+- **`wiki`** – Read-only wiki Q&A (`usewiki=true wikiaccess=ro wikiretrievalv2=true usewikigraph=true`, no shell, writes or delegation); used by `mini-a wikiquery=true`. See the [wiki quickstart](docs/WIKI-QUICKSTART.md).
 - **`chatbot`** – Lightweight conversational mode (`chatbotmode=true usestream=true`).
 - **`web`** – Browser UI with tools, diagrams, charts, maps, vectors, math, history, attachments, and MCP proxying (`usetools=true usediagrams=true usecharts=true usemaps=true usevectors=true usemath=true usehistory=true useattach=true mcpproxy=true mcp=...`).
 - **`webfull`** – Web UI inheriting `web`, adding streaming, extended history retention, complexity estimation, and expanded MCPs (`rss`, `fin`, `oaf`, `oafp`), with planning and ASCII sketches explicitly disabled (`useplanning=false useascii=false usestream=true historykeep=true ...`).

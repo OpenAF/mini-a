@@ -66,7 +66,8 @@ var wikiJobsCanonical = function(path) {
 
 // Build the Mini-A args for a job. Layers, lowest to highest precedence:
 //   mode preset params < job defaults < explicit CLI args < enforced settings.
-// opts: { kind: "hydrate"|"dream", log: fn, createRoot: boolean, homeDir: preset home override }
+// opts: { kind: "hydrate"|"dream"|"query", log: fn, createRoot: boolean, homeDir: preset home override }
+//   The "query" kind builds read-only reader args (wikiaccess=ro) and defaults to the "wiki" mode preset.
 var wikiJobsPrepare = function(args, opts) {
   opts = opts || {}
   var logFn = isFunction(opts.log) ? opts.log : wikiJobsLog
@@ -83,7 +84,10 @@ var wikiJobsPrepare = function(args, opts) {
   root = wikiJobsCanonical(root)
 
   var a = {}
-  var modeName = isDef(args.mode) ? wikiJobsStr(args.mode) : "poweruser"
+  var isQuery = opts.kind === "query"
+  var webRequested = wikiJobsBool(args.web, false) || isDef(args.onport)
+  var defaultMode = isQuery ? "wiki" : "poweruser"
+  var modeName = isDef(args.mode) ? wikiJobsStr(args.mode) : defaultMode
   if (modeName.length > 0 && modeName.toLowerCase() !== "none") {
     if (typeof __miniAResolveModePreset === "undefined") wikiJobsLoadLibs(["mini-a-common.js"])
     var preset = __miniAResolveModePreset(modeName, { basePath: __wikiJobsRoot, homeDir: opts.homeDir })
@@ -98,6 +102,7 @@ var wikiJobsPrepare = function(args, opts) {
 
   var lexical = wikiJobsEnv("OAF_MINI_A_WIKI_LEXICAL")
   var retrievalConfig = wikiJobsEnv("OAF_MINI_A_WIKI_RETRIEVAL_CONFIG")
+  if (isQuery && webRequested) a.useascii = false
   a.usewikigraph = true
   a.wikiretrievalv2 = true
   a.wikitelemetry = true
@@ -106,16 +111,18 @@ var wikiJobsPrepare = function(args, opts) {
 
   Object.keys(args).forEach(function(k) {
     if (WIKI_JOBS_CONTROL_KEYS[k] || k.indexOf("__") === 0 || isUnDef(args[k])) return
+    // `ojob utils/x.yaml ...` surfaces the script path itself as a valueless arg key
+    if (/\.ya?ml$/i.test(k) && String(args[k]).length === 0) return
     a[k] = isJavaObject(args[k]) ? String(args[k]) : args[k]
   })
 
   // Semantic graph evaluation is strictly opt-in: always pass an explicit boolean, because
   // MiniADreams turns it on for apply/plan when wikigraphsemantic is left undefined.
   var semantic = wikiJobsBool(isDef(args.semantic) ? args.semantic : args.wikigraphsemantic, false)
-  a.wikigraphsemantic = semantic
+  if (!isQuery) a.wikigraphsemantic = semantic
   a.usewiki = true
   a.wikibackend = "fs"
-  a.wikiaccess = "rw"
+  a.wikiaccess = isQuery ? "ro" : "rw"
   a.wikiroot = root
   if (isDef(a.mode)) a.__modeApplied = true
 
@@ -265,6 +272,29 @@ var wikiJobsCompactStage = function(prepared, logFn) {
 
 var wikiJobsReaderHint = function(prepared, logFn) {
   logFn("📖 Readers need wikiretrievalv2=true and wikilexical=" + prepared.args.wikilexical)
+  logFn("🔎 Query it: ojob utils/wikiQuery.yaml wikiroot=" + prepared.root + "  (add web=true onport=8888 for the browser, or goal=\"...\" for one answer)")
+}
+
+// Readiness check for a query: returns { ok, pages, v2, warnings }. Never throws; the root was
+// already validated by wikiJobsPrepare.
+var wikiJobsQueryReadiness = function(root) {
+  var warnings = []
+  var pages = 0
+  var walk = function(dir, depth) {
+    var files = dir.listFiles()
+    if (files === null) return
+    for (var i = 0; i < files.length && pages < 1; i++) {
+      var f = files[i], n = String(f.getName())
+      if (n.indexOf(".") === 0) continue
+      if (f.isDirectory()) { if (depth < 8) walk(f, depth + 1) }
+      else if (/\.md$/i.test(n)) pages++
+    }
+  }
+  walk(new java.io.File(root), 0)
+  if (pages === 0) warnings.push("No Markdown pages found in " + root + ". Run: ojob utils/wikiHydrate.yaml wikiroot=" + root + " source=<folder>")
+  var v2 = new java.io.File(root, ".mini-a-wiki-serving").isDirectory()
+  if (pages > 0 && !v2) warnings.push("No published search index found; retrieval may fall back to legacy mode. Hydrate or dream the wiki first.")
+  return { ok: pages > 0, pages: pages, v2: v2, warnings: warnings }
 }
 
 // Print a stage failure and exit 1.
