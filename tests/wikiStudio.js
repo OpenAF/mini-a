@@ -1,6 +1,7 @@
 (function() {
   loadLib("wiki-studio-api.js")
   loadLib("wiki-studio-pages.js")
+  loadLib("wiki-studio-graph.js")
   function fixture(fn) {
     var temp = WikiStudio.canonical(String(io.createTempDir("wiki-studio-test-")))
     var config = { home: temp + "/state", roots: [temp + "/wikis"], base: WikiStudio.canonical("."), port: 18891, host: "127.0.0.1", token: "test-token-with-more-than-32-characters", maxPageBytes: 1048576, maxBodyBytes: 2097152, workers: 2 }
@@ -59,5 +60,17 @@
     s.wikiRoute({method:"DELETE",query:{path:"moved.md"},body:{expectedRevision:moved.revision,confirmation:"moved.md"}},w,["page"],"admin")
     assert(io.fileExists(w.root + "/moved.md"),false,"Delete")
     io.writeFileString(w.root + "/large.md", "0123456789"); s.config.maxPageBytes=4; rejects(function(){s.readPage(w,"large.md")},"page_too_large")
+  }) }
+  exports.testGraph = function() { fixture(function(s, t) {
+    var w = add(s, t)
+    io.writeFileString(w.root + "/one.md", "# One\n[[two]]\n<script>alert(1)</script>")
+    io.writeFileString(w.root + "/two.md", "# Two\n")
+    var html = s.graphHtml(w).studioHtml
+    assert(html.indexOf("Markdown page links") >= 0, true, "Fallback source is explicit")
+    assert(html.indexOf("mini-a-wiki-graph-node") >= 0, true, "Versioned node bridge")
+    assert(html.indexOf("connect-src 'none'") >= 0, true, "Embedded graph denies network")
+    assert(s.graphHtml(w).studioHtml, html, "Cache reuse without overwrite")
+    io.writeFileString(w.root + "/two.md", "# Two changed\n")
+    assert(s.graphHtml(w).studioHtml !== html, true, "External changes invalidate cache")
   }) }
 })()

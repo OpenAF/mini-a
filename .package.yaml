@@ -436,3 +436,4 @@ filesHash:
 - public/studio/studio.css
 - docs/WIKI-STUDIO-IMPLEMENTATION.md
 - wiki-studio-pages.js
+- wiki-studio-graph.js

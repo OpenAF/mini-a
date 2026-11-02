@@ -108,7 +108,7 @@ jobs:
       if (!ids[e.from] || !ids[e.to]) { skipped++; return false }
       return true
     }).map(function(e) { return { from: e.from, to: e.to, type: String(e.type || "related"), provenance: String(e.provenance || "AMBIGUOUS"), props: isMap(e.props) ? e.props : {} } })
-    var data = { title: args.title, source: source, generated: new Date().toISOString(), nodes: nodes, edges: edges, skipped: skipped }
+    var data = { title: args.title, source: source, generated: new Date().toISOString(), nodes: nodes, edges: edges, skipped: skipped, embed: toBoolean(args.embed) === true }
     // Escape HTML-sensitive characters before embedding JSON in a script element.
     var payload = JSON.stringify(data).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029")
     var html = `<!doctype html>
@@ -173,6 +173,9 @@ jobs:
         var note = document.createElement('small'); note.textContent = matches.length > 30 ? 'Showing 30 of ' + matches.length + ' matches' : matches.length + ' matches'; $('results').appendChild(note);
       }
       function select(n, remember) {
+        if (data.embed && parent !== window && n.id === 'doc:' + n.props.path && typeof n.props.path === 'string' && n.props.path.length <= 512 && !/[\\\\%:\x00-\x1f?#]/.test(n.props.path) && /\\.md$/i.test(n.props.path) && n.props.path.split('/').every(function(p) { return p && p !== '.' && p !== '..' && p.charAt(0) !== '.' && !/^AGENTS\\.md$/i.test(p); })) {
+          parent.postMessage({type:'mini-a-wiki-graph-node', version:1, nodeId:n.id, path:n.props.path}, '*');
+        }
         if(selected && selected !== n && remember !== false) history.push(selected.id);
         selected = n; $('back').disabled = !history.length;
         // Connection jumps also restore the destination type if it was filtered out.
@@ -278,6 +281,7 @@ jobs:
     if (!/\.html?$/i.test(output)) throw "Output must be an HTML file or an existing directory: " + output
     var outputFile = new java.io.File(output).getCanonicalFile()
     if (String(outputFile) === graphFile) throw "Output cannot replace the source graph"
+    if (data.embed) html = html.replace('<meta charset="utf-8">', '<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: blob:; connect-src \'none\'; base-uri \'none\'; form-action \'none\'">')
     io.writeFileString(String(outputFile), html.replace("__WIKI_GRAPH_DATA__", function() { return payload }))
     print("Exported " + nodes.length + " nodes and " + edges.length + " edges to " + outputFile)
     if (skipped) printErr("Skipped " + skipped + " dangling edges.")

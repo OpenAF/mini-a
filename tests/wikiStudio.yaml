@@ -18,7 +18,11 @@ jobs:
 - name: Studio pages
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testPages
+- name: Studio graph
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testGraph
 todo:
+- Studio graph
 - Studio pages
 - Studio registry
 - Studio authorization
