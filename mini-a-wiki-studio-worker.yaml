@@ -7,6 +7,8 @@ jobs:
 - name: Run Studio job
   exec: |
     var base = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent())
+    loadLib(base + "/wiki-studio-bootstrap.js")
+    wikiStudioBootstrap(base)
     loadLib(base + "/wiki-studio-common.js")
     loadLib(base + "/wiki-studio-registry.js")
     loadLib(base + "/wiki-studio-api.js")
@@ -14,4 +16,6 @@ jobs:
     loadLib(base + "/wiki-studio-sources.js")
     loadLib(base + "/wiki-studio-jobs.js")
     loadLib(base + "/wiki-studio-operations.js")
+    loadLib(base + "/wiki-studio-backups.js")
+    loadLib(base + "/wiki-studio-ingestion.js")
     wikiStudioRunWorker({ home: WikiStudio.canonical(String(args.studiohome)), base: base }, String(args.jobid))

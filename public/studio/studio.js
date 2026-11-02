@@ -3,7 +3,7 @@
 const StudioApi = {
   token: "",
   async request(path, method = "GET", body) {
-    const response = await fetch("/api/v1/" + path, { method, headers: { Authorization: "Bearer " + this.token, "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const response = await fetch("/api/v1/" + path, { method, headers: { Authorization: "Bearer " + this.token, "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() }, body: body === undefined ? undefined : JSON.stringify(body) });
     const result = await response.json();
     if (!response.ok) { const error = new Error(result.error?.message || "Request failed"); error.details = result.error?.details; error.status = response.status; throw error; }
     return result;
@@ -33,20 +33,33 @@ async function dashboard() {
   form.onsubmit = safely(async event => { event.preventDefault(); const body = Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, v.value])); body.create = create.checked; await StudioApi.register(body); message("Wiki registered"); await dashboard(); });
 }
 let currentWiki, activePage, dirty = false, graphBlob;
-function mayLeave() { return !dirty || confirm("Discard unsaved changes?"); }
+async function studioDialog(title, initial, confirmation) {
+  const previous = document.activeElement, dialog = el("dialog", undefined, document.body), form = el("form", undefined, dialog);
+  form.method = "dialog"; const heading = el("h3", title, form); heading.id = "studio-dialog-title"; dialog.setAttribute("aria-labelledby", heading.id);
+  let input;
+  if (!confirmation) { const label = el("label", title, form); input = el("input", undefined, label); input.value = initial || ""; input.required = true; }
+  const row = el("div", undefined, form); row.className = "row";
+  const cancel = el("button", "Cancel", row); cancel.value = "cancel"; cancel.type = "button"; cancel.onclick = () => dialog.close("cancel");
+  const accept = el("button", confirmation ? "Confirm" : "Continue", row); accept.value = "accept";
+  const result = new Promise(resolve => dialog.addEventListener("close", () => { const value = dialog.returnValue === "accept" ? confirmation ? true : input.value : confirmation ? false : null; dialog.remove(); previous?.focus(); resolve(value); }, { once: true }));
+  dialog.showModal(); (input || cancel).focus(); if (input) input.select(); return result;
+}
+const askText = (title, initial) => studioDialog(title, initial, false);
+const askConfirmation = title => studioDialog(title, "", true);
+async function mayLeave() { return !dirty || await askConfirmation("Discard unsaved changes?"); }
 function button(parent, title, action) { const b = el("button", title, parent); b.type = "button"; b.onclick = safely(action); return b; }
 function wikiPath(suffix = "") { return "wikis/" + encodeURIComponent(currentWiki.id) + (suffix ? "/" + suffix : ""); }
 StudioApi.wiki = function(suffix, method, body) { return this.request(wikiPath(suffix), method, body); };
 async function openWiki(wiki) {
-  if (!mayLeave()) return;
+  if (!(await mayLeave())) return;
   currentWiki = wiki; activePage = null; dirty = false;
   const host = document.getElementById("workspace"); host.replaceChildren();
-  button(host, "← All wikis", async () => { if (mayLeave()) { dirty = false; await dashboard(); } });
+  button(host, "← All wikis", async () => { if (await mayLeave()) { dirty = false; await dashboard(); } });
   el("h2", wiki.name + " · " + wiki.access, host);
   const nav = el("nav", undefined, host); nav.setAttribute("aria-label", "Wiki views");
   const content = el("div", undefined, host); content.id = "view";
   for (const name of ["Overview", "Pages", "Graph", "Sources", "Absorb", "Dreams", "Jobs", "Health", "Settings"]) button(nav, name, async () => {
-    if (!mayLeave()) return; dirty = false; activePage = null; if (graphBlob) { URL.revokeObjectURL(graphBlob); graphBlob = null; }
+    if (!(await mayLeave())) return; dirty = false; activePage = null; if (graphBlob) { URL.revokeObjectURL(graphBlob); graphBlob = null; }
     content.replaceChildren(); message(""); await showView(name, content);
   });
   await showView("Overview", content);
@@ -64,9 +77,9 @@ async function showView(name, content) {
   }
   if (name === "Settings") {
     el("pre", JSON.stringify(currentWiki, null, 2), content);
-    button(content, "Rename display name", async () => { const name = prompt("Display name", currentWiki.name); if (name) { await StudioApi.wiki("", "PATCH", { name }); currentWiki.name = name; await openWiki(currentWiki); } });
+    button(content, "Rename display name", async () => { const name = await askText("Display name", currentWiki.name); if (name) { await StudioApi.wiki("", "PATCH", { name }); currentWiki.name = name; await openWiki(currentWiki); } });
     button(content, currentWiki.access === "rw" ? "Make read-only" : "Enable writes", async () => { const access = currentWiki.access === "rw" ? "ro" : "rw"; await StudioApi.wiki("", "PATCH", { access }); currentWiki.access = access; await openWiki(currentWiki); });
-    button(content, "Unregister (keep all files)", async () => { if (confirm("Remove this registry entry? Wiki files will remain.")) { await StudioApi.wiki("", "DELETE"); await dashboard(); } });
+    button(content, "Unregister (keep all files)", async () => { if (await askConfirmation("Remove this registry entry? Wiki files will remain.")) { await StudioApi.wiki("", "DELETE"); await dashboard(); } });
     return;
   }
   if (window.studioToolsView) return window.studioToolsView(name, content);
@@ -92,7 +105,7 @@ function renderMarkdown(raw, parent) {
         if (!wikiLink && activePage) path = activePage.path.slice(0, activePage.path.lastIndexOf("/") + 1) + path;
         const parts = []; for (const part of path.split("/")) { if (part === "..") parts.pop(); else if (part && part !== ".") parts.push(part); }
         path = parts.join("/"); if (!/\.md$/i.test(path)) path += ".md";
-        if (mayLeave()) { dirty = false; await loadPage(path); }
+        if (await mayLeave()) { dirty = false; await loadPage(path); }
       }); else block.append(document.createTextNode(label + " (blocked link)"));
       last = re.lastIndex;
     }
@@ -110,14 +123,14 @@ async function pagesView(content) {
     list.replaceChildren(); const response = await StudioApi.wiki(search.value ? "search?q=" + encodeURIComponent(search.value) : "pages?limit=100&offset=" + offset);
     const items = Array.isArray(response) ? response : response.results || response.items || response.pages || [];
     if (response.warning) el("p", response.warning, list);
-    for (const item of items) { const path = typeof item === "string" ? item : item.path; if (path && !/(^|\/)AGENTS\.md$/i.test(path)) button(list, path, async () => { if (mayLeave()) { dirty = false; await loadPage(path); } }); }
+    for (const item of items) { const path = typeof item === "string" ? item : item.path; if (path && !/(^|\/)AGENTS\.md$/i.test(path)) button(list, path, async () => { if (await mayLeave()) { dirty = false; await loadPage(path); } }); }
     if (!items.length) el("p", "No pages found. Search can have incomplete coverage; check Health.", list);
     if (!search.value && items.length === 100) button(list, "Next 100", async () => { offset += 100; await refresh(); });
     if (offset) button(list, "First page", async () => { offset = 0; await refresh(); });
   }
   button(toolbar, "Search / refresh", refresh);
   button(toolbar, "New page", async () => {
-    if (!mayLeave()) return; const path = prompt("New Markdown path", "new-page.md"); if (!path) return;
+    if (!(await mayLeave())) return; const path = await askText("New Markdown path", "new-page.md"); if (!path) return;
     activePage = { path, content: "# New page\n", revision: null, creating: true }; dirty = true; drawEditor();
   }).disabled = currentWiki.access !== "rw";
   await refresh();
@@ -141,14 +154,14 @@ function drawEditor() {
         message("Conflict: your local text is preserved. Compare with the current server copy, copy/merge, then reload before retrying.", true);
         const server = await StudioApi.wiki("page?path=" + encodeURIComponent(page.path));
         const compare = el("section", undefined, editor); el("h4", "Server copy · " + server.revision, compare); el("pre", server.content, compare);
-        button(compare, "Use current revision with my merged text", () => { if (confirm("Have you merged the server changes into your local text?")) { page.revision = server.revision; message("Merged revision selected; review text and Save."); } });
+        button(compare, "Use current revision with my merged text", async () => { if (await askConfirmation("Have you merged the server changes into your local text?")) { page.revision = server.revision; message("Merged revision selected; review text and Save."); } });
       } else throw e;
     }
   }
   button(toolbar, "Save ⌘/Ctrl+S", save).disabled = currentWiki.access !== "rw";
-  button(toolbar, "Revert / reload", async () => { if (mayLeave()) await loadPage(page.path); });
-  button(toolbar, "Move / rename", async () => { if (dirty) throw new Error("Save or revert before moving"); const destination = prompt("Destination Markdown path", page.path); if (destination && destination !== page.path) { activePage = await StudioApi.wiki("pages/move", "POST", { source: page.path, destination, expectedRevision: page.revision }); drawEditor(); } }).disabled = currentWiki.access !== "rw" || page.creating;
-  button(toolbar, "Delete", async () => { if (confirm("Delete " + page.path + "?")) { await StudioApi.wiki("page?path=" + encodeURIComponent(page.path), "DELETE", { expectedRevision: page.revision, confirmation: page.path }); dirty = false; activePage = null; editor.replaceChildren(); message("Deleted"); } }).disabled = currentWiki.access !== "rw" || page.creating;
+  button(toolbar, "Revert / reload", async () => { if (await mayLeave()) await loadPage(page.path); });
+  button(toolbar, "Move / rename", async () => { if (dirty) throw new Error("Save or revert before moving"); const destination = await askText("Destination Markdown path", page.path); if (destination && destination !== page.path) { activePage = await StudioApi.wiki("pages/move", "POST", { source: page.path, destination, expectedRevision: page.revision }); drawEditor(); } }).disabled = currentWiki.access !== "rw" || page.creating;
+  button(toolbar, "Delete", async () => { if (await askConfirmation("Delete " + page.path + "?")) { await StudioApi.wiki("page?path=" + encodeURIComponent(page.path), "DELETE", { expectedRevision: page.revision, confirmation: page.path }); dirty = false; activePage = null; editor.replaceChildren(); message("Deleted"); } }).disabled = currentWiki.access !== "rw" || page.creating;
   source.onkeydown = safely(async event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); await save(); } });
   const metadata = el("details", undefined, editor); el("summary", "Frontmatter, outgoing links and provenance", metadata); el("pre", JSON.stringify({ metadata: page.metadata, links: page.links, sourceIds: page.sourceIds, warnings: page.warnings }, null, 2), metadata);
   if (!page.creating) StudioApi.wiki("backlinks?path=" + encodeURIComponent(page.path)).then(result => { const details = el("details", undefined, editor); el("summary", "Incoming backlinks", details); el("pre", JSON.stringify(result, null, 2), details); }).catch(e => message(e.message, true));
@@ -169,5 +182,137 @@ async function graphView(content) {
 window.addEventListener("message", safely(async event => {
   const frame = document.querySelector("#view iframe"), d = event.data;
   if (!frame || event.source !== frame.contentWindow || event.origin !== "null" || !d || d.type !== "mini-a-wiki-graph-node" || d.version !== 1 || typeof d.path !== "string" || d.nodeId !== "doc:" + d.path || d.path.length > 512 || /[\\%:\x00-\x1f?#]/.test(d.path) || !/\.md$/i.test(d.path) || d.path.split("/").some(p => !p || p === "." || p === ".." || p.startsWith(".") || /^AGENTS\.md$/i.test(p))) return;
-  if (!mayLeave()) return; dirty = false; const view = document.getElementById("view"); view.replaceChildren(); await pagesView(view); await loadPage(d.path);
+  if (!(await mayLeave())) return; dirty = false; const view = document.getElementById("view"); view.replaceChildren(); await pagesView(view); await loadPage(d.path);
 }));
+function field(parent, name, choices, initial) {
+  const label = el("label", name, parent), input = el(choices ? "select" : "input", undefined, label);
+  if (choices) choices.forEach(value => { const o = el("option", value, input); o.value = value; });
+  if (initial !== undefined) input.value = initial;
+  return input;
+}
+function check(parent, title) { const label = el("label", title, parent), input = el("input", undefined, label); input.type = "checkbox"; return input; }
+async function queue(suffix, body) { const job = await StudioApi.wiki(suffix, "POST", body); message("Queued job " + job.id); await jobDetail(job.id); return job; }
+window.studioToolsView = async function(name, content) {
+  if (name === "Graph") {
+    const semantic = check(content, "Opt in to model semantic extraction");
+    button(content, "Queue graph rebuild", () => queue("graph/rebuild", { semantic: semantic.checked })).disabled = currentWiki.access !== "rw";
+    await graphView(content); return;
+  }
+  if (name === "Jobs") return jobsView(content);
+  if (name === "Sources") return sourcesView(content);
+  if (name === "Absorb") return absorbView(content);
+  if (name === "Dreams") return dreamsView(content);
+};
+async function jobsView(content) {
+  const result = await StudioApi.request("jobs?wikiId=" + encodeURIComponent(currentWiki.id));
+  if (!result.items.length) el("p", "No jobs yet. History is persisted outside your wiki.", content);
+  button(content, "Refresh jobs", async () => { content.replaceChildren(); await jobsView(content); });
+  for (const job of result.items) { const card = el("section", undefined, content); el("h4", job.operation + " · " + job.status, card); el("p", job.createdAt, card); button(card, "Inspect " + job.id, () => jobDetail(job.id)); }
+}
+async function jobDetail(id) {
+  const view = document.getElementById("view"); view.replaceChildren(); el("h3", "Job " + id, view);
+  const summary = el("pre", "Loading…", view), events = el("pre", "", view); events.setAttribute("aria-label", "Job events");
+  const key = currentWiki.id;
+  button(view, "Request cancellation", async () => { await StudioApi.request("jobs/" + id + "/cancel", "POST", {}); message("Cancellation requested. Active engines may finish with writes; no rollback is implied."); });
+  let cursor = 0;
+  async function refresh() {
+    if (!summary.isConnected || currentWiki.id !== key) return;
+    const job = await StudioApi.request("jobs/" + id); summary.textContent = JSON.stringify(job, null, 2);
+    const response = await fetch("/api/v1/jobs/" + id + "/events", { headers: { Authorization: "Bearer " + StudioApi.token, "Last-Event-ID": String(cursor) } });
+    if (!response.ok) throw new Error("Cannot read job events");
+    for (const frame of (await response.text()).split("\n\n")) {
+      const line = frame.split("\n").find(l => l.startsWith("data: ")); if (!line) continue;
+      const event = JSON.parse(line.slice(6)); if (event.seq <= cursor) continue; cursor = event.seq;
+      events.textContent = (events.textContent + event.time + " [" + event.phase + "] " + event.message + "\n").slice(-100000);
+    }
+    if (["completed", "failed", "partial", "recovery-required", "interrupted", "cancelled"].includes(job.status)) {
+      const changes = await StudioApi.wiki("changes?jobId=" + id); const details = el("details", undefined, view); el("summary", "Actual before/after Markdown changes", details); el("pre", JSON.stringify(changes, null, 2), details);
+      if (["recovery-required", "interrupted"].includes(job.status)) el("p", "No automatic retry was performed. Inspect engine journals and follow the recovery instructions in docs/WIKI-STUDIO.md before submitting another operation.", view);
+    } else setTimeout(safely(refresh), 1500);
+  }
+  await refresh();
+}
+async function sourcesView(content) {
+  el("p", "Destination: " + currentWiki.name + ". Files are staged outside the wiki and are ingested only after Preview or Apply.", content);
+  const catalog = await StudioApi.wiki("sources");
+  for (const source of catalog.items) {
+    const card = el("section", undefined, content); el("h4", source.name + " · " + (source.lastStatus || source.status), card);
+    const details = el("details", undefined, card); el("summary", "Inventory and revision lineage", details); el("pre", JSON.stringify(source, null, 2), details);
+    const mode = field(card, "Mode", ["auto", "normalize", "raw", "distill"]), layout = field(card, "Layout", ["source", "flat"]), section = field(card, "Section"), include = field(card, "Include patterns"), exclude = field(card, "Exclude patterns");
+    const semantic = check(card, "Semantic extraction (requires configured model)"), prune = check(card, "Prune missing source pages (never automatic)");
+    async function run(preview) {
+      if (!preview && prune.checked && !(await askConfirmation("Prune source-owned pages missing from this revision? Manual edits remain subject to engine conflict checks."))) return;
+      await queue("ingestions", { sourceId: source.id, revision: source.revision, preview, options: { mode: mode.value, layout: layout.value, section: section.value, include: include.value, exclude: exclude.value, semantic: semantic.checked, prune: prune.checked }, confirmation: { acknowledgePrune: prune.checked } });
+    }
+    button(card, "Preview ingestion", () => run(true)); button(card, "Apply / rerun this revision", () => run(false)).disabled = currentWiki.access !== "rw";
+  }
+  const upload = el("section", undefined, content); el("h4", "Upload a source revision", upload);
+  const sourceId = field(upload, "Stable source ID", null, "documents"), display = field(upload, "Display name", null, "Documents");
+  el("p", "Reuse a stable source ID when uploading a later revision. Directory paths are preserved. Supported staged formats: Markdown, text and PDF; engine converters determine ingestion support.", upload);
+  const folderLabel = el("label", "Choose directory", upload), folder = el("input", undefined, folderLabel); folder.type = "file"; folder.multiple = true; folder.setAttribute("webkitdirectory", "");
+  const zipLabel = el("label", "Or choose ZIP", upload), zip = el("input", undefined, zipLabel); zip.type = "file"; zip.accept = ".zip";
+  const status = el("pre", "No files selected.", upload);
+  function selected() { return zip.files.length ? [...zip.files] : [...folder.files]; }
+  function inventory() { status.textContent = selected().map(f => (f.webkitRelativePath || f.name) + " · " + f.size + " bytes").join("\n"); }
+  folder.onchange = inventory; zip.onchange = inventory;
+  button(upload, "Stage and register source revision", async () => {
+    const files = selected(); if (!files.length) throw new Error("Select a directory or ZIP");
+    const uploadId = crypto.randomUUID();
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i], path = file.webkitRelativePath || file.name;
+      status.textContent = "Uploading " + (i + 1) + "/" + files.length + " · " + path;
+      const response = await fetch("/api/v1/uploads", { method: "POST", headers: { Authorization: "Bearer " + StudioApi.token, "X-Upload-ID": uploadId, "X-Upload-Path": encodeURIComponent(path) }, body: file });
+      if (!response.ok) throw new Error((await response.json()).error.message);
+    }
+    const source = await StudioApi.wiki("sources", "POST", { id: sourceId.value, name: display.value, type: "upload", uploadId });
+    status.textContent = "Staged revision " + source.revision + ". Preview ingestion to review engine-discovered changes.";
+    content.replaceChildren(); await sourcesView(content);
+  }).disabled = currentWiki.access !== "rw";
+  const unavailable = el("section", undefined, content); el("h4", "Additional adapters", unavailable);
+  const session = await StudioApi.request("session"), directories = session.adapters.directory || [];
+  if (directories.length) {
+    const selected = field(unavailable, "Operator source directory", directories.map(d => d.id)), kind = field(unavailable, "Source kind", ["directory", "git"]);
+    button(unavailable, "Snapshot allowlisted directory / local checkout", async () => { await StudioApi.wiki("sources", "POST", { id: sourceId.value, name: display.value, type: kind.value, directoryId: selected.value }); content.replaceChildren(); await sourcesView(content); });
+  } else el("p", "Local directory / Git checkout intake requires operator studiosourcedirs configuration.", unavailable);
+  for (const name of ["Remote Git repository", "Webpage URL", "YouTube captions"]) { const b = button(unavailable, name + " · unavailable", () => {}); b.disabled = true; b.title = "This build lacks a DNS-pinned bounded outbound transport / operator adapter configuration. Upload a reviewed directory or ZIP export."; }
+  el("p", "Outbound adapters are not implemented in this build. No private scripts are bundled. YouTube requires an operator-installed caption adapter and retrieves captions, not speech-to-text; see documentation.", unavailable);
+}
+async function absorbView(content) {
+  el("p", "Absorption uses Mini-A saved plans and recovery journals. Source wikis remain unchanged. A plan may require a model; apply reuses the saved plan.", content);
+  const wikis = await StudioApi.wikis(), choices = el("div", undefined, content), selected = [];
+  for (const wiki of wikis.items.filter(w => w.id !== currentWiki.id)) selected.push([wiki.id, check(choices, wiki.name)]);
+  const paths = field(content, "Paths (comma-separated; empty means all)"), tags = field(content, "Tags (comma-separated)"), topic = field(content, "Topic"), exclude = field(content, "Exclusions (comma-separated)");
+  button(content, "Generate saved plan", async () => {
+    const body = { action: "plan", sourceWikiIds: selected.filter(([, box]) => box.checked).map(([id]) => id) };
+    for (const [k, input] of [["paths", paths], ["tags", tags], ["exclude", exclude]]) if (input.value.trim()) body[k] = input.value.split(",").map(s => s.trim()).filter(Boolean);
+    if (topic.value) body.topic = topic.value; await queue("absorptions", body);
+  }).disabled = currentWiki.access !== "rw";
+  const plan = field(content, "Saved plan ID");
+  for (const action of ["status", "show", "apply", "resume", "delete", "cancel"]) button(content, action, async () => {
+    if (["apply", "resume", "delete", "cancel"].includes(action) && !(await askConfirmation(action + " saved plan " + plan.value + "? Deleting a plan does not undo applied pages."))) return;
+    await queue("absorptions", { action, planId: plan.value, confirmation: { applySavedPlan: true } });
+  }).disabled = currentWiki.access !== "rw";
+}
+async function dreamsView(content) {
+  el("p", "Plan is model-free maintenance diagnostics. It is not an exact preview of future LLM reorganization. Reorg performs live structural changes and can move, merge or delete pages.", content);
+  const mode = field(content, "Mode", ["plan", "apply", "repair", "reindex", "graph", "indexes", "auto", "reorg"]), semantic = check(content, "Opt in to model semantic extraction"), organize = field(content, "Organization", ["none", "topics"]), instructions = field(content, "Reorg guidance"), steps = field(content, "Maximum model steps", null, "40"), compact = check(content, "Compact after success (offline)"), external = check(content, "External CLI readers and writers are stopped"), confirmReorg = check(content, "I authorize live structural changes after a verified backup"), mutateAuto = check(content, "Auto: apply repairs (otherwise preview)");
+  el("p", "Verified backups are mandatory before page-mutating modes. Model credentials are inherited from the operator environment. Usage is reported only when the engine reports it.", content);
+  button(content, "Queue selected dream", () => queue("dreams", { mode: mode.value, options: { semantic: semantic.checked, organize: organize.value, instructions: instructions.value, dreammaxsteps: Number(steps.value), compact: compact.checked, dryrun: mode.value === "auto" ? !mutateAuto.checked : mode.value === "plan" }, confirmation: { acknowledgeStructuralChanges: confirmReorg.checked, externalProcessesStopped: external.checked } })).disabled = currentWiki.access !== "rw";
+  const maintenance = el("section", undefined, content); el("h4", "Offline maintenance", maintenance);
+  for (const action of ["reindex", "indexes", "compact"]) button(maintenance, "Queue " + action, () => queue("maintenance", { action, externalProcessesStopped: external.checked })).disabled = currentWiki.access !== "rw";
+  await backupsView(content);
+}
+async function backupsView(content) {
+  const section = el("section", undefined, content); el("h4", "Verified snapshots", section);
+  button(section, "Create snapshot", () => queue("backups", {})).disabled = currentWiki.access !== "rw";
+  const result = await StudioApi.wiki("backups");
+  if (!result.items.length) el("p", "No tracked backups yet.", section);
+  for (const backup of result.items) {
+    el("p", backup.createdAt + " · " + backup.id + " · " + backup.size + " bytes · " + (backup.verified ? "verified at creation" : "not verified"), section);
+    button(section, "Restore this snapshot", async () => {
+      if (!(await askConfirmation("Stop external readers and writers. Restore replaces the wiki tree after a verified pre-restore backup. Continue?"))) return;
+      const overview = await StudioApi.wiki("overview"), fingerprint = overview.studio.fingerprint;
+      await queue("backups/" + backup.id + "/restore", { expectedFingerprint: fingerprint, confirmation: backup.id + ":" + fingerprint, externalProcessesStopped: true });
+    }).disabled = currentWiki.access !== "rw" || !backup.verified;
+  }
+}

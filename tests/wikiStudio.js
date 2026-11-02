@@ -5,6 +5,8 @@
   loadLib("wiki-studio-jobs.js")
   loadLib("wiki-studio-sources.js")
   loadLib("wiki-studio-operations.js")
+  loadLib("wiki-studio-backups.js")
+  loadLib("wiki-studio-ingestion.js")
   function fixture(fn) {
     var temp = WikiStudio.canonical(String(io.createTempDir("wiki-studio-test-")))
     var config = { home: temp + "/state", roots: [temp + "/wikis"], base: WikiStudio.canonical("."), port: 18891, host: "127.0.0.1", token: "test-token-with-more-than-32-characters", maxPageBytes: 1048576, maxBodyBytes: 2097152, workers: 2 }
@@ -104,5 +106,56 @@
     assert(io.readFileString(t+"/expanded/folder/page.md"),"safe content","Safe ZIP extraction")
     req.headers["x-upload-id"]=WikiStudio.id();req.headers["x-upload-path"]="..%2Fescape.md"
     rejects(function(){s.streamUpload(req,new java.io.ByteArrayInputStream(WikiStudio.bytes("x")))},"unsafe_path")
+    WikiStudio.privateDir(t+"/checkout");io.writeFileString(t+"/checkout/doc.md","# Local checkout\n")
+    s.config.directories=[{id:"checkout",path:t+"/checkout",identity:WikiStudio.identity(t+"/checkout")}]
+    var local=s.sourceAdd(w,{id:"local",name:"Local",type:"git",directoryId:"checkout"})
+    assert(local.type,"git","Allowlisted local checkout adapter")
+    assert(!!local.files["doc.md"],true,"Directory snapshot inventory")
+  }) }
+  exports.testHydration = function() { fixture(function(s,t) {
+    var w=add(s,t),id=WikiStudio.id();WikiStudio.privateDir(s.config.home+"/sources");WikiStudio.privateDir(s.config.home+"/jobs")
+    s.jobs=new WikiStudioJobs(s.config)
+    s.streamUpload({role:"admin",headers:{"x-upload-id":id,"x-upload-path":"lesson.md"}},new java.io.ByteArrayInputStream(WikiStudio.bytes("# Lesson\n\nUseful facts about the library.\n")))
+    s.sourceAdd(w,{id:"lessons",name:"Lessons",type:"upload",uploadId:id})
+    function run(preview,key){var spec=s.sourceOperation(w,"ingestions",{sourceId:"lessons",revision:id,preview:preview,options:{mode:"raw",semantic:false}});var j=s.jobs.submit(w,spec.operation,spec.params,key,"admin");s.jobs.update(j.id,{status:"acquiring-lock"});wikiStudioRunWorker(s.config,j.id);return s.jobs.get(j.id)}
+    var preview=run(true,"preview-key-123");assert(preview.status,"completed","Ingest dry run")
+    assert(Object.keys(WikiStudio.scan(w.root,false)).length,0,"Preview leaves pages unchanged")
+    var applied=run(false,"apply-key-123");assert(applied.status,"completed","Real raw ingestion: "+JSON.stringify(applied))
+    assert(!!applied.backupId,true,"Ingestion backup recorded")
+    var files=WikiStudio.scan(w.root,false);assert(Object.keys(files).length>0,true,"Engine produced pages")
+    var repeated=run(false,"rerun-key-123");assert(repeated.status,"completed","Idempotent engine rerun")
+    var unchanged=WikiStudio.scan(w.root,false);assert(Object.keys(files).filter(function(p){return p!=="log.md"}).every(function(p){return unchanged[p]&&files[p].hash===unchanged[p].hash}),true,"Stable source ID does not duplicate pages")
+  }) }
+  exports.testBackups = function() { fixture(function(s,t) {
+    var w=add(s,t);WikiStudio.privateDir(s.config.home+"/jobs")
+    io.writeFileString(w.root+"/page.md","# Original\n")
+    var backup=WikiStudio.snapshot(s.config,w,"test")
+    assert(backup.verified,true,"Archive and members verified")
+    io.writeFileString(w.root+"/page.md","# Changed\n")
+    var current=WikiStudio.fingerprint(WikiStudio.scan(w.root,true)),pre=WikiStudio.snapshot(s.config,w,"before-restore"),id=WikiStudio.id()
+    WikiStudio.privateDir(s.config.home+"/jobs/"+id)
+    rejects(function(){WikiStudio.restore(s.config,w,{id:id,params:{backupId:backup.id,expectedFingerprint:"wrong",confirmation:"wrong"}},pre)},"restore_conflict")
+    assert(io.readFileString(w.root+"/page.md"),"# Changed\n","Failed preflight leaves live wiki untouched")
+    WikiStudio.restore(s.config,w,{id:id,params:{backupId:backup.id,expectedFingerprint:current,confirmation:backup.id+":"+current}},pre)
+    assert(io.readFileString(w.root+"/page.md"),"# Original\n","Validated sibling swap restores content")
+    s.registry.verify(s.registry.get(w.id))
+    io.writeFileString(WikiStudio.backupPath(s.config,w,backup.id)+"/snapshot.zip","corruption")
+    rejects(function(){WikiStudio.checkBackup(s.config,w,backup.id)},"corrupt_backup")
+    rejects(function(){WikiStudio.checkBackup(s.config,merge(w,{id:"other"}),backup.id)},"foreign_backup")
+  }) }
+  exports.testDreamSafety = function() { fixture(function(s,t) {
+    var w=add(s,t);WikiStudio.privateDir(s.config.home+"/jobs");s.jobs=new WikiStudioJobs(s.config)
+    rejects(function(){s.jobWikiRoute({method:"POST",headers:{"idempotency-key":"reorg-key-123"},body:{mode:"reorg",options:{}}},w,["dreams"],"admin")},"confirmation_required")
+    io.writeFileString(w.root+"/page.md","# Before\n")
+    var j=s.jobs.submit(w,"dream.reorg",{semantic:false,dreammaxsteps:2,organize:"none",instructions:"test"},"fake-reorg-123","admin"),original=wikiStudioExecute
+    s.jobs.update(j.id,{status:"acquiring-lock"})
+    // A deterministic injected engine verifies worker backup/diff contracts. It
+    // does not claim provider or real agent restructuring quality coverage.
+    wikiStudioExecute=function(config,wiki,job,log,backup){assert(backup.verified,true,"Fake engine cannot start before verified backup");io.writeFileString(wiki.root+"/page.md","# After fake engine\n");return {ok:true}}
+    try{wikiStudioRunWorker(s.config,j.id)}finally{wikiStudioExecute=original}
+    assert(s.jobs.get(j.id).status,"completed","Fake restructuring finalizes")
+    var diff=WikiStudio.json(s.jobs.dir(j.id)+"/changes.json")
+    assert(diff.changedPageCount,1,"Actual changed page count")
+    assert(diff.changes[0].unifiedDiff.indexOf("+# After fake engine")>=0,true,"Before/after human-readable diff")
   }) }
 })()

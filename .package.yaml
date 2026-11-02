@@ -441,3 +441,6 @@ filesHash:
 - wiki-studio-jobs.js
 - wiki-studio-sources.js
 - wiki-studio-operations.js
+- wiki-studio-bootstrap.js
+- wiki-studio-backups.js
+- wiki-studio-ingestion.js

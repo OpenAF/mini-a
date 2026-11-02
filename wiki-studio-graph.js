@@ -20,5 +20,7 @@ WikiStudioServer.prototype.graphHtml = function(w) {
     io.listFiles(cache).files.filter(function(f) { return /\.html$/.test(f.filename) && f.filepath !== path }).sort(function(a,b) { return Number(b.lastModified) - Number(a.lastModified) }).slice(2).forEach(function(f) { new java.io.File(f.filepath).delete() })
   }
   WikiStudio.noLinks(path)
-  return { studioHtml: io.readFileString(path) }
+  // Blob frames inherit the Studio CSP. A server nonce admits only this fixed
+  // renderer's scripts/styles; raw Markdown never becomes HTML in this origin.
+  return { studioHtml: io.readFileString(path).replace(/<script(?=[ >])/g,'<script nonce="'+c.graphNonce+'"').replace(/<style>/g,'<style nonce="'+c.graphNonce+'">') }
 }

@@ -90,8 +90,21 @@ WikiStudioServer.prototype.sourceList = function(w) {
   return io.listFiles(this.config.home + "/sources").files.filter(function(f) { return f.isFile && f.filename.indexOf(w.id + "--") === 0 && /\.json$/.test(f.filename) }).map(function(f) { return WikiStudio.json(f.filepath) }).sort(function(a,b) { return a.id.localeCompare(b.id) })
 }
 WikiStudioServer.prototype.sourceAdd = function(w, body) {
-  WikiStudio.fields(body, ["id", "name", "type", "uploadId"]); WikiStudio.name(body.id)
-  WikiStudio.assert(body.type === "upload", 501, "adapter_unavailable", "Remote Git, webpage and YouTube adapters are disabled: a DNS-pinned, bounded outbound transport is not implemented. Upload a reviewed export/checkout instead. Local directory intake is also unavailable; upload a directory snapshot.")
+  WikiStudio.fields(body, ["id", "name", "type", "uploadId", "directoryId"]); WikiStudio.name(body.id)
+  var sourceType=body.type
+  if(body.type==="directory"||body.type==="git") {
+    var selected=(this.config.directories||[]).filter(function(d){return d.id===body.directoryId})[0]
+    WikiStudio.assert(selected,403,"source_not_allowed","Select an operator-allowlisted source directory ID")
+    WikiStudio.assert(!WikiStudio.inside(selected.path,w.root)&&!WikiStudio.inside(w.root,selected.path),400,"source_overlap","Source and wiki cannot contain each other")
+    WikiStudio.assert(WikiStudio.identity(selected.path)===selected.identity,409,"source_changed","Source directory identity changed; restart after review")
+    var uploadId=WikiStudio.id(),stage=this.config.home+"/sources/uploads/"+uploadId+"/files"
+    WikiStudio.privateDir(stage)
+    var count=0,total=0
+    var copy=function(dir,depth){WikiStudio.assert(depth<16,413,"source_limit","Source depth exceeded");var entries=io.listFiles(dir).files;entries.forEach(function(f){if(String(f.filename).charAt(0)==="."||/^AGENTS\.md$/i.test(f.filename))return;WikiStudio.noLinks(f.filepath);if(f.isDirectory){copy(f.filepath,depth+1);return}if(!/\.(md|txt|pdf)$/i.test(f.filename))return;count++;var bytes=Number(new java.io.File(f.filepath).length());total+=bytes;WikiStudio.assert(count<=2000&&total<=67108864&&bytes<=8388608,413,"source_limit","Source byte/count limit exceeded");var rel=String(f.filepath).substring(selected.path.length+1),dest=WikiStudio.safeFile(stage,rel,false);WikiStudio.privateDir(String(new java.io.File(dest).getParent()));java.nio.file.Files.copy(WikiStudio.path(f.filepath),WikiStudio.path(dest))})}
+    try{copy(selected.path,0)}catch(e){io.rm(String(new java.io.File(stage).getParent()));throw e}
+    body={id:body.id,name:body.name,type:"upload",uploadId:uploadId}
+  }
+  WikiStudio.assert(body.type === "upload", 501, "adapter_unavailable", "Remote Git, webpage and YouTube adapters are disabled: a DNS-pinned, bounded outbound transport is not implemented. Upload a reviewed export/checkout instead.")
   WikiStudio.assert(isString(body.name) && body.name.length <= 120 && /^[a-f0-9-]{36}$/.test(String(body.uploadId)), 400, "invalid_source", "Provide a source name and upload revision UUID")
   var dir = this.config.home + "/sources/uploads/" + body.uploadId, self = this
   return WikiStudio.lock(this.config.home, "upload-" + body.uploadId, function() {
@@ -106,7 +119,7 @@ WikiStudioServer.prototype.sourceAdd = function(w, body) {
       try { WikiStudio.extractZip(dir + "/files/" + zips[0], staging) } catch(e) { if (io.fileExists(staging)) io.rm(staging); throw e }
       inventory = WikiStudio.scan(staging, true)
     }
-    var source = { id: body.id, wikiId: w.id, name: body.name, type: "upload", revision: body.uploadId, inventoryChecksum: WikiStudio.fingerprint(inventory), staging: staging, createdAt: WikiStudio.now(), lineage: existing ? (existing.lineage || []).concat([existing.revision]).slice(-100) : [], files: inventory, status: "staged" }
+    var source = { id: body.id, wikiId: w.id, name: body.name, type: sourceType, revision: body.uploadId, inventoryChecksum: WikiStudio.fingerprint(inventory), staging: staging, createdAt: WikiStudio.now(), lineage: existing ? (existing.lineage || []).concat([existing.revision]).slice(-100) : [], files: inventory, status: "staged" }
     WikiStudio.atomic(dir + "/sealed.json", { wikiId: w.id, sourceId: source.id, checksum: source.inventoryChecksum })
     WikiStudio.atomic(self.sourcePath(w, source.id), source)
     return WikiStudioServer.publicSource(source)

@@ -173,7 +173,7 @@ jobs:
         var note = document.createElement('small'); note.textContent = matches.length > 30 ? 'Showing 30 of ' + matches.length + ' matches' : matches.length + ' matches'; $('results').appendChild(note);
       }
       function select(n, remember) {
-        if (data.embed && parent !== window && n.id === 'doc:' + n.props.path && typeof n.props.path === 'string' && n.props.path.length <= 512 && !/[\\\\%:\x00-\x1f?#]/.test(n.props.path) && /\\.md$/i.test(n.props.path) && n.props.path.split('/').every(function(p) { return p && p !== '.' && p !== '..' && p.charAt(0) !== '.' && !/^AGENTS\\.md$/i.test(p); })) {
+        if (data.embed && parent !== window && n.id === 'doc:' + n.props.path && typeof n.props.path === 'string' && n.props.path.length <= 512 && !/[\\\\%:\\x00-\\x1f?#]/.test(n.props.path) && /\\.md$/i.test(n.props.path) && n.props.path.split('/').every(function(p) { return p && p !== '.' && p !== '..' && p.charAt(0) !== '.' && !/^AGENTS\\.md$/i.test(p); })) {
           parent.postMessage({type:'mini-a-wiki-graph-node', version:1, nodeId:n.id, path:n.props.path}, '*');
         }
         if(selected && selected !== n && remember !== false) history.push(selected.id);

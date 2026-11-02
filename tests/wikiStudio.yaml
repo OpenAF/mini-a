@@ -27,7 +27,19 @@ jobs:
 - name: Studio source boundaries
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testSources
+- name: Studio hydration
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testHydration
+- name: Studio backups and restore
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testBackups
+- name: Studio dream safety
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testDreamSafety
 todo:
+- Studio backups and restore
+- Studio dream safety
+- Studio hydration
 - Studio source boundaries
 - Studio durable jobs
 - Studio graph

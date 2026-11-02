@@ -27,7 +27,7 @@ WikiStudioServer.prototype.dispatch = function(req) {
   var read = req.method === "GET", c = this.config
   WikiStudio.assert(p[0] === "api" && p[1] === "v1", 404, "not_found", "Route not found")
   if (read && p.length === 3 && p[2] === "health") return { ok: true, version: 1 }
-  if (read && p.length === 3 && p[2] === "session") return { role: role, version: 1, csrf: "bearer-header-and-same-origin", backends: { fs: "supported", mounts: "unavailable in Studio", s3: "unavailable in Studio", es: "unavailable in Studio", http: "unavailable in Studio", archive: "unavailable in Studio" }, adapters: { upload: true, directory: false, git: false, url: false, youtube: false }, limits: { pageBytes: c.maxPageBytes } }
+  if (read && p.length === 3 && p[2] === "session") return { role: role, version: 1, csrf: "bearer-header-and-same-origin", backends: { fs: "supported", mounts: "unavailable in Studio", s3: "unavailable in Studio", es: "unavailable in Studio", http: "unavailable in Studio", archive: "unavailable in Studio" }, adapters: { upload: true, directory: (c.directories||[]).map(function(d){return{id:d.id}}), git: "allowlisted-local-checkout-only", url: false, youtube: false }, limits: { pageBytes: c.maxPageBytes } }
   if (p[2] === "wikis" && p.length === 3) {
     if (read) return WikiStudioServer.paginate(this.registry.list().map(function(w) { return self.publicWiki(w, role) }), q)
     if (req.method === "POST") { WikiStudio.authorize(role, "admin"); return this.publicWiki(this.registry.add(body), role) }
@@ -61,6 +61,9 @@ WikiStudioServer.paginate = function(items, q) {
 }
 WikiStudioServer.prototype.start = function() {
   var self = this, c = this.config
+  java.lang.System.setProperty("sun.net.httpserver.maxReqTime", "60")
+  java.lang.System.setProperty("sun.net.httpserver.maxRspTime", "60")
+  java.lang.System.setProperty("sun.net.httpserver.maxConnections", "64")
   var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(c.host, c.port), 32)
   server.createContext("/", new com.sun.net.httpserver.HttpHandler({ handle: function(ex) { self.handle(ex) } }))
   server.setExecutor(java.util.concurrent.Executors.newFixedThreadPool(8)); server.start(); this.http = server
@@ -71,7 +74,7 @@ WikiStudioServer.prototype.handle = function(ex) {
   var id = WikiStudio.id(), status = 200, mime = "application/json; charset=utf-8", result, c = this.config, headers = {}, role
   var response = ex.getResponseHeaders()
   response.set("Cache-Control", "no-store"); response.set("X-Content-Type-Options", "nosniff"); response.set("Referrer-Policy", "no-referrer")
-  response.set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-src blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+  response.set("Content-Security-Policy", "default-src 'none'; script-src 'self' 'nonce-" + c.graphNonce + "'; style-src 'self' 'nonce-" + c.graphNonce + "'; connect-src 'self'; img-src 'self' data: blob:; frame-src blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
   response.set("X-Request-ID", id)
   try {
     var uri = ex.getRequestURI(), path = String(uri.getPath()), method = String(ex.getRequestMethod()), rawPath = String(uri.getRawPath())
@@ -109,6 +112,7 @@ WikiStudioServer.prototype.handle = function(ex) {
     }
   } catch(e) {
     status = e.status || 500
+    mime = "application/json; charset=utf-8"
     result = { error: { code: e.code || "internal_error", message: e.status ? e.message : "Operation failed; inspect local state and job history", details: e.details }, requestId: id }
   }
   try {

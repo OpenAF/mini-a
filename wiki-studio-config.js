@@ -23,7 +23,15 @@ var wikiStudioConfig = function(args) {
     print("Wiki Studio access token (this process only): " + token)
   }
   WikiStudio.assert(token.length >= 32, 400, "weak_token", "STUDIO_TOKEN must contain at least 32 characters")
-  var c = { home: home, roots: roots, host: "127.0.0.1", port: port, token: token, maxPageBytes: 1048576, maxBodyBytes: 2097152, workers: 2, base: WikiStudio.canonical(String(new java.io.File(String(ow.oJob.__file)).getParent())) }
+  var directories=[]
+  if(args.studiosourcedirs) {
+    try{directories=JSON.parse(String(args.studiosourcedirs))}catch(e){throw new Error("studiosourcedirs must be a JSON array")}
+    WikiStudio.assert(isArray(directories)&&directories.length<=50,400,"invalid_config","Invalid source-directory allowlist")
+    var seen={}
+    directories=directories.map(function(d){WikiStudio.fields(d,["id","path"]);WikiStudio.name(d.id);WikiStudio.assert(!seen[d.id],400,"invalid_config","Duplicate directory ID");seen[d.id]=true;WikiStudio.noLinks(d.path);var path=WikiStudio.canonical(d.path);WikiStudio.assert(new java.io.File(path).isDirectory()&&!WikiStudio.inside(path,home)&&path.split("/").length>3&&!/(?:^|\/)\.[^/]+/.test(path),400,"invalid_config","Choose a dedicated visible source directory");return{id:d.id,path:path,identity:WikiStudio.identity(path)}})
+  }
+  var c = { home: home, roots: roots, host: "127.0.0.1", port: port, token: token, graphNonce: WikiStudio.id(), maxPageBytes: 1048576, maxBodyBytes: 2097152, workers: 2, base: String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent()) }
+  c.directories=directories
   ;["sources", "jobs", "backups", "graph-cache", "locks", "audit"].forEach(function(d) { WikiStudio.privateDir(home + "/" + d) })
   WikiStudio.atomic(home + "/config.json", { version: 1, host: c.host, port: port, roots: roots, maxPageBytes: c.maxPageBytes, workers: c.workers })
   return c

@@ -86,7 +86,7 @@ WikiStudioServer.prototype.wikiRoute = function(req, w, parts, role) {
       WikiStudio.assert(res && res.ok !== false, 422, "engine_error", "Wiki operation failed", res)
       if (route === "overview") {
         var inventory = WikiStudio.scan(w.root,false)
-        return {context:res,studio:{pageCount:Object.keys(inventory).length,fingerprint:WikiStudio.fingerprint(inventory),searchIndexPublished:io.fileExists(w.root+"/.mini-a-wiki-serving/current.json"),indexFreshness:"Inspect engine context/search warnings; presence alone does not prove currency",externalProcessesControlled:false}}
+        return {context:res,studio:{pageCount:Object.keys(inventory).length,fingerprint:WikiStudio.fingerprint(WikiStudio.scan(w.root,true)),searchIndexPublished:io.fileExists(w.root+"/.mini-a-wiki-serving/current.json"),indexFreshness:"Inspect engine context/search warnings; presence alone does not prove currency",externalProcessesControlled:false}}
       }
       if (route === "graph/stats") return { stats: res, source: io.fileExists(w.root + "/.mini-a-wiki-graph/graph.json") ? "knowledge-graph-snapshot" : "markdown-links-fallback", freshness: "Snapshot freshness is not inferred from its presence; rebuild after external changes", semantic: "Not inferred; semantic extraction is opt-in" }
       return res
