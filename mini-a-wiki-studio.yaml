@@ -17,5 +17,8 @@ jobs:
     loadLib(base + "/wiki-studio-api.js")
     loadLib(base + "/wiki-studio-pages.js")
     loadLib(base + "/wiki-studio-graph.js")
+    loadLib(base + "/wiki-studio-sources.js")
+    loadLib(base + "/wiki-studio-jobs.js")
+    loadLib(base + "/wiki-studio-operations.js")
     global.__wikiStudio = new WikiStudioServer(wikiStudioConfig(args))
     global.__wikiStudio.start()

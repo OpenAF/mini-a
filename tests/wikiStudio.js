@@ -2,6 +2,9 @@
   loadLib("wiki-studio-api.js")
   loadLib("wiki-studio-pages.js")
   loadLib("wiki-studio-graph.js")
+  loadLib("wiki-studio-jobs.js")
+  loadLib("wiki-studio-sources.js")
+  loadLib("wiki-studio-operations.js")
   function fixture(fn) {
     var temp = WikiStudio.canonical(String(io.createTempDir("wiki-studio-test-")))
     var config = { home: temp + "/state", roots: [temp + "/wikis"], base: WikiStudio.canonical("."), port: 18891, host: "127.0.0.1", token: "test-token-with-more-than-32-characters", maxPageBytes: 1048576, maxBodyBytes: 2097152, workers: 2 }
@@ -72,5 +75,34 @@
     assert(s.graphHtml(w).studioHtml, html, "Cache reuse without overwrite")
     io.writeFileString(w.root + "/two.md", "# Two changed\n")
     assert(s.graphHtml(w).studioHtml !== html, true, "External changes invalidate cache")
+  }) }
+  exports.testJobs = function() { fixture(function(s,t) {
+    WikiStudio.privateDir(s.config.home + "/jobs"); var w = add(s,t), jobs = s.jobs = new WikiStudioJobs(s.config)
+    var j = jobs.submit(w,"dream.plan",{semantic:false},"test-key-123","admin")
+    assert(jobs.submit(w,"dream.plan",{semantic:false},"test-key-123","admin").id,j.id,"Exact idempotent replay")
+    rejects(function(){jobs.submit(w,"dream.plan",{semantic:true},"test-key-123","admin")},"idempotency_conflict")
+    rejects(function(){s.assertIdle(w.id)},"wiki_maintenance")
+    jobs.update(j.id,{status:"acquiring-lock"}); wikiStudioRunWorker(s.config,j.id)
+    assert(jobs.get(j.id).status,"completed","Plan worker finishes: " + JSON.stringify(WikiStudio.json(jobs.dir(j.id)+"/result.json")) + " " + JSON.stringify(jobs.get(j.id)))
+    var before = io.readFileString(jobs.dir(j.id) + "/job.json"); wikiStudioRunWorker(s.config,j.id)
+    assert(io.readFileString(jobs.dir(j.id)+"/job.json"),before,"Terminal worker cannot run twice")
+    assert(new WikiStudioJobs(s.config).get(j.id).status,"completed","Job durable after reopen")
+    assert(WikiStudio.json(jobs.dir(j.id)+"/changes.json").changedPageCount,0,"Plan has no page mutation")
+  }) }
+  exports.testSources = function() { fixture(function(s,t) {
+    var w=add(s,t),id=WikiStudio.id()
+    WikiStudio.privateDir(s.config.home+"/sources")
+    var req={role:"admin",headers:{"x-upload-id":id,"x-upload-path":"nested%2Fsource.md"}}
+    s.streamUpload(req,new java.io.ByteArrayInputStream(WikiStudio.bytes("# Staged\n")))
+    var source=s.sourceAdd(w,{id:"docs",name:"Documents",type:"upload",uploadId:id})
+    assert(source.files["nested/source.md"].size,9,"Preserve directory paths")
+    rejects(function(){s.streamUpload(req,new java.io.ByteArrayInputStream(WikiStudio.bytes("x")))},"upload_sealed")
+    rejects(function(){s.sourceAdd(w,{id:"remote",name:"Remote",type:"url",uploadId:WikiStudio.id()})},"adapter_unavailable")
+    function archive(name,entry){var out=new java.util.zip.ZipOutputStream(new java.io.FileOutputStream(t+"/"+name));out.putNextEntry(new java.util.zip.ZipEntry(entry));out.write(WikiStudio.bytes("safe content"));out.closeEntry();out.close();return t+"/"+name}
+    rejects(function(){WikiStudio.validateZip(archive("slip.zip","../escape.md"))},"unsafe_path")
+    var good=archive("good.zip","folder/page.md"); WikiStudio.extractZip(good,t+"/expanded")
+    assert(io.readFileString(t+"/expanded/folder/page.md"),"safe content","Safe ZIP extraction")
+    req.headers["x-upload-id"]=WikiStudio.id();req.headers["x-upload-path"]="..%2Fescape.md"
+    rejects(function(){s.streamUpload(req,new java.io.ByteArrayInputStream(WikiStudio.bytes("x")))},"unsafe_path")
   }) }
 })()

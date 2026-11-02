@@ -21,7 +21,15 @@ jobs:
 - name: Studio graph
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testGraph
+- name: Studio durable jobs
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testJobs
+- name: Studio source boundaries
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testSources
 todo:
+- Studio source boundaries
+- Studio durable jobs
 - Studio graph
 - Studio pages
 - Studio registry

@@ -1,0 +1,17 @@
+# Internal fixed worker entrypoint. Never accepts job code or engine flags over HTTP.
+ojob:
+  logToConsole: false
+todo:
+- Run Studio job
+jobs:
+- name: Run Studio job
+  exec: |
+    var base = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent())
+    loadLib(base + "/wiki-studio-common.js")
+    loadLib(base + "/wiki-studio-registry.js")
+    loadLib(base + "/wiki-studio-api.js")
+    loadLib(base + "/wiki-studio-pages.js")
+    loadLib(base + "/wiki-studio-sources.js")
+    loadLib(base + "/wiki-studio-jobs.js")
+    loadLib(base + "/wiki-studio-operations.js")
+    wikiStudioRunWorker({ home: WikiStudio.canonical(String(args.studiohome)), base: base }, String(args.jobid))

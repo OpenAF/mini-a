@@ -437,3 +437,7 @@ filesHash:
 - docs/WIKI-STUDIO-IMPLEMENTATION.md
 - wiki-studio-pages.js
 - wiki-studio-graph.js
+- mini-a-wiki-studio-worker.yaml
+- wiki-studio-jobs.js
+- wiki-studio-sources.js
+- wiki-studio-operations.js
