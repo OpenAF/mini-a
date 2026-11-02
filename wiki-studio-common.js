@@ -108,8 +108,21 @@ WikiStudio.scan = function(root, all) {
 WikiStudio.fingerprint = function(files) { return WikiStudio.hash(JSON.stringify(Object.keys(files).sort().map(function(k) { return [k, files[k].hash] }))) }
 WikiStudio.redact = function(value) {
   var text = String(value).replace(/Bearer\s+[^\s"']+/gi, "Bearer [redacted]").replace(/(https?:\/\/)[^/\s@]+@/gi, "$1[redacted]@")
-  ;["OAF_MODEL", "OAF_LC_MODEL", "STUDIO_TOKEN"].forEach(function(k) { var s = String(getEnv(k) || ""); if (s) text = text.split(s).join("[redacted]") })
+  ;["OAF_MODEL", "OAF_LC_MODEL", "STUDIO_TOKEN"].forEach(function(k) {
+    var s = String(getEnv(k) || ""); if (s) text = text.split(s).join("[redacted]")
+    try {
+      var parsed=af.fromJSSLON(s)
+      var visit=function(v,key){if(isObject(v)){Object.keys(v).forEach(function(name){visit(v[name],name)})}else if(/key|token|secret|pass|credential/i.test(key)&&isString(v)&&v.length>=4){text=text.split(v).join("[redacted]")}}
+      visit(parsed,"")
+    } catch(ignore) {}
+  })
   return text.replace(/((?:api[_-]?key|password|secret|authorization|token)\s*[=:]\s*)[^\s,}\]]+/gi, "$1[redacted]").substring(0, 8192)
+}
+WikiStudio.pending = function(root) {
+  var found=[],base=root+"/.mini-a-wiki-ingest",paths=[base+"/journal.json",root+"/.mini-a-wiki-absorb/journal.json"]
+  if(io.fileExists(base+"/journals"))io.listFiles(base+"/journals").files.filter(function(f){return f.isFile&&/\.json$/.test(f.filename)}).forEach(function(f){paths.push(f.filepath)})
+  paths.forEach(function(path){if(io.fileExists(path)){var j=WikiStudio.json(path);if(j.phase!=="complete")found.push({kind:path.indexOf("absorb")>=0?"absorb":"ingest",phase:j.phase||"unknown"})}})
+  return found
 }
 WikiStudio.authorize = function(role, needed, wiki) {
   var roles = ["viewer", "editor", "admin"]

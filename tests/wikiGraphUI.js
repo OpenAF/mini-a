@@ -2,8 +2,9 @@
 // Usage: node tests/wikiGraphUI.js /path/to/export.html
 var fs = require('fs'), vm = require('vm'), assert = require('assert');
 var html = fs.readFileSync(process.argv[2], 'utf8');
-var payload = html.match(/<script id="graph-data" type="application\/json">([\s\S]*?)<\/script>/)[1];
-var script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
+var payload = html.match(/<script[^>]*\bid="graph-data"[^>]*>([\s\S]*?)<\/script>/)[1];
+var scripts = Array.from(html.matchAll(/<script[^>]*>\s*([\s\S]*?)<\/script>/g));
+var script = scripts[scripts.length - 1][1];
 var elements = new Map();
 function element(tag) {
   return {
@@ -32,11 +33,13 @@ var frames = [], sandbox = { document: document, console: console, innerWidth: 1
   location: { hash: '', pathname: '/atlas.html', search: '' },
   requestAnimationFrame: function(fn) { frames.push(fn); }, setTimeout: setTimeout,
   performance: { now: function() { return 0; } }, URL: URL };
-sandbox.window = sandbox; sandbox.history = { replaceState: function() {} };
+var messages=[];
+sandbox.window = sandbox; sandbox.parent={postMessage:function(value){messages.push(value)}}; sandbox.history = { replaceState: function() {} };
 vm.runInNewContext(script, sandbox);
 frames.shift()(0);
 assert.match(elements.get('stats').textContent, /stars/);
 var data = JSON.parse(payload);
+if(data.embed) assert(messages.some(function(m){return m.type==='mini-a-wiki-graph-ready' && m.version===1;}));
 if(data.nodes.length) {
   elements.get('random').click();
   assert(elements.get('detail').children.some(function(c) { return c.tagName === 'H2'; }));
@@ -44,6 +47,10 @@ if(data.nodes.length) {
   if(connection) { connection.click(); assert.strictEqual(elements.get('back').disabled, false); elements.get('back').click(); }
   var search = elements.get('search'); search.value = data.nodes[0].label; search.oninput();
   assert(elements.get('results').children.length > 1);
+  if(data.embed) {
+    var doc=data.nodes.find(function(n){return n.id==='doc:'+n.props.path && /\.md$/i.test(n.props.path)});
+    if(doc){search.value=doc.label;search.oninput();elements.get('results').children[0].click();assert(messages.some(function(m){return m.type==='mini-a-wiki-graph-node' && m.path===doc.props.path && m.nodeId===doc.id && m.version===1;}));}
+  }
   elements.get('focus').checked = true; elements.get('focus').onchange();
   elements.get('plus').click(); elements.get('minus').click(); elements.get('fit').click();
   elements.get('types').children.forEach(function(row) { var input = row.querySelector('input'); input.checked = false; input.onchange(); });

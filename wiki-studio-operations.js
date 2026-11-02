@@ -56,6 +56,7 @@ var wikiStudioRunWorker = function(config, id) {
       var before = WikiStudio.scan(w.root, false), beforeState = WikiStudio.scan(w.root, true)
       WikiStudio.atomic(jobs.dir(id) + "/before.json", before)
       var operation = j.operation, params = j.params, needsBackup = /^(dream\.(apply|repair|indexes|reorg)|ingest\.resume|absorb\.(apply|resume)|backup.restore)$/.test(operation) || operation === "dream.auto" && !params.dryrun || operation === "ingest.run" && !params.dryrun
+      if(!/^(ingest\.(recovery|resume|discard)|absorb\.(status|show|resume)|backup\.)/.test(operation)) WikiStudio.assert(WikiStudio.pending(w.root).length===0,423,"recovery_pending","Pending engine journal must be reviewed/resumed before a new operation")
       var backup
       if (needsBackup) {
         WikiStudio.assert(isFunction(WikiStudio.snapshot), 501, "backup_unavailable", "Verified snapshots are required before this operation")
@@ -73,7 +74,7 @@ var wikiStudioRunWorker = function(config, id) {
       if(isFunction(WikiStudio.contentDiffs)) diff=WikiStudio.contentDiffs(config,w,backup,diff)
       WikiStudio.atomic(jobs.dir(id) + "/after.json", after); WikiStudio.atomic(jobs.dir(id) + "/changes.json", diff)
       if (operation === "dream.plan") WikiStudio.assert(WikiStudio.fingerprint(beforeState) === WikiStudio.fingerprint(WikiStudio.scan(w.root,true)), 500, "plan_mutated", "Maintenance preview unexpectedly changed wiki files")
-      result = MiniAWikiOps.sanitize(result || {ok:false}, {})
+      result = MiniAWikiOps.sanitize(result || {ok:false}, {model:String(getEnv("OAF_MODEL")||""),modeldec:String(getEnv("OAF_LC_MODEL")||"")})
       var serialized = JSON.stringify(result)
       if (serialized.length > 1048576) result = {ok: result.ok, warning:"Engine result exceeded retention limit; inspect local engine artifacts", truncated:true}
       WikiStudio.atomic(jobs.dir(id) + "/result.json", result)

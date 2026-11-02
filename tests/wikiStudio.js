@@ -125,6 +125,9 @@
     var files=WikiStudio.scan(w.root,false);assert(Object.keys(files).length>0,true,"Engine produced pages")
     var repeated=run(false,"rerun-key-123");assert(repeated.status,"completed","Idempotent engine rerun")
     var unchanged=WikiStudio.scan(w.root,false);assert(Object.keys(files).filter(function(p){return p!=="log.md"}).every(function(p){return unchanged[p]&&files[p].hash===unchanged[p].hash}),true,"Stable source ID does not duplicate pages")
+    var managed=Object.keys(unchanged).filter(function(p){return !/(^|\/)(index|log|AGENTS)\.md$/.test(p)})[0]
+    var edited=io.readFileString(w.root+"/"+managed)+"\nManual operator edit\n";io.writeFileString(w.root+"/"+managed,edited)
+    run(false,"manual-conflict-123");assert(io.readFileString(w.root+"/"+managed),edited,"Ingestion never silently overwrites manual source-page edits")
   }) }
   exports.testBackups = function() { fixture(function(s,t) {
     var w=add(s,t);WikiStudio.privateDir(s.config.home+"/jobs")

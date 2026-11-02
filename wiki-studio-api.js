@@ -74,7 +74,7 @@ WikiStudioServer.prototype.handle = function(ex) {
   var id = WikiStudio.id(), status = 200, mime = "application/json; charset=utf-8", result, c = this.config, headers = {}, role
   var response = ex.getResponseHeaders()
   response.set("Cache-Control", "no-store"); response.set("X-Content-Type-Options", "nosniff"); response.set("Referrer-Policy", "no-referrer")
-  response.set("Content-Security-Policy", "default-src 'none'; script-src 'self' 'nonce-" + c.graphNonce + "'; style-src 'self' 'nonce-" + c.graphNonce + "'; connect-src 'self'; img-src 'self' data: blob:; frame-src blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+  response.set("Content-Security-Policy", "default-src 'none'; script-src 'self' 'nonce-" + c.graphNonce + "'; style-src 'self' 'nonce-" + c.graphNonce + "'; connect-src 'self'; img-src 'self' data: blob:; frame-src blob:; base-uri 'none'; form-action 'self'; frame-ancestors http://127.0.0.1:" + c.port + " http://localhost:" + c.port)
   response.set("X-Request-ID", id)
   try {
     var uri = ex.getRequestURI(), path = String(uri.getPath()), method = String(ex.getRequestMethod()), rawPath = String(uri.getRawPath())
@@ -95,7 +95,7 @@ WikiStudioServer.prototype.handle = function(ex) {
         query[key] = value
       })
       var req = { method: method, path: path, query: query, headers: headers, requestId: id, role: role }
-      if (this.streamUpload && path === "/api/v1/uploads" && method === "POST") result = this.streamUpload(req, ex.getRequestBody())
+      if (this.streamUpload && path === "/api/v1/uploads" && method === "POST") { this.audit(id,role,"POST /api/v1/uploads"); result = this.streamUpload(req, ex.getRequestBody()) }
       else if (this.streamEvents && /^\/api\/v1\/jobs\/[a-z0-9-]+\/events$/.test(path) && method === "GET") { this.streamEvents(req, ex); return }
       else {
         var stream = ex.getRequestBody(), out = new java.io.ByteArrayOutputStream(), buffer = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 8192), n, size = 0

@@ -14,6 +14,10 @@ WikiStudioJobs.prototype.update = function(id, values) {
     WikiStudio.atomic(self.dir(id) + "/job.json", j); return j
   })
 }
+WikiStudioJobs.prototype.transition = function(id, from, values) {
+  var self=this
+  return WikiStudio.lock(this.config.home,"job-"+id,function(){var j=self.get(id);if(from.indexOf(j.status)<0)return null;Object.keys(values).forEach(function(k){j[k]=values[k]});j.updatedAt=WikiStudio.now();WikiStudio.atomic(self.dir(id)+"/job.json",j);return j})
+}
 WikiStudioJobs.prototype.event = function(id, phase, message, severity) {
   var self = this
   return WikiStudio.lock(this.config.home, "event-" + id, function() {
@@ -62,7 +66,8 @@ WikiStudioServer.prototype.startJobs = function() {
           if (self._running.get() >= c.workers || selected[j.wikiId]) return
           var busy = self.jobs.list().some(function(x) { return x.wikiId === j.wikiId && x.id !== j.id && WikiStudioJobs.terminal.indexOf(x.status) < 0 && x.status !== "queued" })
           if (busy) return
-          selected[j.wikiId] = true; self.jobs.update(j.id, { status: "acquiring-lock", phase: "acquiring-lock" }); self._running.incrementAndGet()
+          if(!self.jobs.transition(j.id,["queued"],{status:"acquiring-lock",phase:"acquiring-lock"}))return
+          selected[j.wikiId] = true; self._running.incrementAndGet()
           $doV(function() {
             var child
             try {
@@ -89,7 +94,7 @@ WikiStudioServer.prototype.extraRoute = function(req, parts, role) {
     }
     if (parts.length === 5 && parts[4] === "cancel" && req.method === "POST") {
       WikiStudio.authorize(role, "admin"); WikiStudio.fields(body, [])
-      if (j.status === "queued") return WikiStudioJobs.publicJob(jobs.update(j.id, { status: "cancelled", phase: "cancelled", cancelRequested: true }))
+      if (j.status === "queued") { var cancelled=jobs.transition(j.id,["queued"],{status:"cancelled",phase:"cancelled",cancelRequested:true}); if(cancelled)return WikiStudioJobs.publicJob(cancelled);j=jobs.get(j.id) }
       WikiStudio.assert(WikiStudioJobs.terminal.indexOf(j.status) < 0, 409, "job_finished", "Job is already terminal")
       return WikiStudioJobs.publicJob(jobs.update(j.id, { cancelRequested: true, warning: "Cancellation requested. Active engines have no safe abort checkpoint; the job may finish with writes. No rollback is implied." }))
     }

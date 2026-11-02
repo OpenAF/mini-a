@@ -17,7 +17,7 @@ WikiStudioServer.prototype.streamUpload = function(req, input) {
     var temp = dir + "/incoming-" + WikiStudio.id(), out = new java.io.FileOutputStream(temp), size = 0, n, buf = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 8192)
     try {
       while ((n = input.read(buf)) !== -1) {
-        size += n; WikiStudio.assert(size <= 20971520 && total + size <= 67108864, 413, "upload_limit", "Upload byte limit exceeded")
+        size += n; WikiStudio.assert(size <= (/\.zip$/i.test(relative)?20971520:8388608) && total + size <= 67108864, 413, "upload_limit", "Upload byte limit exceeded")
         out.write(buf, 0, n)
       }
       out.getFD().sync(); out.close(); out = null

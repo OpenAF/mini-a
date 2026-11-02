@@ -127,6 +127,7 @@ jobs:
     (function() {
       'use strict';
       var data = JSON.parse(document.getElementById('graph-data').textContent);
+      if (data.embed && parent !== window) parent.postMessage({type:'mini-a-wiki-graph-ready',version:1}, '*');
       var $ = function(id) { return document.getElementById(id); };
       var canvas = $('sky'), ctx = canvas.getContext('2d'), nodes = data.nodes, edges = data.edges;
       var palette = ['#83dedb','#af9aff','#f4bf78','#ff8ca7','#83b8ff','#a9db87','#df9cdd','#e1d78d'];

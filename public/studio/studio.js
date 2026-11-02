@@ -2,7 +2,12 @@
 "use strict";
 const StudioApi = {
   token: "",
-  async request(path, method = "GET", body) {
+  tail: Promise.resolve(),
+  request(path, method = "GET", body) {
+    const result = this.tail.then(() => this.send(path, method, body));
+    this.tail = result.catch(() => {}); return result;
+  },
+  async send(path, method = "GET", body) {
     const response = await fetch("/api/v1/" + path, { method, headers: { Authorization: "Bearer " + this.token, "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() }, body: body === undefined ? undefined : JSON.stringify(body) });
     const result = await response.json();
     if (!response.ok) { const error = new Error(result.error?.message || "Request failed"); error.details = result.error?.details; error.status = response.status; throw error; }
@@ -176,11 +181,15 @@ async function graphView(content) {
     graphBlob = URL.createObjectURL(new Blob([await response.text()], { type: "text/html" }));
     let frame = content.querySelector("iframe"); if (!frame) frame = el("iframe", undefined, content);
     frame.title = "Wiki graph; accessible filters and node list inside"; frame.setAttribute("sandbox", "allow-scripts allow-downloads"); frame.src = graphBlob;
+    const notice = el("p", "Waiting for the isolated renderer…", content); notice.id = "graph-ready-status";
+    button(content, "Download offline HTML", () => { const a = el("a", undefined, content); a.href = graphBlob; a.download = currentWiki.id + "-graph.html"; a.click(); a.remove(); });
+    setTimeout(() => { if (notice.isConnected && !frame.dataset.ready) notice.textContent = "This browser did not report renderer readiness. It may block sandboxed Blob frames. Download the self-contained HTML or use the Pages list."; }, 8000);
   });
   el("p", "Graph opens with no network or parent DOM access. Pages remains an accessible list alternative.", content);
 }
 window.addEventListener("message", safely(async event => {
   const frame = document.querySelector("#view iframe"), d = event.data;
+  if (frame && event.source === frame.contentWindow && event.origin === "null" && d?.type === "mini-a-wiki-graph-ready" && d.version === 1) { frame.dataset.ready = "true"; const status = document.getElementById("graph-ready-status"); if (status) status.textContent = "Isolated renderer ready"; return; }
   if (!frame || event.source !== frame.contentWindow || event.origin !== "null" || !d || d.type !== "mini-a-wiki-graph-node" || d.version !== 1 || typeof d.path !== "string" || d.nodeId !== "doc:" + d.path || d.path.length > 512 || /[\\%:\x00-\x1f?#]/.test(d.path) || !/\.md$/i.test(d.path) || d.path.split("/").some(p => !p || p === "." || p === ".." || p.startsWith(".") || /^AGENTS\.md$/i.test(p))) return;
   if (!(await mayLeave())) return; dirty = false; const view = document.getElementById("view"); view.replaceChildren(); await pagesView(view); await loadPage(d.path);
 }));
@@ -218,13 +227,17 @@ async function jobDetail(id) {
   async function refresh() {
     if (!summary.isConnected || currentWiki.id !== key) return;
     const job = await StudioApi.request("jobs/" + id); summary.textContent = JSON.stringify(job, null, 2);
+    let received;
+    do {
+    received = 0;
     const response = await fetch("/api/v1/jobs/" + id + "/events", { headers: { Authorization: "Bearer " + StudioApi.token, "Last-Event-ID": String(cursor) } });
     if (!response.ok) throw new Error("Cannot read job events");
     for (const frame of (await response.text()).split("\n\n")) {
       const line = frame.split("\n").find(l => l.startsWith("data: ")); if (!line) continue;
-      const event = JSON.parse(line.slice(6)); if (event.seq <= cursor) continue; cursor = event.seq;
+      const event = JSON.parse(line.slice(6)); if (event.seq <= cursor) continue; cursor = event.seq; received++;
       events.textContent = (events.textContent + event.time + " [" + event.phase + "] " + event.message + "\n").slice(-100000);
     }
+    } while (received === 200 && summary.isConnected);
     if (["completed", "failed", "partial", "recovery-required", "interrupted", "cancelled"].includes(job.status)) {
       const changes = await StudioApi.wiki("changes?jobId=" + id); const details = el("details", undefined, view); el("summary", "Actual before/after Markdown changes", details); el("pre", JSON.stringify(changes, null, 2), details);
       if (["recovery-required", "interrupted"].includes(job.status)) el("p", "No automatic retry was performed. Inspect engine journals and follow the recovery instructions in docs/WIKI-STUDIO.md before submitting another operation.", view);

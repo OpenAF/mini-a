@@ -1,6 +1,12 @@
 // Only trusted source registrations and registered wiki roots reach engine args.
 WikiStudioServer.prototype.sourceOperation = function(w, route, body) {
   if (route === "ingestions") {
+    if(body.action) {
+      WikiStudio.fields(body,["action","recoveryId"])
+      WikiStudio.assert(["recovery","resume","discard"].indexOf(body.action)>=0,400,"invalid_action","Invalid recovery action")
+      if(body.action!=="recovery")WikiStudio.assert(isString(body.recoveryId)&&/^[a-zA-Z0-9_-]{1,160}$/.test(body.recoveryId),400,"invalid_recovery","Select a recovery ID")
+      return {operation:"ingest."+body.action,params:body.action==="recovery"?{}:{id:body.recoveryId}}
+    }
     WikiStudio.fields(body,["sourceId","revision","preview","options","confirmation"])
     var source=WikiStudio.json(this.sourcePath(w,body.sourceId)); WikiStudio.assert(source,404,"source_not_found","Source not found")
     WikiStudio.assert(body.revision===source.revision,409,"stale_source","Select the current immutable source revision")
@@ -52,7 +58,8 @@ WikiStudio.executeSource = function(config,w,job,logFn,backup) {
     WikiStudio.assert(WikiStudio.fingerprint(WikiStudio.scan(p.staging,true))===p.inventoryChecksum,409,"source_changed","Immutable staging revision changed; upload it again")
     WikiStudio.assert(Object.keys(WikiStudio.scan(p.staging,true)).length<=p.maxfiles,413,"source_limit","Source exceeds selected file-count limit")
     params={source:p.staging,sourceid:w.id+"--"+p.sourceId,mode:p.mode,layout:p.layout,section:p.section,dryrun:p.dryrun,include:p.include,exclude:p.exclude,prune:p.prune,maxfilekb:p.maxfilesize/1024}
-  } else if(op.indexOf("absorb.")===0) {
+  } else if(/^ingest\.(recovery|resume|discard)$/.test(op))params=p.id?{id:p.id}:{}
+  else if(op.indexOf("absorb.")===0) {
     params=p.spec?{spec:p.spec}:p.id?{id:p.id}:{}
     if(p.spec) p.spec.sources.forEach(function(source){WikiStudio.noLinks(source.root);WikiStudio.scan(source.root,true)})
   } else if(op==="wiki.reindex") params={}

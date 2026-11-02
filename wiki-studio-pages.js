@@ -48,6 +48,7 @@ WikiStudioServer.prototype.wikiRoute = function(req, w, parts, role) {
     if (route === "graph/html" && read && self.graphHtml) return self.graphHtml(w)
     if (["page", "pages", "pages/move"].indexOf(route) >= 0 && !read) {
       WikiStudio.authorize(role, "editor", w)
+      WikiStudio.assert(WikiStudio.pending(w.root).length===0,423,"recovery_pending","Pending ingestion/absorption journal; recover before manual page edits")
       WikiStudio.fields(body, route === "pages/move" ? ["source", "destination", "expectedRevision"] : ["path", "content", "expectedRevision", "confirmation"])
       var path = route === "pages/move" ? body.source : q.path || body.path
       WikiStudio.pagePath(path)
@@ -58,6 +59,7 @@ WikiStudioServer.prototype.wikiRoute = function(req, w, parts, role) {
       if (req.method === "PUT" || creating) self.validateMarkdown(body.content)
       WikiStudio.assert(["PUT", "POST", "DELETE"].indexOf(req.method) >= 0, 405, "method_not_allowed", "Method not allowed")
       WikiStudio.scan(w.root, true)
+      if((route==="pages/move"||req.method==="DELETE")&&isFunction(WikiStudio.snapshot)) WikiStudio.snapshot(self.config,w,"manual-page-"+WikiStudio.id())
       // Opening a rw manager can bootstrap missing core pages. Verify once more
       // immediately before the supported manager operation.
       var result = self.manager(w, true, function(wm) {
@@ -86,7 +88,7 @@ WikiStudioServer.prototype.wikiRoute = function(req, w, parts, role) {
       WikiStudio.assert(res && res.ok !== false, 422, "engine_error", "Wiki operation failed", res)
       if (route === "overview") {
         var inventory = WikiStudio.scan(w.root,false)
-        return {context:res,studio:{pageCount:Object.keys(inventory).length,fingerprint:WikiStudio.fingerprint(WikiStudio.scan(w.root,true)),searchIndexPublished:io.fileExists(w.root+"/.mini-a-wiki-serving/current.json"),indexFreshness:"Inspect engine context/search warnings; presence alone does not prove currency",externalProcessesControlled:false}}
+        return {context:res,studio:{pageCount:Object.keys(inventory).length,fingerprint:WikiStudio.fingerprint(WikiStudio.scan(w.root,true)),pendingRecovery:WikiStudio.pending(w.root),searchIndexPublished:io.fileExists(w.root+"/.mini-a-wiki-serving/current.json"),indexFreshness:"Inspect engine context/search warnings; presence alone does not prove currency",externalProcessesControlled:false}}
       }
       if (route === "graph/stats") return { stats: res, source: io.fileExists(w.root + "/.mini-a-wiki-graph/graph.json") ? "knowledge-graph-snapshot" : "markdown-links-fallback", freshness: "Snapshot freshness is not inferred from its presence; rebuild after external changes", semantic: "Not inferred; semantic extraction is opt-in" }
       return res
