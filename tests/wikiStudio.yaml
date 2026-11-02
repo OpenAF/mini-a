@@ -15,8 +15,13 @@ jobs:
 - name: Studio atomic persistence
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testAtomicAndLocks
+- name: Studio pages
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testPages
 todo:
+- Studio pages
 - Studio registry
 - Studio authorization
 - Studio paths
 - Studio atomic persistence
+

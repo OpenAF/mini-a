@@ -4296,6 +4296,18 @@ MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {
   }
 
   // Full-page write (existing behavior)
+  // Raw editors explicitly opt in to byte/newline/frontmatter preservation. Keep
+  // normal index, cache and provenance behavior without serializing YAML again.
+  if (opts.preserveRaw === true && isString(metaOrRaw) && isUnDef(body)) {
+    try {
+      var rawParsed = this.parseFrontmatter(metaOrRaw)
+      this._backend.write(path, metaOrRaw)
+      this._invalidateReadCache()
+      this._updatePageIndexes(path, metaOrRaw, rawParsed)
+      this._logWrite(path, rawParsed.meta)
+      return { ok: true, path: path }
+    } catch(rawError) { return { ok: false, error: __miniAErrMsg(rawError) } }
+  }
   var meta, bodyText, parsedRaw
   if (isUnDef(body) && isString(metaOrRaw)) {
     parsedRaw = this.parseFrontmatter(metaOrRaw)
