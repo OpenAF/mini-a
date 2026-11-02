@@ -2254,6 +2254,7 @@ These grouped tables complete the parameter entries above. `unset` means no expl
 | `memorymd` | boolean | `false` | Store global memory as path-keyed markdown strings in memorych (one .md record per entry) |
 | `memorypersistevery` | number | `1` | Persist the memory store every Nth mutation instead of every single append/upsert (1 = unchanged synchronous behavior) |
 | `memoryreflect` | boolean | `true` | After a successful run, make one extra LLM call to extract durable memories (default true when usememory=true) |
+| `memoryreflectmode` | string | `background` | Schedule eligible reflection in the background; `sync` waits for reflection before returning |
 | `memoryreflectmin` | number | `2` | Minimum total tool/shell calls a run must have made to qualify for reflection |
 | `memoryreflectmodel` | string | unset | Model config for the reflection pass (falls back to OAF_REFLECT_MODEL, then the low-cost model, then the main model) |
 | `memoryrelevantcap` | number | `8` | Maximum durable memory entries auto-injected when memoryinject=relevant |

@@ -1584,7 +1584,6 @@ ojob:
   #logToConsole: false   # to change when finished
   loadLibs    :
   - mini-a.js
-  - mini-a-eval.js
 
 jobs:
 # -------------------------
@@ -2242,6 +2241,7 @@ jobs:
       dreamreport    : isString.default(__)
   exec : | #js
     if (args.eval === true) {
+      loadLib("mini-a-eval.js")
       if (!isString(args.evalfile) || args.evalfile.trim().length === 0) throw "evalfile is required when eval=true"
       var _eval = new MiniAEval({ fileallow: args.fileallow })
       var _evalFiles = new MiniAFileAccess(args.fileallow)

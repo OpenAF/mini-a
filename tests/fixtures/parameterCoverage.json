@@ -40,6 +40,11 @@
       "ingestsection",
       "ingestsource",
       "ingesttype"
+    ],
+    "Console wiki lifecycle shortcuts dispatch to standalone utility jobs": [
+      "wikihydrate",
+      "wikidream",
+      "wikiquery"
     ]
   },
   "webHelpExclusions": {
@@ -118,6 +123,11 @@
       "wikiman",
       "wikitarget",
       "workermode"
+    ],
+    "Console wiki lifecycle shortcuts dispatch to standalone utility jobs": [
+      "wikihydrate",
+      "wikidream",
+      "wikiquery"
     ]
   },
   "consoleHelpExclusions": {

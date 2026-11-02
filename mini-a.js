@@ -7,12 +7,20 @@
 var __miniABundleRoot = String(new java.io.File(String(__loadedfrom)).getCanonicalFile().getParent())
 
 ow.loadMetrics()
-loadLib("mini-a-common.js")
-loadLib("mini-a-router.js")
-loadLib("mini-a-memory.js")
-loadLib("mini-a-wiki.js")
-loadLib("mini-a-wiki-knowledge.js")
-loadLib("mini-a-history-vm.js")
+loadLib(__miniABundleRoot + "/mini-a-common.js")
+loadLib(__miniABundleRoot + "/mini-a-launcher.js")
+loadLib(__miniABundleRoot + "/mini-a-router.js")
+loadLib(__miniABundleRoot + "/mini-a-wiki.js")
+
+// Serialize optional library evaluation across agents sharing this bundle scope.
+var __miniAOptionalLibraryLock = new java.util.concurrent.locks.ReentrantLock()
+function __miniAEnsureOptionalLibrary(kind) {
+  __miniAOptionalLibraryLock.lock()
+  try {
+    if (kind === "memory" && typeof MiniAMemoryManager !== "function") loadLib(__miniABundleRoot + "/mini-a-memory.js")
+    if (kind === "history" && typeof MiniAHistoryVM !== "function") loadLib(__miniABundleRoot + "/mini-a-history-vm.js")
+  } finally { __miniAOptionalLibraryLock.unlock() }
+}
 
 // Shared thinking-tag list and normalizer used across streaming filter,
 // block extraction, and tag stripping.
@@ -751,14 +759,16 @@ MiniA._terminalSubtaskStates = {
   timeout  : true
 }
 
-load("mini-a-response.js")
-load("mini-a-sandbox.js")
-load("mini-a-tool-selection.js")
-load("mini-a-orchestration.js")
-load("mini-a-capabilities.js")
-load("mini-a-decision.js")
-load("mini-a-fork-policy.js")
-load("mini-a-policy.js")
+// Reattach mixins when callers explicitly reload the core constructor.
+// forceReload still uses OpenAF's compiled script cache.
+loadLib(__miniABundleRoot + "/mini-a-response.js", true)
+loadLib(__miniABundleRoot + "/mini-a-sandbox.js", true)
+loadLib(__miniABundleRoot + "/mini-a-tool-selection.js", true)
+loadLib(__miniABundleRoot + "/mini-a-orchestration.js", true)
+loadLib(__miniABundleRoot + "/mini-a-capabilities.js", true)
+loadLib(__miniABundleRoot + "/mini-a-decision.js", true)
+loadLib(__miniABundleRoot + "/mini-a-fork-policy.js", true)
+loadLib(__miniABundleRoot + "/mini-a-policy.js", true)
 
 MiniA.prototype._stopAgentResources = function() {
   // This is invoked both by the console finalizer and by the OpenAF shutdown
@@ -3208,6 +3218,7 @@ MiniA.prototype._initHistoryVm = function(args, existingPayload) {
   var conversationPath = isString(args.conversation) ? args.conversation.trim() : ""
   var initKey = conversationPath + "|" + enabled + "|" + shadow + "|" + contextVirtualization + "|" + contextVirtualizationShadow
   if (isObject(this._historyVm) && this._historyVmInitKey === initKey) return this._historyVm
+  __miniAEnsureOptionalLibrary("history")
   this._historyVm = new MiniAHistoryVM({
     enabled: enabled,
     shadow: shadow,
@@ -9133,6 +9144,7 @@ MiniA.prototype._initWorkingMemoryUnlocked = function(args, seedState) {
     if (!isObject(this._sessionMemoryManagers[sessionId])) {
       var sessionMemoryCfg = merge({}, cfg)
       sessionMemoryCfg.onEvent = this._createMemoryEventHandler("session")
+      __miniAEnsureOptionalLibrary("memory")
       this._sessionMemoryManagers[sessionId] = new MiniAMemoryManager(sessionMemoryCfg, function(level, msg) {
         if (cfg.debug) this.fnI(level || "info", "[memory][session] " + msg)
       }.bind(this))
@@ -9167,6 +9179,7 @@ MiniA.prototype._initWorkingMemoryUnlocked = function(args, seedState) {
     if (!isObject(this._globalMemoryManager)) {
       var globalMemoryCfg = merge({}, cfg)
       globalMemoryCfg.onEvent = this._createMemoryEventHandler("global")
+      __miniAEnsureOptionalLibrary("memory")
       this._globalMemoryManager = new MiniAMemoryManager(globalMemoryCfg, function(level, msg) {
         if (cfg.debug) this.fnI(level || "info", "[memory][global] " + msg)
       }.bind(this))
@@ -9210,6 +9223,7 @@ MiniA.prototype._gcSessionNamespaces = function(args) {
   if (MiniA._sessionGcDoneFor[ch] === true) return
   MiniA._sessionGcDoneFor[ch] = true
   try {
+    __miniAEnsureOptionalLibrary("memory")
     var namespaces = MiniAMemoryManager.listChannelNamespaces(ch)
     var thresholdMs = days * 86400000
     var removed = 0
@@ -10987,6 +11001,7 @@ MiniA.prototype._validateReflectionEntries = function(raw, allowedSupersedeKeys,
   var accepted = []
   var rejected = 0
   if (!isArray(raw)) return { accepted: accepted, rejected: 0 }
+  __miniAEnsureOptionalLibrary("memory")
   var dupChecker = new MiniAMemoryManager({})
   var allowed = isArray(allowedSupersedeKeys) ? allowedSupersedeKeys : []
   var seenKeys = {}
@@ -17787,85 +17802,10 @@ MiniA.prototype._applyExplicitExternalArgs = function(args, explicitExternalArgs
   })
 }
 
-MiniA._KNOWN_ARGUMENT_NAMES = (function() {
-  var known = {}
-  ;[
-    "absorbmaxpages", "absorbmaxtokens", "absorboutput", "changetrackroot", "dream", "dreamwikimaxaffected", "dreamwikiorganize",
-    "dryrun", "editor", "eval", "evalbaseline", "evalfile", "evalout", "evalwritebaseline",
-    "ingestallowemptyprune", "ingestchunkchars", "ingestconcurrency", "ingestdryrun", "ingestexclude", "ingestforce", "ingestinclude",
-    "ingestindependent", "ingestlayout", "ingestledger", "ingestmaxfilekb", "ingestmode", "ingestprune", "ingestsection",
-    "ingestsource", "ingestsourceid", "ingesttype", "lccontextlimit", "maxauditrecords", "maxtotalsteps", "runmaxtokens", "runmaxtimems", "mcpproxyallow",
-    "mcpproxydeny", "mcpproxynative", "nologtrunc", "skillcontextchars", "skillmanifestchars", "skillmaxautoload", "specfile",
-    "taskfile", "trackchanges", "useeditor", "warnunknownargs", "wikidreambudget", "wikigraphautosave", "wikigraphsavedebouncems",
-    "wikiingestbudget", "wikiingestmaxcalls", "wikillmbudget", "wikimaxprompttokens", "wikimetacache", "wikitelemetry",
-    "rpm", "tpm", "rtm", "maxsteps", "knowledge", "fileallow", "chatyouare", "youare", "homedir",
-    "promptprofile", "systempromptbudget", "outfile", "outfileall", "libs", "model", "modellc", "modelval", "modeldec", "modelvisual",
-    "conversation", "historyvm", "historyvmmode", "historyvmshadow", "contextvirtualization", "contextvirtualizationshadow", "shell", "usesandbox", "sandboxprofile", "sandboxnonetwork", "shellallow", "shellbanextra",
-    "shellguard", "shellguardask", "shellguarddeny", "shellguardtimeout", "shelltimeout", "shellmaxbytes", "toolcachettl", "sessionprewarm", "mcplazy", "mcpdynamic", "mcpproxy", "mcpproxythreshold", "toolargcheck", "toolargrepair",
-    "mcpproxytoon", "contextguard", "contextguardbudget", "toolresultmaxinline", "readresultmaxmatches",
-    "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugdecch", "debugvalch", "debugvisualch", "capabilityselection", "capabilitylimit", "policy", "policyfile", "planfile",
-    "planformat", "plancontent", "planstyle", "forceplanning", "saveplannotes", "outputfile", "updatefreq",
-    "updateinterval", "forceupdates", "planlog", "nosetmcpwd", "noagentsmd", "utilsroot", "utilsallow", "utilsdeny",
-    "useskills", "usestdutils", "useasciiviz", "mini-a-docs", "miniadocs",
-    "usejsonschema", "usejsontool", "usedelegation", "workers", "workerreg", "workerregtoken", "workerevictionttl", "maxconcurrent",
-    "delegationmaxdepth", "delegationtimeout", "delegationstalltimeout", "delegationhardtimeout", "delegationmaxretries",
-    "autodelegation", "autodelegationthreshold", "autodelegationmaxperstep", "noisytools",
-    "subtasks", "subtasksfile", "subtaskssequential", "forkstatemaxbytes", "forkpolicy", "forkdecide",
-    "mcpprogcall", "mcpprogcallport",
-    "mcpprogcallmaxbytes", "mcpprogcallresultttl", "mcpprogcalltools", "mcpprogcallbatchmax", "agent", "agentfile",
-    "verbose", "readwrite", "debug", "debugfile", "debugtrace", "raw", "showthinking", "useshell", "checkall", "shellallowpipes",
-    "shellbatch", "usetools", "usetoolslc", "toolfallback", "useutils", "usediagrams", "usemermaid", "usecharts", "useascii", "usemaps",
-    "usemath", "usesvg", "usevectors", "browsercontext", "chatbotmode", "useplanning", "planmode", "validateplan",
-    "convertplan", "resumefailed", "showexecs", "usestream", "format", "maxcontext", "compressgoal", "compressgoaltokens", "compressgoalchars", "maxpromptchars", "rules",
-    "state", "maxcontent", "earlystopthreshold", "orchestration", "orchestrationcontext", "adaptiverouting", "routerorder",
-    "routerallow", "routerdeny", "routerproxythreshold", "usememory", "memoryscope", "memorysessionid", "memorych",
-    "memorysessionch", "memoryuser", "memoryusersession", "memorymaxpersection", "memorymaxentries", "memorycompactevery", "memorydedup",
-    "memorypromote", "memorystaledays", "memoryartifactttldays", "memoryindexttldays", "memoryinject",
-    "usememorywrite", "memorywritemax", "memorymd", "memoryrelevantcap",
-    "memoryreflect", "memoryreflectmode", "acceptancereview", "acceptanceoptimization", "proxyargrepair", "memoryreflectmodel", "memoryreflectmin", "memorycandidatedays", "memorysessionmaxdays",
-    "memorybudget", "memorysearchbudget", "memorypersistevery",
-    "memorysessionheader", "goal", "mcp", "validationgoal", "valgoal", "deepresearch", "maxcycles",
-    "validationthreshold", "persistlearnings", "valtools", "outerloop", "outerloopinstructions", "outerloopsessionid", "outerloopmaxcycles", "outerloopmaxtime", "outerloopstoponrepeat", "outerloopmaxnochange",
-    "durable", "runid", "resumerun", "runstatus", "runroot", "showseparator", "goalprefix", "shellprefix", "resume", "mode",
-    "onport", "web", "webadvanced", "webadvancedpath", "modelman", "mcptest", "memoryman", "wikiman", "wikitarget", "workermode", "path", "usehistory", "useattach", "historypath",
-    "historykeep", "historykeepperiod", "historykeepcount", "historyretention", "ssequeuetimeout",
-    "logpromptheaders", "historys3bucket", "historys3prefix", "historys3url", "historys3accesskey",
-    "historys3secret", "historys3region", "historys3useversion1", "historys3ignorecertcheck", "extracommands",
-    "extraskills", "extrahooks", "plugins", "pluginsroot", "pluginsroots", "workerregurl", "workerskills", "workertags", "workerreginterval", "secpass",
-    "contractfile", "contractargs", "savecontract", "reusecontract",
-    "agentcomms", "showdelegate", "usea2a", "modellock", "modelstrategy", "advisormaxuses", "advisorenable",
-    "advisoronrisk", "advisoronambiguity", "advisoronharddecision", "advisorcooldownsteps",
-    "advisorbudgetratio", "emergencyreserve", "harddecision", "evidencegate", "evidencegatestrictness",
-    "lcescalatedefer", "lcbudget", "lcjsonretries", "lcreplytool", "llmcomplexity", "usedecide",
-    "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix", "wikiindexdir", "wikis3artifactprefix", "s3artifactbundle", "wikihttpindexurl", "wikihttptimeout", "wikiartifactrefreshsecs",
-    "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
-    "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "wikiretrievalv2", "wikiretrievalconfig", "wikisourceurl", "wikisourcefield", "wikisourceinline", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphmounts", "wikimountgraphttlms", "wikigraphcross", "wikigraphcrossjoin", "wikigraphcrosscap", "wikigraphcrossdepth", "wikigraphcrossmaxdf", "wikigraphcrossminkeylen", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
-    "dreamwikimode", "dreamwikillm", "dreammaxsteps", "dreammemorymode", "dreamwikidryrun", "dreamwikiapproval", "dreamwikireorg", "dreamwikiinstructions",
-    "dreamwikiminpages", "dreamwikimaxdepth", "dreamwikilintresultlimit", "dreamwikisurgical", "wikilintresultlimit", "dreamreport",
-    "useskillswiki", "skillwikibackend", "skillwikiroot", "skillwikimounts", "skillsautosearch", "skillsautolimit", "skillsmaxloaded", "skillsmaxchars"
-  ].forEach(function(name) {
-    if (!isDef(name)) return
-    var normalized = String(name).trim().toLowerCase()
-    if (normalized.length > 0) known[normalized] = true
-  })
-  return known
-})()
+MiniA._KNOWN_ARGUMENT_NAMES = MiniALauncher._KNOWN_ARGUMENT_NAMES
 
 
-MiniA._IGNORED_INTERNAL_ARGUMENT_NAMES = (function() {
-  var ignored = {}
-  ;[
-    "exec", "mini-a", "__id", "init", "objid", "execid", "agent",
-    "__format", "__interaction_source", "__explicitargkeys", "__unknownargsreported",
-    "__modeapplied", "__modelstrategyrequested", "_agentbasedir", "_mcpdefaultdir", "_delegationdepth", "_workerhint", "_requiredskills",
-    "_autodelegate", "_mcphandofftools", "_mcphandoffproxy",
-    "knowledgeupdated"
-  ].forEach(function(name) {
-    var normalized = String(name || "").trim().toLowerCase()
-    if (normalized.length > 0) ignored[normalized] = true
-  })
-  return ignored
-})()
+MiniA._IGNORED_INTERNAL_ARGUMENT_NAMES = MiniALauncher._IGNORED_INTERNAL_ARGUMENT_NAMES
 
 // Noisy tool results are summarized by an isolated child. Keep the summary
 // evidence-bounded: a catalog proves that a tool is callable, not what records
@@ -17884,78 +17824,11 @@ MiniA._buildAutoDelegationSummaryGoal = function(goal, toolName, output) {
     "Tool: " + toolName + "\nOutput:\n" + raw
 }
 
-MiniA._normalizeArgName = function(name) {
-  var normalized = String(name || "").trim().toLowerCase()
-  if (normalized.length === 0) return ""
-  normalized = normalized.replace(/^-+/, "")
-  return normalized
-}
+MiniA._normalizeArgName = MiniALauncher._normalizeArgName
 
-MiniA._argLevenshteinDistance = function(a, b) {
-  var left = String(a || "")
-  var right = String(b || "")
-  var leftLen = left.length
-  var rightLen = right.length
-  if (leftLen === 0) return rightLen
-  if (rightLen === 0) return leftLen
+MiniA._argLevenshteinDistance = MiniALauncher._argLevenshteinDistance
 
-  var matrix = []
-  for (var i = 0; i <= leftLen; i++) {
-    matrix[i] = [i]
-  }
-  for (var j = 1; j <= rightLen; j++) {
-    matrix[0][j] = j
-  }
-  for (var row = 1; row <= leftLen; row++) {
-    for (var col = 1; col <= rightLen; col++) {
-      var cost = left.charAt(row - 1) === right.charAt(col - 1) ? 0 : 1
-      matrix[row][col] = Math.min(
-        matrix[row - 1][col] + 1,
-        matrix[row][col - 1] + 1,
-        matrix[row - 1][col - 1] + cost
-      )
-    }
-  }
-  return matrix[leftLen][rightLen]
-}
-
-MiniA.findClosestKnownArg = function(name, knownNames, maxDistance) {
-  var normalized = MiniA._normalizeArgName(name)
-  if (normalized.length === 0 || !isArray(knownNames) || knownNames.length === 0) return __
-
-  var threshold = isNumber(maxDistance) ? maxDistance : 3
-  var bestMatch = __
-  var bestDistance = Number.MAX_SAFE_INTEGER
-
-  if (isDef(ow.format) && isDef(ow.format.string) && isFunction(ow.format.string.closest)) {
-    try {
-      bestMatch = ow.format.string.closest(normalized, knownNames, threshold)
-    } catch(ignoreClosestErr) {}
-  }
-  if (isString(bestMatch) && bestMatch.length > 0) {
-    if (isDef(ow.format) && isDef(ow.format.string) && isFunction(ow.format.string.distance)) {
-      try {
-        bestDistance = ow.format.string.distance(normalized, bestMatch)
-      } catch(ignoreDistanceErr) {}
-    }
-    if (!isNumber(bestDistance) || !isFinite(bestDistance)) {
-      bestDistance = MiniA._argLevenshteinDistance(normalized, bestMatch)
-    }
-    return bestDistance <= threshold ? { match: bestMatch, distance: bestDistance } : __
-  }
-
-  knownNames.forEach(function(candidate) {
-    var normalizedCandidate = MiniA._normalizeArgName(candidate)
-    if (normalizedCandidate.length === 0) return
-    var distance = MiniA._argLevenshteinDistance(normalized, normalizedCandidate)
-    if (distance < bestDistance) {
-      bestDistance = distance
-      bestMatch = candidate
-    }
-  })
-  if (!isString(bestMatch) || bestDistance > threshold) return __
-  return { match: bestMatch, distance: bestDistance }
-}
+MiniA.findClosestKnownArg = MiniALauncher.findClosestKnownArg
 
 MiniA._toolArgValidationDetails = function(schema, providedParams) {
   if (!isMap(schema) || !isMap(schema.properties)) return { validParams: [], unrecognized: [], missing: [] }
@@ -18172,125 +18045,13 @@ MiniA.prototype._prepareToolArgs = function(schema, providedParams) {
     message: reject ? MiniA._toolArgValidationMessage(schema, params, "Invalid tool parameters.") : "" }
 }
 
-MiniA.applyLibEnvDefault = function(args) {
-  var target = isMap(args) ? args : {}
+MiniA.applyLibEnvDefault = MiniALauncher.applyLibEnvDefault
 
-  if (!(isString(target.libs) && target.libs.trim().length > 0)) {
-    var envLibs = target.OAF_MINI_A_LIBS || getEnv("OAF_MINI_A_LIBS")
-    if (isString(envLibs) && envLibs.trim().length > 0) {
-      target.libs = envLibs.trim()
-    }
-  }
+MiniA.applyLauncherEnvDefaults = MiniALauncher.applyLauncherEnvDefaults
 
-  return target
-}
+MiniA.shouldWarnUnknownArgs = MiniALauncher.shouldWarnUnknownArgs
 
-MiniA.applyLauncherEnvDefaults = function(args) {
-  var target = MiniA.applyLibEnvDefault(args)
-
-  if (!(isString(target.mode) && target.mode.trim().length > 0)) {
-    var envMode = target.OAF_MINI_A_MODE || getEnv("OAF_MINI_A_MODE")
-    if (isString(envMode) && envMode.trim().length > 0) {
-      target.mode = envMode.trim()
-    }
-  }
-
-  return target
-}
-
-MiniA.shouldWarnUnknownArgs = function(args) {
-  if (!isMap(args)) return false
-  if (args.warnunknownargs === false || toBoolean(args.warnunknownargs) === false) return false
-
-  var launchesNonConsoleFlow =
-    isDef(args.goal) ||
-    isDef(args.agent) ||
-    isDef(args.agentfile) ||
-    isDef(args.exec) ||
-    toBoolean(args.web) === true ||
-    toBoolean(args.onport) === true ||
-    toBoolean(args.wikiman) === true ||
-    toBoolean(args.modelman) === true ||
-    toBoolean(args.mcptest) === true ||
-    toBoolean(args.memoryman) === true ||
-    toBoolean(args.workermode) === true
-
-  return launchesNonConsoleFlow !== true
-}
-
-MiniA.warnUnknownArgs = function(args, options) {
-  if (!isMap(args) || args.__unknownargsreported === true) return []
-
-  var opts = isMap(options) ? options : {}
-  var known = merge({}, MiniA._KNOWN_ARGUMENT_NAMES, true)
-  var extraKnown = opts.extraKnownArgs
-  if (isArray(extraKnown)) {
-    extraKnown.forEach(function(name) {
-      var normalized = MiniA._normalizeArgName(name)
-      if (normalized.length > 0) known[normalized] = true
-    })
-  } else if (isMap(extraKnown)) {
-    Object.keys(extraKnown).forEach(function(name) {
-      var normalized = MiniA._normalizeArgName(name)
-      if (normalized.length > 0 && extraKnown[name] === true) known[normalized] = true
-    })
-  }
-
-  var ignored = merge({}, MiniA._IGNORED_INTERNAL_ARGUMENT_NAMES, true)
-  var extraIgnored = opts.extraIgnoredArgs
-  if (isArray(extraIgnored)) {
-    extraIgnored.forEach(function(name) {
-      var normalized = MiniA._normalizeArgName(name)
-      if (normalized.length > 0) ignored[normalized] = true
-    })
-  } else if (isMap(extraIgnored)) {
-    Object.keys(extraIgnored).forEach(function(name) {
-      var normalized = MiniA._normalizeArgName(name)
-      if (normalized.length > 0 && extraIgnored[name] === true) ignored[normalized] = true
-    })
-  }
-
-  var rawExplicitKeys = args.__explicitargkeys
-  var explicitKeys = []
-  if (isArray(rawExplicitKeys)) {
-    explicitKeys = rawExplicitKeys.slice(0)
-  } else if (isMap(rawExplicitKeys)) {
-    explicitKeys = Object.keys(rawExplicitKeys).filter(function(key) {
-      return rawExplicitKeys[key] === true
-    })
-  } else {
-    explicitKeys = Object.keys(args)
-  }
-
-  var unknown = []
-  var seen = {}
-  explicitKeys.forEach(function(key) {
-    var rawKey = String(key || "").trim()
-    var normalized = MiniA._normalizeArgName(rawKey)
-    if (normalized.length === 0) return
-    if (ignored[normalized] === true) return
-    if (normalized.indexOf("__") === 0 || normalized.indexOf("_") === 0) return
-    if (known[normalized] === true) return
-    if (seen[normalized] === true) return
-    seen[normalized] = true
-    unknown.push(rawKey)
-  })
-
-  args.__unknownargsreported = true
-  if (unknown.length <= 0) return []
-
-  var logger = isFunction(opts.logger) ? opts.logger : function(message) { logWarn(message) }
-  var knownNames = Object.keys(known)
-  unknown.forEach(function(rawKey) {
-    var suggestion = MiniA.findClosestKnownArg(rawKey, knownNames, 3)
-    var msg = "Unknown parameter '" + rawKey + "' provided."
-    if (isMap(suggestion) && isString(suggestion.match) && suggestion.match.length > 0) {
-      msg += " Did you mean '" + suggestion.match + "'?"
-    }
-    logger(msg)
-  })
-  return unknown
-}
+MiniA.warnUnknownArgs = MiniALauncher.warnUnknownArgs
 
 MiniA.prototype._warnUnknownArgs = function(args, options) {
   var opts = isMap(options) ? merge({}, options, true) : {}
@@ -25641,8 +25402,8 @@ MiniA.prototype._initComms = function(args) {
   } catch(e) { broker.close(); throw e }
 }
 
-loadLib("mini-a-skill-runtime.js")
+loadLib(__miniABundleRoot + "/mini-a-skill-runtime.js")
 __miniAInstallSkillRuntime()
 
-loadLib("mini-a-supervised.js")
+loadLib(__miniABundleRoot + "/mini-a-supervised.js")
 __miniAInstallSupervised()

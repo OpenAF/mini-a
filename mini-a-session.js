@@ -127,8 +127,13 @@ function MiniAInteractiveSession(args, adapter) {
   var cls = adapter ? function() { adapter.view("clear") } : host.cls
   if (!adapter) plugin("Console")
   var miniABasePath = __miniASessionBundleRoot
-  if (typeof MiniA === "undefined") {
-    load(miniABasePath + "/mini-a.js")
+  loadLib(miniABasePath + "/mini-a-common.js")
+  loadLib(miniABasePath + "/mini-a-launcher.js")
+  var agentLoadThread, agentLoadError
+  function ensureAgentLoaded() {
+    if (isDef(agentLoadThread)) { agentLoadThread.join(); agentLoadThread = __ }
+    if (isDef(agentLoadError)) { var error = agentLoadError; agentLoadError = __; throw error }
+    MiniALauncher.loadAgent(miniABasePath)
   }
   var fileAccess = new MiniAFileAccess(args.fileallow)
   var explicitCLIArgKeys = {}
@@ -216,7 +221,7 @@ function MiniAInteractiveSession(args, adapter) {
   }
 
   // Init
-  MiniA.applyLauncherEnvDefaults(args)
+  MiniALauncher.applyLauncherEnvDefaults(args)
 
   // Apply homedir override before any path resolution
   ;(function() {
@@ -309,8 +314,8 @@ function MiniAInteractiveSession(args, adapter) {
       args.__modeApplied = true
     })(args, explicitCLIArgKeys)
 
-    if (MiniA.shouldWarnUnknownArgs(args)) {
-      MiniA.warnUnknownArgs(args, {
+    if (MiniALauncher.shouldWarnUnknownArgs(args)) {
+      MiniALauncher.warnUnknownArgs(args, {
         extraIgnoredArgs: {
           "mini-a": true,
           exec: true,
@@ -335,6 +340,7 @@ function MiniAInteractiveSession(args, adapter) {
       if (isDef(args.onport) || hasRunnableExecArg || isDef(args.goal) || isDef(args.agent) || isDef(args.agentfile)) wikiManConflicts.push("onport/exec/goal/agent")
       if (wikiManConflicts.length) { logErr("wikiman=true conflicts with " + wikiManConflicts.join(", ")); exit(1, true) }
       global._args = args
+      ensureAgentLoaded()
       load(miniABasePath + "/mini-a-wikiman.js")
       exit(0, true)
     }
@@ -415,8 +421,6 @@ function MiniAInteractiveSession(args, adapter) {
   }
 
   if (!adapter) { __initializeCon(); __conAnsi = host.getAnsi() }
-  loadLib("mini-a-common.js")
-  loadLib(miniABasePath + "/mini-a.js")
 
   ow.loadFormat()
   var con          = adapter ? { readLinePrompt: function(label) { return adapter.ask("text", label) } } : new Console()
@@ -581,7 +585,8 @@ function MiniAInteractiveSession(args, adapter) {
   }
 
   function deleteConversationSessionMemory(conversationPath) {
-    if (typeof MiniAMemoryManager === "undefined" || !isFunction(MiniAMemoryManager.deleteChannelNamespace)) return 0
+    ensureAgentLoaded()
+    __miniAEnsureOptionalLibrary("memory")
     var namespace = resolveConversationMemorySessionNamespace(conversationPath)
     if (!isString(namespace) || namespace.length === 0) return 0
 
@@ -1680,6 +1685,7 @@ function MiniAInteractiveSession(args, adapter) {
 
   var webWikiManager, webSkillWikiManager
   function getConsoleWikiManager() {
+    ensureAgentLoaded()
     if (adapter && webWikiManager) return webWikiManager
     var wm = isObject(activeAgent) && isObject(activeAgent._wikiManager) ? activeAgent._wikiManager : __
     if (isObject(wm)) return wm
@@ -1699,6 +1705,7 @@ function MiniAInteractiveSession(args, adapter) {
   }
 
   function getConsoleSkillWikiManager() {
+    ensureAgentLoaded()
     if (adapter && webSkillWikiManager) return webSkillWikiManager
     var swm = isObject(activeAgent) && isObject(activeAgent._skillWikiManager) ? activeAgent._skillWikiManager : __
     if (isObject(swm)) return swm
@@ -4261,7 +4268,7 @@ function MiniAInteractiveSession(args, adapter) {
 
   function buildUnknownParameterMessage(name) {
     var msg = "Unknown parameter: " + name
-    var suggestion = MiniA.findClosestKnownArg(name, Object.keys(parameterDefinitions), 3)
+    var suggestion = MiniALauncher.findClosestKnownArg(name, Object.keys(parameterDefinitions), 3)
     if (isMap(suggestion) && isString(suggestion.match) && suggestion.match.length > 0) {
       msg += ". Did you mean '" + suggestion.match + "'?"
     }
@@ -5440,12 +5447,31 @@ function MiniAInteractiveSession(args, adapter) {
 
   function prepareNextGoal() {
     if (adapter || isObject(preparedAgent) || toBoolean(sessionOptions.sessionprewarm) === false) return
+    if (typeof MiniA === "undefined") {
+      if (isUnDef(agentLoadThread)) {
+        var preparationArgs = buildArgs("")
+        agentLoadThread = new java.lang.Thread(new JavaAdapter(java.lang.Runnable, {
+          run: function() {
+            try {
+              MiniALauncher.loadAgent(miniABasePath)
+              preparedAgent = new MiniA()
+              preparedAgent.prepareSession(preparationArgs)
+            } catch(e) { agentLoadError = e }
+          }
+        }))
+        agentLoadThread.setDaemon(true)
+        agentLoadThread.start()
+      }
+      return
+    }
+    ensureAgentLoaded()
     preparedAgent = new MiniA()
     preparedAgent.prepareSession(buildArgs(""))
   }
 
   function runGoal(goalText, skillUsage, displayPrompt) {
     var submittedAt = now()
+    ensureAgentLoaded()
     _consoleStreams = adapter ? __ : __miniAConsoleStreams()
     var goalStreams = _consoleStreams
     _consoleStreamHint = false
@@ -5812,6 +5838,7 @@ function MiniAInteractiveSession(args, adapter) {
     if (workerRegBootstrapped) return
     workerRegBootstrapped = true
     if (!isNumber(sessionOptions.workerreg)) return
+    ensureAgentLoaded()
 
     var initArgs = buildArgs("__delegation_bootstrap__")
     initArgs.usedelegation = true
@@ -5841,6 +5868,10 @@ function MiniAInteractiveSession(args, adapter) {
     function finishStep(name, fn) {
       if (isObject(activeAgent) && activeAgent._execution && isFunction(activeAgent._timeExecution)) return activeAgent._timeExecution(name, fn)
       return fn()
+    }
+    if (isDef(agentLoadThread)) {
+      agentLoadThread.join()
+      agentLoadThread = __
     }
     if (isObject(preparedAgent)) finishStep("prepared_agent_cleanup", function() { preparedAgent._stopAgentResources() })
     preparedAgent = __
@@ -7612,6 +7643,7 @@ function MiniAInteractiveSession(args, adapter) {
   }
 
   function dispatchInput(input) {
+    if (String(input).trim().charAt(0) === "/" && !/^\/(help|exit|quit)(\s|$)/.test(String(input).trim())) ensureAgentLoaded()
     do {
     var trimmed = String(input)
     if (trimmed.trim().length === 0) continue

@@ -36,7 +36,7 @@ const jobExcluded = flatten(inventory.jobHelpExclusions);
 const webExcluded = flatten(inventory.webHelpExclusions);
 const consoleExcluded = flatten(inventory.consoleHelpExclusions);
 const publicNames = new Set([...Object.keys(definitions), ...primaryNames, ...Object.values(helps).flatMap(names => [...names])]);
-const knownSource = section(core, 'MiniA._KNOWN_ARGUMENT_NAMES =', '\nMiniA._IGNORED_INTERNAL_ARGUMENT_NAMES =');
+const knownSource = section(read('mini-a-launcher.js').replaceAll('MiniALauncher.', 'MiniA.'), 'MiniA._KNOWN_ARGUMENT_NAMES =', '\nMiniA._IGNORED_INTERNAL_ARGUMENT_NAMES =');
 const knownNames = new Set([...knownSource.matchAll(/"([a-z][\w-]*)"/g)].map(m => m[1]));
 for (const name of publicNames) {
   if (!consoleExcluded.has(name)) assert.ok(definitions[name] || primaryNames.has(name), name + ' missing interactive help (or an applicability exclusion)');
