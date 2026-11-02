@@ -21,6 +21,7 @@ WikiStudioRegistry.capabilities = function(w) {
   var local = w.backend === "fs", rw = local && w.access === "rw", out = {}
   ;["Browse", "Search", "GraphHtml"].forEach(function(k) { out["can" + k] = local })
   ;["Edit", "Hydrate", "Dream", "GraphBuild", "Absorb", "Compact", "Restore"].forEach(function(k) { out["can" + k] = rw })
+  out.canGraphBuild=rw&&w.graph.enabled===true
   out.reasons = { readOnly: rw ? "" : "Requires a writable local filesystem wiki", remote: "Remote, archive and mounted backends are not connected by this Studio build; use the existing CLI/MCP readers." }
   return out
 }
@@ -32,6 +33,7 @@ WikiStudioRegistry.prototype.add = function(body) {
   WikiStudio.assert(["rw", "ro"].indexOf(body.access) >= 0 && isString(body.root) && body.root.charAt(0) === "/", 400, "invalid_root", "Choose an absolute allowlisted root and ro/rw access")
   WikiStudio.noLinks(body.root)
   var root = WikiStudio.canonical(body.root), self = this
+  WikiStudio.assert(!/(?:^|\/)\.[^/]+/.test(root)&&!/^\/(?:dev|proc|sys)(?:\/|$)/.test(root),403,"sensitive_root","Hidden and system directories cannot be registered as wiki roots")
   WikiStudio.assert(this.config.roots.some(function(r) { return root !== r && WikiStudio.inside(root, r) }), 403, "root_not_allowed", "Root must be beneath an operator-configured studioallowroots directory")
   WikiStudio.assert(!WikiStudio.inside(root, this.config.home) && !WikiStudio.inside(this.config.home, root), 403, "state_overlap", "Wiki and Studio home cannot overlap")
   return WikiStudio.lock(this.config.home, "registry", function() {

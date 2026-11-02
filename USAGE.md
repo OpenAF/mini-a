@@ -6,6 +6,12 @@ Mini-A (Mini Agent) is a goal-oriented autonomous agent that uses Large Language
 
 ## Prerequisites
 
+For the standalone [Wiki Studio](docs/WIKI-STUDIO.md), use
+`ojob mini-a-wiki-studio.yaml onport=8890 studiohome=/data/studio
+studioallowroots='["/data/wikis"]'`. No model is required for browsing, raw editing,
+structural graphs or maintenance plan; model-dependent operations are opt-in.
+The following model prerequisites apply to agent sessions.
+
 - **OpenAF**: Mini-A is built for the OpenAF platform
 - **OAF_MODEL Environment Variable**: Must be set to your desired LLM model configuration
 - **OAF_DECIDE_MODEL Environment Variable** (optional): Automatically enables decision-assisted selection in existing dynamic/capability selection modes and ambiguous complexity assessment. `useutils=true usedecide=true` also exposes the bounded `decide` consultation tool. Disable with `usedecide=false`; see [Decision integration and MCP](docs/DECISIONS.md).

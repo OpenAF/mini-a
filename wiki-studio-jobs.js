@@ -24,7 +24,18 @@ WikiStudioJobs.prototype.event = function(id, phase, message, severity) {
   var dir = self.dir(id), file = dir + "/events.ndjson", j = self.get(id)
   WikiStudio.noLinks(file)
   if (new java.io.File(file).length() > 1048576) return
-  var seq = Number(WikiStudio.json(dir + "/cursor.json", { seq: 0 }).seq) + 1
+  var previous=Number(WikiStudio.json(dir + "/cursor.json", { seq: 0 }).seq),fileSize=Number(new java.io.File(file).length())
+  if(fileSize) {
+    var raf=new java.io.RandomAccessFile(file,"rw"),start=Math.max(0,fileSize-16384),tail=java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE,fileSize-start)
+    try {
+      raf.seek(start);raf.readFully(tail);var end=tail.length-1;while(end>=0&&Number(tail[end])!==10)end--
+      if(end<tail.length-1){raf.setLength(start+end+1);raf.getFD().sync()}
+      var text=String(new java.lang.String(java.util.Arrays.copyOf(tail,end+1),"UTF-8"))
+      var lines=text.split("\n").filter(Boolean)
+      if(lines.length)try{previous=Math.max(previous,Number(JSON.parse(lines[lines.length-1]).seq)||0)}catch(ignoreTail){}
+    } finally{raf.close()}
+  }
+  var seq = previous + 1
   var out = new java.io.FileOutputStream(file, true)
   try { out.write(WikiStudio.bytes(JSON.stringify({ seq: seq, time: WikiStudio.now(), jobId: id, wikiId: j.wikiId, phase: phase, severity: severity || "info", message: WikiStudio.redact(message) }) + "\n")); out.getFD().sync() } finally { out.close() }
   WikiStudio.atomic(dir + "/cursor.json", { seq: seq })
@@ -105,7 +116,8 @@ WikiStudioJobs.publicJob = function(j) { var out = JSON.parse(JSON.stringify(j))
 WikiStudioServer.prototype.streamEvents = function(req, ex) {
   var jobs = this.jobs, id = req.path.split("/")[4], j = jobs.get(id), cursor = Number(req.headers["last-event-id"] || req.query.cursor || 0)
   WikiStudio.assert(cursor >= 0 && isFinite(cursor), 400, "invalid_cursor", "Invalid event cursor")
-  var file = jobs.dir(j.id) + "/events.ndjson", events = io.fileExists(file) ? io.readFileString(file).split("\n").filter(Boolean).map(function(l) { return JSON.parse(l) }) : []
+  var file = jobs.dir(j.id) + "/events.ndjson", events = []
+  if(io.fileExists(file))io.readFileString(file).split("\n").filter(Boolean).forEach(function(l){try{events.push(JSON.parse(l))}catch(ignoreIncompleteEvent){}})
   var text = ": replay; reconnect with Last-Event-ID\n\n" + events.filter(function(e) { return e.seq > cursor }).slice(0, 200).map(function(e) { return "id: " + e.seq + "\nevent: progress\ndata: " + JSON.stringify(e) + "\n\n" }).join("")
   var bytes = WikiStudio.bytes(text)
   ex.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8"); ex.sendResponseHeaders(200, bytes.length); ex.getResponseBody().write(bytes); ex.close()

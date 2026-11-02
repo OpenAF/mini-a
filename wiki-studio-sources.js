@@ -13,6 +13,7 @@ WikiStudioServer.prototype.streamUpload = function(req, input) {
     var file = WikiStudio.safeFile(dir + "/files", relative, false)
     WikiStudio.assert(!io.fileExists(file), 409, "duplicate_upload", "Duplicate file path")
     var existing = WikiStudio.scan(dir + "/files", true), total = Object.keys(existing).reduce(function(n,k) { return n + existing[k].size }, 0)
+    WikiStudio.assert(!Object.keys(existing).some(function(p){return p.toLowerCase()===relative.toLowerCase()}),409,"duplicate_upload","Duplicate case-insensitive file path")
     WikiStudio.assert(Object.keys(existing).length < 2000, 413, "upload_count", "Upload file limit exceeded")
     var temp = dir + "/incoming-" + WikiStudio.id(), out = new java.io.FileOutputStream(temp), size = 0, n, buf = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 8192)
     try {
@@ -96,6 +97,7 @@ WikiStudioServer.prototype.sourceAdd = function(w, body) {
     var selected=(this.config.directories||[]).filter(function(d){return d.id===body.directoryId})[0]
     WikiStudio.assert(selected,403,"source_not_allowed","Select an operator-allowlisted source directory ID")
     WikiStudio.assert(!WikiStudio.inside(selected.path,w.root)&&!WikiStudio.inside(w.root,selected.path),400,"source_overlap","Source and wiki cannot contain each other")
+    WikiStudio.assert(!this.registry.list().some(function(registered){return WikiStudio.inside(selected.path,registered.root)||WikiStudio.inside(registered.root,selected.path)}),400,"use_absorption","Use the saved-plan Absorb workflow for registered wikis")
     WikiStudio.assert(WikiStudio.identity(selected.path)===selected.identity,409,"source_changed","Source directory identity changed; restart after review")
     var uploadId=WikiStudio.id(),stage=this.config.home+"/sources/uploads/"+uploadId+"/files"
     WikiStudio.privateDir(stage)

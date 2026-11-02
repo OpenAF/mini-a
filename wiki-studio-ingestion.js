@@ -34,7 +34,7 @@ WikiStudioServer.prototype.sourceOperation = function(w, route, body) {
       p.spec={sources:body.sourceWikiIds.map(function(id){var source=self.registry.verify(self.registry.get(id));WikiStudio.assert(source.id!==w.id&&!WikiStudio.inside(source.root,w.root)&&!WikiStudio.inside(w.root,source.root),400,"source_overlap","Source and destination cannot overlap");p.sourceIdentities[source.id]={root:source.root,identity:source.identity};return {id:source.id,root:source.root,all:!body.paths&&!body.tags&&!body.topic,paths:body.paths||[],tags:body.tags||[],topic:body.topic||"",exclude:body.exclude||[]} })}
     } else if(body.action!=="status") { WikiStudio.assert(isString(body.planId)&&/^[a-zA-Z0-9_-]{1,160}$/.test(body.planId),400,"invalid_plan","Select a saved plan ID"); p.id=body.planId }
     if(["apply","resume"].indexOf(body.action)>=0) {
-      var jobs=this.jobs||new WikiStudioJobs(this.config),matches=jobs.list().filter(function(j){if(j.wikiId!==w.id||j.operation!=="absorb.plan"||j.status!=="completed")return false;var result=WikiStudio.json(jobs.dir(j.id)+"/result.json",{});return result.plan&&result.plan.id===p.id})
+      var jobs=this.jobs||new WikiStudioJobs(this.config),matches=jobs.list().filter(function(j){if(j.wikiId!==w.id||j.operation!=="absorb.plan"||j.status!=="completed")return false;var result=WikiStudio.json(jobs.dir(j.id)+"/result.json",{});return result.id===p.id&&!!result.plan})
       WikiStudio.assert(matches.length>0,409,"plan_not_reviewed","Apply/resume requires a completed plan generated through Studio")
       p.sourceIdentities=matches[0].params.sourceIdentities
     }

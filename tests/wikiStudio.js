@@ -81,6 +81,10 @@
   exports.testJobs = function() { fixture(function(s,t) {
     WikiStudio.privateDir(s.config.home + "/jobs"); var w = add(s,t), jobs = s.jobs = new WikiStudioJobs(s.config)
     var j = jobs.submit(w,"dream.plan",{semantic:false},"test-key-123","admin")
+    var eventsFile=jobs.dir(j.id)+"/events.ndjson",append=new java.io.FileOutputStream(eventsFile,true);append.write(WikiStudio.bytes('{"seq":999'));append.close()
+    jobs.event(j.id,"test","Recover an incomplete final event")
+    var recoveredEvents=io.readFileString(eventsFile).trim().split("\n").map(function(line){return JSON.parse(line)})
+    assert(recoveredEvents[1].seq,2,"Interrupted event append recovers without duplicate sequence")
     assert(jobs.submit(w,"dream.plan",{semantic:false},"test-key-123","admin").id,j.id,"Exact idempotent replay")
     rejects(function(){jobs.submit(w,"dream.plan",{semantic:true},"test-key-123","admin")},"idempotency_conflict")
     rejects(function(){s.assertIdle(w.id)},"wiki_maintenance")
@@ -160,5 +164,21 @@
     var diff=WikiStudio.json(s.jobs.dir(j.id)+"/changes.json")
     assert(diff.changedPageCount,1,"Actual changed page count")
     assert(diff.changes[0].unifiedDiff.indexOf("+# After fake engine")>=0,true,"Before/after human-readable diff")
+  }) }
+  exports.testAbsorption = function() { fixture(function(s,t) {
+    var w=add(s,t);WikiStudio.privateDir(t+"/wikis/beta");io.writeFileString(t+"/wikis/beta/knowledge.md","# Evidence\nA verified fact.\n")
+    var source=s.registry.add({id:"beta",name:"Beta",root:t+"/wikis/beta",access:"rw"}),sourceBefore=WikiStudio.fingerprint(WikiStudio.scan(source.root,true))
+    WikiStudio.privateDir(s.config.home+"/jobs");s.jobs=new WikiStudioJobs(s.config)
+    global.__mini_a_ingest_lib_mode=true;loadLib("mini-a-ingest.js")
+    var original=MiniAIngest.prototype._buildLlm
+    MiniAIngest.prototype._buildLlm=function(){return{promptJSONWithStats:function(){return{response:{proposals:[{path:"knowledge.md",classification:"enrichment",edits:[{before:"",after:"# Evidence\nA verified fact.\n",evidence:["beta:knowledge.md"]}],evidence:["beta:knowledge.md"],mappings:[{evidence:"beta:knowledge.md",anchor:""}],dependencies:[]}],findings:[]}}}}}
+    function run(body,key){var spec=s.sourceOperation(w,"absorptions",body),j=s.jobs.submit(w,spec.operation,spec.params,key,"admin");s.jobs.update(j.id,{status:"acquiring-lock"});wikiStudioRunWorker(s.config,j.id);return {job:s.jobs.get(j.id),result:WikiStudio.json(s.jobs.dir(j.id)+"/result.json")}}
+    var planned
+    try{planned=run({action:"plan",sourceWikiIds:["beta"]},"absorb-plan-123")}finally{MiniAIngest.prototype._buildLlm=original}
+    assert(planned.job.status,"completed","Real saved plan with injected model: "+JSON.stringify(planned.result))
+    var applied=run({action:"apply",planId:planned.result.id,confirmation:{applySavedPlan:true}},"absorb-apply-123")
+    assert(applied.job.status,"completed","Saved plan applies without another model: "+JSON.stringify(applied.result))
+    assert(io.fileExists(w.root+"/knowledge.md"),true,"Transferred page exists")
+    assert(WikiStudio.fingerprint(WikiStudio.scan(source.root,true)),sourceBefore,"Source wiki remains unchanged")
   }) }
 })()

@@ -4,6 +4,12 @@
 
 Mini-A is a minimalist autonomous agent that uses LLMs, shell commands and/or MCP servers to achieve user-defined goals. Simple, flexible, and easy to use as a library, CLI tool, or embedded interface.
 
+[Wiki Studio](docs/WIKI-STUDIO.md) provides a separate authenticated local browser
+for filesystem wikis, Markdown editing, graph exports, staged imports, jobs and
+verified recovery. Start with `ojob mini-a-wiki-studio.yaml studiohome=/data/studio
+studioallowroots='["/data/wikis"]'`; browsing requires no model. See its documented
+capabilities and disabled outbound adapters before enabling workflows.
+
 ![/.github/mini-a-web-screenshot1.jpg](/.github/mini-a-web-screenshot1.jpg)
 
 ![/.github/mini-a-con-screenshot.png](/.github/mini-a-con-screenshot.png)

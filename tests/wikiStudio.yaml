@@ -36,7 +36,11 @@ jobs:
 - name: Studio dream safety
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testDreamSafety
+- name: Studio planned absorption
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testAbsorption
 todo:
+- Studio planned absorption
 - Studio backups and restore
 - Studio dream safety
 - Studio hydration

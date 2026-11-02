@@ -13,7 +13,15 @@ const StudioApi = {
     if (!response.ok) { const error = new Error(result.error?.message || "Request failed"); error.details = result.error?.details; error.status = response.status; throw error; }
     return result;
   },
-  wikis() { return this.request("wikis"); },
+  async raw(path, options = {}) {
+    const response = await fetch("/api/v1/" + path, { ...options, headers: { ...options.headers, Authorization: "Bearer " + this.token } });
+    if (!response.ok) throw new Error((await response.json()).error?.message || "Request failed");
+    return response;
+  },
+  async graphHtml(wikiId) { return (await this.raw("wikis/" + encodeURIComponent(wikiId) + "/graph/html")).text(); },
+  async events(jobId, cursor) { return (await this.raw("jobs/" + encodeURIComponent(jobId) + "/events", { headers: { "Last-Event-ID": String(cursor) } })).text(); },
+  async upload(uploadId, path, file) { return (await this.raw("uploads", { method: "POST", headers: { "X-Upload-ID": uploadId, "X-Upload-Path": encodeURIComponent(path) }, body: file })).json(); },
+  wikis(offset = 0) { return this.request("wikis?limit=100&offset=" + offset); },
   register(wiki) { return this.request("wikis", "POST", wiki); }
 };
 const el = (tag, text, parent) => { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (parent) parent.append(node); return node; };
@@ -23,12 +31,14 @@ document.getElementById("login").addEventListener("submit", safely(async event =
   event.preventDefault(); StudioApi.token = document.getElementById("token").value; await StudioApi.request("session");
   document.getElementById("token").value = ""; document.getElementById("login").hidden = true; await dashboard();
 }));
-async function dashboard() {
+async function dashboard(offset = 0) {
   const host = document.getElementById("workspace"); host.hidden = false; host.replaceChildren();
-  const wikis = await StudioApi.wikis();
+  const wikis = await StudioApi.wikis(offset);
   el("h2", "Your wikis", host);
   if (!wikis.items.length) el("p", "Register an existing wiki or create one in an operator-allowlisted directory.", host);
   wikis.items.forEach(wiki => { const b = el("button", wiki.name + " · " + wiki.access, host); b.onclick = safely(() => openWiki(wiki)); });
+  if (offset) button(host,"Previous wikis",()=>dashboard(Math.max(0,offset-100)));
+  if (wikis.truncated) button(host,"Next wikis",()=>dashboard(offset+100));
   const form = el("form", undefined, host); form.className = "card"; el("h3", "Add wiki", form);
   const fields = {};
   for (const [key, title] of [["id", "Stable ID"], ["name", "Display name"], ["root", "Absolute root"]]) { const label = el("label", title, form); fields[key] = el("input", undefined, label); fields[key].required = true; }
@@ -120,25 +130,33 @@ function renderMarkdown(raw, parent) {
 async function pagesView(content) {
   const toolbar = el("div", undefined, content); toolbar.className = "row";
   const searchLabel = el("label", "Search this wiki", toolbar); const search = el("input", undefined, searchLabel); search.type = "search";
+  const scope = field(toolbar,"Scope",["This wiki","All registered wikis"]);
   const split = el("div", undefined, content); split.className = "split";
   const list = el("aside", undefined, split); list.id = "page-list";
   const editor = el("div", undefined, split); editor.id = "page-editor";
   let offset = 0;
   async function refresh() {
-    list.replaceChildren(); const response = await StudioApi.wiki(search.value ? "search?q=" + encodeURIComponent(search.value) : "pages?limit=100&offset=" + offset);
+    list.replaceChildren(); const response = search.value&&scope.value==="All registered wikis" ? await StudioApi.request("search?q="+encodeURIComponent(search.value)) : await StudioApi.wiki(search.value ? "search?q=" + encodeURIComponent(search.value) : "pages?limit=100&offset=" + offset);
     const items = Array.isArray(response) ? response : response.results || response.items || response.pages || [];
     if (response.warning) el("p", response.warning, list);
-    for (const item of items) { const path = typeof item === "string" ? item : item.path; if (path && !/(^|\/)AGENTS\.md$/i.test(path)) button(list, path, async () => { if (await mayLeave()) { dirty = false; await loadPage(path); } }); }
+    if(response.coverage){const coverage=el("details",undefined,list);el("summary","Per-wiki search coverage",coverage);el("pre",JSON.stringify(response.coverage,null,2),coverage)}
+    for (const item of items) { const path = typeof item === "string" ? item : item.path; if (path && !/(^|\/)AGENTS\.md$/i.test(path)) button(list, (item.wikiId?item.wikiId+" / ":"")+path, async () => { if (await mayLeave()) { dirty = false;if(item.wikiId&&item.wikiId!==currentWiki.id){const wiki=await StudioApi.request("wikis/"+item.wikiId);await openWiki(wiki);const view=document.getElementById("view");view.replaceChildren();await pagesView(view)} await loadPage(path); } }); }
     if (!items.length) el("p", "No pages found. Search can have incomplete coverage; check Health.", list);
     if (!search.value && items.length === 100) button(list, "Next 100", async () => { offset += 100; await refresh(); });
     if (offset) button(list, "First page", async () => { offset = 0; await refresh(); });
   }
   button(toolbar, "Search / refresh", refresh);
+  button(toolbar,"Folder tree",async()=>{
+    const tree=await StudioApi.wiki("tree");list.replaceChildren();let count=0;
+    const draw=(node,parent)=>{if(count++>=1000)return;const details=el("details",undefined,parent);details.open=!node.path;el("summary",(node.name||currentWiki.name)+" · "+node.page_count,details);if(node.index?.exists)button(details,"index.md",async()=>{if(await mayLeave()){dirty=false;await loadPage(node.index.path)}});for(const page of node.pages||[]){if(!/(^|\/)AGENTS\.md$/i.test(page.path))button(details,page.title||page.path,async()=>{if(await mayLeave()){dirty=false;await loadPage(page.path)}})}for(const section of node.sections||[])draw(section,details)};
+    draw(tree,list);if(tree.truncated||count>=1000)el("p","Tree is bounded; use search or the paginated page list for remaining pages.",list);
+  });
   button(toolbar, "New page", async () => {
     if (!(await mayLeave())) return; const path = await askText("New Markdown path", "new-page.md"); if (!path) return;
     activePage = { path, content: "# New page\n", revision: null, creating: true }; dirty = true; drawEditor();
   }).disabled = currentWiki.access !== "rw";
   await refresh();
+  list.studioRefresh = refresh;
 }
 async function loadPage(path) { activePage = await StudioApi.wiki("page?path=" + encodeURIComponent(path)); dirty = false; drawEditor(); }
 function drawEditor() {
@@ -153,7 +171,7 @@ function drawEditor() {
   async function save() {
     try {
       const result = await StudioApi.wiki(page.creating ? "pages" : "page?path=" + encodeURIComponent(page.path), page.creating ? "POST" : "PUT", { path: page.path, content: source.value, expectedRevision: page.revision });
-      activePage = result; dirty = false; message("Saved"); drawEditor();
+      activePage = result; dirty = false; message("Saved"); await document.getElementById("page-list")?.studioRefresh?.(); drawEditor();
     } catch (e) {
       if (e.status === 409) {
         message("Conflict: your local text is preserved. Compare with the current server copy, copy/merge, then reload before retrying.", true);
@@ -175,10 +193,9 @@ window.addEventListener("beforeunload", event => { if (dirty) { event.preventDef
 async function graphView(content) {
   const stats = await StudioApi.wiki("graph/stats"); el("p", stats.source + " · " + stats.freshness, content);
   button(content, "Open graph", async () => {
-    const response = await fetch("/api/v1/" + wikiPath("graph/html"), { headers: { Authorization: "Bearer " + StudioApi.token } });
-    if (!response.ok) throw new Error((await response.json()).error.message);
+    const html = await StudioApi.graphHtml(currentWiki.id);
     if (graphBlob) URL.revokeObjectURL(graphBlob);
-    graphBlob = URL.createObjectURL(new Blob([await response.text()], { type: "text/html" }));
+    graphBlob = URL.createObjectURL(new Blob([html], { type: "text/html" }));
     let frame = content.querySelector("iframe"); if (!frame) frame = el("iframe", undefined, content);
     frame.title = "Wiki graph; accessible filters and node list inside"; frame.setAttribute("sandbox", "allow-scripts allow-downloads"); frame.src = graphBlob;
     const notice = el("p", "Waiting for the isolated renderer…", content); notice.id = "graph-ready-status";
@@ -212,11 +229,13 @@ window.studioToolsView = async function(name, content) {
   if (name === "Absorb") return absorbView(content);
   if (name === "Dreams") return dreamsView(content);
 };
-async function jobsView(content) {
-  const result = await StudioApi.request("jobs?wikiId=" + encodeURIComponent(currentWiki.id));
+async function jobsView(content, offset = 0) {
+  const result = await StudioApi.request("jobs?wikiId=" + encodeURIComponent(currentWiki.id) + "&limit=100&offset=" + offset);
   if (!result.items.length) el("p", "No jobs yet. History is persisted outside your wiki.", content);
   button(content, "Refresh jobs", async () => { content.replaceChildren(); await jobsView(content); });
   for (const job of result.items) { const card = el("section", undefined, content); el("h4", job.operation + " · " + job.status, card); el("p", job.createdAt, card); button(card, "Inspect " + job.id, () => jobDetail(job.id)); }
+  if (offset) button(content,"Previous jobs",async()=>{content.replaceChildren();await jobsView(content,Math.max(0,offset-100));});
+  if (result.truncated) button(content,"Next jobs",async()=>{content.replaceChildren();await jobsView(content,offset+100);});
 }
 async function jobDetail(id) {
   const view = document.getElementById("view"); view.replaceChildren(); el("h3", "Job " + id, view);
@@ -230,9 +249,7 @@ async function jobDetail(id) {
     let received;
     do {
     received = 0;
-    const response = await fetch("/api/v1/jobs/" + id + "/events", { headers: { Authorization: "Bearer " + StudioApi.token, "Last-Event-ID": String(cursor) } });
-    if (!response.ok) throw new Error("Cannot read job events");
-    for (const frame of (await response.text()).split("\n\n")) {
+    for (const frame of (await StudioApi.events(id,cursor)).split("\n\n")) {
       const line = frame.split("\n").find(l => l.startsWith("data: ")); if (!line) continue;
       const event = JSON.parse(line.slice(6)); if (event.seq <= cursor) continue; cursor = event.seq; received++;
       events.textContent = (events.textContent + event.time + " [" + event.phase + "] " + event.message + "\n").slice(-100000);
@@ -274,8 +291,7 @@ async function sourcesView(content) {
     for (let i = 0; i < files.length; i++) {
       const file = files[i], path = file.webkitRelativePath || file.name;
       status.textContent = "Uploading " + (i + 1) + "/" + files.length + " · " + path;
-      const response = await fetch("/api/v1/uploads", { method: "POST", headers: { Authorization: "Bearer " + StudioApi.token, "X-Upload-ID": uploadId, "X-Upload-Path": encodeURIComponent(path) }, body: file });
-      if (!response.ok) throw new Error((await response.json()).error.message);
+      await StudioApi.upload(uploadId,path,file);
     }
     const source = await StudioApi.wiki("sources", "POST", { id: sourceId.value, name: display.value, type: "upload", uploadId });
     status.textContent = "Staged revision " + source.revision + ". Preview ingestion to review engine-discovered changes.";

@@ -6,9 +6,16 @@ help:
 ojob:
   daemon: true
   logToConsole: false
+  catch: |
+    printErr("Wiki Studio startup failed: " + exception); exit(1)
 todo:
+- Shutdown Wiki Studio
 - Start Wiki Studio
 jobs:
+- name: Shutdown Wiki Studio
+  type: shutdown
+  exec: |
+    if(isDef(global.__wikiStudio)) global.__wikiStudio.stop()
 - name: Start Wiki Studio
   exec: |
     var base = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent())

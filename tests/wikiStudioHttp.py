@@ -2,9 +2,11 @@
 """Model-free HTTP/worker E2E using isolated disposable wiki/state directories."""
 import argparse
 import json
+import io
 import os
 from pathlib import Path
 import shutil
+import signal
 import socket
 import subprocess
 import tempfile
@@ -12,6 +14,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+import zipfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--base", default=str(Path(__file__).resolve().parents[1]))
@@ -58,6 +61,9 @@ def job(path, body):
             assert result["status"] == "completed", result
             events = request("jobs/" + result["id"] + "/events")
             assert "event: progress" in events
+            last_seq = max(int(line[4:]) for line in events.splitlines() if line.startswith("id: "))
+            replay = request("jobs/" + result["id"] + "/events", headers={"Last-Event-ID": str(last_seq)})
+            assert "data: " not in replay
             request("jobs/" + result["id"] + "/events", auth=False, status=401)
             return result
         time.sleep(0.3)
@@ -74,14 +80,14 @@ env["STUDIO_TOKEN"] = token
 env.pop("OAF_MODEL", None)
 env.pop("OAF_LC_MODEL", None)
 log = open(temp / "server.log", "w")
-proc = subprocess.Popen([shutil.which("ojob") or "ojob", str(base / "mini-a-wiki-studio.yaml"), f"onport={port}", f"studiohome={temp / 'state'}", "studioallowroots=" + json.dumps([str(root)])], cwd=temp, env=env, stdout=log, stderr=subprocess.STDOUT)
+proc = subprocess.Popen([shutil.which("ojob") or "ojob", str(base / "mini-a-wiki-studio.yaml"), f"onport={port}", f"studiohome={temp / 'state'}", "studioallowroots=" + json.dumps([str(root)])], cwd=temp, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 try:
     deadline = time.monotonic() + 40
     while True:
         try:
             request("health")
             break
-        except (urllib.error.URLError, TimeoutError):
+        except (OSError, TimeoutError):
             if time.monotonic() > deadline:
                 raise AssertionError((temp / "server.log").read_text())
             time.sleep(0.3)
@@ -97,7 +103,34 @@ try:
     request("wikis/a/page?path=..%2Foutside.md", status=400)
     request("wikis/a/page?path=AGENTS.md", status=400)
     request("wikis/a/search?q=First")
+    aggregate = request("search?q=wiki")
+    assert len(aggregate["coverage"]) == 2
     request("wikis/a/backlinks?path=first.md")
+    for attack in ["slip", "symlink", "duplicate", "bomb", "encrypted"]:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+            if attack == "slip":
+                z.writestr("../escape.md", "escape")
+            elif attack == "symlink":
+                info = zipfile.ZipInfo("link.md")
+                info.create_system = 3
+                info.external_attr = 0xA1FF << 16
+                z.writestr(info, "target.md")
+            elif attack == "duplicate":
+                z.writestr("A.md", "one")
+                z.writestr("a.md", "two")
+            elif attack == "bomb":
+                z.writestr("large.md", "a" * 1048576)
+            else:
+                z.writestr("private.md", "encrypted flag")
+        data = bytearray(buf.getvalue())
+        if attack == "encrypted":
+            data[data.index(b"PK\x01\x02") + 8] |= 1
+            data[6] |= 1
+        upload_id = str(uuid.uuid4())
+        request("uploads", "POST", headers={"X-Upload-ID": upload_id, "X-Upload-Path": "attack.zip"}, raw=bytes(data))
+        request("wikis/a/sources", "POST", {"id": attack, "name": attack, "type": "upload", "uploadId": upload_id}, status=400)
+    assert not (temp / "escape.md").exists()
     assert (root / "b" / "separate.md").read_text() == "# Separate wiki\n"
     html = request("wikis/b/graph/html")
     assert "Markdown page links" in html and "mini-a-wiki-graph-node" in html
@@ -123,14 +156,45 @@ try:
     request("wikis/b/dreams", "POST", {"mode": "apply"}, status=403, headers={"Idempotency-Key": uuid.uuid4().hex})
     request("wikis/b", "DELETE")
     assert (root / "b" / "separate.md").is_file()
+    # Simulate an abrupt crash; no active engine is being interrupted here.
+    os.killpg(proc.pid, signal.SIGKILL)
+    proc.wait(timeout=10)
+    before_restart = {p.relative_to(root / "a"): p.read_bytes() for p in (root / "a").rglob("*") if p.is_file()}
+    seeded = []
+    for state in ["queued", "running"]:
+        job_id = str(uuid.uuid4())
+        directory = temp / "state/jobs" / job_id
+        directory.mkdir()
+        (directory / "job.json").write_text(json.dumps({"version": 1, "id": job_id, "wikiId": "a", "operation": "dream.reorg", "params": {}, "status": state, "createdAt": "2026-01-01T00:00:00Z", "phase": state}))
+        seeded.append(job_id)
+    proc = subprocess.Popen([shutil.which("ojob") or "ojob", str(base / "mini-a-wiki-studio.yaml"), f"onport={port}", f"studiohome={temp / 'state'}", "studioallowroots=" + json.dumps([str(root)])], cwd=temp, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    deadline = time.monotonic() + 40
+    while True:
+        try:
+            request("health")
+            break
+        except OSError:
+            if time.monotonic() > deadline:
+                raise AssertionError((temp / "server.log").read_text())
+            time.sleep(0.3)
+    for job_id in seeded:
+        assert request("jobs/" + job_id)["status"] == "interrupted"
+    assert before_restart == {p.relative_to(root / "a"): p.read_bytes() for p in (root / "a").rglob("*") if p.is_file()}, "Restart replayed a mutating job"
     print(f"PASS: {checks} HTTP assertions; real isolated worker, raw ingest, plan, graph, indexes, backup and restore; no model/network")
 finally:
-    proc.terminate()
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
-        proc.kill()
+        os.killpg(proc.pid, signal.SIGKILL)
         proc.wait()
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
     log.close()
     if os.environ.get("STUDIO_KEEP_TESTS"):
         print("Retained test state:", temp)

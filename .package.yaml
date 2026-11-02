@@ -241,19 +241,43 @@ files:
 - utils/wikiJobsLib.js
 - utils/wikiOps.yaml
 - utils/wikiQuery.yaml
+- mini-a-wiki-studio.yaml
+- wiki-studio-common.js
+- wiki-studio-config.js
+- wiki-studio-registry.js
+- wiki-studio-api.js
+- public/studio/index.html
+- public/studio/studio.js
+- public/studio/studio.css
+- docs/WIKI-STUDIO-IMPLEMENTATION.md
+- wiki-studio-pages.js
+- wiki-studio-graph.js
+- mini-a-wiki-studio-worker.yaml
+- wiki-studio-jobs.js
+- wiki-studio-sources.js
+- wiki-studio-operations.js
+- wiki-studio-bootstrap.js
+- wiki-studio-backups.js
+- wiki-studio-ingestion.js
+- docs/WIKI-STUDIO.md
+- examples/wiki-studio/README.md
+- examples/wiki-studio/alpha.md
+- examples/wiki-studio/beta.md
+- examples/wiki-studio/source/lesson.md
+- mini-a-launcher.js
 filesHash:
   .gitignore: b2f52bb5498ed71251fa0d2e76d32a9b9a1a0019
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENT-CHEATSHEET.md: 38a09d995d38b824a4c68397162040b15c425996
   AGENTS.md: 108ea2ac09a8fa0f5b1f72bf9511082f619c2a43
-  CHEATSHEET.md: fc9d9b9d4d1e72f3cc384e675d5adba396430f19
+  CHEATSHEET.md: c8d07be78e5eb06cd6ca68d334283e4bf40c7818
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
-  CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
+  CONTRIBUTING.md: 3c2b6d37d6c672b17795f0e9ddc9cea117d522c1
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   METRICS.md: 7dd872f40105f3c2156a64f15bdf0bfa8ac5661b
-  README.md: 42fa5aebf9e8217994b8755a97b0d3744540599c
-  RELEASE_NOTES.md: c73293147879b0288813a080a234b8a8c444447c
-  USAGE.md: dae67891f57c265fc5f3c047ac7b28e33ac33355
+  README.md: a8b95f7119ac673645289db9e1b3721c6504c5ed
+  RELEASE_NOTES.md: fabd2aca0502fdae5b84d3180310daf74c27f2e6
+  USAGE.md: e1904b0db71d94c20059af293f82dcd870db4c43
   docs/ABSORB.md: 31bbe919b680e78b369772608d10dda78d1e015e
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/AGENT-PLUGINS.md: af8f692ac4bc690ac9df180e86bb1a1307a5aae5
@@ -348,7 +372,7 @@ filesHash:
   mini-a-advanced.js: fa769acccdebcf40dee066911d8000d2180046ca
   mini-a-capabilities.js: 7627dbcf9cceb6cbc52178078ae54dec0cdd9665
   mini-a-common.js: d8d1ba3ee21f4bac6b73a36f6233c0adff5dbffd
-  mini-a-con.js: 8953d1720b12352191542c1a002b7fece0f4e0da
+  mini-a-con.js: 0e176e8ddbf4915fcd08bda497c4de281ec6356d
   mini-a-decision.js: 8ea3a49c2e7af5e05886add649dbe25c823bcf35
   mini-a-dreams.js: d4946f6f388f592f5587138ba693596ddeb34a63
   mini-a-eval.js: cf4810443fe36214305ab4682130d399bbcc5d1b
@@ -373,7 +397,7 @@ filesHash:
   mini-a-response.js: 8670172ba964e0a30d70ed0458889b2dc3b81967
   mini-a-router.js: 381d0f2d34864fdca03d5d4f528fa0f827bbed48
   mini-a-sandbox.js: d2cb513e2bcde93fe9b9ba235e6fd5d7fb3743f5
-  mini-a-session.js: 724dd4afd03884b263549899ff0751d1fd0d98ab
+  mini-a-session.js: 2534f34a140ae251ed59043d51753eda63801862
   mini-a-skill-runtime.js: f0c28dcdee6651f48a87dbc2a3da03e1832aa9c4
   mini-a-skills.js: dc872bc2ab80de9cd48375768b642fab514bf826
   mini-a-subtask.js: 77e7c31e5122a0457e64c1fcecdda1d5d8b436e9
@@ -387,20 +411,20 @@ filesHash:
   mini-a-wiki-knowledge.js: e610424bc39c3acce8f67ce3c8595a6213b28834
   mini-a-wiki-maintenance.js: c4eb53388a3674092c0a722e7631de09df759c8a
   mini-a-wiki-retrieval.js: fe4f654f7831a26a31174f45514861ec0a4757a5
-  mini-a-wiki.js: b129e75d09193bfb2d64bf12d2f6f4eac4bbc8a6
+  mini-a-wiki.js: eeedd47dcfd95b0b8072cbf78cb31ca8af5720d2
   mini-a-wikiman.js: d3893459789696a0ab68e3fd7a7fb29f24c45255
   mini-a-wikiops.js: 8319cc308dca129e8b953ab621e07df961694d9a
   mini-a-worker.yaml: c4515b667c22fe6f41149e5858a29fa20a5798fc
-  mini-a.js: c8a5b2138cb3ff817201da7dfa65053761bd314b
+  mini-a.js: f96161bc28c58977baf84cb2fd35d12488b27a93
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
-  mini-a.yaml: 4b662d0cf3fe2bf9e5bb0d7390f02a7b26343aad
+  mini-a.yaml: 080d1d17daee91749220ac354cffaa510d133e25
   public/advanced.css: 531d5c0b6252367e4234069b50b7d8061a196431
   public/advanced.js: 2c2c5fa20fd40b703a68165dc414cdb8a117482b
   public/apple-touch-icon.png: 5e22ed6b303b377787779423b97c22f7b20b56ed
   public/data-editor.js: 1433293e0ed9f6486f14b6a91ed88684525a79b3
   public/favicon.ico: 7d62af53ff8c43ba32d022107153e6877567ba75
-  public/index.md: 51b0be5b3c7adea08e3992acace2a5019cf18e7e
-  public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
+  public/index.md: 584d88b7ab11d56d3773bb0dfff2532793ab3519
+  public/showdown.min.js: 29d358707982b0f14b59fb8ec91607eadf5e90ae
   skills/mini-a-contract-authoring/SKILL.md: ddb6c5ccf38cd2a75a1359747e6f293d6500a9b1
   skills/mini-a-contract-authoring/references/CONTRACT.md: 58d482c7a033e0c03e7b0fe40d037bcd99e663c9
   skills/mini-a-decisions/SKILL.md: 2f5f011baacbf1bf7d1d37c6268eb78113e62524
@@ -421,26 +445,32 @@ filesHash:
   utils/indexStats.yaml: 7fc4b114655146b3b3f94813949867485917bacd
   utils/wikiCompact.yaml: 9ed9b7842cd43d045c7b556539e15ed7ba392b06
   utils/wikiDream.yaml: a25d05740d89f515ac2a0cb144f1763ce4b2c04f
-  utils/wikiGraph.yaml: 2f80cb21d90fd6623833e52c8572beb4a5060cbc
+  utils/wikiGraph.yaml: ecf7524a7284b43ad599b802db973cb9a646a105
   utils/wikiHydrate.yaml: 5089022c0c3ee5a56c942ac95ed7f37dfe48251b
   utils/wikiJobsLib.js: e47872b4473c632cde1f18b02767ab6e80754c68
   utils/wikiOps.yaml: fce153acf503c7a93b035ed87fb9296711cae91c
   utils/wikiQuery.yaml: 4584642aee4ef7d37f88d092febd37026c25f9a9
-- mini-a-wiki-studio.yaml
-- wiki-studio-common.js
-- wiki-studio-config.js
-- wiki-studio-registry.js
-- wiki-studio-api.js
-- public/studio/index.html
-- public/studio/studio.js
-- public/studio/studio.css
-- docs/WIKI-STUDIO-IMPLEMENTATION.md
-- wiki-studio-pages.js
-- wiki-studio-graph.js
-- mini-a-wiki-studio-worker.yaml
-- wiki-studio-jobs.js
-- wiki-studio-sources.js
-- wiki-studio-operations.js
-- wiki-studio-bootstrap.js
-- wiki-studio-backups.js
-- wiki-studio-ingestion.js
+  mini-a-wiki-studio.yaml: cf6f86fdee74d915a9fe0207de2bb5f1c5c3bbd1
+  wiki-studio-common.js: e77d4787cd45cee075a9ac7481ff61a83cb7be40
+  wiki-studio-config.js: 0e2621d4212ac4dfd6cd2abfe78a6cdc84f5f73d
+  wiki-studio-registry.js: f3e70d4848670b1377eef3e94d4adaa21142e9ec
+  wiki-studio-api.js: fbd01bf04408207be5b3a09b4c6e3e11e64219f9
+  public/studio/index.html: bfef8368ae6ba630c9a7b724f131a2fa0d157bf9
+  public/studio/studio.js: 4b1cf6cba7a8ca560e685910aa5a58bdab620d66
+  public/studio/studio.css: 7c075ad8f7e471c225344a839102b7fbbf79c6b2
+  docs/WIKI-STUDIO-IMPLEMENTATION.md: 522384e089bd65a0a13a9b23828c251611bb3b68
+  wiki-studio-pages.js: 1de03a78e751fed35a8788740745a98108b6b543
+  wiki-studio-graph.js: 10955546c41707073e8a465b055c4690d4e32d77
+  mini-a-wiki-studio-worker.yaml: 1b585561dfe18e29a6e054605501bb12bd7bc00f
+  wiki-studio-jobs.js: 887396af0c8c3248009148fcfe8c6a215033e45c
+  wiki-studio-sources.js: 5a774522ac71d3f0923ce5a6454ce9e1681e8cde
+  wiki-studio-operations.js: 463b05ca68c16aae4d987a118756b1db78b89dcb
+  wiki-studio-bootstrap.js: 63bdec8c544e8a0143057b5a7a96ef165e13d049
+  wiki-studio-backups.js: 77e217cf6b5ae5800851fed2e8eed95cfa06b325
+  wiki-studio-ingestion.js: b067a53efbc5c9e8b465c96c2fb133317273ae64
+  docs/WIKI-STUDIO.md: c5d7e5eaccf772623a0e3e0c4e9c53b4e787eb1b
+  examples/wiki-studio/README.md: 4e06c3a9a1dfaef975b46474713a00bfef7180e9
+  examples/wiki-studio/alpha.md: 2cb6822fbb17a4d75691d71f3284f254ff184902
+  examples/wiki-studio/beta.md: e26b434de10df30c06cdb2af6746f1684b36af75
+  examples/wiki-studio/source/lesson.md: 5ad4f0d89460cccc8905e199ab8c5c9a501357d6
+  mini-a-launcher.js: 9a49f9b9694fb9cbdbfeeaa326b53ae5bd28e2ef

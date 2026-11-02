@@ -1,5 +1,6 @@
 WikiStudioServer.prototype.graphHtml = function(w) {
   var c = this.config, manifest = WikiStudio.scan(w.root, false), graphFile = w.root + "/.mini-a-wiki-graph/graph.json"
+  manifest["renderer"]={hash:WikiStudio.hash(java.nio.file.Files.readAllBytes(WikiStudio.path(c.base+"/utils/wikiGraph.yaml")))}
   if (io.fileExists(graphFile)) {
     WikiStudio.noLinks(graphFile)
     WikiStudio.assert(new java.io.File(graphFile).length() <= 8388608, 413, "graph_limit", "Graph snapshot exceeds the Studio embedding limit")

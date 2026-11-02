@@ -1,6 +1,8 @@
 # Internal fixed worker entrypoint. Never accepts job code or engine flags over HTTP.
 ojob:
   logToConsole: false
+  catch: |
+    printErr("Wiki Studio worker startup failed: " + exception); exit(1)
 todo:
 - Run Studio job
 jobs:

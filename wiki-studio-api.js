@@ -32,6 +32,20 @@ WikiStudioServer.prototype.dispatch = function(req) {
     if (read) return WikiStudioServer.paginate(this.registry.list().map(function(w) { return self.publicWiki(w, role) }), q)
     if (req.method === "POST") { WikiStudio.authorize(role, "admin"); return this.publicWiki(this.registry.add(body), role) }
   }
+  if(read&&p.length===3&&p[2]==="search") {
+    WikiStudio.assert(isString(q.q)&&q.q.length>0&&q.q.length<=1000,400,"invalid_query","A search query is required")
+    var hits=[],coverage=[],wikis=this.registry.list()
+    wikis.slice(0,20).forEach(function(w){
+      try {
+        var result=self.wikiRoute({method:"GET",query:{q:q.q,limit:100}},self.registry.verify(w),["search"],role)
+        var items=isArray(result)?result:result.results||[]
+        items.forEach(function(hit){var decorated=JSON.parse(JSON.stringify(hit));decorated.wikiId=w.id;decorated.sourceNamespace=w.id+":";hits.push(decorated)})
+        coverage.push({wikiId:w.id,outcome:result.outcome||"not-reported",warning:result.warning||null,sources:result.sources||null,truncated:result.truncated===true})
+      } catch(e){coverage.push({wikiId:w.id,outcome:"unavailable",warning:e.status?e.message:"Wiki search unavailable"})}
+    })
+    hits.sort(function(a,b){return Number(b.score||0)-Number(a.score||0)||a.wikiId.localeCompare(b.wikiId)||String(a.path).localeCompare(String(b.path))})
+    var aggregate=WikiStudioServer.paginate(hits,q);aggregate.coverage=coverage;aggregate.warning="Coordinated per-wiki search; absence does not establish complete coverage.";aggregate.wikisOmitted=Math.max(0,wikis.length-20);return aggregate
+  }
   if (p[2] === "audit" && p.length === 3 && read) {
     WikiStudio.authorize(role, "admin")
     var events = []
@@ -66,9 +80,19 @@ WikiStudioServer.prototype.start = function() {
   java.lang.System.setProperty("sun.net.httpserver.maxConnections", "64")
   var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(c.host, c.port), 32)
   server.createContext("/", new com.sun.net.httpserver.HttpHandler({ handle: function(ex) { self.handle(ex) } }))
-  server.setExecutor(java.util.concurrent.Executors.newFixedThreadPool(8)); server.start(); this.http = server
+  this._httpExecutor=java.util.concurrent.Executors.newFixedThreadPool(8)
+  server.setExecutor(this._httpExecutor); this.http = server
   if (this.startJobs) this.startJobs()
+  server.start()
   print("Wiki Studio: http://127.0.0.1:" + c.port)
+}
+WikiStudioServer.prototype.stop = function() {
+  var server=this.http;this.http=null
+  if(server)server.stop(5)
+  if(this._httpExecutor)this._httpExecutor.shutdown()
+  if(this._lease){try{this._lease.lock.release()}finally{this._lease.channel.close();this._lease.file.close();this._lease=null}}
+  // Workers retain their own wiki locks and durable records. Do not kill an
+  // active engine or claim that shutting down the listener undoes its writes.
 }
 WikiStudioServer.prototype.handle = function(ex) {
   var id = WikiStudio.id(), status = 200, mime = "application/json; charset=utf-8", result, c = this.config, headers = {}, role
