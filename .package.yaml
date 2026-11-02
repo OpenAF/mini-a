@@ -426,3 +426,12 @@ filesHash:
   utils/wikiJobsLib.js: e47872b4473c632cde1f18b02767ab6e80754c68
   utils/wikiOps.yaml: fce153acf503c7a93b035ed87fb9296711cae91c
   utils/wikiQuery.yaml: 4584642aee4ef7d37f88d092febd37026c25f9a9
+- mini-a-wiki-studio.yaml
+- wiki-studio-common.js
+- wiki-studio-config.js
+- wiki-studio-registry.js
+- wiki-studio-api.js
+- public/studio/index.html
+- public/studio/studio.js
+- public/studio/studio.css
+- docs/WIKI-STUDIO-IMPLEMENTATION.md

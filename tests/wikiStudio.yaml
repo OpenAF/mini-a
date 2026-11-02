@@ -1,0 +1,22 @@
+include:
+- oJobTest.yaml
+ojob:
+  logToConsole: false
+jobs:
+- name: Studio registry
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testRegistry
+- name: Studio authorization
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testAuth
+- name: Studio paths
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testPaths
+- name: Studio atomic persistence
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testAtomicAndLocks
+todo:
+- Studio registry
+- Studio authorization
+- Studio paths
+- Studio atomic persistence

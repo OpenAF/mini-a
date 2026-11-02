@@ -1,0 +1,19 @@
+help:
+  text: |
+    Standalone local Wiki Studio. No model is required for browsing/editing.
+    ojob mini-a-wiki-studio.yaml studiohome=/data/studio studioallowroots='["/data/wikis"]'
+    Uses STUDIO_TOKEN, or prints a new process-scoped token once at startup.
+ojob:
+  daemon: true
+  logToConsole: false
+todo:
+- Start Wiki Studio
+jobs:
+- name: Start Wiki Studio
+  exec: |
+    var base = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent())
+    loadLib(base + "/wiki-studio-common.js")
+    loadLib(base + "/wiki-studio-config.js")
+    loadLib(base + "/wiki-studio-api.js")
+    global.__wikiStudio = new WikiStudioServer(wikiStudioConfig(args))
+    global.__wikiStudio.start()

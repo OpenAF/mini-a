@@ -1,0 +1,119 @@
+loadLib("wiki-studio-common.js")
+loadLib("wiki-studio-registry.js")
+var WikiStudioServer = function(config) { this.config = config; this.registry = new WikiStudioRegistry(config) }
+WikiStudioServer.prototype.auth = function(headers, method) {
+  var c = this.config, host = headers.host || "", origin = headers.origin
+  WikiStudio.assert(["127.0.0.1:" + c.port, "localhost:" + c.port].indexOf(host) >= 0, 403, "invalid_host", "Host rejected")
+  if (origin) WikiStudio.assert(["http://127.0.0.1:" + c.port, "http://localhost:" + c.port].indexOf(origin) >= 0, 403, "invalid_origin", "Cross-origin requests are denied")
+  WikiStudio.assert(java.security.MessageDigest.isEqual(WikiStudio.bytes(headers.authorization || ""), WikiStudio.bytes("Bearer " + c.token)), 401, "unauthorized", "A valid bearer token is required")
+  return "admin"
+}
+WikiStudioServer.prototype.publicWiki = function(w, role) {
+  var result = JSON.parse(JSON.stringify(w)); delete result.identity
+  if (role !== "admin") delete result.root
+  result.capabilities = WikiStudioRegistry.capabilities(w); return result
+}
+WikiStudioServer.prototype.audit = function(id, role, action, wikiId) {
+  var c = this.config, file = c.home + "/audit/" + WikiStudio.now().substring(0, 10) + ".ndjson"
+  WikiStudio.lock(c.home, "audit", function() {
+    WikiStudio.noLinks(file)
+    if (new java.io.File(file).length() > 8388608) WikiStudio.fail(507, "audit_full", "Audit log limit reached; archive it locally before further writes")
+    var out = new java.io.FileOutputStream(file, true)
+    try { out.write(WikiStudio.bytes(JSON.stringify({ requestId: id, time: WikiStudio.now(), role: role, action: action, wikiId: wikiId || null }) + "\n")); out.getFD().sync() } finally { out.close() }
+  })
+}
+WikiStudioServer.prototype.dispatch = function(req) {
+  var role = req.role || this.auth(req.headers, req.method), p = req.path.split("/").filter(Boolean), q = req.query || {}, body = req.body || {}, self = this
+  var read = req.method === "GET", c = this.config
+  WikiStudio.assert(p[0] === "api" && p[1] === "v1", 404, "not_found", "Route not found")
+  if (read && p.length === 3 && p[2] === "health") return { ok: true, version: 1 }
+  if (read && p.length === 3 && p[2] === "session") return { role: role, version: 1, csrf: "bearer-header-and-same-origin", backends: { fs: "supported", mounts: "unavailable in Studio", s3: "unavailable in Studio", es: "unavailable in Studio", http: "unavailable in Studio", archive: "unavailable in Studio" }, adapters: { upload: true, directory: false, git: false, url: false, youtube: false }, limits: { pageBytes: c.maxPageBytes } }
+  if (p[2] === "wikis" && p.length === 3) {
+    if (read) return WikiStudioServer.paginate(this.registry.list().map(function(w) { return self.publicWiki(w, role) }), q)
+    if (req.method === "POST") { WikiStudio.authorize(role, "admin"); return this.publicWiki(this.registry.add(body), role) }
+  }
+  if (p[2] === "audit" && p.length === 3 && read) {
+    WikiStudio.authorize(role, "admin")
+    var events = []
+    io.listFiles(c.home + "/audit").files.filter(function(f) { return /\.ndjson$/.test(f.filename) }).sort(function(a, b) { return b.filename.localeCompare(a.filename) }).slice(0, 7).forEach(function(f) { io.readFileString(f.filepath).split("\n").filter(Boolean).forEach(function(l) { events.push(JSON.parse(l)) }) })
+    return WikiStudioServer.paginate(events.reverse(), q)
+  }
+  if (p[2] === "wikis" && p.length >= 4) {
+    var w = this.registry.verify(this.registry.get(p[3]))
+    if (p.length === 4) {
+      if (read) return this.publicWiki(w, role)
+      WikiStudio.authorize(role, "admin")
+      return WikiStudio.lock(c.home, w.id, function() {
+        if (req.method === "PATCH") return self.registry.update(w.id, body, false)
+        if (req.method === "DELETE") return self.registry.update(w.id, {}, true)
+        WikiStudio.fail(405, "method_not_allowed", "Method not allowed")
+      })
+    }
+    if (this.wikiRoute) return this.wikiRoute(req, w, p.slice(4), role)
+  }
+  if (this.extraRoute) return this.extraRoute(req, p, role)
+  WikiStudio.fail(405, "method_not_allowed", "Unknown route or method")
+}
+WikiStudioServer.paginate = function(items, q) {
+  var offset = Number(q.offset || 0), limit = Number(q.limit || 100)
+  WikiStudio.assert(isFinite(offset) && Math.floor(offset) === offset && offset >= 0 && isFinite(limit) && Math.floor(limit) === limit && limit > 0 && limit <= 200, 400, "invalid_paging", "Invalid offset/limit")
+  return { items: items.slice(offset, offset + limit), total: items.length, offset: offset, limit: limit, truncated: offset + limit < items.length }
+}
+WikiStudioServer.prototype.start = function() {
+  var self = this, c = this.config
+  var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(c.host, c.port), 32)
+  server.createContext("/", new com.sun.net.httpserver.HttpHandler({ handle: function(ex) { self.handle(ex) } }))
+  server.setExecutor(java.util.concurrent.Executors.newFixedThreadPool(8)); server.start(); this.http = server
+  if (this.startJobs) this.startJobs()
+  print("Wiki Studio: http://127.0.0.1:" + c.port)
+}
+WikiStudioServer.prototype.handle = function(ex) {
+  var id = WikiStudio.id(), status = 200, mime = "application/json; charset=utf-8", result, c = this.config, headers = {}, role
+  var response = ex.getResponseHeaders()
+  response.set("Cache-Control", "no-store"); response.set("X-Content-Type-Options", "nosniff"); response.set("Referrer-Policy", "no-referrer")
+  response.set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-src blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+  response.set("X-Request-ID", id)
+  try {
+    var uri = ex.getRequestURI(), path = String(uri.getPath()), method = String(ex.getRequestMethod()), rawPath = String(uri.getRawPath())
+    WikiStudio.assert(!/%|[\x00-\x1f]/.test(rawPath) && !/\/\//.test(path), 400, "invalid_route", "Encoded route paths are not accepted")
+    var iterator = ex.getRequestHeaders().entrySet().iterator()
+    while (iterator.hasNext()) { var item = iterator.next(); WikiStudio.assert(item.getValue().size() === 1, 400, "duplicate_header", "Duplicate headers are not accepted"); headers[String(item.getKey()).toLowerCase()] = String(item.getValue().get(0)) }
+    if (path.indexOf("/api/") !== 0) {
+      WikiStudio.assert(method === "GET", 405, "method_not_allowed", "Method not allowed")
+      var assets = { "/": ["index.html", "text/html"], "/studio.js": ["studio.js", "text/javascript"], "/studio.css": ["studio.css", "text/css"] }, asset = assets[path]
+      WikiStudio.assert(asset, 404, "not_found", "Asset not found")
+      mime = asset[1] + "; charset=utf-8"; result = io.readFileString(c.base + "/public/studio/" + asset[0])
+    } else {
+      role = this.auth(headers, method)
+      var query = {}, rawQuery = String(uri.getRawQuery() || "")
+      if (rawQuery !== "null" && rawQuery) rawQuery.split("&").forEach(function(pair) {
+        var pos = pair.indexOf("="), key = decodeURIComponent(pos < 0 ? pair : pair.substring(0, pos)), value = decodeURIComponent(pos < 0 ? "" : pair.substring(pos + 1).replace(/\+/g, " "))
+        WikiStudio.assert(!Object.prototype.hasOwnProperty.call(query, key) && ["__proto__", "constructor", "prototype", "token"].indexOf(key) < 0, 400, "invalid_query", "Duplicate or forbidden query key")
+        query[key] = value
+      })
+      var req = { method: method, path: path, query: query, headers: headers, requestId: id, role: role }
+      if (this.streamUpload && path === "/api/v1/uploads" && method === "POST") result = this.streamUpload(req, ex.getRequestBody())
+      else if (this.streamEvents && /^\/api\/v1\/jobs\/[a-z0-9-]+\/events$/.test(path) && method === "GET") { this.streamEvents(req, ex); return }
+      else {
+        var stream = ex.getRequestBody(), out = new java.io.ByteArrayOutputStream(), buffer = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 8192), n, size = 0
+        try { while ((n = stream.read(buffer)) !== -1) { size += n; WikiStudio.assert(size <= c.maxBodyBytes, 413, "payload_limit", "Request exceeds byte limit"); out.write(buffer, 0, n) } } finally { stream.close() }
+        if (size) {
+          WikiStudio.assert(/^application\/json(?:;|$)/i.test(headers["content-type"] || ""), 415, "content_type", "Use application/json")
+          try { req.body = JSON.parse(String(out.toString("UTF-8"))) } catch(e) { WikiStudio.fail(400, "invalid_json", "Malformed JSON") }
+          WikiStudio.assert(isMap(req.body), 400, "invalid_body", "Expected JSON object")
+        }
+        if (method !== "GET") this.audit(id, role, method + " " + path, path.split("/")[4])
+        result = this.dispatch(req)
+      }
+      if (result && result.studioHtml) { mime = "text/html; charset=utf-8"; result = result.studioHtml }
+    }
+  } catch(e) {
+    status = e.status || 500
+    result = { error: { code: e.code || "internal_error", message: e.status ? e.message : "Operation failed; inspect local state and job history", details: e.details }, requestId: id }
+  }
+  try {
+    var bytes = WikiStudio.bytes(mime.indexOf("application/json") === 0 ? JSON.stringify(result) : result)
+    if (bytes.length > 8388608) { status = 413; mime = "application/json"; bytes = WikiStudio.bytes('{"error":{"code":"result_limit","message":"Result exceeds byte limit"}}') }
+    response.set("Content-Type", mime); ex.sendResponseHeaders(status, bytes.length); ex.getResponseBody().write(bytes)
+  } finally { ex.close() }
+}
