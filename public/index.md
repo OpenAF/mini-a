@@ -2487,26 +2487,40 @@
     function normalizeRenderedConversationText(text) {
         if (!text) return '';
         const input = String(text);
-        const lines = input.split('\n').map(normalizeReasoningDisplayLine);
-        const normalized = [];
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmed = line.trim();
-            if (trimmed === 'final' || trimmed === 'assistant' || trimmed === '🤖') {
-                const remainder = lines.slice(i + 1).join('\n').trim();
-                const answer = extractAssistantAnswerText(remainder);
-                if (answer) {
-                    normalized.push(line);
-                    normalized.push(answer);
-                    return normalized.join('\n');
+        const fenced = input.match(/^\s*```(?:json)?\s*\n([\s\S]*?)\n```\s*$/i);
+        const wholeEnvelope = fenced ? fenced[1] : input;
+        try {
+            JSON.parse(wholeEnvelope);
+            const answer = extractAssistantAnswerText(wholeEnvelope);
+            if (answer) return answer;
+            return input;
+        } catch (_) { /* A conversation can contain several JSON envelopes. */ }
+        // A transcript can contain an older JSON answer followed by more turns.
+        // Unwrap each envelope in place; extracting from the entire transcript
+        // would replace later prompts and answers with the first matching answer.
+        let result = '', copiedUntil = 0;
+        for (let start = input.indexOf('{'); start >= 0; start = input.indexOf('{', start + 1)) {
+            let depth = 0, quoted = false, escaped = false;
+            for (let end = start; end < input.length; end++) {
+                const character = input[end];
+                if (quoted) {
+                    if (escaped) escaped = false;
+                    else if (character === '\\') escaped = true;
+                    else if (character === '"') quoted = false;
+                } else if (character === '"') quoted = true;
+                else if (character === '{') depth++;
+                else if (character === '}' && --depth === 0) {
+                    const answer = extractAssistantAnswerText(input.slice(start, end + 1));
+                    if (answer) {
+                        result += input.slice(copiedUntil, start) + answer;
+                        copiedUntil = end + 1;
+                    }
+                    start = end;
+                    break;
                 }
             }
-            normalized.push(line);
         }
-
-        const answerOnly = extractAssistantAnswerText(input);
-        return answerOnly || input;
+        return (result + input.slice(copiedUntil)).split('\n').map(normalizeReasoningDisplayLine).join('\n');
     }
 
     function extractFirstUserPromptFromEvents(events) {
