@@ -126,7 +126,7 @@ const commandState = { runtime: {
   options: () => ({}), attach() {}, sync() {}, beginTrace: () => () => {},
   saveConversation() {}, afterGoal() {}
 } };
-g.__advanced = { sessions: { commands: commandState }, persist() {}, safe: x => x,
+g.__advanced = { sessions: { commands: commandState }, get(uuid) { return this.sessions[uuid]; }, persist() {}, safe: x => x,
   emit(state, type, value) { commandEvents.push({type, value}); } };
 Agent.prototype.setTraceFn = function() {};
 const originalStart = Agent.prototype.start;
@@ -152,6 +152,19 @@ assert.equal(g.__conversations['simple-label']._webGoalPrefix, undefined, 'prefi
 assert.doesNotMatch(JSON.stringify(call('result', {uuid:'simple-label'})), /Prefix: /, 'prefix is absent from the browser response');
 Agent.prototype.start = originalStart;
 console.log('Advanced custom command display checks passed.');
+
+// A first Simple prompt must attach input before any browser snapshot is fetched.
+let simpleAttached = 0;
+const simpleState = {runtime: {...commandState.runtime, attach() { simpleAttached++; }}};
+g.__advanced.get = function(uuid) {
+  assert.equal(uuid, 'simple-first');
+  this.sessions[uuid] = simpleState;
+  return simpleState;
+};
+call('prompt', {uuid:'simple-first', prompt:'First Simple goal'}); pending.shift()();
+assert.ok(simpleAttached > 0, 'Simple prompt initializes and attaches the interactive runtime');
+assert.equal(simpleState.kind, 'prompt');
+console.log('First Simple prompt attaches browser input without a prior snapshot.');
 
 // Advanced new-conversation and expiry preserve console history and its VM store.
 let savedAdvanced = 0, persistedAdvanced = 0, disposedAdvanced = 0, deletedVm = 0, prunedAdvanced = 0;
@@ -234,7 +247,7 @@ call('prompt',{uuid:'binary',prompt:'Follow up'});pending.shift()();
 assert.equal(g.__res.binary.filter(e => e.event === '👤').at(-1).displayMessage,undefined);
 assert.equal(g.__res.binary.filter(e => e.event === '👤').at(-1).message,'Follow up');
 // Advanced user journal and answer pane use the label; the model still sees evidence.
-g.__advanced = {sessions:{'binary-advanced':commandState},persist(){},safe:x=>x,emit(state,type,value){commandEvents.push({type,value});}};
+g.__advanced = {sessions:{'binary-advanced':commandState},get(uuid){return this.sessions[uuid];},persist(){},safe:x=>x,emit(state,type,value){commandEvents.push({type,value});}};
 call('prompt',{uuid:'binary-advanced',prompt:'Explain',attachments:[attachment]});pending.shift()();
 assert.equal(commandEvents.filter(e => e.type === 'user').at(-1).value,'Explain\n\n📎 report.pdf');
 assert.match(g.__conversations['binary-advanced'].lastArgs.goal,/Image evidence/);

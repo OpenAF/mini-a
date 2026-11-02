@@ -52,11 +52,12 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20261101'
+version: '20261102'
 dependencies:
   openaf: '>=20250915'
 files:
 - .gitignore
+- .mini-a-wiki-ingest/writer.lock
 - .odoc.db
 - .package.yaml
 - AGENT-CHEATSHEET.md
@@ -66,6 +67,7 @@ files:
 - CONTRIBUTING.md
 - LICENSE
 - METRICS.md
+- PLAN-UI.md
 - README.md
 - RELEASE_NOTES.md
 - USAGE.md
@@ -232,6 +234,8 @@ files:
 - skills/mini-a-visual-output/SKILL.md
 - skills/mini-a-wiki-retrieval/SKILL.md
 - skills/mini-a-wiki-retrieval/references/retrieval.md
+- tmp-contract.md
+- tmp-contract.sh
 - utils/graphStats.yaml
 - utils/indexStats.yaml
 - utils/wikiCompact.yaml
@@ -243,6 +247,7 @@ files:
 - utils/wikiQuery.yaml
 filesHash:
   .gitignore: b2f52bb5498ed71251fa0d2e76d32a9b9a1a0019
+  .mini-a-wiki-ingest/writer.lock: da39a3ee5e6b4b0d3255bfef95601890afd80709
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENT-CHEATSHEET.md: 38a09d995d38b824a4c68397162040b15c425996
   AGENTS.md: 108ea2ac09a8fa0f5b1f72bf9511082f619c2a43
@@ -251,6 +256,7 @@ filesHash:
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   METRICS.md: 7dd872f40105f3c2156a64f15bdf0bfa8ac5661b
+  PLAN-UI.md: fb31d159f61710f79f81127e3d958097542b2ee9
   README.md: 42fa5aebf9e8217994b8755a97b0d3744540599c
   RELEASE_NOTES.md: c73293147879b0288813a080a234b8a8c444447c
   USAGE.md: dae67891f57c265fc5f3c047ac7b28e33ac33355
@@ -381,7 +387,7 @@ filesHash:
   mini-a-tool-selection.js: 4402d1831b821a43d9f7741752860543ff286e7d
   mini-a-utils.js: fcaf6329fee45adb300a590c70e01f9e2cd81533
   mini-a-web-attachments.js: f8a7c78c833b81f2f96b9833da464867655c0bc2
-  mini-a-web-session.js: ca1e7132056e33dff01483a2aea81517f8603764
+  mini-a-web-session.js: 17df3f92877c11dd5ca22aa968de8bb8d39eea7a
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 874bcc56a6a4fe5763d4f877bae21f9918132ba7
   mini-a-wiki-knowledge.js: e610424bc39c3acce8f67ce3c8595a6213b28834
@@ -395,7 +401,7 @@ filesHash:
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 4b662d0cf3fe2bf9e5bb0d7390f02a7b26343aad
   public/advanced.css: 531d5c0b6252367e4234069b50b7d8061a196431
-  public/advanced.js: cb6842cd678a5a44e1c0636bd30a72f88eda9cc8
+  public/advanced.js: 2c2c5fa20fd40b703a68165dc414cdb8a117482b
   public/apple-touch-icon.png: 5e22ed6b303b377787779423b97c22f7b20b56ed
   public/data-editor.js: 1433293e0ed9f6486f14b6a91ed88684525a79b3
   public/favicon.ico: 7d62af53ff8c43ba32d022107153e6877567ba75
@@ -417,6 +423,8 @@ filesHash:
   skills/mini-a-visual-output/SKILL.md: bb71e2b5c9c24d9dd2d4dd33f17024b33584b402
   skills/mini-a-wiki-retrieval/SKILL.md: b3492e2955cb4cd2aa45189be57e9ed940e697c9
   skills/mini-a-wiki-retrieval/references/retrieval.md: 5a89fd51b99ceaa598ac9116479f7f9d0a86c2b3
+  tmp-contract.md: fd753edb3da83a2de282df3bf874fac970194bfd
+  tmp-contract.sh: 24cf3578e5f2ab0bd99a8cc0ccfe5dfff7ce77f4
   utils/graphStats.yaml: ce32169c30db09d0e74dfffdbba7d70c27db24bc
   utils/indexStats.yaml: 7fc4b114655146b3b3f94813949867485917bacd
   utils/wikiCompact.yaml: 9ed9b7842cd43d045c7b556539e15ed7ba392b06

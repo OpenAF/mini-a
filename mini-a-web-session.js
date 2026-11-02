@@ -77,7 +77,8 @@ function MiniAWebPrompt(request) {
       // If history is enabled, set the history file
       var _hfile = (global.__usehistory || global.maArgs.historyvm === true || global.maArgs.historyvmshadow === true) ? global.__historypath + "/c-" + uuid + ".json" : __
 
-      var advancedState = isDef(global.__advanced) ? global.__advanced.sessions[uuid] : __
+      // Attach browser input even when the first Simple prompt precedes UI polling.
+      var advancedState = isDef(global.__advanced) ? global.__advanced.get(uuid) : __
       var effectiveArgs = isDef(advancedState) ? merge(global.maArgs, advancedState.runtime.options()) : global.maArgs
       if (isDef(advancedState)) {
         advancedState.operation = isString(postData.advancedRequestId) && /^[a-zA-Z0-9-]{1,80}$/.test(postData.advancedRequestId) ? postData.advancedRequestId : runToken

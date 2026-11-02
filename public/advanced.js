@@ -469,8 +469,8 @@ window.MiniAAdvancedUI = function(bridge) {
     while (events.childElementCount > 1000) events.firstChild.remove();
   }
   async function poll() {
-    // Sessions already attached to Advanced can still ask after switching panes.
-    if ((!enabled && !snapshot) || polling) return;
+    // Input requests belong to the conversation, including before Advanced is opened.
+    if (polling) return;
     polling = true;
     try {
       const current = bridge.uuid();
