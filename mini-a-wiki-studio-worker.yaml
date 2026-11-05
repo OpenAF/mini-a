@@ -9,6 +9,9 @@ jobs:
 - name: Run Studio job
   exec: |
     var base = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent())
+    if (!io.fileExists(base + "/js/studio/wiki-studio-bootstrap.js")) base = getOPackPath("mini-a")
+    if (!isString(base) || !io.fileExists(base + "/js/studio/wiki-studio-bootstrap.js")) throw new Error("Cannot locate the Mini-A Wiki Studio package for " + ow.oJob.__file)
+    base = String(new java.io.File(base).getCanonicalPath())
     loadLib(base + "/js/studio/wiki-studio-bootstrap.js")
     wikiStudioBootstrap(base)
     loadLib(base + "/js/studio/wiki-studio-common.js")

@@ -529,6 +529,8 @@ jobs:
       audit               : default(__)
   exec : | #js
     var miniALibraryRoot = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParentFile().getParent())
+    if (!io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) miniALibraryRoot = getOPackPath("mini-a")
+    if (!isString(miniALibraryRoot) || !io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) throw new Error("Cannot locate the Mini-A package for " + ow.oJob.__file)
     loadLib(miniALibraryRoot + "/js/mini-a-paths.js")
     __miniAPackageRoot = __miniAResolvePackageRoot(miniALibraryRoot)
     loadLib(__miniAPath("js/wiki/mini-a-mcp-wiki.js"))

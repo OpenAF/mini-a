@@ -2,7 +2,7 @@
 if (typeof __miniAPath !== "function") loadLib(String(new java.io.File(String(__loadedfrom)).getCanonicalFile().getParentFile().getParent()) + "/mini-a-paths.js")
 
 loadLib(__miniAPath("js/studio/wiki-studio-common.js"))
-var wikiStudioConfig = function(args) {
+var wikiStudioConfig = function(args, base) {
   var home = WikiStudio.canonical(String(args.studiohome || (java.lang.System.getProperty("user.home") + "/.openaf-mini-a/wiki-studio")))
   WikiStudio.noLinks(home); WikiStudio.privateDir(home)
   var roots
@@ -33,7 +33,7 @@ var wikiStudioConfig = function(args) {
     var seen={}
     directories=directories.map(function(d){WikiStudio.fields(d,["id","path"]);WikiStudio.name(d.id);WikiStudio.assert(!seen[d.id],400,"invalid_config","Duplicate directory ID");seen[d.id]=true;WikiStudio.noLinks(d.path);var path=WikiStudio.canonical(d.path);WikiStudio.assert(new java.io.File(path).isDirectory()&&!WikiStudio.inside(path,home)&&path.split("/").length>3&&!/(?:^|\/)\.[^/]+/.test(path),400,"invalid_config","Choose a dedicated visible source directory");return{id:d.id,path:path,identity:WikiStudio.identity(path)}})
   }
-  var c = { home: home, roots: roots, host: "127.0.0.1", port: port, token: token, openBrowser: !(args.openbrowser === false || String(args.openbrowser) === "false"), graphNonce: WikiStudio.id(), maxPageBytes: 1048576, maxBodyBytes: 2097152, workers: 2, base: String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent()) }
+  var c = { home: home, roots: roots, host: "127.0.0.1", port: port, token: token, openBrowser: !(args.openbrowser === false || String(args.openbrowser) === "false"), graphNonce: WikiStudio.id(), maxPageBytes: 1048576, maxBodyBytes: 2097152, workers: 2, base: __miniAPath(".", base) }
   c.directories=directories
   ;["sources", "jobs", "backups", "graph-cache", "locks", "audit"].forEach(function(d) { WikiStudio.privateDir(home + "/" + d) })
   WikiStudio.atomic(home + "/config.json", { version: 1, host: c.host, port: port, roots: roots, maxPageBytes: c.maxPageBytes, workers: c.workers })

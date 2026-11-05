@@ -265,7 +265,7 @@ jobs:
 
       var presets = {}
       try {
-        var modesPath = getOPackPath("mini-a") + "/mini-a-modes.yaml"
+        var modesPath = __miniAPath("mini-a-modes.yaml")
         var loaded = io.readFileYAML(modesPath)
         if (isMap(loaded) && isMap(loaded.modes)) {
           presets = loaded.modes

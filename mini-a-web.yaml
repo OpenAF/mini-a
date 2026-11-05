@@ -1928,7 +1928,7 @@ jobs:
 # ---------------------
 - name : Static content
   exec : | #js
-    args.path = io.fileExists("public/index.md") ? io.fileInfo("public").canonicalPath : getOPackPath("mini-a") + "/public"
+    args.path = __miniAPath("public")
   to   :
   - (httpdFileBrowse): "${onport:-8888}"
     ((uri          )): /
@@ -2237,6 +2237,8 @@ jobs:
     global.__advanced = __
     if (args.webadvanced === true) {
       var miniALibraryRoot = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent())
+      if (!io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) miniALibraryRoot = getOPackPath("mini-a")
+      if (!isString(miniALibraryRoot) || !io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) throw new Error("Cannot locate the Mini-A package for " + ow.oJob.__file)
       loadLib(miniALibraryRoot + "/js/mini-a-paths.js")
       __miniAPackageRoot = __miniAResolvePackageRoot(miniALibraryRoot)
       loadLib(__miniAPath("js/session/mini-a-session.js"))

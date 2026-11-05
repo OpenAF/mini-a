@@ -91,6 +91,12 @@ try:
             if time.monotonic() > deadline:
                 raise AssertionError((temp / "server.log").read_text())
             time.sleep(0.3)
+    # Static assets must come from the selected package even from an unrelated cwd.
+    for route, relative in [("/", "index.html"), ("/studio.js", "studio.js"), ("/studio.css", "studio.css")]:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}" + route, timeout=30) as response:
+            assert response.status == 200
+            assert response.read() == (base / "public/studio" / relative).read_bytes()
+            checks += 1
     for path in ["health", "session", "wikis", "jobs", "audit", "wikis/a/graph/html"]:
         request(path, auth=False, status=401)
     request("session", headers={"Origin": "https://evil.invalid"}, status=403)

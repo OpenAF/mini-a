@@ -43,7 +43,12 @@ todo:
 jobs:
 - name: Query wiki
   exec: | #js
-    loadLib(String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent()) + "/wikiJobsLib.js", true)
+    var miniALibraryRoot = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParentFile().getParent())
+    if (!io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) miniALibraryRoot = getOPackPath("mini-a")
+    if (!isString(miniALibraryRoot) || !io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) throw new Error("Cannot locate the Mini-A package for " + ow.oJob.__file)
+    loadLib(miniALibraryRoot + "/js/mini-a-paths.js")
+    __miniAPackageRoot = __miniAResolvePackageRoot(miniALibraryRoot)
+    loadLib(__miniAPath("utils/wikiJobsLib.js"), true)
     var logFn = wikiJobsLog
     var prepared = wikiJobsPrepare(args, { kind: "query", log: logFn, createRoot: false })
     var ready = wikiJobsQueryReadiness(prepared.root)
