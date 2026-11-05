@@ -63,7 +63,7 @@ todo:
 jobs:
 - name: Hydrate wiki
   exec: | #js
-    load(String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent()) + "/wikiJobsLib.js")
+    loadLib(String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent()) + "/wikiJobsLib.js", true)
     var logFn = wikiJobsLog
     var prepared = wikiJobsPrepare(args, { kind: "hydrate", log: logFn, createRoot: true })
     var ingestArgs = wikiJobsIngestArgs(prepared, args)

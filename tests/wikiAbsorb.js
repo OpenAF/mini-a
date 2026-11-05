@@ -1,6 +1,6 @@
 (function() {
-  load("mini-a-common.js")
-  load("mini-a-absorb.js")
+  load("js/core/mini-a-common.js")
+  load("js/wiki/mini-a-absorb.js")
   function assert(value, message) { if (!value) throw new Error(message || "Assertion failed") }
   function fixture(fn) {
     var root = String(io.createTempDir("absorb_test_"))

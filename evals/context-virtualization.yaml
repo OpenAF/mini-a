@@ -21,7 +21,7 @@ scenarios:
           - role: assistant
             content: |-
               SYSTEM INSPECTION RESULT: repository list and validation logs.
-              Files: mini-a.js, mini-a-wiki.js, mini-a-utils.js, tests/wiki.js.
+              Files: mini-a.js, js/wiki/mini-a-wiki.js, js/core/mini-a-utils.js, tests/wiki.js.
               Checks: routing, isolation, migration, permissions, cache invalidation,
               missing mounts, duplicate names, exact artifact restoration, rollback.
               Revision {{iteration}} inspected; preserve the original for audit.

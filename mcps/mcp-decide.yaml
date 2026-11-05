@@ -111,7 +111,7 @@ ojob:
   argsFromEnvs: true
   daemon: true
   loadLibs:
-  - mini-a-decision.js
+  - js/core/mini-a-decision.js
 
 include:
 - oJobMCP.yaml

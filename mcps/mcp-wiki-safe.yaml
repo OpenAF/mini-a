@@ -304,7 +304,10 @@ jobs:
       wikimounts              : isString.default(__)
       audit                   : default(__)
   exec : | #js
-    loadLib("mini-a-mcp-wiki.js")
+    var miniALibraryRoot = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParentFile().getParent())
+    loadLib(miniALibraryRoot + "/js/mini-a-paths.js")
+    __miniAPackageRoot = __miniAResolvePackageRoot(miniALibraryRoot)
+    loadLib(__miniAPath("js/wiki/mini-a-mcp-wiki.js"))
     // restricted retrieval is this server's default and only supported mode,
     // regardless of any caller-supplied/env "wikirestrict" value, EXCEPT for
     // the explicit "off" profile below, which is an opt-in escape hatch that

@@ -1,11 +1,11 @@
 // Local real-Lucene benchmark. First-call costs use fresh read-only managers; warm calls reuse them.
-load("mini-a-common.js"); load("mini-a-wiki.js"); load("mini-a-wiki-knowledge.js")
+load("js/core/mini-a-common.js"); load("js/wiki/mini-a-wiki.js"); load("js/wiki/mini-a-wiki-knowledge.js")
 var simulated=String(getEnv("WIKI_BENCH_REMOTE") || "false")==="true", latency=Math.max(0,Number(getEnv("WIKI_BENCH_LATENCY_MS")) || 0)
 var measureBytes=function(text){return Number(new java.lang.String(String(text)).getBytes("UTF-8").length)}
 var mode=String(getEnv("WIKI_BENCH_MODE") || "v2"), count=Math.max(10,Number(getEnv("WIKI_BENCH_PAGES")) || 100), samples=Math.max(2,Number(getEnv("WIKI_BENCH_SAMPLES")) || 10)
 var lexical=isString(getEnv("WIKI_BENCH_LEXICAL")) ? af.fromJSSLON(getEnv("WIKI_BENCH_LEXICAL")) : __
 var zeroQuery=lexical && lexical.ngrams === true ? "zqxjvkb" : "neverpresentidentifier"
-var dir=String(io.createTempDir("wiki-perf-")), root, mounted, report={mode:mode,pages:count,samples:samples,backend:simulated?"simulated-remote-current-source":"local-fs",simulatedLatencyMs:latency,liveProvider:false,runtime:getVersion(),jvm:String(java.lang.System.getProperty("java.version")),operations:{},sourceSha1:{wiki:sha1(io.readFileString("mini-a-wiki.js")),knowledge:sha1(io.readFileString("mini-a-wiki-knowledge.js")),retrieval:io.fileExists("mini-a-wiki-retrieval.js")?sha1(io.readFileString("mini-a-wiki-retrieval.js")):null}}
+var dir=String(io.createTempDir("wiki-perf-")), root, mounted, report={mode:mode,pages:count,samples:samples,backend:simulated?"simulated-remote-current-source":"local-fs",simulatedLatencyMs:latency,liveProvider:false,runtime:getVersion(),jvm:String(java.lang.System.getProperty("java.version")),operations:{},sourceSha1:{wiki:sha1(io.readFileString("js/wiki/mini-a-wiki.js")),knowledge:sha1(io.readFileString("js/wiki/mini-a-wiki-knowledge.js")),retrieval:io.fileExists("js/wiki/mini-a-wiki-retrieval.js")?sha1(io.readFileString("js/wiki/mini-a-wiki-retrieval.js")):null}}
 report.lexical=lexical || {language:"english"};report.zeroQuery=zeroQuery
 var make=function(path,access){return new MiniAWikiManager({backend:"fs",root:path,access:access,wikiretrievalv2:mode==="v2",wikilexical:lexical},function(){})}
 var millis=function(fn){var t=java.lang.System.nanoTime(),value=fn();return {ms:Number(java.lang.System.nanoTime()-t)/1000000,value:value}}

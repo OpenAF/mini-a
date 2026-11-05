@@ -149,9 +149,9 @@
     })
   }
   exports.testLaunchAndGuidance = function() {
-    var consoleSource=io.readFileString("mini-a-session.js"), dreamSource=io.readFileString("mini-a-dreams.js")
+    var consoleSource=io.readFileString("js/session/mini-a-session.js"), dreamSource=io.readFileString("js/memory/mini-a-dreams.js")
     assert(consoleSource.indexOf('wikiman=true conflicts with')>=0,true,"Conflicting modes rejected")
-    assert(io.readFileString("mini-a-subtask.js").indexOf('"wikiman"')>=0,true,"UI mode excluded from delegation")
+    assert(io.readFileString("js/core/mini-a-subtask.js").indexOf('"wikiman"')>=0,true,"UI mode excluded from delegation")
     assert(dreamSource.indexOf('dreamArgs.goal += "\\n\\nAdditional operator guidance')>=0,true,"Guidance appended to established goal")
     assert(dreamSource.indexOf('dreamArgs.useshell    = false')>=0,true,"Shell restriction remains")
   }
@@ -232,7 +232,7 @@
     assert(new MiniAWikiOps({wikiroot:"/tmp",dreammaxsteps:"17"}).args.dreammaxsteps,17,"CLI numeric tuning normalized")
   }
   exports.testGraphStatsConsoleParity = function() {
-    var source = io.readFileString("mini-a-session.js")
+    var source = io.readFileString("js/session/mini-a-session.js")
     var start = source.indexOf("  function printGraph("), end = source.indexOf("  function printIngestRecovery(", start)
     var consoleStats = new Function("wm", "capture", 'var getConsoleWikiManager=function(){return wm}, print=function(){}, printTree=function(v){capture(v);return ""};\n' + source.substring(start,end) + '\nprintGraph("stats");')
     fixture(function(root, runner) {

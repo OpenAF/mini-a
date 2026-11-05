@@ -1,12 +1,12 @@
 (function() {
-  loadLib("wiki-studio-api.js")
-  loadLib("wiki-studio-pages.js")
-  loadLib("wiki-studio-graph.js")
-  loadLib("wiki-studio-jobs.js")
-  loadLib("wiki-studio-sources.js")
-  loadLib("wiki-studio-operations.js")
-  loadLib("wiki-studio-backups.js")
-  loadLib("wiki-studio-ingestion.js")
+  loadLib(String(new java.io.File("js/studio/wiki-studio-api.js").getCanonicalPath()))
+  loadLib(String(new java.io.File("js/studio/wiki-studio-pages.js").getCanonicalPath()))
+  loadLib(String(new java.io.File("js/studio/wiki-studio-graph.js").getCanonicalPath()))
+  loadLib(String(new java.io.File("js/studio/wiki-studio-jobs.js").getCanonicalPath()))
+  loadLib(String(new java.io.File("js/studio/wiki-studio-sources.js").getCanonicalPath()))
+  loadLib(String(new java.io.File("js/studio/wiki-studio-operations.js").getCanonicalPath()))
+  loadLib(String(new java.io.File("js/studio/wiki-studio-backups.js").getCanonicalPath()))
+  loadLib(String(new java.io.File("js/studio/wiki-studio-ingestion.js").getCanonicalPath()))
   function fixture(fn) {
     var temp = WikiStudio.canonical(String(io.createTempDir("wiki-studio-test-")))
     var config = { home: temp + "/state", roots: [temp + "/wikis"], base: WikiStudio.canonical("."), port: 18891, host: "127.0.0.1", token: "test-token-with-more-than-32-characters", maxPageBytes: 1048576, maxBodyBytes: 2097152, workers: 2 }
@@ -41,6 +41,15 @@
     java.nio.file.Files.createSymbolicLink(WikiStudio.path(w.root + "/escape.md"), WikiStudio.path(t))
     rejects(function() { WikiStudio.safeFile(w.root, "escape.md") }, "unsafe_path")
     new java.io.File(w.root + "/escape.md").delete()
+    WikiStudio.privateDir(w.root + "/.index")
+    io.writeFileString(w.root + "/.index/a", "immutable")
+    java.nio.file.Files.createLink(WikiStudio.path(w.root + "/.index/b"), WikiStudio.path(w.root + "/.index/a"))
+    assert(WikiStudio.scan(w.root, true)[".index/b"].size, 9, "Inventory accepts internal index links")
+    assert(Object.keys(WikiStudio.scan(w.root, false)).length, 0, "Page inventory excludes index state")
+    rejects(function() { WikiStudio.noLinks(w.root + "/.index/a") }, "unsafe_path")
+    java.nio.file.Files.createLink(WikiStudio.path(t + "/outside"), WikiStudio.path(w.root + "/.index/a"))
+    rejects(function() { WikiStudio.scan(w.root, true) }, "unsafe_path")
+    new java.io.File(t + "/outside").delete()
     new java.io.File(w.root).renameTo(new java.io.File(w.root + "-old")); io.mkdir(w.root)
     rejects(function() { s.registry.verify(w) }, "root_changed")
   }) }
@@ -104,6 +113,10 @@
     assert(source.files["nested/source.md"].size,9,"Preserve directory paths")
     rejects(function(){s.streamUpload(req,new java.io.ByteArrayInputStream(WikiStudio.bytes("x")))},"upload_sealed")
     rejects(function(){s.sourceAdd(w,{id:"remote",name:"Remote",type:"url",uploadId:WikiStudio.id()})},"adapter_unavailable")
+    rejects(function(){s.sourceAdd(w,{id:"web",name:"Web",type:"web",url:"http://127.0.0.1/"})},"outbound_blocked")
+    rejects(function(){s.sourceAdd(w,{id:"web",name:"Web",type:"web",url:"http://169.254.169.254/latest"})},"outbound_blocked")
+    rejects(function(){s.sourceAdd(w,{id:"web",name:"Web",type:"web",url:"https://example.com:8443/"})},"invalid_url")
+    rejects(function(){s.sourceAdd(w,{id:"yt",name:"YT",type:"youtube",video:"https://evil.example/watch?v=l6ZcFa8pybE"})},"invalid_video")
     function archive(name,entry){var out=new java.util.zip.ZipOutputStream(new java.io.FileOutputStream(t+"/"+name));out.putNextEntry(new java.util.zip.ZipEntry(entry));out.write(WikiStudio.bytes("safe content"));out.closeEntry();out.close();return t+"/"+name}
     rejects(function(){WikiStudio.validateZip(archive("slip.zip","../escape.md"))},"unsafe_path")
     var good=archive("good.zip","folder/page.md"); WikiStudio.extractZip(good,t+"/expanded")
@@ -169,7 +182,7 @@
     var w=add(s,t);WikiStudio.privateDir(t+"/wikis/beta");io.writeFileString(t+"/wikis/beta/knowledge.md","# Evidence\nA verified fact.\n")
     var source=s.registry.add({id:"beta",name:"Beta",root:t+"/wikis/beta",access:"rw"}),sourceBefore=WikiStudio.fingerprint(WikiStudio.scan(source.root,true))
     WikiStudio.privateDir(s.config.home+"/jobs");s.jobs=new WikiStudioJobs(s.config)
-    global.__mini_a_ingest_lib_mode=true;loadLib("mini-a-ingest.js")
+    global.__mini_a_ingest_lib_mode=true;loadLib(String(new java.io.File("js/wiki/mini-a-ingest.js").getCanonicalPath()))
     var original=MiniAIngest.prototype._buildLlm
     MiniAIngest.prototype._buildLlm=function(){return{promptJSONWithStats:function(){return{response:{proposals:[{path:"knowledge.md",classification:"enrichment",edits:[{before:"",after:"# Evidence\nA verified fact.\n",evidence:["beta:knowledge.md"]}],evidence:["beta:knowledge.md"],mappings:[{evidence:"beta:knowledge.md",anchor:""}],dependencies:[]}],findings:[]}}}}}
     function run(body,key){var spec=s.sourceOperation(w,"absorptions",body),j=s.jobs.submit(w,spec.operation,spec.params,key,"admin");s.jobs.update(j.id,{status:"acquiring-lock"});wikiStudioRunWorker(s.config,j.id);return {job:s.jobs.get(j.id),result:WikiStudio.json(s.jobs.dir(j.id)+"/result.json")}}

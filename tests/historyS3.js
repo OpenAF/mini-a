@@ -1,7 +1,7 @@
 (function() {
   exports.testWebPersistence = function() {
     load("mini-a.js")
-    loadLib("mini-a-history-vm.js")
+    loadLib(String(new java.io.File("js/memory/mini-a-history-vm.js").getCanonicalPath()))
     var root = String(java.nio.file.Files.createTempDirectory("mini-a-history-s3-").toAbsolutePath())
     var yaml = io.readFileString("mini-a-web.yaml")
     var start = yaml.indexOf("    global._mini_a_web_buildHistoryPayload =")

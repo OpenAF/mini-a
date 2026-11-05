@@ -1,7 +1,7 @@
 (function() {
-  load('mini-a-common.js')
-  load('mini-a-wiki.js')
-  load('mini-a-mcp-wiki.js')
+  load('js/core/mini-a-common.js')
+  load('js/wiki/mini-a-wiki.js')
+  load('js/wiki/mini-a-mcp-wiki.js')
   var makeDir = function() { var d = String(java.io.File.createTempFile('catalog-test-', '').getCanonicalPath()); io.rm(d); io.mkdir(d); return d }
   var primary = function(mounts, extra, root) { return __miniAWikiCreatePrimary(__miniAWikiPrimaryConfig(merge({ backend: 'fs', root: root || '.', access: 'rw' }, extra || {}), root, mounts)) }
   exports.testCatalog = function() {
@@ -112,7 +112,7 @@
         if (!cfg.root || cfg.root === '.') throw new Error('TEST: attempted cwd backend')
         return originalFs.call(this, cfg)
       }
-      var source = io.readFileString('mini-a.js')
+      var source = io.readFileString('js/core/mini-a.js')
       var method = function(name, end) {
         var start = source.indexOf('MiniA.prototype.' + name + ' = ') + ('MiniA.prototype.' + name + ' = ').length
         return (new Function('return (' + source.substring(start, source.indexOf(end, start)).trim().replace(/;$/, '') + ')'))()
@@ -127,7 +127,7 @@
       initSkills.call(agent, { useskillswiki: true, skillwikimounts: mounts })
       ow.test.assert(!!agent._skillWikiManager && agent._skillWikiManager._catalog, true, 'dedicated skills array selects catalog')
       managers.push(agent._skillWikiManager)
-      var consoleSource = io.readFileString('mini-a-session.js')
+      var consoleSource = io.readFileString('js/session/mini-a-session.js')
       var start = consoleSource.indexOf('  function getConsoleWikiManager()'), end = consoleSource.indexOf('  function getWikiSubcommandCompletions()', start)
       var consoleInit = new Function('ensureAgentLoaded', 'adapter', 'sessionOptions', 'extraCLIArgs', 'activeAgent', consoleSource.substring(start, end) + '\nreturn [getConsoleWikiManager(), getConsoleSkillWikiManager()]')
       var consoleManagers = consoleInit(function() {}, __, { usewiki:true, usewikigraph:true, useskillswiki:true, skillwikimounts:raw }, { wikimounts:raw }, __)

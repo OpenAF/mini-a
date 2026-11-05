@@ -36,8 +36,11 @@ todo:
 jobs:
 - name: Mini-A Wiki Absorb
   exec: |
-    loadLib("mini-a-common.js")
-    loadLib("mini-a-absorb.js")
+    var miniALibraryRoot = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent())
+    loadLib(miniALibraryRoot + "/js/mini-a-paths.js")
+    __miniAPackageRoot = __miniAResolvePackageRoot(miniALibraryRoot)
+    loadLib(__miniAPath("js/core/mini-a-common.js"))
+    loadLib(__miniAPath("js/wiki/mini-a-absorb.js"))
     var result = new MiniAAbsorb(args, log).run()
     print(printTree(result))
     if (!result.ok) exit(1)

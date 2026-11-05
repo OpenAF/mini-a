@@ -1,9 +1,9 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const c = vm.createContext({global:{__useattach:true},__ : undefined,
+const c = vm.createContext({__miniAPath: p => p,global:{__useattach:true},__ : undefined,
   isDef:x=>x!=null,isUnDef:x=>x==null,isArray:Array.isArray,isString:x=>typeof x==='string',isMap:x=>x!=null&&typeof x==='object'&&!Array.isArray(x)});
-vm.runInContext(fs.readFileSync('mini-a-web-attachments.js','utf8'),c);
+vm.runInContext(fs.readFileSync('js/web/mini-a-web-attachments.js','utf8'),c);
 const a = c.MiniAWebAttachments;
 const upload = {name:'picture.png',base64:Buffer.from([137,80,78,71,13,10,26,10]).toString('base64')};
 assert.equal(a.validate([upload],'Inspect')[0].size,8);

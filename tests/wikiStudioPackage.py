@@ -15,8 +15,8 @@ manifest = (base / ".package.yaml").read_text()
 section = manifest.split("\nfiles:\n", 1)[1].split("\nfilesHash:", 1)[0]
 files = [line[2:].strip() for line in section.splitlines() if line.startswith("- ")]
 assert len(files) == len(set(files)), "Duplicate package members"
-required = [p.relative_to(base).as_posix() for p in base.glob("wiki-studio-*.js")]
-required += ["mini-a-wiki-studio.yaml", "mini-a-wiki-studio-worker.yaml", "mini-a-launcher.js"]
+required = [p.relative_to(base).as_posix() for p in (base / "js/studio").glob("wiki-studio-*.js")]
+required += ["mini-a-wiki-studio.yaml", "mini-a-wiki-studio-worker.yaml", "js/core/mini-a-launcher.js"]
 required += [p.relative_to(base).as_posix() for p in (base / "public/studio").rglob("*") if p.is_file()]
 assert all(name in files for name in required), "Production file missing from manifest"
 temp = Path(tempfile.mkdtemp(prefix="wiki-studio-package-test-", dir="/private/tmp"))

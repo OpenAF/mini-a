@@ -1,6 +1,6 @@
 (function() {
-  load("mini-a-common.js")
-  load("mini-a-wiki.js")
+  load("js/core/mini-a-common.js")
+  load("js/wiki/mini-a-wiki.js")
 
   var createTestDir = function() {
     var testDir = java.io.File.createTempFile("miniwikicross-test-", "").getCanonicalPath()

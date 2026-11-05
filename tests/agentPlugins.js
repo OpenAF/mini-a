@@ -1,6 +1,6 @@
 (function() {
-  load("mini-a-common.js")
-  load("mini-a-plugins.js")
+  load("js/core/mini-a-common.js")
+  load("js/skills/mini-a-plugins.js")
 
   // ─── helpers ────────────────────────────────────────────────
 

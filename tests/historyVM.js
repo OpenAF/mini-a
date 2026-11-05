@@ -1,5 +1,5 @@
 (function() {
-  load("mini-a-history-vm.js")
+  load("js/memory/mini-a-history-vm.js")
 
   var removeTree = function(path) {
     var file = new java.io.File(path)
@@ -43,7 +43,7 @@
     var root = String(java.nio.file.Files.createTempDirectory("mini-a-history-vm-test-").toAbsolutePath())
     var conversation = root + "/conversation.json"
     try {
-      load("mini-a-history-vm.js")
+      load("js/memory/mini-a-history-vm.js")
       var opts = merge({ enabled: true, conversationPath: conversation, conversationId: "test-conversation", sessionId: "test-session" }, isMap(options) ? options : {}, true)
       return fn(new MiniAHistoryVM(opts), conversation)
     } finally {
@@ -556,7 +556,7 @@
   exports.testRuntimeSourceViewsAndDelegation = function() {
     withVm(function(vm) {
       load("mini-a.js")
-      load("mini-a-subtask.js")
+      load("js/core/mini-a-subtask.js")
       var agent = new MiniA()
       agent._historyVm = vm
       agent._sessionArgs = { goal: "Redis isolation", knowledge: "Redis mounts isolate tenants." }

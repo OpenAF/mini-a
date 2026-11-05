@@ -1,5 +1,5 @@
 // Run from the checkout: oaf -f tests/optionalLibraries.js
-loadLib("mini-a.js")
+loadLib(String(new java.io.File("mini-a.js").getCanonicalPath()))
 function check(value, message) { if (!value) throw new Error(message) }
 check(typeof MiniAMemoryManager === "undefined", "Memory loaded eagerly")
 check(typeof MiniAHistoryVM === "undefined", "History VM loaded eagerly")

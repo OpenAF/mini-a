@@ -1,10 +1,10 @@
 (function() {
   global.__mini_a_ingest_lib_mode = true
   global.__mini_a_dreams_lib_mode = true
-  load("mini-a-common.js")
-  load("mini-a-memory.js")
-  load("mini-a-wiki.js")
-  load("mini-a-ingest.js")
+  load("js/core/mini-a-common.js")
+  load("js/memory/mini-a-memory.js")
+  load("js/wiki/mini-a-wiki.js")
+  load("js/wiki/mini-a-ingest.js")
 
   // ─── helpers ────────────────────────────────────────────────
 
@@ -112,7 +112,7 @@
   }
 
   exports.testIngestReadsDocumentsAndImages = function() {
-    loadLib("mini-a-utils.js")
+    loadLib(String(new java.io.File("js/core/mini-a-utils.js").getCanonicalPath()))
     var src = String(io.createTempDir("miniingest_binary_")), wiki = String(io.createTempDir("miniingest_wiki_"))
     var originalExtractor = MiniUtilsTool.prototype._createDocumentExtractor
     try {
@@ -147,7 +147,7 @@
   }
 
   exports.testIngestRejectsIncompleteDocumentExtraction = function() {
-    loadLib("mini-a-utils.js")
+    loadLib(String(new java.io.File("js/core/mini-a-utils.js").getCanonicalPath()))
     var src = String(io.createTempDir("miniingest_binary_")), wiki = String(io.createTempDir("miniingest_wiki_"))
     var originalExtractor = MiniUtilsTool.prototype._createDocumentExtractor
     try {

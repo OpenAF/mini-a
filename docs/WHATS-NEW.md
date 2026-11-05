@@ -54,7 +54,7 @@ Recovery now accepts already-parsed object/array retries, sends the corrective p
 
 **Change**: Read-only `wikibackend=http` wikis fetch pages from a static server while consuming a published `mini-a-wiki-index.zip` for catalog, Lucene search, and graph state. S3 can opt into the same bundle with `s3artifactbundle=true`; set `wikiartifactrefreshsecs` to periodically recheck remote ETag/Last-Modified metadata in long-lived processes.
 
-### Wiki: automated knowledge ingestion (`mini-a-ingest.js`)
+### Wiki: automated knowledge ingestion (`js/wiki/mini-a-ingest.js`)
 
 **Change**: New ingestion pipeline that turns a documentation folder, a git repository (local checkout or clone URL) or a web page into distilled, linked, indexed wiki pages.
 
@@ -119,7 +119,7 @@ New arguments: `ingestsource`, `ingesttype`, `ingestsection`, `ingestinclude`, `
 
 ### Wiki: Open Knowledge Format (OKF) compatibility
 
-**Change**: The wiki (`mini-a-wiki.js`) is now format-level compatible with Google's [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog) (OKF), so mini-a wikis can be read by — and can read — OKF bundles.
+**Change**: The wiki (`js/wiki/mini-a-wiki.js`) is now format-level compatible with Google's [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog) (OKF), so mini-a wikis can be read by — and can read — OKF bundles.
 
 - **`type` front-matter field**: `write` now auto-fills `type: concept` when omitted (OKF's only required field). `lint` reports an info-level `missing_frontmatter` issue (field `type`) for legacy pages with no `type`, skipping `index.md` / `*/index.md`.
 - **Bundle-root-relative links**: `[label](/path/to/page.md)` links (leading `/`) now resolve from the wiki root instead of being rejected as external/absolute — they participate in link resolution, lint, and the backlinks graph like any other internal link. `move` continues to leave `/`-rooted links untouched (a pre-existing guard), so an absolute link pointing at a moved page is not auto-rewritten.
@@ -147,7 +147,7 @@ New arguments: `ingestsource`, `ingesttype`, `ingestsection`, `ingestinclude`, `
 ```bash
 # Standalone (memory + wiki)
 mini-a dream=true \
-  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/js/memory/mini-a-memory.json))' \
   usewiki=true wikiroot=/shared/wiki \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 
@@ -251,7 +251,7 @@ See [docs/DELEGATION.md](DELEGATION.md) for full documentation including example
 
 **What's New**:
 
-- **`MiniAWikiManager`** class (`mini-a-wiki.js`): pluggable FS, S3, S3+FS (`s3fs`), and Elasticsearch/OpenSearch (`es`) backends, `parseFrontmatter`, `extractLinks`, `tree`, `browse`, `backlinks`, `move`, `search`, `lint`, and `write` operations.
+- **`MiniAWikiManager`** class (`js/wiki/mini-a-wiki.js`): pluggable FS, S3, S3+FS (`s3fs`), and Elasticsearch/OpenSearch (`es`) backends, `parseFrontmatter`, `extractLinks`, `tree`, `browse`, `backlinks`, `move`, `search`, `lint`, and `write` operations.
 
 - **New `wiki` agent action**: the agent can call `list`, `tree`, `browse`, `read`, `search`, `grep`, `backlinks`, `lint`, `write` (when `wikiaccess=rw`), `move` (when `wikiaccess=rw`), `init` (when `wikiaccess=rw`), or `delete` (when `wikiaccess=rw`) at any step:
   ```json

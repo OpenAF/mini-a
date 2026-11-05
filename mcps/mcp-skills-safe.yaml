@@ -323,7 +323,10 @@ jobs:
       wikimounts              : isString.default(__)
       audit                   : default(__)
   exec : | #js
-    loadLib("mini-a-mcp-skills.js")
+    var miniALibraryRoot = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParentFile().getParent())
+    loadLib(miniALibraryRoot + "/js/mini-a-paths.js")
+    __miniAPackageRoot = __miniAResolvePackageRoot(miniALibraryRoot)
+    loadLib(__miniAPath("js/skills/mini-a-mcp-skills.js"))
     // Same "off" escape hatch as mcp-wiki-safe.yaml: restricted retrieval is the
     // default and only supported mode otherwise.
     var restrictOff = isString(args.wikirestrictprofile) && args.wikirestrictprofile.trim().toLowerCase() === "off"

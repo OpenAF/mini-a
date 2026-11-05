@@ -504,7 +504,7 @@ ojob:
     killPrevious: true
   loadLibs    :
   - mini-a.js
-  - mini-a-subtask.js
+  - js/core/mini-a-subtask.js
 
 jobs:
 # ----------

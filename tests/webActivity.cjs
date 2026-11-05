@@ -6,7 +6,7 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const page = fs.readFileSync(path.join(root, 'public/index.md'), 'utf8');
 const yaml = require('./webSource.cjs');
-const agent = fs.readFileSync(path.join(root, 'mini-a.js'), 'utf8');
+const agent = fs.readFileSync(path.join(root, 'js/core/mini-a.js'), 'utf8');
 const showdown = require(path.join(root, 'public/showdown.min.js'));
 const converter = new showdown.Converter({ tables: true });
 assert.match(page, /\.answer-activity > summary\s*\{[\s\S]*?color: #737373;[\s\S]*?font-style: italic;/);

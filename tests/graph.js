@@ -1,6 +1,6 @@
 (function() {
-  load("mini-a-common.js")
-  load("mini-a-graph.js")
+  load("js/core/mini-a-common.js")
+  load("js/wiki/mini-a-graph.js")
 
   var mkTmp = function() {
     var d = String(java.io.File.createTempFile("miniagraph-test-", "").getCanonicalPath())

@@ -2,9 +2,9 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync('mini-a.js', 'utf8');
-const decision = fs.readFileSync('mini-a-decision.js', 'utf8');
-const wiki = fs.readFileSync('mini-a-wiki.js', 'utf8');
+const source = fs.readFileSync('js/core/mini-a.js', 'utf8');
+const decision = fs.readFileSync('js/core/mini-a-decision.js', 'utf8');
+const wiki = fs.readFileSync('js/wiki/mini-a-wiki.js', 'utf8');
 let clock = 0;
 const context = {
   MiniA: function() {}, MiniAWikiManager: function() {}, __: undefined,

@@ -4,6 +4,16 @@
 
 Mini-A is a minimalist autonomous agent that uses LLMs, shell commands and/or MCP servers to achieve user-defined goals. Simple, flexible, and easy to use as a library, CLI tool, or embedded interface.
 
+JavaScript implementations are grouped by functionality under `js/` (`core`,
+`session`, `web`, `memory`, `skills`, `wiki`, and `studio`). The root keeps the public
+`mini-a.js` library and the console, model manager, memory manager, MCP tester,
+wiki manager, and dreams entry points. YAML jobs and shell launchers retain their
+existing paths. Direct users of other libraries should use their new paths, for
+example `loadLib((getOPackPath("mini-a") || ".") + "/js/wiki/mini-a-wiki.js")`.
+Internal dependencies resolve from the executing package so a checkout can coexist
+with another installed Mini-A version.
+
+
 [Wiki Studio](docs/WIKI-STUDIO.md) provides a separate authenticated local browser
 for filesystem wikis, Markdown editing, graph exports, staged imports, jobs and
 verified recovery. Start with `ojob mini-a-wiki-studio.yaml studiohome=/data/studio
@@ -462,12 +472,12 @@ Mini-A ships with complementary components:
 - **`mini-a-memoryman.js`** - Interactive working-memory manager for inspecting and maintaining persisted global/session memories — launched via `mini-a memoryman=true`
 - **`mini-a-wikiman.js`** - Guided wiki, graph, Dream and ingestion maintenance menus with replayable CLI commands; run `mini-a wikiman=true wikiroot=/path/to/wiki wikiaccess=rw` (see [usage](USAGE.md#wiki-operations-manager))
 - **`mini-a-modelman.js`** - Interactive model/config manager, also reachable from the console via `/model` — launched via `mini-a modelman=true`
-- **`mini-a-wiki-maintenance.js`** - Shared local writer lock and durable maintenance journal persistence.
+- **`js/wiki/mini-a-wiki-maintenance.js`** - Shared local writer lock and durable maintenance journal persistence.
 - **`mini-a-dreams.js`** - Dream engine for memory/wiki consolidation with mode routing, reorg gates, and structured output/reporting — launched via `mini-a dream=true` or `/dream`
 - **`mini-a.sh`** - Shell wrapper script for running directly from a cloned repository
 - **`mini-a.js`** - Reusable library for embedding in other OpenAF jobs
-- **`mini-a-progcall.js`** - Per-session localhost HTTP bridge used by programmatic MCP tool calling (`mcpprogcall=true`)
-- **`mini-a-subtask.js`** - SubtaskManager for local child-agent delegation and remote worker delegation
+- **`js/core/mini-a-progcall.js`** - Per-session localhost HTTP bridge used by programmatic MCP tool calling (`mcpprogcall=true`)
+- **`js/core/mini-a-subtask.js`** - SubtaskManager for local child-agent delegation and remote worker delegation
 - **`mini-a-web.sh` / `mini-a-web.yaml`** - Lightweight HTTP server for browser UI — launched via `mini-a web=true` or `mini-a onport=<port>` (or directly with `./mini-a-web.sh onport=<port>`)
 - **`mini-a-worker.yaml`** - Headless HTTP API server for programmatic agent delegation (launch with `mini-a workermode=true`)
 - **`mini-a-modes.yaml`** - Built-in configuration presets for common use cases (can be extended with `~/.openaf-mini-a_modes.yaml` or `~/.openaf-mini-a/modes.yaml`)

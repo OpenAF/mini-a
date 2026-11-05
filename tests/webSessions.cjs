@@ -36,9 +36,10 @@ const c = { global: g, MiniA: Agent, __: undefined, genUUID: () => 'token-' + ++
   sleep() {},
   $tb(fn) { return { stopWhen(check) { this.check = check; return this; }, exec() { fn(); this.check(true); } }; },
   $doV(fn) { if (scheduleFail) throw Error('schedule failed'); pending.push(fn); return { catch() {} }; } };
+c.__miniAPath = p => p;
 vm.createContext(c);
-vm.runInContext(fs.readFileSync('mini-a-common.js', 'utf8'), c);
-vm.runInContext(fs.readFileSync('mini-a-web-attachments.js', 'utf8'), c);
+vm.runInContext(fs.readFileSync('js/core/mini-a-common.js', 'utf8'), c);
+vm.runInContext(fs.readFileSync('js/web/mini-a-web-attachments.js', 'utf8'), c);
 const helpers = yaml.slice(yaml.indexOf('    global._mini_a_web_reserve ='), yaml.indexOf('    global.__webtoken =')).replace(/^    /gm,'');
 vm.runInContext(helpers,c);
 function call(name, data) { c.request = { files: { postData: JSON.stringify(data) }, header: { 'x-session': ' selected ' } }; return vm.runInContext('(function(){'+route(name)+'})()',c); }
@@ -299,7 +300,7 @@ assert.equal(recovered.c.at(-1).content, 'Important answer');
 console.log('Final answers survive local recovery and remote history payload rebuilding.');
 
 // New-session preparation uses the same reservation, auth and disposal boundaries.
-const core = fs.readFileSync('mini-a.js', 'utf8');
+const core = fs.readFileSync('js/core/mini-a.js', 'utf8');
 vm.runInContext(core.slice(core.indexOf('MiniA.prepareWebSession ='), core.indexOf('MiniA.prototype._startupKey =')), c);
 g.__preparedConversations = {};
 g.maArgs.sessionprewarm = true;

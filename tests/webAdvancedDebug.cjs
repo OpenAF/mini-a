@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync('public/advanced.js', 'utf8');
-const session = fs.readFileSync('mini-a-session.js', 'utf8');
+const session = fs.readFileSync('js/session/mini-a-session.js', 'utf8');
 const filters = [...session.matchAll(/\{ key: "([^"]+)", label: "([^"]+)" \}/g)].map(([, category, label]) => ({category, label}));
 const shared = vm.createContext({
   isMap: value => value !== null && typeof value === 'object' && !Array.isArray(value),

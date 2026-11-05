@@ -1,6 +1,6 @@
 (function() {
   load("mini-a.js")
-  load("mini-a-eval.js")
+  load("js/core/mini-a-eval.js")
 
   function FakeAgent(answer, values) {
     this.answer = answer
@@ -220,7 +220,7 @@
   }
 
   exports.testEvalWikiMetadataAndRetrieval = function() {
-    loadLib("mini-a-skills.js")
+    loadLib(String(new java.io.File("js/skills/mini-a-skills.js").getCanonicalPath()))
     var fixtures = require("examples/eval-skills.js")
     fixtures.withSuite({}, function(scenarios, fixture) {
       var wiki = fixture.root + "/wiki"

@@ -1,6 +1,6 @@
 (function() {
   load("mini-a.js")
-  load("mini-a-subtask.js")
+  load("js/core/mini-a-subtask.js")
 
   var createAgent = function() {
     return new MiniA()
@@ -168,7 +168,7 @@
   }
 
   exports.testWikiContinuationAndBudgetForwarding = function() {
-    var agent=createAgent(), source=io.readFileString("mini-a.js")
+    var agent=createAgent(), source=io.readFileString("js/core/mini-a.js")
     var params={op:"read",wiki:"mounted",path:"@mounted/page.md",startLine:7,endLine:11,charOffset:13,charStart:4,charEnd:200,revision:"revision",maxQueries:2,maxCandidates:3,expandGraph:false}
     var normalized=agent._normalizeActionParams("wiki",params)
     ;["wiki","charOffset","charStart","charEnd","revision","maxQueries","maxCandidates","expandGraph"].forEach(function(key){ow.test.assert(normalized[key],params[key],"flattened field preserved: "+key)})
@@ -184,7 +184,7 @@
   }
 
   exports.testMountedWikiDiscoveryReplay = function() {
-    load("mini-a-wiki.js")
+    load("js/wiki/mini-a-wiki.js")
     var root=String(io.createTempDir("mounted-dispatch-")), writer, agent, requests=0, searches=0, reads=0
     try {
       io.mkdir(root+"/noise");io.mkdir(root+"/opacks")
@@ -214,7 +214,7 @@
   }
 
   exports.testJsonWikiDispatchReplay = function() {
-    load("mini-a-wiki.js")
+    load("js/wiki/mini-a-wiki.js")
     var root = String(io.createTempFile("mini-a-dispatch-", ""))
     io.rm(root); io.mkdir(root)
     io.writeFileString(root + "/fixture.md", "---\ntitle: fixture-hit\n---\n# Evidence\nfixture-evidence-739")
@@ -255,7 +255,7 @@
   }
 
   exports.testFlattenedBuiltInDispatchReplay = function() {
-    load("mini-a-wiki.js")
+    load("js/wiki/mini-a-wiki.js")
     var root = String(io.createTempFile("mini-a-flat-dispatch-", ""))
     io.rm(root); io.mkdir(root)
     io.writeFileString(root + "/fixture.md", "# Evidence\nfixture-evidence-739")
@@ -452,8 +452,8 @@
   }
 
   exports.testAutomaticNoteBudgetRecovery = function() {
-    load("mini-a-history-vm.js")
-    var agent = createAgent(), source = io.readFileString("mini-a.js")
+    load("js/memory/mini-a-history-vm.js")
+    var agent = createAgent(), source = io.readFileString("js/core/mini-a.js")
     var root = String(java.nio.file.Files.createTempDirectory("mini-a-budget-test-").toAbsolutePath())
     var vm = new MiniAHistoryVM({ enabled: true, contextVirtualization: true, conversationPath: root + "/conversation.json" })
     try {
@@ -517,7 +517,7 @@
   }
 
   exports.testLargeSummaryChunksAndMergeStayBounded = function() {
-    var agent = createAgent(), source = io.readFileString("mini-a.js"), inputs = []
+    var agent = createAgent(), source = io.readFileString("js/core/mini-a.js"), inputs = []
     agent.fnI = function() {}
     agent._use_lc = true; agent.lc_llm = {}; agent.llm = {}
     agent._withExponentialBackoff = function(fn) { return fn() }
@@ -595,7 +595,7 @@
   }
 
   exports.testSummaryMaintenanceUsesSafeBoundary = function() {
-    var source = io.readFileString("mini-a.js")
+    var source = io.readFileString("js/core/mini-a.js")
     var begin = source.indexOf("    var finalizeToolExecution =")
     var end = source.indexOf("    this._finalizeToolExecution = finalizeToolExecution", begin)
     ow.test.assert(begin >= 0 && end > begin, true, "Locate tool finalizer")
@@ -604,7 +604,7 @@
   }
 
   exports.testContextTokenCacheRefreshesAfterTextReads = function() {
-    var agent = createAgent(), source = io.readFileString("mini-a.js")
+    var agent = createAgent(), source = io.readFileString("js/core/mini-a.js")
     var begin = source.indexOf("    var markContextDirty = () => {")
     var end = source.indexOf("    var getEffectiveContextBudget", begin)
     var factory = new Function("runtime", source.substring(begin, end) + "\nreturn { dirty: markContextDirty, text: getCachedContextText, tokens: getCachedContextTokens };")
@@ -4382,7 +4382,7 @@
   }
 
   exports.testTargetedSchemaDiagnostics = function() {
-    load("mini-a-utils.js")
+    load("js/core/mini-a-utils.js")
     var meta = MiniUtilsTool.getMetadataByFn()
     var issues = MiniA._toolArgIssues(meta.filesystemModify.inputSchema, { operation: "edit", path: "target", pattern: "old" })
     ow.test.assert(issues[0].path, "replacement", "Operation-specific missing field identified")
@@ -5781,7 +5781,7 @@
     var agent = createAgent()
     agent.fnI = function() {}
     // Exercise the actual loop's retry normalization with deterministic adapter outputs.
-    var source = io.readFileString("mini-a.js")
+    var source = io.readFileString("js/core/mini-a.js")
     var begin = source.indexOf("            var lcRetryRmsg = lcRetryResponseWithStats.response")
     var end = source.indexOf("\n          }\n\n          if (lcRetryStopRequested", begin)
     ow.test.assert(begin >= 0 && end > begin, true, "Locate the loop retry normalization")

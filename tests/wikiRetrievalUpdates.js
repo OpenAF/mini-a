@@ -1,7 +1,7 @@
 // Real local-FS incremental generation benchmark; run identical harness in both checkouts.
-load("mini-a-common.js"); load("mini-a-wiki.js")
+load("js/core/mini-a-common.js"); load("js/wiki/mini-a-wiki.js")
 var pages = Math.max(10, Number(getEnv("WIKI_BENCH_PAGES")) || 1000), samples = Math.max(2, Number(getEnv("WIKI_BENCH_SAMPLES")) || 10)
-var dir = String(io.createTempDir("wiki-updates-")), manager, report = { kind: "incremental-generations", mode: String(getEnv("WIKI_BENCH_LABEL") || "reuse"), backend: "local-fs", pages: pages, samples: samples, runtime: getVersion(), jvm: String(java.lang.System.getProperty("java.version")), sourceSha1: {wiki:sha1(io.readFileString("mini-a-wiki.js")),retrieval:sha1(io.readFileString("mini-a-wiki-retrieval.js")),harness:sha1(io.readFileString("tests/wikiRetrievalUpdates.js"))}, observations: [] }
+var dir = String(io.createTempDir("wiki-updates-")), manager, report = { kind: "incremental-generations", mode: String(getEnv("WIKI_BENCH_LABEL") || "reuse"), backend: "local-fs", pages: pages, samples: samples, runtime: getVersion(), jvm: String(java.lang.System.getProperty("java.version")), sourceSha1: {wiki:sha1(io.readFileString("js/wiki/mini-a-wiki.js")),retrieval:sha1(io.readFileString("js/wiki/mini-a-wiki-retrieval.js")),harness:sha1(io.readFileString("tests/wikiRetrievalUpdates.js"))}, observations: [] }
 var clock = function() { return Number(java.lang.System.nanoTime()) / 1000000 }
 var disk = function(root) {
   var seen = {}, unique = 0, apparent = 0, files = 0

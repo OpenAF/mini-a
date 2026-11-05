@@ -40,7 +40,7 @@ def crash_checks(base):
                        ingestsource=str(source), ingestsection='docs', ingestmode='distill',
                        wikiretrievalv2=True, wikiretrievalconfig=dict(bundlePath=str(work / 'bundle.zip')))
         setup = '''
-          global.__mini_a_ingest_lib_mode=true; load('mini-a-ingest.js');
+          global.__mini_a_ingest_lib_mode=true; load('js/wiki/mini-a-ingest.js');
           var runner=new MiniAIngest(%s,function(){}), countPath=%s;
           runner._setLlm({promptJSONWithStats:function(prompt){
             var n=io.fileExists(countPath)?Number(io.readFileString(countPath)):0;
@@ -96,7 +96,7 @@ def http_checks(base):
     root.mkdir()
     cache.mkdir()
     execute(work, 'publish', '''
-      global.__mini_a_ingest_lib_mode=true;load('mini-a-ingest.js');
+      global.__mini_a_ingest_lib_mode=true;load('js/wiki/mini-a-ingest.js');
       var source=%s;io.mkdir(source);io.writeFileString(source+'/a.md','# A\\n\\nhttprecoveryneedle');
       var r=new MiniAIngest({usewiki:true,wikiaccess:'rw',wikiroot:%s,ingestsource:source,
         ingestsection:'docs',ingestmode:'raw',wikiretrievalv2:true,
@@ -125,7 +125,7 @@ def http_checks(base):
     try:
         url = 'http://127.0.0.1:' + str(server.server_port)
         result = execute(work, 'reader', '''
-          load('mini-a-common.js');load('mini-a-wiki.js');
+          load('js/core/mini-a-common.js');load('js/wiki/mini-a-wiki.js');
           var reader=new MiniAWikiManager({backend:'http',root:%s,indexdir:%s,access:'ro',wikiretrievalv2:true},function(){}), checks=[];
           function check(name,condition){if(!condition)throw new Error(name);checks.push(name)}
           try{

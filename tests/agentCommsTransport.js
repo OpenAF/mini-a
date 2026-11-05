@@ -1,6 +1,6 @@
 // Real HTTP transport using the worker's /comms route and authentication code.
 // No model calls. Run: oaf -f tests/agentCommsTransport.js
-load("mini-a-subtask.js")
+load("js/core/mini-a-subtask.js")
 ow.loadServer()
 var spec = io.readFileYAML("mini-a-worker.yaml")
 var route = spec.todo.filter(function(r) { return isMap(r) && r["((uri       ))"] === "/comms" })[0]

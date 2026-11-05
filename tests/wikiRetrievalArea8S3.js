@@ -1,7 +1,7 @@
 // Run only against a disposable S3-compatible endpoint and bucket. This is a
 // live transport check, not a public-cloud IAM or durability test.
 (function() {
-  load("mini-a-common.js"); load("mini-a-wiki.js"); loadLib("s3.js")
+  load("js/core/mini-a-common.js"); load("js/wiki/mini-a-wiki.js"); loadLib("s3.js")
   var env = java.lang.System.getenv(), endpoint = String(env.get("WIKI_AREA8_S3_URL") || "")
   var bucket = String(env.get("WIKI_AREA8_S3_BUCKET") || "")
   var access = String(env.get("WIKI_AREA8_S3_ACCESS_KEY") || "")

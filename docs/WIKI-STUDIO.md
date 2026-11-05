@@ -170,18 +170,23 @@ hidden state/instructions and other formats are skipped. It does not execute Git
 hooks, update the checkout or infer a remote commit. Refresh the checkout outside
 Studio, then create a new source revision with the same source ID.
 
-**Remote Git clones, webpage URL conversion and YouTube adapters are disabled.**
-There is no DNS-pinned, quota-aware outbound transport in this release. Merely
-checking a URL before handing it to a redirecting fetch/clone implementation would
-not satisfy the requested SSRF/DNS-rebinding protections. Export reviewed content
-outside Studio and upload it instead. No private `nmaguiar/personal` files are
-distributed or required. Its optional documented recipes use `oafp libs=mdconvert
-... in=raw out=html2md` and an operator-installed `ytTranscript.yaml` followed by
-`oafp out=md`. Those are **external workflows**, not installed Studio adapters.
-YouTube's recipe retrieves existing captions, not arbitrary audio transcription.
-Use trusted source URLs/IDs and your own outbound policy when running them, then
-upload the resulting Markdown. A future adapter requires explicit installation,
-canonical video-ID validation, bounded process streams and transport policy.
+**Webpage and YouTube-caption adapters** fetch from the Studio server using
+`js/studio/wiki-studio-outbound.js`, a bounded transport: only `http`/`https` on ports 80/443,
+no URL credentials, the host is resolved once and every answer must be a public
+address (loopback, link-local/metadata, private, CGNAT, multicast, documentation and
+mapped ranges are refused), the socket connects to that resolved IP (no second DNS
+lookup, so rebinding cannot swap it) while TLS still verifies the original host name,
+redirects are followed manually (max 5) and re-validated per hop, responses are
+capped at 5 MiB, and the whole request has a 30 s deadline. Any public host is
+allowed; there is no operator host allowlist. Pages are converted with the installed
+`mdconvert` oPack (HTML only; text/Markdown pass through) into one Markdown file with
+`Source:` and `Retrieved:` lines. YouTube retrieves existing captions only (manual
+preferred, then automatic; no speech-to-text) from fixed YouTube hosts, mirroring
+the `ytTranscript.yaml` recipe. Both are staged as a normal source revision
+(`type: web|youtube`, with `origin`), and ingested only after Preview/Apply.
+API: `POST /sources {id,name,type:"web",url}` or `{type:"youtube",video,lang}`.
+**Remote Git clones remain disabled**: a `git` subprocess cannot use the pinned
+transport. Upload a reviewed checkout or ZIP, or use `studiosourcedirs`.
 
 Apply snapshots the destination first and uses a stable namespaced
 `ingestsourceid`. The engine retains conflicts, receipts, journals and incremental
@@ -349,3 +354,9 @@ budgets, richer freshness dashboards, automatic retention, seamless interrupted
 restore recovery and full browser/provider absorption/reorg coverage. The in-app
 browser Blob-frame limitation is reported above. CRDT, scheduling, a new database
 and an exact LLM reorg pre-approval plan are intentional non-goals.
+
+### Test a wiki in Mini-A Web
+
+When Studio inherits a non-empty `OAF_MODEL`, the wiki Overview offers **Open wiki test in new tab**. **Enable Advanced view** is an explicit, unchecked opt-in for trusted console controls. The child server inherits model configuration and opens the selected wiki with `wikiaccess=ro`, retrieval v2 enabled, and `useshell=false`. Each wiki/view-mode pair reuses its running test server; child servers stop when the Studio process exits normally. Allow browser pop-ups for Studio. Startup reports an error if the server does not listen within 30 seconds.
+
+**Build web command**, available on the wiki dashboard and Overview, opens a command-preview wizard even without a configured model. Select one or more registered wikis, choose a port and mode (`webini` by default), and optionally enable Advanced view. A single wiki uses `wikiroot`; multiple wikis use named read-only `wikimounts`. The copyable `ojob` command uses this installation's `mini-a-web.yaml` and quotes arguments for macOS/Linux shells. Run it in a terminal with `OAF_MODEL` configured. Generating or copying the command does not execute it.

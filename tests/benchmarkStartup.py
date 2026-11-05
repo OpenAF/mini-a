@@ -14,13 +14,13 @@ if args.runs < 1:
     parser.error('--runs must be positive')
 cases = {
     'runtime': '',
-    'session_parse': 'loadLib("mini-a-session.js");',
+    'session_parse': 'loadLib("js/session/mini-a-session.js");',
     'agent_load': 'loadLib("mini-a.js");',
     'agent_construct': 'loadLib("mini-a.js"); new MiniA();',
-    'console_no_prewarm': 'loadLib("mini-a-session.js"); __initializeCon(); Console.prototype.readLinePrompt=function(){print("MINIA_BENCH_READY");exit(0,true)}; MiniAInteractiveSession({sessionprewarm:false});',
+    'console_no_prewarm': 'loadLib("js/session/mini-a-session.js"); __initializeCon(); Console.prototype.readLinePrompt=function(){print("MINIA_BENCH_READY");exit(0,true)}; MiniAInteractiveSession({sessionprewarm:false});',
 }
 cases['console_prewarm'] = cases['console_no_prewarm'].replace('sessionprewarm:false', 'sessionprewarm:true')
-cases['immediate_command'] = 'loadLib("mini-a-session.js"); __initializeCon(); var reads=0; Console.prototype.readLinePrompt=function(){if(++reads===1)return "/set verbose false";print("MINIA_BENCH_READY");return "/exit"}; MiniAInteractiveSession({sessionprewarm:true});'
+cases['immediate_command'] = 'loadLib("js/session/mini-a-session.js"); __initializeCon(); var reads=0; Console.prototype.readLinePrompt=function(){if(++reads===1)return "/set verbose false";print("MINIA_BENCH_READY");return "/exit"}; MiniAInteractiveSession({sessionprewarm:true});'
 if args.selected and any(name not in cases for name in args.selected):
     parser.error('Unknown case; choose from ' + ', '.join(cases))
 for name, code in cases.items():

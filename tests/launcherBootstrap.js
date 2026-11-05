@@ -1,5 +1,5 @@
 // Run from the checkout: oaf -f tests/launcherBootstrap.js
-loadLib("mini-a-launcher.js")
+loadLib(String(new java.io.File("js/core/mini-a-launcher.js").getCanonicalPath()))
 function check(value, message) { if (!value) throw new Error(message) }
 check(typeof MiniA === "undefined", "Launcher loaded the core")
 var args = MiniALauncher.applyLauncherEnvDefaults({ OAF_MINI_A_MODE: "test-mode", OAF_MINI_A_LIBS: "test-library" })

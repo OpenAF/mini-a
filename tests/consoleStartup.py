@@ -1,7 +1,7 @@
 """Provider-free OpenAF integration checks for console bootstrap."""
 import subprocess
 
-prefix = 'loadLib("mini-a-session.js"); __initializeCon(); '
+prefix = 'loadLib("js/session/mini-a-session.js"); __initializeCon(); '
 cases = {
     'help_without_core': prefix + '''
       var reads=0;

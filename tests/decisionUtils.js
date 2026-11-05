@@ -1,6 +1,6 @@
 (function() {
   load("mini-a.js")
-  load("mini-a-utils.js")
+  load("js/core/mini-a-utils.js")
 
   var request = { state: { ticket: "Charged twice" }, questions: {
     team: { type: "choice", instructions: "Choose the responsible team", criteria: { billing: "Payments", technical: "Software" } },

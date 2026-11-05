@@ -2,9 +2,9 @@
   "increment": "passage-grounded-derivatives",
   "measuredAt": "2026-09-14T14:15:11.321930+00:00",
   "sourceSha1": {
-    "mini-a-wiki-knowledge.js": "801f5531e315367f5d72135380a47db1bcf17beb",
-    "mini-a-wiki-retrieval.js": "f14ace810abc9d9509869893ea2e26dec40eaa48",
-    "mini-a-ingest.js": "69f670f4501622bc26bb069d6ebc213d1b2c278b",
+    "js/wiki/mini-a-wiki-knowledge.js": "801f5531e315367f5d72135380a47db1bcf17beb",
+    "js/wiki/mini-a-wiki-retrieval.js": "f14ace810abc9d9509869893ea2e26dec40eaa48",
+    "js/wiki/mini-a-ingest.js": "69f670f4501622bc26bb069d6ebc213d1b2c278b",
     "tests/wikiRetrievalV2.js": "5d60406e6b25e5ac3e8158512ab07a06cf95f127",
     "tests/wikiRetrievalV2.yaml": "d1fac981712f4e7b467e4253bfc3309b5fa1c3e9",
     "tests/wiki.yaml": "3b2b01aaa0b0a06890f06eb9a87f1faebecb1c2e"

@@ -1,10 +1,10 @@
 (function() {
   global.__mini_a_ingest_lib_mode = true
   global.__mini_a_dreams_lib_mode = true
-  load('mini-a-common.js')
-  load('mini-a-wiki.js')
-  load('mini-a-wiki-knowledge.js')
-  load('mini-a-ingest.js')
+  load('js/core/mini-a-common.js')
+  load('js/wiki/mini-a-wiki.js')
+  load('js/wiki/mini-a-wiki-knowledge.js')
+  load('js/wiki/mini-a-ingest.js')
   var assert = function(actual, expected, message) { ow.test.assert(actual, expected, message) }
   var fixture = function(fn) {
     var src = String(io.createTempDir('reconcile_src_')), wiki = String(io.createTempDir('reconcile_wiki_'))

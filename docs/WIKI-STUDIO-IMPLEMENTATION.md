@@ -54,7 +54,7 @@ The in-app browser did not load the sandboxed Blob graph; the UI has an explicit
 readiness warning and offline HTML download, and this remains a browser QA limit.
 
 Packaging checks found and fixed a missing pre-existing launcher dependency.
-`mini-a-launcher.js` is now included alongside every Studio production file.
+`js/core/mini-a-launcher.js` is now included alongside every Studio production file.
 `tests/wikiStudioPackage.py` builds only explicit manifest files, generates an
 actual `.opack`, extracts an isolated install layout and runs real-worker HTTP
 flows from another cwd. It never modifies the existing OpenAF package registry.

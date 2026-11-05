@@ -832,12 +832,12 @@ mini-a goal="iterative research task" usememory=true memoryinject=full
 
 # Persist global memory to a file channel across runs
 mini-a goal="iterative research task" \
-  memorych="(name: mini_a_global_mem, type: file, options: (file: '/tmp/mini-a-memory.json'))"
+  memorych="(name: mini_a_global_mem, type: file, options: (file: '/tmp/js/memory/mini-a-memory.json'))"
 
 # Separate channels for session vs global memory
 mini-a goal="long research" \
   memorych="(name: global_mem, type: file, options: (file: '/tmp/mini-a-global.json'))" \
-  memorysessionch="(name: session_mem, type: file, options: (file: '/tmp/mini-a-session.json'))" \
+  memorysessionch="(name: session_mem, type: file, options: (file: '/tmp/js/session/mini-a-session.json'))" \
   memorysessionid="research-2024"
 
 # Session-only scope (no global writes)
@@ -849,7 +849,7 @@ mini-a goal="analyze all source files" useshell=true \
 
 # Reuse persisted global memory from a previous run (automatic on restart)
 mini-a goal="continue from where we left off" \
-  memorych="(name: mini_a_global_mem, type: file, options: (file: '/tmp/mini-a-memory.json'))"
+  memorych="(name: mini_a_global_mem, type: file, options: (file: '/tmp/js/memory/mini-a-memory.json'))"
 
 # User-local persistent memory shorthand (home-dir file channels, auto-creates directory)
 # Also enables auto-promotion (facts,decisions,summaries) and 30-day staleness sweep
@@ -874,7 +874,7 @@ mini-a memoryman=true usememory=true memoryuser=true
 # Open memory manager against explicit channels + session namespace
 mini-a memoryman=true usememory=true \
   memorych="(name: global_mem, type: file, options: (file: '/tmp/mini-a-global.json'))" \
-  memorysessionch="(name: session_mem, type: file, options: (file: '/tmp/mini-a-session.json'))" \
+  memorysessionch="(name: session_mem, type: file, options: (file: '/tmp/js/session/mini-a-session.json'))" \
   memorysessionid="demo-session"
 ```
 
@@ -1294,12 +1294,12 @@ Use `mini-a dream=true` with the same channel and model arguments you used durin
 ```bash
 # Memory dream only (dry-run preview)
 mini-a dream=true dryrun=true \
-  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/js/memory/mini-a-memory.json))' \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 
 # Full memory dream (writes back)
 mini-a dream=true \
-  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/js/memory/mini-a-memory.json))' \
   auditch='(name: mini_a_audit, type: file, options: (file: /tmp/mini-a-audit.log))' \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 
@@ -1310,7 +1310,7 @@ mini-a dream=true \
 
 # Combined memory + wiki dream
 mini-a dream=true \
-  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/js/memory/mini-a-memory.json))' \
   usewiki=true wikiroot=/shared/wiki \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 
@@ -1362,7 +1362,7 @@ global.__mini_a_dreams_lib_mode = true
 loadLib("mini-a-dreams.js")
 
 var dreamer = new MiniADreams({
-  memorych: "(name: mini_a_global_mem, type: file, options: (file: '/tmp/mini-a-memory.json'))",
+  memorych: "(name: mini_a_global_mem, type: file, options: (file: '/tmp/js/memory/mini-a-memory.json'))",
   auditch: "(name: mini_a_audit, type: file, options: (file: '/tmp/mini-a-audit.log'))",
   usewiki: true,
   wikiroot: "/shared/wiki",
@@ -1653,7 +1653,7 @@ mini-a goal="run command" nosetmcpwd=true
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `adaptiverouting` | boolean | `false` | Enable rule-based route selection (`mini-a-router.js`) — chooses between direct/proxy/shell/utility/delegation based on intent, payload size, latency, and route history |
+| `adaptiverouting` | boolean | `false` | Enable rule-based route selection (`js/core/mini-a-router.js`) — chooses between direct/proxy/shell/utility/delegation based on intent, payload size, latency, and route history |
 | `routerorder` | string | - | Comma-separated preferred route order (e.g. `mcp_direct_call,mcp_proxy_path,shell_execution`) |
 | `routerallow` | string | - | Comma-separated allowlist of route types the router may use |
 | `routerdeny` | string | - | Comma-separated denylist of route types the router must not use |
@@ -2099,7 +2099,7 @@ mini-a ➤ Follow these instructions @docs/guide.md and apply rules from @polici
 # Evaluation
 
 ```bash
-mini-a eval=true evalfile=evals/core.yaml evalout=/tmp/mini-a-eval.json
+mini-a eval=true evalfile=evals/core.yaml evalout=/tmp/js/core/mini-a-eval.json
 mini-a eval=true evalfile=evals/core.yaml evalbaseline=evals/baseline.json
 ```
 

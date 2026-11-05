@@ -21,7 +21,7 @@ for mode, report in reports.items():
     assert report["evaluationVersion"] == 3 and report["mode"] == mode
     assert report["split"] == "acceptance" and report["samples"] == len(fixture["queries"])
     assert report["fixtureSha1"] == hashlib.sha1(fixture_bytes).hexdigest()
-    for key, name in (("wiki", "mini-a-wiki.js"), ("knowledge", "mini-a-wiki-knowledge.js"), ("retrieval", "mini-a-wiki-retrieval.js"), ("harness", "tests/wikiRetrievalQuality.js")):
+    for key, name in (("wiki", "js/wiki/mini-a-wiki.js"), ("knowledge", "js/wiki/mini-a-wiki-knowledge.js"), ("retrieval", "js/wiki/mini-a-wiki-retrieval.js"), ("harness", "tests/wikiRetrievalQuality.js")):
         assert report["sourceSha1"][key] == hashlib.sha1((ROOT / name).read_bytes()).hexdigest(), (mode, name)
     assert len(report["results"]) == len(fixture["queries"])
     assert report["unanswerableCorrect"] == report["unanswerableSamples"]

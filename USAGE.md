@@ -473,7 +473,7 @@ You can also point directly to existing channels:
 ```bash
 mini-a memoryman=true usememory=true \
   memorych=\"{type:'file',options:{file:'/tmp/mini-a-global.json'}}\" \
-  memorysessionch=\"{type:'file',options:{file:'/tmp/mini-a-session.json'}}\" \
+  memorysessionch=\"{type:'file',options:{file:'/tmp/js/session/mini-a-session.json'}}\" \
   memorysessionid=\"demo-session\"
 ```
 
@@ -1052,7 +1052,7 @@ The following `wikisearch*` options configure direct `MiniAWikiManager` instance
 
 - **`wikisearchscanbudget`** (number, default: `1000`) / **`wikisearchscanmaxms`** (number, default: `15000`): Cap how many pages, and how many milliseconds, `wiki search`'s scan-fallback path (triggered by `forceScan`, `regex`, a scoped `path`, or an unavailable Lucene index) may spend reading pages one at a time. The budget is shared across a search and its mount fan-out — it is not reset per mount. When either cap is hit, the search returns early with whatever results were already found; direct JS callers (not the serialized MCP tool text) can check `.truncated`/`.scanned`/`.scanBudget` on the returned array to see whether it stopped short.
 - **`wikisearchcache`** (boolean, default: `true` for `s3`/`http`/`es` backends, `false` for `fs`/archive) / **`wikisearchcachettlms`** (number, default: `15000`) / **`wikisearchcachemaxsize`** (number, default: `500`): Cache scan-fallback `backend.read()` results per `MiniAWikiManager` instance for the given TTL (capped to `wikisearchcachemaxsize` entries), so repeated searches against slow S3/HTTP backends don't re-fetch unchanged pages; `fs`/archive backends default to uncached since a local read has no latency to amortize and caching would only add staleness for pages edited outside the manager. Set `wikisearchcache` explicitly to override the default either way. On write or delete, the whole per-instance cache is invalidated and lazily rebuilt (not a per-page unset) — coarser than per-key invalidation, but writes/deletes are rare relative to reads.
-- **`wikisearchparallel`** (boolean, default: `false`): Parallelize the scan-fallback path's `backend.read()` calls via `pForEach`, opt-in. A prior `pForEach`-based read path elsewhere in the wiki manager deadlocked OpenAF's shared thread pool under repeated same-JVM runs, and that failure's root cause was never fully isolated (see `docs/WIKI.md` and the code comment above the `wikisearchparallel` branch in `mini-a-wiki.js`) — leave this off unless you've validated it against your own workload with two consecutive full test-suite runs in one JVM.
+- **`wikisearchparallel`** (boolean, default: `false`): Parallelize the scan-fallback path's `backend.read()` calls via `pForEach`, opt-in. A prior `pForEach`-based read path elsewhere in the wiki manager deadlocked OpenAF's shared thread pool under repeated same-JVM runs, and that failure's root cause was never fully isolated (see `docs/WIKI.md` and the code comment above the `wikisearchparallel` branch in `js/wiki/mini-a-wiki.js`) — leave this off unless you've validated it against your own workload with two consecutive full test-suite runs in one JVM.
 - **`wikilintstaleddays`** (number, default: `90`): Age threshold used by wiki lint stale-page checks.
 - **`wikilintstreamthreshold`** / **`wikilintmaxpairs`**: Inactive configuration plumbing; current lint does not consume either setting.
 - **`wikimounts`** (SLON/JSON, optional): Read-only wiki mounts. Array of `{name, backend, root|bucket|prefix|url|accessKey|secret|region}`. An `fs` root may be a local directory or a local `.zip`/`.okt` archive; archives expose their entry root and are always read-only. Each mount's pages appear under `@<name>/path.md` in search, read, browse, and tree. Example: `wikimounts="[{name: 'reference', backend: 'fs', root: '/shared/reference.okt'}]"`.
@@ -1182,7 +1182,7 @@ Example: `useshell=true readwrite=true shellguard=auto shellguardask=medium shel
 - **`sessionprewarm`** (boolean, default: true): Prepare read-only wiki resources and configured external MCP transports while composing a console or web prompt. Use `false` to keep setup at submission.
 - **`mcplazy`** (boolean, default: false): Compatibility setting for MCP preparation. Direct connections still initialize and list tools before the first model request; this is not a guarantee of deferred networking.
 - **`mcpproxy`** (boolean, default: false): Aggregate all MCP connections (including `mcp="..."` and `useutils=true`) through a single proxy interface that exposes a `proxy-dispatch` tool. This reduces context usage by presenting only one tool to the LLM instead of exposing all tools from all connections individually. The LLM can use `proxy-dispatch` to list, search, and call tools across all downstream MCP connections. For large payloads, `proxy-dispatch` also supports `argumentsFile` (load arguments from JSON file) and `resultToFile=true` (store result in temporary JSON `resultFile`). Prefer this for large input/output when `useutils=true` (recommended) or `useshell=true readwrite=true`. See [docs/MCPPROXY-FEATURE.md](docs/MCPPROXY-FEATURE.md) for flow diagrams and advanced usage notes.
-- **`adaptiverouting`** (boolean, default: false): Enable the adaptive route layer (`mini-a-router.js`) that chooses execution pathways (direct MCP/proxy/shell/utility/delegation) from rule-based intent analysis and execution history while preserving existing policy controls.
+- **`adaptiverouting`** (boolean, default: false): Enable the adaptive route layer (`js/core/mini-a-router.js`) that chooses execution pathways (direct MCP/proxy/shell/utility/delegation) from rule-based intent analysis and execution history while preserving existing policy controls.
 - **`routerorder`** (string, optional): Comma-separated preferred route order (for example `mcp_direct_call,mcp_proxy_path,shell_execution`).
 - **`routerallow`** (string, optional): Comma-separated allowlist of route types the adaptive router may use.
 - **`routerdeny`** (string, optional): Comma-separated denylist of route types the adaptive router must not use.
@@ -1280,7 +1280,7 @@ Set `usetools=true mcpdynamic=true` when you want Mini-A to narrow the registere
 3. **Primary model inference**: the main model performs the same selection when the low-cost tier does not return results.
 4. **Connection chooser fallback**: when no tools are selected, Mini-A asks the low-cost model (then the primary model if needed) to pick the single most helpful MCP connection and its tools before falling back further.
 
-Only when every stage returns an empty list (or errors) does Mini-A log the issue and register the full tool catalog so nothing is accidentally hidden. Selection happens per MCP connection, and you will see `mcp` log entries showing which tools were registered. The new `tool_selection` metrics track which selection method was used (keyword, llm_lc, llm_main, connection_chooser, or fallback_all). Leave `mcpdynamic` false when you prefer the traditional "register everything" behaviour or when your model lacks tool-calling support.
+A valid empty LLM selection means no task-specific tools are needed; failed or invalid selections continue through the remaining stages before falling back to the full catalog. Configured transport and coordination tools (`proxy-dispatch`, `subtask-status`, `execution-task`, `agent-comms`, and `agent-state`) remain available even after an empty selection, so follow-up questions can still discover and call tools. Selection happens per MCP connection, and you will see `mcp` log entries showing which tools were registered. The `tool_selection` metrics track which selection method was used (keyword, llm_lc, llm_main, connection_chooser, or fallback_all). Leave `mcpdynamic` false when you prefer the traditional "register everything" behaviour or when your model lacks tool-calling support.
 
 #### Knowledge and Context
 
@@ -2300,7 +2300,7 @@ With `useutils=true`, the `mathematics` tool accepts an `operation` and the
 parameters below. It is also available directly from OpenAF:
 
 ```javascript
-load("mini-a-utils.js")
+load("js/core/mini-a-utils.js")
 var tool = new MiniUtilsTool()
 tool.mathematics({ operation: "statistics", values: [-1, 0, 1], metrics: ["sum", "mean", "median"] })
 // { sum: 0, mean: 0, median: 0 }
@@ -3406,15 +3406,15 @@ By default the durable (global) store persists to the `memorych` channel as JSON
 # candidate to ever *activate*: activation requires a second, different memorysessionid
 # to write the same key, which can't happen if session memory resets every run
 mini-a goal="..." usememory=true memorymd=true \
-  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
-  memorysessionch='(name: mini_a_session_mem, type: file, options: (file: /tmp/mini-a-session.json))'
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/js/memory/mini-a-memory.json))' \
+  memorysessionch='(name: mini_a_session_mem, type: file, options: (file: /tmp/js/session/mini-a-session.json))'
 
 # global store is markdown, session memory is in-process only (no persistence across runs) --
 # fine for read-only use of existing durable memory, and model-authored memory_write records
 # still promote as candidates on their first write, but each run gets a fresh session id, so
 # they can never be *activated* by a second sighting from that same (never-reused) session
 mini-a goal="..." usememory=true memorymd=true \
-  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))'
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/js/memory/mini-a-memory.json))'
 ```
 
 `memoryuser=true` can be combined with `memorymd=true`: it provides the global channel in which the Markdown strings are stored.
@@ -3461,7 +3461,7 @@ Commands refer to sensitive argument values through `MINIA_WIKIOPS_<ARGUMENT>` e
 
 ## Wiki Ingestion
 
-`mini-a-ingest.js` turns an existing body of documentation into wiki pages. Discovery, filtering, chunking, the re-ingest ledger, writing and finalization are deterministic; distillation and image descriptions call the LLM.
+`js/wiki/mini-a-ingest.js` turns an existing body of documentation into wiki pages. Discovery, filtering, chunking, the re-ingest ledger, writing and finalization are deterministic; distillation and image descriptions call the LLM.
 
 **Sources**: a documentation folder, a git repository (local checkout or clone URL), or a web page URL. Folders and repositories may include Markdown, plain text, HTML, DOCX/DOC, XLSX/XLS, PPTX/PPT, PDF, PNG, and JPEG files. Other supported structured file types are read through oafp, including YAML, CSV, NDJSON, JSON, SLON, NDSLON, OpenMetrics, TOML, XML, INI, DSV and TOON. The type is auto-detected; `ingesttype=` overrides.
 
@@ -3756,26 +3756,26 @@ Use `mini-a dream=true` with the same channel and model arguments used during th
 ```bash
 # Memory dream — dry-run preview (no writes)
 mini-a dream=true dryrun=true \
-  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/js/memory/mini-a-memory.json))' \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 
 # Memory dream — write consolidated state back
 mini-a dream=true \
-  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/js/memory/mini-a-memory.json))' \
   auditch='(name: mini_a_audit, type: file, options: (file: /tmp/mini-a-audit.log))' \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 
 # Session memory dream (using memorysessionch + memorysessionid)
 mini-a dream=true \
-  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
-  memorysessionch='(name: mini_a_session_mem, type: file, options: (file: /tmp/mini-a-session.json))' \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/js/memory/mini-a-memory.json))' \
+  memorysessionch='(name: mini_a_session_mem, type: file, options: (file: /tmp/js/session/mini-a-session.json))' \
   memorysessionid='research-2026' \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 
 # Memory dream against markdown records in the global memory channel
 mini-a dream=true \
   memorymd=true \
-  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/js/memory/mini-a-memory.json))' \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 
 # Wiki dream
@@ -3785,7 +3785,7 @@ mini-a dream=true \
 
 # Combined memory + wiki dream
 mini-a dream=true \
-  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/js/memory/mini-a-memory.json))' \
   usewiki=true wikiroot=/shared/wiki \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 
@@ -4179,7 +4179,7 @@ For JavaScript tests, reuse the same adapter directly:
 
 ```javascript
 load("mini-a.js")
-load("mini-a-eval.js")
+load("js/core/mini-a-eval.js")
 var evaluator = new MiniAEval()
 var report = evaluator.runTests(evaluator.load("evals/core.yaml"), {
   suite: "Answers",
@@ -4727,9 +4727,9 @@ payload only when expanded; `/debug` pages the existing disk-backed trace and lo
 selected records on demand. Activity and traces are authenticated and use the same
 session token as the rest of the interface.
 
-Implementation: `mini-a-session.js` contains the shared console session;
-`mini-a-con.js` is the terminal entry point. `mini-a-web-session.js` holds the existing
-prompt route shared by Simple chat and Advanced commands. `mini-a-advanced.js`
+Implementation: `js/session/mini-a-session.js` contains the shared console session;
+`mini-a-con.js` is the terminal entry point. `js/web/mini-a-web-session.js` holds the existing
+prompt route shared by Simple chat and Advanced commands. `js/web/mini-a-advanced.js`
 provides authenticated session operations and event storage; `public/advanced.js`
 and `public/advanced.css` add browser presentation without a frontend framework.
 

@@ -1,8 +1,8 @@
 (function() {
   load("mini-a.js")
-  load("mini-a-utils.js")
-  load("mini-a-skills.js")
-  load("mini-a-subtask.js")
+  load("js/core/mini-a-utils.js")
+  load("js/skills/mini-a-skills.js")
+  load("js/core/mini-a-subtask.js")
 
   function fixture(fn) {
     var root = String(java.io.File.createTempFile("mini-a-skill-runtime-", "").getCanonicalPath())
@@ -113,7 +113,7 @@
   }
 
   exports.testBundledConsoleDiscovery = function() {
-    load("mini-a-session.js")
+    load("js/session/mini-a-session.js")
     fixture(function(root) {
       var makeSession = function(options) {
         return MiniAInteractiveSession(merge({ homedir: root, usehistory: false }, options), {

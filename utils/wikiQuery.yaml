@@ -43,7 +43,7 @@ todo:
 jobs:
 - name: Query wiki
   exec: | #js
-    load(String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent()) + "/wikiJobsLib.js")
+    loadLib(String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent()) + "/wikiJobsLib.js", true)
     var logFn = wikiJobsLog
     var prepared = wikiJobsPrepare(args, { kind: "query", log: logFn, createRoot: false })
     var ready = wikiJobsQueryReadiness(prepared.root)
@@ -52,6 +52,6 @@ jobs:
 
     var queryArgs = merge({}, prepared.args)
     if (isDef(queryArgs.goal) && !isString(queryArgs.goal)) queryArgs.goal = String(queryArgs.goal)
-    wikiJobsLoadLibs(["mini-a-common.js"])
-    load(__wikiJobsRoot + "/mini-a-session.js")
+    wikiJobsLoadLibs(["js/core/mini-a-common.js"])
+    loadLib(__wikiJobsRoot + "/js/session/mini-a-session.js", true)
     MiniAInteractiveSession(queryArgs)

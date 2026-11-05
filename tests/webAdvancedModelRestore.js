@@ -1,8 +1,8 @@
 // Environment-backed model restore integration; no model requests.
 // Run: node tests/webAdvancedModelRestore.cjs
-load('mini-a-session.js')
-load('mini-a-web-attachments.js')
-load('mini-a-advanced.js')
+load('js/session/mini-a-session.js')
+load('js/web/mini-a-web-attachments.js')
+load('js/web/mini-a-advanced.js')
 var testRoot = String(io.createTempFile('mini-a-model-restore-', '.dir'))
 io.rm(testRoot); io.mkdir(testRoot)
 testRoot = String(new java.io.File(testRoot).getCanonicalPath())

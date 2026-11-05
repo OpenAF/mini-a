@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mini-A Wiki Studio</title><link rel="stylesheet" href="/studio.css"></head><body>
-<header><h1>Wiki Studio</h1><p>Local knowledge, under your control.</p></header>
-<main id="app"><form id="login"><label>Access token <input id="token" type="password" autocomplete="off" required></label><button>Unlock Studio</button></form><p id="message" role="status" aria-live="polite"></p><div id="workspace" hidden></div></main>
-<script src="/studio.js" defer></script></body></html>
+<header><h1><strong class="studio-logo" role="img" aria-label="mini-a"><span aria-hidden="true"> ._ _ <span class="studio-logo-dot">o</span>._ <span class="studio-logo-dot">o</span>   _ 
+ | | ||| ||~~(_|</span></strong><span>Wiki Studio</span></h1><p>Local knowledge, under your control.</p></header>
+<main id="app"><div id="studio-activity" class="studio-activity" role="status" aria-live="polite" hidden><progress aria-label="Studio request in progress"></progress><span id="studio-activity-text"></span></div><form id="login"><label>Access token <input id="token" type="password" autocomplete="off" required></label><button>Unlock Studio</button></form><p id="message" role="status" aria-live="polite"></p><div id="workspace" hidden></div></main>
+<script src="/js/openafsigil.js"></script><script src="/js/njsmap.js"></script><script src="/studio.js" defer></script></body></html>

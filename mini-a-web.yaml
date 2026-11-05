@@ -701,7 +701,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : adaptiverouting
-    desc     : Enable rule-based route selection via mini-a-router.js
+    desc     : Enable rule-based route selection via js/core/mini-a-router.js
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
@@ -750,7 +750,7 @@ help:
     mandatory: false
   - name     : memorysessionch
     desc     : SLON/JSON channel definition or native file path for session memory persistence
-    example  : "(name: mini_a_session_mem, type: file, options: (file: '/tmp/mini-a-session.json'))"
+    example  : "(name: mini_a_session_mem, type: file, options: (file: '/tmp/js/session/mini-a-session.json'))"
     mandatory: false
   - name     : memorymaxpersection
     desc     : Maximum memory entries kept per section
@@ -1863,8 +1863,8 @@ ojob:
   argsFromEnvs: true
   loadLibs    :
   - mini-a.js
-  - mini-a-web-attachments.js
-  - mini-a-web-session.js
+  - js/web/mini-a-web-attachments.js
+  - js/web/mini-a-web-session.js
   - s3.js
   channels    :
     create:
@@ -2236,8 +2236,11 @@ jobs:
     }
     global.__advanced = __
     if (args.webadvanced === true) {
-      loadLib("mini-a-session.js")
-      loadLib("mini-a-advanced.js")
+      var miniALibraryRoot = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent())
+      loadLib(miniALibraryRoot + "/js/mini-a-paths.js")
+      __miniAPackageRoot = __miniAResolvePackageRoot(miniALibraryRoot)
+      loadLib(__miniAPath("js/session/mini-a-session.js"))
+      loadLib(__miniAPath("js/web/mini-a-advanced.js"))
       global.__advanced = new MiniAAdvanced(args)
     }
     global.__res = {}

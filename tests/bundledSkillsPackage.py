@@ -51,7 +51,7 @@ names.forEach(function(name) {
   var support = tool.skills({operation: "read", name: name, reference: rendered.referencedFiles[0].relativePath})
   if (!isString(support.body) || support.body.length < 100) throw new Error("Failed offline reference " + name)
 })
-load(expected + "/mini-a-session.js")
+load(expected + "/js/session/mini-a-session.js")
 var session = MiniAInteractiveSession({useskills: true, homedir: %s, usehistory: false}, {
   print: function() {}, error: function() {}, event: function() {}, view: function() {},
   validateOption: function() {}, ask: function() {}, goal: function() {}, commandResult: function() {}

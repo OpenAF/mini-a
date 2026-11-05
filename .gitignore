@@ -1,3 +1,4 @@
 .openaf_precompiled/
 .BUGS-CATALOG.md
 .mini-a
+cleanup-precompiled.sh

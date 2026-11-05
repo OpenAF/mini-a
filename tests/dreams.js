@@ -1,7 +1,7 @@
 (function() {
   global.__mini_a_dreams_lib_mode = true
-  load("mini-a-common.js")
-  load("mini-a-memory.js")
+  load("js/core/mini-a-common.js")
+  load("js/memory/mini-a-memory.js")
   load("mini-a-dreams.js")
 
   // ─── helpers ────────────────────────────────────────────────
@@ -498,7 +498,7 @@
   }
 
   var seedWiki = function(dir, pageCount) {
-    load("mini-a-wiki.js")
+    load("js/wiki/mini-a-wiki.js")
     var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" }, function() {})
     for (var i = 0; i < (isNumber(pageCount) ? pageCount : 6); i++) {
       wm.write("notes/page" + i + ".md",
@@ -546,7 +546,7 @@
       ow.test.assert(res.indexes_created + res.indexes_updated + res.finalize.indexes_regenerated > 0, true, "apply should regenerate index pages somewhere in the pipeline")
       ow.test.assert(res.finalize.reindexed, true, "finalize should rebuild the search index")
 
-      load("mini-a-wiki.js")
+      load("js/wiki/mini-a-wiki.js")
       var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" }, function() {})
       // all seeded pages live under notes/, so the root gets the sections table
       var idx = wm.read("index.md")
@@ -603,7 +603,7 @@
   }
 
   var seedRepairWiki = function(dir) {
-    load("mini-a-wiki.js")
+    load("js/wiki/mini-a-wiki.js")
     var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" }, function() {})
     wm.write("section/index.md", { title: "Section", description: "Section index" }, "# Section")
     wm.write("section/one.md", { title: "One", description: "One" }, "# One")
@@ -672,7 +672,7 @@
     // anchor should now resolve via normalization and get rewritten to the canonical slug.
     var dir = makeWikiDir()
     try {
-      load("mini-a-wiki.js")
+      load("js/wiki/mini-a-wiki.js")
       var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" }, function() {})
       wm.write("target.md", { title: "Target", description: "d" }, "# Target\n\n## Real Heading\n\nBody.")
       wm.write("source.md", { title: "Source", description: "d" }, "# Source\n\nSee [link](target.md#Real Heading).")
@@ -702,7 +702,7 @@
     // match; a linking page in the same directory as one of them should resolve to that one.
     var dir = makeWikiDir()
     try {
-      load("mini-a-wiki.js")
+      load("js/wiki/mini-a-wiki.js")
       var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" }, function() {})
       wm.write("docs/setup.md", { title: "Setup", description: "d" }, "# Setup\n\nDocs setup.")
       wm.write("guide/setup.md", { title: "Setup", description: "d" }, "# Setup\n\nGuide setup.")
@@ -722,7 +722,7 @@
     // write, reorg mode (which allows only 1 repair pass) would never converge such a page.
     var dir = makeWikiDir()
     try {
-      load("mini-a-wiki.js")
+      load("js/wiki/mini-a-wiki.js")
       var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" }, function() {})
       wm.write("actual-target.md", { title: "Actual Target", description: "d", aliases: ["missing"] }, "# Actual Target")
       wm.write("md-source.md", { title: "MdSource", description: "d" }, "# MdSource\n\nSee [a](missing.md) and also [b](missing.md).")
@@ -744,7 +744,7 @@
     // a permanently-unfixable invalid_anchor issue.
     var dir = makeWikiDir()
     try {
-      load("mini-a-wiki.js")
+      load("js/wiki/mini-a-wiki.js")
       var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" }, function() {})
       wm.write("target.md", { title: "New Title", description: "d" }, "# Old Title\n\nBody.")
       wm.write("source.md", { title: "Source", description: "d" }, "# Source\n\nSee [link](target.md#old-title).")
@@ -798,7 +798,7 @@
     // must be reported exactly once per repair run, not once per internal pass.
     var dir = makeWikiDir()
     try {
-      load("mini-a-wiki.js")
+      load("js/wiki/mini-a-wiki.js")
       var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" }, function() {})
       wm.write("target.md", { title: "Target", description: "d" }, "# Target\n\n## Real Heading\n\nBody.")
       wm.write("source.md", { title: "Source", description: "d" }, "# Source\n\nSee [link](target.md#typo-heading).")
@@ -828,7 +828,7 @@
     // here), so the full chain — root, a/, a/b/, and the leaf's own a/b/c/ — should all exist.
     var dir = makeWikiDir()
     try {
-      load("mini-a-wiki.js")
+      load("js/wiki/mini-a-wiki.js")
       var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" }, function() {})
       wm.write("a/b/c/page.md", { title: "Page", description: "Deep page" }, "# Page")
       wm.close()
@@ -847,7 +847,7 @@
     // repair's scoped one, since both funnel through the same shared function.
     var dir = makeWikiDir()
     try {
-      load("mini-a-wiki.js")
+      load("js/wiki/mini-a-wiki.js")
       var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" }, function() {})
       wm.write("a/b/c/page.md", { title: "Page", description: "Deep page" }, "# Page")
       wm.close()
@@ -871,7 +871,7 @@
     ;[true, false].forEach(function(v2) {
       var dir = seedWiki(makeWikiDir()), inspector, snapshot
       try {
-        load("mini-a-wiki.js")
+        load("js/wiki/mini-a-wiki.js")
         // Bypass managed writes to prove reindex discovers unpublished content.
         io.mkdir(dir + "/offindex")
         io.writeFileString(dir + "/offindex/page.md",
@@ -971,7 +971,7 @@
   exports.testDreamWikiIndexesModeRegeneratesAllIndexes = function() {
     var dir = seedWiki(makeWikiDir())
     try {
-      load("mini-a-wiki.js")
+      load("js/wiki/mini-a-wiki.js")
       var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "indexes" }, function() {}).dreamWiki()
       ow.test.assert(res.ok, true, "indexes mode should succeed")
       ow.test.assert(res.mode, "indexes", "mode should be indexes")

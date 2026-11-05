@@ -1,8 +1,9 @@
 // Author: Nuno Aguiar
 // License: Apache 2.0
-// Terminal entry point. Command behavior is shared with Advanced web sessions.
-try {
-  var miniASessionBase = io.fileExists("mini-a-session.js") ? "." : getOPackPath("mini-a")
-  loadLib(miniASessionBase + "/mini-a-session.js")
-  MiniAInteractiveSession(processExpr(" "))
-} catch(e) { $err(e) }
+// Public entry point; implementation lives under js/.
+var __miniAEntryRoot = typeof __loadedfrom === "string" && io.fileExists(__loadedfrom)
+  ? String(new java.io.File(__loadedfrom).getCanonicalFile().getParent())
+  : (getOPackPath("mini-a") || ".")
+loadLib(__miniAEntryRoot + "/js/mini-a-paths.js")
+__miniAPackageRoot = __miniAResolvePackageRoot(__miniAEntryRoot)
+loadLib(__miniAPath("js/session/mini-a-con.js", __miniAEntryRoot), true)

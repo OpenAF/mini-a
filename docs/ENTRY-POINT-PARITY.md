@@ -39,7 +39,7 @@ and completion apply to its command grammar; shell wrappers already forward `"$@
   and dereferenced missing results. It now retains structured results, handles string
   and wrapped answers, preserves raw strings, and reports a missing final result through
   its existing error/disposal path.
-- Hook parsing and execution were duplicated. They now live in `mini-a-common.js`,
+- Hook parsing and execution were duplicated. They now live in `js/core/mini-a-common.js`,
   retaining console hook metadata, validation warnings, filters, environment conversion,
   output limits, timeouts and blocking behavior. The one-shot path gains the console's
   invalid-event and empty-command warnings.
