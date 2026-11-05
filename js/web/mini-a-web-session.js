@@ -1,6 +1,10 @@
 // Shared prompt route used by Simple chat and Advanced console commands.
 function MiniAWebPrompt(request) {
   var _res = {}
+  var artifacts = typeof MiniAWebArtifacts !== 'undefined' ? MiniAWebArtifacts : {
+    enabled: function() { return false }, protect: function() {}, begin: function() { return null }, finish: function() {}
+  }
+  if (global.maArgs.webartifacts === true && !artifacts.enabled()) throw new Error("Artifact broker unavailable")
   var submittedAt = Date.now()
   try {
     if (!global._mini_a_web_checkToken(request)) {
@@ -24,6 +28,7 @@ function MiniAWebPrompt(request) {
     postData.prompt = __normalizePromptInput(postData.prompt)
     if (isString(postData.displayPrompt)) postData.displayPrompt = __normalizePromptInput(postData.displayPrompt)
     var binaryAttachments = MiniAWebAttachments.validate(postData.attachments, postData.prompt)
+    if (artifacts.enabled() && binaryAttachments.length) throw new Error("Attachments are disabled in the artifact isolation profile; supply explicit input data in the goal")
     var attachmentDisplayPrompt = binaryAttachments.length ? MiniAWebAttachments.displayPrompt(postData.prompt, binaryAttachments) : __
     delete postData.attachments
     // Validate UUID or generate a new one
@@ -62,7 +67,7 @@ function MiniAWebPrompt(request) {
     }
     // Start Mini-A interaction in a non-blocking way
     $doV(() => {
-      var uuid = _res.uuid, lma
+      var uuid = _res.uuid, lma, artifactBinding, artifactSuccess = false
       try {
       if (global.__usestream && isFunction(global._mini_a_web_initSSE)) {
         global._mini_a_web_initSSE(uuid)
@@ -86,12 +91,13 @@ function MiniAWebPrompt(request) {
         advancedState.displayPrompt = postData.displayPrompt
         global.__advanced.persist(advancedState)
       }
+      artifacts.protect(effectiveArgs)
       var startArgs = merge(effectiveArgs, {
         goal        : __miniAPrefixGoal(postData.prompt, effectiveArgs.goalprefix),
         raw         : true,
         __startupSubmittedAt: submittedAt
       })
-      if (isMap(postData.skillUsage) && isString(postData.skillUsage.name) && /^[a-z0-9][a-z0-9_-]*$/.test(postData.skillUsage.name)) {
+      if (!artifacts.enabled() && isMap(postData.skillUsage) && isString(postData.skillUsage.name) && /^[a-z0-9][a-z0-9_-]*$/.test(postData.skillUsage.name)) {
         startArgs._skillHandoff = [{ ref: "local:" + postData.skillUsage.name, args: isString(postData.skillUsage.args) ? postData.skillUsage.args.substring(0, 4000) : "", required: true }]
       }
       if (toBoolean(startArgs.usememory) && isString(global.__memorysessionheader) && global.__memorysessionheader.length > 0 && isMap(request.header)) {
@@ -373,6 +379,8 @@ function MiniAWebPrompt(request) {
           }
         })
         if (isString(startArgs.conversation) && isUnDef(advancedState)) startArgs.conversation = global._mini_a_web_loadFile(startArgs.conversation)
+        artifactBinding = artifacts.begin(uuid, runToken, function() { return global._mini_a_web_owns(uuid, runToken) && global.__attachmentStops[uuid] !== runToken && (!advancedState || !advancedState.cancelled) })
+        lma._artifactBinding = artifactBinding
         // Input capability must be attached before init builds the utility catalog.
         if (isDef(advancedState)) advancedState.runtime.attach(lma)
         // Image attachment inspection needs a configured model before start().
@@ -383,6 +391,8 @@ function MiniAWebPrompt(request) {
         lma._beginStartupTiming(startArgs)
       }
 
+      if (!artifactBinding) artifactBinding = artifacts.begin(uuid, runToken, function() { return global._mini_a_web_owns(uuid, runToken) && global.__attachmentStops[uuid] !== runToken && (!advancedState || !advancedState.cancelled) })
+      lma._artifactBinding = artifactBinding
       lma._historyCheckpointFn = function(goal) {
         if (isUnDef(advancedState) && isObject(lma._historyVm)) global._mini_a_web_storeHistory(uuid, goal)
       }
@@ -432,6 +442,7 @@ function MiniAWebPrompt(request) {
       if (!global._mini_a_web_owns(uuid, runToken)) return
       // start() can return a string, a structured result, or no result on failure.
       // Keep typed answers intact and never dereference an absent result.
+      if (artifactBinding && !artifactBinding.live()) throw new Error("Generation cancelled")
       if (isUnDef(_rma)) throw "Agent returned no final answer"
       var finalMessage = isObject(_rma) && isString(_rma.answer) && _rma.answer.trim().length > 0 ? _rma.answer : _rma
       if (isString(finalMessage) && startArgs.format != "raw") finalMessage = __miniAUnwrapAnswer(finalMessage)
@@ -460,6 +471,7 @@ function MiniAWebPrompt(request) {
       if (isFunction(lma._scheduleReflectionQueue)) {
         try { lma._scheduleReflectionQueue(startArgs, now() + 1) } catch(ignoreReflectionSchedule) {}
       }
+      artifactSuccess = true
       } catch(eee) {
         logErr(eee)
         if (isDef(advancedState)) global.__advanced.emit(advancedState, "error", __miniAErrMsg(eee))
@@ -475,7 +487,10 @@ function MiniAWebPrompt(request) {
         binaryAttachments = null
         if (global.__attachmentStops[uuid] === runToken) delete global.__attachmentStops[uuid]
         try { if (isDef(advancedState)) { global.__advanced.emit(advancedState, "complete", { requestId: advancedState.operation, action: "goal" }); advancedState.operation = null; delete advancedState.displayPrompt; global.__advanced.persist(advancedState) } }
-        finally { global._mini_a_web_release(uuid, runToken) }
+        finally {
+          try { artifacts.finish(artifactBinding, artifactSuccess) }
+          finally { global._mini_a_web_release(uuid, runToken) }
+        }
       }
     }).catch((eee) => {
       logErr(eee)

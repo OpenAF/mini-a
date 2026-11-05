@@ -1210,6 +1210,7 @@ window.MiniAAdvancedUI = function(bridge) {
       if (child.tagName === 'A') child.setAttribute('rel','noopener noreferrer');
     }
     node.append(template.content);
+    if (bridge.renderSvgBlocks) bridge.renderSvgBlocks(node);
     for (const code of node.querySelectorAll('code.language-mermaid')) {
       if (!window.mermaid) continue;
       const source = code.textContent;
@@ -1229,7 +1230,8 @@ window.MiniAAdvancedUI = function(bridge) {
     const controls = el('div', undefined, 'advanced-actions');
     const draw = () => content.replaceChildren(raw ? el('pre', text) : markdown(text));
     controls.append(button('Rendered / Raw', () => { raw = !raw; draw(); }), button('Copy', () => navigator.clipboard.writeText(text)), button('Download', () => download(text, name)));
-    container.append(controls, content); draw(); return container;
+    container.append(controls, content); draw();
+    return container;
   }
   function helpScreen(skillsOnly = false) {
     const search = input(skillsOnly ? 'Search local skills' : 'Search Help', skillsOnly && !/^(search|remote|recommend|open|read|related|context)( |$)/.test(viewParams.args || '') ? viewParams.args || '' : ''); search.setAttribute('aria-label', search.placeholder);
@@ -1364,7 +1366,7 @@ window.MiniAAdvancedUI = function(bridge) {
   function renderBlock(block) {
     const value = block.value, meta = block.meta || {}, container = el('section',undefined,'advanced-result-block');
     if (block.type === 'markdown') { if (meta.ref) container.append(el('h4',meta.ref)); if (meta.path) container.append(el('h4',meta.path),breadcrumbs(meta.path)); if (meta.page) container.append(structuredMap(meta.page)); container.append(reader(String(value || ''))); }
-    else if (block.type === 'answer') { container.append(reader(String(value.answer || ''),meta.raw === true)); const goal = el('details'); goal.append(el('summary','Previous goal'),el('pre',value.goal || '')); container.append(goal); }
+    else if (block.type === 'answer') { container.append(reader(String(value.answer || ''),meta.raw === true)); if (bridge.renderGeneratedFiles) bridge.renderGeneratedFiles(container, bridge.uuid()); const goal = el('details'); goal.append(el('summary','Previous goal'),el('pre',value.goal || '')); container.append(goal); }
     else if (block.type === 'context') container.append(contextResult(value));
     else if (block.type === 'graph') container.append(graphResult(value,meta));
     else if (block.type === 'recoveries') container.append(recoveryResult(value));

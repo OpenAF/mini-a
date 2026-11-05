@@ -43,7 +43,7 @@ MiniALauncher._KNOWN_ARGUMENT_NAMES = (function() {
     "memorysessionheader", "goal", "mcp", "validationgoal", "valgoal", "deepresearch", "maxcycles",
     "validationthreshold", "persistlearnings", "valtools", "outerloop", "outerloopinstructions", "outerloopsessionid", "outerloopmaxcycles", "outerloopmaxtime", "outerloopstoponrepeat", "outerloopmaxnochange",
     "durable", "runid", "resumerun", "runstatus", "runroot", "showseparator", "goalprefix", "shellprefix", "resume", "mode",
-    "onport", "web", "webadvanced", "webadvancedpath", "modelman", "mcptest", "memoryman", "wikiman", "wikihydrate", "wikidream", "wikiquery", "wikitarget", "workermode", "path", "usehistory", "useattach", "historypath",
+    "webartifacts", "artifactworkerurl", "artifactdir", "onport", "web", "webadvanced", "webadvancedpath", "modelman", "mcptest", "memoryman", "wikiman", "wikihydrate", "wikidream", "wikiquery", "wikitarget", "workermode", "path", "usehistory", "useattach", "historypath",
     "historykeep", "historykeepperiod", "historykeepcount", "historyretention", "ssequeuetimeout",
     "logpromptheaders", "historys3bucket", "historys3prefix", "historys3url", "historys3accesskey",
     "historys3secret", "historys3region", "historys3useversion1", "historys3ignorecertcheck", "extracommands",

@@ -381,6 +381,20 @@
         height: auto !important;
     }
 
+    .svg-rendered-block { position: relative; --svg-control-bg: #f1f5f9; --svg-control-text: #475569; --svg-control-border: #cbd5e1; }
+    body.markdown-body-dark .svg-rendered-block { --svg-control-bg: #252b36; --svg-control-text: #d1d9e6; --svg-control-border: #475569; }
+    .svg-viewport { overflow: auto; }
+    .svg-image-stage { width: 100%; }
+    .svg-image-stage img { margin-inline: auto; }
+    .svg-controls { position: absolute; top: 6px; right: 6px; display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+    .svg-rendered-block .svg-controls button { display: inline-flex; align-items: center; justify-content: center; width: 26px; min-height: 26px; height: 26px; border: 1px solid var(--svg-control-border); border-radius: 5px; padding: 4px; cursor: pointer; color: var(--svg-control-text); background: var(--svg-control-bg); }
+    .svg-controls button svg { flex: none; }
+    .svg-controls button:disabled { opacity: .4; cursor: default; }
+    .svg-rendered-block:hover .svg-controls,
+    .svg-rendered-block:focus-within .svg-controls { opacity: 1; }
+    .svg-controls button:hover { filter: brightness(.94); }
+    .svg-controls button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+    @media (hover: none) { .svg-controls { opacity: 1; } }
     .mermaid-diagram {
         position: relative;
         text-align: center;
@@ -3146,6 +3160,7 @@
         captureActivityDisclosures();
         lastRenderedHtml = processedHtml;
         resultsDiv.innerHTML = processedHtml;
+        renderGeneratedFiles(resultsDiv, currentSessionUuid);
         restoreActivityDisclosures();
 
         // Apply streaming class and animation
@@ -4063,8 +4078,118 @@
         }
     }
 
+    // File bytes are fetched only after a deliberate click, with header auth.
+    async function renderGeneratedFiles(root, session) {
+        if (!root || !session) return;
+        root.setAttribute('data-artifact-session', session);
+        const previous = root.querySelector('.generated-files');
+        const ticket = {}; root._artifactRequest = ticket;
+        const panel = document.createElement('section');
+        panel.className = 'generated-files';
+        try {
+            const response = await fetch(resolveAppUrl('artifacts'), {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uuid: session })
+            });
+            if (!root.isConnected || root._artifactRequest !== ticket || root.getAttribute('data-artifact-session') !== session) return;
+            if (!response.ok) { if (previous) previous.remove(); root.removeAttribute('data-artifact-session'); return; }
+            const data = await response.json();
+            if (!root.isConnected || root._artifactRequest !== ticket || root.getAttribute('data-artifact-session') !== session) return;
+            if (!Array.isArray(data.files) || !data.files.length) { if (previous) previous.remove(); return; }
+            const signature = JSON.stringify(data.files);
+            if (previous && previous._artifactSignature === signature) return;
+            panel._artifactSignature = signature;
+            if (previous) previous.remove();
+            root.appendChild(panel);
+            const heading = document.createElement('h4'); heading.textContent = 'Generated files'; panel.appendChild(heading);
+            for (const file of data.files) {
+                const row = document.createElement('div');
+                const label = document.createElement('span');
+                label.textContent = file.name + ' · ' + Math.ceil(file.size / 1024) + ' KiB · ' +
+                    (file.status === 'published' ? 'expires ' + new Date(file.expires).toLocaleString() : file.status);
+                row.appendChild(label);
+                if (file.status === 'published' && file.expires > Date.now()) {
+                    const download = document.createElement('button'); download.type = 'button'; download.textContent = 'Download';
+                    download.addEventListener('click', async () => {
+                        download.disabled = true;
+                        try {
+                            const result = await fetch(resolveAppUrl('artifacts'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uuid: session, id: file.id }) });
+                            if (!result.ok) throw new Error('File unavailable');
+                            const url = URL.createObjectURL(await result.blob());
+                            const link = document.createElement('a'); link.href = url; link.download = file.name;
+                            document.body.appendChild(link); link.click(); link.remove();
+                            setTimeout(() => URL.revokeObjectURL(url), 1000);
+                        } catch (_) { download.textContent = 'Unavailable'; }
+                        finally { download.disabled = false; }
+                    });
+                    row.appendChild(download);
+                }
+                panel.appendChild(row);
+            }
+        } catch (_) { panel.remove(); }
+    }
+
+    setInterval(() => {
+        document.querySelectorAll('[data-artifact-session]').forEach(root => renderGeneratedFiles(root, root.getAttribute('data-artifact-session')));
+    }, 3000);
+
+    // Shared by Simple and Advanced. Export only the validated preview bytes.
+    function addSvgDownloadControl(container, svgText) {
+        if (container.querySelector('.svg-download-button')) return;
+        const control = document.createElement('button');
+        control.type = 'button';
+        control.className = 'svg-download-button';
+        control.title = 'Download SVG';
+        control.setAttribute('aria-label', 'Download SVG');
+        control.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5"/></svg>';
+        control.addEventListener('click', () => {
+            const url = URL.createObjectURL(new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' }));
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'diagram.svg';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        });
+        const controls = document.createElement('div');
+        controls.className = 'svg-controls';
+        controls.setAttribute('role', 'group');
+        controls.setAttribute('aria-label', 'SVG controls');
+        controls.appendChild(control);
+        const image = container.querySelector('img');
+        if (image) {
+            let scale = 1, baseWidth = 0;
+            const resizeButton = (label, path, action) => {
+                const button = document.createElement('button');
+                button.type = 'button'; button.className = 'svg-resize-button';
+                button.title = label; button.setAttribute('aria-label', label);
+                button.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="' + path + '"/></svg>';
+                button.addEventListener('click', action); controls.appendChild(button);
+                return button;
+            };
+            const resize = next => {
+                if (!baseWidth) baseWidth = image.getBoundingClientRect().width;
+                if (!baseWidth) return;
+                scale = Math.max(.25, Math.min(3, next));
+                image.style.width = (baseWidth * scale) + 'px';
+                image.style.maxWidth = 'none';
+                smaller.disabled = scale <= .25;
+                larger.disabled = scale >= 3;
+            };
+            const smaller = resizeButton('Shrink SVG', 'M5 12h14', () => resize(scale - .25));
+            const larger = resizeButton('Enlarge SVG', 'M5 12h14M12 5v14', () => resize(scale + .25));
+            resizeButton('Reset SVG size', 'M3 11a9 9 0 1 1 2 7M3 4v7h7', () => {
+                scale = 1; baseWidth = 0;
+                image.style.width = ''; image.style.maxWidth = '100%';
+                smaller.disabled = false; larger.disabled = false;
+            });
+        }
+        container.appendChild(controls);
+    }
+
     function sanitizeSvgContent(rawSvg) {
-        if (typeof rawSvg !== 'string') return '';
+        if (typeof rawSvg !== 'string' || rawSvg.length > 2 * 1024 * 1024) return '';
 
         let sanitized = rawSvg.trim();
         if (sanitized.length === 0) return '';
@@ -4133,7 +4258,39 @@
             return match;
         });
 
-        return sanitized;
+        if (/<!DOCTYPE|<!ENTITY|<\?/i.test(sanitized) || typeof DOMParser === 'undefined') return '';
+        sanitized = sanitized.replace(/<svg\b([^>]*)>/i, (tag, attributes) => /\bxmlns\s*=/.test(attributes) ? tag : '<svg xmlns="http://www.w3.org/2000/svg"' + attributes + '>');
+        const doc = new DOMParser().parseFromString(sanitized, 'image/svg+xml');
+        if (doc.querySelector('parsererror') || doc.documentElement.localName !== 'svg') return '';
+        const tags = new Set('svg g defs title desc path rect circle ellipse line polyline polygon text tspan textPath clipPath mask linearGradient radialGradient stop pattern marker symbol use'.split(' '));
+        const attrs = new Set('xmlns xmlns:xlink id class viewBox width height x y x1 y1 x2 y2 cx cy r rx ry d points transform fill fill-opacity fill-rule stroke stroke-width stroke-opacity stroke-linecap stroke-linejoin stroke-dasharray stroke-dashoffset opacity font-family font-size font-weight font-style text-anchor dominant-baseline alignment-baseline dx dy rotate textLength lengthAdjust preserveAspectRatio gradientUnits gradientTransform offset stop-color stop-opacity spreadMethod clip-path clip-rule mask maskUnits maskContentUnits patternUnits patternContentUnits patternTransform marker-start marker-mid marker-end markerWidth markerHeight refX refY orient markerUnits href xlink:href'.split(' '));
+        const nodes = [doc.documentElement, ...doc.documentElement.querySelectorAll('*')];
+        if (nodes.length > 10000) return '';
+        for (const node of nodes) {
+            if (node.namespaceURI !== 'http://www.w3.org/2000/svg' || !tags.has(node.localName)) return '';
+            for (const attr of [...node.attributes]) {
+                if (attr.name === 'style') {
+                    // Preserve passive presentation styles as SVG attributes.
+                    for (const declaration of attr.value.split(';')) {
+                        if (!declaration.trim()) continue;
+                        const colon = declaration.indexOf(':');
+                        const name = declaration.slice(0, colon).trim();
+                        const value = declaration.slice(colon + 1).trim();
+                        if (colon < 1 || !/^(fill|fill-opacity|stroke|stroke-width|stroke-opacity|opacity|font-family|font-size|font-weight|font-style|text-anchor|dominant-baseline)$/.test(name) ||
+                            /[\\<>\u0000-\u001f]|url|expression|@|:/i.test(value)) return '';
+                        node.setAttribute(name, value);
+                    }
+                    node.removeAttributeNode(attr);
+                    continue;
+                }
+                if (!attrs.has(attr.name)) { node.removeAttributeNode(attr); continue; }
+                const value = attr.value.trim();
+                if ((attr.localName === 'href' && !/^#[\w.-]+$/.test(value)) ||
+                    (/url\s*\(/i.test(value) && !/^url\(\s*#[\w.-]+\s*\)$/.test(value)) ||
+                    /[\\\u0000-\u001f]|javascript:|data:|https?:/i.test(value) && attr.name !== 'xmlns' && attr.name !== 'xmlns:xlink') return '';
+            }
+        }
+        return new XMLSerializer().serializeToString(doc.documentElement);
     }
 
     function validateSvgXmlContent(svgText) {
@@ -4171,14 +4328,14 @@
         }
     }
 
-    function renderSvgBlocks() {
-        if (!resultsDiv) return;
+    function renderSvgBlocks(root = resultsDiv) {
+        if (!root) return;
 
         const isDark = typeof _isD !== 'undefined' && _isD;
         const background = isDark ? '#101218' : '#f8fafc';
         const border = isDark ? 'rgba(230,230,230,0.2)' : 'rgba(33,37,41,0.18)';
 
-        const svgBlocks = resultsDiv.querySelectorAll('pre code.language-svg, pre code.svg');
+        const svgBlocks = root.querySelectorAll('pre code.language-svg, pre code.svg');
         svgBlocks.forEach((block) => {
             if (block.dataset.svgRendered === 'true') return;
 
@@ -4223,7 +4380,7 @@
             wrapper.style.borderRadius = '8px';
             wrapper.style.padding = '10px';
             wrapper.style.margin = '12px 0';
-            wrapper.style.overflow = 'auto';
+            wrapper.style.overflow = 'hidden';
             wrapper.setAttribute('data-svg-source', sanitizedSvg);
 
             const image = document.createElement('img');
@@ -4233,12 +4390,17 @@
             image.style.maxWidth = '100%';
             image.style.height = 'auto';
 
-            wrapper.appendChild(image);
+            const viewport = document.createElement('div');
+            viewport.className = 'svg-viewport';
+            const stage = document.createElement('div');
+            stage.className = 'svg-image-stage';
+            stage.appendChild(image); viewport.appendChild(stage); wrapper.appendChild(viewport);
+            addSvgDownloadControl(wrapper, sanitizedSvg);
             pre.replaceWith(wrapper);
             block.dataset.svgRendered = 'true';
         });
 
-        const rendered = resultsDiv.querySelectorAll('.svg-rendered-block[data-svg-source]');
+        const rendered = root.querySelectorAll('.svg-rendered-block[data-svg-source]');
         rendered.forEach((container) => {
             container.style.background = background;
             container.style.border = '1px solid ' + border;
@@ -5058,6 +5220,8 @@
             openComposer,
             composerExpanded,
             renderMarkdown: renderConversationMarkdown,
+            renderSvgBlocks,
+            renderGeneratedFiles,
             url: resolveAppUrl,
             newRequestId: generateNewSessionUuid,
             uuid: () => { if (!currentSessionUuid) currentSessionUuid = getOrCreateSessionUuid(); return currentSessionUuid; },

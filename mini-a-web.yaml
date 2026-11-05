@@ -529,6 +529,15 @@ help:
     desc     : Maximum shell output size in characters
     example  : "12000"
     mandatory: false
+  - name     : webartifacts
+    desc     : Enable isolated generated-file downloads; requires a private worker, strong webtoken and usesandbox
+    mandatory: false
+  - name     : artifactworkerurl
+    desc     : Private per-instance worker URL ending in /artifact-worker
+    mandatory: false
+  - name     : artifactdir
+    desc     : Private durable artifact directory (24 hour expiry)
+    mandatory: false
   - name     : usesandbox
     desc     : Built-in shell sandbox preset (off, auto, linux, macos, windows)
     example  : "auto"
@@ -1377,7 +1386,14 @@ todo:
 - (httpdService   ): "${onport:-8888}"
   ((uri          )): /ping
   ((execURI      )): | #js
+    if (global.__artifactRequired && !MiniAWebArtifacts.enabled()) return ow.server.httpd.reply({ status: "unavailable" }, 503)
     return ow.server.httpd.reply({ status: "ok" })
+
+# Generated artifacts require header authentication even when stream tokens use URLs.
+- (httpdService   ): "${onport:-8888}"
+  ((uri          )): /artifacts
+  ((execURI      )): | #js
+    return MiniAWebArtifacts.route(request)
 
 # Info about the server
 - (httpdService   ): "${onport:-8888}"
@@ -1404,6 +1420,10 @@ todo:
       var raw = request.files.postData
       if (!isString(raw) || raw.length > MiniAWebAttachments.maxRequestChars) throw "Invalid advanced request"
       var data = jsonParse(raw)
+      if (typeof MiniAWebArtifacts !== "undefined" && MiniAWebArtifacts.enabled()) {
+        if (data.action === "stop") MiniAWebArtifacts.cancel(data.uuid)
+        MiniAWebArtifacts.guardAdvanced(data)
+      }
       if (raw.length > 150000 && (!isArray(data.attachments) || !data.attachments.length)) throw "Invalid advanced request"
       return ow.server.httpd.reply(global.__advanced.request(data))
     } catch(e) { return ow.server.httpd.reply({ error: String(e) }) }
@@ -1422,11 +1442,12 @@ todo:
       }
       var mutationToken = global._mini_a_web_reserve(postData.uuid)
       if (isUnDef(mutationToken)) return ow.server.httpd.reply({ error: "session busy", uuid: postData.uuid, busy: true })
+      if (typeof MiniAWebArtifacts !== "undefined" && (postData.force || (!global.__usehistory && isUnDef(global.__advanced)))) MiniAWebArtifacts.remove(postData.uuid)
       // Starting a new Advanced conversation keeps the previous console history.
       if (isDef(global.__advanced) && isDef(global.__advanced.sessions[postData.uuid])) {
         var advancedSession = global.__advanced.sessions[postData.uuid]
         if (postData.force) {
-          advancedSession.runtime.execute("/clear")
+          if (typeof MiniAWebArtifacts === "undefined" || !MiniAWebArtifacts.enabled()) advancedSession.runtime.execute("/clear")
           global.__advanced.removeSession(postData.uuid)
         } else {
           advancedSession.runtime.saveConversation()
@@ -1485,6 +1506,7 @@ todo:
 - (httpdService   ): "${onport:-8888}"
   ((uri          )): /prepare
   ((execURI      )): | #js
+    if (typeof MiniAWebArtifacts !== "undefined" && MiniAWebArtifacts.enabled()) return ow.server.httpd.reply({ prepared: false })
     if (!global._mini_a_web_checkToken(request)) return ow.server.httpd.reply({ error: "unauthorized" })
     try {
       var raw = request.files.postData
@@ -1516,6 +1538,7 @@ todo:
       }
 
       if (isDef(postData.request) && postData.request == "stop") {
+        if (typeof MiniAWebArtifacts !== "undefined") MiniAWebArtifacts.cancel(postData.uuid)
         global.__attachmentStops = global.__attachmentStops || {}
         if (isDef(global.__runTokens[postData.uuid])) global.__attachmentStops[postData.uuid] = global.__runTokens[postData.uuid]
         var _stopConv = global.__conversations[ postData.uuid ]
@@ -1865,6 +1888,8 @@ ojob:
   - mini-a.js
   - js/web/mini-a-web-attachments.js
   - js/web/mini-a-web-session.js
+  - js/artifacts/mini-a-artifact-policy.js
+  - js/web/mini-a-web-artifacts.js
   - s3.js
   channels    :
     create:
@@ -1880,6 +1905,7 @@ jobs:
     if (isUnDef(getEnv("OAF_MODEL")) && !hasModelOverride) {
       throw "OAF_MODEL environment variable not set. Please export OAF_MODEL or provide model= with your model configuration before starting the Mini-A web server."
     }
+    global.__artifactRequired = toBoolean(args.webartifacts) === true
     global.__webTokenGenerated = false
     if (toBoolean(args.webadvanced) === true && (isUnDef(args.onport) || String(args.onport).trim() === "")) {
       // webadvanced implies the web view: pick a free port (prefer 8888) when none was requested.
@@ -1942,6 +1968,9 @@ jobs:
   - CheckEnv
   check:
     in:
+      webartifacts   : toBoolean().isBoolean().default(false)
+      artifactworkerurl: isString().default(__)
+      artifactdir    : isString().default(__)
       webadvanced    : toBoolean().isBoolean().default(false)
       showexecs       : toBoolean().isBoolean().default(false)
       verbose         : toBoolean().isBoolean().default(false)
@@ -2310,6 +2339,7 @@ jobs:
     global._mini_a_web_isValidUuid = (u) => isString(u) && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(u)
 
     global._mini_a_web_checkToken = (request) => {
+      if (global.__artifactRequired && !MiniAWebArtifacts.enabled()) return false
       if (isUnDef(global.__webtoken)) return true
       var _h = isMap(request) && isMap(request.header) ? request.header["x-mini-a-token"] : __
       if (isString(_h) && _h === global.__webtoken) return true
@@ -2394,6 +2424,8 @@ jobs:
 
     args.browsercontext = browserContext
     MiniA.applyLibEnvDefault(args)
+    if (typeof MiniAWebArtifacts !== "undefined") MiniAWebArtifacts.init(args)
+    else if (toBoolean(args.webartifacts) === true) throw new Error("Artifact broker unavailable")
     global.maArgs = merge(args, {})
     var needsWorkerRegBootstrap = isNumber(args.workerreg)
     if (needsWorkerRegBootstrap) {
@@ -2796,6 +2828,7 @@ jobs:
         toDelete.push(uuid)
       }
     }
+    if (typeof MiniAWebArtifacts !== "undefined") MiniAWebArtifacts.cleanup()
     for (var i = 0; i < toDelete.length; i++) {
       var uuid = toDelete[i]
       var expiryToken = global._mini_a_web_reserve(uuid)
@@ -2822,6 +2855,7 @@ jobs:
       if ((global.__usehistory || global.maArgs.historyvm === true || global.maArgs.historyvmshadow === true) && !global.__historykeep && !advancedExpiry && isFunction(global._mini_a_web_deleteHistory)) {
         try {
           global._mini_a_web_deleteHistory(uuid)
+          if (typeof MiniAWebArtifacts !== "undefined") MiniAWebArtifacts.remove(uuid)
         } catch(cleanErr) {
           logErr(cleanErr)
         }

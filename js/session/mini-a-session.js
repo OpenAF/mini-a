@@ -1907,6 +1907,7 @@ function MiniAInteractiveSession(args, adapter) {
   }
 
   function runHooks(event, contextVars) {
+    if (typeof MiniAWebArtifacts !== "undefined" && MiniAWebArtifacts.enabled()) return { blocked: false, outputs: [] }
     return __miniARunHooks(loadedHooks, event, contextVars)
   }
 
@@ -6778,6 +6779,11 @@ function MiniAInteractiveSession(args, adapter) {
   }
 
   function executeBrowserCommand(input, action) {
+    if (typeof MiniAWebArtifacts !== "undefined" && MiniAWebArtifacts.enabled()) {
+      if (!adapter || !isString(input) || /^\s*[/$]/.test(input)) throw new Error("Console commands disabled in artifact isolation profile")
+      // Bypass attachment/skill expansion and console dispatch entirely.
+      return adapter.goal(input, __, input)
+    }
     var view = commandView(input)
     commandResult = { version: 1, command: input, view: view.name, params: view.params, status: "completed", blocks: [], messages: [] }
     try {

@@ -1692,6 +1692,7 @@ MiniA.prototype.setTraceFn = function(fn) {
 }
 
 MiniA.prototype._trace = function(kind, payload) {
+  if (this._artifactBinding && /^tool_/.test(kind) && isMap(payload) && isDef(payload.params)) payload = merge(payload, { params: { redacted: true } })
   if (this._execution && this._executionActive !== false && /^(tool_result|shell_result|wiki_result)$/.test(kind) && payload && !payload.error && !payload.blocked && !(isMap(payload.result) && (payload.result.error || payload.result.isError))) {
     var tool = payload.name || payload.op || "shell"
     if (tool === "proxy-dispatch" && payload.params && payload.params.tool) tool = payload.params.tool
@@ -8981,6 +8982,7 @@ MiniA.prototype._configureFileAccess = function(args) {
   this._fileAccess = new MiniAFileAccess(args.fileallow)
 }
 MiniA.prototype._filePath = function(path) {
+  if (this._artifactBinding) throw new Error("Host filesystem disabled in artifact isolation profile")
   return this._fileAccess ? this._fileAccess.assert(path) : path
 }
 MiniA.prototype._registerOwnedResultFile = function(path) {
@@ -12548,6 +12550,7 @@ MiniA.prototype._resolveToolInfo = function(toolName) {
 // args.pluginsroot(s), memoized per agent instance so plugin dirs are scanned once
 // regardless of how many call sites need the result (skills wiring + MCP wiring).
 MiniA.prototype._getPluginsDiscovery = function(args) {
+  if (this._artifactBinding) return { skillsRoots: [], mcpConfigs: [], warnings: [] }
   if (isMap(args) && isMap(args._remoteScopedFiles)) return { skillsRoots: [], mcpConfigs: [], warnings: [] }
   if (isObject(this._pluginsDiscovery)) return this._pluginsDiscovery
 
@@ -16659,6 +16662,7 @@ MiniA.prototype._truncateShellOutput = function(output, maxBytes) {
 }
 
 MiniA.prototype._runCommand = function(args) {
+  if (this._artifactBinding) throw new Error("Host shell disabled in artifact isolation profile")
     if (this._executionParentBusy("shell")) { args.output = "[blocked] Shared resources are owned by an active or unreconciled child"; return args }
     if (this._supervised) {
       if (this._supervised.alreadySatisfied) throw new Error("Current criteria already satisfied; shell execution unnecessary")
@@ -18978,6 +18982,10 @@ MiniA.prototype.init = function(args) {
         if (isMap(jsonToolMcpConfig) && toBoolean(args.mcpproxy) !== true) aggregatedMcpConfigs.push(jsonToolMcpConfig)
       }
 
+      // This binding is installed only by the authenticated web prompt handler.
+      // Replace every tool source, including plugins and restored MCP settings.
+      if (this._artifactBinding) aggregatedMcpConfigs = [MiniAWebArtifacts.config(this._artifactBinding)]
+
       // If mcpproxy is enabled, wrap all MCP configs into a single proxy
       if (toBoolean(args.mcpproxy) === true && aggregatedMcpConfigs.length > 0) {
         this.fnI("mcp", `MCP proxy mode enabled. Aggregating ${aggregatedMcpConfigs.length} MCP connection(s) into a single proxy...`)
@@ -19023,7 +19031,7 @@ MiniA.prototype.init = function(args) {
                 parent._pendingProxyDisplayThought = t === "proxy-dispatch"
                   ? parent._translateProxyToolThought(t, a, "Using tool 'proxy-dispatch'") : __
                 try {
-                  parent.fnI(MiniA._isCommsTool(t, a) ? "comms" : "exec", `Executing action '${t}' with parameters: ${MiniA._isCommsTool(t, a) ? "[payload omitted]" : parent._truncateAuditValue(af.toCSLON(a), 800)}`)
+                  parent.fnI(MiniA._isCommsTool(t, a) ? "comms" : "exec", `Executing action '${t}' with parameters: ${parent._artifactBinding || MiniA._isCommsTool(t, a) ? "[payload omitted]" : parent._truncateAuditValue(af.toCSLON(a), 800)}`)
                 } finally {
                   parent._pendingProxyDisplayThought = __
                 }
@@ -20641,7 +20649,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.goal = this._coerceGoalText(args.goal)
 
     // Check if goal is a string or a file path
-    if (args.goal.length > 0 && args.goal.indexOf("\n") < 0 && io.fileExists(args.goal) && io.fileInfo(args.goal).isFile) {
+    if (!this._artifactBinding && args.goal.length > 0 && args.goal.indexOf("\n") < 0 && io.fileExists(args.goal) && io.fileInfo(args.goal).isFile) {
       this.fnI("load", `Loading goal from file: ${args.goal}...`)
       args.goal = this._coerceGoalText(io.readFileString(this._filePath(args.goal)))
     }

@@ -868,3 +868,34 @@ with browser sign-in, SBucket credential persistence and read-only tools by defa
 Opt in with `modelstrategy=supervised` to prepare a protected contract with main and execute with LC. `savecontract=true` and `reusecontract=true` separately enable accepted-contract persistence and exact-goal reuse. See [supervised contracts](docs/SUPERVISED.md) for configuration, validation and evaluation.
 
 With `orchestration=auto`, Mini-A tracks progress independently of successful tool calls and checks task results before accepting them. Delegated work can declare dependencies, acceptance criteria, and resource scopes; optional `runmaxtokens` and `runmaxtimems` control aggregate admission across the agent tree. Durable runs reconcile prior remote work before resubmission. See [reliable automatic orchestration](USAGE.md#reliable-automatic-orchestration) for contracts, defaults, and verification commands.
+
+### Download SVG answers
+
+Simple and Advanced display supported SVG answer blocks as images. Hover over a
+centered graphic to reveal its download and shrink/enlarge/reset icons, or focus
+the controls with the keyboard. Resizing affects the preview only.
+On touch devices the icon stays visible. The browser downloads the sanitized SVG
+used by the preview, preserving its dimensions and Unicode text. This does not
+require `usesandbox` and does not read files from the server. Invalid or unsupported
+SVG remains available as source. Active elements, external resources, embedded
+HTML, animation and stylesheet blocks are not supported; passive inline
+presentation styles are preserved.
+
+### Optional document-generation libraries
+
+The container image is maintained in `openaf-dockers/mini-a`. Document-generation
+libraries are optional and are not installed by this feature:
+
+| Output | OpenAF support |
+| --- | --- |
+| PDF, DOCX | `mdconvert` oPack, using its Markdown conversion APIs |
+| XLSX | `plugin-XLS` oPack and the `XLS` plugin |
+| PPTX | Apache POI XSLF (`org.apache.poi.xslf.usermodel.XMLSlideShow`) bundled with `plugin-XLS`; use the Java API directly |
+| PNG, JPEG | Java ImageIO and Java2D; provide fonts and a headless-compatible JRE |
+| SVG | UTF-8 XML text; no additional oPack needed |
+
+Generation libraries are not security validators. Installing them does not provide
+an isolated worker or authorize publication of server files. Server-generated
+file publication uses the separate restricted worker and artifact broker. See
+[generated-file downloads](docs/GENERATED-FILES.md) for setup and limits; browser-only
+SVG export remains independent of that facility.

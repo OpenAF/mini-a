@@ -94,6 +94,7 @@ MiniAAdvanced.prototype.mergeOptions = function(base, override) {
   // Persisted sessions and presets cannot widen the server's filesystem boundary.
   if (isDef(this.args.fileallow)) out.fileallow = this.args.fileallow
   else delete out.fileallow
+  if (typeof MiniAWebArtifacts !== "undefined" && MiniAWebArtifacts.enabled()) return MiniAWebArtifacts.protect(out)
   return out
 }
 
@@ -379,6 +380,7 @@ MiniAAdvanced.prototype.snapshot = function(state, after) {
 }
 
 MiniAAdvanced.prototype.request = function(data) {
+  if (typeof MiniAWebArtifacts !== "undefined") MiniAWebArtifacts.guardAdvanced(data)
   var self = this, state = this.get(data.uuid)
   var after = Math.max(0, Math.floor(Number(data.after) || 0))
   if (!isFinite(after)) throw new Error("Invalid cursor")
