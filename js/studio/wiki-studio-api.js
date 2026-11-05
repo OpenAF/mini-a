@@ -30,7 +30,7 @@ WikiStudioServer.prototype.dispatch = function(req) {
   var read = req.method === "GET", c = this.config
   WikiStudio.assert(p[0] === "api" && p[1] === "v1", 404, "not_found", "Route not found")
   if (read && p.length === 3 && p[2] === "health") return { ok: true, version: 1 }
-  if (read && p.length === 3 && p[2] === "session") return { role: role, version: 1, webJob: c.base + "/mini-a-web.yaml", canTestWiki: String(getEnv("OAF_MODEL") || "").trim().length > 0, csrf: "bearer-header-and-same-origin", backends: { fs: "supported", mounts: "unavailable in Studio", s3: "unavailable in Studio", es: "unavailable in Studio", http: "unavailable in Studio", archive: "unavailable in Studio" }, adapters: { upload: true, directory: (c.directories||[]).map(function(d){return{id:d.id}}), git: "allowlisted-local-checkout-only", url: false, youtube: false }, limits: { pageBytes: c.maxPageBytes } }
+  if (read && p.length === 3 && p[2] === "session") return { role: role, version: 1, webJob: c.base + "/mini-a-web.yaml", canTestWiki: String(getEnv("OAF_MODEL") || "").trim().length > 0, csrf: "bearer-header-and-same-origin", backends: { fs: "supported", mounts: "unavailable in Studio", s3: "unavailable in Studio", es: "unavailable in Studio", http: "unavailable in Studio", archive: "unavailable in Studio" }, adapters: { upload: true, directory: (c.directories||[]).map(function(d){return{id:d.id}}), git: "allowlisted-local-checkout-only", url: true, youtube: true }, limits: { pageBytes: c.maxPageBytes } }
   if (p[2] === "wikis" && p.length === 3) {
     if (read) return WikiStudioServer.paginate(this.registry.list().map(function(w) { return self.publicWiki(w, role) }), q)
     if (req.method === "POST") { WikiStudio.authorize(role, "admin"); return this.publicWiki(this.registry.add(body), role) }
@@ -138,7 +138,7 @@ WikiStudioServer.prototype.handle = function(ex) {
     while (iterator.hasNext()) { var item = iterator.next(); WikiStudio.assert(item.getValue().size() === 1, 400, "duplicate_header", "Duplicate headers are not accepted"); headers[String(item.getKey()).toLowerCase()] = String(item.getValue().get(0)) }
     if (path.indexOf("/api/") !== 0) {
       WikiStudio.assert(method === "GET", 405, "method_not_allowed", "Method not allowed")
-      var assets = { "/": ["index.html", "text/html"], "/studio.js": ["studio.js", "text/javascript"], "/studio.css": ["studio.css", "text/css"], "/js/openafsigil.js": ["js/openafsigil.js", "text/javascript", 1], "/js/njsmap.js": ["js/njsmap.js", "text/javascript", 1] }, asset = assets[path]
+      var assets = { "/": ["index.html", "text/html"], "/studio.js": ["studio.js", "text/javascript"], "/studio.css": ["studio.css", "text/css"], "/js/openafsigil.js": ["js/openafsigil.js", "text/javascript", 1], "/js/chart.js": ["js/chart.js", "text/javascript", 1], "/js/njsmap.js": ["js/njsmap.js", "text/javascript", 1] }, asset = assets[path]
       WikiStudio.assert(asset, 404, "not_found", "Asset not found")
       mime = asset[1] + "; charset=utf-8"; result = asset[2] ? io.readFileString(getOpenAFJar() + "::" + asset[0]) : io.readFileString(c.base + "/public/studio/" + asset[0])
     } else {

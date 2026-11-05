@@ -80,7 +80,7 @@ env["STUDIO_TOKEN"] = token
 env.pop("OAF_MODEL", None)
 env.pop("OAF_LC_MODEL", None)
 log = open(temp / "server.log", "w")
-proc = subprocess.Popen([shutil.which("ojob") or "ojob", str(base / "mini-a-wiki-studio.yaml"), f"onport={port}", f"studiohome={temp / 'state'}", "studioallowroots=" + json.dumps([str(root)])], cwd=temp, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+proc = subprocess.Popen([shutil.which("ojob") or "ojob", str(base / "mini-a-wiki-studio.yaml"), f"onport={port}", f"studiohome={temp / 'state'}", "studioallowroots=" + json.dumps([str(root)]), "openbrowser=false"], cwd=temp, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 try:
     deadline = time.monotonic() + 40
     while True:
@@ -97,6 +97,9 @@ try:
             assert response.status == 200
             assert response.read() == (base / "public/studio" / relative).read_bytes()
             checks += 1
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/js/chart.js", timeout=30) as response:
+        assert response.status == 200 and b"Chart" in response.read()
+        checks += 1
     for path in ["health", "session", "wikis", "jobs", "audit", "wikis/a/graph/html"]:
         request(path, auth=False, status=401)
     request("session", headers={"Origin": "https://evil.invalid"}, status=403)
@@ -112,6 +115,15 @@ try:
     aggregate = request("search?q=wiki")
     assert len(aggregate["coverage"]) == 2
     request("wikis/a/backlinks?path=first.md")
+    children = request("wikis/a/children?limit=1")
+    assert children["items"] and children["total"] >= 1
+    request("wikis/a/children?path=..%2Foutside", status=400)
+    graph_status = request("wikis/a/graph/stats")
+    assert graph_status["source"] in {"markdown-links-fallback", "knowledge-graph-snapshot"}
+    request("wikis/a", "PATCH", {"graph": {"enabled": False}})
+    assert request("wikis/a/graph/stats")["source"] == "markdown-links-fallback"
+    request("wikis/a", "PATCH", {"graph": {"enabled": True}})
+
     for attack in ["slip", "symlink", "duplicate", "bomb", "encrypted"]:
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
@@ -157,6 +169,20 @@ try:
     backup_id = backup_job["result"]["backupId"]
     fingerprint = request("wikis/a/overview")["studio"]["fingerprint"]
     job("wikis/a/backups/" + backup_id + "/restore", {"expectedFingerprint": fingerprint, "confirmation": backup_id + ":" + fingerprint, "externalProcessesStopped": True})
+    history = request("jobs?wikiId=a")["items"]
+    assert all(j["deletion"]["allowed"] for j in history)
+    request("jobs/" + backup_job["id"], "DELETE", {"wikiId": "a", "confirmation": "delete-history"}, auth=False, status=401)
+    request("jobs/" + backup_job["id"], "DELETE", {"wikiId": "b", "confirmation": "delete-history"}, status=404)
+    request("jobs/" + backup_job["id"], "DELETE", {"wikiId": "a", "confirmation": "delete-history"})
+    request("jobs/" + backup_job["id"], status=404)
+    backups = request("wikis/a/backups")["items"]
+    assert next(b for b in backups if b["id"] == backup_id)["origin"] == "manual"
+    request("wikis/a/backups/" + backup_id, "DELETE", {"confirmation": "wrong"}, status=400)
+    request("wikis/a/backups/" + backup_id, "DELETE", {"confirmation": backup_id, "acknowledgeLast": True})
+    assert backup_id not in {b["id"] for b in request("wikis/a/backups")["items"]}
+    retained = request("jobs?wikiId=a")["items"]
+    request("jobs", "DELETE", {"wikiId": "a", "ids": [j["id"] for j in retained], "confirmation": "delete-history"})
+    assert request("jobs?wikiId=a")["total"] == 0
     request("wikis/b", "PATCH", {"access": "ro"})
     request("wikis/b/pages", "POST", {"path": "denied.md", "content": "# Denied", "expectedRevision": None}, status=403)
     request("wikis/b/dreams", "POST", {"mode": "apply"}, status=403, headers={"Idempotency-Key": uuid.uuid4().hex})
@@ -173,7 +199,7 @@ try:
         directory.mkdir()
         (directory / "job.json").write_text(json.dumps({"version": 1, "id": job_id, "wikiId": "a", "operation": "dream.reorg", "params": {}, "status": state, "createdAt": "2026-01-01T00:00:00Z", "phase": state}))
         seeded.append(job_id)
-    proc = subprocess.Popen([shutil.which("ojob") or "ojob", str(base / "mini-a-wiki-studio.yaml"), f"onport={port}", f"studiohome={temp / 'state'}", "studioallowroots=" + json.dumps([str(root)])], cwd=temp, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    proc = subprocess.Popen([shutil.which("ojob") or "ojob", str(base / "mini-a-wiki-studio.yaml"), f"onport={port}", f"studiohome={temp / 'state'}", "studioallowroots=" + json.dumps([str(root)]), "openbrowser=false"], cwd=temp, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     deadline = time.monotonic() + 40
     while True:
         try:
@@ -185,6 +211,7 @@ try:
             time.sleep(0.3)
     for job_id in seeded:
         assert request("jobs/" + job_id)["status"] == "interrupted"
+    request("jobs", "DELETE", {"wikiId": "a", "ids": seeded, "confirmation": "delete-history"}, status=409)
     assert before_restart == {p.relative_to(root / "a"): p.read_bytes() for p in (root / "a").rglob("*") if p.is_file()}, "Restart replayed a mutating job"
     print(f"PASS: {checks} HTTP assertions; real isolated worker, raw ingest, plan, graph, indexes, backup and restore; no model/network")
 finally:

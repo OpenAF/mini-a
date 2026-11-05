@@ -360,3 +360,92 @@ and an exact LLM reorg pre-approval plan are intentional non-goals.
 When Studio inherits a non-empty `OAF_MODEL`, the wiki Overview offers **Open wiki test in new tab**. **Enable Advanced view** is an explicit, unchecked opt-in for trusted console controls. The child server inherits model configuration and opens the selected wiki with `wikiaccess=ro`, retrieval v2 enabled, and `useshell=false`. Each wiki/view-mode pair reuses its running test server; child servers stop when the Studio process exits normally. Allow browser pop-ups for Studio. Startup reports an error if the server does not listen within 30 seconds.
 
 **Build web command**, available on the wiki dashboard and Overview, opens a command-preview wizard even without a configured model. Select one or more registered wikis, choose a port and mode (`webini` by default), and optionally enable Advanced view. A single wiki uses `wikiroot`; multiple wikis use named read-only `wikimounts`. The copyable `ojob` command uses this installation's `mini-a-web.yaml` and quotes arguments for macOS/Linux shells. Run it in a terminal with `OAF_MODEL` configured. Generating or copying the command does not execute it.
+
+
+## Task-oriented workspace
+
+Opening a wiki starts in **Pages**. Expand folders in the Explorer-style sidebar,
+select a file to read it, and choose **Edit** to change Markdown. Arrow keys,
+Home/End, Enter and type-ahead navigate the tree. Folder contents load in pages of
+100, including empty folders. Search results retain the tree and offer **Reveal
+in tree**. The Graph viewer is available from the Pages toolbar.
+
+The main navigation groups existing capabilities into Overview, Pages, Import,
+Maintenance, Activity and Settings. Overview shows counts and current activity;
+Maintenance separates health findings, engine tasks, backups and recovery.
+Technical records remain available in expandable details. Local Chart.js renders
+category comparisons with equivalent data tables when charts are unavailable.
+
+### Import workflow
+
+```mermaid
+flowchart LR
+  A[Choose source method] --> B[Download or upload]
+  B --> C[Prepare source revision]
+  C --> D[Preview changes]
+  D --> E[Review results]
+  E --> F[Import into wiki]
+  E --> G[Change options]
+  G --> D
+```
+
+Webpage and YouTube inputs each have their own adjacent download action. Source
+name/ID are part of the selected method. Choose **Update source** in the library
+to create another revision of an existing source. Preview estimates engine
+changes; it is not a guarantee of identical future model output. Changing
+options invalidates the preview. Application checks that the source revision is
+still current. Advanced options retain modes, layout, filters, pruning and
+semantic extraction. Import from another wiki retains saved Absorb plans and
+all their lifecycle controls.
+
+Submissions show background progress without replacing the current form. Open
+activity details to inspect results, changed pages and processing logs. Import
+forms remain in memory when moving between sections; credentials and form drafts
+are not persisted to browser storage.
+
+### History and snapshot cleanup
+
+Activity supports individual, selected and all-eligible history deletion within
+the current wiki. Confirmation lists the eligible count and protected exclusions.
+Deleting history removes logs/results and frees the 1,000-job inventory limit;
+it leaves wiki files, source revisions, saved plans, snapshots and audit logs.
+Small receipts outside the live job inventory prevent an old request from
+executing again and retain the authorization required to apply a saved Absorb
+plan. A replay of a deleted request returns `410 job_history_deleted`.
+
+Active jobs and unresolved recovery are protected. Resolve engine journals or
+restore a snapshot, inspect the result, then **Mark recovery reviewed** in the job
+details. This acknowledgment does not repair the wiki or delete engine journals;
+the server refuses it while work or pending journals remain.
+
+Backups lists manual/automatic origin separately from automatic verification at
+creation. Both kinds can be deleted, except while active work or unresolved
+recovery depends on them. Deleting the last verified backup requires an explicit
+acknowledgment. Restore continues to verify the archive and create a pre-restore
+backup. No automatic retention policy is enabled.
+
+Additional HTTP interfaces (same authentication and path protections):
+
+- `GET /api/v1/wikis/:id/children?path=&limit=100&offset=0`: immediate folder/file entries, folders first.
+- `DELETE /api/v1/jobs/:id`: `{wikiId, confirmation:"delete-history"}`.
+- `DELETE /api/v1/jobs`: `{wikiId, ids:[...], confirmation:"delete-history"}`; exact IDs are confirmed, with eligibility rechecked under locks.
+- `POST /api/v1/jobs/:id/review-recovery`: `{confirmation:"<job-id>"}`.
+- `DELETE /api/v1/wikis/:id/backups/:backupId`: `{confirmation:"<backup-id>", acknowledgeLast:false}`; use `true` only after confirming last-backup deletion.
+
+Job and snapshot listings include `deletion: {allowed, reason}`. Cleanup requires
+an administrator. Snapshot deletion also requires an editable wiki. Existing
+state needs no migration; receipts and origin metadata are written when history
+is removed. A process interruption during deletion may leave disposable files
+under `studiohome/deleted-history`, outside the scheduler inventory.
+
+### Redesign verification
+
+Run `node tests/wikiStudioUI.cjs` for tree keyboard/read/edit behavior, import
+control grouping, draft retention, preview invalidation and chart fallback.
+`ojob tests/wikiStudio.yaml` additionally covers cleanup permissions, recovery
+protection, request replay, last-backup acknowledgment, folder pagination and
+saved-plan application after deleting history. `python3 tests/wikiStudioHttp.py`
+and `python3 tests/wikiStudioPackage.py` exercise real HTTP workers and packaged
+assets. Browser acceptance should include dark/light themes, narrow layouts,
+200% zoom, keyboard focus and external edit conflicts. Real model-driven
+reorganization and live remote downloads require separate configured checks.

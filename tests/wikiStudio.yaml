@@ -3,6 +3,12 @@ include:
 ojob:
   logToConsole: false
 jobs:
+- name: Studio cleanup
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testCleanup
+- name: Studio explorer
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testExplorer
 - name: Studio registry
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testRegistry
@@ -40,6 +46,8 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testAbsorption
 todo:
+- Studio cleanup
+- Studio explorer
 - Studio planned absorption
 - Studio backups and restore
 - Studio dream safety

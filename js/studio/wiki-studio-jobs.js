@@ -48,9 +48,14 @@ WikiStudioJobs.prototype.submit = function(w, operation, params, key, role) {
   WikiStudio.assert(isString(key) && /^[a-zA-Z0-9_-]{8,120}$/.test(key), 400, "idempotency_required", "Use an Idempotency-Key header (8–120 letters/digits/_/-)")
   var self = this, digest = WikiStudio.hash(JSON.stringify({ operation: operation, params: params })), scope = WikiStudio.hash(role + ":" + w.id + ":" + operation + ":" + key)
   return WikiStudio.lock(this.config.home, "queue", function() {
+    var receipt = WikiStudio.json(self.config.home + "/receipts/requests/" + scope + ".json")
+    if (receipt) {
+      WikiStudio.assert(receipt.payloadHash === digest, 409, "idempotency_conflict", "Idempotency key already used with a different payload")
+      WikiStudio.fail(410, "job_history_deleted", "This request already ran; its job history was deleted")
+    }
     var previous = self.list().filter(function(j) { return j.idempotency === scope })[0]
     if (previous) { WikiStudio.assert(previous.payloadHash === digest, 409, "idempotency_conflict", "Idempotency key already used with a different payload"); return previous }
-    WikiStudio.assert(self.list().length < 1000, 507, "job_retention_limit", "Job inventory is full; archive completed jobs locally")
+    WikiStudio.assert(self.list().length < 1000, 507, "job_retention_limit", "Job inventory is full; delete eligible history in Activity")
     var id = WikiStudio.id(), dir = self.dir(id)
     WikiStudio.privateDir(dir)
     var j = { version: 1, id: id, wikiId: w.id, operation: operation, params: params, root: w.root, rootIdentity: w.identity, status: "queued", phase: "queued", createdAt: WikiStudio.now(), updatedAt: WikiStudio.now(), idempotency: scope, payloadHash: digest, role: role, cancelRequested: false }
@@ -87,9 +92,10 @@ WikiStudioServer.prototype.startJobs = function() {
             try {
               var args = new java.util.ArrayList(); args.add(String(getOpenAFPath()) + "/ojob"); args.add(c.base + "/mini-a-wiki-studio-worker.yaml"); args.add("studiohome=" + c.home); args.add("jobid=" + j.id)
               child = new java.lang.ProcessBuilder(args).directory(new java.io.File(c.base)).redirectOutput(java.lang.ProcessBuilder.Redirect.DISCARD).redirectError(java.lang.ProcessBuilder.Redirect.DISCARD).start()
-              var code = Number(child.waitFor()), final = self.jobs.get(j.id)
+              var code = Number(child.waitFor()), final = WikiStudio.json(self.jobs.dir(j.id) + "/job.json")
+              if (!final) return // Terminal history may have been removed after worker finalization.
               if (WikiStudioJobs.terminal.indexOf(final.status) < 0) self.jobs.update(j.id, { status: "recovery-required", phase: "worker-exit", warning: "Worker exited without finalization (exit " + code + "). Inspect engine journals before retry." })
-            } catch(e) { self.jobs.update(j.id, { status: "recovery-required", phase: "worker-error", warning: "Worker failed; inspect recovery before retry" }) }
+            } catch(e) { if(io.fileExists(self.jobs.dir(j.id)+"/job.json")) self.jobs.update(j.id, { status: "recovery-required", phase: "worker-error", warning: "Worker failed; inspect recovery before retry" }) }
             finally { self._running.decrementAndGet() }
           })
         })
@@ -101,10 +107,40 @@ WikiStudioServer.prototype.startJobs = function() {
 WikiStudioServer.prototype.extraRoute = function(req, parts, role) {
   var jobs = this.jobs || new WikiStudioJobs(this.config), q = req.query || {}, body = req.body || {}
   if (parts[2] === "jobs") {
-    if (parts.length === 3 && req.method === "GET") return WikiStudioServer.paginate(jobs.list().filter(function(j) { return !q.wikiId || j.wikiId === q.wikiId }).map(WikiStudioJobs.publicJob), q)
+    if (req.method === "DELETE" && (parts.length === 3 || parts.length === 4)) {
+      WikiStudio.authorize(role, "admin")
+      WikiStudio.fields(body, ["wikiId", "ids", "confirmation"])
+      var w = this.registry.verify(this.registry.get(WikiStudio.name(body.wikiId)))
+      var ids = parts.length === 4 ? [parts[3]] : body.ids
+      WikiStudio.assert(isArray(ids) && ids.length > 0 && ids.length <= 1000 && body.confirmation === "delete-history", 400, "confirmation_required", "Confirm the selected job history")
+      var self = this
+      return WikiStudio.lock(this.config.home, w.id, function() {
+        self.registry.verify(w)
+        return WikiStudio.lock(self.config.home, "queue", function() { return jobs.removeHistory(w, ids) })
+      })
+    }
+    if (parts.length === 3 && req.method === "GET") {
+      var inventory = jobs.list(), registry = this.registry
+      return WikiStudioServer.paginate(inventory.filter(function(j) { return !q.wikiId || j.wikiId === q.wikiId }).map(function(j) {
+        var out = WikiStudioJobs.publicJob(j), wiki
+        try { wiki = registry.verify(registry.get(j.wikiId)); out.deletion = jobs.deletion(j, wiki, inventory) }
+        catch(e) { out.deletion = { allowed: false, reason: "Wiki is unavailable; restore its registration before cleanup" } }
+        return out
+      }), q)
+    }
     var j = jobs.get(parts[3])
     if (parts.length === 4 && req.method === "GET") {
       var result = WikiStudioJobs.publicJob(j); result.result = WikiStudio.json(jobs.dir(j.id) + "/result.json", null); return result
+    }
+    if (parts.length === 5 && parts[4] === "review-recovery" && req.method === "POST") {
+      WikiStudio.authorize(role, "admin"); WikiStudio.fields(body, ["confirmation"])
+      WikiStudio.assert(body.confirmation === j.id && ["partial", "interrupted", "recovery-required"].indexOf(j.status) >= 0, 400, "confirmation_required", "Confirm the reviewed recovery job")
+      var self = this, w = this.registry.verify(this.registry.get(j.wikiId))
+      return WikiStudio.lock(this.config.home, w.id, function() {
+        self.assertIdle(w.id)
+        WikiStudio.assert(WikiStudio.pending(w.root).length === 0, 409, "recovery_pending", "Resolve engine journals before marking recovery reviewed")
+        return WikiStudioJobs.publicJob(jobs.update(j.id, { recoveryReviewedAt: WikiStudio.now() }))
+      })
     }
     if (parts.length === 5 && parts[4] === "cancel" && req.method === "POST") {
       WikiStudio.authorize(role, "admin"); WikiStudio.fields(body, [])
@@ -124,4 +160,53 @@ WikiStudioServer.prototype.streamEvents = function(req, ex) {
   var text = ": replay; reconnect with Last-Event-ID\n\n" + events.filter(function(e) { return e.seq > cursor }).slice(0, 200).map(function(e) { return "id: " + e.seq + "\nevent: progress\ndata: " + JSON.stringify(e) + "\n\n" }).join("")
   var bytes = WikiStudio.bytes(text)
   ex.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8"); ex.sendResponseHeaders(200, bytes.length); ex.getResponseBody().write(bytes); ex.close()
+}
+
+// Keep only durable authorization/deduplication receipts when users remove history.
+WikiStudioJobs.prototype.planReceiptPath = function(wikiId, planId) {
+  return this.config.home + "/receipts/plans/" + WikiStudio.hash(wikiId + ":" + planId) + ".json"
+}
+WikiStudioJobs.prototype.deletion = function(job, wiki, inventory) {
+  var reason = ""
+  if (WikiStudioJobs.terminal.indexOf(job.status) < 0) reason = "Job is still active"
+  else if (WikiStudio.pending(wiki.root).length) reason = "Resolve pending wiki recovery before clearing history"
+  else if (["partial", "recovery-required", "interrupted"].indexOf(job.status) >= 0 && !job.recoveryReviewedAt) reason = "Review and resolve this job's recovery before deleting history"
+  return { allowed: !reason, reason: reason }
+}
+WikiStudioJobs.prototype.removeHistory = function(wiki, ids) {
+  var self = this, inventory = this.list(), selected = [], seen = {}
+  ids.forEach(function(id) {
+    var j = self.get(id)
+    WikiStudio.assert(j.wikiId === wiki.id, 404, "job_not_found", "Job does not belong to this wiki")
+    WikiStudio.assert(!seen[id], 400, "duplicate_job", "Select each job once"); seen[id] = true
+    var eligibility = self.deletion(j, wiki, inventory)
+    WikiStudio.assert(eligibility.allowed, 409, "history_protected", eligibility.reason)
+    WikiStudio.scan(self.dir(id), true); selected.push(j)
+  })
+  var deleted = []
+  selected.forEach(function(j) {
+    WikiStudio.lock(self.config.home, "job-" + j.id, function() {
+      WikiStudio.lock(self.config.home, "event-" + j.id, function() {
+        var current = self.get(j.id)
+        WikiStudio.assert(self.deletion(current, wiki, inventory).allowed, 409, "history_protected", "Job eligibility changed")
+        if (j.operation === "absorb.plan" && j.status === "completed") {
+          var result = WikiStudio.json(self.dir(j.id) + "/result.json", {})
+          if (result.id && result.plan) WikiStudio.atomic(self.planReceiptPath(wiki.id, result.id), { wikiId: wiki.id, planId: result.id, rootIdentity: j.rootIdentity, sourceIdentities: j.params.sourceIdentities })
+        }
+        var backups = self.config.home + "/backups/" + wiki.id
+        if (io.fileExists(backups)) io.listFiles(backups).files.filter(function(f) { return f.isDirectory && /^[a-f0-9-]{36}$/.test(f.filename) }).forEach(function(f) {
+          var manifest = WikiStudio.json(f.filepath+"/manifest.json")
+          if (manifest && manifest.sourceJob === j.id && !manifest.origin) { manifest.origin = j.operation === "backup.snapshot" ? "manual" : "automatic"; WikiStudio.atomic(f.filepath+"/manifest.json",manifest) }
+        })
+        if (j.idempotency) WikiStudio.atomic(self.config.home + "/receipts/requests/" + j.idempotency + ".json", { id: j.id, payloadHash: j.payloadHash })
+        // Rename out of the live inventory before removing files. A crash can only
+        // leave disposable garbage, never a half-deleted job in the scheduler.
+        var trash = self.config.home + "/deleted-history/" + j.id
+        WikiStudio.privateDir(self.config.home + "/deleted-history"); WikiStudio.noLinks(trash)
+        java.nio.file.Files.move(WikiStudio.path(self.dir(j.id)), WikiStudio.path(trash), java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+        io.rm(trash); deleted.push(j.id)
+      })
+    })
+  })
+  return { deleted: deleted }
 }

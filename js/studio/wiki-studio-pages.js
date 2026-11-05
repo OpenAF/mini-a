@@ -47,6 +47,15 @@ WikiStudioServer.prototype.wikiRoute = function(req, w, parts, role) {
   return WikiStudio.lock(this.config.home, w.id, function() {
     self.registry.verify(w)
     if (self.assertIdle) self.assertIdle(w.id)
+    if (route === "children" && read) {
+      var path = q.path || "", folder = path ? WikiStudio.safeFile(w.root,path,false) : w.root
+      WikiStudio.assert(new java.io.File(folder).isDirectory(),404,"folder_not_found","Folder not found")
+      var entries = io.listFiles(folder).files.filter(function(f) { return f.filename.charAt(0) !== "." && !/^AGENTS\.md$/i.test(f.filename) && (f.isDirectory || /\.md$/i.test(f.filename)) }).map(function(f) {
+        WikiStudio.noLinks(f.filepath)
+        return {name:f.filename,path:(path ? path+"/" : "")+f.filename,kind:f.isDirectory ? "folder" : "page"}
+      }).sort(function(a,b) { return (a.kind === b.kind ? 0 : a.kind === "folder" ? -1 : 1) || a.name.toLowerCase().localeCompare(b.name.toLowerCase()) || a.name.localeCompare(b.name) })
+      return WikiStudioServer.paginate(entries,q)
+    }
     if (route === "page" && read) return self.readPage(w, q.path)
     if (route === "graph/html" && read && self.graphHtml) return self.graphHtml(w)
     if (["page", "pages", "pages/move"].indexOf(route) >= 0 && !read) {
@@ -76,6 +85,7 @@ WikiStudioServer.prototype.wikiRoute = function(req, w, parts, role) {
       return req.method === "DELETE" ? result : self.readPage(w, route === "pages/move" ? body.destination : path)
     }
     if (read) {
+      if (route === "graph/stats" && (!w.graph.enabled || !io.fileExists(w.root + "/.mini-a-wiki-graph/graph.json"))) return { stats: { enabled: w.graph.enabled, snapshotAvailable: false }, source: "markdown-links-fallback", freshness: "No active extracted graph snapshot. The graph viewer uses current Markdown links.", semantic: "Not inferred; semantic extraction is opt-in" }
       var operations = { overview: "wiki.context", tree: "wiki.tree", pages: "wiki.list", search: "wiki.search", backlinks: "wiki.backlinks", lint: "wiki.lint", "graph/stats": "graph.stats", "graph/related": "graph.neighbors" }, op = operations[route]
       WikiStudio.assert(op, 404, "not_found", "Route not found")
       var params = {}, paging = WikiStudioServer.paginate([], q)

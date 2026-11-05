@@ -35,8 +35,9 @@ WikiStudioServer.prototype.sourceOperation = function(w, route, body) {
     } else if(body.action!=="status") { WikiStudio.assert(isString(body.planId)&&/^[a-zA-Z0-9_-]{1,160}$/.test(body.planId),400,"invalid_plan","Select a saved plan ID"); p.id=body.planId }
     if(["apply","resume"].indexOf(body.action)>=0) {
       var jobs=this.jobs||new WikiStudioJobs(this.config),matches=jobs.list().filter(function(j){if(j.wikiId!==w.id||j.operation!=="absorb.plan"||j.status!=="completed")return false;var result=WikiStudio.json(jobs.dir(j.id)+"/result.json",{});return result.id===p.id&&!!result.plan})
-      WikiStudio.assert(matches.length>0,409,"plan_not_reviewed","Apply/resume requires a completed plan generated through Studio")
-      p.sourceIdentities=matches[0].params.sourceIdentities
+      var receipt = WikiStudio.json(jobs.planReceiptPath(w.id, p.id))
+      WikiStudio.assert(matches.length > 0 || receipt && receipt.wikiId === w.id && receipt.rootIdentity === w.identity,409,"plan_not_reviewed","Apply/resume requires a completed plan generated through Studio")
+      p.sourceIdentities=matches.length ? matches[0].params.sourceIdentities : receipt.sourceIdentities
     }
     return {operation:"absorb."+body.action,params:p}
   }

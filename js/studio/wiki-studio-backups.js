@@ -50,7 +50,7 @@ WikiStudio.snapshot = function(config,w,jobId) {
     var sync = new java.io.RandomAccessFile(archive,"rw"); sync.getFD().sync(); sync.close()
     var stream = new java.io.FileInputStream(archive), digest = java.security.MessageDigest.getInstance("SHA-256"), b = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE,8192), n
     try { while((n=stream.read(b)) !== -1) digest.update(b,0,n) } finally { stream.close() }
-    var info = {version:1,id:id,wikiId:w.id,createdAt:WikiStudio.now(),sourceJob:jobId,rootIdentity:w.identity,beforeFingerprint:WikiStudio.fingerprint(files),archiveChecksum:WikiStudio.hex(digest.digest()),size:Number(new java.io.File(archive).length()),files:files,verified:false}
+    var info = {version:1,id:id,wikiId:w.id,createdAt:WikiStudio.now(),sourceJob:jobId,rootIdentity:w.identity,beforeFingerprint:WikiStudio.fingerprint(files),archiveChecksum:WikiStudio.hex(digest.digest()),size:Number(new java.io.File(archive).length()),files:files,verified:false,origin: jobsOrigin(config,jobId)}
     WikiStudio.atomic(dir + "/manifest.json",info)
     WikiStudio.checkBackup(config,w,id)
     WikiStudio.assert(WikiStudio.fingerprint(WikiStudio.scan(w.root,true)) === info.beforeFingerprint,409,"external_change","Wiki changed during backup; stop external writers")
@@ -108,7 +108,7 @@ WikiStudioServer.prototype.backupRoute = function(req,w,parts,role) {
   var route=parts.join("/"),c=this.config,jobs=this.jobs||new WikiStudioJobs(c),body=req.body||{},q=req.query||{},self=this
   if(route==="backups" && req.method==="GET") {
     var dir=c.home+"/backups/"+w.id; WikiStudio.privateDir(dir)
-    var items=io.listFiles(dir).files.filter(function(f){return f.isDirectory && /^[a-f0-9-]{36}$/.test(f.filename)}).map(function(f){var info=WikiStudio.json(f.filepath+"/manifest.json");var out=JSON.parse(JSON.stringify(info));delete out.files;delete out.rootIdentity;return out})
+    var items=io.listFiles(dir).files.filter(function(f){return f.isDirectory && /^[a-f0-9-]{36}$/.test(f.filename)}).map(function(f){var info=WikiStudio.json(f.filepath+"/manifest.json");var out=JSON.parse(JSON.stringify(info));delete out.files;delete out.rootIdentity;out.origin=out.origin||jobsOrigin(c,out.sourceJob);out.deletion=WikiStudio.backupDeletion(c,w,out,jobs);return out})
     return WikiStudioServer.paginate(items.sort(function(a,b){return b.createdAt.localeCompare(a.createdAt)}),q)
   }
   if(route==="changes" && req.method==="GET") {
@@ -116,6 +116,27 @@ WikiStudioServer.prototype.backupRoute = function(req,w,parts,role) {
     return WikiStudio.json(jobs.dir(j.id)+"/changes.json",{changes:[],warning:"No finalized comparison is available"})
   }
   WikiStudio.authorize(role,"admin",w)
+  if (parts.length === 2 && req.method === "DELETE") {
+    WikiStudio.fields(body,["confirmation","acknowledgeLast"])
+    WikiStudio.assert(body.confirmation === parts[1],400,"confirmation_required","Confirm the snapshot ID")
+    return WikiStudio.lock(c.home,w.id,function() {
+      self.registry.verify(w)
+      return WikiStudio.lock(c.home,"queue",function() {
+        var dir = WikiStudio.backupPath(c,w,parts[1]), info = WikiStudio.json(dir+"/manifest.json")
+        WikiStudio.assert(info && info.wikiId === w.id && info.id === parts[1],404,"backup_not_found","Snapshot not found")
+        var eligibility = WikiStudio.backupDeletion(c,w,info,jobs)
+        WikiStudio.assert(eligibility.allowed,409,"backup_protected",eligibility.reason)
+        var verified = io.listFiles(c.home+"/backups/"+w.id).files.filter(function(f) { return f.isDirectory && /^[a-f0-9-]{36}$/.test(f.filename) }).map(function(f) { return WikiStudio.json(f.filepath+"/manifest.json",{}) }).filter(function(b) { return b.verified })
+        WikiStudio.assert(!info.verified || verified.length > 1 || body.acknowledgeLast === true,409,"last_backup","Confirm deletion of the last verified snapshot")
+        WikiStudio.noLinks(dir); io.listFiles(dir).files.forEach(function(f) { WikiStudio.noLinks(f.filepath); WikiStudio.assert(f.isFile,400,"unsafe_backup","Unexpected snapshot directory") })
+        var trash = c.home+"/deleted-history/backup-"+info.id
+        WikiStudio.privateDir(c.home+"/deleted-history");WikiStudio.noLinks(trash)
+        java.nio.file.Files.move(WikiStudio.path(dir),WikiStudio.path(trash),java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+        io.rm(trash)
+        return {deleted:info.id}
+      })
+    })
+  }
   WikiStudio.assert(req.method==="POST",405,"method_not_allowed","Use POST")
   var op,params
   if(route==="backups") { WikiStudio.fields(body,[]);op="backup.snapshot";params={} }
@@ -128,4 +149,18 @@ WikiStudioServer.prototype.backupRoute = function(req,w,parts,role) {
     op="backup.restore"
   } else WikiStudio.fail(404,"not_found","Backup route not found")
   return WikiStudio.lock(c.home,w.id,function(){ self.registry.verify(w);return WikiStudioJobs.publicJob(jobs.submit(w,op,params,req.headers["idempotency-key"],role)) })
+}
+
+function jobsOrigin(config, jobId) {
+  var j = /^[a-f0-9-]{36}$/.test(jobId) ? WikiStudio.json(config.home + "/jobs/" + jobId + "/job.json") : null
+  return j && j.operation === "backup.snapshot" ? "manual" : "automatic"
+}
+WikiStudio.backupDeletion = function(config, w, backup, jobs) {
+  var reason = "", inventory = jobs.list()
+  if (WikiStudio.pending(w.root).length) reason = "Resolve pending wiki recovery before deleting snapshots"
+  inventory.filter(function(j) { return j.wikiId === w.id }).forEach(function(j) {
+    if (WikiStudioJobs.terminal.indexOf(j.status) < 0) reason = "Wait for active wiki jobs before deleting snapshots"
+    if ((j.backupId === backup.id || (j.params || {}).backupId === backup.id || backup.sourceJob === j.id) && ["partial","interrupted","recovery-required"].indexOf(j.status) >= 0 && !j.recoveryReviewedAt) reason = "Snapshot is needed by unresolved recovery"
+  })
+  return { allowed: !reason, reason: reason }
 }
