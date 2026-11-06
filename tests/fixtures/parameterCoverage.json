@@ -46,6 +46,12 @@
       "wikidream",
       "wikiquery"
     ],
+    "Web Extension startup options; no effect in ordinary agent jobs": [
+      "webextensions",
+      "webextensionsconfig",
+      "webextensionsonly",
+      "webextensionsagent"
+    ],
     "Web embedding startup options": [
       "webembed",
       "webembedorigins",

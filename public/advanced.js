@@ -362,7 +362,8 @@ window.MiniAAdvancedUI = function(bridge) {
   async function newConversation() {
     if (busy) throw new Error('Stop or finish the current operation before starting a new conversation.');
     if (!await resolvePendingChanges()) return;
-    await bridge.newConversation(); resetSessionView();
+    if (await bridge.newConversation() === false) return;
+    resetSessionView();
     activeScreen = 'activity'; renderScreen();
     sessionStorage.removeItem(storeKey); await poll();
     if (storageMode === 'browser') {
@@ -412,9 +413,12 @@ window.MiniAAdvancedUI = function(bridge) {
   async function command(value, attachments, embed) {
     // Capture before any asynchronous confirmation or command expansion.
     if (embed === undefined && bridge.embedSnapshot) embed = bridge.embedSnapshot();
-    if (/^\/(?:clear|reset|restore|rewind|exit|quit)(?:\s|$)/.test(value) && !await resolvePendingChanges()) return false;
+    const changesSession = /^\/(?:clear|reset|restore|rewind|exit|quit)(?:\s|$)/.test(value);
+    if (changesSession && !await resolvePendingChanges()) return false;
+    if (changesSession && bridge.beforeExternalSessionChange && !await bridge.beforeExternalSessionChange()) return false;
     history.push(value); historyIndex = history.length;
-    await mutate({action:'command',command:value,attachments,embed});
+    await mutate({action:'command',command:value,attachments,embed,...(bridge.artifactScope ? bridge.artifactScope() : {})});
+    if (changesSession && bridge.afterExternalSessionChange) bridge.afterExternalSessionChange();
   }
   function setEnabled(value) {
     debugGeneration++;
@@ -907,6 +911,7 @@ window.MiniAAdvancedUI = function(bridge) {
         preview.append(button('Open conversation', async () => {
           if (busy) throw new Error('Finish the current operation first.');
           if (!await resolvePendingChanges()) return;
+          if (bridge.beforeExternalSessionChange && !await bridge.beforeExternalSessionChange()) return;
           if (!current() || request !== previewSerial) return;
           if (session.entry) await bridge.openBrowserHistory(session.entry); else bridge.resume(session.uuid);
           resetSessionView(); filter.value = ''; filter.oninput(); activeScreen = 'activity'; renderScreen(); bridge.refresh(); await poll();

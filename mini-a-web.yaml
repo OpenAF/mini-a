@@ -122,6 +122,18 @@ help:
     desc     : Local directory for Advanced session journals and presets
     example  : "/var/lib/mini-a/web"
     mandatory: false
+  - name     : webextensions
+    desc     : Enable opt-in isolated Web Extensions (generates a strong token when omitted)
+    mandatory: false
+  - name     : webextensionsconfig
+    desc     : Operator-owned JSON configuration for local extensions, static asset mounts and limits
+    mandatory: false
+  - name     : webextensionsonly
+    desc     : Start a model-free extension workspace; requires webextensions=true and excludes Advanced and worker modes
+    mandatory: false
+  - name     : webextensionsagent
+    desc     : Enable optional document tools scoped to explicitly selected artifacts
+    mandatory: false
   - name     : webembed
     desc     : "Enable the opt-in iframe bridge at ?embed=1 (default false). See docs/WEB-EMBED.md."
     mandatory: false
@@ -1400,6 +1412,7 @@ todo:
 - (httpdMetrics   ): "${onport:-8888}"
 - Static content
 - Apply embedding headers
+- Register web extensions
 - (httpdService   ): "${onport:-8888}"
   ((uri          )): /ping
   ((execURI      )): | #js
@@ -1422,6 +1435,10 @@ todo:
       }
       var _res = { status: "ok", webadvanced: isDef(global.__advanced), usehistory: global.__usehistory, useattach: global.__useattach, historyretention: args.historyretention, showexecs: global.__showexecs, usestream: global.__usestream, showthinking: global.__showthinking, usemath: global.__usemath }
       _res.embed = MiniAWebEmbed.config
+      if (typeof MiniAWebExtensions !== "undefined" && MiniAWebExtensions.enabled()) {
+        _res.webextensions = MiniAWebExtensions.info()
+        _res.agentAvailable = global.maArgs.webextensionsonly !== true
+      }
       return ow.server.httpd.reply(_res)
     } catch(e) {
       printErr(e)
@@ -1460,6 +1477,7 @@ todo:
       }
       var mutationToken = global._mini_a_web_reserve(postData.uuid)
       if (isUnDef(mutationToken)) return ow.server.httpd.reply({ error: "session busy", uuid: postData.uuid, busy: true })
+      if (typeof MiniAWebExtensions !== "undefined" && MiniAWebExtensions.enabled()) MiniAWebExtensions.disposeSession(postData.uuid, postData.force === true)
       if (typeof MiniAWebArtifacts !== "undefined" && (postData.force || (!global.__usehistory && isUnDef(global.__advanced)))) MiniAWebArtifacts.remove(postData.uuid)
       // Starting a new Advanced conversation keeps the previous console history.
       if (isDef(global.__advanced) && isDef(global.__advanced.sessions[postData.uuid])) {
@@ -1524,6 +1542,7 @@ todo:
 - (httpdService   ): "${onport:-8888}"
   ((uri          )): /prepare
   ((execURI      )): | #js
+    if (global.maArgs.webextensionsonly === true) return ow.server.httpd.reply({ prepared: false })
     if (typeof MiniAWebArtifacts !== "undefined" && MiniAWebArtifacts.enabled()) return ow.server.httpd.reply({ prepared: false })
     if (!global._mini_a_web_checkToken(request)) return ow.server.httpd.reply({ error: "unauthorized" })
     try {
@@ -1738,6 +1757,7 @@ todo:
         _res.status = "finished"; _res.phase = "finished"; _res.outcome = "success"
       }
       if (unchanged) { delete _res.content; delete _res.history }
+      if (typeof MiniAWebExtensions !== "undefined" && MiniAWebExtensions.enabled() && global._mini_a_web_isValidUuid(postData.uuid)) _res.artifacts = MiniAWebDocuments.linked(postData.uuid)
       return ow.server.httpd.reply(_res)
     } catch(e) {
       printErr(e)
@@ -1938,12 +1958,25 @@ jobs:
     ;["js/core/mini-a.js", "js/web/mini-a-web-attachments.js", "js/web/mini-a-web-session.js", "js/web/mini-a-web-embed.js", "js/artifacts/mini-a-artifact-policy.js", "js/web/mini-a-web-artifacts.js"].forEach(function(path) {
       loadLib(__miniAPath(path), true)
     })
+    if (typeof args !== "undefined" && toBoolean(args.webextensions) === true) {
+      loadLib(__miniAPath("js/web/mini-a-web-extensions.js"), true)
+      if (toBoolean(args.webextensionsagent) === true) {
+        loadLib(__miniAPath("js/artifacts/mini-a-document-tools.js"), true)
+        loadLib(__miniAPath("js/web/mini-a-web-document-agent.js"), true)
+      }
+    }
 
 # ---------------------
 - name : CheckEnv
   exec : | #js
+    var extensionsOnly = toBoolean(args.webextensionsonly) === true
+    var extensionsEnabled = toBoolean(args.webextensions) === true
+    if (extensionsOnly && !extensionsEnabled) throw new Error("webextensionsonly requires webextensions=true")
+    if (toBoolean(args.webextensionsagent) === true && !extensionsEnabled) throw new Error("webextensionsagent requires webextensions=true")
+    if (extensionsEnabled && toBoolean(args.webartifacts) === true) throw new Error("Web Extensions cannot be combined with the restricted generated-artifact profile")
+    if (extensionsOnly && (toBoolean(args.webadvanced) === true || isDef(args.workerreg) || toBoolean(args.webextensionsagent) === true)) throw new Error("The model-free workspace excludes Advanced, worker registration and agent tools")
     var hasModelOverride = isDef(args) && isDef(args.model) && ((isString(args.model) && args.model.trim().length > 0) || isMap(args.model))
-    if (isUnDef(getEnv("OAF_MODEL")) && !hasModelOverride) {
+    if (!extensionsOnly && isUnDef(getEnv("OAF_MODEL")) && !hasModelOverride) {
       throw "OAF_MODEL environment variable not set. Please export OAF_MODEL or provide model= with your model configuration before starting the Mini-A web server."
     }
     global.__artifactRequired = toBoolean(args.webartifacts) === true
@@ -1959,19 +1992,20 @@ jobs:
       }
       log("webadvanced=true without onport; using available port " + args.onport)
     }
-    if (toBoolean(args.webadvanced) === true && (!isString(args.webtoken) || !args.webtoken.trim())) {
+    if ((toBoolean(args.webadvanced) === true || extensionsEnabled) && (!isString(args.webtoken) || !args.webtoken.trim())) {
       // 256 bits from the JVM CSPRNG; retain leading zeroes in the hex encoding.
       args.webtoken = String(new java.math.BigInteger(256, new java.security.SecureRandom()).toString(16))
       while (args.webtoken.length < 64) args.webtoken = "0" + args.webtoken
       global.__webTokenGenerated = true
     }
+    if (extensionsEnabled && args.webtoken.trim().length < 32) throw new Error("Web Extensions require a webtoken of at least 32 characters")
 
 # ---------------------
 - name : Open Advanced browser
   exec : | #js
-    if (global.__webTokenGenerated !== true || !isDef(global.__advanced)) return
+    if (global.__webTokenGenerated !== true || (!isDef(global.__advanced) && args.webextensions !== true)) return
     var url = "http://localhost:" + (isDef(args.onport) ? args.onport : 8888) + "/#token=" + encodeURIComponent(global.__webtoken)
-    print("Mini-A Advanced access URL: " + url)
+    print((args.webextensionsonly === true ? "Mini-A workspace access URL: " : "Mini-A Advanced access URL: ") + url)
     try {
       if (java.awt.Desktop.isDesktopSupported()) {
         java.awt.Desktop.getDesktop().browse(new java.net.URI(url))
@@ -2023,6 +2057,19 @@ jobs:
       })
     }
 
+# Install nothing when disabled: no registry loads, scans, routes or private directories.
+- name : Register web extensions
+  exec : | #js
+    if (typeof MiniAWebExtensions !== "undefined" && MiniAWebExtensions.enabled()) {
+      var extensionPort = Number(args.onport || 8888)
+      ;["/web-extensions", "/web-documents", "/web-extension-assets", "/web-extension-frame"].forEach(function(path) {
+        global.__ojobRoutes[extensionPort][path] = function(request, server) {
+          return MiniAWebExtensions.route(request, server || global.__ojobHttp[extensionPort])
+        }
+      })
+      ow.server.httpd.route(global.__ojobHttp[extensionPort], global.__ojobRoutes[extensionPort])
+    }
+
 # -----------
 - name : Init
   from :
@@ -2033,6 +2080,10 @@ jobs:
       artifactworkerurl: isString().default(__)
       artifactdir    : isString().default(__)
       webadvanced    : toBoolean().isBoolean().default(false)
+      webextensions  : toBoolean().isBoolean().default(false)
+      webextensionsconfig: isString().default(__)
+      webextensionsonly: toBoolean().isBoolean().default(false)
+      webextensionsagent: toBoolean().isBoolean().default(false)
       webembed       : toBoolean().isBoolean().default(false)
       webembedcontextrequired: toBoolean().isBoolean().default(true)
       webembedprompt : toBoolean().isBoolean().default(false)
@@ -2328,6 +2379,11 @@ jobs:
       })
     }
     global.__advanced = __
+    if (args.webextensionsonly === true) {
+      args.sessionprewarm = false
+      args.useattach = false
+      args.usestream = false
+    }
     MiniAWebEmbed.init(args)
     if (args.webadvanced === true) {
       loadLib(__miniAPath("js/session/mini-a-session.js"))
@@ -2527,6 +2583,7 @@ jobs:
     MiniA.applyLibEnvDefault(args)
     if (typeof MiniAWebArtifacts !== "undefined") MiniAWebArtifacts.init(args)
     else if (toBoolean(args.webartifacts) === true) throw new Error("Artifact broker unavailable")
+    if (args.webextensions === true) MiniAWebExtensions.init(args)
     global.maArgs = merge(args, {})
     var needsWorkerRegBootstrap = isNumber(args.workerreg)
     if (needsWorkerRegBootstrap) {
@@ -2951,6 +3008,7 @@ jobs:
       delete global.__lastActivity[ uuid ]
       global._mini_a_web_transcript(uuid, "clear")
       global._mini_a_web_dispose(uuid)
+      if (typeof MiniAWebExtensions !== "undefined" && MiniAWebExtensions.enabled()) MiniAWebExtensions.disposeSession(uuid)
       if (isDef(global.__planState) && isDef(global.__planState[ uuid ])) delete global.__planState[ uuid ]
       if (isDef(global.__subagentState) && isDef(global.__subagentState[ uuid ])) delete global.__subagentState[ uuid ]
       if ((global.__usehistory || global.maArgs.historyvm === true || global.maArgs.historyvmshadow === true) && !global.__historykeep && !advancedExpiry && isFunction(global._mini_a_web_deleteHistory)) {
@@ -2987,6 +3045,7 @@ jobs:
 - name : Shutdown history S3 client
   type : shutdown
   exec : | #js
+    if (typeof MiniAWebExtensions !== "undefined") MiniAWebExtensions.close()
     if (isObject(global.__bootstrapAgent)) global.__bootstrapAgent._stopAgentResources()
     Object.keys(global.__conversations || {}).forEach(global._mini_a_web_dispose)
     if (isDef(global.__advanced)) Object.keys(global.__advanced.sessions).forEach(function(uuid) {

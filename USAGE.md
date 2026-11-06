@@ -652,6 +652,25 @@ Optional flags when starting the server:
 
 Endpoints used by the UI (served by `mini-a-web.yaml`): `/prompt`, `/result`, `/clear`, and `/ping`.
 
+### Optional Web Extensions
+
+Web Extensions add local viewers and editors to both Simple and Advanced modes. They
+are disabled by default, and each package requires explicit permission approval before
+it runs. Start with `webextensions=true webextensionsconfig=/absolute/extensions.json`.
+Add `webextensionsonly=true` to use the existing Simple shell without an LLM provider.
+This generates a web token if none is supplied; open the access URL printed by the server.
+
+The minimal configuration is `{"directories":["/absolute/mini-a/examples/web-extensions/text-editor"]}`.
+Open **Extensions**, enable the text editor, then create or import a document. **Save**
+stores its native representation in the private document library. Disabling an editor
+does not delete saved documents. Optional `webextensionsagent=true` adds per-prompt
+document selection and creation/editing grants when a model is configured.
+
+See [installation and configuration](docs/WEB-EXTENSIONS.md), [the API](docs/WEB-EXTENSIONS-API.md),
+[security boundaries](docs/WEB-EXTENSIONS-SECURITY.md) and [the local draw.io reference](docs/WEB-EXTENSIONS-DRAWIO.md).
+Web discovery does not activate an adjacent Agent Plugin, skills or MCP configuration.
+The initial framework cannot be combined with `webartifacts=true`.
+
 ## Running Mini-A in Docker
 
 Mini-A can run inside a Docker container for isolated execution, portability, and consistent deployment across environments. The container supports three main usage patterns: CLI console, web interface, and goal-based execution.
@@ -5088,6 +5107,10 @@ Console parameters appear in `mini-a --help` and interactive `/set` completion. 
 | `path` | string | unset | Static asset path used by the web UI/worker modes. |
 | `ssequeuetimeout` | number | `120` | Web SSE queue timeout in seconds. |
 | `webadvanced` | boolean | `false` | Enable trusted Advanced web console APIs (generates a token and opens the browser when webtoken is omitted). |
+| `webextensions` | boolean | `false` | Enable isolated, explicitly approved local Web Extensions. |
+| `webextensionsconfig` | string | unset | Operator-owned JSON file containing extension directories, mounts and policy. |
+| `webextensionsonly` | boolean | `false` | Model-free Simple workspace; requires Web Extensions and excludes Advanced/worker modes. |
+| `webextensionsagent` | boolean | `false` | Enable scoped saved-document tools, with explicit per-prompt permissions. |
 | `webartifacts` | boolean | `false` | Web-only: enable isolated artifact generation. |
 | `artifactworkerurl` | string | unset | Web-only: private worker URL ending in `/artifact-worker`. |
 | `artifactdir` | string | private default | Web-only: private artifact storage directory; 24 hour expiry. |

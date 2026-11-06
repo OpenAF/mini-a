@@ -528,10 +528,15 @@
     .mermaid-fullscreen .mermaid-control-group { position: static; flex-direction: row; flex-wrap: wrap; width: auto; }
     .mermaid-fullscreen .mermaid-control-btn { width: 36px; min-height: 36px; justify-content: center; padding: 8px; }
     .mermaid-fullscreen .diagram-action-label { display: none; }
+    /* Include popup actions in the details element's bounds instead of
+       relying on touch hit testing outside a summary-sized box. */
+    .svg-actions > summary, details.mermaid-diagram-controls > summary { margin-left: auto; }
+    .svg-actions > .svg-controls, details.mermaid-diagram-controls > .mermaid-control-group {
+        position: relative; top: auto; right: auto; margin-top: 4px;
+    }
 
     @media (pointer: coarse) {
         .svg-actions summary, .mermaid-diagram-controls summary { width: 44px; height: 44px; }
-        .svg-controls, .mermaid-control-group { top: 48px; }
         .svg-rendered-block .svg-controls button, .mermaid-control-btn { min-height: 44px; }
         .mermaid-fullscreen .mermaid-control-btn { width: 44px; min-height: 44px; }
     }
@@ -3003,6 +3008,7 @@
     }
 
     async function handleBranchConversation() {
+        if (typeof extensionsUI !== 'undefined' && extensionsUI && !await extensionsUI.beforeSessionChange()) return;
         if (advancedUI && !await advancedUI.beforeSessionChange()) return;
         try {
             const events = getCurrentConversationEvents();
@@ -3019,6 +3025,7 @@
             await sendHistoryToServer(entry);
 
             lastKnownHistory = events;
+            if (typeof resetExtensionSessionView === 'function') resetExtensionSessionView();
             currentSessionUuid = newUuid;
             transcriptPollUuid = null; activeSubmissionRunId = null;
             if (typeof window !== 'undefined') {
@@ -4281,7 +4288,7 @@
         controls.appendChild(control);
         const png = document.createElement('button');
         png.type = 'button'; png.className = 'svg-png-button';
-        png.innerHTML = diagramActionIcon('download-png') + '<span>Download PNG</span>'; png.title = 'Download PNG (2×, transparent)';
+        png.innerHTML = diagramActionIcon('download-png') + '<span>Download PNG</span>'; png.title = 'Download PNG (4×, transparent)';
         png.setAttribute('aria-label', png.title);
         const status = document.createElement('span');
         status.className = 'svg-export-status'; status.setAttribute('role', 'status');
@@ -4415,7 +4422,7 @@
         });
         const width = raster.naturalWidth, height = raster.naturalHeight;
         if (!width || !height) throw new Error('SVG has no dimensions');
-        const scale = Math.min(2, 8192 / width, 8192 / height, Math.sqrt(16777216 / width / height));
+        const scale = Math.min(4, 8192 / width, 8192 / height, Math.sqrt(16777216 / width / height));
         const canvas = document.createElement('canvas');
         canvas.width = Math.max(1, Math.floor(width * scale));
         canvas.height = Math.max(1, Math.floor(height * scale));
@@ -5444,6 +5451,107 @@
     }
 
     let advancedUI = null;
+    let extensionsUI = null;
+    let extensionAgentAvailable = true;
+    let extensionPromptReferences = [];
+    let extensionPromptOptions = null;
+    let extensionArtifactCards = null;
+    let extensionArtifactDigest = '';
+
+    function clearExtensionPromptScope() {
+        extensionPromptReferences = [];
+        if (extensionPromptOptions) {
+            extensionPromptOptions.create.checked = false; extensionPromptOptions.write.checked = false;
+            extensionPromptOptions.status.textContent = 'No saved documents selected.';
+        }
+    }
+
+    function resetExtensionSessionView() {
+        clearExtensionPromptScope();
+        extensionArtifactDigest = '';
+        if (extensionArtifactCards) extensionArtifactCards.replaceChildren();
+    }
+
+    function renderExtensionArtifacts(data) {
+        if (!extensionsUI || !extensionArtifactCards || !data || !Array.isArray(data.artifacts)) return;
+        const digest = JSON.stringify(data.artifacts);
+        if (digest === extensionArtifactDigest) return;
+        extensionArtifactDigest = digest;
+        extensionArtifactCards.replaceChildren();
+        extensionsUI.renderArtifacts(extensionArtifactCards, data.artifacts);
+    }
+
+    async function refreshExtensionArtifacts(uuid) {
+        if (!extensionsUI || !uuid) return;
+        try {
+            const response = await fetch(resolveAppUrl('result'), {
+                method: 'POST', headers: { 'Content-Type': 'application/json; charset=utf-8' },
+                body: JSON.stringify({ uuid })
+            });
+            if (!response.ok) throw new Error('Saved document references could not be loaded');
+            const data = await response.json();
+            if (uuid === currentSessionUuid) renderExtensionArtifacts(data);
+        } catch (error) { console.error('Failed to load saved document references:', error); }
+    }
+
+    function extensionPromptScope() {
+        if (!extensionsUI || !extensionPromptOptions) return {};
+        return {
+            artifactReferences: extensionPromptReferences.map(item => ({ id: item.id, revision: item.revision })),
+            artifactPermissions: { create: extensionPromptOptions.create.checked, write: extensionPromptOptions.write.checked }
+        };
+    }
+
+    async function enableWebExtensions(info, agentAvailable) {
+        if (extensionsUI) return;
+        await new Promise((resolve, reject) => {
+            const link = document.createElement('link'); link.rel = 'stylesheet';
+            link.href = resolveAppUrl('web-extensions.css?raw=true'); link.onload = resolve; link.onerror = reject; document.head.append(link);
+        });
+        for (const name of ['web-extension-contract.js', 'web-extensions.js']) {
+            await new Promise((resolve, reject) => {
+                const script = document.createElement('script'); script.src = resolveAppUrl(name + '?raw=true');
+                script.onload = resolve; script.onerror = reject; document.head.append(script);
+            });
+        }
+        const button = document.createElement('button'); button.type = 'button'; button.id = 'webExtensionsBtn';
+        button.textContent = 'Extensions'; button.title = 'Open local viewers, editors and saved documents';
+        const toolbar = historyBtn && historyBtn.parentElement || clearBtn.parentElement;
+        toolbar.append(button);
+        let selectionStatus;
+        if (info.agentEnabled === true && agentAvailable) {
+            const options = document.createElement('details'); options.className = 'web-extension-prompt-options';
+            const summary = document.createElement('summary'); summary.textContent = 'Document permissions for the next prompt'; options.append(summary);
+            selectionStatus = document.createElement('p'); selectionStatus.textContent = 'No saved documents selected.'; options.append(selectionStatus);
+            extensionPromptOptions = { status: selectionStatus };
+            for (const [key, label] of [['create', 'Allow creating saved documents'], ['write', 'Allow editing the selected saved documents']]) {
+                const row = document.createElement('label'), input = document.createElement('input'); input.type = 'checkbox';
+                row.append(input, document.createTextNode(' ' + label)); options.append(row, document.createElement('br'));
+                extensionPromptOptions[key] = input;
+            }
+            const clear = document.createElement('button'); clear.type = 'button'; clear.textContent = 'Clear selection';
+            clear.onclick = () => { extensionPromptReferences = []; selectionStatus.textContent = 'No saved documents selected.'; extensionPromptOptions.write.checked = false; };
+            options.append(clear); toolbar.parentElement.append(options);
+        }
+        extensionsUI = window.MiniAWebExtensionsUI({
+            url: resolveAppUrl,
+            sanitizeSvg: sanitizeSvgContent,
+            validateSvg: validateSvgXmlContent,
+            uuid: () => { if (!currentSessionUuid) currentSessionUuid = getOrCreateSessionUuid(); return currentSessionUuid; },
+            agentAvailable: info.agentEnabled === true && agentAvailable,
+            onSelectArtifact: reference => {
+                if (!extensionPromptOptions || !reference || !reference.id) return;
+                extensionPromptReferences = extensionPromptReferences.filter(item => item.id !== reference.id).concat([reference]).slice(-8);
+                selectionStatus.textContent = extensionPromptReferences.length + ' saved document(s) selected for this prompt. Access is read-only unless editing is checked.';
+                extensionPromptOptions.create.closest('details').open = true;
+            }
+        });
+        button.addEventListener('click', () => extensionsUI.openManager());
+        extensionArtifactCards = document.createElement('div'); extensionArtifactCards.className = 'mini-a-extension-artifacts';
+        resultsDiv.parentElement.insertBefore(extensionArtifactCards, resultsDiv);
+        window.addEventListener('pagehide', () => extensionsUI.dispose());
+        refreshExtensionArtifacts(currentSessionUuid);
+    }
     async function enableAdvancedUI() {
         if (advancedUI) return;
         const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = resolveAppUrl('advanced.css?raw=true'); document.head.append(css);
@@ -5457,6 +5565,9 @@
         await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = resolveAppUrl('advanced.js?raw=true'); script.onload = resolve; script.onerror = reject; document.head.append(script); });
         advancedUI = window.MiniAAdvancedUI({
             embedded: embeddedMode,
+            artifactScope: extensionPromptScope,
+            beforeExternalSessionChange: async () => !extensionsUI || await extensionsUI.beforeSessionChange(),
+            afterExternalSessionChange: resetExtensionSessionView,
             embedSnapshot: captureEmbedContext,
             openComposer,
             composerExpanded,
@@ -5467,7 +5578,7 @@
             url: resolveAppUrl,
             newRequestId: generateNewSessionUuid,
             uuid: () => { if (!currentSessionUuid) currentSessionUuid = getOrCreateSessionUuid(); return currentSessionUuid; },
-            resume: uuid => { currentSessionUuid = uuid; transcriptPollUuid = null; activeSubmissionRunId = null; window.mini_a_session_uuid = uuid; },
+            resume: uuid => { resetExtensionSessionView(); currentSessionUuid = uuid; transcriptPollUuid = null; activeSubmissionRunId = null; window.mini_a_session_uuid = uuid; },
             refresh: () => { pollOnce(); },
             trackRun: data => {
                 if (data.busy && data.kind === 'prompt' && !isProcessing) {
@@ -5507,6 +5618,15 @@
 
             const data = await response.json();
             embeddingInfo = data.embed;
+            if (data.webextensions && data.webextensions.enabled === true) {
+                extensionAgentAvailable = data.agentAvailable !== false;
+                try { await enableWebExtensions(data.webextensions, extensionAgentAvailable); }
+                catch (error) { console.error('Unable to load Web Extensions:', error); composerNotice('Web Extensions could not be loaded.'); }
+                if (!extensionAgentAvailable) {
+                    promptInput.disabled = true; submitBtn.disabled = true;
+                    promptInput.placeholder = 'Model-free workspace: open Extensions to create or edit a document.';
+                }
+            }
             if (data.webadvanced === true) await enableAdvancedUI();
             if (typeof data.usehistory === 'boolean') {
                 shouldEnableHistory = data.usehistory;
@@ -5741,6 +5861,7 @@
 
     async function loadConversationEntry(entry, strict = false) {
         if (!entry) return;
+        if (typeof extensionsUI !== 'undefined' && extensionsUI && !await extensionsUI.beforeSessionChange()) return;
         if (advancedUI && !await advancedUI.beforeSessionChange()) return;
         resetActivityDisclosure = true;
 
@@ -5761,6 +5882,7 @@
             window.mini_a_session_uuid = entry.uuid;
         }
 
+        if (typeof resetExtensionSessionView === 'function') resetExtensionSessionView();
         currentSessionUuid = entry.uuid;
         transcriptPollUuid = null; activeSubmissionRunId = null;
 
@@ -5777,6 +5899,7 @@
         closeHistoryPanel();
         lastRawContent = savedContent;
         lastRenderedRaw = '';
+        if (typeof refreshExtensionArtifacts === 'function') refreshExtensionArtifacts(entry.uuid);
     }
 
     async function refreshCurrentConversationView() {
@@ -5802,6 +5925,7 @@
             if (!response.ok) throw new Error('Failed to load current conversation');
 
             const data = await response.json();
+            if (typeof renderExtensionArtifacts === 'function' && uuid === currentSessionUuid) renderExtensionArtifacts(data);
             if (Array.isArray(data.history)) {
                 lastKnownHistory = sanitizeHistoryEvents(data.history);
                 const historyPrompt = extractLastUserPromptFromEvents(lastKnownHistory);
@@ -6467,6 +6591,7 @@
     }
 
     async function handleSubmit() {
+        if (typeof extensionAgentAvailable !== 'undefined' && !extensionAgentAvailable) { composerNotice('Agent operations are disabled in this model-free workspace.'); return false; }
         if (advancedUI && advancedUI.enabled() && isProcessing) { await advancedUI.stop(); return; }
         if (isProcessing) {
             await stopProcessing(true);
@@ -6482,7 +6607,7 @@
         if (binaryAttachments.length && !rawPrompt.trim()) { notifyAttachmentWarning('Enter a question or instruction for the attached files.'); composerNotice('Enter a question or instruction for the attached files.'); return; }
         if (advancedUI && advancedUI.enabled() && !embedInitialDraft) {
             if (!rawPrompt.trim()) return;
-            try { if (await advancedUI.submit(buildPromptWithAttachments(rawPrompt, attachmentsEnabled ? attachments : []), binaryAttachments, embed) === false) return; embedConversationUsed = true; clearAttachments(); setComposerExpanded(false); autoResizeTextarea(); }
+            try { if (await advancedUI.submit(buildPromptWithAttachments(rawPrompt, attachmentsEnabled ? attachments : []), binaryAttachments, embed) === false) return; if (typeof clearExtensionPromptScope === 'function') clearExtensionPromptScope(); embedConversationUsed = true; clearAttachments(); setComposerExpanded(false); autoResizeTextarea(); }
             catch (error) { console.error(error); alert(error.message); }
             return;
         }
@@ -6507,7 +6632,7 @@
             const response = await fetch(resolveAppUrl('prompt'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
-                body: JSON.stringify({ prompt: finalPrompt, uuid: currentSessionUuid, browserContext, attachments: binaryAttachments, embed })
+                body: JSON.stringify({ prompt: finalPrompt, uuid: currentSessionUuid, browserContext, attachments: binaryAttachments, embed, ...(typeof extensionPromptScope === 'function' ? extensionPromptScope() : {}) })
             });
 
             if (!response.ok) throw new Error('Failed to submit prompt');
@@ -6526,6 +6651,7 @@
             embedConversationUsed = true;
             activeSubmissionStartedAt = Date.now();
             activeSubmissionRunId = data.runId || null;
+            if (typeof clearExtensionPromptScope === 'function') clearExtensionPromptScope();
             sawNonFinishedForActiveSubmission = false;
             setComposerExpanded(false);
             startProcessing();
@@ -6584,6 +6710,7 @@
             if (pollUuid !== currentSessionUuid) {
                 return;
             }
+            if (typeof renderExtensionArtifacts === 'function') renderExtensionArtifacts(data);
             if (activeSubmissionRunId && data.runId && data.runId !== activeSubmissionRunId) {
                 scheduleImmediatePoll(120);
                 return;
@@ -6954,7 +7081,9 @@
 
     /* ========== EVENT HANDLERS ========== */
     async function handleClearClick() {
-        if (advancedUI && !await advancedUI.beforeSessionChange()) return;
+        if (typeof extensionsUI !== 'undefined' && extensionsUI && !await extensionsUI.beforeSessionChange()) return false;
+        if (advancedUI && !await advancedUI.beforeSessionChange()) return false;
+        if (typeof resetExtensionSessionView === 'function') resetExtensionSessionView();
         embedInitialDraft = false;
         resetActivityDisclosure = true;
         const uuidToClear = currentSessionUuid || 
@@ -7012,6 +7141,11 @@
         activeHistoryId = null;
         refreshHistoryPanel();
         prepareCurrentSession();
+        if (typeof extensionAgentAvailable !== 'undefined' && extensionAgentAvailable === false) {
+            promptInput.disabled = true;
+            submitBtn.disabled = true;
+        }
+        return true;
     }
 
     function handleScroll() {

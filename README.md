@@ -173,6 +173,12 @@ Slash commands open dedicated panes with readable results, searchable Help,
 answer/wiki readers, and paginated previous results. Progress remains in Live activity.
 See [Advanced web console](USAGE.md#advanced-web-console).
 
+Optional [Web Extensions](docs/WEB-EXTENSIONS.md) add isolated local editors and viewers.
+Use `webextensions=true webextensionsconfig=/path/to/extensions.json` and enable each
+reviewed package in the Extensions menu. Add `webextensionsonly=true` for a model-free
+workspace. The shipped text editor demonstrates the API; the draw.io adapter uses an
+operator-supplied, pinned local editor with a separate conformance gate.
+
 For application integration, see [iframe context and same-origin prompt handoff](docs/WEB-EMBED.md).
 The opt-in bridge accepts validated parameters and can expand a parent input box into a conversation.
 
@@ -464,6 +470,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 - **[Delegation Guide](docs/DELEGATION.md)** - Hierarchical task decomposition with local and remote delegation
 - **[MCP Proxy Guide](docs/MCPPROXY-FEATURE.md)** - How to consolidate multiple MCP connections behind one `proxy-dispatch` tool
 - **[Usage Guide](USAGE.md)** - Comprehensive guide covering all features
+- **[Web Extensions](docs/WEB-EXTENSIONS.md)** - Local editors, versioned API, permissions, developer guide and draw.io reference
   - [Getting Started](USAGE.md#basic-usage)
   - [Model Configuration](USAGE.md#model-configuration)
   - [Mode Presets](USAGE.md#mode-presets)

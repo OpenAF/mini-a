@@ -14,6 +14,21 @@ This document describes the backend endpoints that the web UI (`public/index.md`
 | `/load-history` | POST | Push local history into the server (resume/branch). | `sendHistoryToServer()` |
 | `/clear` | POST | Clear a session (and optionally force-delete history). | `handleClearClick()`, `handleHistoryEntryDelete()`, `handleClearHistoryStorage()` |
 | `/ping` | POST | Keep a session alive during idle UI usage. | `startPing()` / `sendPing()` |
+| `/web-extensions` | GET, POST | Optional registry, explicit grants and instance lifecycle. | Shared extension host |
+| `/web-documents` | POST | Optional private document list/read/save/delete/download. | Shared extension host |
+
+The last two routes are registered only with `webextensions=true`. They require a
+header token and origin validation; legacy query-token authentication does not apply.
+See the [versioned extension API](WEB-EXTENSIONS-API.md#http-services) for the full
+actions and payloads. `/info` includes `webextensions` and `agentAvailable` only when
+enabled. `webextensionsonly=true` makes `/prompt` return 503 `agent_unavailable` and
+`/prepare` return `prepared:false`, without initializing a model.
+
+When optional agent integration is enabled, `/prompt` also accepts
+`artifactReferences:[{id,revision}]` (at most eight) and
+`artifactPermissions:{create:false,write:false}`. These grants apply to one run;
+model tool arguments cannot expand them. `/result` includes bounded saved-document
+descriptors under `artifacts`, separate from ordinary Markdown content.
 
 ## Endpoint details
 

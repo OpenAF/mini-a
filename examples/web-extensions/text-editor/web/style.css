@@ -1,0 +1,6 @@
+:root { color-scheme: light dark; font: 16px system-ui, sans-serif; }
+body { margin: 0; padding: 12px; box-sizing: border-box; height: 100dvh; display: flex; flex-direction: column; gap: 8px; }
+label { font-weight: 600; }
+textarea { flex: 1; min-height: 100px; resize: none; padding: 12px; font: 14px/1.5 ui-monospace, monospace; }
+textarea:focus-visible { outline: 3px solid #4789dc; outline-offset: 2px; }
+p { margin: 0; font-size: 13px; }
