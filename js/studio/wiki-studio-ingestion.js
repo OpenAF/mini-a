@@ -14,12 +14,14 @@ WikiStudioServer.prototype.sourceOperation = function(w, route, body) {
     WikiStudio.assert(!isDef(body.preview)||isBoolean(body.preview),400,"invalid_options","Preview must be boolean")
     WikiStudio.assert(!isDef(o.mode)||["auto","normalize","raw","distill"].indexOf(o.mode)>=0,400,"invalid_options","Unsupported ingestion mode")
     WikiStudio.assert(!isDef(o.layout)||["source","flat"].indexOf(o.layout)>=0,400,"invalid_options","Unsupported ingestion layout")
-    if(o.section) WikiStudio.pagePath(o.section,false)
+    // Use the logical source identity instead of the private staging directory name.
+    var section=o.section||source.id
+    WikiStudio.pagePath(section,false)
     ;["include","exclude"].forEach(function(k){ if(isDef(o[k])) WikiStudio.assert(isString(o[k])&&o[k].length<=1000&&!/[\x00-\x1f]/.test(o[k]),400,"invalid_options","Invalid include/exclude patterns") })
     ;["prune","semantic"].forEach(function(k){if(isDef(o[k]))WikiStudio.assert(isBoolean(o[k]),400,"invalid_options","Expected boolean")})
     ;["maxfiles","maxfilesize"].forEach(function(k){if(isDef(o[k]))WikiStudio.assert(isNumber(o[k])&&o[k]>=1&&Math.floor(o[k])===o[k]&&o[k]<=(k==="maxfiles"?2000:8388608),400,"invalid_options","Limit exceeds Studio quota")})
     if(o.prune===true) WikiStudio.assert(body.confirmation&&body.confirmation.acknowledgePrune===true,400,"confirmation_required","Explicit prune confirmation required; empty-source authorization is not available")
-    return {operation:"ingest.run",params:{sourceId:source.id,revision:source.revision,staging:source.staging,inventoryChecksum:source.inventoryChecksum,dryrun:body.preview!==false,mode:o.mode||"auto",layout:o.layout||"source",section:o.section||"",include:o.include||"",exclude:o.exclude||"",prune:o.prune===true,semantic:o.semantic===true,maxfiles:o.maxfiles||2000,maxfilesize:o.maxfilesize||8388608}}
+    return {operation:"ingest.run",params:{sourceId:source.id,revision:source.revision,staging:source.staging,inventoryChecksum:source.inventoryChecksum,dryrun:body.preview!==false,mode:o.mode||"auto",layout:o.layout||"source",section:section,include:o.include||"",exclude:o.exclude||"",prune:o.prune===true,semantic:o.semantic===true,maxfiles:o.maxfiles||2000,maxfilesize:o.maxfilesize||8388608}}
   }
   if(route==="absorptions") {
     WikiStudio.fields(body,["action","sourceWikiIds","paths","tags","topic","exclude","planId","confirmation"])

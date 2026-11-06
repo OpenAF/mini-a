@@ -1206,7 +1206,8 @@ window.MiniAAdvancedUI = function(bridge) {
       if (!tags.has(child.tagName)) { child.replaceWith(document.createTextNode(child.textContent)); continue; }
       for (const attribute of [...child.attributes]) {
         const safeLink = child.tagName === 'A' && attribute.name === 'href' && /^(https?:\/\/|mailto:|#)/i.test(attribute.value);
-        const safeClass = child.tagName === 'CODE' && attribute.name === 'class' && /^language-[\w-]+$/.test(attribute.value);
+        const safeClass = child.tagName === 'CODE' && attribute.name === 'class' && attribute.value.split(/\s+/).find(value => /^language-[\w-]+$/.test(value));
+        if (safeClass) child.setAttribute('class', safeClass);
         if (!safeLink && !safeClass) child.removeAttribute(attribute.name);
       }
       if (child.tagName === 'A') child.setAttribute('rel','noopener noreferrer');
@@ -1220,9 +1221,15 @@ window.MiniAAdvancedUI = function(bridge) {
         window.mermaid.initialize({startOnLoad:false,securityLevel:'strict',theme:document.body.classList.contains('markdown-body-dark')?'dark':'default'});
         const rendered = await window.mermaid.render('advanced-diagram-' + bridge.newRequestId(), source);
         if (!node.isConnected) return;
-        const frame = el('iframe'); frame.title = 'Mermaid preview'; frame.setAttribute('sandbox','');
-        frame.srcdoc = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'">' + rendered.svg;
-        code.parentElement.after(frame);
+        if (bridge.renderMermaidPreview) {
+          const preview = el('div');
+          bridge.renderMermaidPreview(preview, rendered.svg);
+          code.parentElement.after(preview);
+        } else {
+          const frame = el('iframe'); frame.title = 'Mermaid preview'; frame.setAttribute('sandbox','');
+          frame.srcdoc = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'">' + rendered.svg;
+          code.parentElement.after(frame);
+        }
       }).catch(() => { /* Keep the original diagram source readable. */ });
     }
     return node;

@@ -159,6 +159,7 @@ run('StudioApi.request=api;StudioApi.background=api;studioSession={canTestWiki:f
   video.value='sample-video';let resolvePreview;
   context.queueFixture=async()=>({id:'preview-job',finished:new Promise(resolve=>{resolvePreview=resolve;})});
   run('queue=queueFixture;');await click(view,'Download captions');
+  assert.equal(field(view,'Destination section').value,'team-notes','Destination defaults to the stable source ID');
   assert(find(view,'button','4. Import into wiki').disabled,'Import starts disabled');
   const preview=click(view,'Preview changes');await new Promise(resolve=>setImmediate(resolve));
   resolvePreview({status:'completed',result:{ok:true,changes:[]}});await preview;

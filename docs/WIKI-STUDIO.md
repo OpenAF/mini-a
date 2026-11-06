@@ -142,6 +142,13 @@ claimed. Exporter and simulated DOM node-navigation tests pass.
 Select the destination wiki first. Sources supports browser directory selection
 and ZIP upload, staged file inventory, stable source IDs, immutable upload
 revisions and bounded lineage. Reuse the source ID for a later uploaded revision.
+
+The destination section defaults to the stable source ID, rather than the internal
+upload directory name. Change **Advanced options → Destination section** to override
+it; an empty field uses the source ID. Source layout preserves uploaded folder paths
+beneath that section. Existing pages are not moved automatically; to keep updating
+an older import under `files` (or `expanded` for ZIPs), explicitly use that section.
+
 Stage first, then choose Preview or Apply; filenames never select a destination.
 Preview is the ingestion engine's dry run, not a guaranteed model-generated diff.
 Auto/normalize/raw/distill, source/flat layout, section, include/exclude, prune and

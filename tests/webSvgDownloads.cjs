@@ -11,13 +11,14 @@ function element(tag) {
     getBoundingClientRect() { return { width: 200 }; },
     setAttribute(name, value) { this.attributes.push({name,value}); },
     addEventListener(name, fn) { this.listeners[name] = fn; },
+    contains(node) { return node === this || this.children.includes(node); },
     focus() { this.focused = true; },
     click() { this.clicked = true; }, remove() { this.removed = true; }
   };
 }
 let blob, revoked, timer;
 const body = element('body');
-const ctx = vm.createContext({document:{body,createElement:element}, Blob,
+const ctx = vm.createContext({document:{body,createElement:element,addEventListener(){}}, Blob,
   URL:{createObjectURL(b){blob=b;return 'blob:svg';},revokeObjectURL(u){revoked=u;}},
   setTimeout(fn){timer=fn;}
 });
@@ -28,6 +29,12 @@ const safe = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><text>
 ctx.addSvgDownloadControl(wrapper,safe);
 ctx.addSvgDownloadControl(wrapper,safe);
 assert.equal(wrapper.children.length,3,'Rerenders do not duplicate controls');
+const menu = wrapper.children[1];
+menu.open = true;
+menu.listeners.focusout({relatedTarget: null});
+assert.equal(menu.open, true, 'Safari blur leaves the action available for its pending click');
+menu.listeners.focusout({relatedTarget: body});
+assert.equal(menu.open, false);
 const toolbar=wrapper.children[1].children[1];
 const [smaller, larger, reset, button, png, fullscreen] = toolbar.children;
 for (const action of toolbar.children) assert.match(action.innerHTML, /class="diagram-action-icon"/);

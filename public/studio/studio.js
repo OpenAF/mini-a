@@ -827,7 +827,8 @@ async function sourcesView(content) {
     body.replaceChildren();el("h4","3. Preview changes · "+source.name,body);
     el("p","Review this source revision before importing. Preview reports engine estimates; application revalidates the current source.",body);
     const advanced=el("disclosure",undefined,body);el("disclosure-toggle","Advanced options",advanced);
-    const mode=field(advanced,"Processing",["auto","normalize","raw","distill"]),layout=field(advanced,"Layout",["source","flat"]),section=field(advanced,"Destination section"),include=field(advanced,"Include patterns"),exclude=field(advanced,"Exclude patterns");
+    const mode=field(advanced,"Processing",["auto","normalize","raw","distill"]),layout=field(advanced,"Layout",["source","flat"]),section=field(advanced,"Destination section",null,source.id),include=field(advanced,"Include patterns"),exclude=field(advanced,"Exclude patterns");
+    el("p","Destination section defaults to the source ID ("+source.id+"). Enter another section to override it.",advanced);
     const semantic=check(advanced,"Semantic extraction"),prune=check(advanced,"Remove source-owned pages missing from this revision");disable(semantic,writeReason(true));
     const actions=row(body),result=el("div",undefined,body);let approved=null,working=false;
     const options=()=>({mode:mode.value,layout:layout.value,section:section.value,include:include.value,exclude:exclude.value,semantic:semantic.checked,prune:prune.checked});

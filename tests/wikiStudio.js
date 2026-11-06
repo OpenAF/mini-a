@@ -129,6 +129,10 @@
     s.streamUpload(req,new java.io.ByteArrayInputStream(WikiStudio.bytes("# Staged\n")))
     var source=s.sourceAdd(w,{id:"docs",name:"Documents",type:"upload",uploadId:id})
     assert(source.files["nested/source.md"].size,9,"Preserve directory paths")
+    ;[{}, {section:""}, {section:"guides/reference"}].forEach(function(options) {
+      var spec=s.sourceOperation(w,"ingestions",{sourceId:source.id,revision:source.revision,options:options})
+      assert(spec.params.section,options.section||"docs","Default section uses source ID and preserves explicit overrides")
+    })
     rejects(function(){s.streamUpload(req,new java.io.ByteArrayInputStream(WikiStudio.bytes("x")))},"upload_sealed")
     rejects(function(){s.sourceAdd(w,{id:"remote",name:"Remote",type:"url",uploadId:WikiStudio.id()})},"adapter_unavailable")
     rejects(function(){s.sourceAdd(w,{id:"web",name:"Web",type:"web",url:"http://127.0.0.1/"})},"outbound_blocked")
@@ -158,6 +162,8 @@
     var applied=run(false,"apply-key-123");assert(applied.status,"completed","Real raw ingestion: "+JSON.stringify(applied))
     assert(!!applied.backupId,true,"Ingestion backup recorded")
     var files=WikiStudio.scan(w.root,false);assert(Object.keys(files).length>0,true,"Engine produced pages")
+    assert(!!files["lessons/lesson.md"],true,"Source ID sets the actual destination section")
+    assert(Object.keys(files).some(function(p){return /^files\//.test(p)}),false,"Staging directory does not become a wiki section")
     var repeated=run(false,"rerun-key-123");assert(repeated.status,"completed","Idempotent engine rerun")
     var unchanged=WikiStudio.scan(w.root,false);assert(Object.keys(files).filter(function(p){return p!=="log.md"}).every(function(p){return unchanged[p]&&files[p].hash===unchanged[p].hash}),true,"Stable source ID does not duplicate pages")
     var managed=Object.keys(unchanged).filter(function(p){return !/(^|\/)(index|log|AGENTS)\.md$/.test(p)})[0]

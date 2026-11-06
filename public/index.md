@@ -392,6 +392,9 @@
     .svg-controls { position: absolute; top: 32px; right: 0; display: flex; flex-direction: column; gap: 2px; width: 150px; padding: 4px; border: 1px solid var(--svg-control-border); border-radius: 6px; background: var(--svg-control-bg); box-shadow: 0 3px 10px #0002; }
     .svg-rendered-block .svg-controls button { display: flex; align-items: center; width: 100%; min-height: 32px; border: 0; border-radius: 4px; padding: 5px 8px; cursor: pointer; text-align: left; font-size: 12px; color: var(--svg-control-text); background: var(--svg-control-bg); }
     .svg-controls button:disabled { opacity: .4; cursor: default; }
+    .svg-actions[open], details.mermaid-diagram-controls[open] { z-index: 5; }
+    .mermaid-image-preview { margin: 12px 0; padding: 10px; border: 1px solid var(--svg-control-border); border-radius: 8px; }
+    .svg-controls button, .svg-actions summary, .mermaid-control-btn, .mermaid-diagram-controls summary { touch-action: manipulation; }
     .svg-controls button:hover { filter: brightness(.94); }
     .svg-controls button:focus-visible, .svg-actions summary:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
     .svg-export-status { display: block; font-size: 12px; color: var(--svg-control-text); }
@@ -525,6 +528,13 @@
     .mermaid-fullscreen .mermaid-control-group { position: static; flex-direction: row; flex-wrap: wrap; width: auto; }
     .mermaid-fullscreen .mermaid-control-btn { width: 36px; min-height: 36px; justify-content: center; padding: 8px; }
     .mermaid-fullscreen .diagram-action-label { display: none; }
+
+    @media (pointer: coarse) {
+        .svg-actions summary, .mermaid-diagram-controls summary { width: 44px; height: 44px; }
+        .svg-controls, .mermaid-control-group { top: 48px; }
+        .svg-rendered-block .svg-controls button, .mermaid-control-btn { min-height: 44px; }
+        .mermaid-fullscreen .mermaid-control-btn { width: 44px; min-height: 44px; }
+    }
 
     /* ========== LEAFLET MAPS ========== */
     .leaflet-map {
@@ -3711,10 +3721,10 @@
         });
     }
 
-    function openMermaidFullscreen(svg, originalViewBoxAttr, originalPreserveAspectRatio, svgText) {
+    function openMermaidFullscreen(svg, originalViewBoxAttr, originalPreserveAspectRatio, svgText, imageKind) {
         const dialog = document.createElement('dialog');
         dialog.className = 'mermaid-fullscreen';
-        const kind = typeof svgText === 'string' ? 'SVG' : 'Mermaid';
+        const kind = imageKind || (typeof svgText === 'string' ? 'SVG' : 'Mermaid');
         dialog.setAttribute('aria-label', 'Full-screen ' + kind + ' diagram. Pinch to zoom and drag to pan.');
         const stage = document.createElement('div');
         stage.className = 'mermaid-fullscreen-stage';
@@ -3796,7 +3806,7 @@
             if (!button) return;
             const action = button.getAttribute('data-action');
             if (action.startsWith('download-')) {
-                if (kind === 'SVG') exportSvgDiagram(svgText, action, button, exportStatus);
+                if (typeof svgText === 'string') exportSvgDiagram(svgText, action, button, exportStatus, kind === 'Mermaid' ? 'mermaid' : 'diagram');
                 else exportMermaidDiagram(svg, originalViewBoxAttr, originalPreserveAspectRatio, action, button, exportStatus);
                 return;
             }
@@ -3872,17 +3882,7 @@
             actions.map(([action, label]) => '<button type="button" class="mermaid-control-btn" data-action="' +
                 action + '" aria-label="' + label + '" title="' + label + '">' +
                 diagramActionIcon(action) + '<span class="diagram-action-label">' + label + '</span></button>').join('') + '</div>';
-        if (!fullscreen) {
-            menu.addEventListener('keydown', event => {
-                if (event.key === 'Escape' && menu.open) {
-                    event.preventDefault(); event.stopPropagation();
-                    menu.open = false; menu.querySelector('summary').focus();
-                }
-            });
-            menu.addEventListener('focusout', event => {
-                if (!menu.contains(event.relatedTarget)) menu.open = false;
-            });
-        }
+        if (!fullscreen) bindDiagramMenu(menu);
         return menu;
     }
 
@@ -4226,7 +4226,8 @@
     }, 3000);
 
     // Shared by Simple and Advanced. Export only the validated preview bytes.
-    function addSvgDownloadControl(container, svgText) {
+    function addSvgDownloadControl(container, svgText, kind = 'SVG') {
+        const filename = kind === 'Mermaid' ? 'mermaid' : 'diagram';
         if (container.querySelector('.svg-download-button')) return;
         const control = document.createElement('button');
         control.type = 'button';
@@ -4235,12 +4236,12 @@
         control.setAttribute('aria-label', 'Download SVG');
         control.innerHTML = diagramActionIcon('download-svg') + '<span>Download SVG</span>';
         control.addEventListener('click', () => {
-            downloadDiagramBlob(new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' }), 'diagram.svg');
+            downloadDiagramBlob(new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' }), filename + '.svg');
         });
         const controls = document.createElement('div');
         controls.className = 'svg-controls';
         controls.setAttribute('role', 'group');
-        controls.setAttribute('aria-label', 'SVG controls');
+        controls.setAttribute('aria-label', kind + ' controls');
         const image = container.querySelector('img');
         if (image) {
             let scale = 1, baseWidth = 0;
@@ -4261,9 +4262,9 @@
                 smaller.disabled = scale <= .25;
                 larger.disabled = scale >= 3;
             };
-            const smaller = resizeButton('Shrink SVG', 'zoom-out', () => resize(scale - .25));
-            const larger = resizeButton('Enlarge SVG', 'zoom-in', () => resize(scale + .25));
-            resizeButton('Reset SVG size', 'reset', () => {
+            const smaller = resizeButton(kind === 'SVG' ? 'Shrink SVG' : 'Zoom out', 'zoom-out', () => resize(scale - .25));
+            const larger = resizeButton(kind === 'SVG' ? 'Enlarge SVG' : 'Zoom in', 'zoom-in', () => resize(scale + .25));
+            resizeButton(kind === 'SVG' ? 'Reset SVG size' : 'Reset view', 'reset', () => {
                 scale = 1; baseWidth = 0;
                 image.style.width = ''; image.style.maxWidth = '100%';
                 smaller.disabled = false; larger.disabled = false;
@@ -4279,7 +4280,7 @@
         png.addEventListener('click', async () => {
             png.disabled = true; status.textContent = '';
             try {
-                await downloadSvgAsPng(svgText, 'diagram.png');
+                await downloadSvgAsPng(svgText, filename + '.png');
             } catch (_) {
                 status.textContent = 'PNG export failed. Try again or download the SVG.';
             } finally {
@@ -4295,26 +4296,67 @@
             // Restore focus to the visible menu trigger when the dialog closes.
             menu.open = false; trigger.focus();
             const svg = new DOMParser().parseFromString(svgText, 'image/svg+xml').documentElement;
-            openMermaidFullscreen(svg, svg.getAttribute('viewBox'), svg.getAttribute('preserveAspectRatio'), svgText);
+            openMermaidFullscreen(svg, svg.getAttribute('viewBox'), svg.getAttribute('preserveAspectRatio'), svgText, kind);
         });
         controls.appendChild(fullscreen);
         const menu = document.createElement('details');
         menu.className = 'svg-actions';
         const trigger = document.createElement('summary');
-        trigger.textContent = '⋯'; trigger.title = 'SVG actions';
-        trigger.setAttribute('aria-label', 'SVG actions');
+        trigger.textContent = '⋯'; trigger.title = kind + ' actions';
+        trigger.setAttribute('aria-label', kind + ' actions');
         menu.appendChild(trigger); menu.appendChild(controls);
-        menu.addEventListener('keydown', event => {
-            if (event.key === 'Escape') { menu.open = false; trigger.focus(); }
-        });
-        menu.addEventListener('focusout', event => {
-            if (!menu.contains(event.relatedTarget)) menu.open = false;
-        });
+        bindDiagramMenu(menu);
         controls.addEventListener('click', event => {
             if (event.target.closest('button') && event.target.closest('button') !== fullscreen) { menu.open = false; trigger.focus(); }
         });
         container.appendChild(menu);
         container.appendChild(status);
+    }
+
+    function bindDiagramMenu(menu) {
+        // Safari can blur a summary without focusing the tapped button. Closing on
+        // a null relatedTarget removes the button before its click is dispatched.
+        menu.addEventListener('focusout', event => {
+            if (event.relatedTarget && !menu.contains(event.relatedTarget)) menu.open = false;
+        });
+        menu.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && menu.open) {
+                event.preventDefault(); event.stopPropagation();
+                menu.open = false; menu.querySelector('summary').focus();
+            }
+        });
+        if (!bindDiagramMenu.outsideListener) {
+            document.addEventListener('pointerdown', event => {
+                document.querySelectorAll('details.svg-actions[open], details.mermaid-diagram-controls[open]').forEach(openMenu => {
+                    if (!openMenu.contains(event.target)) openMenu.open = false;
+                });
+            }, true);
+            bindDiagramMenu.outsideListener = true;
+        }
+    }
+
+    function renderMermaidPreview(container, svgText) {
+        const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+        const svg = doc.documentElement;
+        if (doc.querySelector('parsererror') || svg.localName !== 'svg' || svg.namespaceURI !== 'http://www.w3.org/2000/svg') {
+            throw new Error('Invalid Mermaid SVG');
+        }
+        const bounds = (svg.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+        if (bounds.length === 4 && bounds.every(Number.isFinite) && bounds[2] > 0 && bounds[3] > 0) {
+            svg.setAttribute('width', bounds[2]); svg.setAttribute('height', bounds[3]);
+            svg.style.width = bounds[2] + 'px'; svg.style.height = bounds[3] + 'px'; svg.style.maxWidth = 'none';
+        }
+        const text = new XMLSerializer().serializeToString(svg);
+        container.className = 'svg-rendered-block mermaid-image-preview';
+        const viewport = document.createElement('div'); viewport.className = 'svg-viewport';
+        const stage = document.createElement('div'); stage.className = 'svg-image-stage';
+        const image = document.createElement('img'); image.alt = 'Rendered Mermaid diagram';
+        // SVG image documents isolate styles/IDs and disable scripts and external
+        // resources, retaining isolation without putting controls inside an iframe.
+        image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(text);
+        image.style.display = 'block'; image.style.maxWidth = '100%'; image.style.height = 'auto';
+        stage.appendChild(image); viewport.appendChild(stage); container.appendChild(viewport);
+        addSvgDownloadControl(container, text, 'Mermaid');
     }
 
     function diagramActionIcon(action) {
@@ -4330,12 +4372,12 @@
         return '<svg class="diagram-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="' + paths[action] + '"/></svg>';
     }
 
-    async function exportSvgDiagram(svgText, action, button, status) {
+    async function exportSvgDiagram(svgText, action, button, status, filename = 'diagram') {
         if (button.disabled) return;
         button.disabled = true; status.textContent = '';
         try {
-            if (action === 'download-png') await downloadSvgAsPng(svgText, 'diagram.png');
-            else downloadDiagramBlob(new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' }), 'diagram.svg');
+            if (action === 'download-png') await downloadSvgAsPng(svgText, filename + '.png');
+            else downloadDiagramBlob(new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' }), filename + '.svg');
         } catch (_) {
             status.textContent = 'Diagram export failed. Try again or download the SVG.';
         } finally {
@@ -5412,6 +5454,7 @@
             composerExpanded,
             renderMarkdown: renderConversationMarkdown,
             renderSvgBlocks,
+            renderMermaidPreview,
             renderGeneratedFiles,
             url: resolveAppUrl,
             newRequestId: generateNewSessionUuid,

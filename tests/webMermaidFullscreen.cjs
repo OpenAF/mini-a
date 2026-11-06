@@ -14,6 +14,7 @@ class Element {
   cloneNode() { const copy = new Element(this.tag); copy.attrs = { ...this.attrs }; return copy; }
   getBoundingClientRect() { return { left: 0, top: 0, width: 400, height: 800 }; }
   setPointerCapture() {}
+  contains(node) { return node === this || this.children.includes(node); }
   querySelector() { return { focus() {} }; }
   focus() { this.focused = true; }
   showModal() { this.modal = true; }
@@ -25,12 +26,12 @@ body.style.overflow = 'auto';
 const trigger = new Element('button');
 let serialized;
 let revoked;
-const context = { document: { body, activeElement: trigger, createElement: tag => new Element(tag) },
+const context = { document: { body, activeElement: trigger, createElement: tag => new Element(tag), addEventListener() {} },
   Blob, URL: { createObjectURL: () => 'blob:test', revokeObjectURL: url => { revoked = url; } },
   XMLSerializer: class { serializeToString(copy) { serialized = copy.attrs; return '<svg/>'; } } };
 vm.createContext(context);
 vm.runInContext(page.slice(page.indexOf('    function openMermaidFullscreen('), page.indexOf('    function addMermaidPanZoomLayer(')), context);
-vm.runInContext(page.slice(page.indexOf('    function diagramActionIcon('), page.indexOf('    function downloadDiagramBlob(')), context);
+vm.runInContext(page.slice(page.indexOf('    function bindDiagramMenu('), page.indexOf('    function downloadDiagramBlob(')), context);
 const svg = new Element('svg');
 svg.setAttribute('viewBox', '10 20 50 50');
 context.openMermaidFullscreen(svg, '0 0 100 100', null);
@@ -56,6 +57,11 @@ inlineMenu.emit('keydown', { key: 'Escape',
   stopPropagation() { menuEscapeStopped = true; } });
 assert.equal(inlineMenu.open, false);
 assert.ok(menuEscapePrevented && menuEscapeStopped, 'Escape dismisses the menu before the dialog');
+inlineMenu.open = true;
+inlineMenu.emit('focusout', {relatedTarget: null});
+assert.equal(inlineMenu.open, true, 'Safari blur must not remove the pending click target');
+inlineMenu.emit('focusout', {relatedTarget: new Element('button')});
+assert.equal(inlineMenu.open, false, 'Keyboard navigation out of the menu still dismisses it');
 assert.equal(dialog.modal, true);
 const pointer = (name, id, x, y) => stage.emit(name, { pointerId: id, button: 0, clientX: x, clientY: y });
 const action = action => controls.emit('click', { target: { closest: () => ({ getAttribute: () => action }) } });
