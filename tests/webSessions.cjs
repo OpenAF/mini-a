@@ -33,7 +33,7 @@ const c = { global: g, MiniA: Agent, __: undefined, genUUID: () => 'token-' + ++
   toBoolean: x => x === true, merge: (a,b) => ({...a,...b}), jsonParse: JSON.parse, stringify: JSON.stringify,
   af: { fromJSSLON: JSON.parse, toSLON: JSON.stringify }, ow: { server: { httpd: { reply: x => x } } },
   log() {}, logErr() {}, logWarn() {}, printErr(e) { throw e; }, $err() {}, __miniAErrMsg: String,
-  sleep() {},
+  sleep() {}, now: Date.now,
   $tb(fn) { return { stopWhen(check) { this.check = check; return this; }, exec() { fn(); this.check(true); } }; },
   $doV(fn) { if (scheduleFail) throw Error('schedule failed'); pending.push(fn); return { catch() {} }; } };
 c.__miniAPath = p => p;
@@ -365,3 +365,78 @@ assert.equal(g.__conversations['embed-one'].lastArgs._webEmbedContext,null);
 c.MiniAWebEmbed.config.enabled=false;
 assert.match(call('prompt',{uuid:'embed-off',prompt:'hello',embed:embed('x')}).error,/disabled/);
 console.log('Embedded HTTP validation, immutable snapshots, isolation and standalone clearing passed.');
+
+// Terminal outcomes are independent of transcript events and belong to one run.
+g.__advanced = undefined; g.__usehistory = false;
+for (const streaming of [false, true]) {
+  g.__usestream = streaming;
+  fail = true;
+  const id = 'outcome-failure-' + streaming;
+  call('prompt', {uuid:id, prompt:'fail before a user event'});
+  const running = call('result', {uuid:id});
+  assert.equal(running.status, 'processing');
+  pending.shift()();
+  const failed = call('result', {uuid:id, ifTranscriptRevision:running.transcriptRevision});
+  assert.equal(failed.status, 'finished'); assert.equal(failed.outcome, 'failure');
+  assert.match(failed.error, /init fixture failure/);
+  fail = false;
+  call('prompt', {uuid:id, prompt:'retry'}); pending.shift()();
+  assert.equal(call('result', {uuid:id}).outcome, 'success');
+}
+g.__usestream = false;
+scheduleFail = true;
+call('prompt', {uuid:'outcome-schedule', prompt:'fail scheduling'});
+assert.equal(call('result', {uuid:'outcome-schedule'}).outcome, 'failure');
+scheduleFail = false;
+call('prompt', {uuid:'outcome-cancel', prompt:'cancel before dispatch'});
+call('result', {uuid:'outcome-cancel', request:'stop'}); pending.shift()();
+assert.equal(call('result', {uuid:'outcome-cancel'}).outcome, 'cancelled');
+const oldOwner = g._mini_a_web_reserve('outcome-owner');
+g._mini_a_web_outcome('outcome-owner', oldOwner, 'processing');
+g._mini_a_web_release('outcome-owner', oldOwner);
+const newOwner = g._mini_a_web_reserve('outcome-owner');
+g._mini_a_web_outcome('outcome-owner', newOwner, 'processing');
+assert.equal(g._mini_a_web_outcome('outcome-owner', oldOwner, 'failure', 'late'), false);
+assert.equal(g.__runOutcomes['outcome-owner'].outcome, 'processing');
+g._mini_a_web_release('outcome-owner', newOwner);
+// Matching polls skip message rendering, even when plan/status metadata changes.
+let renders = 0;
+const counted = {event:'final', get message() {renders++; return 'Cached answer';}};
+g._mini_a_web_transcript('revision', 'replace', [counted]);
+const full = call('result', {uuid:'revision'});
+assert.equal(full.status, 'finished'); assert.ok(renders > 0);
+const renderCount = renders;
+g.__planState = {revision:{items:[{title:'Updated'}],total:1}};
+const unchanged = call('result', {uuid:'revision',ifTranscriptRevision:full.transcriptRevision});
+assert.equal(unchanged.content,undefined); assert.equal(unchanged.history,undefined);
+assert.equal(unchanged.plan.items[0].title,'Updated'); assert.equal(renders,renderCount);
+assert.equal(call('result', {uuid:'revision'}).content,full.content);
+assert.equal(renders,renderCount,'full snapshots reuse rendered content');
+g._mini_a_web_transcript('revision','append',{event:'final',message:'New answer'});
+const changed = call('result',{uuid:'revision',ifTranscriptRevision:full.transcriptRevision});
+assert.notEqual(changed.transcriptRevision,full.transcriptRevision); assert.match(changed.content,/New answer/);
+g._mini_a_web_transcript('revision','replace',[{event:'final',message:'Replaced'}]);
+assert.match(call('result',{uuid:'revision'}).content,/Replaced/);
+g._mini_a_web_transcript('revision','clear');
+assert.equal(call('result',{uuid:'revision'}).content,'');
+console.log('Web terminal outcomes, run ownership and revision-aware rendered-cache checks passed.');
+// A mutation after snapshot capture cannot invalidate that response's cached body.
+g._mini_a_web_transcript('snapshot-race','replace',[{event:'final',message:'Stable cached answer'}]);
+const stable = call('result',{uuid:'snapshot-race'});
+const realTranscript = g._mini_a_web_transcript;
+g._mini_a_web_transcript = function(id, operation, value) {
+  const snapshot = realTranscript(id, operation, value);
+  if (operation === 'snapshot') realTranscript(id, 'append', {event:'user',message:'Later mutation'});
+  return snapshot;
+};
+assert.equal(call('result',{uuid:'snapshot-race'}).content,stable.content);
+g._mini_a_web_transcript = realTranscript;
+// Artifact publication failure is terminal failure; cleanup cannot hide a primary error.
+c.MiniAWebArtifacts = {enabled:()=>false,protect(){},begin(){},finish(){throw Error('Artifact publication failed');}};
+call('prompt',{uuid:'publication-failure',prompt:'generate'});pending.shift()();
+assert.equal(call('result',{uuid:'publication-failure'}).outcome,'failure');
+assert.match(call('result',{uuid:'publication-failure'}).error,/Artifact publication failed/);
+fail=true;call('prompt',{uuid:'primary-failure',prompt:'generate'});pending.shift()();fail=false;
+assert.match(call('result',{uuid:'primary-failure'}).error,/init fixture failure/);
+delete c.MiniAWebArtifacts;
+console.log('Atomic transcript snapshots and finalization failure checks passed.');

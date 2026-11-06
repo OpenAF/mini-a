@@ -490,7 +490,7 @@ MiniA.prototype._normalizeToolNameList = function(value) {
 
 MiniA.prototype._getProxyCatalogTools = function() {
   var tools = []
-  var state = isObject(global.__mcpProxyState__) ? global.__mcpProxyState__ : __
+  var state = this._getMcpProxyState()
   if (!isObject(state) || !isArray(state.catalog)) return tools
 
   state.catalog.forEach(function(entry) {

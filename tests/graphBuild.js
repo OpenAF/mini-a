@@ -16,6 +16,30 @@ try {
   ;[{maxCalls:0},{maxCalls:1.5},{maxTokens:Infinity},{maxMinutes:-1},{strategy:"resume",force:true,extraction:"semantic"},{strategy:"resume"},{extraction:"no"},{modelHelp:"yes"}].forEach(function(options) {var rejected=false;try{MiniAGraphBuild.resolve(options)}catch(e){rejected=true}assert(rejected,"invalid options rejected: "+stringify(options))})
   assert(!MiniAGraphBuild.preferences({extraction:"semantic",strategy:"resume"}).strategy, "resume never saved")
   assert(MiniAGraphBuild.fingerprint({model:"x",key:"secret1"}) === MiniAGraphBuild.fingerprint({model:"x",key:"secret2"}), "fingerprints exclude credentials")
+  var batchGraph = graph("batch-derived"), referenceGraph = graph("reference-derived")
+  var batchPages = [page("one.md", "# One\nAlpha", {title:"One", tags:["shared"]}), page("two.md", "# Two\nBeta", {title:"Two", tags:["shared"]}), page("old.md", "# Old\nRemove me")]
+  batchGraph.build(batchPages, {extraction:"structural"}); referenceGraph.build(batchPages, {extraction:"structural"})
+  batchPages = [page("one.md", "# One\nChanged alpha", {title:"One",tags:["shared"]}), page("two.md", "# Two\nChanged beta", {title:"Two",tags:["shared"]}), page("new.md", "# New\nAdded")]
+  var rebuilds = 0, rescored = 0, detect = batchGraph.detectCommunities, surprise = batchGraph.crossDocumentSurprise
+  batchGraph.detectCommunities = function() { rebuilds++; return detect.apply(this, arguments) }
+  batchGraph.crossDocumentSurprise = function() { rescored++; return surprise.apply(this, arguments) }
+  var batchReport = batchGraph.build(batchPages, {extraction:"structural"})
+  batchPages.forEach(function(p) { referenceGraph.updatePage(p) }); referenceGraph.removePage("old.md")
+  assert(rebuilds === 1 && rescored === 1, "changed-page batch rebuilds communities and scores once")
+  assert(stringify(batchGraph.stats()) === stringify(referenceGraph.stats()), "batch derived stats equal sequential public updates")
+  function graphShape(g) {
+    return { nodes:Object.keys(g._state.nodes).sort().map(function(k) { return g._state.nodes[k] }), edges:g._state.edges.filter(function(e) {return !e._deleted}), summaries:g._state.summaries }
+  }
+  assert(stringify(graphShape(batchGraph)) === stringify(graphShape(referenceGraph)), "batch graph state equals sequential updates")
+  assert(batchGraph._autosave === referenceGraph._autosave, "batch restores autosave")
+  rebuilds = 0; rescored = 0
+  batchGraph.build(batchPages, {extraction:"semantic",modelHelp:"off"})
+  assert(rebuilds === 1 && rescored === 1, "semantic batch computes derived state only at completion")
+  rebuilds = 0; rescored = 0
+  batchGraph.build(batchPages, {extraction:"semantic",modelHelp:"off",strategy:"full"})
+  assert(rebuilds === 1 && rescored === 1, "full semantic batch computes derived state only at completion")
+  assert(!!batchGraph.updatePage(page("new.md", "# New\nChanged again")).stats, "single-page update preserves stats return")
+  assert(!!batchGraph.removePage("new.md").stats, "single-page removal preserves stats return")
   var calls=0, g=graph("foundation",{modelExtractors:[{role:"main",extract:function(){calls++;return{relationships:[]}}}]})
   var pages=[page("a.md","# Alpha\nTLS and `Node.js` use C++.\n"+new Array(100).join("## Extra\nPlain prose.\n")+"## Late\nECONNREFUSED uses conn.ReceiveFunc.",{title:"Alpha",tags:["network"]}),page("b.md","# Beta\nTLS works with Node.js and conn.ReceiveFunc.",{title:"Beta"})]
   assert(g.build(pages,{extraction:"structural",modelHelp:"auto"}).calls===0 && calls===0,"structural is zero call")

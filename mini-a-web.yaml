@@ -1478,7 +1478,7 @@ todo:
       if (!global.__usehistory || postData.force) {
         log("Clearing session " + postData.uuid)
         if (isDef(global.__res[ postData.uuid ])) {
-          delete global.__res[ postData.uuid ]
+          global._mini_a_web_transcript(postData.uuid, "clear")
         }
         if (isDef(global.__conversations[ postData.uuid ])) {
           if (isObject(global.__conversations[ postData.uuid ]._historyVm)) {
@@ -1568,7 +1568,11 @@ todo:
           }
         }
       }
-      var _res = { content: "", status: "processing", phase: "execution", history: [] }
+      var snapshot = global._mini_a_web_transcript(postData.uuid, "snapshot", postData.ifTranscriptRevision)
+      var _res = { content: "", status: "processing", phase: "execution", history: [], transcriptRevision: snapshot.revision || null }
+      var unchanged = isDef(postData.ifTranscriptRevision) && postData.ifTranscriptRevision === snapshot.revision
+      var rendered = snapshot.rendered
+      var runOutcome = snapshot.outcome
       var __attachmentLangMap = {
         md: 'markdown', markdown: 'markdown', json: 'json', yaml: 'yaml', yml: 'yaml',
         csv: 'csv', tsv: 'tsv', xml: 'xml', html: 'html', htm: 'html', css: 'css', scss: 'scss', less: 'less',
@@ -1631,7 +1635,7 @@ todo:
 
         return html
       }
-      if (isDef(global.__res[ postData.uuid ])) {
+      if (snapshot.exists) {
         // Update last activity
         global.__lastActivity[ postData.uuid ] = Date.now()
         var activeConversation = isDef(global.__conversations) ? global.__conversations[ postData.uuid ] : __
@@ -1641,6 +1645,10 @@ todo:
         var planState = isDef(global.__planState) ? global.__planState[ postData.uuid ] : __
         var hasActivePlan = isDef(planState) && isArray(planState.items) && planState.items.length > 0
 
+        if (!unchanged && rendered && rendered.revision === snapshot.revision) {
+          _res.content = rendered.content
+          _res.history = rendered.history
+        } else if (!unchanged) {
         // Append all messages to content
         var _history = []
         var activityLines = []
@@ -1655,8 +1663,8 @@ todo:
           activityLines = []
           activityWarnings = 0
         }
-        for (var i = 0; i < global.__res[ postData.uuid ].length; i++) {
-          var r = global.__res[ postData.uuid ][i]
+        for (var i = 0; i < snapshot.entries.length; i++) {
+          var r = snapshot.entries[i]
           if (isDef(r.event)) {
             var _h = { event: r.event }
             if (isDef(r.message)) _h.message = r.message
@@ -1666,12 +1674,8 @@ todo:
           if (r.event == "final") {
             flushActivity(true)
             activityId++
-            if (i == global.__res[ postData.uuid ].length - 1) {
-              _res.status = "finished"
-              _res.phase = "finished"
-            }
             _res.content += "\n" + r.message + "\n"
-            //delete global.__res[ postData.uuid ]
+            //global._mini_a_web_transcript(postData.uuid, "clear")
             //break
           } else {
             if (r.event == "👤" || r.event == "user") {
@@ -1690,6 +1694,8 @@ todo:
         }
         flushActivity(false)
         _res.history = _history
+        if (global.__transcriptRevisions[postData.uuid] === snapshot.revision) global.__renderedTranscripts[postData.uuid] = { revision: snapshot.revision, content: _res.content, history: _history }
+        }
         if (hasActivePlan) {
           _res.plan = {
             active     : true,
@@ -1723,6 +1729,15 @@ todo:
         }
       }
 
+      if (runOutcome) {
+        _res.outcome = runOutcome.outcome
+        _res.runId = runOutcome.runId
+        if (runOutcome.error) _res.error = runOutcome.error
+        if (runOutcome.outcome !== "processing") { _res.status = "finished"; _res.phase = "finished" }
+      } else if (snapshot.busy !== true && snapshot.lastEvent === "final") {
+        _res.status = "finished"; _res.phase = "finished"; _res.outcome = "success"
+      }
+      if (unchanged) { delete _res.content; delete _res.history }
       return ow.server.httpd.reply(_res)
     } catch(e) {
       printErr(e)
@@ -1867,7 +1882,7 @@ todo:
         sanitized.push(entry)
       }
 
-      global.__res[ postData.uuid ] = sanitized
+      global._mini_a_web_transcript(postData.uuid, "replace", sanitized)
       if (isObject(global.__conversations[ postData.uuid ]) && isObject(global.__conversations[ postData.uuid ]._historyVm)) {
         try { global.__conversations[ postData.uuid ]._historyVm.deleteOwnedStore() } catch(ignoreLoadedHistoryVm) {}
       }
@@ -2365,6 +2380,47 @@ jobs:
           delete global.__runTokens[uuid]
           delete global.__busy[uuid]
         }
+      } finally { global.__sessionLock.unlock() }
+    }
+    // All transcript mutations share revision/cache invalidation, including history imports.
+    global._mini_a_web_transcript = function(uuid, operation, value) {
+      global.__sessionLock.lock()
+      try {
+        global.__transcriptRevisions = global.__transcriptRevisions || {}
+        global.__renderedTranscripts = global.__renderedTranscripts || {}
+        if (operation === "append") {
+          if (!isArray(global.__res[uuid])) global.__res[uuid] = []
+          global.__res[uuid].push(value)
+        } else if (operation === "replace") {
+          global.__res[uuid] = value.slice()
+          if (global.__runOutcomes) delete global.__runOutcomes[uuid]
+        }
+        else if (operation === "clear") {
+          delete global.__res[uuid]
+          if (global.__runOutcomes) delete global.__runOutcomes[uuid]
+        }
+        if (operation !== "snapshot") {
+          if (operation === "clear") delete global.__transcriptRevisions[uuid]
+          else global.__transcriptRevisions[uuid] = genUUID()
+          delete global.__renderedTranscripts[uuid]
+        }
+        if (!global.__transcriptRevisions[uuid] && operation !== "clear" && (isArray(global.__res[uuid]) || global.__runOutcomes && global.__runOutcomes[uuid])) global.__transcriptRevisions[uuid] = genUUID()
+        var entries = isArray(global.__res[uuid]) ? global.__res[uuid] : []
+        var revision = global.__transcriptRevisions[uuid]
+        var cached = global.__renderedTranscripts[uuid]
+        var needsEntries = operation === "snapshot" && value !== revision && (!cached || cached.revision !== revision)
+        return { revision: revision, rendered: cached, exists: isArray(global.__res[uuid]), entries: needsEntries ? entries.slice() : [], lastEvent: entries.length ? entries[entries.length - 1].event : null, outcome: global.__runOutcomes && global.__runOutcomes[uuid], busy: global.__busy && global.__busy[uuid] }
+      } finally { global.__sessionLock.unlock() }
+    }
+    global._mini_a_web_outcome = function(uuid, token, outcome, error) {
+      global.__sessionLock.lock()
+      try {
+        if (!global._mini_a_web_owns(uuid, token)) return false
+        global.__runOutcomes = global.__runOutcomes || {}
+        var previous = global.__runOutcomes[uuid]
+        if (previous && previous.runId === token && previous.outcome !== "processing") return false
+        global.__runOutcomes[uuid] = { runId: token, outcome: outcome, error: error || null }
+        return true
       } finally { global.__sessionLock.unlock() }
     }
     global._mini_a_web_dispose = function(uuid) {
@@ -2893,7 +2949,7 @@ jobs:
         delete global.__advanced.sessions[uuid]
       }
       delete global.__lastActivity[ uuid ]
-      delete global.__res[ uuid ]
+      global._mini_a_web_transcript(uuid, "clear")
       global._mini_a_web_dispose(uuid)
       if (isDef(global.__planState) && isDef(global.__planState[ uuid ])) delete global.__planState[ uuid ]
       if (isDef(global.__subagentState) && isDef(global.__subagentState[ uuid ])) delete global.__subagentState[ uuid ]

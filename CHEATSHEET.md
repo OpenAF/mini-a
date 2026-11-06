@@ -2351,6 +2351,9 @@ These grouped tables complete the parameter entries above. `unset` means no expl
 | --- | --- | --- | --- |
 | `path` | string | unset | Static asset path used by the web UI/worker modes. |
 | `webadvanced` | boolean | `false` | Enable trusted Advanced web console APIs (generates a token and opens the browser when webtoken is omitted). |
+| `webartifacts` | boolean | `false` | Web-only: enable isolated artifact generation. |
+| `artifactworkerurl` | string | unset | Web-only: private worker URL ending in `/artifact-worker`. |
+| `artifactdir` | string | private default | Web-only: private artifact storage directory; 24 hour expiry. |
 | `webadvancedpath` | string | unset | Local Advanced session journal and preset directory. |
 
 ### Output and diagnostics — Display and visualizations
@@ -2430,3 +2433,20 @@ See the [wiki guide](docs/WIKI.md), [delegation guide](docs/DELEGATION.md), and 
 | `runmaxtimems` | Aggregate elapsed-time admission cap in milliseconds for `orchestration=auto`. Prevents new calls and dispatch after expiry; existing transport/tool timeouts govern in-flight work. | `0` (unlimited) |
 
 Wiki graph extraction, model budgets, saved defaults and resume controls are documented in [Graph builds](docs/GRAPH-BUILDS.md).
+
+### Additional runtime and launcher options
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `acceptancereview` | boolean | `false` | Review final answers before acceptance. |
+| `acceptanceoptimization` | boolean | `true` | Skip semantic acceptance review when a required deterministic check fails. |
+| `proxyargrepair` | boolean | `true` | Repair unambiguous read-only proxy operation aliases. |
+| `orchestrationcontext` | string | `auto` | Automatic strategy context: auto, interactive, or batch. |
+| `usejsonschema` | string | `auto` | Schema responses: auto or off. |
+| `wikihydrate` | boolean | `false` | Console shortcut: create/update a wiki from `source=<folder>` using `utils/wikiHydrate.yaml`. |
+| `wikidream` | boolean | `false` | Console shortcut: run wiki Dream maintenance. |
+| `wikiquery` | boolean | `false` | Console shortcut: query an existing wiki. |
+| `shellguard` | string | `auto` | Shell decision guard: auto, off, or decide (required decision model). |
+| `shellguardask` | string | `medium` | Minimum shell risk requiring approval: low, medium, high, critical. |
+| `shellguarddeny` | string | `critical` | Minimum shell risk denied without approval. |
+| `shellguardtimeout` | number | `5000` | Shell decision request timeout in milliseconds. |

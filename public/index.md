@@ -2169,8 +2169,12 @@
     let pollInFlight = false;
     let pollQueued = false;
     let pollErrorCount = 0;
+    let transcriptPollUuid = null;
+    let transcriptRevision = null;
+    let transcriptContent = "";
     let streamErrorCount = 0;
     let activeSubmissionStartedAt = 0;
+    let activeSubmissionRunId = null;
     let sawNonFinishedForActiveSubmission = false;
 
     // Store session uuid in global in-memory variable (no localStorage persistence)
@@ -3016,6 +3020,7 @@
 
             lastKnownHistory = events;
             currentSessionUuid = newUuid;
+            transcriptPollUuid = null; activeSubmissionRunId = null;
             if (typeof window !== 'undefined') {
                 window.mini_a_session_uuid = newUuid;
             }
@@ -3096,6 +3101,9 @@
 
             const receipt = await response.json();
             if (receipt.error || receipt.busy) throw new Error(receipt.error || 'Session busy');
+            activeSubmissionRunId = receipt.runId || null;
+            activeSubmissionStartedAt = Date.now();
+            sawNonFinishedForActiveSubmission = false;
             startProcessing();
             if (streamEnabled) startStream(currentSessionUuid);
             startPolling();
@@ -5459,12 +5467,13 @@
             url: resolveAppUrl,
             newRequestId: generateNewSessionUuid,
             uuid: () => { if (!currentSessionUuid) currentSessionUuid = getOrCreateSessionUuid(); return currentSessionUuid; },
-            resume: uuid => { currentSessionUuid = uuid; window.mini_a_session_uuid = uuid; },
+            resume: uuid => { currentSessionUuid = uuid; transcriptPollUuid = null; activeSubmissionRunId = null; window.mini_a_session_uuid = uuid; },
             refresh: () => { pollOnce(); },
             trackRun: data => {
                 if (data.busy && data.kind === 'prompt' && !isProcessing) {
                     lastSubmittedPrompt = '';
                     activeSubmissionStartedAt = Date.now();
+                    activeSubmissionRunId = data.runId || null;
                     sawNonFinishedForActiveSubmission = false;
                     startProcessing();
                     if (streamEnabled) startStream(currentSessionUuid);
@@ -5753,6 +5762,7 @@
         }
 
         currentSessionUuid = entry.uuid;
+        transcriptPollUuid = null; activeSubmissionRunId = null;
 
         const savedContent = upgradeActivityTranscript(entry.content || '', lastKnownHistory);
         const htmlContent = renderConversationMarkdown(savedContent);
@@ -6345,6 +6355,7 @@
 
     function stopProcessing(sendStopRequest = false) {
         isProcessing = false;
+        activeSubmissionRunId = null;
         pollErrorCount = 0;
         streamErrorCount = 0;
         promptInput.disabled = false;
@@ -6514,6 +6525,7 @@
             embedInitialDraft = false;
             embedConversationUsed = true;
             activeSubmissionStartedAt = Date.now();
+            activeSubmissionRunId = data.runId || null;
             sawNonFinishedForActiveSubmission = false;
             setComposerExpanded(false);
             startProcessing();
@@ -6536,6 +6548,11 @@
             return;
         }
         const pollUuid = currentSessionUuid;
+        if (transcriptPollUuid !== pollUuid) {
+            transcriptPollUuid = pollUuid;
+            transcriptRevision = null;
+            transcriptContent = "";
+        }
         if (!pollUuid) {
             return;
         }
@@ -6552,7 +6569,7 @@
             const response = await fetch(resolveAppUrl('result'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
-                body: JSON.stringify({ uuid: pollUuid }),
+                body: JSON.stringify({ uuid: pollUuid, ifTranscriptRevision: transcriptRevision }),
                 signal: controller ? controller.signal : undefined
             });
 
@@ -6567,8 +6584,14 @@
             if (pollUuid !== currentSessionUuid) {
                 return;
             }
+            if (activeSubmissionRunId && data.runId && data.runId !== activeSubmissionRunId) {
+                scheduleImmediatePoll(120);
+                return;
+            }
 
                 pollErrorCount = 0;
+                if (data.transcriptRevision) transcriptRevision = data.transcriptRevision;
+                if (typeof data.content === "string") transcriptContent = data.content;
 
                 if (Array.isArray(data.history)) {
                     lastKnownHistory = sanitizeHistoryEvents(data.history);
@@ -6591,7 +6614,7 @@
                 }
 
                 // Only update content if it has actually changed to prevent chart flickering
-                const rawContent = data.content || '';
+                const rawContent = typeof data.content === 'string' ? data.content : transcriptContent;
                 const contentForDisplay = ensurePromptVisibleUntilAcknowledged(rawContent, lastSubmittedPrompt, promptAcknowledged);
                 if (data.status !== 'finished' && contentForDisplay !== lastRawContent) {
                     lastRawContent = contentForDisplay;
@@ -6608,6 +6631,7 @@
                 const isStaleFinished = !!(
                     data &&
                     data.status === 'finished' &&
+                    (!data.runId || (activeSubmissionRunId && data.runId !== activeSubmissionRunId)) &&
                     hasActivePrompt &&
                     !promptAcknowledged &&
                     !sawNonFinishedForActiveSubmission
@@ -6622,14 +6646,15 @@
                 if (data.status === 'finished') {
                     // Completed server content is authoritative. Stream previews can
                     // omit or alter passages and must not be appended or saved here.
-                    const finalContent = contentForDisplay;
+                    const unsuccessful = data.outcome === 'failure' || data.outcome === 'cancelled';
+                    const finalContent = contentForDisplay + (unsuccessful ? '<p role="alert" class="run-error">' + escapeHtml(data.error || (data.outcome === 'cancelled' ? 'Request cancelled.' : 'Request failed.')) + '</p>' : '');
                     conversationFinished = true;
                     setPlanningMode(false);
                     stopStream();
                     lastRawContent = finalContent;
                     await renderRawContent(finalContent);
-                    if (currentSessionUuid && historyEnabled !== false) {
-                        const historyData = Object.assign({}, data, { content: finalContent });
+                    if (!unsuccessful && currentSessionUuid && historyEnabled !== false) {
+                        const historyData = Object.assign({}, data, { content: finalContent, history: lastKnownHistory });
                         const savedEntry = addConversationToHistory(currentSessionUuid, lastSubmittedPrompt, historyData);
                         if (savedEntry) {
                             activeHistoryId = savedEntry.id;
@@ -6638,6 +6663,7 @@
                     lastFinishedPrompt = lastSubmittedPrompt || lastFinishedPrompt;
                     lastSubmittedPrompt = '';
                     activeSubmissionStartedAt = 0;
+                    activeSubmissionRunId = null;
                     sawNonFinishedForActiveSubmission = false;
                     removePreview();
                     // Force close and hide plan panel when final answer is provided
@@ -6957,6 +6983,7 @@
         lastRawContent = '';
         lastRenderedRaw = '';
         lastKnownHistory = [];
+        transcriptPollUuid = null; activeSubmissionRunId = null;
         lastFinishedPrompt = '';
         lastSubmittedPrompt = '';
         hideScrollToBottomButton();

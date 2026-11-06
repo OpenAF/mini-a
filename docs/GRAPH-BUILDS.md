@@ -24,7 +24,10 @@ The legacy `semantic=true` maps to semantic extraction with automatic assistance
 `semantic=false` explicitly requests structural extraction. Explicit `extraction` and
 `modelHelp` take precedence over that alias.
 
-Incremental builds update changed or missing work and remove deleted evidence. Full
+Incremental builds update changed or missing work and remove deleted evidence. Page batches
+calculate communities and scores after the batch completes; direct single-page updates
+still return current statistics. Semantic checkpoints preserve evidence and progress, with
+derived statistics recomputed on reload. Full
 builds reconstruct structural state while retaining valid enrichment. Force ignores
 semantic caches. Resume revalidates the current pages and continues unfinished
 sections; it never runs automatically. Resume plus force, and structural resume/force,

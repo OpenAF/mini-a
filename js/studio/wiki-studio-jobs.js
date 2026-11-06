@@ -75,6 +75,7 @@ WikiStudioServer.prototype.startJobs = function() {
   try { lease = channel.tryLock() } catch(ignore) {}
   WikiStudio.assert(lease !== null && isDef(lease), 423, "server_running", "Another Studio server owns this home")
   this._lease = { file: file, channel: channel, lock: lease }
+  if (this.migrateSources) this.migrateSources()
   this.jobs.list().forEach(function(j) { if (WikiStudioJobs.terminal.indexOf(j.status) < 0) self.jobs.update(j.id, { status: "interrupted", phase: "interrupted", warning: "Server restarted. No automatic retry. A worker may still hold the OS lock; inspect engine recovery before a new submission." }) })
   this._running = new java.util.concurrent.atomic.AtomicInteger(0)
   $doV(function() {
@@ -114,7 +115,7 @@ WikiStudioServer.prototype.extraRoute = function(req, parts, role) {
       var ids = parts.length === 4 ? [parts[3]] : body.ids
       WikiStudio.assert(isArray(ids) && ids.length > 0 && ids.length <= 1000 && body.confirmation === "delete-history", 400, "confirmation_required", "Confirm the selected job history")
       var self = this
-      return WikiStudio.lock(this.config.home, w.id, function() {
+      return WikiStudio.wikiLock(this.config.home, w.id, function() {
         self.registry.verify(w)
         return WikiStudio.lock(self.config.home, "queue", function() { return jobs.removeHistory(w, ids) })
       })
@@ -136,7 +137,7 @@ WikiStudioServer.prototype.extraRoute = function(req, parts, role) {
       WikiStudio.authorize(role, "admin"); WikiStudio.fields(body, ["confirmation"])
       WikiStudio.assert(body.confirmation === j.id && ["partial", "interrupted", "recovery-required"].indexOf(j.status) >= 0, 400, "confirmation_required", "Confirm the reviewed recovery job")
       var self = this, w = this.registry.verify(this.registry.get(j.wikiId))
-      return WikiStudio.lock(this.config.home, w.id, function() {
+      return WikiStudio.wikiLock(this.config.home, w.id, function() {
         self.assertIdle(w.id)
         WikiStudio.assert(WikiStudio.pending(w.root).length === 0, 409, "recovery_pending", "Resolve engine journals before marking recovery reviewed")
         return WikiStudioJobs.publicJob(jobs.update(j.id, { recoveryReviewedAt: WikiStudio.now() }))

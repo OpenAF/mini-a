@@ -1,0 +1,37 @@
+include:
+- oJobTest.yaml
+
+jobs:
+- name: MCP Web::RawResponses
+  to: oJob Test
+  exec: args.func = require("tests/mcpWeb.js").testRawResponses
+- name: MCP Web::StyledResponses
+  to: oJob Test
+  exec: args.func = require("tests/mcpWeb.js").testStyledResponses
+- name: MCP Web::EmptyResponses
+  to: oJob Test
+  exec: args.func = require("tests/mcpWeb.js").testEmptyResponses
+- name: MCP Web::UrlPolicy
+  to: oJob Test
+  exec: args.func = require("tests/mcpWeb.js").testUrlPolicy
+- name: MCP Web::FetchErrors
+  to: oJob Test
+  exec: args.func = require("tests/mcpWeb.js").testFetchErrors
+- name: MCP Web::Schema
+  to: oJob Test
+  exec: args.func = require("tests/mcpWeb.js").testSchema
+- name: MCP Web::ExitOnFailure
+  exec: if (ow.test.getCountFail() > 0) exit(1)
+
+todo:
+- MCP Web::RawResponses
+- MCP Web::StyledResponses
+- MCP Web::EmptyResponses
+- MCP Web::UrlPolicy
+- MCP Web::FetchErrors
+- MCP Web::Schema
+- oJob Test Results
+- MCP Web::ExitOnFailure
+
+ojob:
+  logToConsole: false

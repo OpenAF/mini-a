@@ -61,9 +61,9 @@ todo:
               description: The URL to fetch.
             style:
               type       : string
-              description: Output format - "html" (raw HTML), "basic" (cleaned HTML), "text" (simple text), or "map" (JSON map representation).
+              description: Output format - "html" (raw HTML), "basic" (cleaned HTML), "text" (simple text), or "map" (JSON map representation). Omit to return the raw response.
               enum       : [ html, basic, text, map ]
-              default    : basic
+              default    : html
           required: [ url ]
         annotations:
           title         : get-url
@@ -180,12 +180,11 @@ jobs:
     if (!global.__webReadWrite__ && isFunction(global.__webIsPrivateOrLocalUrl__) && global.__webIsPrivateOrLocalUrl__(args.url)) {
       return "[ERROR] Read-only mode blocks localhost/private/non-http URLs"
     }
-    var _s = $rest().get(args.url)
     if (isDef(args.style)) {
       var ws = new WebSearch()
-      return ws.getURL(_s, args.style)
+      return ws.getURL(args.url, args.style)
     } else {
-      return _s
+      return $rest().get(args.url)
     }
 
 # -------------------

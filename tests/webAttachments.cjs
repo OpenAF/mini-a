@@ -57,7 +57,7 @@ assert.ok(html.indexOf('Inspect')<html.indexOf('<img'));
 assert.doesNotMatch(c.formatUserPromptHtml('```attachment x.png\nmini-a-image-preview:https://example.com/x\n```'),/<img/);
 const server=fs.readFileSync('mini-a-web.yaml','utf8');
 const serverStart=server.indexOf('      function __formatUserMessage(');
-const serverEnd=server.indexOf('      if (isDef(global.__res',serverStart);
+const serverEnd=server.indexOf('      if (snapshot.exists)',serverStart);
 Object.assign(c,{__escapeHtml:c.escapeHtml,__escapeAttr:c.escapeHtml,__detectAttachmentLang:()=> 'png',af:{fromBytes2String:x=>x,toBase64Bytes:s=>Buffer.from(s).toString('base64')}});
 vm.runInContext(server.slice(serverStart,serverEnd),c);
 assert.equal(c.__formatUserMessage(display),html);

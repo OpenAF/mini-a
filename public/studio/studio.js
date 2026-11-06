@@ -633,21 +633,34 @@ function drawEditor() {
   const modes=row(editor);editor.insertBefore(modes,columns);
   for(const mode of ["Source and preview","Source","Preview"])button(modes,mode,()=>{columns.className="editor"+(mode==="Source and preview"?"":" single");source.hidden=mode==="Preview";preview.hidden=mode==="Source";});
   const preview = el("article", undefined, columns); preview.setAttribute("aria-label", "Safe Markdown preview"); renderMarkdown(source.value, preview);
-  source.oninput = () => { dirty = true; message("Unsaved changes"); renderMarkdown(source.value, preview); };
-  async function save() {
-    try {
-      const result = await StudioApi.wiki(page.creating ? "pages" : "page?path=" + encodeURIComponent(page.path), page.creating ? "POST" : "PUT", { path: page.path, content: source.value, expectedRevision: page.revision });
-      if (!editor.isConnected || currentWiki.id !== wikiId || activePage !== page) { message("Page saved"); return; }
-      activePage = result; dirty = false; editing = false; pageState().selected=result.path; message("Saved"); await document.getElementById("page-list")?.studioRefresh?.(); drawEditor();
-    } catch (e) {
-      if (!editor.isConnected || currentWiki.id !== wikiId || activePage !== page) { message(e.message, true); return; }
-      if (e.status === 409) {
-        message("Conflict: your local text is preserved. Compare with the current server copy, copy/merge, then reload before retrying.", true);
-        const server = await StudioApi.wiki("page?path=" + encodeURIComponent(page.path));
-        const compare = el("section", undefined, editor); el("h4", "Server copy · " + server.revision, compare); el("pre", server.content, compare);
-        button(compare, "Use current revision with my merged text", async () => { if (await askConfirmation("Have you merged the server changes into your local text?")) { page.revision = server.revision; message("Merged revision selected; review text and Save."); } });
-      } else throw e;
-    }
+  let editVersion = 0, pendingSave = null;
+  source.oninput = () => { editVersion++; dirty = true; message("Unsaved changes"); renderMarkdown(source.value, preview); };
+  function save() {
+    if (pendingSave) return pendingSave;
+    const submittedText = source.value, submittedVersion = editVersion;
+    pendingSave = (async () => {
+      try {
+        const result = await StudioApi.wiki(page.creating ? "pages" : "page?path=" + encodeURIComponent(page.path), page.creating ? "POST" : "PUT", { path: page.path, content: submittedText, expectedRevision: page.revision });
+        if (!editor.isConnected || currentWiki.id !== wikiId || activePage !== page) { message("Page saved"); return; }
+        // Advance the server baseline even when newer local typing remains dirty.
+        Object.assign(page, result); delete page.creating;
+        const unchanged = editVersion === submittedVersion && source.value === submittedText;
+        dirty = !unchanged; pageState().selected = result.path;
+        if (unchanged) { editing = false; message("Saved"); drawEditor(); }
+        else message("Saved submitted version. Newer edits are unsaved.");
+        await document.getElementById("page-list")?.studioRefresh?.();
+      } catch (e) {
+        if (!editor.isConnected || currentWiki.id !== wikiId || activePage !== page) { message(e.message, true); return; }
+        if (e.status === 409) {
+          message("Conflict: your local text is preserved. Compare with the current server copy, copy/merge, then reload before retrying.", true);
+          const server = await StudioApi.wiki("page?path=" + encodeURIComponent(page.path));
+          if (!editor.isConnected || currentWiki.id !== wikiId || activePage !== page) return;
+          const compare = el("section", undefined, editor); el("h4", "Server copy · " + server.revision, compare); el("pre", server.content, compare);
+          button(compare, "Use current revision with my merged text", async () => { if (await askConfirmation("Have you merged the server changes into your local text?")) { page.revision = server.revision; message("Merged revision selected; review text and Save."); } });
+        } else throw e;
+      }
+    })().finally(() => { pendingSave = null; });
+    return pendingSave;
   }
   button(toolbar, "Save ⌘/Ctrl+S", save).disabled = currentWiki.access !== "rw";
   button(toolbar, "Cancel editing", async () => { if (await mayLeave()) { if(page.creating){dirty=false;editing=false;activePage=null;editor.replaceChildren();}else await loadPage(page.path); } });

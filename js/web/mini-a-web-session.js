@@ -51,17 +51,20 @@ function MiniAWebPrompt(request) {
       return ow.server.httpd.reply({ error: "session busy", uuid: _res.uuid, busy: true })
     }
 
+    _res.runId = runToken
     global.__attachmentStops = global.__attachmentStops || {}
     delete global.__attachmentStops[_res.uuid]
     if (isDef(global.__advanced) && isDef(global.__advanced.sessions[_res.uuid])) global.__advanced.sessions[_res.uuid].cancelled = false
     // Initialize response storage
     if (isUnDef(global.__res[_res.uuid])) {
-      global.__res[ _res.uuid ] = [ ]
+      global._mini_a_web_transcript(_res.uuid, "replace", [])
       global.__lastActivity[ _res.uuid ] = Date.now()
     } else {
       global.__lastActivity[ _res.uuid ] = Date.now()
     }
     
+    global._mini_a_web_outcome(_res.uuid, runToken, "processing")
+
     // Prompt header logging
     if (global.__logpromptheaders.length > 0) {
       global.__logpromptheaders.forEach( h => {
@@ -351,7 +354,7 @@ function MiniAWebPrompt(request) {
               var proxyDisplayThought = lma._pendingProxyDisplayThought
               if (_e == "⚙️" && isString(proxyDisplayThought) && !genericProxyPattern.test(proxyDisplayThought.trim())) {
                 var proxyCounter = / #\d+$/.exec(pendingProxyThought.trim())
-                global.__res[uuid].push({ event: "💭", message: proxyDisplayThought + (proxyCounter ? proxyCounter[0] : "") })
+                global._mini_a_web_transcript(uuid, "append", { event: "💭", message: proxyDisplayThought + (proxyCounter ? proxyCounter[0] : "") })
                 pendingProxyThought = __
               } else if (isTranslatedProxyThought || _e == "🏁" || _e == "🛑" || _e == "👤") {
                 // Canonical thoughts supersede announcements. Never guess a tool
@@ -361,7 +364,7 @@ function MiniAWebPrompt(request) {
             }
             var transcriptEntry = { event: _e, message: m }
             if (isString(displayMessage)) transcriptEntry.displayMessage = displayMessage
-            global.__res[uuid].push(transcriptEntry)
+            global._mini_a_web_transcript(uuid, "append", transcriptEntry)
             if (global.__usestream && isFunction(global._mini_a_web_ssePush) && _e != "🗺️") {
               global._mini_a_web_ssePush(uuid, "interaction", { event: _e })
             }
@@ -379,7 +382,7 @@ function MiniAWebPrompt(request) {
             logErr(`[${uuid}] interaction handler error: ` + __miniAErrMsg(eee))
             try {
               if (isDef(global.__res[uuid])) {
-                global.__res[uuid].push({ event: "❗", message: String(__miniAErrMsg(eee)) })
+                global._mini_a_web_transcript(uuid, "append", { event: "❗", message: String(__miniAErrMsg(eee)) })
               }
             } catch(ignorePushErr) {}
           }
@@ -412,7 +415,7 @@ function MiniAWebPrompt(request) {
         postData.prompt = __normalizePromptInput(MiniAWebAttachments.process(binaryAttachments, postData.prompt, lma,
           function() { return global._mini_a_web_owns(uuid, runToken) && global.__attachmentStops[uuid] !== runToken && (!advancedState || !advancedState.cancelled) },
           function(message) {
-            global.__res[uuid].push({ event: "info", message: message })
+            global._mini_a_web_transcript(uuid, "append", { event: "info", message: message })
             if (advancedState) global.__advanced.emit(advancedState, "info", message)
           }))
         startArgs.goal = __miniAPrefixGoal(postData.prompt, effectiveArgs.goalprefix)
@@ -434,7 +437,7 @@ function MiniAWebPrompt(request) {
         }).exec()
         if (stopped()) {
           if (global._mini_a_web_owns(uuid, runToken)) {
-            global.__res[uuid].push({ event: "stop", message: "Stopped from Advanced mode" })
+            global._mini_a_web_transcript(uuid, "append", { event: "stop", message: "Stopped from Advanced mode" })
             if (global.__usestream && isFunction(global._mini_a_web_sseClose)) global._mini_a_web_sseClose(uuid, "stopped")
             global._mini_a_web_dispose(uuid)
             advancedState.runtime.sync(__)
@@ -446,6 +449,7 @@ function MiniAWebPrompt(request) {
       }
 
       if (!global._mini_a_web_owns(uuid, runToken)) return
+      if (global.__attachmentStops[uuid] === runToken || lma._stopRequested === true || lma.state === "stop") return
       // start() can return a string, a structured result, or no result on failure.
       // Keep typed answers intact and never dereference an absent result.
       if (artifactBinding && !artifactBinding.live()) throw new Error("Generation cancelled")
@@ -453,7 +457,7 @@ function MiniAWebPrompt(request) {
       var finalMessage = isObject(_rma) && isString(_rma.answer) && _rma.answer.trim().length > 0 ? _rma.answer : _rma
       if (isString(finalMessage) && startArgs.format != "raw") finalMessage = __miniAUnwrapAnswer(finalMessage)
       if (isObject(finalMessage)) finalMessage = af.toSLON(finalMessage)
-      global.__res[uuid].push( { event: "final", message: finalMessage } )
+      global._mini_a_web_transcript(uuid, "append",  { event: "final", message: finalMessage } )
       if (isDef(advancedState)) {
         advancedState.runtime.sync(lma, isString(attachmentDisplayPrompt) ? attachmentDisplayPrompt : postData.prompt, finalMessage)
         advancedState.runtime.saveConversation()
@@ -480,10 +484,10 @@ function MiniAWebPrompt(request) {
       artifactSuccess = true
       } catch(eee) {
         logErr(eee)
+        global._mini_a_web_outcome(uuid, runToken, global.__attachmentStops[uuid] === runToken || (advancedState && advancedState.cancelled) ? "cancelled" : "failure", __miniAErrMsg(eee))
         if (isDef(advancedState)) global.__advanced.emit(advancedState, "error", __miniAErrMsg(eee))
         if (global._mini_a_web_owns(uuid, runToken)) {
-          if (isUnDef(global.__res[uuid])) global.__res[uuid] = []
-          global.__res[uuid].push({ event: "❗", message: "Agent failed: " + __miniAErrMsg(eee) })
+          global._mini_a_web_transcript(uuid, "append", { event: "❗", message: "Agent failed: " + __miniAErrMsg(eee) })
           if (global.__usestream && isFunction(global._mini_a_web_sseClose)) global._mini_a_web_sseClose(uuid, "error")
           global._mini_a_web_dispose(uuid)
         }
@@ -492,20 +496,30 @@ function MiniAWebPrompt(request) {
         if (isDef(lma) && isDef(lma._webAttachmentDisplayPrompt) && lma._webAttachmentDisplayPrompt.token === runToken) delete lma._webAttachmentDisplayPrompt
         binaryAttachments = null
         if (global.__attachmentStops[uuid] === runToken) delete global.__attachmentStops[uuid]
+        var completionError
         try { if (isDef(advancedState)) { global.__advanced.emit(advancedState, "complete", { requestId: advancedState.operation, action: "goal" }); advancedState.operation = null; delete advancedState.displayPrompt; global.__advanced.persist(advancedState) } }
-        finally {
-          try { artifacts.finish(artifactBinding, artifactSuccess) }
-          finally { global._mini_a_web_release(uuid, runToken) }
-        }
+        catch(finalizeErr) { completionError = finalizeErr; logErr(finalizeErr) }
+        try { artifacts.finish(artifactBinding, artifactSuccess) }
+        catch(artifactErr) { if (isUnDef(completionError)) completionError = artifactErr; logErr(artifactErr) }
+        try {
+          // Publish success only after durable result/artifact finalization. A prior
+          // failure or cancellation remains authoritative if cleanup also fails.
+          if (isDef(completionError)) global._mini_a_web_outcome(uuid, runToken, "failure", __miniAErrMsg(completionError))
+          else global._mini_a_web_outcome(uuid, runToken, artifactSuccess ? "success" : "cancelled", artifactSuccess ? null : "Request cancelled")
+        } finally { global._mini_a_web_release(uuid, runToken) }
       }
     }).catch((eee) => {
       logErr(eee)
+      global._mini_a_web_outcome(_res.uuid, runToken, "failure", __miniAErrMsg(eee))
       global._mini_a_web_release(_res.uuid, runToken)
     })
   } catch(ee) {
     _res.error = String(ee)
     logErr(ee)
-    if (isDef(runToken)) global._mini_a_web_release(_res.uuid, runToken)
+    if (isDef(runToken)) {
+      global._mini_a_web_outcome(_res.uuid, runToken, "failure", __miniAErrMsg(ee))
+      global._mini_a_web_release(_res.uuid, runToken)
+    }
   }
 
   return ow.server.httpd.reply(_res)

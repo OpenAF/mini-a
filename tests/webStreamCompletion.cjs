@@ -10,17 +10,18 @@ assert.ok(start >= 0 && end > start);
 // Run the actual polling path through rendering and local history persistence.
 const polling = '(async () => {\n' + page.slice(start, end) + '\n}\n})()';
 
-async function check({ status = 'finished', streaming = true, stale = false, preview }) {
+async function check({ status = 'finished', streaming = true, stale = false, preview, outcome, unchanged = false }) {
   const content = '# Answer\n\nFirst passage.\n\nAdditional context.\n\nLast passage.';
   const renders = [];
   const saved = [];
   const context = vm.createContext({
-    data: { status, content }, lastRawContent: 'Previous transcript',
+    data: { status, content: unchanged ? undefined : content, outcome, runId: outcome ? 'active-run' : undefined, error: outcome === 'failure' ? 'Fixture failure <unsafe>' : undefined }, transcriptContent:content, lastRawContent: 'Previous transcript',
+    escapeHtml: value => value.replaceAll('<', '&lt;').replaceAll('>', '&gt;'),
     streamActive: streaming, streamBuffer: preview, conversationFinished: false,
     lastSubmittedPrompt: 'Explain', promptAcknowledged: !stale,
     sawNonFinishedForActiveSubmission: false, currentSessionUuid: 'session',
-    historyEnabled: true, activeHistoryId: null, lastFinishedPrompt: '',
-    activeSubmissionStartedAt: 1,
+    historyEnabled: true, lastKnownHistory: [], activeHistoryId: null, lastFinishedPrompt: '',
+    activeSubmissionStartedAt: 1, activeSubmissionRunId: 'active-run',
     ensurePromptVisibleUntilAcknowledged: value => value,
     normalizePromptForComparison: value => value,
     mergeFinalContentWithStream: (base, stream) => {
@@ -38,6 +39,12 @@ async function check({ status = 'finished', streaming = true, stale = false, pre
     assert.deepEqual(renders, []);
     assert.deepEqual(saved, []);
     assert.equal(context.streamBuffer, preview, 'A stale result must preserve the current preview');
+  } else if (outcome === 'failure' || outcome === 'cancelled') {
+    assert.equal(context.conversationFinished, true);
+    assert.deepEqual(saved, [], 'Failures and cancellation are not saved as successful answers');
+    assert.equal(context.streamActive, false);
+    assert.match(renders[0], /role="alert"/);
+    assert.ok(!renders[0].includes('<unsafe>'));
   } else if (status === 'finished') {
     assert.deepEqual(renders, [content], 'Render only the authoritative answer, without a duplicate flash');
     assert.deepEqual(saved, [content], 'Save only the authoritative answer');
@@ -56,6 +63,8 @@ async function check({ status = 'finished', streaming = true, stale = false, pre
       await check({ streaming, preview });
     }
   }
+  for (const streaming of [true, false]) for (const outcome of ['failure', 'cancelled']) await check({streaming, outcome, preview:'Provisional', unchanged:true});
+  await check({unchanged:true,preview:''});
   await check({ stale: true, preview: 'Current answer' });
   await check({ status: 'processing', preview: 'Partial answer' });
   console.log('Web stream completion checks passed (rendering, history, stale results, preview).');

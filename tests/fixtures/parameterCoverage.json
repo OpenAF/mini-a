@@ -45,6 +45,13 @@
       "wikihydrate",
       "wikidream",
       "wikiquery"
+    ],
+    "Web embedding startup options": [
+      "webembed",
+      "webembedorigins",
+      "webembedfields",
+      "webembedcontextrequired",
+      "webembedprompt"
     ]
   },
   "webHelpExclusions": {
@@ -171,6 +178,11 @@
     ],
     "Reserved budget, not enforced by current dreams": [
       "wikidreambudget"
+    ],
+    "Web-only artifact isolation startup options": [
+      "webartifacts",
+      "artifactworkerurl",
+      "artifactdir"
     ]
   },
   "nonPublic": {

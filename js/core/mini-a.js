@@ -76,15 +76,14 @@ var MiniA = function() {
   this._shellSandboxRuntimeDir = ""
   this._shellSandboxRuntimeDirError = ""
   this._toolCacheSettings = {}
+  this._toolCacheFamily = { namespace: genUUID(), epoch: 0, mutations: 0, clients: {}, entries: new java.util.LinkedHashMap(), lock: new java.util.concurrent.locks.ReentrantLock() }
   this._toolInfoByName = {}
   this._lazyMcpConnections = {}
   this._toolCacheDefaultTtl = 300000
   this._systemPromptCacheName = "mini-a.systemPrompts"
   this._toolSchemaCacheName = "mini-a.toolSchemas"
-  this._toolResultCacheName = "mini-a.toolResults"
   this._ensureCache(this._systemPromptCacheName, { ttl: 600000, maxSize: 128 })
   this._ensureCache(this._toolSchemaCacheName, { ttl: 3600000, maxSize: 512 })
-  this._ensureCache(this._toolResultCacheName, { ttl: 3600000, maxSize: 2048 })
   this._planCacheName = "mini-a.plans"
   this._ensureCache(this._planCacheName, { ttl: 900000, maxSize: 128, popularity: true })
   this._delegationDescCache = { description: __, builtAt: 0, workerKey: __ }
@@ -1017,27 +1016,31 @@ MiniA._destroyAllMcpConnections = function() {
   })
 }
 
+MiniA.prototype._getMcpProxyState = function() {
+  return isObject(this._mcpProxyState) ? this._mcpProxyState : global.__mcpProxyState__
+}
+
 MiniA._destroyMcpProxyConnections = function(ownerId) {
-  var state = global.__mcpProxyState__
-  if (!isObject(state)) return false
-
-  // During normal agent teardown only the agent that configured the proxy may
-  // close it. The process shutdown hook deliberately omits ownerId so it can
-  // clean up a partially initialized proxy as well.
-  if (isString(ownerId) && ownerId.length > 0 && state.ownerId !== ownerId) return false
-
-  var destroyedClients = []
-  Object.keys(state.connections || {}).forEach(function(connectionId) {
-    var entry = state.connections[connectionId]
-    var client = isObject(entry) ? entry.client : __
-    if (!isObject(client) || typeof client.destroy !== "function" || destroyedClients.indexOf(client) >= 0) return
-    destroyedClients.push(client)
-    try { client.destroy() } catch(ignoreProxyClientDestroy) {}
+  var states = isArray(MiniA._mcpProxyStates) ? MiniA._mcpProxyStates.slice() : []
+  if (isObject(global.__mcpProxyState__) && states.indexOf(global.__mcpProxyState__) < 0) states.push(global.__mcpProxyState__)
+  var destroyedClients = [], didDestroy = false
+  states.forEach(function(state) {
+    if (isString(ownerId) && ownerId.length > 0 && state.ownerId !== ownerId) return
+    Object.keys(state.connections || {}).forEach(function(connectionId) {
+      var entry = state.connections[connectionId], client = isObject(entry) ? entry.client : __
+      if (!isObject(client) || typeof client.destroy !== "function" || destroyedClients.indexOf(client) >= 0) return
+      destroyedClients.push(client)
+      try { client.destroy() } catch(ignoreProxyClientDestroy) {}
+    })
+    state.connections = {}
+    if (global.__mcpProxyState__ === state) {
+      delete global.__mcpProxyState__
+      delete global.__mcpProxyHelpers__
+    }
+    if (isArray(MiniA._mcpProxyStates)) MiniA._mcpProxyStates = MiniA._mcpProxyStates.filter(function(item) { return item !== state })
+    didDestroy = true
   })
-
-  delete global.__mcpProxyState__
-  delete global.__mcpProxyHelpers__
-  return true
+  return didDestroy
 }
 
 MiniA._stopAllRegistrationServers = function() {
@@ -12069,9 +12072,56 @@ MiniA.prototype._stableStringify = function(value) {
   return stringify(value, __, "")
 }
 
-MiniA.prototype._buildToolCacheKey = function(toolName, params) {
+// The family is shared only by delegated agents. Namespaces and client generations
+// are opaque: descriptor URLs, credentials and user identifiers never form keys.
+MiniA.prototype._toolCacheSync = function(fn) {
+  var family = this._toolCacheFamily
+  family.lock.lock()
+  try { return fn(family) } finally { family.lock.unlock() }
+}
+
+MiniA.prototype._registerToolCacheClient = function(connectionId, client, catalog) {
+  var parent = this
+  return this._toolCacheSync(function(family) {
+    var entry = family.clients[connectionId]
+    var signature = isArray(catalog) ? parent._stableStringify(catalog) : __
+    if (!isObject(entry) || entry.client !== client || (isDef(signature) && entry.catalog !== signature)) {
+      entry = { client: client, generation: genUUID(), catalog: signature, tools: catalog }
+      family.clients[connectionId] = entry
+    }
+    return entry.generation
+  })
+}
+
+MiniA.prototype._resolveMcpToolInfo = function(connectionId, client, toolName) {
+  var registered = this._toolCacheSync(function(family) {
+    var entry = family.clients[connectionId]
+    if (isObject(entry) && entry.client === client && isArray(entry.tools)) {
+      return entry.tools.find(function(tool) { return tool.name === toolName })
+    }
+  })
+  return registered || this._resolveToolInfo(toolName)
+}
+
+MiniA.prototype._beginToolMutation = function() {
+  this._toolCacheSync(function(family) { family.epoch++; family.mutations++; family.entries.clear() })
+}
+
+MiniA.prototype._endToolMutation = function() {
+  this._toolCacheSync(function(family) { family.epoch++; family.mutations = Math.max(0, family.mutations - 1) })
+}
+
+MiniA.prototype._toolExecutionHints = function(tool) {
+  var info = isObject(tool) ? tool : {}, a = info.annotations || {}, m = info.metadata || {}
+  var writable = a.readOnlyHint === false || m.readOnlyHint === false || a.destructiveHint === true || m.destructiveHint === true
+  var readOnly = !writable && (a.readOnlyHint === true || m.readOnlyHint === true)
+  var idempotent = a.idempotentHint !== false && m.idempotentHint !== false && (a.idempotentHint === true || m.idempotentHint === true)
+  return { readOnly: readOnly, idempotent: idempotent, writable: writable }
+}
+
+MiniA.prototype._buildToolCacheKey = function(toolName, params, scope, settings) {
   var baseName = isString(toolName) ? toolName : stringify(toolName, __, "")
-  var config = this._toolCacheSettings[toolName] || {}
+  var config = settings || this._toolCacheSettings[toolName] || {}
   var keyParams = params
 
   if (isMap(config) && isArray(config.keyFields) && config.keyFields.length > 0 && isMap(params)) {
@@ -12085,30 +12135,35 @@ MiniA.prototype._buildToolCacheKey = function(toolName, params) {
   }
 
   var serializedParams = this._stableStringify(keyParams)
-  return md5(`${baseName}::${serializedParams}`)
+  return md5(this._toolCacheFamily.namespace + "::" + (scope || "") + "::" + baseName + "::" + serializedParams)
 }
 
 MiniA.prototype._getToolResultFromCache = function(cacheKey) {
   if (!isString(cacheKey) || cacheKey.length === 0) return { hit: false }
-
-  var entry = $cache(this._toolResultCacheName).get(cacheKey)
-  if (isObject(entry) && isDef(entry.value)) {
-    if (!isNumber(entry.expiresAt) || entry.expiresAt >= now()) {
-      return { hit: true, value: entry.value }
+  return this._toolCacheSync(function(family) {
+    var entry = family.entries.get(cacheKey)
+    if (isObject(entry) && isDef(entry.value)) {
+      if (entry.expiresAt >= now()) return { hit: true, value: clone(entry.value) }
+      family.entries.remove(cacheKey)
     }
-    $cache(this._toolResultCacheName).unset(cacheKey)
-  }
-
-  return { hit: false }
+    return { hit: false }
+  })
 }
 
 MiniA.prototype._storeToolResultInCache = function(cacheKey, result, ttl) {
   if (!isString(cacheKey) || cacheKey.length === 0) return
-  if (isObject(result) && isDef(result.error)) return
-
+  if (isObject(result) && (isDef(result.error) || result.isError === true)) return
   var ttlMs = isNumber(ttl) && ttl > 0 ? ttl : this._toolCacheDefaultTtl
-  var expiresAt = now() + ttlMs
-  $cache(this._toolResultCacheName).set(cacheKey, { value: result, expiresAt: expiresAt })
+  // OpenAF cache channels evaluate their fn on set; explicit result storage
+  // needs its own bounded map. Every access is covered by the family lock.
+  this._toolCacheSync(function(family) {
+    family.entries.remove(cacheKey)
+    while (family.entries.size() >= 2048) {
+      var oldest = family.entries.keySet().iterator()
+      if (oldest.hasNext()) { oldest.next(); oldest.remove() }
+    }
+    family.entries.put(cacheKey, { value: clone(result), expiresAt: now() + ttlMs })
+  })
 }
 
 MiniA.prototype._categorizeError = function(error, context) {
@@ -12138,7 +12193,7 @@ MiniA.prototype._categorizeError = function(error, context) {
   }
   var transientSignals = [
     "timeout", "temporar", "rate limit", "throttle", "econnreset", "econnrefused", "unreachable",
-    "network", "backoff", "retry", "429", "503", "504", "connection closed", "circuit open"
+    "network", "backoff", "retry", "429", "503", "504", "connection closed", "connection reset", "circuit open"
   ]
   var permanentSignals = ["invalid", "syntax", "parse", "unknown action", "not found", "missing", "denied"]
 
@@ -13924,8 +13979,8 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
     var parent = this
 
     // Initialize proxy state similar to mcp-proxy.yaml
-    if (!isObject(global.__mcpProxyState__)) {
-      global.__mcpProxyState__ = {
+    if (!isObject(parent._mcpProxyState)) {
+      parent._mcpProxyState = {
         connections       : {},
         aliasToId         : {},
         idToAlias         : {},
@@ -13937,9 +13992,13 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
       }
     }
 
-    if (!isObject(global.__mcpProxyHelpers__)) global.__mcpProxyHelpers__ = {}
-
-    var helpers = global.__mcpProxyHelpers__
+    if (!isObject(parent._mcpProxyHelpers)) parent._mcpProxyHelpers = {}
+    var helpers = parent._mcpProxyHelpers
+    // Keep the legacy diagnostic pointer, but executable closures use their owner.
+    global.__mcpProxyState__ = parent._mcpProxyState
+    global.__mcpProxyHelpers__ = helpers
+    if (!isArray(MiniA._mcpProxyStates)) MiniA._mcpProxyStates = []
+    if (MiniA._mcpProxyStates.indexOf(parent._mcpProxyState) < 0) MiniA._mcpProxyStates.push(parent._mcpProxyState)
 
     // Define helper functions
     helpers.deepClone = function(value) {
@@ -13989,7 +14048,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
     }
 
     helpers.ensureAlias = function(connectionId) {
-      var state = global.__mcpProxyState__
+      var state = parent._mcpProxyState
       if (!isObject(state)) return connectionId
       if (isString(state.idToAlias[connectionId])) return state.idToAlias[connectionId]
       state.aliasCounter = (state.aliasCounter || 0) + 1
@@ -14000,7 +14059,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
     }
 
     helpers.resolveConnectionId = function(identifier) {
-      var state = global.__mcpProxyState__
+      var state = parent._mcpProxyState
       if (!isObject(state) || isUnDef(identifier)) return __
       if (isString(identifier) && identifier.length > 0) {
         var normalized = identifier.trim()
@@ -14035,7 +14094,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
     }
 
     helpers.rebuildIndexes = function() {
-      var state = global.__mcpProxyState__
+      var state = parent._mcpProxyState
       if (!isObject(state)) return
       state.catalog = []
       state.toolToConnections = {}
@@ -14065,7 +14124,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
     }
 
     helpers.refreshConnections = function(targetIds) {
-      var state = global.__mcpProxyState__
+      var state = parent._mcpProxyState
       if (!isObject(state)) return
       var ids = targetIds
       if (!isArray(ids) || ids.length === 0) ids = Object.keys(state.connections || {})
@@ -14075,9 +14134,9 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         if (!isObject(entry.client) || typeof entry.client.listTools !== "function") return
         try {
           var listResult = entry.client.listTools()
-          client.__miniAPreinitialized = false
-      var extracted = helpers.extractTools(listResult)
+          var extracted = helpers.extractTools(listResult)
           entry.tools = extracted.tools
+          parent._registerToolCacheClient("proxy:" + id, entry.client, entry.tools)
           if (isDef(extracted.serverInfo)) entry.serverInfo = extracted.serverInfo
           entry.lastRefreshed = now()
           entry.lastError = __
@@ -14089,7 +14148,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
     }
 
     // Initialize all downstream MCP connections
-    var state = global.__mcpProxyState__
+    var state = parent._mcpProxyState
     state.ownerId = parent._id
     mcpConfigs.forEach(function(descriptor, index) {
       var configObject = descriptor
@@ -14149,6 +14208,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
       }
 
       var extracted = helpers.extractTools(listResult)
+      parent._registerToolCacheClient("proxy:" + connectionId, client, extracted.tools)
       var alias = helpers.ensureAlias(connectionId)
 
       state.connections[connectionId] = {
@@ -14444,7 +14504,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
     // Define the proxy-dispatch function
     var fns = {
       "proxy-dispatch": function(params) {
-        var state = global.__mcpProxyState__
+        var state = parent._mcpProxyState
         if (!isObject(state) || Object.keys(state.connections || {}).length === 0) {
           return { error: "MCP proxy is not initialized or has no active connections." }
         }
@@ -14812,11 +14872,9 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           // Track if argumentsFile was used to suppress echoing large args
           var usedArgumentsFile = isString(params.argumentsFile) && params.argumentsFile.trim().length > 0
 
-          var _callToolSchema = (function() {
-            if (!isArray(target.tools)) return __
-            var _tm = target.tools.find(function(t) { return t.name === toolName })
-            return isMap(_tm) ? _tm.inputSchema : __
-          })()
+          var _callToolInfo = isArray(target.tools) ? target.tools.find(function(t) { return t.name === toolName }) : __
+          if (!isMap(_callToolInfo)) return { error: "Tool '" + toolName + "' is not present in the selected connection catalog." }
+          var _callToolSchema = _callToolInfo.inputSchema
           var _preparedCall = parent._prepareToolArgs(_callToolSchema, inputArgs)
           inputArgs = _preparedCall.params
           if (_preparedCall.repairs.length > 0) parent._trace("tool_call", { name: toolName, params: inputArgs, source: "mcp-proxy", repairs: _preparedCall.repairs })
@@ -14826,9 +14884,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           }
 
           try {
-            var result = isDef(meta)
-              ? target.client.callTool(toolName, inputArgs, meta)
-              : target.client.callTool(toolName, inputArgs)
+            var result = parent._invokeMcpTool("proxy:" + connectionId, target.client, _callToolInfo, inputArgs, __, { meta: meta })
 
             if (isMap(result) && isString(result.error) && isMap(_callToolSchema)) {
               var _enriched = MiniA._enrichToolCallError(result.error, _callToolSchema, inputArgs)
@@ -14935,6 +14991,9 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
             }
 
             if (isMap(result) && isDef(result.error)) responseObj.error = result.error
+            if (isMap(result) && result.isError === true) responseObj.isError = true
+            if (isMap(result) && isDef(result.outcome)) responseObj.outcome = result.outcome
+            if (isMap(result) && isDef(result.retryable)) responseObj.retryable = result.retryable
             if (autoSpilled) responseObj.autoSpilled = true
             if (!useResultFile && resultByteSize > 0) responseObj.estimatedTokens = Math.ceil(resultByteSize / 4)
 
@@ -14946,6 +15005,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
               connection: { id: target.id, alias: target.alias },
               tool      : toolName,
               error     : __miniAErrMsg(e),
+              retryable : false,
               content: [{ type: "text", text: "Error: " + __miniAErrMsg(e) }]
             }
           }
@@ -15239,18 +15299,12 @@ MiniA.prototype._computeToolCacheSettings = function(tool, defaultTtl) {
     if (!isNaN(metaSeconds) && metaSeconds > 0) candidateTtl = metaSeconds * 1000
   }
 
-  var deterministicHints = [
-    annotations.deterministic,
-    metadata.deterministic,
-    annotations.cacheable,
-    metadata.cacheable,
-    annotations.readOnlyHint,
-    annotations.idempotentHint,
-    metadata.readOnlyHint,
-    metadata.idempotentHint
-  ]
-
-  var enabled = annotations.cacheable !== false && metadata.cacheable !== false && deterministicHints.some(hint => toBoolean(hint) === true)
+  var deterministicHints = [annotations.deterministic, metadata.deterministic, annotations.cacheable, metadata.cacheable]
+  // Read-only and idempotent describe execution safety, not freshness.
+  // A negative declaration wins even if another metadata source opts in.
+  var enabled = !this._toolExecutionHints(info).writable &&
+    !deterministicHints.some(function(hint) { return hint === false }) &&
+    deterministicHints.some(function(hint) { return hint === true })
   var keyFields = []
   var keyCandidates = annotations.cacheKeyFields || metadata.cacheKeyFields
   if (isArray(keyCandidates)) {
@@ -15293,7 +15347,7 @@ MiniA.prototype._executeToolWithCache = function(connectionId, toolName, params,
     throw new Error(`MCP client for tool '${toolName}' not available.`)
   }
 
-  var toolInfo = this._resolveToolInfo(toolName)
+  var toolInfo = this._resolveMcpToolInfo(connectionId, client, toolName)
   var prepared = this._prepareToolArgs(isObject(toolInfo) ? toolInfo.inputSchema : __, params)
   if (prepared.repairs.length > 0) this._trace("tool_call", { name: toolName, params: prepared.params, source: "mcp", repairs: prepared.repairs })
   if (!prepared.ok) {
@@ -15308,89 +15362,103 @@ MiniA.prototype._executeToolWithCache = function(connectionId, toolName, params,
     callParams.returnOutput = true
   }
 
-  var cacheConfig = this._supervised ? __ : this._toolCacheSettings[toolName]
-  var inputToolName = toolName === "proxy-dispatch" && isMap(params) && isString(params.tool) ? params.tool : toolName
-  var shouldCache = ["userInput", "question"].indexOf(inputToolName) < 0 && !MiniA._isCommsTool(toolName, params) && isObject(cacheConfig) && cacheConfig.enabled === true
-  var cacheKey = shouldCache ? this._buildToolCacheKey(toolName, callParams) : ""
+  var result = this._invokeMcpTool(connectionId, client, toolInfo || { name: toolName }, callParams, callContext, {
+    initialize: true,
+    singleAttempt: toolName === "proxy-dispatch",
+    proxyEnvelope: toolName === "proxy-dispatch"
+  })
+  if (toolName === "visualize" && isMap(params) && params.returnOutput !== true) result = this._processDirectDisplayToolResult(toolName, result)
+  return result
+}
 
+// Direct calls and resolved proxy calls share the same cache and dispatch rules.
+// Proxy formatting and result-file work stay outside this retry boundary.
+MiniA.prototype._invokeMcpTool = function(connectionId, client, toolInfo, params, callContext, options) {
+  var parent = this, opts = options || {}, toolName = toolInfo.name
+  var hints = this._toolExecutionHints(toolInfo)
+  var cacheConfig = this._computeToolCacheSettings(toolInfo, this._toolCacheDefaultTtl)
+  var shouldCache = !this._supervised && opts.proxyEnvelope !== true &&
+    ["userInput", "question"].indexOf(toolName) < 0 && !MiniA._isCommsTool(toolName, params) && cacheConfig.enabled === true
+  var generation = this._registerToolCacheClient(connectionId, client)
+  var cacheEpoch, cacheKey = "", cached = { hit: false }
   if (shouldCache) {
-    var cached = this._getToolResultFromCache(cacheKey)
+    this._toolCacheSync(function(family) {
+      cacheEpoch = family.epoch
+      // Include the tool contract as well, covering replacement outside catalog refresh.
+      cacheKey = parent._buildToolCacheKey(toolName, params, generation + ":" + cacheEpoch + ":" + md5(parent._stableStringify(toolInfo)), cacheConfig)
+      if (family.mutations === 0) cached = parent._getToolResultFromCache(cacheKey)
+      else shouldCache = false
+    })
     if (cached.hit) {
-      if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_cache_hits)) {
-        global.__mini_a_metrics.tool_cache_hits.inc()
-      }
+      if (global.__mini_a_metrics && global.__mini_a_metrics.tool_cache_hits) global.__mini_a_metrics.tool_cache_hits.inc()
       if (isObject(callContext)) callContext.fromCache = true
-      this._logToolUsage(toolName, params, cached.value, {
-        connectionId: connectionId,
-        fromCache   : true,
-        error       : isMap(cached.value) && isDef(cached.value.error)
-      })
+      this._logToolUsage(toolName, params, cached.value, { connectionId: connectionId, fromCache: true, error: false })
       return cached.value
-    } else {
-      if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_cache_misses)) {
-        global.__mini_a_metrics.tool_cache_misses.inc()
-      }
     }
+    if (global.__mini_a_metrics && global.__mini_a_metrics.tool_cache_misses) global.__mini_a_metrics.tool_cache_misses.inc()
   }
 
   if (this._isCircuitOpen(connectionId)) {
-    var circuitError = new Error(`Circuit open for connection '${connectionId}'. Skipping MCP call.`)
+    var circuitError = new Error("Circuit open for connection '" + connectionId + "'. Skipping MCP call.")
     circuitError.transient = true
-    this._logToolUsage(toolName, params, { error: circuitError.message }, {
-      connectionId: connectionId,
-      error       : true,
-      fromCache   : false
-    })
     throw circuitError
   }
 
-  var parent = this
+  // An explicit deterministic/cacheable contract permits caching without a
+  // read-only hint. Everything else may mutate, including idempotent writes.
+  var mutating = opts.proxyEnvelope !== true && !hints.readOnly && !cacheConfig.enabled
   var result
+  if (mutating) this._beginToolMutation()
   try {
     result = this._withExponentialBackoff(function() {
-      parent._ensureConnectionInitialized(connectionId)
-      return client.__miniAOriginalCallTool ? client.__miniAOriginalCallTool(toolName, callParams) : client.callTool(toolName, callParams)
+      if (opts.initialize === true) parent._ensureConnectionInitialized(connectionId)
+      try {
+        var call = client.__miniAOriginalCallTool || client.callTool
+        return call.call(client, toolName, params, opts.meta)
+      } catch(err) {
+        if (opts.singleAttempt === true || (!hints.readOnly && !hints.idempotent)) {
+          var message = "MCP '" + toolName + "' response was lost after dispatch; the operation may have completed. " + __miniAErrMsg(err)
+          return { error: message, content: [{ type: "text", text: message }], outcome: "unknown", retryable: false }
+        }
+        throw err
+      }
     }, {
-      maxAttempts : 3,
+      maxAttempts: opts.singleAttempt === true ? 1 : 3,
       initialDelay: 250,
-      maxDelay    : 4000,
-      context     : { source: "mcp", connectionId: connectionId, toolName: toolName },
-      onRetry     : function(err, attempt, wait, category) {
-        parent.fnI("retry", `MCP '${toolName}' attempt ${attempt} failed (${category.type}). Retrying in ${wait}ms...`)
-        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
-          global.__mini_a_metrics.retries.inc()
-        }
+      maxDelay: 4000,
+      context: { source: "mcp", connectionId: connectionId, toolName: toolName },
+      onRetry: function(err, attempt, wait, category) {
+        parent.fnI("retry", "MCP '" + toolName + "' attempt " + attempt + " failed (" + category.type + "). Retrying in " + wait + "ms...")
+        if (global.__mini_a_metrics && global.__mini_a_metrics.retries) global.__mini_a_metrics.retries.inc()
       },
-      onFailure   : function(err, attempts, category) {
-        if (isObject(category) && category.type === "transient") {
-          parent._recordCircuitFailure(connectionId, { tool: toolName, message: err && err.message })
-        }
+      onFailure: function(err, attempts, category) {
+        if (isObject(category) && category.type === "transient") parent._recordCircuitFailure(connectionId, { tool: toolName, message: err && err.message })
       }
     })
-  } catch (e) {
-    this._logToolUsage(toolName, params, { error: e.message }, {
-      connectionId: connectionId,
-      fromCache   : false,
-      error       : true
-    })
+  } catch(e) {
+    this._logToolUsage(toolName, params, { error: __miniAErrMsg(e) }, { connectionId: connectionId, fromCache: false, error: true })
     throw e
+  } finally {
+    if (mutating) this._endToolMutation()
   }
 
-  parent._recordCircuitSuccess(connectionId)
-  if (toolName === "visualize" && isMap(params) && params.returnOutput !== true) {
-    result = parent._processDirectDisplayToolResult(toolName, result)
+  if (isMap(result) && (isDef(result.error) || result.isError === true) &&
+      (opts.proxyEnvelope === true || (!hints.readOnly && !hints.idempotent))) {
+    // An application error is still a dispatched action. Other route layers
+    // must not replay an unsafe operation merely because its result is an error.
+    result.retryable = false
   }
-
+  if (!(isMap(result) && result.outcome === "unknown")) this._recordCircuitSuccess(connectionId)
   if (shouldCache) {
-    this._storeToolResultInCache(cacheKey, result, cacheConfig.ttl)
+    this._toolCacheSync(function(family) {
+      var current = family.clients[connectionId]
+      if (family.mutations === 0 && family.epoch === cacheEpoch && current && current.generation === generation) {
+        parent._storeToolResultInCache(cacheKey, result, cacheConfig.ttl)
+      }
+    })
   }
-
   if (isObject(callContext)) callContext.fromCache = false
-  this._logToolUsage(toolName, params, result, {
-    connectionId: connectionId,
-    fromCache   : false,
-    error       : isMap(result) && isDef(result.error)
-  })
+  this._logToolUsage(toolName, params, result, { connectionId: connectionId, fromCache: false, error: isMap(result) && (isDef(result.error) || result.isError === true) })
   return result
 }
 
@@ -15414,7 +15482,7 @@ MiniA.prototype._ensureConnectionInitialized = function(connectionId) {
     }
   } catch (e) {
     this.fnI("warn", `Lazy initialization for MCP connection failed: ${e.message}`)
-    this._lazyMcpConnections[connectionId] = false
+    this._lazyMcpConnections[connectionId] = true
     if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.mcp_lazy_init_failed)) {
       global.__mini_a_metrics.mcp_lazy_init_failed.inc()
     }
@@ -16268,6 +16336,9 @@ MiniA.prototype._executeParallelToolBatch = function(batch, options) {
         if (isDef(envelope.error)) {
           errorTrail.push({ route: attemptRoute, error: envelope.error })
           parent._recordRouteOutcome(attemptRoute, false)
+          // A different route can still dispatch the same remote action.
+          // Never turn an uncertain write or proxy formatting failure into replay.
+          if (isMap(envelope.rawResult) && (envelope.rawResult.retryable === false || envelope.rawResult.outcome === "unknown")) break
         } else {
           parent._recordRouteOutcome(attemptRoute, true)
           break
@@ -16833,7 +16904,9 @@ MiniA.prototype._runCommand = function(args) {
         var shellExec = $sh(shInput)
         if (isNumber(args.shelltimeout)) shellExec = shellExec.timeout(args.shelltimeout)
         if (isObject(this._progCallEnv)) shellExec = shellExec.envs(this._progCallEnv)
-        var _r = shellExec.get(0)
+        var _r
+        this._beginToolMutation()
+        try { _r = shellExec.get(0) } finally { this._endToolMutation() }
         if (this._supervised) args.exitcode = _r.exitcode
         args.output = _r.stdout + (isDef(_r.stderr) && _r.stderr.length > 0 ? "\n[stderr] " + _r.stderr : "")
         args.output = this._truncateShellOutput(args.output, shellMaxBytesValue)
@@ -16963,6 +17036,7 @@ MiniA.prototype._buildChildMcpHandoffArgs = function(goal, request, parentArgs) 
 }
 
 MiniA.prototype._prepareChildMcpHandoff = function(childAgent, childArgs, subtask) {
+  if (isObject(childAgent)) childAgent._toolCacheFamily = this._toolCacheFamily
   if (!isObject(childAgent) || !isMap(childArgs) || !isArray(childArgs._mcpHandoffTools) || childArgs._mcpHandoffTools.length === 0) return
   if (!isObject(this._mcpConnections) || !isArray(this.mcpTools) || !isObject(this.mcpToolToConnection)) return
 
@@ -17024,6 +17098,7 @@ MiniA.prototype._prepareChildMcpHandoff = function(childAgent, childArgs, subtas
 
   if (childTools.length === 0) return
 
+  if (proxyMode) childAgent._mcpProxyState = this._getMcpProxyState()
   childAgent._mcpConnections = childConnections
   childAgent._mcpConnectionInfo = childInfo
   childAgent._mcpConnectionAliases = childAliases
@@ -19153,6 +19228,8 @@ MiniA.prototype.init = function(args) {
             throw new Error(`MCP connection ${index + 1} failed or returned no tools.`)
           }
           
+          this._registerToolCacheClient(id, mcp, tools)
+
           // Store connection and map tools to this connection
           //this._mcpConnections.push(mcp)
           tools.forEach(tool => {
@@ -19408,8 +19485,8 @@ MiniA.prototype._buildRunPrompt = function(args) {
     var shellViaActionPreferred = args.useshell === true && this._useTools === true
     var proxyToolsList = ""
     var proxyToolCount = this.mcpTools.length
-    if (promptUseMcpProxy === true && isObject(global.__mcpProxyState__)) {
-      var proxyState = global.__mcpProxyState__
+    if (promptUseMcpProxy === true && isObject(this._getMcpProxyState())) {
+      var proxyState = this._getMcpProxyState()
       var proxyNames = []
       if (isMap(proxyState.toolToConnections)) {
         proxyNames = Object.keys(proxyState.toolToConnections)
@@ -23224,7 +23301,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               global.__mini_a_metrics.similar_thoughts_detected.inc()
               if (this._useMcpProxy === true) {
                 var _tl = thoughtStr.toLowerCase()
-                var _proxyState = global.__mcpProxyState__
+                var _proxyState = this._getMcpProxyState()
                 var _mentionedTool = __
                 if (isObject(_proxyState) && isMap(_proxyState.toolToConnections)) {
                   var _toolNames = Object.keys(_proxyState.toolToConnections).filter(function(n) { return n !== "proxy-dispatch" })

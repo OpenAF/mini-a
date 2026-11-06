@@ -167,6 +167,35 @@ run('StudioApi.request=api;StudioApi.background=api;studioSession={canTestWiki:f
   const mode=field(view,'Processing');mode.value='raw';await mode.parentElement.parentElement.fire('input');
   assert(find(view,'button','4. Import into wiki').disabled,'Changed processing invalidates the preview');
   await run('navigate("Pages")');assert.equal(view.querySelector('[role="treeitem"]').getAttribute('aria-expanded'),'true','Expanded folders survive navigation');
+  // Typing and repeated keyboard saves during an outstanding request retain the buffer.
+  await click(view,'Edit');
+  let releaseTypingSave, typingSaveCalls=0, savedBodies=[];
+  context.typingApi=async(path,method,body)=>{
+    if(method==='PUT'){typingSaveCalls++;savedBodies.push({...body});return new Promise(resolve=>{releaseTypingSave=resolve;});}
+    return context.api(path,method,body);
+  };
+  run('StudioApi.request=typingApi;');
+  const typingSource=view.querySelector('textarea');
+  typingSource.value='# Submitted';await typingSource.fire('input');
+  const firstTypingSave=typingSource.fire('keydown',{key:'s',ctrlKey:true});
+  await new Promise(resolve=>setImmediate(resolve));
+  typingSource.value='# Newer local typing';await typingSource.fire('input');
+  const joinedSave=typingSource.fire('keydown',{key:'s',metaKey:true});
+  assert.equal(typingSaveCalls,1,'Repeated keyboard saves join the in-flight request');
+  releaseTypingSave({path:'Guides/intro.md',content:'# Submitted',revision:'saved-typing-1'});
+  await Promise.all([firstTypingSave,joinedSave]);
+  assert.equal(typingSource.value,'# Newer local typing','Save cannot replace newer text');
+  assert.equal(run('dirty'),true,'Newer edits stay dirty');
+  assert.equal(run('editing'),true,'Newer edits keep the editor open');
+  assert.equal(run('activePage.revision'),'saved-typing-1','Server revision advances');
+  const nextTypingSave=typingSource.fire('keydown',{key:'s',ctrlKey:true});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(savedBodies[1].expectedRevision,'saved-typing-1','Next save uses the accepted revision');
+  assert.equal(savedBodies[1].content,'# Newer local typing');
+  releaseTypingSave({path:'Guides/intro.md',content:'# Newer local typing',revision:'saved-typing-2'});
+  await nextTypingSave;
+  assert.equal(run('dirty'),false);assert.equal(run('editing'),false);
+  run('StudioApi.request=api;');
   // Late save responses must not replace a page selected while the save was pending.
   await click(view,'Edit');
   let finishSave;context.saveApi=async(path,method,body)=>method==='PUT'?new Promise(resolve=>{finishSave=resolve;}):context.api(path,method,body);

@@ -17,6 +17,88 @@
   var assert = function(actual, expected, note) { ow.test.assert(actual, expected, note) }
   function rejects(fn, code) { var error; try { fn() } catch(e) { error = e.code } assert(error, code, "Expected rejection: " + code) }
   function add(s, temp, access) { return s.registry.add({ id: "alpha", name: "Alpha", root: temp + "/wikis/existing", access: access || "rw" }) }
+  exports.testSourceIsolationAndMigration = function() { fixture(function(s,t) {
+    var w = add(s,t), other = merge(w,{id:"alpha--part"})
+    function upload(text) { var id=WikiStudio.id();s.streamUpload({role:"admin",headers:{"x-upload-id":id,"x-upload-path":"doc.md"}},new java.io.ByteArrayInputStream(WikiStudio.bytes(text)));return id }
+    var first = s.sourceAdd(w,{id:"part--docs",name:"First",type:"upload",uploadId:upload("first")})
+    var second = s.sourceAdd(other,{id:"docs",name:"Second",type:"upload",uploadId:upload("second")})
+    assert(s.sourceList(w).length,1,"Wiki enumerates only its directory")
+    assert(s.sourceGet(w,first.id).revision,first.revision,"Colliding legacy filename retains first owner")
+    assert(s.sourceGet(other,second.id).revision,second.revision,"Colliding legacy filename retains second owner")
+    var old = s.sourceGet(w,first.id), nextUpload=upload("new")
+    WikiStudio.sourceLock(s.config.home,w.id,first.id,function(){rejects(function(){s.sourceAdd(w,{id:first.id,name:"New",type:"upload",uploadId:nextUpload})},"busy")})
+    var updated=s.sourceAdd(w,{id:first.id,name:"New",type:"upload",uploadId:nextUpload})
+    assert(s.sourceUpdateRun(w,{id:"old-job",params:{sourceId:first.id,revision:old.revision,dryrun:false}}, {ok:true}),false,"Older job cannot overwrite newer registration")
+    assert(s.sourceGet(w,first.id).revision,updated.revision,"New revision remains published")
+    assert(s.sourceUpdateRun(w,{id:"new-job",params:{sourceId:first.id,revision:updated.revision,dryrun:true}}, {ok:true}),true,"Matching revision receives run status")
+    assert(s.sourceGet(w,first.id).lastRun,"new-job","Run update persisted")
+    WikiStudio.atomic(s.sourcePath(w,"foreign"),{id:"foreign",wikiId:other.id})
+    rejects(function(){s.sourceGet(w,"foreign")},"foreign_source");rejects(function(){s.sourceList(w)},"foreign_source")
+    new java.io.File(s.sourcePath(w,"foreign")).delete()
+    // Legacy registration is identified by embedded IDs, and a valid new record wins.
+    WikiStudio.atomic(s.config.home+"/sources/"+w.id+"--"+first.id+".json",old)
+    WikiStudio.atomic(s.config.home+"/sources/misleading.json",{wikiId:w.id,id:"legacy",revision:"legacy-upload",staging:"retained"})
+    WikiStudio.atomic(s.config.home+"/sources/z-last.json",{wikiId:other.id,id:"last",revision:"last-upload"})
+    var original=WikiStudio.atomic, interrupted=false
+    WikiStudio.atomic=function(path,value){if(/\/last\.json$/.test(path)&&!interrupted){interrupted=true;throw new Error("simulated interruption")}return original(path,value)}
+    try { try{s.migrateSources()}catch(e){assert(String(e).indexOf("simulated interruption")>=0,true,"Migration interruption fixture")} } finally {WikiStudio.atomic=original}
+    assert(s.sourceGet(w,"legacy").revision,"legacy-upload","Already published migration record survives interruption")
+    io.writeFileString(s.config.home+"/sources/corrupt.json","{invalid")
+    var report=s.migrateSources()
+    assert(report.warnings.some(function(warning){return warning.code==="invalid_legacy_source"&&warning.file==="corrupt.json"}),true,"Malformed legacy record is reported without stopping valid migrations")
+    assert(s.sourceGet(other,"last").revision,"last-upload","Restart migrates remaining record")
+    assert(s.sourceGet(w,first.id).revision,updated.revision,"New layout record takes precedence over legacy")
+    assert(io.fileExists(s.config.home+"/sources/misleading.json"),true,"Legacy files retained")
+    assert(report.warnings.some(function(warning){return warning.code==="legacy_name_mismatch"}),true,"Ambiguous filenames are reported without reconstruction")
+    var missing=WikiStudio.id();WikiStudio.atomic(s.config.home+"/sources/uploads/"+missing+"/sealed.json",{wikiId:"missing",sourceId:"overwritten"})
+    var corruptUpload=WikiStudio.id();WikiStudio.privateDir(s.config.home+"/sources/uploads/"+corruptUpload);io.writeFileString(s.config.home+"/sources/uploads/"+corruptUpload+"/sealed.json","{invalid")
+    report=s.migrateSources()
+    assert(report.warnings.some(function(warning){return warning.code==="invalid_upload_owner"&&warning.upload===corruptUpload}),true,"Malformed upload seal is reported without aborting migration")
+    assert(report.warnings.some(function(warning){return warning.code==="missing_source_registration"&&warning.sourceId==="overwritten"}),true,"Missing overwritten registration reported from seal")
+    assert(s.sourceGet({id:"missing"},"overwritten"),null,"Missing registration is never guessed")
+    var spec=s.sourceOperation(w,"ingestions",{sourceId:first.id,revision:updated.revision,preview:true,options:{mode:"raw"}})
+    assert(spec.params.sourceId,first.id,"Public source ID preserved")
+    assert(spec.params.revision,updated.revision,"Upload revision preserved")
+  }) }
+  exports.testInventoryAndNamespaces = function() { fixture(function(s,t) {
+    var w=add(s,t), originalHash=WikiStudio.hash, hashes=0
+    for(var i=0;i<60;i++)io.writeFileString(w.root+"/page-"+i+".md","# Page "+i)
+    WikiStudio.privateDir(w.root+"/.hidden");io.writeFileString(w.root+"/.hidden/ignore.md","hidden");io.writeFileString(w.root+"/AGENTS.md","instructions")
+    WikiStudio.hash=function(bytes){hashes++;return originalHash(bytes)}
+    var originalKeys=Object.keys, enumerations=0
+    Object.keys=function(value){enumerations++;return originalKeys(value)}
+    try {var metadata=WikiStudio.scan(w.root,true,true);assert(enumerations,1,"Scan enumerates link accounting once, never the growing file inventory");assert(Object.keys(metadata).length,62,"Metadata inventory includes all files");assert(hashes,0,"Metadata quota traversal never reads bodies for hashes")}
+    finally {WikiStudio.hash=originalHash;Object.keys=originalKeys}
+    var scans=0, originalScan=WikiStudio.scan
+    WikiStudio.scan=function(root,all,metadataOnly){scans++;return originalScan(root,all,metadataOnly)}
+    try {var overview=s.wikiRoute({method:"GET",query:{}},w,["overview"],"admin");assert(overview.studio.pageCount,60,"Overview counts public Markdown from full post-engine inventory");assert(scans,2,"Overview uses pre-engine safety and one post-engine scan")}
+    finally {WikiStudio.scan=originalScan}
+    ;["queue","registry","audit","server","source-migration"].forEach(function(id){
+      WikiStudio.wikiLock(s.config.home,id,function(){WikiStudio.lock(s.config.home,id,function(){});rejects(function(){WikiStudio.wikiLock(s.config.home,id,function(){})},"busy")})
+    })
+    var upload=WikiStudio.id(), req={role:"admin",headers:{"x-upload-id":upload,"x-upload-path":"first.md"}}
+    s.streamUpload(req,new java.io.ByteArrayInputStream(WikiStudio.bytes("existing-body")))
+    var priorUpload=WikiStudio.path(s.config.home+"/sources/uploads/"+upload+"/files/first.md")
+    java.nio.file.Files.setPosixFilePermissions(priorUpload,java.nio.file.attribute.PosixFilePermissions.fromString("---------"))
+    hashes=0;WikiStudio.hash=function(bytes){hashes++;return originalHash(bytes)}
+    try {req.headers["x-upload-path"]="second.md";s.streamUpload(req,new java.io.ByteArrayInputStream(WikiStudio.bytes("new-body")));assert(hashes,1,"Upload hashes only the newly received file")}
+    finally {WikiStudio.hash=originalHash;java.nio.file.Files.setPosixFilePermissions(priorUpload,java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"))}
+    assert(WikiStudio.scan(s.config.home+"/sources/uploads/"+upload+"/files",true)["first.md"].hash,originalHash(WikiStudio.bytes("existing-body")),"Full sealing inventory retains body hashing")
+  }) }
+  exports.testOversizedOutcomes = function() { fixture(function(s,t) {
+    var w=add(s,t);WikiStudio.privateDir(s.config.home+"/jobs");s.jobs=new WikiStudioJobs(s.config)
+    var original=wikiStudioExecute, large=new Array(1048578).join("x")
+    var cases=[{ok:true,partial:true,expected:"partial"},{ok:true,sync_complete:false,expected:"partial"},{ok:true,status:"cancelled",expected:"cancelled"},{ok:true,result:{status:"cancelled"},expected:"cancelled"},{ok:false,expected:"recovery-required"},{ok:true,result:{partial:true},expected:"partial"},{ok:true,result:{sync_complete:false},expected:"partial"},{ok:true,result:{ok:false},expected:"recovery-required"}]
+    try {cases.forEach(function(result,index){
+      var j=s.jobs.submit(w,"graph.build",{dryrun:false},"large-result-"+index,"admin");s.jobs.update(j.id,{status:"acquiring-lock"})
+      wikiStudioExecute=function(){return merge(result,{large:large})};wikiStudioRunWorker(s.config,j.id)
+      var stored=WikiStudio.json(s.jobs.dir(j.id)+"/result.json"),finished=s.jobs.get(j.id)
+      assert(finished.status,result.expected,"Oversized result preserves outcome "+index)
+      assert(stored.truncated,true,"Result retention remains bounded")
+      assert(stored.terminalStatus,result.expected,"Retained summary states terminal status")
+      if(result.partial)assert(s.jobs.deletion(finished,w,s.jobs.list()).allowed,false,"Partial result is protected from cleanup")
+    })}finally{wikiStudioExecute=original}
+  }) }
   exports.testRegistry = function() { fixture(function(s, t) {
     var w = add(s, t); assert(w.access, "rw", "Registered wiki")
     assert(new WikiStudioRegistry(s.config).get("alpha").root, w.root, "Registry survives reopen")

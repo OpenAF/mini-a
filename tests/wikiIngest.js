@@ -129,7 +129,7 @@
       ing._setLlm({ promptImage: function(prompt, path) {
         images++
         ow.test.assert(prompt.indexOf("untrusted source data") >= 0, true, "vision prompt distrusts image text")
-        ow.test.assert(String(path).indexOf("diagram.png") >= 0, true, "image path reaches vision model")
+        ow.test.assert(String(path).indexOf("iVBOR") === 0, true, "prepared immutable PNG bytes reach vision model")
         return "A diagram labeled Widget"
       } })
       var result = ing.run()

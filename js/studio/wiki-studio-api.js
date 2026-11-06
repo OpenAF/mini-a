@@ -60,7 +60,7 @@ WikiStudioServer.prototype.dispatch = function(req) {
     if (p.length === 4) {
       if (read) return this.publicWiki(w, role)
       WikiStudio.authorize(role, "admin")
-      return WikiStudio.lock(c.home, w.id, function() {
+      return WikiStudio.wikiLock(c.home, w.id, function() {
         if (req.method === "PATCH") return self.registry.update(w.id, body, false)
         if (req.method === "DELETE") return self.registry.update(w.id, {}, true)
         WikiStudio.fail(405, "method_not_allowed", "Method not allowed")

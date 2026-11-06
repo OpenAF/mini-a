@@ -1879,6 +1879,12 @@ MiniAHistoryVM.prototype.projectRequestContext = function(input, options) {
 MiniAHistoryVM.prototype.assembleContext = function(options) {
   if (!this.contextVirtualization) return { error: "Context virtualization is not enabled." }
   var opts = isMap(options) ? options : {}
+  var costMemo = {}, self = this
+  var representationCost = function(object, level) {
+    var key = self._representationCacheKey(object, level) + ":" + (opts.deterministic === true)
+    if (!Object.prototype.hasOwnProperty.call(costMemo, key)) costMemo[key] = self._contextRepresentationCost(object, level, opts)
+    return costMemo[key]
+  }
   var consumerPolicy = this._contextConsumerPolicy(opts.consumer)
   if (isNumber(opts.recentLimit)) consumerPolicy.recentLimit = Math.max(0, Math.min(50, Math.floor(opts.recentLimit)))
   if (isNumber(opts.candidateLimit)) consumerPolicy.candidateLimit = Math.max(1, Math.min(500, Math.floor(opts.candidateLimit)))
@@ -2001,7 +2007,7 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
     var forced = candidates[m]
     if (!forced.mandatory) continue
     var minimumLevel = forced.object.kind === "constraint" ? "L4" : "L2"
-    var forcedCost = this._contextRepresentationCost(forced.object, minimumLevel, opts)
+    var forcedCost = representationCost(forced.object, minimumLevel)
     selected[forced.object.handle] = merge({}, forced, true)
     selected[forced.object.handle].level = minimumLevel
     selected[forced.object.handle].tokenCost = forcedCost
@@ -2013,7 +2019,7 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
   for (var b = 0; b < candidates.length; b++) {
     var base = candidates[b]
     if (isMap(selected[base.object.handle])) continue
-    var baseCost = this._contextRepresentationCost(base.object, "L0", opts)
+    var baseCost = representationCost(base.object, "L0")
     baseOffers.push({ candidate: base, cost: baseCost, efficiency: base.utility * levelValue.L0 / Math.max(1, baseCost) })
   }
   baseOffers.sort(function(a, b) { return b.efficiency - a.efficiency || a.candidate.object.handle.localeCompare(b.candidate.object.handle) })
@@ -2040,7 +2046,7 @@ MiniAHistoryVM.prototype.assembleContext = function(options) {
       var nextLevel = levels[currentIndex + 1]
       var ceiling = consumerPolicy.levelCeilings[item.object.kind]
       if (isString(ceiling) && levels.indexOf(nextLevel) > levels.indexOf(ceiling)) return
-      var nextCost = this._contextRepresentationCost(item.object, nextLevel, opts)
+      var nextCost = representationCost(item.object, nextLevel)
       var deltaCost = nextCost - item.tokenCost
       var deltaUtility = item.utility * (levelValue[nextLevel] - levelValue[item.level])
       upgradeOffers.push({ item: item, level: nextLevel, cost: nextCost, deltaCost: deltaCost, efficiency: deltaUtility / Math.max(1, deltaCost) })

@@ -3,6 +3,15 @@ include:
 ojob:
   logToConsole: false
 jobs:
+- name: Studio source migration and isolation
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testSourceIsolationAndMigration
+- name: Studio inventory and lock namespaces
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testInventoryAndNamespaces
+- name: Studio oversized outcomes
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testOversizedOutcomes
 - name: Studio recursive folders
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testFolders
@@ -52,6 +61,9 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testAbsorption
 todo:
+- Studio source migration and isolation
+- Studio inventory and lock namespaces
+- Studio oversized outcomes
 - Studio recursive folders
 - Studio graph build settings
 - Studio cleanup

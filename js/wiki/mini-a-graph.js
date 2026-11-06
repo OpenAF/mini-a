@@ -432,7 +432,9 @@ MiniAWikiGraph.prototype._persist = function(diff) {
   return syncResult
 }
 
-MiniAWikiGraph.prototype.buildStructural = function(pages, opts) {
+MiniAWikiGraph.prototype.buildStructural = function(pages, opts) { return this._buildStructural(pages, opts, false) }
+
+MiniAWikiGraph.prototype._buildStructural = function(pages, opts, deferStats) {
   if (this._readOnly) return { ok: false, error: "graph is read-only" }
   var options = isMap(opts) ? opts : {}
   var list = isArray(pages) ? pages : []
@@ -479,12 +481,15 @@ MiniAWikiGraph.prototype.buildStructural = function(pages, opts) {
   }
   this._pruneUnreferencedNodes("")
   this._markDerivedDirty()
-  this._ensureDerived()
+  if (!deferStats) this._ensureDerived()
   if (options.preview !== true) this._persist()
-  return this.stats()
+  return deferStats ? { ok: true } : this.stats()
 }
 
-MiniAWikiGraph.prototype.updatePage = function(p) {
+MiniAWikiGraph.prototype.updatePage = function(p) { return this._updatePage(p, false) }
+
+// Batch builds defer derived statistics until every page change is present.
+MiniAWikiGraph.prototype._updatePage = function(p, deferStats) {
   if (this._readOnly) return {ok:false,error:"graph is read-only"}
   if (!isMap(p) || !isString(p.path)) return { ok: false, error: "path is required" }
   var newHash = this._pageHash(p)
@@ -515,10 +520,12 @@ MiniAWikiGraph.prototype.updatePage = function(p) {
     upsertEdges: upsertEdges,
     deleteEdges: removed.deleteEdges
   })
-  return { ok: true, changed: true, stats: this.stats() }
+  return deferStats ? { ok: true, changed: true } : { ok: true, changed: true, stats: this.stats() }
 }
 
-MiniAWikiGraph.prototype.removePage = function(path) {
+MiniAWikiGraph.prototype.removePage = function(path) { return this._removePage(path, false) }
+
+MiniAWikiGraph.prototype._removePage = function(path, deferStats) {
   if (this._readOnly) return {ok:false,error:"graph is read-only"}
   if (!isString(path) || path.length === 0) return { ok: false, error: "path is required" }
   var removed = this._removePageState(path)
@@ -534,7 +541,7 @@ MiniAWikiGraph.prototype.removePage = function(path) {
     upsertEdges: [],
     deleteEdges: removed.deleteEdges
   })
-  return { ok: true, changed: true, stats: this.stats() }
+  return deferStats ? { ok: true, changed: true } : { ok: true, changed: true, stats: this.stats() }
 }
 
 // All semantic evidence uses body offsets (UTF-16), one-based body lines and a section ID.
@@ -618,12 +625,12 @@ MiniAWikiGraph.prototype.build = function(pages, options) {
   var report = {ok:true,stage:"structural",processed:0,cached:0,pending:0,failed:0,calls:0,estimatedTokens:0,effective:MiniAGraphBuild.resolve(opts)}
   var progress = function(count) { report.processed=count;report.elapsedMs=Date.now()-started;if(isFunction(opts.onProgress))opts.onProgress(merge(clone(report),{index:count,total:list.length})) }
   progress(0)
-  if (opts.strategy === "full") this.buildStructural(list, { preview: true, onStructuralProgress:progress })
+  if (opts.strategy === "full") this._buildStructural(list, { preview: true, onStructuralProgress:progress }, true)
   else {
     var present = {}, autosave = this._autosave; this._autosave = "off"
     try {
-      list.forEach(function(page,index) { present[page.path] = true; self.updatePage(page); if((index+1)%25===0)progress(index+1) })
-      Object.keys(this._state.summaries.pages).forEach(function(path) { if (!present[path]) self.removePage(path) })
+      list.forEach(function(page,index) { present[page.path] = true; self._updatePage(page, true); if((index+1)%25===0)progress(index+1) })
+      Object.keys(this._state.summaries.pages).forEach(function(path) { if (!present[path]) self._removePage(path, true) })
     } finally { this._autosave = autosave }
   }
   if (opts.extraction === "semantic") return this.buildSemantic(list, opts)
@@ -652,7 +659,9 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, options) {
     report.elapsedMs = Date.now() - started
     self._state.build_status = clone(report)
     self._compactEdges(true)
-    self._markDerivedDirty(); self._ensureDerived()
+    self._markDerivedDirty()
+    // Checkpoints retain source evidence and progress. Reload recomputes derived state.
+    if (report.stage === "complete") self._ensureDerived()
     if (opts.preview !== true) self.save()
     if (isFunction(opts.onProgress)) opts.onProgress(merge(clone(report), { index: report.processed, total: list.length, status: stopped || report.stage }))
   }
@@ -773,7 +782,7 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, options) {
   report.resumable = report.pending > 0
   report.status = stopped || (report.partial ? "partial" : "complete")
   report.stage = "complete"
-  this._markDerivedDirty(); this._ensureDerived(); this._pruneUnreferencedNodes("")
+  this._pruneUnreferencedNodes("")
   checkpoint()
   if (opts.preview !== true) this._persist()
   report.stats = this.stats()

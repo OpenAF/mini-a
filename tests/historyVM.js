@@ -987,6 +987,36 @@
     }, { contextVirtualization: true })
   }
 
+  exports.testAssemblyCostsMemoizedPerInvocation = function() {
+    withVm(function(vm) {
+      var handles = []
+      for (var i = 0; i < 12; i++) {
+        vm.registerContextObject("artifact", "source_code", "function item" + i + "() {\n" + new Array(100).join("  var evidence = 'context budget';\n") + "}")
+        handles.push(vm.objects[vm.objects.length - 1].handle)
+      }
+      var originalCost = vm._contextRepresentationCost
+      var seen = {}, calls = 0
+      vm._contextRepresentationCost = function(object, level, options) {
+        var key = this._representationCacheKey(object, level) + ":" + (options.deterministic === true)
+        ow.test.assert(isUnDef(seen[key]), true, "Each assembly computes a representation cost once")
+        seen[key] = true; calls++
+        return originalCost.call(this, object, level, options)
+      }
+      ;[false, true].forEach(function(deterministic) {
+        var options = { candidateIds: handles, budget: 1800, outputReserve: 0, includeRecent: false, deterministic: deterministic }
+        seen = {}; calls = 0
+        var first = vm.assembleContext(options)
+        var firstCalls = calls
+        seen = {}; calls = 0
+        var second = vm.assembleContext(options)
+        var project = function(value) { return value.objects.map(function(item) { return [item.handle, item.level, item.tokenCost, item.representation.text] }) }
+        ow.test.assert(stringify(project(first)), stringify(project(second)), "Memoization preserves selected order, levels, costs and output")
+        ow.test.assert(firstCalls > 0 && calls > 0, true, "Costs are recalculated on each assembly")
+        ow.test.assert(first.materializedTokens, second.materializedTokens, "Budget usage is unchanged")
+      })
+    }, { contextVirtualization: true })
+  }
+
   exports.testConsumerSpecificContextViews = function() {
     withVm(function(vm) {
       var historyIds = []

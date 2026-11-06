@@ -8,7 +8,7 @@ WikiStudioServer.prototype.sourceOperation = function(w, route, body) {
       return {operation:"ingest."+body.action,params:body.action==="recovery"?{}:{id:body.recoveryId}}
     }
     WikiStudio.fields(body,["sourceId","revision","preview","options","confirmation"])
-    var source=WikiStudio.json(this.sourcePath(w,body.sourceId)); WikiStudio.assert(source,404,"source_not_found","Source not found")
+    var source=this.sourceGet(w,body.sourceId); WikiStudio.assert(source,404,"source_not_found","Source not found")
     WikiStudio.assert(body.revision===source.revision,409,"stale_source","Select the current immutable source revision")
     var o=body.options||{}; WikiStudio.fields(o,["mode","layout","section","include","exclude","prune","semantic","maxfiles","maxfilesize"])
     WikiStudio.assert(!isDef(body.preview)||isBoolean(body.preview),400,"invalid_options","Preview must be boolean")
@@ -58,8 +58,9 @@ WikiStudio.executeSource = function(config,w,job,logFn,backup) {
   var a={wikiroot:w.root,wikiaccess:"rw",usewikigraph:w.graph.enabled,wikigraphsemantic:p.semantic===true,wikiretrievalv2:true},params={}
   if(op==="ingest.run") {
     WikiStudio.assert(WikiStudio.inside(p.staging,config.home+"/sources/uploads"),400,"invalid_source","Source staging leaves trusted area")
-    WikiStudio.assert(WikiStudio.fingerprint(WikiStudio.scan(p.staging,true))===p.inventoryChecksum,409,"source_changed","Immutable staging revision changed; upload it again")
-    WikiStudio.assert(Object.keys(WikiStudio.scan(p.staging,true)).length<=p.maxfiles,413,"source_limit","Source exceeds selected file-count limit")
+    var inventory = WikiStudio.scan(p.staging,true)
+    WikiStudio.assert(WikiStudio.fingerprint(inventory)===p.inventoryChecksum,409,"source_changed","Immutable staging revision changed; upload it again")
+    WikiStudio.assert(Object.keys(inventory).length<=p.maxfiles,413,"source_limit","Source exceeds selected file-count limit")
     params={source:p.staging,sourceid:w.id+"--"+p.sourceId,mode:p.mode,layout:p.layout,section:p.section,dryrun:p.dryrun,include:p.include,exclude:p.exclude,prune:p.prune,maxfilekb:p.maxfilesize/1024}
   } else if(/^ingest\.(recovery|resume|discard)$/.test(op))params=p.id?{id:p.id}:{}
   else if(op.indexOf("absorb.")===0) {
@@ -71,11 +72,23 @@ WikiStudio.executeSource = function(config,w,job,logFn,backup) {
   var runner=new MiniAWikiOps(a,logFn),result
   function run(){return runner.execute(runner.spec(op,params),{confirm:true})}
   var ids=Object.keys(p.sourceIdentities||{}).sort(),registry=new WikiStudioRegistry(config)
-  function locked(index){if(index===ids.length)return run();var id=ids[index];return WikiStudio.lock(config.home,id,function(){var source=registry.verify(registry.get(id)),expected=p.sourceIdentities[id];WikiStudio.assert(source.root===expected.root&&source.identity===expected.identity,409,"source_changed","Absorption source root identity changed; replan");return locked(index+1)})}
+  function locked(index){if(index===ids.length)return run();var id=ids[index];return WikiStudio.wikiLock(config.home,id,function(){var source=registry.verify(registry.get(id)),expected=p.sourceIdentities[id];WikiStudio.assert(source.root===expected.root&&source.identity===expected.identity,409,"source_changed","Absorption source root identity changed; replan");return locked(index+1)})}
   result=locked(0)
   if(op==="ingest.run") {
-    var server=new WikiStudioServer(config),record=WikiStudio.json(server.sourcePath(w,p.sourceId))
-    if(record && record.revision===p.revision){record.lastRun=job.id;record.lastStatus=result.ok===false?"failed":p.dryrun?"previewed":"ingested";record.lastInventoryChecksum=p.inventoryChecksum;WikiStudio.atomic(server.sourcePath(w,p.sourceId),record)}
+    new WikiStudioServer(config).sourceUpdateRun(w, job, result)
   }
   return result
+}
+
+WikiStudioServer.prototype.sourceUpdateRun = function(w, job, result) {
+  var self = this, p = job.params
+  return WikiStudio.sourceLock(this.config.home, w.id, p.sourceId, function() {
+    var record = self.sourceGet(w, p.sourceId)
+    if (!record || record.revision !== p.revision) return false
+    record.lastRun = job.id
+    record.lastStatus = result.ok === false ? "failed" : p.dryrun ? "previewed" : "ingested"
+    record.lastInventoryChecksum = p.inventoryChecksum
+    WikiStudio.atomic(self.sourcePath(w, p.sourceId), record)
+    return true
+  })
 }

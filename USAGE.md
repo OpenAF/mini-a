@@ -2201,18 +2201,11 @@ Pair `usetools=true` with `mcpdynamic=true` to let Mini-A narrow the registered 
 
 ### Tool Caching & Optimization
 
-Mini-A implements smart caching for deterministic and read-only tools to avoid redundant operations.
+Mini-A caches results only when tools explicitly declare boolean `cacheable: true` or `deterministic: true` in annotations or metadata. False declarations override positive ones, and explicitly writable tools are never cached. Read-only or idempotent hints alone do not promise freshness; time, random and live-data tools remain fresh.
 
-**Caching criteria:**
-- Tools marked with `annotations.readOnlyHint`
-- Tools marked with `annotations.idempotentHint`
-- Tools with explicit caching metadata
+Use `toolcachettl=<ms>` for the default lifetime and existing per-tool TTL and `cacheKeyFields` metadata for overrides. Keys include opaque root-session and client/catalog generations plus tool identity and selected arguments. Delegated children sharing clients share invalidation. Potentially mutating tools and shell execution invalidate the session family before and after execution; reads bypass caching during mutations and cannot insert results across an invalidation.
 
-**Configuration:**
-- Use `toolcachettl=<ms>` to set the default cache window
-- Override per-tool via metadata
-- Results are keyed by tool name and parameters
-- Cache is maintained within a single session
+Transient failures retry only for explicit read-only/idempotent operations or initialization before dispatch. An unsafe call that loses its response returns `outcome: "unknown"` and `retryable: false`: inspect remote state before deciding to repeat it. The embedded proxy applies these rules to the resolved downstream tool; its outer call is uncached and single-attempt. See [MCP dispatch safety](docs/MCPPROXY-FEATURE.md#caching-and-dispatch-safety).
 
 **Smart context caching:**
 - System prompts are cached across sessions
@@ -3241,7 +3234,7 @@ Mini-A records extensive counters that help track behaviour and costs:
 | `behavior_patterns` | `escalations`, `escalation_consecutive_errors`, `escalation_consecutive_thoughts`, `escalation_thought_loop`, `escalation_steps_without_action`, `escalation_similar_thoughts`, `escalation_context_window`, `retries`, `consecutive_errors`, `consecutive_thoughts`, `json_parse_failures`, `action_loops_detected`, `thinking_loops_detected`, `similar_thoughts_detected` | Signals that highlight unhealthy loops or parser problems. Per-reason escalation counters show which trigger fires most frequently. |
 | `summarization` | `summaries_made`, `summaries_skipped`, `summaries_forced`, `context_summarizations`, `summaries_tokens_reduced`, `summaries_original_tokens`, `summaries_final_tokens` | Auto-summarization activity and token savings. |
 | `tool_selection` | `dynamic_used`, `keyword`, `llm_lc`, `llm_main`, `connection_chooser_lc`, `connection_chooser_main`, `fallback_all` | Dynamic tool selection metrics tracking how tools are selected when `mcpdynamic=true`. Shows usage of keyword matching, LLM-based selection (low-cost and main models), connection-level chooser fallbacks, and full catalog fallback. Includes stemming, synonym matching, n-grams, and fuzzy matching capabilities. |
-| `tool_cache` | `hits`, `misses`, `total_requests`, `hit_rate` | Tool result caching metrics for deterministic and read-only MCP tools. Tracks cache effectiveness and provides hit rate percentage. |
+| `tool_cache` | `hits`, `misses`, `total_requests`, `hit_rate` | Tool result caching metrics for explicitly cacheable MCP tools. Tracks cache effectiveness and provides hit rate percentage. |
 | `mcp_resilience` | `circuit_breaker_trips`, `circuit_breaker_resets`, `lazy_init_success`, `lazy_init_failed` | MCP resilience and optimization metrics. Circuit breaker trips/resets track connection health management. Lazy initialization metrics show deferred MCP connection establishment when `mcplazy=true`. |
 | `context_compression` | `prompt_context_selections`, `prompt_context_compressed`, `prompt_context_tokens_saved`, `goal_block_compressed`, `goal_block_tokens_saved`, `hook_context_compressed`, `hook_context_tokens_saved` | Automatic context compression activity. `prompt_context_selections` counts how many times compressed context was offered to the model; `*_compressed` counters increment when compression achieved >30% token reduction on the respective block; `*_tokens_saved` accumulate the tokens removed by compression across the session. |
 | `system_prompt` | `system_prompt_builds`, `system_prompt_tokens_total`, `system_prompt_tokens_last`, `system_prompt_tokens_avg`, `system_prompt_budget_applied`, `system_prompt_budget_tokens_saved`, `system_prompt_examples_dropped`, `system_prompt_skill_descriptions_dropped`, `system_prompt_tool_details_dropped`, `system_prompt_planning_details_dropped`, `system_prompt_skills_trimmed`, `system_prompt_last_meta` | System prompt construction and budget trimming. `system_prompt_builds` counts total builds; `*_tokens_*` track token cost (total, last, computed average). When the prompt exceeds `systempromptbudget`, `system_prompt_budget_applied` increments and `system_prompt_budget_tokens_saved` records savings. Each `*_dropped` counter records how many times that section was omitted (priority order: examples → skill descriptions → tool details → planning details). `system_prompt_skills_trimmed` counts trims of individual skill bodies. `system_prompt_last_meta` is the raw metadata object from the most recent build (useful for debugging budget decisions). |
@@ -5095,6 +5088,9 @@ Console parameters appear in `mini-a --help` and interactive `/set` completion. 
 | `path` | string | unset | Static asset path used by the web UI/worker modes. |
 | `ssequeuetimeout` | number | `120` | Web SSE queue timeout in seconds. |
 | `webadvanced` | boolean | `false` | Enable trusted Advanced web console APIs (generates a token and opens the browser when webtoken is omitted). |
+| `webartifacts` | boolean | `false` | Web-only: enable isolated artifact generation. |
+| `artifactworkerurl` | string | unset | Web-only: private worker URL ending in `/artifact-worker`. |
+| `artifactdir` | string | private default | Web-only: private artifact storage directory; 24 hour expiry. |
 | `webadvancedpath` | string | unset | Local Advanced session journal and preset directory. |
 | `webembed` | boolean | `false` | Enable iframe context at `?embed=1`; see [embedding](docs/WEB-EMBED.md). |
 | `webembedorigins` | string/array | unset | Exact allowed parent origins; required when embedding is enabled. |
@@ -5277,3 +5273,26 @@ Dynamic tool selection uses isolated, tool-free requests. A valid empty selectio
 means no tools are needed; selection failures retain the existing fallback sequence.
 
 Wiki graph extraction, model budgets, saved defaults and resume controls are documented in [Graph builds](docs/GRAPH-BUILDS.md).
+
+### Additional runtime and launcher options
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `acceptancereview` | boolean | `false` | Review final answers before acceptance. |
+| `acceptanceoptimization` | boolean | `true` | Skip semantic acceptance review when a required deterministic check fails. |
+| `proxyargrepair` | boolean | `true` | Repair unambiguous read-only proxy operation aliases. |
+| `orchestrationcontext` | string | `auto` | Automatic strategy context: auto, interactive, or batch. |
+| `usejsonschema` | string | `auto` | Schema responses: auto or off. |
+| `wikihydrate` | boolean | `false` | Console shortcut: create/update a wiki from `source=<folder>` using `utils/wikiHydrate.yaml`. |
+| `wikidream` | boolean | `false` | Console shortcut: run wiki Dream maintenance. |
+| `wikiquery` | boolean | `false` | Console shortcut: query an existing wiki. |
+| `shellguard` | string | `auto` | Shell decision guard: auto, off, or decide (required decision model). |
+| `shellguardask` | string | `medium` | Minimum shell risk requiring approval: low, medium, high, critical. |
+| `shellguarddeny` | string | `critical` | Minimum shell risk denied without approval. |
+| `shellguardtimeout` | number | `5000` | Shell decision request timeout in milliseconds. |
+
+### Web result polling
+
+`/prompt` returns a `runId` for each accepted request. `/result` retains `status: processing|finished` and adds `outcome: processing|success|failure|cancelled`, the owning `runId`, and an error for unsuccessful runs. A terminal failure or cancellation does not become a successful answer.
+
+Clients may send `ifTranscriptRevision` from the previous response. Matching revisions omit `content` and `history` while still returning status, plan and subagent metadata; retain the last full transcript and reset the revision when changing conversations. Requests without a revision always receive full snapshots, including copy/export/history consumers.

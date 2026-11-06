@@ -13,7 +13,7 @@ WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
     if (req.method !== "GET") WikiStudio.authorize(role, "admin", w)
     WikiStudio.assert(req.method === "GET" || req.method === "PUT", 405, "method_not_allowed", "Use GET or PUT for graph settings")
     WikiStudio.fields(body, ["extraction", "modelHelp", "maxCalls", "maxTokens", "maxMinutes", "preset"])
-    return WikiStudio.lock(this.config.home, w.id, function() {
+    return WikiStudio.wikiLock(this.config.home, w.id, function() {
       if (req.method === "PUT" && self.assertIdle) self.assertIdle(w.id)
       return self.manager(w, req.method === "PUT", function(wm) { return wm.graphBuildSettings(body, req.method === "PUT") }, {skipBootstrap:true})
     })
@@ -25,7 +25,7 @@ WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
     WikiStudio.fields(body, ["source", "destination", "expectedRevision", "confirmation"])
     WikiStudio.safeFile(w.root, body.source, false)
     if (body.destination) WikiStudio.safeFile(w.root, body.destination, false)
-    if (route === "folders/preview") return WikiStudio.lock(this.config.home, w.id, function() {
+    if (route === "folders/preview") return WikiStudio.wikiLock(this.config.home, w.id, function() {
       self.assertIdle(w.id)
       var preview = self.manager(w, false, function(wm) { return wm.previewFolder(body.source, body.destination || null) }, {skipBootstrap:true})
       WikiStudio.assert(preview.ok, 409, "folder_preflight", preview.error || "Folder preview failed")
@@ -60,7 +60,7 @@ WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
   if (operation !== "graph.build" && params.semantic || operation === "dream.reorg") WikiStudio.assert(String(getEnv("OAF_MODEL") || "").length > 0, 422, "model_required", "Configure OAF_MODEL in the trusted server environment for this operation")
   // Reject a new submission while a synchronous Studio page mutation holds the
   // same lock. Queued jobs then block subsequent page reads/writes.
-  return WikiStudio.lock(this.config.home, w.id, function() { self.registry.verify(w); return WikiStudioJobs.publicJob(jobs.submit(w, operation, params, req.headers["idempotency-key"], role)) })
+  return WikiStudio.wikiLock(this.config.home, w.id, function() { self.registry.verify(w); return WikiStudioJobs.publicJob(jobs.submit(w, operation, params, req.headers["idempotency-key"], role)) })
 }
 WikiStudio.diffManifests = function(before, after) {
   var changes = [], deleted = [], created = []
@@ -76,7 +76,7 @@ var wikiStudioRunWorker = function(config, id) {
   if (j.status !== "acquiring-lock") return
   function phase(name, message) { jobs.update(id, { status: name === "running" ? "running" : name, phase: name }); jobs.event(id, name, message) }
   try {
-    WikiStudio.lock(config.home, j.wikiId, function() {
+    WikiStudio.wikiLock(config.home, j.wikiId, function() {
       var w = registry.verify(registry.get(j.wikiId)); WikiStudio.authorize(j.role, "admin", w)
       WikiStudio.assert(w.root === j.root && w.identity === j.rootIdentity, 409, "root_changed", "Job root identity no longer matches registry")
       if (jobs.get(id).cancelRequested) { jobs.update(id, {status:"cancelled",phase:"cancelled"}); return }
@@ -104,10 +104,22 @@ var wikiStudioRunWorker = function(config, id) {
       WikiStudio.atomic(jobs.dir(id) + "/after.json", after); WikiStudio.atomic(jobs.dir(id) + "/changes.json", diff)
       if (operation === "dream.plan") WikiStudio.assert(WikiStudio.fingerprint(beforeState) === WikiStudio.fingerprint(WikiStudio.scan(w.root,true)), 500, "plan_mutated", "Maintenance preview unexpectedly changed wiki files")
       result = MiniAWikiOps.sanitize(result || {ok:false}, {model:String(getEnv("OAF_MODEL")||""),modeldec:String(getEnv("OAF_LC_MODEL")||"")})
+      var outcomes = [result].concat(isMap(result.result) ? [result.result] : [])
+      var cancelled = outcomes.some(function(r) { return r.status === "cancelled" || r.cancelled === true })
+      var failed = outcomes.some(function(r) { return r.ok === false || r.status === "failed" })
+      var partial = outcomes.some(function(r) { return r.partial === true || ["partial", "blocked"].indexOf(r.status) >= 0 || r.sync_complete === false && !params.dryrun })
+      var status = cancelled ? "cancelled" : failed ? (/^wiki\.folder/.test(operation) && result.recovery_pending === false ? "failed" : "recovery-required") : partial ? "partial" : "completed"
       var serialized = JSON.stringify(result)
-      if (serialized.length > 1048576) result = {ok: result.ok, warning:"Engine result exceeded retention limit; inspect local engine artifacts", truncated:true}
+      if (serialized.length > 1048576) {
+        var summary = {warning:"Engine result exceeded retention limit; inspect local engine artifacts", truncated:true, terminalStatus:status}
+        ;["ok", "status", "partial", "sync_complete", "recovery_pending", "cancelled", "outcome"].forEach(function(key) { if (isDef(result[key])) summary[key] = result[key] })
+        if (isMap(result.result)) {
+          summary.result = {}
+          ;["ok", "status", "partial", "sync_complete", "recovery_pending", "cancelled", "outcome"].forEach(function(key) { if (isDef(result.result[key])) summary.result[key] = result.result[key] })
+        }
+        result = summary
+      }
       WikiStudio.atomic(jobs.dir(id) + "/result.json", result)
-      var status = result.status === "cancelled" || result.result && result.result.status === "cancelled" ? "cancelled" : result.ok === false ? (/^wiki\.folder/.test(operation) && result.recovery_pending === false ? "failed" : "recovery-required") : result.partial === true || ["partial","blocked"].indexOf(result.status)>=0 || result.sync_complete===false && !params.dryrun ? "partial" : "completed"
       jobs.update(id, {status:status,phase:status,completedAt:WikiStudio.now(),changedPageCount:diff.changedPageCount}); jobs.event(id,status,"Finished with " + diff.changedPageCount + " changed Markdown paths")
     })
   } catch(e) {

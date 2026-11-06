@@ -15,6 +15,9 @@ global._mini_a_web_isValidUuid = function(id) { return /^[a-z0-9-]+$/.test(id) }
 global._mini_a_web_reserve = function(id) { if (global.__busy[id]) return __; global.__busy[id] = true; return global.__runTokens[id] = genUUID() }
 global._mini_a_web_release = function(id, token) { if (global.__runTokens[id] === token) { delete global.__busy[id]; delete global.__runTokens[id] } }
 global._mini_a_web_dispose = function(id) { delete global.__conversations[id] }
+var webYaml = io.readFileString('mini-a-web.yaml')
+global.__sessionLock = new java.util.concurrent.locks.ReentrantLock()
+eval(webYaml.substring(webYaml.indexOf('    global._mini_a_web_transcript ='), webYaml.indexOf('    global._mini_a_web_outcome =')).replace(/^    /gm, ''))
 try {
   // Supply fixture credentials through the real environment lookup boundary.
   // No model requests are made and the actual environment is left untouched.

@@ -63,6 +63,8 @@ WikiStudio.lock = function(home, key, fn) {
     return fn()
   } finally { if (lock) lock.release(); if (channel) channel.close(); if (file) file.close() }
 }
+WikiStudio.wikiLock = function(home, wikiId, fn) { return WikiStudio.lock(home, "wiki-" + WikiStudio.name(wikiId), fn) }
+WikiStudio.sourceLock = function(home, wikiId, sourceId, fn) { return WikiStudio.lock(home, "source-" + WikiStudio.hash(JSON.stringify([WikiStudio.name(wikiId), WikiStudio.name(sourceId)])), fn) }
 WikiStudio.fields = function(obj, allowed) {
   WikiStudio.assert(isMap(obj), 400, "invalid_body", "Expected an object")
   Object.keys(obj).forEach(function(k) { WikiStudio.assert(allowed.indexOf(k) >= 0, 400, "unknown_field", "Unsupported field: " + k) })
@@ -90,8 +92,8 @@ WikiStudio.identity = function(root) {
   var a = java.nio.file.Files.readAttributes(WikiStudio.path(root), java.nio.file.attribute.BasicFileAttributes)
   return String(a.fileKey())
 }
-WikiStudio.scan = function(root, all) {
-  var files = {}, total = 0, linkedFiles = {}
+WikiStudio.scan = function(root, all, metadataOnly) {
+  var files = {}, total = 0, count = 0, linkedFiles = {}
   WikiStudio.noLinks(root)
   var walk = function(dir, depth) {
     WikiStudio.assert(depth < 32, 413, "depth_limit", "Directory nesting limit exceeded")
@@ -104,8 +106,10 @@ WikiStudio.scan = function(root, all) {
       if (f.isDirectory()) walk(String(f), depth + 1)
       else if (f.isFile() && (all || /\.md$/i.test(name))) {
         total += Number(f.length())
-        WikiStudio.assert(Object.keys(files).length < 20000 && total <= 536870912 && f.length() <= 16777216, 413, "inventory_limit", "Wiki inventory exceeds Studio limits")
-        files[rel] = { hash: WikiStudio.hash(java.nio.file.Files.readAllBytes(f.toPath())), size: Number(f.length()) }
+        WikiStudio.assert(count < 20000 && total <= 536870912 && f.length() <= 16777216, 413, "inventory_limit", "Wiki inventory exceeds Studio limits")
+        files[rel] = { size: Number(f.length()) }
+        if (metadataOnly !== true) files[rel].hash = WikiStudio.hash(java.nio.file.Files.readAllBytes(f.toPath()))
+        count++
       }
     }
   }

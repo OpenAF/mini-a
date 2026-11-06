@@ -17,7 +17,7 @@ MiniAAdvanced.prototype.removeSession = function(uuid) {
   if (state) { state.cancelled = true; state.closed = true; state.pending = null; state.runtime.dispose() }
   delete this.sessions[uuid]
   global._mini_a_web_dispose(uuid)
-  delete global.__res[uuid]
+  global._mini_a_web_transcript(uuid, "clear")
   delete global.__lastActivity[uuid]
   ;[".json", ".ndjson"].forEach(function(ext) {
     var path = this.root + "/" + uuid + ext
@@ -167,8 +167,8 @@ MiniAAdvanced.prototype._get = function(uuid) {
     print: function(value) { emit("output", value) },
     error: function(value) { emit("error", value) },
     event: function(type, value) {
-      if (type === "history-clear") global.__res[uuid] = []
-      if (type === "history-replace") global.__res[uuid] = value
+      if (type === "history-clear") global._mini_a_web_transcript(uuid, "replace", [])
+      if (type === "history-replace") global._mini_a_web_transcript(uuid, "replace", value)
       emit(type, value)
     },
     result: function(value) { emit("result-part", value) },
@@ -207,13 +207,13 @@ MiniAAdvanced.prototype._get = function(uuid) {
   })
   if (isUnDef(global.__res)) global.__res = {}
   if (isUnDef(global.__res[uuid]) && state.sequence) {
-    global.__res[uuid] = []
+    global._mini_a_web_transcript(uuid, "replace", [])
     for (var offset = 0; offset < state.sequence; offset += 100) {
       this.events(state, offset, 100, true).forEach(function(event) {
-        if (event.type === "history-clear") global.__res[uuid] = []
-        if (event.type === "history-replace") global.__res[uuid] = event.value
-        if (event.type === "user") global.__res[uuid].push({ event: "👤", message: String(event.value) })
-        if (event.type === "answer") global.__res[uuid].push({ event: "final", message: String(event.value) })
+        if (event.type === "history-clear") global._mini_a_web_transcript(uuid, "replace", [])
+        if (event.type === "history-replace") global._mini_a_web_transcript(uuid, "replace", event.value)
+        if (event.type === "user") global._mini_a_web_transcript(uuid, "append", { event: "👤", message: String(event.value) })
+        if (event.type === "answer") global._mini_a_web_transcript(uuid, "append", { event: "final", message: String(event.value) })
       })
     }
   }
@@ -365,7 +365,7 @@ MiniAAdvanced.prototype.validateInput = function(fields, answers) {
 MiniAAdvanced.prototype.snapshot = function(state, after) {
   var definitions = state.runtime.definitions, defaults = state.runtime.defaultOptions(), options = state.runtime.options(), inherited = this.inheritedOptions(), self = this
   return {
-    uuid: state.uuid, sequence: state.sequence, busy: !!global.__busy[state.uuid], closed: state.closed,
+    uuid: state.uuid, runId: global.__runTokens[state.uuid] || null, sequence: state.sequence, busy: !!global.__busy[state.uuid], closed: state.closed,
     operation: state.operation, operationView: state.operationView, kind: state.kind, pending: state.pending ? this.safe(state.pending) : null,
     commandMetadata: state.runtime.commandMetadata(), commands: state.runtime.commands(), completions: state.runtime.completions(), events: this.events(state, after, 100),
     settings: Object.keys(definitions).sort().map(function(key) {

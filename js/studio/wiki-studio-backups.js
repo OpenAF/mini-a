@@ -119,7 +119,7 @@ WikiStudioServer.prototype.backupRoute = function(req,w,parts,role) {
   if (parts.length === 2 && req.method === "DELETE") {
     WikiStudio.fields(body,["confirmation","acknowledgeLast"])
     WikiStudio.assert(body.confirmation === parts[1],400,"confirmation_required","Confirm the snapshot ID")
-    return WikiStudio.lock(c.home,w.id,function() {
+    return WikiStudio.wikiLock(c.home,w.id,function() {
       self.registry.verify(w)
       return WikiStudio.lock(c.home,"queue",function() {
         var dir = WikiStudio.backupPath(c,w,parts[1]), info = WikiStudio.json(dir+"/manifest.json")
@@ -148,7 +148,7 @@ WikiStudioServer.prototype.backupRoute = function(req,w,parts,role) {
     WikiStudio.assert(isString(body.expectedFingerprint) && body.confirmation===parts[1]+":"+body.expectedFingerprint,400,"confirmation_required","Restore confirmation must bind backup ID and current wiki fingerprint")
     op="backup.restore"
   } else WikiStudio.fail(404,"not_found","Backup route not found")
-  return WikiStudio.lock(c.home,w.id,function(){ self.registry.verify(w);return WikiStudioJobs.publicJob(jobs.submit(w,op,params,req.headers["idempotency-key"],role)) })
+  return WikiStudio.wikiLock(c.home,w.id,function(){ self.registry.verify(w);return WikiStudioJobs.publicJob(jobs.submit(w,op,params,req.headers["idempotency-key"],role)) })
 }
 
 function jobsOrigin(config, jobId) {

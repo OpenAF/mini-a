@@ -65,12 +65,27 @@ sources,jobs,operations,backups,ingestion,bootstrap}.js`. Both YAML entrypoints 
 all production assets are included in `.package.yaml`. The canonical entrypoint
 is the oJob; no `wikistudio=true` console-parser change is introduced.
 
-State under `studiohome` includes `config.json`, `registry.json`, `sources/`,
+State under `studiohome` includes `config.json`, `registry.json`,
+`sources/records/<wikiId>/<sourceId>.json`, `sources/uploads/`,
 `jobs/<UUID>/{job.json,events.ndjson,result.json,before.json,after.json,changes.json}`,
 `graph-cache/`, `backups/<wikiId>/<backupId>/`, `locks/` and daily `audit/` files.
 Directories are owner-only. JSON is written to a private temporary file, fsynced,
 then atomically renamed. This covers process crashes; parent-directory fsync and
 power-loss durability have not been established on all filesystems.
+
+When upgrading from flat `sources/<wikiId>--<sourceId>.json` records, **stop
+admitting requests, drain all old workers, then stop Studio before installing and
+restarting this version**. Wiki locks now use `wiki-<wikiId>` names; mixed old/new
+workers must never run concurrently because their locks do not coordinate.
+Before starting its scheduler, Studio atomically copies legacy registrations using
+their embedded wiki/source identifiers. Valid records already in the new layout
+win, and an interrupted migration can restart. Legacy files and uploaded revisions
+are retained. IDs, upload revisions and engine `ingestsourceid` provenance remain
+unchanged. Review `sources/records/migration-report.json` and startup warnings:
+registrations already overwritten by a legacy filename collision cannot be
+reconstructed from that filename. Restore a verified record or register a fresh
+upload; Studio reports missing registrations identified by upload seals without
+guessing their contents.
 
 ## Wiki lifecycle and capabilities
 
@@ -110,7 +125,9 @@ not a full CommonMark renderer. Mount links show an unavailable message.
 GET page returns **complete** UTF-8 content, SHA-256 of raw bytes and metadata,
 or a size error; it never disguises a bounded agentic read as a complete page.
 Saves require the expected revision and return 409 on mismatch. Local edits are
-retained for comparison/merge. Frontmatter comments and newline style survive
+retained for comparison/merge. Typing can continue during a save; repeated keyboard
+saves join that request. A successful response advances the server revision while
+keeping newer text dirty and editable. Save again to publish those newer edits. Frontmatter comments and newline style survive
 Studio writes through the manager's opt-in `preserveRaw` option. Other manager
 callers retain existing serialization behavior. Invalid frontmatter blocks save.
 Move/delete use manager semantics and create a full snapshot first. Moves preserve
@@ -142,6 +159,11 @@ claimed. Exporter and simulated DOM node-navigation tests pass.
 Select the destination wiki first. Sources supports browser directory selection
 and ZIP upload, staged file inventory, stable source IDs, immutable upload
 revisions and bounded lineage. Reuse the source ID for a later uploaded revision.
+Registrations are scoped to the selected wiki and verify their embedded ownership
+on reads. Publication and run-status updates share a source lock; an older job
+cannot replace the status or revision of a newer registration. Upload quota checks
+traverse file metadata without re-reading previous uploads. Sealing and ingestion
+still hash all source bytes.
 
 The destination section defaults to the stable source ID, rather than the internal
 upload directory name. Change **Advanced options → Destination section** to override
@@ -296,7 +318,10 @@ details; this uses the job cancellation behavior described above.
 Events use authenticated finite SSE replay responses with cursor/Last-Event-ID
 and a heartbeat comment; the UI fetches/reconnects and deduplicates sequences.
 There is no EventSource URL token. Each event log is capped at 1 MiB, result at
-approximately 1 MiB, browser event display at 100,000 characters. Job inventory
+approximately 1 MiB, browser event display at 100,000 characters. Terminal status
+is calculated from the complete engine result before retention truncation; stored
+summaries keep outcome fields, so partial and cancelled runs remain distinct and
+recovery-dependent history remains protected. Job inventory
 stops at 1,000 records. Wiki scans stop at 20,000 files/512 MiB/16 MiB per file;
 editor pages at 1 MiB; embedded graphs at 5,000 nodes/30,000 edges/8 MiB output.
 These are fixed v1 bounds, not a configurable quota/retention UI.

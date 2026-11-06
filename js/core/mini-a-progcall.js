@@ -165,7 +165,7 @@ MiniAProgCallServer.prototype._makeResultResponse = function(jsonResult) {
  */
 MiniAProgCallServer.prototype._getToolList = function(withSchema) {
   var mapping = this._agent.mcpToolToConnection || {}
-  var proxyState = isDef(mapping["proxy-dispatch"]) && isObject(global.__mcpProxyState__) ? global.__mcpProxyState__ : __
+  var proxyState = isDef(mapping["proxy-dispatch"]) ? (isFunction(this._agent._getMcpProxyState) ? this._agent._getMcpProxyState() : global.__mcpProxyState__) : __
   var agentTools = isArray(this._agent.mcpTools) ? this._agent.mcpTools : []
   var tools = __miniABuildCompactToolManifest(agentTools, proxyState, withSchema)
   var self = this
@@ -212,6 +212,14 @@ MiniAProgCallServer.prototype._callTool = function(toolName, params, connection)
     }
   }
   return callResult
+}
+
+MiniAProgCallServer.prototype._makeErrorResponse = function(callResult) {
+  var result = { ok: false, error: (callResult.normalized && callResult.normalized.display) || "tool error" }
+  var raw = callResult.rawResult
+  if (isMap(raw) && isDef(raw.outcome)) result.outcome = raw.outcome
+  if (isMap(raw) && isDef(raw.retryable)) result.retryable = raw.retryable
+  return result
 }
 
 /**
@@ -266,7 +274,7 @@ MiniAProgCallServer.prototype._setupRoutes = function(hs) {
     try {
       var callResult = self._callTool(toolName, params, body.connection)
       if (callResult.error) {
-        return _replyJSON(200, { ok: false, error: (callResult.normalized && callResult.normalized.display) || "tool error" })
+        return _replyJSON(200, self._makeErrorResponse(callResult))
       }
       return _replyJSON(200, self._makeResultResponse(self._toJsonResult(callResult.normalized)))
     } catch(e) {
@@ -293,7 +301,7 @@ MiniAProgCallServer.prototype._setupRoutes = function(hs) {
       if (!self._isToolAllowed(toolName)) return { id: callId, ok: false, error: "Tool not in allowlist: " + toolName }
       try {
         var callResult = self._callTool(toolName, params, call.connection)
-        if (callResult.error) return { id: callId, ok: false, error: (callResult.normalized && callResult.normalized.display) || "tool error" }
+        if (callResult.error) return merge({ id: callId }, self._makeErrorResponse(callResult))
         var envelope = self._makeResultResponse(self._toJsonResult(callResult.normalized))
         return merge({ id: callId }, envelope)
       } catch(e) {

@@ -44,7 +44,7 @@ WikiStudioServer.prototype.validateMarkdown = function(content) {
 WikiStudioServer.prototype.wikiRoute = function(req, w, parts, role) {
   var self = this, q = req.query || {}, body = req.body || {}, route = parts.join("/"), read = req.method === "GET"
   if (this.jobWikiRoute && ["dreams", "ingestions", "absorptions", "graph/rebuild", "graph/settings", "backups", "changes", "maintenance", "sources", "folders/preview", "folders/move", "folders/delete"].indexOf(route) >= 0 || this.jobWikiRoute && /^backups\//.test(route)) return this.jobWikiRoute(req, w, parts, role)
-  return WikiStudio.lock(this.config.home, w.id, function() {
+  return WikiStudio.wikiLock(this.config.home, w.id, function() {
     self.registry.verify(w)
     if (self.assertIdle) self.assertIdle(w.id)
     if (route === "children" && read) {
@@ -100,8 +100,9 @@ WikiStudioServer.prototype.wikiRoute = function(req, w, parts, role) {
       var ops = new MiniAWikiOps({ wikiroot: w.root, wikiaccess: "ro", usewikigraph: w.graph.enabled, wikiretrievalv2: w.retrieval.v2 !== false }), res = ops.execute(ops.spec(op, params))
       WikiStudio.assert(res && res.ok !== false, 422, "engine_error", "Wiki operation failed", res)
       if (route === "overview") {
-        var inventory = WikiStudio.scan(w.root,false)
-        return {context:res,studio:{pageCount:Object.keys(inventory).length,fingerprint:WikiStudio.fingerprint(WikiStudio.scan(w.root,true)),pendingRecovery:WikiStudio.pending(w.root),searchIndexPublished:io.fileExists(w.root+"/.mini-a-wiki-serving/current.json"),indexFreshness:"Inspect engine context/search warnings; presence alone does not prove currency",externalProcessesControlled:false}}
+        var inventory = WikiStudio.scan(w.root,true)
+        var pageCount = Object.keys(inventory).filter(function(path) { return /\.md$/i.test(path) && path.split("/").every(function(part) { return part.charAt(0) !== "." && !/^AGENTS\.md$/i.test(part) }) }).length
+        return {context:res,studio:{pageCount:pageCount,fingerprint:WikiStudio.fingerprint(inventory),pendingRecovery:WikiStudio.pending(w.root),searchIndexPublished:io.fileExists(w.root+"/.mini-a-wiki-serving/current.json"),indexFreshness:"Inspect engine context/search warnings; presence alone does not prove currency",externalProcessesControlled:false}}
       }
       if (route === "graph/stats") return { stats: res, source: io.fileExists(w.root + "/.mini-a-wiki-graph/graph.json") ? "knowledge-graph-snapshot" : "markdown-links-fallback", freshness: "Snapshot freshness is not inferred from its presence; rebuild after external changes", semantic: "Not inferred; semantic extraction is opt-in" }
       return res

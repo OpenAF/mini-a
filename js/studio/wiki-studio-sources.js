@@ -16,7 +16,7 @@ WikiStudioServer.prototype.streamUpload = function(req, input) {
     WikiStudio.privateDir(dir + "/files")
     var file = WikiStudio.safeFile(dir + "/files", relative, false)
     WikiStudio.assert(!io.fileExists(file), 409, "duplicate_upload", "Duplicate file path")
-    var existing = WikiStudio.scan(dir + "/files", true), total = Object.keys(existing).reduce(function(n,k) { return n + existing[k].size }, 0)
+    var existing = WikiStudio.scan(dir + "/files", true, true), total = Object.keys(existing).reduce(function(n,k) { return n + existing[k].size }, 0)
     WikiStudio.assert(!Object.keys(existing).some(function(p){return p.toLowerCase()===relative.toLowerCase()}),409,"duplicate_upload","Duplicate case-insensitive file path")
     WikiStudio.assert(Object.keys(existing).length < 2000, 413, "upload_count", "Upload file limit exceeded")
     var temp = dir + "/incoming-" + WikiStudio.id(), out = new java.io.FileOutputStream(temp), size = 0, n, buf = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 8192)
@@ -89,10 +89,48 @@ WikiStudio.extractZip = function(file, destination) {
     }
   } finally { zip.close() }
 }
-WikiStudioServer.prototype.sourcePath = function(w, id) { return this.config.home + "/sources/" + w.id + "--" + WikiStudio.name(id) + ".json" }
+WikiStudioServer.prototype.sourcePath = function(w, id) { return this.config.home + "/sources/records/" + WikiStudio.name(w.id) + "/" + WikiStudio.name(id) + ".json" }
+WikiStudioServer.prototype.sourceGet = function(w, id) {
+  var record = WikiStudio.json(this.sourcePath(w, id), null)
+  WikiStudio.assert(record === null || isMap(record) && record.wikiId === w.id && record.id === id, 409, "foreign_source", "Source record ownership does not match its wiki and source ID")
+  return record
+}
 WikiStudioServer.prototype.sourceList = function(w) {
-  var self = this
-  return io.listFiles(this.config.home + "/sources").files.filter(function(f) { return f.isFile && f.filename.indexOf(w.id + "--") === 0 && /\.json$/.test(f.filename) }).map(function(f) { return WikiStudio.json(f.filepath) }).sort(function(a,b) { return a.id.localeCompare(b.id) })
+  var self = this, dir = this.config.home + "/sources/records/" + WikiStudio.name(w.id)
+  if (!io.fileExists(dir)) return []
+  WikiStudio.noLinks(dir)
+  return io.listFiles(dir).files.filter(function(f) { return f.isFile && /\.json$/.test(f.filename) }).map(function(f) { return self.sourceGet(w, f.filename.replace(/\.json$/, "")) }).sort(function(a,b) { return a.id.localeCompare(b.id) })
+}
+// Each record is atomically published, so interruption can restart this pass.
+// Legacy filenames are not parsed: only the embedded owners identify a record.
+WikiStudioServer.prototype.migrateSources = function() {
+  var self = this, home = this.config.home, base = home + "/sources"
+  return WikiStudio.lock(home, "source-migration", function() {
+    WikiStudio.privateDir(base + "/records")
+    var report = {version:1, checkedAt:WikiStudio.now(), migrated:0, retained:0, warnings:[]}
+    io.listFiles(base).files.filter(function(f) { return f.isFile && /\.json$/.test(f.filename) }).sort(function(a,b) { return a.filename.localeCompare(b.filename) }).forEach(function(f) {
+      var record
+      try { record = WikiStudio.json(f.filepath); WikiStudio.name(record.wikiId); WikiStudio.name(record.id) }
+      catch(e) { report.warnings.push({file:f.filename, code:"invalid_legacy_source", message:"Unreadable record or invalid embedded identifiers; registration was not reconstructed"}); return }
+      WikiStudio.sourceLock(home, record.wikiId, record.id, function() {
+        var owner = {id:record.wikiId}, existing = self.sourceGet(owner, record.id)
+        if (existing) { report.retained++; return }
+        WikiStudio.atomic(self.sourcePath(owner, record.id), record); report.migrated++
+      })
+      if (f.filename !== record.wikiId + "--" + record.id + ".json") report.warnings.push({file:f.filename, code:"legacy_name_mismatch", message:"Used embedded ownership; overwritten registrations cannot be recovered from filenames"})
+    })
+    // Seals identify missing registrations without guessing from ambiguous names.
+    var uploads = base + "/uploads"
+    if (io.fileExists(uploads)) io.listFiles(uploads).files.filter(function(f) { return f.isDirectory }).forEach(function(f) {
+      var seal
+      try { seal = WikiStudio.json(f.filepath + "/sealed.json", null); if (!seal) return; WikiStudio.name(seal.wikiId); WikiStudio.name(seal.sourceId) }
+      catch(e) { report.warnings.push({upload:f.filename, code:"invalid_upload_owner"}); return }
+      if (!self.sourceGet({id:seal.wikiId}, seal.sourceId)) report.warnings.push({wikiId:seal.wikiId, sourceId:seal.sourceId, upload:f.filename, code:"missing_source_registration", message:"Registration may have been overwritten in the legacy layout; restore a verified record or register a fresh upload"})
+    })
+    WikiStudio.atomic(base + "/records/migration-report.json", report)
+    report.warnings.forEach(function(warning) { logWarn("Studio source migration: " + JSON.stringify(warning)) })
+    return report
+  })
 }
 WikiStudioServer.prototype.sourceAdd = function(w, body) {
   WikiStudio.fields(body, ["id", "name", "type", "uploadId", "directoryId", "url", "video", "lang"]); WikiStudio.name(body.id)
@@ -122,22 +160,24 @@ WikiStudioServer.prototype.sourceAdd = function(w, body) {
   WikiStudio.assert(body.type === "upload", 501, "adapter_unavailable", "Remote Git clones are disabled; webpage and YouTube adapters require type web/youtube. Upload a reviewed checkout instead.")
   WikiStudio.assert(isString(body.name) && body.name.length <= 120 && /^[a-f0-9-]{36}$/.test(String(body.uploadId)), 400, "invalid_source", "Provide a source name and upload revision UUID")
   var dir = this.config.home + "/sources/uploads/" + body.uploadId, self = this
-  return WikiStudio.lock(this.config.home, "upload-" + body.uploadId, function() {
-    var existing = WikiStudio.json(self.sourcePath(w, body.id), null)
-    WikiStudio.assert(!io.fileExists(dir + "/sealed.json"), 409, "upload_sealed", "Upload is already sealed")
-    WikiStudio.assert(io.fileExists(dir + "/files"), 404, "upload_not_found", "Upload not found")
-    var inventory = WikiStudio.scan(dir + "/files", true), zips = Object.keys(inventory).filter(function(p) { return /\.zip$/i.test(p) }), staging = dir + "/files"
-    if (zips.length) {
-      WikiStudio.assert(zips.length === 1 && Object.keys(inventory).length === 1, 400, "mixed_zip", "Submit a single ZIP separately from directory uploads")
-      staging = dir + "/expanded"
-      WikiStudio.assert(!io.fileExists(staging), 409, "staging_exists", "Failed extraction remains; use a new upload UUID")
-      try { WikiStudio.extractZip(dir + "/files/" + zips[0], staging) } catch(e) { if (io.fileExists(staging)) io.rm(staging); throw e }
-      inventory = WikiStudio.scan(staging, true)
-    }
-    var source = { id: body.id, wikiId: w.id, name: body.name, type: sourceType, origin: origin, revision: body.uploadId, inventoryChecksum: WikiStudio.fingerprint(inventory), staging: staging, createdAt: WikiStudio.now(), lineage: existing ? (existing.lineage || []).concat([existing.revision]).slice(-100) : [], files: inventory, status: "staged" }
-    WikiStudio.atomic(dir + "/sealed.json", { wikiId: w.id, sourceId: source.id, checksum: source.inventoryChecksum })
-    WikiStudio.atomic(self.sourcePath(w, source.id), source)
-    return WikiStudioServer.publicSource(source)
+  return WikiStudio.sourceLock(this.config.home, w.id, body.id, function() {
+    return WikiStudio.lock(self.config.home, "upload-" + body.uploadId, function() {
+      var existing = self.sourceGet(w, body.id)
+      WikiStudio.assert(!io.fileExists(dir + "/sealed.json"), 409, "upload_sealed", "Upload is already sealed")
+      WikiStudio.assert(io.fileExists(dir + "/files"), 404, "upload_not_found", "Upload not found")
+      var inventory = WikiStudio.scan(dir + "/files", true), zips = Object.keys(inventory).filter(function(p) { return /\.zip$/i.test(p) }), staging = dir + "/files"
+      if (zips.length) {
+        WikiStudio.assert(zips.length === 1 && Object.keys(inventory).length === 1, 400, "mixed_zip", "Submit a single ZIP separately from directory uploads")
+        staging = dir + "/expanded"
+        WikiStudio.assert(!io.fileExists(staging), 409, "staging_exists", "Failed extraction remains; use a new upload UUID")
+        try { WikiStudio.extractZip(dir + "/files/" + zips[0], staging) } catch(e) { if (io.fileExists(staging)) io.rm(staging); throw e }
+        inventory = WikiStudio.scan(staging, true)
+      }
+      var source = { id: body.id, wikiId: w.id, name: body.name, type: sourceType, origin: origin, revision: body.uploadId, inventoryChecksum: WikiStudio.fingerprint(inventory), staging: staging, createdAt: WikiStudio.now(), lineage: existing ? (existing.lineage || []).concat([existing.revision]).slice(-100) : [], files: inventory, status: "staged" }
+      WikiStudio.atomic(dir + "/sealed.json", { wikiId: w.id, sourceId: source.id, checksum: source.inventoryChecksum })
+      WikiStudio.atomic(self.sourcePath(w, source.id), source)
+      return WikiStudioServer.publicSource(source)
+    })
   })
 }
 WikiStudioServer.publicSource = function(s) { var out = JSON.parse(JSON.stringify(s)); delete out.staging; return out }

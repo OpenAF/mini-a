@@ -14,11 +14,12 @@ var MiniAWikiKnowledgeBudget = function(args, scope) {
   this.used = 0; this.estimatedInput = 0; this.estimatedOutput = 0
   this.attempted = 0; this.executed = 0; this.deferred = []
 }
-MiniAWikiKnowledgeBudget.prototype.reserve = function(candidate, input, output) {
+MiniAWikiKnowledgeBudget.prototype.reserve = function(candidate, input, output, promptTokens) {
   input = Math.max(0, Number(input) || 0); output = Math.max(0, Number(output) || 0)
+  promptTokens = isNumber(promptTokens) ? promptTokens : input
   this.attempted++; this.estimatedInput += input; this.estimatedOutput += output
-  if ((this.maxPrompt > 0 && input > this.maxPrompt) || (this.limit >= 0 && this.used + input + output > this.limit)) {
-    this.deferred.push({ candidate: candidate, input_tokens: input, output_tokens: output, reason: this.maxPrompt > 0 && input > this.maxPrompt ? "max-prompt-tokens" : "budget" })
+  if ((this.maxPrompt > 0 && promptTokens > this.maxPrompt) || (this.limit >= 0 && this.used + input + output > this.limit)) {
+    this.deferred.push({ candidate: candidate, input_tokens: input, output_tokens: output, reason: this.maxPrompt > 0 && promptTokens > this.maxPrompt ? "max-prompt-tokens" : "budget" })
     return false
   }
   this.used += input + output; this.executed++; return true

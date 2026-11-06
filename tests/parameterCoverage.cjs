@@ -130,7 +130,7 @@ context.sessionOptions = {};
 assert.equal(context.buildArgs('test').wikimaxprompttokens, undefined, 'unset prompt cap remains omitted');
 // Execute the production budget helper to pin the documented precedence/sentinel behavior.
 const budgetSource = read('js/wiki/mini-a-wiki-knowledge.js').split('\nMiniAWikiManager.prototype.')[0];
-const Budget = vm.runInNewContext(budgetSource + ';MiniAWikiKnowledgeBudget', { isMap: x => x && typeof x === 'object' });
+const Budget = vm.runInNewContext(budgetSource + ';MiniAWikiKnowledgeBudget', { isMap: x => x && typeof x === 'object', isNumber: x => typeof x === 'number' });
 assert.equal(new Budget({}, 'ingest').maxPrompt, 0);
 assert.equal(new Budget({ wikimaxprompttokens: 0 }, 'ingest').maxPrompt, 0);
 assert.equal(new Budget({ wikimaxprompttokens: 'invalid' }, 'ingest').maxPrompt, 0);

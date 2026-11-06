@@ -809,7 +809,7 @@ Tools:
 - `web-search`: Search the web and return an array of results with `title`, `description`, and `link`.
   - Input: `query` (string, required), `limit` (number, default 12), `searchEngine` (string, default `duckduckgo`/`ddg`).
 - `get-url`: Fetch and process a single URL.
-  - Input: `url` (string, required), `style` (enum `html` | `basic` | `text` | `map`, default `basic`).
+  - Input: `url` (string, required), `style` (enum `html` | `basic` | `text` | `map`, default `html`). Omitting `style` returns the raw `$rest().get(url)` response; `html` also returns the raw response, while `basic`, `text`, and `map` process it with jsoup.
 - `http-request`: Execute a direct HTTP request and return the raw `$rest` response map.
   - Input: `url` (string, required), `method` (enum `GET` | `HEAD` | `POST` | `PUT` | `PATCH` | `DELETE`, default `GET`), `data` (object, optional for `POST`/`PUT`/`PATCH`), `headers` (object, optional), `throwExceptions` (boolean, default `false`).
   - `POST`/`PUT`/`PATCH`/`DELETE` require starting the MCP with `readwrite=true`.
