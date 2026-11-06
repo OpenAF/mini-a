@@ -171,7 +171,7 @@ try:
     (folder / "index.md").write_text("# Folder\n[Page](nested/café.md)\n")
     (folder / "nested" / "café.md").write_text("# FolderNeedle\n![Asset](../asset.bin)\n")
     (folder / "asset.bin").write_bytes(b"\x00\xffasset")
-    (root / "b" / "incoming.md").write_text("# Incoming\n[Folder](old folder/index.md)\n")
+    (root / "b" / "incoming.md").write_text("# Incoming\n[Folder](old folder/index.md)\n[unfinished](" + "x" * 4096 + "\n")
     preview = request("wikis/b/folders/preview", "POST", {"source": "old folder", "destination": "renamed folder"})
     assert (preview["pages"], preview["files"], preview["folders"]) == (2, 3, 3)
     assert preview["incomingLinks"][0]["path"] == "incoming.md"

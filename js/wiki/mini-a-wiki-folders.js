@@ -111,11 +111,52 @@ MiniAWikiManager.prototype._rewriteFolderLinks = function(raw, page, nextPage, m
     return line.split(/(`+[^`]*`+)/g).map(function(part) {
       if (part.charAt(0) === "`") return part
       part = part.replace(/\[\[([^\]|]+)(\|[^\]]*)?\]\]/g, function(full, url, label) { return "[[" + target(url, true) + (label || "") + "]]" })
-      part = part.replace(/(!?\[[^\]]*\]\()(<[^>]+>|(?:[^()]+|\([^()]*\))+)(\))/g, function(full, start, dest, end) {
-        var match = dest.match(/^(<[^>]+>|.*?)(\s+["'][\s\S]*["'])?$/), url = match[1], angle = url.charAt(0) === "<"
-        var revised = target(angle ? url.slice(1, -1) : url, false)
-        return start + (angle ? "<" + revised + ">" : revised) + (match[2] || "") + end
-      })
+      // Match delimiters once. The old nested-quantifier regex backtracked
+      // exponentially on unfinished links in imported Markdown, holding the
+      // Studio request/lock indefinitely even for a deletion preview.
+      var brackets = [], parentheses = [], closes = Object.create(null), titles = Object.create(null), angle = false
+      for (var i = 0; i < part.length; i++) {
+        var ch = part.charAt(i)
+        if (ch === "\\") { i++; continue }
+        if (angle) { if (ch === ">") angle = false; continue }
+        if (ch === "<" && part.charAt(i - 1) === "(" && part.charAt(i - 2) === "]") { angle = true; continue }
+        if ((ch === '"' || ch === "'") && parentheses.length && /\s/.test(part.charAt(i - 1))) {
+          var titleOpen = i, quote = ch
+          for (i++; i < part.length; i++) {
+            if (part.charAt(i) === "\\") { i++; continue }
+            if (part.charAt(i) === quote) break
+          }
+          if (i < part.length) titles[parentheses[parentheses.length - 1]] = {start:titleOpen,end:i}
+          continue
+        }
+        if (ch === "[") brackets.push(i)
+        else if (ch === "]" && brackets.length) closes[brackets.pop()] = i
+        else if (ch === "(") parentheses.push(i)
+        else if (ch === ")" && parentheses.length) closes[parentheses.pop()] = i
+      }
+      var rewritten = [], copied = 0
+      for (var i = 0; i < part.length; i++) {
+        if (part.charAt(i) !== "[" || !Object.prototype.hasOwnProperty.call(closes, i)) continue
+        var labelEnd = closes[i], open = labelEnd + 1, end = closes[open]
+        if (part.charAt(open) !== "(" || !isNumber(end)) continue
+        var dest = part.substring(open + 1, end), url = dest, title = "", wrapped = dest.charAt(0) === "<"
+        if (wrapped) {
+          var angleEnd = dest.indexOf(">")
+          if (angleEnd < 0) continue
+          url = dest.substring(1, angleEnd); title = dest.substring(angleEnd + 1)
+        } else {
+          var quoted = titles[open]
+          if (quoted && quoted.end === end - 1) {
+            var titleStart = quoted.start - open - 1
+            while (titleStart > 0 && /\s/.test(dest.charAt(titleStart - 1))) titleStart--
+            url = dest.substring(0, titleStart); title = dest.substring(titleStart)
+          }
+        }
+        var revised = target(url, false)
+        rewritten.push(part.substring(copied, open + 1), wrapped ? "<" + revised + ">" : revised, title, ")")
+        copied = end + 1; i = end
+      }
+      rewritten.push(part.substring(copied)); part = rewritten.join("")
       part = part.replace(/<(?:a|img|video|audio|source)\b[^>]*>/gi, function(tag) {
         return tag.replace(/(\s(?:href|src|poster)\s*=\s*)(["'])(.*?)\2/gi, function(full, prefix, quote, url) { return prefix + quote + target(url, false) + quote })
       })

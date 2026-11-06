@@ -16,6 +16,26 @@
     io.writeFileString(root + "/outside.md", "# Outside\n[Child](old/nested/caf%C3%A9%20page.md#part)\n![Image](old/image.bin)\n[[old/index.md|Landing]]\n`[example](old/index.md)`\n````\n[code](old/index.md)\n````\n")
     assert(wm.reindex().ok,true,"Initial index")
   }
+  exports.testFolderMalformedLinks = function() { fixture(false,function(wm,root) {
+    io.mkdir(root + "/old")
+    io.writeFileString(root + "/old/index.md", "# Old\n")
+    var incomplete = "[unfinished](" + new Array(4097).join("x"), raw = "# Imported\n" + incomplete + "\n[ok](old/index.md)\n"
+    io.writeFileString(root + "/incoming.md", raw)
+    var started = Date.now(), preview = wm.previewFolder("old")
+    assert(preview.ok,true,"Malformed Markdown does not block deletion preview")
+    assert(Date.now() - started < 5000,true,"Unfinished link handled within bounded time")
+    assert(preview.incomingLinks.length,1,"Valid links still counted after malformed link")
+    var mapping = {"old/index.md":"new/index.md"}, refs = {}
+    var rewritten = wm._rewriteFolderLinks(raw,"incoming.md","incoming.md",mapping,refs)
+    assert(rewritten.indexOf(incomplete) >= 0,true,"Malformed text preserved")
+    assert(rewritten.indexOf("[ok](new/index.md)") >= 0,true,"Valid link rewritten")
+    var links = '[nested](old/image(one(two)).png) ![angle](<old/image) name.png> "caption") [title](old/index.md "Keep this (title")'
+    var files = {"old/image(one(two)).png":"new/image(one(two)).png","old/image) name.png":"new/image) name.png","old/index.md":"new/index.md"}
+    assert(wm._rewriteFolderLinks(links,"incoming.md","incoming.md",files,{}), '[nested](new/image(one(two)).png) ![angle](<new/image) name.png> "caption") [title](new/index.md "Keep this (title")',"Nested parentheses, angle destinations, titles and images")
+    var deleted = wm.deleteFolder("old",{expectedRevision:preview.revision,confirmation:"old"})
+    assert(deleted.ok,true,"Deletion works with malformed surviving Markdown: " + JSON.stringify(deleted))
+    assert(io.readFileString(root + "/incoming.md"),raw,"Deletion leaves surviving Markdown byte-for-byte intact")
+  }) }
   exports.testRecursiveFolders = function() {
     ;[false,true].forEach(function(v2) { fixture(v2,function(wm,root) {
       seed(wm,root)

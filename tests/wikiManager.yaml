@@ -2,6 +2,9 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA Wiki Manager Tests::FolderMalformedLinks
+  to: oJob Test
+  exec: args.func = require("tests/wikiFolders.js").testFolderMalformedLinks
 - name: MiniA Wiki Manager Tests::FolderConfirmations
   to: oJob Test
   exec: args.func = require("tests/wikiManager.js").testFolderConfirmations
@@ -101,6 +104,7 @@ jobs:
   exec: args.func = require("tests/wikiManager.js").testReplayPresentation
 
 todo:
+- MiniA Wiki Manager Tests::FolderMalformedLinks
 - MiniA Wiki Manager Tests::FolderConfirmations
 - MiniA Wiki Manager Tests::FolderSemanticAndReferences
 - MiniA Wiki Manager Tests::RecursiveFolders
