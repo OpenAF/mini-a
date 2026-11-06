@@ -468,3 +468,35 @@ reorganization and live remote downloads require separate configured checks.
 ### Graph build controls
 
 Graph exposes structural/semantic extraction, off/automatic model assistance, incremental/full/resume strategy, force, presets, custom budgets, and shared saved defaults. See [Graph builds](GRAPH-BUILDS.md). Semantic extraction works without models. `GET /graph/settings` displays effective defaults; `PUT /graph/settings` saves them for a writable wiki. `POST /graph/rebuild` accepts the shared build options. Graph cancellation checkpoints completed work and stops scheduling calls; an in-flight request uses its configured timeout.
+
+## Recursive folder operations
+
+Select a folder in **Pages** to use **Move/rename folder** or **Delete folder**.
+These administrator actions support registered local writable filesystem wikis.
+The preview lists the source, destination, page/file/folder counts and surviving
+pages with incoming links. Every nested file, attachment and empty directory is
+included. Review the preview, and type the exact source path for deletion.
+
+A move requires an existing destination parent and an unused destination name;
+folders are never merged or overwritten, and no redirect pages are created.
+Moves rewrite internal links, incoming links, relative attachment references and
+ingestion ownership. Deletion preserves links in surviving Markdown so **Lint**
+can report them. Root paths, protected engine state, symlinks, mounts and
+read-only or unsupported backends cannot be changed.
+
+Studio queues one durable, deduplicated background job for each operation.
+The worker rechecks the preview revision under the shared wiki writer lock,
+creates verified recovery snapshots, changes the subtree and publishes the final
+navigation/search/graph indexes. If another edit makes the preview stale, the job
+fails without changing content; preview again. On success Explorer opens the
+moved folder or selects the deleted folder's parent.
+
+Use **Activity** for progress, errors, changes and the associated snapshot.
+An interrupted write or failed index/graph publication requires recovery and
+blocks new maintenance. Stop other readers and writers before restoring the
+verified Studio snapshot. Snapshot restoration restores the entire wiki, not
+just the selected folder. The engine also retains a verified directory snapshot
+beside the wiki and a pending journal inside `.mini-a-wiki-folders`; Wiki Manager's
+**Restore pending folder snapshot** can roll it back using the exact recovery ID.
+Reopen readers after restoration. Do not delete pending recovery files; successful
+engine directory snapshots are retained until an operator removes them.

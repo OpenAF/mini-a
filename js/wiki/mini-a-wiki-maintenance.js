@@ -15,6 +15,7 @@ var __miniAWikiWriterLock = function(root, options) {
       if (entry.thread !== thread) throw new Error("wiki-writer-busy")
       entry.depth++
     } else {
+      if (!opts.folderRecovery && io.fileExists(canonical + "/.mini-a-wiki-folders/pending.json")) throw new Error("folder-recovery-required: restore the verified folder snapshot")
       if (String(new java.io.File(path).getCanonicalPath()) !== path) throw new Error("unsafe-writer-lock")
       if (!opts.maintenance && io.fileExists(canonical + "/.mini-a-wiki-maintenance/pending.json")) throw new Error("wiki-maintenance-pending: run /dream wiki auto to reconcile")
       var dir = new java.io.File(path).getParentFile()

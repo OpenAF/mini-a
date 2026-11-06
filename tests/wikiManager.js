@@ -138,6 +138,24 @@
     assert(sanitized.ok,true,"Sanitization preserves result structure")
     assert(/SECRET_VALUE|MODEL_SECRET|MOUNT_SECRET/.test(JSON.stringify(sanitized)),false,"Error and history redaction")
   }
+  exports.testFolderConfirmations = function() {
+    var choices=[0], inputs=["folder"], calls=[], shown=[]
+    var man=new MiniAWikiMan({wikiroot:"/tmp/wiki",wikiaccess:"rw"},{choose:function(){return choices.shift()},ask:function(){return inputs.shift()},print:function(v){shown.push(v)}})
+    man.runner=function(){var runner=new MiniAWikiOps(man.args);runner.execute=function(spec,gates){calls.push({operation:spec.operation,params:clone(spec.params),gates:clone(gates||{})});return spec.operation==="wiki.folderPreview"?{ok:true,revision:"reviewed-revision",source:"folder",pages:2,files:3,folders:2,incomingLinks:[]}:{ok:true}};return runner}
+    man.runOperation("wiki.folderDelete")
+    assert(calls.length,1,"Declining folder operation only previews")
+    calls=[];choices=[1];inputs=["folder","wrong"]
+    man.runOperation("wiki.folderDelete")
+    assert(calls.length,1,"Wrong exact path never deletes")
+    calls=[];choices=[1];inputs=["folder","folder"]
+    man.runOperation("wiki.folderDelete")
+    assert(calls.length,2,"Preview then confirmed deletion")
+    assert(calls[1].params.expectedRevision,"reviewed-revision","Reviewed revision carried into execution")
+    assert(calls[1].params.confirmation,"folder","Exact path carried into execution")
+    assert(calls[1].gates.confirm,true,"Mutation gate retained")
+    var remote=new MiniAWikiOps({wikibackend:"s3",wikibucket:"test",wikiaccess:"rw"})
+    assert(remote.unavailable(remote.spec("wiki.folderMove",{from:"old",to:"new"})).indexOf("local filesystem")>=0,true,"Unsupported backend disabled")
+  }
   exports.testReorgConfirmations = function() {
     var executed = [], printed = [], choices = [], prompts = []
     var man = new MiniAWikiMan({wikiroot:"/tmp/wiki",wikiaccess:"rw",model:"test"},{

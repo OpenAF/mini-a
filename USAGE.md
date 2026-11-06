@@ -3492,6 +3492,22 @@ Writes require review and `confirm=true` in noninteractive runs. Reorg asks two 
 
 Compaction previews first and requires confirmation that other readers/writers have stopped (`params='{"dryRun":false,"offline":true}'`). A failed or interrupted mutation may leave partial changes. Ingestion recovery discard and absorption plan delete/cancel do **not** undo written pages. Use their existing recovery actions; reorg has no general rollback.
 
+**Move/rename folder** and **Delete folder** under **Pages & structure** operate on the entire folder: Markdown pages (including `index.md`), attachments, nested folders and empty directories. Select a local writable primary wiki. The preview shows source/destination, page/file/folder counts and incoming links. Rename is a move to another name; the destination's parent must already exist. Existing destinations are rejected: there is no merge, overwrite or redirect stub. Root operations, symlinks, protected engine state, mounted/read-only wikis and non-filesystem backends are rejected.
+
+Moves rewrite page links, relative attachment references and ingestion ownership in one transaction. Other file bytes are preserved. Deletion requires typing the exact source path and leaves incoming links in surviving pages for lint to report. A revision check rejects edits made after the preview; preview again before retrying. All files are preflighted under the shared wiki writer lock before a verified full snapshot is created. Search, navigation and enabled graph data publish once after the changes; valid unchanged semantic evidence is retained.
+
+A failed or interrupted folder transaction keeps `.mini-a-wiki-folders/pending.json` and blocks subsequent writers, ingestion and maintenance. The journal identifies a verified snapshot beside the wiki at `<wikiroot>.mini-a-folder-recovery/<recovery-id>`. Stop other readers, choose **Restore pending folder snapshot**, and enter the exact recovery ID. This rolls the entire wiki back to the snapshot, including attachments, empty directories, ownership and indexes; reopen the wiki afterward. Snapshots remain on disk after success or rollback and are not automatically pruned. Do not remove an unresolved journal or its snapshot. In Studio, Activity links the operation to its verified snapshot, which can also be restored through the existing snapshot workflow.
+
+Noninteractive callers use the same preview and revision gates:
+
+```sh
+ojob utils/wikiOps.yaml operation=wiki.folderPreview wikiroot="/path/My Wiki" params='{"from":"guides","to":"archive/guides"}'
+ojob utils/wikiOps.yaml operation=wiki.folderMove wikiroot="/path/My Wiki" wikiaccess=rw confirm=true params='{"from":"guides","to":"archive/guides","expectedRevision":"<preview revision>"}'
+ojob utils/wikiOps.yaml operation=wiki.folderDelete wikiroot="/path/My Wiki" wikiaccess=rw confirm=true params='{"from":"guides","expectedRevision":"<deletion preview revision>","confirmation":"guides"}'
+```
+
+For a deletion preview, omit `to`. Recovery uses `operation=wiki.folderRestore params='{"id":"<recovery-id>"}'` with `wikiaccess=rw confirm=true`.
+
 Page editing imports a content file or opens `editor=` / `$EDITOR` (default `vi`) without invoking a shell. The reviewed content is snapshotted in a temporary file. **Session → Run history / export** saves a sanitized JSON run record; page-write exports also preserve the content next to the record. Unexported editor snapshots are removed on exit. No connection profiles or history are saved automatically.
 
 Commands refer to sensitive argument values through `MINIA_WIKIOPS_<ARGUMENT>` environment variables, listing the required variables without printing their values. Existing `OAF_MODEL` configuration and saved model aliases remain usable. Launch modes such as `modelman`, `mcptest`, Dream, web, worker, and goal/exec cannot be combined with `wikiman=true`.

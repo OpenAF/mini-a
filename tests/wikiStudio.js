@@ -75,6 +75,35 @@
     assert(io.fileExists(w.root + "/moved.md"),false,"Delete")
     io.writeFileString(w.root + "/large.md", "0123456789"); s.config.maxPageBytes=4; rejects(function(){s.readPage(w,"large.md")},"page_too_large")
   }) }
+  exports.testFolders = function() { fixture(function(s,t) {
+    var w=add(s,t);WikiStudio.privateDir(s.config.home+"/jobs");s.jobs=new WikiStudioJobs(s.config)
+    io.mkdir(w.root+"/old/empty");io.writeFileString(w.root+"/old/index.md","# Folder\n")
+    var route=function(action,body,role,key){return s.wikiRoute({method:"POST",headers:{"idempotency-key":key||"folder-request-123"},body:body},w,["folders",action],role||"admin")}
+    rejects(function(){route("preview",{source:"old"},"editor")},"forbidden")
+    var preview=route("preview",{source:"old",destination:"new"})
+    assert(preview.folders,2,"Preview includes empty folders")
+    var body={source:"old",destination:"new",expectedRevision:preview.revision}
+    var job=route("move",body)
+    assert(route("move",body).id,job.id,"Request deduplicated")
+    rejects(function(){route("preview",{source:"old"})},"wiki_maintenance")
+    io.writeFileString(w.root+"/old/late.md","# Late change")
+    s.jobs.update(job.id,{status:"acquiring-lock"});wikiStudioRunWorker(s.config,job.id)
+    assert(s.jobs.get(job.id).status,"failed","Stale preview fails without recovery claim")
+    assert(io.fileExists(w.root+"/new"),false,"Stale preview never moves files")
+    assert(WikiStudio.pending(w.root).length,0,"No journal for rejected preview")
+    preview=route("preview",{source:"old",destination:"new"})
+    job=route("move",{source:"old",destination:"new",expectedRevision:preview.revision},"admin","folder-request-456")
+    s.jobs.update(job.id,{status:"acquiring-lock"});wikiStudioRunWorker(s.config,job.id)
+    assert(s.jobs.get(job.id).status,"completed","Worker publishes recursive move")
+    assert(!!s.jobs.get(job.id).backupId,true,"Activity retains verified backup")
+    assert(io.fileExists(w.root+"/new/empty"),true,"Worker moves empty directories")
+    var blocked=route("preview",{source:"new"})
+    rejects(function(){route("delete",{source:"new",expectedRevision:blocked.revision,confirmation:"New"})},"confirmation_required")
+    // Persisted interruption is visible to activity/maintenance guards.
+    WikiStudio.atomic(w.root+"/.mini-a-wiki-folders/pending.json",{phase:"publishing"})
+    assert(WikiStudio.pending(w.root)[0].kind,"folder","Folder recovery surfaced")
+    rejects(function(){route("preview",{source:"new"})},"folder_preflight")
+  }) }
   exports.testGraphBuildSettings = function() { fixture(function(s,t) {
     WikiStudio.privateDir(s.config.home+"/jobs")
     var w=add(s,t), route=["graph","settings"]

@@ -3,6 +3,9 @@ include:
 ojob:
   logToConsole: false
 jobs:
+- name: Studio recursive folders
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testFolders
 - name: Studio graph build settings
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testGraphBuildSettings
@@ -49,6 +52,7 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testAbsorption
 todo:
+- Studio recursive folders
 - Studio graph build settings
 - Studio cleanup
 - Studio explorer

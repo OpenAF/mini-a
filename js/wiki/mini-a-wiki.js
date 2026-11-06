@@ -515,7 +515,7 @@ MiniAWikiManager.prototype._isHiddenPath = function(path) {
   if (p.length === 0) return false
   var bn = p.split("/").pop()
   var meta = this._indexMeta()
-  return p.split("/").some(function(part) { return /^\.mini-a-wiki-(serving|bundles|legacy|state|ingest|absorb|maintenance|meta|lucene|graph)(?:$|\.)/.test(part) }) || meta.hiddenNames.indexOf(p) >= 0 || meta.hiddenNames.indexOf(bn) >= 0
+  return p.split("/").some(function(part) { return /^\.mini-a-wiki-(serving|bundles|legacy|state|ingest|absorb|maintenance|folders|move|meta|lucene|graph)(?:$|\.)/.test(part) }) || meta.hiddenNames.indexOf(p) >= 0 || meta.hiddenNames.indexOf(bn) >= 0
 }
 
 MiniAWikiManager.prototype._isSearchExcludedPath = function(path) {
@@ -1873,7 +1873,7 @@ MiniAWikiManager.prototype.reindex = function(options) {
     if (!this._ensureLucene() || !this._hasEnhancedLexicalSupport()) return { ok: false, error: "Lucene oPack does not support lexicalEnhanced search; upgrade the lucene oPack before publishing an enhanced wiki index." }
     var manifestStatus = this._lexicalManifestStatus()
     var pageDocs = this._readAllPageDocs()
-    var rebuilt = this._rebuildSearchIndex({ resetLucene: !manifestStatus.compatible }, pageDocs)
+    var rebuilt = this._rebuildSearchIndex({ resetLucene: !manifestStatus.compatible || !!(options && options.resetLucene) }, pageDocs)
     if (!isMap(rebuilt) || rebuilt.ok !== true) return isMap(rebuilt) ? rebuilt : { ok: false, error: "failed to rebuild lexical index" }
     this._writeLexicalManifest()
     this._rebuildGraphIndex(pageDocs)
@@ -2949,13 +2949,13 @@ var __miniAWikiFsListSerial = function(dir, normalizedPrefix, sep, work) {
     counters.directoryListings = (Number(counters.directoryListings) || 0) + 1
     for (var i = 0; children && i < children.length; i++) {
       var child = children[i], name = String(child.getName())
-      if (/^\.mini-a-wiki-(serving|bundles|legacy|state|ingest|absorb|maintenance|meta|lucene|graph)(?:$|\.)/.test(name)) {
+      if (/^\.mini-a-wiki-(serving|bundles|legacy|state|ingest|absorb|maintenance|folders|move|meta|lucene|graph)(?:$|\.)/.test(name)) {
         counters.derivedEntriesSkipped = (Number(counters.derivedEntriesSkipped) || 0) + 1; continue
       }
       var target = String(child.getCanonicalPath())
       if (target.indexOf(boundary) !== 0) continue
       if (target.substring(boundary.length).replace(/\\/g, "/").split("/").some(function(part) {
-        return /^\.mini-a-wiki-(serving|bundles|legacy|state|ingest|absorb|maintenance|meta|lucene|graph)(?:$|\.)/.test(part)
+        return /^\.mini-a-wiki-(serving|bundles|legacy|state|ingest|absorb|maintenance|folders|move|meta|lucene|graph)(?:$|\.)/.test(part)
       })) {
         counters.derivedEntriesSkipped = (Number(counters.derivedEntriesSkipped) || 0) + 1; continue
       }
@@ -5730,6 +5730,8 @@ MiniAWikiManager.prototype.assembleContext = function(query, options) {
 // guessing from function source or overwriting a caller's custom implementation.
 MiniAWikiManager.prototype._assembleContextPlaceholder = MiniAWikiManager.prototype.assembleContext
 
+loadLib(__miniAPath("js/wiki/mini-a-wiki-folders.js"), true)
+
 // Hold one shared lock across complete operations, including link rewrites and
 // publication. Nested manager operations and journal recovery are reentrant.
 ;["configure", "write", "delete", "move", "init", "regenerateIndexes", "reindex", "compact", "appendLog", "upgradeAgents", "_bootstrapWiki", "graph"].forEach(function(name) {
@@ -5749,7 +5751,7 @@ MiniAWikiManager.prototype._assembleContextPlaceholder = MiniAWikiManager.protot
     var root = name === "configure" ? cfg.root || "." : this._backend.root
     if (!local || !writable || !graphWrite || cfg.__catalog === true || new java.io.File(String(root)).isFile()) return original.apply(this, arguments)
     var lock
-    try { lock = __miniAWikiWriterLock(root) }
+    try { lock = __miniAWikiWriterLock(root, {folderRecovery: name === "configure" && cfg.folderRecovery === true && cfg.maintenanceSourceOnly === true}) }
     catch(e) {
       if (name === "configure") throw e
       return { ok: false, error: __miniAErrMsg(e) }

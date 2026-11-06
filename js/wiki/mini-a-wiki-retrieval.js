@@ -1079,6 +1079,7 @@ MiniAWikiRetrievalV2.prototype.close = function() {
 }
 MiniAWikiRetrievalV2.prototype._pending = function() {
   var m = this.manager, paths, state = m._getIndexRoot() + "/.mini-a-wiki-state/manifest.json", pending = {}, token = ""
+  if (io.fileExists(m._getIndexRoot() + "/.mini-a-wiki-folders/pending.json")) return { _all: true }
   var stamp = function(p) { var f = new java.io.File(p); return f.isFile() ? String(java.nio.file.Files.getLastModifiedTime(f.toPath())) + ":" + Number(f.length()) : "missing" }
   try { paths = m._ingestJournalPaths() } catch(e) { return { _all: true } }
   token = paths.map(function(path) { return path + ":" + stamp(path) }).join("|") + "|" + stamp(state)

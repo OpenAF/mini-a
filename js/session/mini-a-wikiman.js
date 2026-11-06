@@ -278,6 +278,17 @@ MiniAWikiMan.prototype.runOperation = function(id, advanced) {
     if (result && result.ok === false || !this.yes("Apply this compaction preview?")) return
     if (!this.yes("Have all other readers and writers of this wiki stopped?")) return
     spec.params.dryRun = false; spec.params.offline = true; gates.confirm = true
+  } else if (id === "wiki.folderMove" || id === "wiki.folderDelete") {
+    var folderPreview = runner.execute(runner.spec("wiki.folderPreview", {from:params.from,to:params.to || ""}))
+    this.show(folderPreview)
+    if (!folderPreview.ok) return
+    if (!this.yes("Apply this recursive operation after creating a verified recovery snapshot?")) return
+    spec.params.expectedRevision = folderPreview.revision
+    if (id === "wiki.folderDelete") {
+      spec.params.confirmation = this.input("Type the exact source folder path to delete")
+      if (spec.params.confirmation !== params.from) { this.show("Confirmation did not match; nothing changed."); return }
+    }
+    gates.confirm = true
   } else if (MiniAWikiOps.mutates(spec)) {
     this.show({ operation: id, target: runner.args.wikitarget || runner.args.wikiroot || runner.args.wikiurl || runner.args.wikibucket,
       access: runner.args.wikiaccess, params: spec.params, settings: runner.args })

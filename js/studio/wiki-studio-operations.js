@@ -21,7 +21,22 @@ WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
   WikiStudio.assert(req.method === "POST", 405, "method_not_allowed", "Use POST to submit jobs")
   WikiStudio.authorize(role, "admin", w)
   var operation, params = {}
-  if (route === "graph/rebuild") {
+  if (/^folders\/(preview|move|delete)$/.test(route)) {
+    WikiStudio.fields(body, ["source", "destination", "expectedRevision", "confirmation"])
+    WikiStudio.safeFile(w.root, body.source, false)
+    if (body.destination) WikiStudio.safeFile(w.root, body.destination, false)
+    if (route === "folders/preview") return WikiStudio.lock(this.config.home, w.id, function() {
+      self.assertIdle(w.id)
+      var preview = self.manager(w, false, function(wm) { return wm.previewFolder(body.source, body.destination || null) }, {skipBootstrap:true})
+      WikiStudio.assert(preview.ok, 409, "folder_preflight", preview.error || "Folder preview failed")
+      return preview
+    })
+    WikiStudio.assert(isString(body.expectedRevision) && /^[a-f0-9]{40}$/.test(body.expectedRevision), 400, "preview_required", "Preview the folder operation first")
+    if (route === "folders/delete") WikiStudio.assert(body.confirmation === body.source && !body.destination, 400, "confirmation_required", "Confirm deletion by exact source folder path")
+    else WikiStudio.assert(isString(body.destination) && body.destination.length > 0, 400, "destination_required", "Choose a destination folder")
+    params = {from:body.source,to:route === "folders/move" ? body.destination : null,expectedRevision:body.expectedRevision,confirmation:body.confirmation || ""}
+    operation = route === "folders/move" ? "wiki.folderMove" : "wiki.folderDelete"
+  } else if (route === "graph/rebuild") {
     WikiStudio.fields(body, MiniAGraphBuild.fields)
     try { params = this.manager(w, false, function(wm) { return wm.graphBuildSettings(body).effective }) }
     catch(e) { WikiStudio.fail(400, "invalid_options", String(e.message || e)) }
@@ -81,6 +96,7 @@ var wikiStudioRunWorker = function(config, id) {
       if (jobs.get(id).cancelRequested) { jobs.update(id,{status:"cancelled",phase:"cancelled"}); return }
       phase("running", "Executing the existing Mini-A engine; semantic extraction " + (params.extraction === "semantic" || params.semantic ? "enabled" : "disabled")); started = true
       var result = wikiStudioExecute(config, w, j, function(msg) { jobs.event(id, "running", msg) }, backup)
+      if (/^wiki\.folder/.test(operation)) { var updated = jobs.get(id); if (updated.backupId) backup = WikiStudio.json(WikiStudio.backupPath(config,w,updated.backupId) + "/manifest.json") }
       phase("refreshing", "Closing engine readers and comparing Markdown manifests")
       registry.verify(w)
       var after = WikiStudio.scan(w.root, false), diff = WikiStudio.diffManifests(before, after)
@@ -91,7 +107,7 @@ var wikiStudioRunWorker = function(config, id) {
       var serialized = JSON.stringify(result)
       if (serialized.length > 1048576) result = {ok: result.ok, warning:"Engine result exceeded retention limit; inspect local engine artifacts", truncated:true}
       WikiStudio.atomic(jobs.dir(id) + "/result.json", result)
-      var status = result.status === "cancelled" || result.result && result.result.status === "cancelled" ? "cancelled" : result.ok === false ? "recovery-required" : result.partial === true || ["partial","blocked"].indexOf(result.status)>=0 || result.sync_complete===false && !params.dryrun ? "partial" : "completed"
+      var status = result.status === "cancelled" || result.result && result.result.status === "cancelled" ? "cancelled" : result.ok === false ? (/^wiki\.folder/.test(operation) && result.recovery_pending === false ? "failed" : "recovery-required") : result.partial === true || ["partial","blocked"].indexOf(result.status)>=0 || result.sync_complete===false && !params.dryrun ? "partial" : "completed"
       jobs.update(id, {status:status,phase:status,completedAt:WikiStudio.now(),changedPageCount:diff.changedPageCount}); jobs.event(id,status,"Finished with " + diff.changedPageCount + " changed Markdown paths")
     })
   } catch(e) {
@@ -108,6 +124,17 @@ var wikiStudioExecute = function(config, w, job, logFn, backup) {
   if (operation === "dream.reorg") { a.dreamwikireorg = true; a.dreamwikiapproval = "auto" }
   var params = operation === "graph.build" ? clone(p) : operation.indexOf("dream.") === 0 ? {dryrun:p.dryrun === true} : {}
   if (operation === "dream.reorg") { params.instructions = p.instructions; params.organize = p.organize }
+  if (operation === "wiki.folderMove" || operation === "wiki.folderDelete") {
+    var wm = new MiniAWikiManager({root:w.root,backend:"fs",access:"rw",skipBootstrap:true,usegraph:w.graph.enabled,wikiretrievalv2:w.retrieval.v2 !== false})
+    try {
+      var folderOptions = {expectedRevision:p.expectedRevision,confirmation:p.confirmation,onProgress:logFn,snapshot:function() {
+        var info = WikiStudio.snapshot(config,w,job.id)
+        new WikiStudioJobs(config).update(job.id,{backupId:info.id})
+        return info
+      }}
+      return operation === "wiki.folderMove" ? wm.moveFolder(p.from,p.to,folderOptions) : wm.deleteFolder(p.from,folderOptions)
+    } finally { wm.close() }
+  }
   if (isFunction(WikiStudio.executeSource) && /^(ingest|absorb|backup|wiki)\./.test(operation)) return WikiStudio.executeSource(config,w,job,logFn,backup)
   WikiStudio.assert(operation === "graph.build" || /^dream\.(plan|apply|repair|reindex|graph|indexes|auto|reorg)$/.test(operation), 400, "invalid_operation", "Worker operation is not allowlisted")
   var runner = new MiniAWikiOps(a,logFn)

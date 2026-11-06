@@ -2,6 +2,18 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA Wiki Manager Tests::FolderConfirmations
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testFolderConfirmations
+- name: MiniA Wiki Manager Tests::FolderSemanticAndReferences
+  to: oJob Test
+  exec: args.func = require("tests/wikiFolders.js").testFolderSemanticAndReferences
+- name: MiniA Wiki Manager Tests::RecursiveFolders
+  to: oJob Test
+  exec: args.func = require("tests/wikiFolders.js").testRecursiveFolders
+- name: MiniA Wiki Manager Tests::FolderGuardsAndRecovery
+  to: oJob Test
+  exec: args.func = require("tests/wikiFolders.js").testFolderGuardsAndRecovery
 - name: MiniA Wiki Manager Tests::GraphBuildNoMarkdownAndDreamTags
   to: oJob Test
   exec: args.func = require("tests/wikiManager.js").testGraphBuildNoMarkdownAndDreamTags
@@ -89,6 +101,10 @@ jobs:
   exec: args.func = require("tests/wikiManager.js").testReplayPresentation
 
 todo:
+- MiniA Wiki Manager Tests::FolderConfirmations
+- MiniA Wiki Manager Tests::FolderSemanticAndReferences
+- MiniA Wiki Manager Tests::RecursiveFolders
+- MiniA Wiki Manager Tests::FolderGuardsAndRecovery
 - MiniA Wiki Manager Tests::GraphBuildNoMarkdownAndDreamTags
 - MiniA Wiki Manager Tests::GraphBuildControls
 - MiniA Wiki Manager Tests::MutationGates

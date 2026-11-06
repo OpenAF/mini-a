@@ -98,7 +98,11 @@ MiniAWikiOps.catalog = (function() {
   add("wiki.mounts", "Inspect", "Federation / mounts", false)
   add("wiki.init", "Pages & structure", "Initialize wiki or sub-wiki", true, [path])
   add("wiki.write", "Pages & structure", "Create / edit a page", true, [["path", "Page path"], ["contentfile", "Content file"]])
-  add("wiki.move", "Pages & structure", "Move a page or section", true, [["from", "Source wiki path"], ["to", "Destination wiki path"]])
+  add("wiki.move", "Pages & structure", "Move a page", true, [["from", "Source wiki path"], ["to", "Destination wiki path"]])
+  add("wiki.folderPreview", "Pages & structure", "Preview folder operation", false, [["from", "Source folder path"], ["to", "Destination folder (empty for deletion)", ""]])
+  add("wiki.folderMove", "Pages & structure", "Move/rename folder", true, [["from", "Source folder path"], ["to", "Destination folder path"]])
+  add("wiki.folderDelete", "Pages & structure", "Delete folder", true, [["from", "Source folder path"]])
+  add("wiki.folderRestore", "Pages & structure", "Restore pending folder snapshot", true, [["id", "Exact recovery ID (stop other readers first)"]])
   add("wiki.delete", "Pages & structure", "Delete a page", true, [["path", "Page path"]])
   add("wiki.indexes", "Pages & structure", "Regenerate directory indexes", true)
   add("wiki.upgrade", "Pages & structure", "Upgrade wiki instructions", true)
@@ -202,7 +206,8 @@ MiniAWikiOps.prototype.unavailable = function(spec) {
   var id = spec.operation, backend = String(cfg.backend || "fs"), archive = /\.(zip|okt)$/i.test(String(cfg.root || ""))
   var writable = cfg.access === "rw" && !cfg.__catalog && backend !== "http" && backend !== "https" && !archive
   if ((MiniAWikiOps.mutates(spec) || id === "wiki.compact") && id !== "graph.html" && !(id === "absorb.plan" && this.args.absorboutput) && !writable) return "Requires a writable primary wiki; mounts, archives and HTTP wikis are read-only"
-  if ((id === "wiki.compact" || id === "wiki.indexstats" || id === "graph.filestats" || id === "graph.html" || id.indexOf("absorb.") === 0) && (backend !== "fs" || archive || cfg.__catalog)) return "Requires a local filesystem wiki"
+  if ((id.indexOf("wiki.folder") === 0 || id === "wiki.compact" || id === "wiki.indexstats" || id === "graph.filestats" || id === "graph.html" || id.indexOf("absorb.") === 0) && (backend !== "fs" || archive || cfg.__catalog)) return "Requires a local filesystem wiki"
+  if (id.indexOf("wiki.folder") === 0 && this.args.wikitarget) return "Folder operations require a local primary wiki; mounted wikis are read-only"
   if (id === "dream.auto" && (backend !== "fs" || archive || cfg.__catalog || this.args.wikitarget)) return "Auto requires a local primary filesystem wiki"
   if (id === "wiki.compact" && toBoolean(cfg.wikiretrievalv2) === false) return "Compaction requires Retrieval V2"
   if (id.indexOf("graph.") === 0 && id !== "graph.html" && id !== "graph.filestats" && id !== "graph.settings" && id !== "graph.defaults" && toBoolean(cfg.usegraph) !== true) return "Enable usewikigraph=true in session settings"
@@ -256,6 +261,8 @@ MiniAWikiOps.prototype._execute = function(spec, gates) {
     var a = merge({}, this.args), cfg = this.targetConfig(), group = id.split(".")[0], action = id.split(".")[1]
 
     if (id === "graph.build" || id === "graph.defaults") cfg.skipBootstrap = true
+    if (id.indexOf("wiki.folder") === 0) cfg.skipBootstrap = true
+    if (id === "wiki.folderRestore") { cfg.folderRecovery = true; cfg.maintenanceSourceOnly = true }
     delete a.wikiman; delete a.wikitarget
     if (this.args.wikitarget) {
       // Services that accept CLI arguments must receive the selected mount, never the primary.
@@ -378,6 +385,10 @@ MiniAWikiOps.prototype._execute = function(spec, gates) {
         ? reviewed[p.contentfile] : io.readFileString(new MiniAFileAccess(this.args.fileallow).assert(p.contentfile))
       return wm.write(p.path, content)
     }
+    if (action === "folderPreview") return wm.previewFolder(p.from, p.to || null)
+    if (action === "folderMove") return wm.moveFolder(p.from, p.to, p)
+    if (action === "folderDelete") return wm.deleteFolder(p.from, p)
+    if (action === "folderRestore") return wm.restoreFolder(p.id)
     if (action === "move") return wm.move(p.from, p.to, p)
     if (action === "init") return wm.init(p.path || "")
     if (action === "delete") return wm.delete(p.path)

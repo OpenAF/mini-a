@@ -165,6 +165,31 @@ try:
     applied = job("wikis/a/ingestions", {"sourceId": "docs", "revision": upload_id, "preview": False, "options": {"mode": "raw"}})
     assert applied["backupId"]
     job("wikis/a/dreams", {"mode": "indexes", "options": {"semantic": False}})
+    # Recursive operations use real workers, verified snapshots and deduplicated requests.
+    folder = root / "b" / "old folder"
+    (folder / "nested" / "empty").mkdir(parents=True)
+    (folder / "index.md").write_text("# Folder\n[Page](nested/café.md)\n")
+    (folder / "nested" / "café.md").write_text("# FolderNeedle\n![Asset](../asset.bin)\n")
+    (folder / "asset.bin").write_bytes(b"\x00\xffasset")
+    (root / "b" / "incoming.md").write_text("# Incoming\n[Folder](old folder/index.md)\n")
+    preview = request("wikis/b/folders/preview", "POST", {"source": "old folder", "destination": "renamed folder"})
+    assert (preview["pages"], preview["files"], preview["folders"]) == (2, 3, 3)
+    assert preview["incomingLinks"][0]["path"] == "incoming.md"
+    moved = job("wikis/b/folders/move", {"source": "old folder", "destination": "renamed folder", "expectedRevision": preview["revision"]})
+    assert moved["backupId"] and moved["result"]["recovery_pending"] is False
+    assert (root / "b" / "renamed folder" / "nested" / "empty").is_dir()
+    assert (root / "b" / "renamed folder" / "asset.bin").read_bytes() == b"\x00\xffasset"
+    preview = request("wikis/b/folders/preview", "POST", {"source": "renamed folder"})
+    request("wikis/b/folders/delete", "POST", {"source": "renamed folder", "expectedRevision": preview["revision"], "confirmation": "wrong"}, status=400)
+    incoming = (root / "b" / "incoming.md").read_bytes()
+    deleted = job("wikis/b/folders/delete", {"source": "renamed folder", "expectedRevision": preview["revision"], "confirmation": "renamed folder"})
+    assert not (root / "b" / "renamed folder").exists()
+    assert (root / "b" / "incoming.md").read_bytes() == incoming
+    fingerprint = request("wikis/b/overview")["studio"]["fingerprint"]
+    restore_id = deleted["backupId"]
+    job("wikis/b/backups/" + restore_id + "/restore", {"expectedFingerprint": fingerprint, "confirmation": restore_id + ":" + fingerprint, "externalProcessesStopped": True})
+    assert (root / "b" / "renamed folder" / "nested" / "empty").is_dir()
+    assert (root / "b" / "renamed folder" / "asset.bin").read_bytes() == b"\x00\xffasset"
     backup_job = job("wikis/a/backups", {})
     backup_id = backup_job["result"]["backupId"]
     fingerprint = request("wikis/a/overview")["studio"]["fingerprint"]

@@ -239,5 +239,28 @@ run('StudioApi.request=api;StudioApi.background=api;studioSession={canTestWiki:f
   const preset=field(graphHost,'Budget preset');preset.value='small';await preset.fire('change');assert.equal(Number(field(graphHost,'Maximum calls').value),20,'Preset changes budget');
   preset.value='reset';await preset.fire('change');assert.equal(field(graphHost,'Maximum calls').value,'100','Reset restores built-in budget');
   const readOnlyHost=new Element('div');context.readOnlyHost=readOnlyHost;run('currentWiki.access="ro"');await run('graphBuildControls(readOnlyHost)');assert(find(readOnlyHost,'button','Save defaults').disabled&&find(readOnlyHost,'button','Run graph build').disabled,'Read-only build controls disabled');
-  console.log('PASS: Pages default, keyboard tree, read/edit, grouped downloads, retained drafts, preview gates, late-save race and chart fallback');
+  const folderHost=new Element('div');document.body.append(folderHost);context.folderHost=folderHost;
+  let folderName='Guides', folderAnswers=['Renamed'], folderJobs=[];
+  context.folderApi=async(path,method,body)=>{
+    if(path.startsWith('children?')){const parent=new URLSearchParams(path.split('?')[1]).get('path');return {items:parent||!folderName?[]:[{kind:'folder',name:folderName,path:folderName}]};}
+    if(path==='folders/preview')return {ok:true,source:body.source,destination:body.destination,pages:2,files:3,folders:2,incomingLinks:[{path:'index.md',targets:['Guides/index.md']}],revision:'reviewed'};
+    throw Error('Unexpected folder request: '+path);
+  };
+  context.folderDialog=async(title,initial,confirmation)=>confirmation?true:folderAnswers.shift();
+  context.folderQueue=async(path,body)=>{folderJobs.push({path,body});folderName=body.destination;return {id:'folder-job',finished:Promise.resolve({status:'completed'})};};
+  run('currentWiki={id:"folder-ui",name:"Folder UI",access:"rw"};studioSession={role:"admin"};dirty=false;StudioApi.wiki=folderApi;studioDialog=folderDialog;queue=folderQueue;');
+  await run('pagesView(folderHost)');
+  await folderHost.querySelector('[role="treeitem"]').fire('keydown',{key:'Enter'});
+  assert(find(folderHost,'button','Move/rename folder')&&!find(folderHost,'button','Move/rename folder').disabled,'Folder actions visible for admins');
+  await click(folderHost,'Move/rename folder');
+  assert.equal(folderJobs[0].body.expectedRevision,'reviewed','Reviewed subtree revision submitted');
+  assert.equal(folderJobs[0].body.destination,'Renamed');
+  assert.equal(folderHost.querySelector('[role="treeitem"]').dataset.path,'Renamed','Explorer refreshes to moved folder');
+  assert.equal(folderHost.querySelector('[role="treeitem"]').getAttribute('aria-selected'),'true','Moved folder selected');
+  folderAnswers=['wrong'];await click(folderHost,'Delete folder');assert.equal(folderJobs.length,1,'Wrong exact path never queues deletion');
+  folderAnswers=['Renamed'];await click(folderHost,'Delete folder');
+  assert.equal(folderJobs[1].body.confirmation,'Renamed','Deletion forwards exact confirmation');
+  assert.equal(run('pageState().folder'),'','Deleted folder selects parent');
+  assert(folderHost.textContent.includes('Folder deleted.'),'Deletion feedback visible');
+  console.log('PASS: Pages default, keyboard tree, read/edit, grouped downloads, retained drafts, preview gates, late-save race, chart fallback and recursive folder controls');
 })().catch(error=>{console.error(error);process.exitCode=1;});

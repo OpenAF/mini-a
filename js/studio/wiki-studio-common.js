@@ -129,9 +129,9 @@ WikiStudio.redact = function(value) {
   return text.replace(/((?:api[_-]?key|password|secret|authorization|token)\s*[=:]\s*)[^\s,}\]]+/gi, "$1[redacted]").substring(0, 8192)
 }
 WikiStudio.pending = function(root) {
-  var found=[],base=root+"/.mini-a-wiki-ingest",paths=[base+"/journal.json",root+"/.mini-a-wiki-absorb/journal.json"]
+  var found=[],base=root+"/.mini-a-wiki-ingest",paths=[base+"/journal.json",root+"/.mini-a-wiki-absorb/journal.json",root+"/.mini-a-wiki-folders/pending.json",root+"/.mini-a-wiki-move/journal.json",root+"/.mini-a-wiki-maintenance/pending.json"]
   if(io.fileExists(base+"/journals"))io.listFiles(base+"/journals").files.filter(function(f){return f.isFile&&/\.json$/.test(f.filename)}).forEach(function(f){paths.push(f.filepath)})
-  paths.forEach(function(path){if(io.fileExists(path)){var j=WikiStudio.json(path);if(j.phase!=="complete")found.push({kind:path.indexOf("absorb")>=0?"absorb":"ingest",phase:j.phase||"unknown"})}})
+  paths.forEach(function(path){if(io.fileExists(path)){var j=WikiStudio.json(path);if(j.phase!=="complete")found.push({kind:path.indexOf("folders")>=0?"folder":path.indexOf("maintenance")>=0?"maintenance":path.indexOf("move")>=0?"move":path.indexOf("absorb")>=0?"absorb":"ingest",phase:j.phase||"unknown"})}})
   return found
 }
 WikiStudio.authorize = function(role, needed, wiki) {

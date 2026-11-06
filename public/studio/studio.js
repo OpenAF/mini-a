@@ -535,8 +535,8 @@ async function pagesView(content) {
         if(open){state.expanded.add(entry.path);if(!loaded){await branch(group,entry.path,level+1);loaded=true;}}else state.expanded.delete(entry.path);
       }
       if(folder){group=el("div",undefined,item);group.setAttribute("role","group");group.hidden=true;item.setAttribute("aria-expanded","false");arrow.onclick=safely(async event=>{event.stopPropagation();focus(item);await expand(group.hidden);});}
-      const activate=async()=>{if(!(await mayLeave()))return;dirty=false;editing=false;focus(item);select(item,entry.path);if(folder){state.folder=entry.path;activePage=null;editor.replaceChildren();el("h4",entry.path,editor);el("p","Expand this folder to select a page. Its index.md file is its landing page.",editor);await expand(true);}else{state.folder=entry.path.includes("/")?entry.path.slice(0,entry.path.lastIndexOf("/")):"";await loadPage(entry.path);}};
-      label.onclick=safely(activate);
+      const activate=async()=>{if(!(await mayLeave()))return;dirty=false;editing=false;focus(item);select(item,entry.path);if(folder){state.folder=entry.path;activePage=null;editor.replaceChildren();el("h4",entry.path,editor);el("p","Expand this folder to select a page. Its index.md file is its landing page.",editor);folderActions(entry.path);await expand(true);}else{state.folder=entry.path.includes("/")?entry.path.slice(0,entry.path.lastIndexOf("/")):"";await loadPage(entry.path);}};
+      item.studioActivate=activate;label.onclick=safely(activate);
       item.addEventListener("keydown",safely(async event=>{
         if(event.target!==item)return;
         const visible=[...tree.querySelectorAll('[role="treeitem"]')].filter(n=>!n.closest('[hidden]')),index=visible.indexOf(item);let next;
@@ -555,6 +555,33 @@ async function pagesView(content) {
       if(childName&&!response.items.some(e=>e.name===childName)){await branch(parent,path,level,offset+response.items.length);return;}
       const more=button(parent,"Load more in "+(path||currentWiki.name),async()=>{more.remove();await branch(parent,path,level,offset+response.items.length);});more.classList.add("tree-more");}
     if(!response.items.length&&!offset)el("p","Empty folder",parent).className="muted";
+  }
+  function folderActions(source) {
+    const actions=row(editor);
+    async function changeFolder(deleting) {
+      const wikiId=currentWiki.id;
+      const destination=deleting?null:await askText("Move/rename folder — destination path",source);
+      if(!deleting&&!destination)return;
+      const preview=await StudioApi.wiki("folders/preview","POST",{source,destination});
+      const impact=source+(destination?" → "+destination:"")+"\n"+preview.pages+" pages, "+preview.files+" files, "+preview.folders+" folders (including empty folders).\n"+preview.incomingLinks.length+" surviving pages link into this folder.\nA verified recovery snapshot will be created before changes.";
+      const review=el("section",undefined,editor);el("h4","Folder operation preview",review);el("p",impact,review);
+      for(const link of preview.incomingLinks)el("p",link.path+" → "+link.targets.join(", "),review);
+      if(!(await askConfirmation(impact+(deleting?"\nIncoming links will remain for lint to report. Delete this entire folder?":"\nExisting destinations are rejected. No redirects are created. Continue?"))))return;
+      const confirmation=deleting?await askText("Type the exact source folder path to delete: "+source):"";
+      if(deleting&&confirmation!==source){message("Confirmation did not match; nothing changed.");return;}
+      if(currentWiki.id!==wikiId||!editor.isConnected)return;
+      const job=await queue(deleting?"folders/delete":"folders/move",{source,destination,expectedRevision:preview.revision,confirmation});
+      const finished=await job.finished;
+      if(finished.status!=="completed"){message("Folder operation "+human(finished.status)+". Open Activity for details and recovery snapshots.",true);return;}
+      if(currentWiki.id!==wikiId||!editor.isConnected)return;
+      state.folder=deleting?(source.includes("/")?source.slice(0,source.lastIndexOf("/")):""):destination;
+      state.selected=state.folder;state.expanded.add(state.folder);activePage=null;editor.replaceChildren();
+      if(state.folder){await tree.reveal(state.folder);const selected=[...tree.querySelectorAll('[role="treeitem"]')].find(n=>n.dataset.path===state.folder);if(selected)await selected.studioActivate();}
+      else {await refresh();el("h4",currentWiki.name,editor);el("p","Folder deleted. Select a page or folder in Explorer.",editor);}
+    }
+    const reason=writeReason()||(studioSession?.role!=="admin"?"Folder operations require an administrator":"");
+    disable(button(actions,"Move/rename folder",()=>changeFolder(false)),reason);
+    disable(button(actions,"Delete folder",()=>changeFolder(true)),reason);
   }
   async function refresh(){state.scroll=aside.scrollTop;lastFocus=null;tree.replaceChildren();await branch(tree,"",1);aside.scrollTop=state.scroll;}
   tree.studioRefresh=refresh;
@@ -759,6 +786,7 @@ async function jobDetail(id) {
       do {received=0;for(const frame of (await StudioApi.events(id,cursor,{silent:true})).split("\n\n")){const line=frame.split("\n").find(l=>l.startsWith("data: "));if(!line)continue;const event=JSON.parse(line.slice(6));if(event.seq<=cursor)continue;cursor=event.seq;received++;events.textContent=(events.textContent+date(event.time)+" · "+event.message+"\n").slice(-100000);}}while(received===200&&dialog.isConnected);
       if(finished){
         outcome(summary,job.result);
+        if(job.backupId)button(summary,"View recovery snapshots",async()=>{dialog.close();if(currentWiki.id!==job.wikiId)await openWiki(await StudioApi.request("wikis/"+job.wikiId));await navigate("Maintenance");const host=document.getElementById("view");host.replaceChildren();await backupsView(host);},"snapshot");
         const changes=await StudioApi.request("wikis/"+encodeURIComponent(job.wikiId)+"/changes?jobId="+id);
         if(!dialog.isConnected)return;
         for(const change of changes.changes||[]){const r=row(summary);el("span",human(change.type||change.action)+" · "+change.path,r);if(change.path&&!/delete|removed/i.test(change.type||change.action||""))button(r,"Open page",async()=>{if(!(await mayLeave()))return;dirty=false;dialog.close();if(currentWiki.id!==job.wikiId)await openWiki(await StudioApi.request("wikis/"+job.wikiId));await navigate("Pages",true,change.path);});}

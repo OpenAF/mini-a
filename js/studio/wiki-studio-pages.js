@@ -43,7 +43,7 @@ WikiStudioServer.prototype.validateMarkdown = function(content) {
 }
 WikiStudioServer.prototype.wikiRoute = function(req, w, parts, role) {
   var self = this, q = req.query || {}, body = req.body || {}, route = parts.join("/"), read = req.method === "GET"
-  if (this.jobWikiRoute && ["dreams", "ingestions", "absorptions", "graph/rebuild", "graph/settings", "backups", "changes", "maintenance", "sources"].indexOf(route) >= 0 || this.jobWikiRoute && /^backups\//.test(route)) return this.jobWikiRoute(req, w, parts, role)
+  if (this.jobWikiRoute && ["dreams", "ingestions", "absorptions", "graph/rebuild", "graph/settings", "backups", "changes", "maintenance", "sources", "folders/preview", "folders/move", "folders/delete"].indexOf(route) >= 0 || this.jobWikiRoute && /^backups\//.test(route)) return this.jobWikiRoute(req, w, parts, role)
   return WikiStudio.lock(this.config.home, w.id, function() {
     self.registry.verify(w)
     if (self.assertIdle) self.assertIdle(w.id)
