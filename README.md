@@ -110,7 +110,7 @@ Shell access is disabled by default for safety; add `useshell=true` when you exp
 - Agent Plugins ([agent-plugins.org](https://agent-plugins.org)): `plugins=<dir1,dir2>` or `pluginsroot(s)=<dir>` — see [docs/AGENT-PLUGINS.md](docs/AGENT-PLUGINS.md)
 - Starter generators: `mini-a --command`, `mini-a --skill`, `mini-a --hook`, `mini-a --agent`
 
-With `useskills=true`, Mini-A also discovers three bundled skills:
+With `useskills=true`, Mini-A also discovers bundled skills including
 `mini-a-wiki-retrieval`, `mini-a-skill-authoring`, and
 `mini-a-runtime-diagnostics`. For example:
 
@@ -128,6 +128,19 @@ Bundling preserves `useskills=false` and the conditional `skillsautosearch`
 default. It adds no selection calls by itself. Instructions and supporting
 references ship locally; execution still requires the relevant tools and sources.
 Normal `fileallow`, tool filters, access modes, and skill budgets apply.
+
+For visual responses, the bundled `mini-a-visual-output` skill provides on-demand
+guides and examples for Chart.js, Mermaid, LaTeX math, and Leaflet. Enable the
+relevant renderer and request the skill explicitly, for example:
+
+```bash
+opack exec mini-a useskills=true skillsautosearch=false usemath=true goal='Use $local:mini-a-visual-output to explain the quadratic formula.'
+```
+
+Use `usecharts`, `usediagrams` (alias `usemermaid`), or `usemaps` for the other
+formats. Rich rendering happens in the web UI; console transcripts preserve
+their source. See [visual-output skill guidance](USAGE.md#visual-output-skill)
+for loading, validation, and browser asset requirements.
 
 - Override the base home directory: `homedir=<path>` (reads `.openaf-mini-a` from `<path>` instead of `~`)
 
@@ -159,6 +172,9 @@ settings/presets, detailed activity and debug traces, and subsystem operation sc
 Slash commands open dedicated panes with readable results, searchable Help,
 answer/wiki readers, and paginated previous results. Progress remains in Live activity.
 See [Advanced web console](USAGE.md#advanced-web-console).
+
+For application integration, see [iframe context and same-origin prompt handoff](docs/WEB-EMBED.md).
+The opt-in bridge accepts validated parameters and can expand a parent input box into a conversation.
 
 For history/attachments and S3-backed history examples, see [USAGE.md](USAGE.md#web-ui-quick-start).
 
@@ -871,15 +887,23 @@ With `orchestration=auto`, Mini-A tracks progress independently of successful to
 
 ### Download SVG answers
 
-Simple and Advanced display supported SVG answer blocks as images. Hover over a
-centered graphic to reveal its download and shrink/enlarge/reset icons, or focus
-the controls with the keyboard. Resizing affects the preview only.
-On touch devices the icon stays visible. The browser downloads the sanitized SVG
-used by the preview, preserving its dimensions and Unicode text. This does not
+Simple and Advanced display supported SVG answer blocks as images. A compact
+“⋯” menu in the top-right corner of each graphic contains shrink/enlarge/reset
+controls, SVG and PNG download buttons, and a full-screen action. Each menu
+option has a small icon. In full screen, all controls remain available in a
+floating toolbar with tooltips. Resizing affects the preview only. SVG downloads preserve the
+sanitized preview dimensions and Unicode text. PNG downloads use a transparent
+background at 2× resolution, capped at 8192 pixels per side and approximately
+16 megapixels for large diagrams. Both exports run entirely in the browser. This does not
 require `usesandbox` and does not read files from the server. Invalid or unsupported
 SVG remains available as source. Active elements, external resources, embedded
 HTML, animation and stylesheet blocks are not supported; passive inline
 presentation styles are preserved.
+
+Mermaid diagrams provide the same SVG and PNG download options in their “⋯”
+menu, including in full-screen mode. Exports include the complete diagram with
+its current theme, regardless of preview zoom or pan. PNG uses the same 2×
+transparent-background default and size limits described above.
 
 ### Optional document-generation libraries
 
@@ -899,3 +923,5 @@ an isolated worker or authorize publication of server files. Server-generated
 file publication uses the separate restricted worker and artifact broker. See
 [generated-file downloads](docs/GENERATED-FILES.md) for setup and limits; browser-only
 SVG export remains independent of that facility.
+
+Wiki graph extraction, model budgets, saved defaults and resume controls are documented in [Graph builds](docs/GRAPH-BUILDS.md).

@@ -9,13 +9,23 @@ WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
     if (req.method === "POST") { WikiStudio.authorize(role, "admin", w); return this.sourceAdd(w, body) }
   }
   if (this.backupRoute && (route === "backups" || /^backups\//.test(route) || route === "changes")) return this.backupRoute(req, w, parts, role)
+  if (route === "graph/settings") {
+    if (req.method !== "GET") WikiStudio.authorize(role, "admin", w)
+    WikiStudio.assert(req.method === "GET" || req.method === "PUT", 405, "method_not_allowed", "Use GET or PUT for graph settings")
+    WikiStudio.fields(body, ["extraction", "modelHelp", "maxCalls", "maxTokens", "maxMinutes", "preset"])
+    return WikiStudio.lock(this.config.home, w.id, function() {
+      if (req.method === "PUT" && self.assertIdle) self.assertIdle(w.id)
+      return self.manager(w, req.method === "PUT", function(wm) { return wm.graphBuildSettings(body, req.method === "PUT") }, {skipBootstrap:true})
+    })
+  }
   WikiStudio.assert(req.method === "POST", 405, "method_not_allowed", "Use POST to submit jobs")
   WikiStudio.authorize(role, "admin", w)
   var operation, params = {}
   if (route === "graph/rebuild") {
-    WikiStudio.fields(body, ["semantic"])
-    WikiStudio.assert(!isDef(body.semantic) || isBoolean(body.semantic), 400, "invalid_options", "Semantic must be boolean")
-    operation = "graph.build"; params.semantic = body.semantic === true
+    WikiStudio.fields(body, MiniAGraphBuild.fields)
+    try { params = this.manager(w, false, function(wm) { return wm.graphBuildSettings(body).effective }) }
+    catch(e) { WikiStudio.fail(400, "invalid_options", String(e.message || e)) }
+    operation = "graph.build"
   } else if (route === "dreams") {
     WikiStudio.fields(body, ["mode", "options", "confirmation"])
     WikiStudio.assert(["plan", "apply", "repair", "reindex", "graph", "indexes", "reorg", "auto"].indexOf(body.mode) >= 0, 400, "invalid_mode", "Unsupported dream mode")
@@ -32,7 +42,7 @@ WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
   } else if (this.sourceOperation && ["ingestions", "absorptions", "maintenance"].indexOf(route) >= 0) {
     var spec = this.sourceOperation(w, route, body); operation = spec.operation; params = spec.params
   } else WikiStudio.fail(501, "operation_unavailable", "This operation has no safe adapter in this build")
-  if (params.semantic || operation === "dream.reorg") WikiStudio.assert(String(getEnv("OAF_MODEL") || "").length > 0, 422, "model_required", "Configure OAF_MODEL in the trusted server environment for this operation")
+  if (operation !== "graph.build" && params.semantic || operation === "dream.reorg") WikiStudio.assert(String(getEnv("OAF_MODEL") || "").length > 0, 422, "model_required", "Configure OAF_MODEL in the trusted server environment for this operation")
   // Reject a new submission while a synchronous Studio page mutation holds the
   // same lock. Queued jobs then block subsequent page reads/writes.
   return WikiStudio.lock(this.config.home, w.id, function() { self.registry.verify(w); return WikiStudioJobs.publicJob(jobs.submit(w, operation, params, req.headers["idempotency-key"], role)) })
@@ -69,7 +79,7 @@ var wikiStudioRunWorker = function(config, id) {
       // No mid-engine kill: cancellation after this checkpoint may finish with
       // writes. The final status always reflects the real result.
       if (jobs.get(id).cancelRequested) { jobs.update(id,{status:"cancelled",phase:"cancelled"}); return }
-      phase("running", "Executing the existing Mini-A engine; semantic extraction " + (params.semantic ? "enabled" : "disabled")); started = true
+      phase("running", "Executing the existing Mini-A engine; semantic extraction " + (params.extraction === "semantic" || params.semantic ? "enabled" : "disabled")); started = true
       var result = wikiStudioExecute(config, w, j, function(msg) { jobs.event(id, "running", msg) }, backup)
       phase("refreshing", "Closing engine readers and comparing Markdown manifests")
       registry.verify(w)
@@ -81,7 +91,7 @@ var wikiStudioRunWorker = function(config, id) {
       var serialized = JSON.stringify(result)
       if (serialized.length > 1048576) result = {ok: result.ok, warning:"Engine result exceeded retention limit; inspect local engine artifacts", truncated:true}
       WikiStudio.atomic(jobs.dir(id) + "/result.json", result)
-      var status = result.ok === false ? "recovery-required" : result.partial === true || ["partial","blocked"].indexOf(result.status)>=0 || result.sync_complete===false && !params.dryrun ? "partial" : "completed"
+      var status = result.status === "cancelled" || result.result && result.result.status === "cancelled" ? "cancelled" : result.ok === false ? "recovery-required" : result.partial === true || ["partial","blocked"].indexOf(result.status)>=0 || result.sync_complete===false && !params.dryrun ? "partial" : "completed"
       jobs.update(id, {status:status,phase:status,completedAt:WikiStudio.now(),changedPageCount:diff.changedPageCount}); jobs.event(id,status,"Finished with " + diff.changedPageCount + " changed Markdown paths")
     })
   } catch(e) {
@@ -91,16 +101,22 @@ var wikiStudioRunWorker = function(config, id) {
 }
 var wikiStudioExecute = function(config, w, job, logFn, backup) {
   var p = job.params, operation = job.operation
-  var a = { wikiroot: w.root, wikiaccess: "rw", wikiretrievalv2: true, usewikigraph: w.graph.enabled, wikigraphsemantic: p.semantic === true, dreammaxsteps: p.dreammaxsteps || 40 }
+  var a = { wikiroot: w.root, wikiaccess: "rw", wikiretrievalv2: true, usewikigraph: w.graph.enabled, wikigraphsemantic: isDef(p.semantic) ? p.semantic === true : __, dreammaxsteps: p.dreammaxsteps || 40 }
   // A writable manager may bootstrap an empty registered directory even for a
   // preview. Plan must open a reader and must never bootstrap Markdown/state.
   if (operation === "dream.plan" || operation === "dream.auto" && p.dryrun) a.wikiaccess = "ro"
   if (operation === "dream.reorg") { a.dreamwikireorg = true; a.dreamwikiapproval = "auto" }
-  var params = operation === "graph.build" ? {semantic:p.semantic === true} : operation.indexOf("dream.") === 0 ? {dryrun:p.dryrun === true} : {}
+  var params = operation === "graph.build" ? clone(p) : operation.indexOf("dream.") === 0 ? {dryrun:p.dryrun === true} : {}
   if (operation === "dream.reorg") { params.instructions = p.instructions; params.organize = p.organize }
   if (isFunction(WikiStudio.executeSource) && /^(ingest|absorb|backup|wiki)\./.test(operation)) return WikiStudio.executeSource(config,w,job,logFn,backup)
   WikiStudio.assert(operation === "graph.build" || /^dream\.(plan|apply|repair|reindex|graph|indexes|auto|reorg)$/.test(operation), 400, "invalid_operation", "Worker operation is not allowlisted")
-  var runner = new MiniAWikiOps(a,logFn), result = runner.execute(runner.spec(operation,params), {confirm:true,backupconfirmed:!!backup})
+  var runner = new MiniAWikiOps(a,logFn)
+  if (operation === "graph.build") {
+    var jobs = new WikiStudioJobs(config)
+    runner.isCancelled = function() { return jobs.get(job.id).cancelRequested === true }
+    runner.onGraphProgress = function(progress) { jobs.update(job.id, { progress: progress }); logFn(JSON.stringify(progress)) }
+  }
+  var result = runner.execute(runner.spec(operation,params), {confirm:true,backupconfirmed:!!backup})
   if (result.ok !== false && p.compact && operation !== "dream.plan" && !p.dryrun) {
     var compact = runner.execute(runner.spec("wiki.compact",{dryRun:false,offline:true}),{confirm:true})
     result.compaction = compact; if (compact.ok === false) result.ok = false

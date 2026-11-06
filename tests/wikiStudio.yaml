@@ -3,6 +3,9 @@ include:
 ojob:
   logToConsole: false
 jobs:
+- name: Studio graph build settings
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testGraphBuildSettings
 - name: Studio cleanup
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testCleanup
@@ -46,6 +49,7 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testAbsorption
 todo:
+- Studio graph build settings
 - Studio cleanup
 - Studio explorer
 - Studio planned absorption

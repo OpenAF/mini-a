@@ -61,6 +61,47 @@
       assert(run(runner,"wiki.delete",{path:"renamed.md"},true).ok,true,"Delete")
     })
   }
+  exports.testGraphBuildControls = function() {
+    fixture(function(root, runner) {
+      run(runner,"wiki.init",{},true)
+      var saved = run(runner,"graph.defaults",{extraction:"semantic",modelHelp:"off",maxCalls:7,maxTokens:8000,maxMinutes:2},true)
+      assert(saved.ok,true,"Save graph defaults")
+      var reopened = new MiniAWikiOps(runner.args)
+      assert(run(reopened,"graph.settings").effective.maxCalls,7,"Defaults survive new manager")
+      var result = run(reopened,"graph.build",{maxCalls:3},true)
+      assert(result.effective.maxCalls,3,"Run override")
+      assert(result.calls,0,"Saved model off guarantees no calls")
+      assert(run(reopened,"graph.settings").effective.maxCalls,7,"Override not saved")
+      throws(function(){reopened.spec("graph.build",{extraction:"semantic",strategy:"resume",force:true})},"Resume")
+      var ro=new MiniAWikiOps(merge(runner.args,{wikiaccess:"ro"}))
+      assert(run(ro,"graph.defaults",{maxCalls:4},true).ok,false,"Read-only save rejected")
+      assert(run(ro,"graph.build",{},true).ok,false,"Read-only build rejected")
+      assert(run(ro,"graph.settings").effective.maxCalls,7,"Read-only settings visible")
+      var replay=runner.command(runner.spec("graph.build",{extraction:"semantic",modelHelp:"off",strategy:"resume",maxCalls:3}),{confirm:true})
+      assert(replay.command.indexOf("resume")>=0,true,"Replay preserves strategy")
+    })
+  }
+  exports.testGraphBuildNoMarkdownAndDreamTags = function() {
+    fixture(function(root,runner) {
+      assert(run(runner,"graph.defaults",{extraction:"semantic",modelHelp:"off"},true).ok,true,"Save defaults on empty wiki")
+      assert(run(runner,"graph.build",{},true).ok,true,"Build empty wiki")
+      assert(io.listFiles(root).files.some(function(file){return /\.md$/.test(file.filename)}),false,"Graph build/defaults never bootstrap Markdown")
+      var wm=__miniAWikiCreatePrimary(runner.config())
+      try {
+        var body="# Technical\nTLS HTTP TCP UDP DNS HTTPS JSON YAML XML"
+        wm.write("tags.md",{title:"Technical",tags:["existing"]},body)
+        wm.graph("build",{extraction:"semantic",modelHelp:"off"})
+        wm._config.graphTagPolicy=true
+        assert(wm.write("tags.md",{title:"Technical",tags:[]},body).ok,false,"Reorg cannot remove tags")
+        assert(wm.write("tags.md",{title:"Technical",tags:["existing","unsupported"]},body).ok,false,"Unsupported additions rejected")
+        assert(wm.write("tags.md",{title:"Technical",tags:["existing","TLS","HTTP","TCP","UDP","DNS","HTTPS"]},body).ok,false,"Six additions rejected")
+        var suggestions=wm.graph("tags",{path:"tags.md"}), additions=suggestions.additions.slice(0,2).map(function(item){return item.tag})
+        assert(additions.length,2,"Graph supplies evidenced additions")
+        assert(wm.write("tags.md",{title:"Technical",tags:["existing"].concat(additions)},body).ok,true,"Main model selected evidenced tags accepted")
+        assert(wm._dreamTagReasons.length,2,"Reasons recorded")
+      } finally {wm.close()}
+    })
+  }
   exports.testGraphAndIndexes = function() {
     fixture(function(root, runner) {
       run(runner,"wiki.init",{},true)
@@ -234,7 +275,7 @@
   exports.testGraphStatsConsoleParity = function() {
     var source = io.readFileString("js/session/mini-a-session.js")
     var start = source.indexOf("  function printGraph("), end = source.indexOf("  function printIngestRecovery(", start)
-    var consoleStats = new Function("wm", "capture", 'var getConsoleWikiManager=function(){return wm}, print=function(){}, printTree=function(v){capture(v);return ""};\n' + source.substring(start,end) + '\nprintGraph("stats");')
+    var consoleStats = new Function("wm", "capture", 'var adapter=null, getConsoleWikiManager=function(){return wm}, print=function(){}, printTree=function(v){capture(v);return ""};\n' + source.substring(start,end) + '\nprintGraph("stats");')
     fixture(function(root, runner) {
       function compare(label) {
         var wm = __miniAWikiCreatePrimary(runner.config()), expected

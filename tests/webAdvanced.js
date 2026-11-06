@@ -347,5 +347,20 @@ try {
   promptNames.forEach(function(key) { check(isUnDef(resetReload.runtime.options()[key]), key + ' remains unset on next resume') })
   resetReload.runtime.dispose()
 
+  loadLib(__miniAPath('js/web/mini-a-web-embed.js'))
+  MiniAWebEmbed.init({webembed:true,webembedorigins:'https://app.example',webembedfields:{customerId:{type:'string',required:true}}})
+  var embedData = {version:1,revision:1,context:{customerId:'EXPANSION_RECORD'}}
+  jobs = []
+  advanced.request({uuid:'embedded-expansion',action:'command',command:'/git-impact app',requestId:'embed-command',embed:embedData})
+  embedData.context.customerId = 'CHANGED_AFTER_ADMISSION'
+  jobs.shift()()
+  check(submitted[submitted.length-1].embed.context.customerId === 'EXPANSION_RECORD', 'expanded goal retains the admitted snapshot')
+  check(submitted[submitted.length-1].prompt.indexOf('Review the complete changes') >= 0, 'custom command still expands')
+  check(stringify(advanced.snapshot(advanced.get('embedded-expansion'),0).settings).indexOf('EXPANSION_RECORD') < 0, 'context is not a setting')
+  check(io.readFileString(advanced.get('embedded-expansion').file).indexOf('EXPANSION_RECORD') < 0, 'context is not persisted in options or receipts')
+  var invalidEmbed = false
+  try { advanced.request({uuid:'embedded-expansion',action:'command',command:'goal',requestId:'embed-invalid',embed:{version:1,revision:2,context:null}}) } catch(e) { invalidEmbed = true }
+  check(invalidEmbed && jobs.length === 0, 'invalid context rejected before command execution')
+  advanced.get('embedded-expansion').runtime.dispose()
   print('Advanced OpenAF integration checks passed')
 } catch(e) { printErr(e); exit(1) } finally { __gHDir = originalHome; io.rm(testRoot) }

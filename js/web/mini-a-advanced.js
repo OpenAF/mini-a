@@ -470,6 +470,12 @@ MiniAAdvanced.prototype.request = function(data) {
   if (state.closed) throw new Error("Session ended. Start a new conversation.")
   if (!isString(data.requestId) || !/^[a-zA-Z0-9-]{1,80}$/.test(data.requestId)) throw new Error("A requestId is required")
   if (state.receipts[data.requestId]) return state.receipts[data.requestId]
+  // Snapshot before asynchronous command expansion, without persisting it as a setting.
+  var embedSnapshot = null
+  if (Object.prototype.hasOwnProperty.call(data, "embed")) {
+    if (typeof MiniAWebEmbed === "undefined") throw new Error("Embedding is unavailable")
+    embedSnapshot = MiniAWebEmbed.validate(data)
+  }
   var binaryAttachments = isDef(data.attachments) ? MiniAWebAttachments.validate(data.attachments, data.command) : []
   if (binaryAttachments.length && (data.action !== "command" || /^\s*[/$]/.test(data.command))) throw new Error("Binary attachments require an ordinary goal, not a slash or skill command")
   var token = global._mini_a_web_reserve(state.uuid)
@@ -578,7 +584,9 @@ MiniAAdvanced.prototype.request = function(data) {
       if (state.goal && !state.cancelled && !state.closed) {
         var goal = state.goal
         state.goal = null
-        self.submitPrompt({ header: { "x-mini-a-token": global.__webtoken }, files: { postData: stringify({ uuid: state.uuid, prompt: goal.prompt, skillUsage: goal.skillUsage, displayPrompt: goal.displayPrompt, advancedRequestId: data.requestId, attachments: data.attachments }, __, "") } })
+        var promptData = { uuid: state.uuid, prompt: goal.prompt, skillUsage: goal.skillUsage, displayPrompt: goal.displayPrompt, advancedRequestId: data.requestId, attachments: data.attachments }
+        if (embedSnapshot) promptData.embed = embedSnapshot
+        self.submitPrompt({ header: { "x-mini-a-token": global.__webtoken }, files: { postData: stringify(promptData, __, "") } })
       }
     }
   }).catch(function(e) { state.operation = null; global._mini_a_web_release(state.uuid, token); self.emit(state, "error", String(e)) })

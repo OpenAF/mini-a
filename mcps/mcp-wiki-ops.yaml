@@ -265,13 +265,33 @@ todo:
 
       graph_build:
         name       : graph_build
-        description: "Build wiki graph (structural always; semantic optional when configured). Syncs FalkorDB automatically when configured."
+        description: "Build wiki graph. Semantic extraction is deterministic; optional models are serial and budgeted. Full rebuild retains valid caches; force ignores them; resume continues pending work."
         inputSchema:
           type      : object
           properties:
-            semantic:
-              type   : boolean
-              default: false
+            extraction: { type: string, enum: [structural, semantic] }
+            modelHelp: { type: string, enum: [off, auto] }
+            strategy: { type: string, enum: [incremental, full, resume] }
+            force: { type: boolean }
+            maxCalls: { type: integer, minimum: 1 }
+            maxTokens: { type: integer, minimum: 1 }
+            maxMinutes: { type: number, exclusiveMinimum: 0 }
+            preset: { type: string, enum: [small, moderate, large, custom, reset] }
+            semantic: { type: boolean, description: Legacy semantic=true maps to semantic extraction with automatic assistance. }
+
+      graph_settings:
+        name: graph_settings
+        description: Read shared graph defaults, or explicitly save preferences for a writable wiki. Force and resume are per-run actions.
+        inputSchema:
+          type: object
+          properties:
+            save: { type: boolean, default: false }
+            extraction: { type: string, enum: [structural, semantic] }
+            modelHelp: { type: string, enum: [off, auto] }
+            maxCalls: { type: integer, minimum: 1 }
+            maxTokens: { type: integer, minimum: 1 }
+            maxMinutes: { type: number, exclusiveMinimum: 0 }
+            preset: { type: string, enum: [small, moderate, large, custom, reset] }
 
       graph_falkor:
         name       : graph_falkor
@@ -288,6 +308,7 @@ todo:
       edit        : Wiki edit page
       maintain    : Wiki maintain
       reindex     : Wiki reindex
+      graph_settings: Wiki graph settings
       graph_build : Wiki graph build
       graph_falkor: Wiki graph falkor
   ((else)):
@@ -488,14 +509,19 @@ jobs:
     return global.__wikiTool.wiki({ operation: "reindex" })
 
 - name : Wiki graph build
+  exec : | #js
+    var params = { operation: "build" }
+    ;["extraction", "modelHelp", "strategy", "force", "maxCalls", "maxTokens", "maxMinutes", "preset", "semantic"].forEach(function(k) { if (isDef(args[k])) params[k] = args[k] })
+    return global.__wikiTool.graph(params)
+
+- name : Wiki graph settings
   check:
     in:
-      semantic: toBoolean.isBoolean.default(false)
+      save: toBoolean.isBoolean.default(false)
   exec : | #js
-    return global.__wikiTool.graph({
-      operation: "build",
-      semantic : args.semantic === true
-    })
+    var params = { operation: args.save === true ? "defaults" : "settings" }
+    ;["extraction", "modelHelp", "maxCalls", "maxTokens", "maxMinutes", "preset"].forEach(function(k) { if (isDef(args[k])) params[k] = args[k] })
+    return global.__wikiTool.graph(params)
 
 - name : Wiki graph falkor
   check:

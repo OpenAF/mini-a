@@ -2,6 +2,12 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA Wiki Manager Tests::GraphBuildNoMarkdownAndDreamTags
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testGraphBuildNoMarkdownAndDreamTags
+- name: MiniA Wiki Manager Tests::GraphBuildControls
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testGraphBuildControls
 - name: MiniA Wiki Manager Tests::MutationGates
   to: oJob Test
   exec: args.func = require("tests/wikiManager.js").testMutationGates
@@ -83,6 +89,8 @@ jobs:
   exec: args.func = require("tests/wikiManager.js").testReplayPresentation
 
 todo:
+- MiniA Wiki Manager Tests::GraphBuildNoMarkdownAndDreamTags
+- MiniA Wiki Manager Tests::GraphBuildControls
 - MiniA Wiki Manager Tests::MutationGates
 - MiniA Wiki Manager Tests::ConfigurationAndMounts
 - MiniA Wiki Manager Tests::ParameterValidation

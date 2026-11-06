@@ -29,10 +29,11 @@
   exports.testGraphEvidenceOwnership = function() {
     var dir = mkTmp(), calls = 0
     try {
-      var extract = function() { calls++; return { summary: "Supported", relationships: [{from:"Foo",to:"Bar",type:"RELATED_TO",provenance:"EXTRACTED"}] } }
+      var extract = function() { calls++; return { summary: "Supported", relationships: [{from:"Foo",to:"Bar",type:"RELATED_TO",provenance:"EXTRACTED",evidence:{quote:"Foo uses Bar"}}] } }
       var g = new MiniAWikiGraph({graphDir:dir,llmExtractFn:extract}), input = pages()
+      input.forEach(function(page) {page.body = "Foo uses Bar"})
       g.buildStructural(input); g.buildSemantic(input)
-      var assertions = function(graph) { return graph._state.edges.filter(function(e) {return !e._deleted && e.from === "concept:foo"}) }
+      var assertions = function(graph) { return graph._state.edges.filter(function(e) {return !e._deleted && e.from === "concept:id:Foo"}) }
       ow.test.assert(assertions(g).length, 2, "identical assertions retain both source pages")
       g = new MiniAWikiGraph({graphDir:dir,llmExtractFn:extract})
       ow.test.assert(assertions(g).length, 2, "save/load preserves both assertions")
@@ -47,7 +48,7 @@
       ow.test.assert(calls, 3, "only changed page is extracted")
       g.removePage("a.md")
       ow.test.assert(assertions(g).length, 1, "deletion preserves independent support")
-      ow.test.assert(g.joinKeys().concepts.foo.join(","), "b.md", "concept joins retain surviving source")
+      ow.test.assert(g.joinKeys().concepts["id:Foo"].join(","), "b.md", "concept joins retain surviving source")
       var queries = []; g._falkorLink({query:function(q){queries.push(q)}}, assertions(g)[0])
       ow.test.assert(queries[0].indexOf("evidenceKey:") >= 0, true, "Falkor relationship identity includes source assertion")
     } finally { io.rm(dir) }
@@ -75,9 +76,10 @@
       var page={path:"a.md",meta:{title:"A"},body:new Array(12).join("A sufficiently long repeated prose line.\n"),links:[]}
       g.buildStructural([page]);g.buildSemantic([page]); page.body += "Late body edit"
       g.buildSemantic([page]);ow.test.assert(calls,2,"changes outside compact payload invalidate extraction")
-      var before=stringify(g._state,__,"");fail=true;page.body+=" another edit"
-      try {g.buildSemantic([page])}catch(expected){}
-      ow.test.assert(stringify(g._state,__,""),before,"failed extraction does not destroy previous graph state")
+      fail=true;page.body+=" another edit"
+      var failed = g.buildSemantic([page])
+      ow.test.assert(failed.failed > 0 && failed.resumable, true, "failed extraction stays pending")
+      ow.test.assert(g._state.edges.filter(function(e) {return e.props && e.props.method === "model"}).length, 0, "changed source cannot retain stale assertions")
     } finally {io.rm(dir)}
   }
 
@@ -414,9 +416,9 @@
       var summary = g._state.summaries.pages["alpha.md"]
       ow.test.assert(isString(summary.summary) && summary.summary.length > 0, true, "fallback semantic build should produce a summary")
       var semanticEdges = g._state.edges.filter(function(edge) {
-        return String(edge.provenance || "").toUpperCase() === "AMBIGUOUS" || String(edge.provenance || "").toUpperCase() === "INFERRED"
+        return edge.type === "MENTIONS" && edge.props.evidenceLayer === "grounded"
       })
-      ow.test.assert(semanticEdges.length > 0, true, "fallback semantic build should produce semantic edges")
+      ow.test.assert(semanticEdges.length > 0, true, "deterministic semantic build should produce grounded mentions")
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 

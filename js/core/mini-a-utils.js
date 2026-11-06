@@ -5145,12 +5145,21 @@ MiniUtilsTool._metadataByFn = (function() {
       inputSchema: {
         type      : "object",
         properties: {
-          operation: { type: "string", enum: ["build", "stats", "query", "neighbors", "path", "communities", "surprise", "retrieve", "answer", "export", "falkor"], default: "stats" },
+          operation: { type: "string", enum: ["build", "stats", "query", "neighbors", "path", "communities", "surprise", "retrieve", "answer", "export", "falkor", "tags", "settings", "defaults"], default: "stats" },
           op       : { type: "string", description: "Alias for operation." },
           query    : { type: "string", description: "Query text for query/retrieve/answer." },
           text     : { type: "string", description: "Alias for query in graph query." },
           format   : { type: "string", description: "Export format (mermaid, graphml, neo4j, html, svg)." },
-          semantic : { type: "boolean", description: "When operation=build, also run semantic extraction." }
+          semantic : { type: "boolean", description: "Legacy semantic=true maps to semantic extraction and automatic model assistance." },
+          extraction: { type: "string", enum: ["structural", "semantic"] },
+          modelHelp: { type: "string", enum: ["off", "auto"] },
+          strategy: { type: "string", enum: ["incremental", "full", "resume"] },
+          force: { type: "boolean" },
+          maxCalls: { type: "integer", minimum: 1 },
+          maxTokens: { type: "integer", minimum: 1 },
+          maxMinutes: { type: "number", exclusiveMinimum: 0 },
+          preset: { type: "string", enum: ["small", "moderate", "large", "custom", "reset"] },
+          path: { type: "string", description: "Page for evidenced tag suggestions." }
         }
       }
     }

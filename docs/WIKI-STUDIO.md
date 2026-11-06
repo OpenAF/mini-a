@@ -278,6 +278,14 @@ recorded and they may complete with writes. There is no force-stop UI or claim o
 undo. Child process stdout/stderr is discarded; structured engine callback logs
 are retained/redacted. This is not a promise to capture every library print.
 
+The processing banner offers **Cancel requests**, including while request details
+are collapsed. Expand the details to cancel an individual request. Queued requests
+are removed before sending; active requests and uploads stop waiting in the browser.
+Server work already started may continue, and cancellation does not undo writes.
+Check Activity before retrying a change whose response was cancelled. Background
+jobs have a **Request cancellation** button beside **View activity** and in their
+details; this uses the job cancellation behavior described above.
+
 Events use authenticated finite SSE replay responses with cursor/Last-Event-ID
 and a heartbeat comment; the UI fetches/reconnects and deduplicates sequences.
 There is no EventSource URL token. Each event log is capped at 1 MiB, result at
@@ -449,3 +457,7 @@ and `python3 tests/wikiStudioPackage.py` exercise real HTTP workers and packaged
 assets. Browser acceptance should include dark/light themes, narrow layouts,
 200% zoom, keyboard focus and external edit conflicts. Real model-driven
 reorganization and live remote downloads require separate configured checks.
+
+### Graph build controls
+
+Graph exposes structural/semantic extraction, off/automatic model assistance, incremental/full/resume strategy, force, presets, custom budgets, and shared saved defaults. See [Graph builds](GRAPH-BUILDS.md). Semantic extraction works without models. `GET /graph/settings` displays effective defaults; `PUT /graph/settings` saves them for a writable wiki. `POST /graph/rebuild` accepts the shared build options. Graph cancellation checkpoints completed work and stops scheduling calls; an in-flight request uses its configured timeout.

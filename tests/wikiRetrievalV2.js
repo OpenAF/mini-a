@@ -627,8 +627,8 @@
     try {
       io.mkdir(dir+"/root");io.mkdir(dir+"/remote")
       root=make(dir+"/root",{usegraph:true,wikigraphcrossmaxdf:1});remote=make(dir+"/remote",{usegraph:true})
-      root.write("seed.md",{title:"Seed",tags:["joined"],aliases:["Shared alias"]},"# Seed\nsharedcrossneedle")
-      remote.write("target.md",{title:"Remote",tags:["joined"],aliases:["Shared alias"]},"# Remote\nSupporting evidence")
+      root.write("seed.md",{title:"Seed",tags:["joined"],aliases:["Shared alias"]},"# Seed\nsharedcrossneedle JoinedProtocol")
+      remote.write("target.md",{title:"Remote",tags:["joined"],aliases:["Shared alias"]},"# Remote\nSupporting evidence JoinedProtocol")
       root.reindex();remote.reindex();root.attach("other",{backend:"fs",root:dir+"/remote"})
       var options={wiki:"*",expandGraph:true}, has=function(out){return out.results.some(function(r){return r.path==="@other/target.md"})}
       ;["tag","alias"].forEach(function(kind){root._config.wikigraphcrossjoin=kind;ow.test.assert(has(root.agenticSearch("sharedcrossneedle",options)),true,"cross "+kind+" joins use bounded adjacency")})
@@ -639,13 +639,11 @@
       root._config.wikigraphcrossminkeylen=3;root._config.wikigraphcrossjoin=""
       ow.test.assert(has(root.agenticSearch("sharedcrossneedle",options)),false,"empty join kinds disable cross joins")
       root._config.wikigraphcrossjoin="concept"
-      var extract=function(){return {relationships:[{from:"Joined concept",to:"Other concept",provenance:"INFERRED"}]}}
-      root._graph._llmExtractFn=extract;remote._graph._llmExtractFn=extract
-      root._graph.buildSemantic(root._graphPages());remote._graph.buildSemantic(remote._graphPages())
+      root._graph.buildSemantic(root._graphPages(),{modelHelp:"off"});remote._graph.buildSemantic(remote._graphPages(),{modelHelp:"off"})
       root.attach("other",{backend:"fs",root:dir+"/remote"})
       var graph=root._mounts[0].manager._graph
       ow.test.assert(has(root.agenticSearch("sharedcrossneedle",options)),true,"semantic concepts join different pinned wikis")
-      graph._semanticByPage["target.md"][0].props.revision="stale"
+      graph._semanticByPage["target.md"].forEach(function(edge) {edge.props.revision="stale"})
       var stale=root.agenticSearch("sharedcrossneedle",options)
       ow.test.assert(has(stale),false,"stale target semantic support excluded")
       ow.test.assert(stale.stopReasons.indexOf("stale-graph-evidence")>=0,true,"stale cross support reported explicitly")
@@ -719,15 +717,14 @@
       wm.write("seed.md",{title:"Seed",tags:["shared"]},"# Seed\ngraphneedle")
       wm.write("target.md",{title:"Related",tags:["shared"]},"# Details\nShared metadata evidence")
       ow.test.assert(wm.agenticSearch("graphneedle",{expandGraph:true}).results.some(function(r){return r.path==="target.md"}),true,"shared tag discovery validates both source assertions")
-      wm.write("seed.md",{title:"Seed"},"# Seed\ngraphneedle")
-      wm.write("target.md",{title:"Related"},"# Details\nConceptual supporting evidence")
-      wm._graph._llmExtractFn=function(payload){return {relationships:payload.path === "seed.md" || payload.path === "target.md" ? [{from:"Shared concept",to:"Other concept",provenance:"INFERRED"}] : []}}
-      wm._graph.buildSemantic(wm._graphPages())
+      wm.write("seed.md",{title:"Seed"},"# Seed\ngraphneedle SharedProtocol")
+      wm.write("target.md",{title:"Related"},"# Details\nConceptual supporting evidence SharedProtocol")
+      wm._graph.buildSemantic(wm._graphPages(),{modelHelp:"off"})
       ow.test.assert(wm.agenticSearch("graphneedle",{expandGraph:true}).results.some(function(r){return r.path==="target.md"}),true,"source-bound shared concepts discover supporting pages")
-      var semantic=wm._graph._semanticByPage["seed.md"][0], revision=semantic.props.revision
-      semantic.props.revision="obsolete"
+      var semantic=wm._graph._semanticByPage["seed.md"], revisions=semantic.map(function(edge){return edge.props.revision})
+      semantic.forEach(function(edge){edge.props.revision="obsolete"})
       ow.test.assert(wm.agenticSearch("graphneedle",{expandGraph:true}).results.some(function(r){return r.path==="target.md"}),false,"semantic assertion revision must match, even when document node is current")
-      semantic.props.revision=revision
+      semantic.forEach(function(edge,index){edge.props.revision=revisions[index]})
       // Revoke supporting authority after collection but before public materialization.
       var active=wm._retrievalV2._graphActive
       wm._retrievalV2._graphActive=function(hit,deadline,used){return hit.graphSupports ? false : active.call(this,hit,deadline,used)}

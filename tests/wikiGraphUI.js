@@ -9,18 +9,20 @@ var elements = new Map();
 function element(tag) {
   return {
     tagName: tag.toUpperCase(), children: [], style: {}, value: '', checked: true,
-    append: function() { this.children.push.apply(this.children, arguments); },
-    appendChild: function(child) { this.children.push(child); return child; },
+    append: function() { var self=this; Array.from(arguments).forEach(function(child){child.parentElement=self;self.children.push(child);}); },
+    appendChild: function(child) { child.parentElement=this;this.children.push(child); return child; },
     replaceChildren: function() { this.children = Array.from(arguments); },
     setAttribute: function(k, v) { this[k] = v; },
+    getAttribute: function(k) { return this[k]; },
     querySelector: function(tag) { return this.children.find(function(c) { return c.tagName === tag.toUpperCase(); }); },
     focus: function() { document.activeElement = this; },
-    click: function() { if(this.onclick) this.onclick(); },
+    click: function() { var event={preventDefault:function(){this.defaultPrevented=true;},stopPropagation:function(){this.propagationStopped=true;}}; if(this.onclick) this.onclick(event); return event; },
     setPointerCapture: function() {}
   };
 }
 Array.from(html.matchAll(/<([a-z]+)[^>]*\bid="([^"]+)"/g)).forEach(function(m) { elements.set(m[2], element(m[1])); });
 elements.get('graph-data').textContent = payload;
+var helpDetails=element('div');helpDetails.appendChild(elements.get('explore-summary'));
 var context = new Proxy({}, { get: function(target, key) {
   if(key === 'createRadialGradient') return function() { return { addColorStop: function() {} }; };
   return target[key] || function() {};
@@ -37,12 +39,23 @@ var messages=[];
 sandbox.window = sandbox; sandbox.parent={postMessage:function(value){messages.push(value)}}; sandbox.history = { replaceState: function() {} };
 vm.runInNewContext(script, sandbox);
 frames.shift()(0);
+var helpClick=elements.get('explore-summary').click();
+assert.strictEqual(helpDetails.open,true);
+assert(helpClick.defaultPrevented && helpClick.propagationStopped);
+elements.get('explore-summary').click();
+assert.strictEqual(helpDetails.open,false);
 assert.match(elements.get('stats').textContent, /stars/);
 var data = JSON.parse(payload);
 if(data.embed) assert(messages.some(function(m){return m.type==='mini-a-wiki-graph-ready' && m.version===1;}));
 if(data.nodes.length) {
   elements.get('random').click();
   assert(elements.get('detail').children.some(function(c) { return c.tagName === 'H2'; }));
+  var properties=elements.get('detail').children.find(function(c){return c.className==='disclosure';});
+  var propertyClick=properties.querySelector('button').click();
+  assert.strictEqual(properties.open,true);
+  assert(propertyClick.defaultPrevented && propertyClick.propagationStopped);
+  properties.querySelector('button').click();
+  assert.strictEqual(properties.open,false);
   var connection = elements.get('detail').children.find(function(c) { return c.tagName === 'BUTTON'; });
   if(connection) { connection.click(); assert.strictEqual(elements.get('back').disabled, false); elements.get('back').click(); }
   var search = elements.get('search'); search.value = data.nodes[0].label; search.oninput();

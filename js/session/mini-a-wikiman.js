@@ -69,6 +69,7 @@ MiniAWikiMan.prototype.runner = function() {
   var self = this
   this.args.fileallow = this._fileallow
   var runner = new MiniAWikiOps(this.args, function(msg) { self.show(msg) })
+  runner.onGraphProgress = function(p) { self.ui.print(ansiColor("FG(249)", p.stage + " · " + p.processed + " processed · " + p.cached + " cached · " + p.pending + " pending · " + p.failed + " failed · " + p.calls + "/" + p.effective.maxCalls + " calls · " + p.estimatedTokens + "/" + p.effective.maxTokens + " estimated tokens · " + ((p.elapsedMs || 0) / 60000).toFixed(2) + "/" + p.effective.maxMinutes + " minutes" + (p.resumable ? " · resume pending work explicitly" : ""))) }
   runner._reviewedContent = this._reviewedContent
   return runner
 }
@@ -244,6 +245,7 @@ MiniAWikiMan.prototype.runOperation = function(id, advanced) {
     if (id === "absorb.plan" && field[0] === "spec") { params.spec = self.absorbSpec(); return }
     params[field[0]] = field[3] === "boolean" ? self.yes(field[1] + "?") : self.input(field[1], field[2])
   })
+  if (id === "graph.build" || id === "graph.defaults") params = this.graphBuildControls(runner, id === "graph.defaults")
   if (id === "wiki.write") this.editPage(params)
   if (id === "dream.auto") params.dryrun = !this.yes("Run automatic repairs instead of previewing?")
   if (id === "ingest.run") params.dryrun = !this.yes("Apply ingestion instead of previewing?")
@@ -258,7 +260,7 @@ MiniAWikiMan.prototype.runOperation = function(id, advanced) {
       runner = new MiniAWikiOps(merge(clone(this.args), tuning), runner.log)
     }
   }
-  if ((id === "dream.reorg" || id === "absorb.plan" || id === "graph.build" && params.semantic === true) && !runner.args.model && !getEnv("OAF_MODEL")) {
+  if ((id === "dream.reorg" || id === "absorb.plan") && !runner.args.model && !getEnv("OAF_MODEL")) {
     runner.args.model = this.input("Configured model alias (or set OAF_MODEL before starting)")
   }
   if (id === "dream.reorg") {
@@ -377,6 +379,31 @@ MiniAWikiMan.prototype.run = function() {
   } finally {
     this.tempFiles.forEach(function(file) { try { io.rm(file) } catch(ignore) {} })
   }
+}
+
+// Both interfaces edit the same contract; force and resume never enter saved defaults.
+MiniAWikiMan.prototype.graphBuildControls = function(runner, saveOnly) {
+  var settings = runner.execute(runner.spec("graph.settings", {}), {}), self = this
+  if (settings.ok === false) throw new Error(settings.error)
+  var current = settings.result || settings
+  while (current.result && !current.effective) current = current.result
+  var base = current.effective || MiniAGraphBuild.defaults
+  var extraction = this.choose("Extraction", ["Structural", "Semantic"])
+  var options = merge(clone(base), { extraction: extraction === 1 ? "semantic" : "structural" })
+  options.modelHelp = options.extraction === "semantic" && this.choose("Model assistance", ["Off", "Automatic"]) === 1 ? "auto" : "off"
+  options.strategy = saveOnly ? "incremental" : ["incremental", "full", "resume"][this.choose("Build strategy", ["Incremental", "Full rebuild", "Resume pending work"])]
+  var preset = ["small", "moderate", "large", "custom", "reset"][this.choose("Budgets", ["Small", "Moderate", "Large", "Custom", "Reset to built-in defaults"])]
+  if (preset === "reset") options = clone(MiniAGraphBuild.defaults)
+  else if (MiniAGraphBuild.presets[preset]) options = merge(options, MiniAGraphBuild.presets[preset])
+  else ["maxCalls", "maxTokens", "maxMinutes"].forEach(function(k) { options[k] = Number(self.input(k, options[k])) })
+  options.force = !saveOnly && options.extraction === "semantic" && options.strategy !== "resume" && this.yes("Force extraction, ignoring semantic caches?")
+  options = MiniAGraphBuild.resolve(options)
+  this.show({ effective: options, models: current.models || MiniAGraphBuild.availability(), fallback: current.fallback })
+  if (!saveOnly && this.yes("Save extraction, model assistance and budgets as defaults for this wiki?")) {
+    var saved = runner.execute(runner.spec("graph.defaults", MiniAGraphBuild.preferences(options)), { confirm: true })
+    if (saved.ok === false) throw new Error(saved.error)
+  }
+  return saveOnly ? MiniAGraphBuild.preferences(options) : options
 }
 
 if (!toBoolean(global.__mini_a_wikiman_lib_mode)) {

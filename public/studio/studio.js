@@ -1,43 +1,227 @@
 /* Studio uses a single authenticated client; token is held only in memory. */
 "use strict";
 const StudioActivity = {
-  pending: 0,
-  update(delta) {
-    this.pending += delta;
+  requests: new Set(),
+  timer: null,
+  begin(path, method, queued = false, cancel) {
+    const request = { path, method, cancel, queuedAt: Date.now(), startedAt: queued ? null : Date.now() };
+    this.requests.add(request);
+    this.render();
+    if (this.timer === null) this.timer = setInterval(() => this.render(), 1000);
+    return request;
+  },
+  start(request) {
+    request.startedAt = Date.now();
+    this.render();
+  },
+  finish(request) {
+    this.requests.delete(request);
+    request.item?.remove();
+    if (!this.requests.size) { clearInterval(this.timer); this.timer = null; }
+    this.render();
+  },
+  render() {
     const node = document.getElementById("studio-activity");
-    node.hidden = this.pending === 0;
-    document.getElementById("studio-activity-text").textContent = this.pending > 1 ? "Processing requests… (" + this.pending + " pending)" : "Processing request…";
+    node.hidden = this.requests.size === 0;
+    const text = this.requests.size > 1 ? "Processing requests… (" + this.requests.size + " pending)" : "Processing request…";
+    const status = document.getElementById("studio-activity-text");
+    if (status.textContent !== text) status.textContent = text;
+    const cancelAll = document.getElementById("studio-activity-cancel");
+    if (cancelAll) cancelAll.onclick = () => { for (const request of this.requests) request.cancel?.(); };
+    const list = document.getElementById("studio-activity-requests");
+    const elapsed = since => Math.floor((Date.now() - since) / 1000) + "s";
+    for (const request of this.requests) {
+      if (!request.item) {
+        request.item = document.createElement("li");
+        const path = document.createElement("code");
+        path.textContent = request.method + " " + request.path;
+        request.timing = document.createElement("span");
+        request.item.append(path, request.timing);
+        if (request.cancel) {
+          const cancel = document.createElement("button");
+          cancel.type = "button"; cancel.textContent = "Cancel";
+          cancel.title = "Stop waiting for this request. Server work already started may continue.";
+          cancel.onclick = () => { cancel.disabled = true; request.cancel(); };
+          request.item.append(cancel);
+        }
+        list.append(request.item);
+      }
+      const timing = request.startedAt === null ? "Queued · waiting " + elapsed(request.queuedAt) : "Running · " + elapsed(request.startedAt);
+      if (request.timing.textContent !== timing) request.timing.textContent = timing;
+    }
   }
 };
 const StudioApi = {
   token: "",
   tail: Promise.resolve(),
-  request(path, method = "GET", body) {
-    StudioActivity.update(1);
-    const result = this.tail.then(() => this.send(path, method, body)).finally(() => StudioActivity.update(-1));
-    this.tail = result.catch(() => {}); return result;
+  request(path, method = "GET", body, options = {}) {
+    return this.perform(path, method, options, signal => this.send(path, method, body, signal), true);
   },
-  async send(path, method = "GET", body) {
-    const response = await fetch("/api/v1/" + path, { method, headers: { Authorization: "Bearer " + this.token, "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() }, body: body === undefined ? undefined : JSON.stringify(body) });
+  perform(path, method, options, send, queued = false) {
+    const controller = new AbortController();
+    let activity, rejectCancellation;
+    const cancelled = new Promise((resolve, reject) => { rejectCancellation = reject; });
+    const cancel = () => {
+      if (controller.signal.aborted) return;
+      const error = new Error(activity?.startedAt === null ? "Queued request cancelled before it was sent." : "Request cancelled. Server work already started may continue; check Activity before retrying changes.");
+      error.name = "AbortError";
+      controller.abort(error); rejectCancellation(error);
+    };
+    activity = options.silent ? null : StudioActivity.begin(path, method, queued, cancel);
+    options.signal?.addEventListener("abort", cancel, { once: true });
+    if (options.signal?.aborted) cancel();
+    const operation = (queued ? this.tail : Promise.resolve()).then(() => {
+      controller.signal.throwIfAborted();
+      if (activity) StudioActivity.start(activity);
+      return send(controller.signal);
+    });
+    if (queued) this.tail = operation.catch(() => {});
+    return Promise.race([operation, cancelled]).finally(() => {
+      options.signal?.removeEventListener("abort", cancel);
+      if (activity) StudioActivity.finish(activity);
+    });
+  },
+  async send(path, method = "GET", body, signal) {
+    const response = await fetch("/api/v1/" + path, { method, signal, headers: { Authorization: "Bearer " + this.token, "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() }, body: body === undefined ? undefined : JSON.stringify(body) });
     const result = await response.json();
+    signal?.throwIfAborted();
     if (!response.ok) { const error = new Error(result.error?.message || "Request failed"); error.details = result.error?.details; error.status = response.status; throw error; }
+    if (method !== "GET") {
+      const match = /^wikis\/([^/?]+)/.exec(path);
+      if (match && !(method === "DELETE" && path === "wikis/" + match[1])) SummaryCache.invalidate(decodeURIComponent(match[1]));
+      else if (match) SummaryCache.entries.delete(decodeURIComponent(match[1]));
+      else if (path.startsWith("jobs/")) SummaryCache.invalidateAll();
+    } else if (/^jobs\/[^/?]+$/.test(path) && result.wikiId && terminalStates.includes(result.status) && !SummaryCache.completedJobs.has(result.id)) {
+      SummaryCache.completedJobs.add(result.id);
+      SummaryCache.invalidate(result.wikiId);
+    }
     return result;
   },
-  async raw(path, options = {}) {
-    StudioActivity.update(1);
-    try {
-    const response = await fetch("/api/v1/" + path, { ...options, headers: { ...options.headers, Authorization: "Bearer " + this.token } });
-    if (!response.ok) throw new Error((await response.json()).error?.message || "Request failed");
-    return response;
-    } finally { StudioActivity.update(-1); }
+  async background(path) {
+    // Share the server-safe queue with interactive calls, yielding between reads.
+    for (let attempt = 0; ; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, attempt ? attempt * 500 : 0));
+      try { return await this.request(path, "GET", undefined, { silent: true }); }
+      catch (error) { if (error.status !== 423 || attempt >= 3) throw error; }
+    }
   },
-  async graphHtml(wikiId) { return (await this.raw("wikis/" + encodeURIComponent(wikiId) + "/graph/html")).text(); },
-  async events(jobId, cursor) { return (await this.raw("jobs/" + encodeURIComponent(jobId) + "/events", { headers: { "Last-Event-ID": String(cursor) } })).text(); },
-  async upload(uploadId, path, file) { return (await this.raw("uploads", { method: "POST", headers: { "X-Upload-ID": uploadId, "X-Upload-Path": encodeURIComponent(path) }, body: file })).json(); },
+  async raw(path, options = {}, consume) {
+    const { silent = false, ...fetchOptions } = options;
+    return this.perform(path, options.method || "GET", options, async signal => {
+      const response = await fetch("/api/v1/" + path, { ...fetchOptions, signal, headers: { ...fetchOptions.headers, Authorization: "Bearer " + this.token } });
+      if (!response.ok) throw new Error((await response.json()).error?.message || "Request failed");
+      const result = consume ? await consume(response) : response;
+      signal.throwIfAborted();
+      return result;
+    });
+  },
+  async graphHtml(wikiId) { return this.raw("wikis/" + encodeURIComponent(wikiId) + "/graph/html", {}, response => response.text()); },
+  async events(jobId, cursor, options = {}) { return this.raw("jobs/" + encodeURIComponent(jobId) + "/events", { ...options, headers: { "Last-Event-ID": String(cursor) } }, response => response.text()); },
+  async upload(uploadId, path, file) { return this.raw("uploads", { method: "POST", headers: { "X-Upload-ID": uploadId, "X-Upload-Path": encodeURIComponent(path) }, body: file }, response => response.json()); },
   wikis(offset = 0) { return this.request("wikis?limit=100&offset=" + offset); },
   register(wiki) { return this.request("wikis", "POST", wiki); }
 };
-const el = (tag, text, parent) => { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (parent) parent.append(node); return node; };
+// Session-only snapshots, collected one request at a time without blocking navigation.
+const SummaryCache = {
+  entries: new Map(),
+  completedJobs: new Set(),
+  entry(id) {
+    if (!this.entries.has(id)) this.entries.set(id, { snapshot: null, error: null, dirty: true, pending: null, listeners: new Set() });
+    return this.entries.get(id);
+  },
+  notify(entry) {
+    for (const listener of entry.listeners) {
+      if (!listener.host.isConnected) entry.listeners.delete(listener);
+      else listener.update();
+    }
+  },
+  invalidate(id) {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+    entry.dirty = true;
+    this.load(id);
+  },
+  invalidateAll() { for (const id of this.entries.keys()) this.invalidate(id); },
+  load(id, refresh = false) {
+    const entry = this.entry(id);
+    if (refresh) entry.dirty = true;
+    if (entry.pending) return entry.pending;
+    if (!entry.dirty && entry.snapshot) return Promise.resolve(entry.snapshot);
+    entry.dirty = false;
+    const base = "wikis/" + encodeURIComponent(id) + "/";
+    entry.pending = (async () => {
+      const reports = [];
+      for (const path of ["overview", "lint", "graph/stats"]) {
+        reports.push((await Promise.allSettled([StudioApi.background(base + path)]))[0]);
+      }
+      const jobs = await Promise.allSettled([(async () => {
+        const items = [];
+        let result;
+        do {
+          result = await StudioApi.background("jobs?wikiId=" + encodeURIComponent(id) + "&limit=100&offset=" + items.length);
+          items.push(...result.items);
+        } while (result.truncated && result.items.length);
+        return { items };
+      })()]);
+      if (!entry.dirty) {
+        const failed = reports.concat(jobs).find(report => report.status === "rejected");
+        entry.error = failed ? (failed.reason.status === 423 ? "Wiki is busy. Refresh after the active operation finishes." : "Refresh incomplete: " + failed.reason.message) : null;
+        if (!failed || !entry.snapshot) entry.snapshot = { reports, jobs: jobs[0], gatheredAt: Date.now() };
+      }
+    })().finally(() => {
+      entry.pending = null;
+      this.notify(entry);
+      // A write during collection invalidates that collection too.
+      if (entry.dirty) this.load(id);
+    });
+    this.notify(entry);
+    return entry.pending;
+  }
+};
+// Use ordinary buttons/panels instead of native details/summary activation on iOS.
+function initializeDisclosure(node) {
+  if (Object.getOwnPropertyDescriptor(node, "open")) return;
+  Object.defineProperty(node, "open", {
+    get() { return node.dataset.open === "true"; },
+    set(value) {
+      node.dataset.open = String(!!value);
+      const toggle = node.querySelector(".disclosure-toggle");
+      if (toggle) toggle.setAttribute("aria-expanded", String(!!value));
+    }
+  });
+  node.open = false;
+}
+function bindDisclosure(toggle) {
+  if (toggle.dataset.disclosureBound) return;
+  toggle.dataset.disclosureBound = "true";
+  toggle.type = "button";
+  const panel = toggle.parentElement;
+  initializeDisclosure(panel);
+  toggle.setAttribute("aria-expanded", String(panel.open));
+  toggle.addEventListener("click", event => {
+    event.preventDefault(); event.stopPropagation();
+    panel.open = !panel.open;
+  });
+}
+const el = (tag, text, parent) => {
+  const node = document.createElement(tag === "disclosure" ? "div" : tag === "disclosure-toggle" ? "button" : tag);
+  if (text !== undefined) node.textContent = text;
+  if (parent) parent.append(node);
+  if (tag === "disclosure") { node.className = "studio-disclosure"; initializeDisclosure(node); }
+  if (tag === "disclosure-toggle") { node.className = "disclosure-toggle"; bindDisclosure(node); }
+  return node;
+};
+document.querySelectorAll("#studio-activity .disclosure-toggle").forEach(bindDisclosure);
+function disclosureStates(host) {
+  return [...host.querySelectorAll(".studio-disclosure")].map(node => ({
+    title: node.querySelector(".disclosure-toggle")?.textContent, open: node.open
+  }));
+}
+function restoreDisclosures(host, states) {
+  [...host.querySelectorAll(".studio-disclosure")].forEach((node, index) => {
+    if (states[index]?.title === node.querySelector(".disclosure-toggle")?.textContent) node.open = states[index].open;
+  });
+}
 
 // JSON is rendered with nJSMap (as in Mini-A web Advanced). Values are escaped first because nJSMap emits HTML,
 // and inline style attributes are removed because Studio's CSP forbids them; studio.css themes the classes instead.
@@ -97,7 +281,7 @@ const VIEW_ICONS = { Import: "sources", Maintenance: "health", Activity: "jobs",
 const BUTTON_ICONS = [[/^all wikis|^first page|^previous/i, "back"], [/cancel|unregister|^delete/i, "trash"], [/^add |^new |^create|^queue|^stage/i, "add"], [/^save/i, "save"], [/^revert|reload|^restore|^apply|rerun/i, "reset"], [/refresh|^search/i, "refresh"], [/download/i, "download"], [/^open|^inspect|^next|^use /i, "open"], [/^move|^rename/i, "move"], [/^preview|^generate/i, "play"], [/^snapshot/i, "snapshot"], [/^folder tree/i, "tree"], [/^status$/i, "info"], [/^show$/i, "open"], [/^resume$/i, "play"], [/\.md$/i, "pages"]];
 const STATE_ICONS = { completed: "check", succeeded: "check", done: "check", failed: "cross", error: "cross", cancelled: "stop", canceled: "stop", running: "jobs", queued: "clock" };
 const message = (text, error = false) => { const node = document.getElementById("message"); node.textContent = text; node.className = error ? "error" : ""; };
-const safely = fn => async (...args) => { try { await fn(...args); } catch (error) { message(error.message, true); } };
+const safely = fn => async (...args) => { try { await fn(...args); } catch (error) { message(error.message, error.name !== "AbortError"); } };
 async function unlock(token) {
   StudioApi.token = token; studioSession = await StudioApi.request("session");
   document.getElementById("token").value = ""; document.getElementById("login").hidden = true; await dashboard();
@@ -132,7 +316,7 @@ function pageState() {
   return pageStates.get(currentWiki.id);
 }
 function row(parent) { const node = el("div", undefined, parent); node.className = "row"; return node; }
-function technical(value, parent, title = "Technical details") { const d = el("details", undefined, parent); el("summary", title, d); jsonView(value, d); return d; }
+function technical(value, parent, title = "Technical details") { const d = el("disclosure", undefined, parent); el("disclosure-toggle", title, d); jsonView(value, d); return d; }
 function human(value) { return String(value || "").replace(/[._-]+/g, " ").replace(/^./, c => c.toUpperCase()); }
 function bytes(value) { return new Intl.NumberFormat(undefined, {maximumFractionDigits: 1}).format(value / (value >= 1048576 ? 1048576 : 1024)) + (value >= 1048576 ? " MiB" : " KiB"); }
 function date(value) { return value ? new Date(value).toLocaleString() : "—"; }
@@ -153,7 +337,7 @@ function metricChart(parent, title, values, unit = "Count") {
   const section = el("section", undefined, parent); el("h4", title, section);
   const entries = Object.entries(values).filter(([,v]) => Number.isFinite(v));
   if (!entries.length) { el("p", "No data yet.", section); return; }
-  const valuesNode = el("details", undefined, section); el("summary", "View values", valuesNode);
+  const valuesNode = el("disclosure", undefined, section); el("disclosure-toggle", "View values", valuesNode);
   const body = dataTable(valuesNode, ["Category", unit]); entries.forEach(([k,v]) => { const r = el("tr", undefined, body); el("td", human(k), r); el("td", String(v), r); });
   if (typeof window.Chart !== "function") { valuesNode.open = true; return; }
   const frame = el("div", undefined, section); frame.className = "chart-frame";
@@ -204,6 +388,7 @@ async function openWiki(wiki, target = "Pages", record = true) {
   const content = el("div", undefined, host); content.id = "view";
   for (const name of ["Overview", "Pages", "Import", "Maintenance", "Activity", "Settings"]) { const b=navButton(nav,name,()=>navigate(name)); b.dataset.view=name; }
   await navigate(target,record);
+  SummaryCache.load(wiki.id);
 }
 async function navigate(name, record = true, path) {
   if (navigating || !(await mayLeave())) return;
@@ -219,7 +404,19 @@ async function navigate(name, record = true, path) {
   if (version!==navigationVersion) return;
   if (path && name==="Pages") await loadPage(path,false);
   const alerts=document.getElementById("wiki-alerts");
-  try { const info=await StudioApi.wiki("overview"); if(version!==navigationVersion)return; alerts.replaceChildren(); if(info.studio.pendingRecovery?.length) { el("p","This wiki needs recovery before edits or imports can continue.",alerts).className="error"; button(alerts,"Review recovery",()=>navigate("Maintenance")); } } catch(error) { if(version===navigationVersion) alerts.textContent=error.message; }
+  const entry = SummaryCache.entry(wikiId);
+  const updateAlerts = () => {
+    const report = entry.snapshot?.reports[0];
+    alerts.replaceChildren();
+    if (report?.status === "fulfilled" && report.value.studio.pendingRecovery?.length) {
+      el("p","This wiki needs recovery before edits or imports can continue.",alerts).className="error";
+      button(alerts,"Review recovery",()=>navigate("Maintenance"));
+    }
+  };
+  // The alert host survives navigation within a wiki; replace its old subscription.
+  if (alerts.summaryListener) entry.listeners.delete(alerts.summaryListener);
+  alerts.summaryListener = { host: alerts, update: updateAlerts };
+  entry.listeners.add(alerts.summaryListener); updateAlerts();
   } finally { navigating=false; }
 }
 window.addEventListener("popstate",safely(async event=>{
@@ -242,7 +439,7 @@ async function showView(name, content) {
   if (name === "Overview" || name === "Health") {
     if (name === "Overview") {
       button(content, "Build web command", () => webCommandWizard(currentWiki.id), "open");
-      const session = await StudioApi.request("session");
+      const session = studioSession || await StudioApi.request("session");
       if (session.canTestWiki) {
         const test = el("section", undefined, content); el("h4", "Test this wiki", test);
         el("p", "Chat with this wiki in Mini-A Web. The wiki opens read-only; shell access is disabled. Test servers stop when Studio exits.", test);
@@ -430,8 +627,8 @@ function drawEditor() {
   button(toolbar, "Move / rename", async () => { if (dirty) throw new Error("Save or revert before moving"); const destination = await askText("Destination Markdown path", page.path); if (destination && destination !== page.path) { const moved = await StudioApi.wiki("pages/move", "POST", { source: page.path, destination, expectedRevision: page.revision }); if (!editor.isConnected || currentWiki.id !== wikiId || activePage !== page) return; activePage=moved; pageState().selected=activePage.path; await document.getElementById("page-list")?.studioRefresh?.(); drawEditor(); } }).disabled = currentWiki.access !== "rw" || page.creating;
   button(toolbar, "Delete", async () => { if (await askConfirmation("Delete " + page.path + "?")) { await StudioApi.wiki("page?path=" + encodeURIComponent(page.path), "DELETE", { expectedRevision: page.revision, confirmation: page.path }); if (!editor.isConnected || currentWiki.id !== wikiId || activePage !== page) return; dirty = false; activePage = null; editor.replaceChildren(); pageState().selected=""; await document.getElementById("page-list")?.studioRefresh?.(); message("Deleted"); } }).disabled = currentWiki.access !== "rw" || page.creating;
   source.onkeydown = safely(async event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); await save(); } });
-  const metadata = el("details", undefined, editor); el("summary", "Frontmatter, outgoing links and provenance", metadata); jsonView({ metadata: page.metadata, links: page.links, sourceIds: page.sourceIds, warnings: page.warnings }, metadata);
-  if (!page.creating) StudioApi.wiki("backlinks?path=" + encodeURIComponent(page.path)).then(result => { const details = el("details", undefined, editor); el("summary", "Incoming backlinks", details); jsonView(result, details); }).catch(e => message(e.message, true));
+  const metadata = el("disclosure", undefined, editor); el("disclosure-toggle", "Frontmatter, outgoing links and provenance", metadata); jsonView({ metadata: page.metadata, links: page.links, sourceIds: page.sourceIds, warnings: page.warnings }, metadata);
+  if (!page.creating) StudioApi.wiki("backlinks?path=" + encodeURIComponent(page.path)).then(result => { const details = el("disclosure", undefined, editor); el("disclosure-toggle", "Incoming backlinks", details); jsonView(result, details); }).catch(e => message(e.message, true));
 }
 window.addEventListener("beforeunload", event => { if (dirty) { event.preventDefault(); event.returnValue = ""; } });
 async function graphView(content) {
@@ -462,14 +659,28 @@ function field(parent, name, choices, initial) {
 }
 function check(parent, title) { const label = el("label", title, parent), input = el("input", undefined, label); label.className="check-field"; input.type = "checkbox"; label.prepend(input); return input; }
 const trackedJobs = new Map();
+function jobCancelButton(parent, id) {
+  const cancel = button(parent, "Request cancellation", async () => {
+    cancel.disabled = true; cancel.pending = true;
+    try {
+      const job = await StudioApi.request("jobs/" + id + "/cancel", "POST", {});
+      cancel.requested = true;
+      message(job.status === "cancelled" ? "Job cancelled before it started." : job.warning || "Cancellation requested. The engine may finish its current writes.");
+    } finally { cancel.pending = false; cancel.disabled = !!cancel.requested; }
+  }, "stop");
+  return cancel;
+}
 async function queue(suffix, body) {
   const wikiId=currentWiki.id, job=await StudioApi.wiki(suffix,"POST",body);
   message(human(job.operation)+" started");
   const host=document.getElementById("background-jobs");
   const status=row(host);status.classList.add("background-job");const text=el("span",human(job.operation)+" · Queued",status);
   button(status,"View activity",()=>jobDetail(job.id),"jobs");
+  const cancel=jobCancelButton(status,job.id);
+  // Automatic refreshes have their own progress UI; do not toggle the page banner.
   async function poll(){
-    try {const latest=await StudioApi.request("jobs/"+job.id);trackedJobs.set(job.id,latest);text.textContent=human(latest.operation)+" · "+human(latest.status)+(latest.phase!==latest.status?" · "+human(latest.phase):"");
+    try {const latest=await StudioApi.request("jobs/"+job.id,"GET",undefined,{silent:true});trackedJobs.set(job.id,latest);text.textContent=human(latest.operation)+" · "+human(latest.status)+(latest.phase!==latest.status?" · "+human(latest.phase):"");
+      cancel.disabled=!!(cancel.pending||cancel.requested||latest.cancelRequested||terminalStates.includes(latest.status));
       if(terminalStates.includes(latest.status)){if(["failed","partial","recovery-required","interrupted"].includes(latest.status))status.classList.add("error");button(status,"Dismiss",()=>status.remove(),"cross");return latest;}
     }catch(e){text.textContent=e.message;button(status,"Dismiss",()=>status.remove(),"cross");return {status:"unavailable"};}
     return new Promise(resolve=>setTimeout(()=>resolve(poll()),1500));
@@ -478,8 +689,7 @@ async function queue(suffix, body) {
 }
 window.studioToolsView = async function(name, content) {
   if (name === "Graph") {
-    const semantic = check(content, "Opt in to model semantic extraction"); disable(semantic, writeReason(true));
-    button(content, "Queue graph rebuild", () => queue("graph/rebuild", { semantic: semantic.checked })).disabled = currentWiki.access !== "rw";
+    await graphBuildControls(content);
     await graphView(content); return;
   }
   if (name === "Jobs") return jobsView(content);
@@ -517,22 +727,36 @@ async function jobsView(content) {
 async function jobDetail(id) {
   const previous=document.activeElement, dialog=el("dialog",undefined,document.body);dialog.className="job-dialog";
   el("h3","Activity details",dialog);button(dialog,"Close",()=>dialog.close(),"cross");
-  const summary=el("div",undefined,dialog),log=el("details",undefined,dialog);el("summary","Processing log",log);const events=el("pre","",log);
-  const controls=row(dialog),cancel=button(controls,"Request cancellation",async()=>{await StudioApi.request("jobs/"+id+"/cancel","POST",{});cancel.disabled=true;message("Cancellation requested. The engine may finish its current writes.");});
-  let cursor=0;
+  const summary=el("div",undefined,dialog),log=el("disclosure",undefined,dialog);el("disclosure-toggle","Processing log",log);const events=el("pre","",log);
+  const controls=row(dialog),cancel=jobCancelButton(controls,id);
+  // Keep the dialog and its animated progress indicator mounted across polls.
+  const title=el("h4","",summary), state=el("p","",summary);
+  const warning=el("p","",summary);warning.className="error";warning.hidden=true;
+  const changed=el("p","",summary);changed.hidden=true;
+  const progress=el("progress",undefined,summary);progress.setAttribute("aria-label","Job in progress");
+  const phase=el("p","",summary), graphProgress=el("p","",summary), details=el("disclosure",undefined,summary);
+  graphProgress.hidden=true;
+  el("disclosure-toggle","Technical details",details);
+  const detailBody=el("div",undefined,details);
+  let cursor=0, detailValue;
+  const updateText=(node,text)=>{if(node.textContent!==text)node.textContent=text;};
   dialog.addEventListener("close",()=>{dialog.remove();previous?.focus();destroyDetachedCharts();},{once:true});dialog.showModal();
   async function refresh(){
     if(!dialog.isConnected)return;
     try {
-      const job=await StudioApi.request("jobs/"+id);if(!dialog.isConnected)return;
-      summary.replaceChildren();el("h4",human(job.operation),summary);el("p",human(job.status)+" · "+date(job.createdAt),summary);
-      if(job.warning)el("p",job.warning,summary).className="error";
-      if(job.changedPageCount!==undefined)el("p",job.changedPageCount+" pages changed",summary);
-      const finished=terminalStates.includes(job.status);cancel.disabled=finished||job.cancelRequested;
-      if(!finished){const progress=el("progress",undefined,summary);progress.setAttribute("aria-label","Job in progress");el("p",human(job.phase)+". Updates automatically.",summary);}
-      technical(job,summary);
+      const job=await StudioApi.request("jobs/"+id,"GET",undefined,{silent:true});if(!dialog.isConnected)return;
+      updateText(title,human(job.operation));updateText(state,human(job.status)+" · "+date(job.createdAt));
+      warning.hidden=!job.warning;updateText(warning,job.warning||"");
+      changed.hidden=job.changedPageCount===undefined;updateText(changed,job.changedPageCount===undefined?"":job.changedPageCount+" pages changed");
+      const finished=terminalStates.includes(job.status);cancel.disabled=!!(finished||job.cancelRequested||cancel.pending||cancel.requested);
+      progress.hidden=finished;phase.hidden=finished;
+      updateText(phase,human(job.phase)+". Updates automatically.");
+      const gp=job.progress;graphProgress.hidden=!gp;
+      if(gp) updateText(graphProgress,human(gp.stage)+" · "+(gp.processed||0)+" processed · "+(gp.cached||0)+" cached · "+(gp.pending||0)+" pending · "+(gp.failed||0)+" failed · "+(gp.calls||0)+" / "+(gp.effective?.maxCalls||"?")+" calls · "+(gp.estimatedTokens||0)+" / "+(gp.effective?.maxTokens||"?")+" estimated tokens · "+((gp.elapsedMs||0)/60000).toFixed(2)+" / "+(gp.effective?.maxMinutes||"?")+" minutes"+(gp.resumable?" · Pending work can be resumed explicitly":""));
+      const nextDetails=JSON.stringify(job);
+      if(nextDetails!==detailValue){detailValue=nextDetails;detailBody.replaceChildren();jsonView(job,detailBody);}
       let received;
-      do {received=0;for(const frame of (await StudioApi.events(id,cursor)).split("\n\n")){const line=frame.split("\n").find(l=>l.startsWith("data: "));if(!line)continue;const event=JSON.parse(line.slice(6));if(event.seq<=cursor)continue;cursor=event.seq;received++;events.textContent=(events.textContent+date(event.time)+" · "+event.message+"\n").slice(-100000);}}while(received===200&&dialog.isConnected);
+      do {received=0;for(const frame of (await StudioApi.events(id,cursor,{silent:true})).split("\n\n")){const line=frame.split("\n").find(l=>l.startsWith("data: "));if(!line)continue;const event=JSON.parse(line.slice(6));if(event.seq<=cursor)continue;cursor=event.seq;received++;events.textContent=(events.textContent+date(event.time)+" · "+event.message+"\n").slice(-100000);}}while(received===200&&dialog.isConnected);
       if(finished){
         outcome(summary,job.result);
         const changes=await StudioApi.request("wikis/"+encodeURIComponent(job.wikiId)+"/changes?jobId="+id);
@@ -602,7 +826,7 @@ async function sourcesView(content) {
   async function review(source){
     body.replaceChildren();el("h4","3. Preview changes · "+source.name,body);
     el("p","Review this source revision before importing. Preview reports engine estimates; application revalidates the current source.",body);
-    const advanced=el("details",undefined,body);el("summary","Advanced options",advanced);
+    const advanced=el("disclosure",undefined,body);el("disclosure-toggle","Advanced options",advanced);
     const mode=field(advanced,"Processing",["auto","normalize","raw","distill"]),layout=field(advanced,"Layout",["source","flat"]),section=field(advanced,"Destination section"),include=field(advanced,"Include patterns"),exclude=field(advanced,"Exclude patterns");
     const semantic=check(advanced,"Semantic extraction"),prune=check(advanced,"Remove source-owned pages missing from this revision");disable(semantic,writeReason(true));
     const actions=row(body),result=el("div",undefined,body);let approved=null,working=false;
@@ -644,8 +868,28 @@ async function absorbView(content) {
     await queue("absorptions", { action, planId: plan.value, confirmation: { applySavedPlan: true } });
   }).disabled = currentWiki.access !== "rw";
 }
-async function summaryView(content, health = false) {
-  const reports=await Promise.allSettled([StudioApi.wiki("overview"),StudioApi.wiki("lint"),StudioApi.wiki("graph/stats")]);
+function summaryView(content, health = false) {
+  const wikiId = currentWiki.id, entry = SummaryCache.entry(wikiId);
+  const controls = row(content), status = el("span", "", controls), body = el("div", undefined, content);
+  const refresh = button(controls, health ? "Refresh health" : "Refresh overview", () => SummaryCache.load(wikiId, true), "refresh");
+  let rendered;
+  const update = () => {
+    refresh.disabled = !!entry.pending;
+    status.textContent = entry.snapshot ? "Gathered " + date(entry.snapshot.gatheredAt) + (entry.pending ? " · Refreshing…" : " · Cached for this session") : "Gathering wiki information in the background…";
+    if (entry.error) status.textContent += " · " + entry.error + (entry.snapshot ? " Showing the last gathered data." : "");
+    if (entry.snapshot && rendered !== entry.snapshot) {
+      rendered = entry.snapshot;
+      const states = disclosureStates(body);
+      body.replaceChildren(); destroyDetachedCharts();
+      renderSummary(body, health, entry.snapshot);
+      restoreDisclosures(body, states);
+    }
+  };
+  entry.listeners.add({ host: body, update });
+  update(); SummaryCache.load(wikiId);
+}
+function renderSummary(content, health, snapshot) {
+  const reports=snapshot.reports;
   reports.forEach((report,index)=>{if(report.status==="rejected")el("p",["Wiki context","Health check","Graph status"][index]+": "+report.reason.message,content).className="error";});
   const info=reports[0].status==="fulfilled"?reports[0].value:{studio:{pageCount:"Unavailable",pendingRecovery:[]}},lint=reports[1].status==="fulfilled"?reports[1].value:{issues:[],total_issues:"Unavailable"},graph=reports[2].status==="fulfilled"?reports[2].value:{freshness:"Graph status unavailable"};
   const metrics=row(content);metrics.classList.add("metrics");
@@ -657,7 +901,7 @@ async function summaryView(content, health = false) {
     const groups={};
     for(const issue of findings){const type=issue.type||issue.code||issue.kind||"Other";(groups[type] ||= []).push(issue);}
     for(const [type,issues] of Object.entries(groups)){
-      const category=el("details",undefined,content);el("summary",human(type)+" · "+issues.length+" findings",category);
+      const category=el("disclosure",undefined,content);el("disclosure-toggle",human(type)+" · "+issues.length+" findings",category);
       const body=dataTable(category,["Page","Details","Actions"]),pages={};
       issues.forEach(issue=>{const path=issue.page||issue.path||issue.section||"Wiki";(pages[path] ||= []).push(issue);});
       for(const [path,items] of Object.entries(pages)){
@@ -671,16 +915,21 @@ async function summaryView(content, health = false) {
     if(lint.truncated){el("p","More findings are available.",content);button(content,"Load all findings",async()=>{let offset=findings.length,next;do{next=await StudioApi.wiki("lint?limit=100&offset="+offset);(next.issues||[]).forEach(issue=>{const section=el("section",undefined,content);el("p",issue.message||issue.path||human(issue.type),section);technical(issue,section);});offset+=(next.issues||[]).length;}while(next.truncated&&next.issues?.length);});}
     if(!findings.length&&reports[1].status==="fulfilled")el("p","No findings in the reported check coverage.",content);
   }else{
-    const jobs=await allItems("jobs?wikiId="+encodeURIComponent(currentWiki.id));const active=jobs.filter(j=>!terminalStates.includes(j.status));
-    el("h4","Current activity",content);if(!active.length)el("p","No running jobs.",content);active.forEach(j=>button(content,human(j.operation)+" · "+human(j.status),()=>jobDetail(j.id)));
+    const jobs=snapshot.jobs.status==="fulfilled"?snapshot.jobs.value.items:[];
+    const active=jobs.filter(j=>!terminalStates.includes(j.status));
+    el("h4","Activity when gathered",content);
+    if(snapshot.jobs.status==="rejected")el("p","Activity unavailable: "+snapshot.jobs.reason.message,content).className="error";
+    else if(!active.length)el("p","No running jobs in this snapshot.",content);
+active.forEach(j=>button(content,human(j.operation)+" · "+human(j.status),()=>jobDetail(j.id)));
     button(content,"Review wiki health",()=>navigate("Maintenance"));
   }
   el("p",graph.freshness,content);technical(info,content,"Wiki context");technical(graph,content,"Graph details");technical(lint,content,"Complete check result");
 }
 async function maintenanceView(content){
+  el("p","Mini-A’s Dream feature checks, repairs and reorganizes your wiki. Open Dream tasks to choose an action.",content);
   const tabs=row(content),panel=el("div",undefined,content);
-  for(const [label,render] of [["Health",()=>summaryView(panel,true)],["Tasks",()=>dreamsView(panel)],["Backups",()=>backupsView(panel)],["Recovery",()=>recoveryView(panel)]])button(tabs,label,async()=>{panel.replaceChildren();destroyDetachedCharts();await render();});
-  await summaryView(panel,true);
+  for(const [label,render] of [["Dream tasks",()=>dreamsView(panel)],["Health",()=>summaryView(panel,true)],["Backups",()=>backupsView(panel)],["Recovery",()=>recoveryView(panel)]])button(tabs,label,async()=>{panel.replaceChildren();destroyDetachedCharts();await render();});
+  await dreamsView(panel);
 }
 async function recoveryView(content){
   el("p","Review engine recovery before retrying partial work. Cancelling a job does not roll back changes.",content);
@@ -689,11 +938,11 @@ async function recoveryView(content){
   el("p","For absorption, use the saved plan controls in Import from another wiki. Backups can restore a verified earlier state.",content);button(content,"Open activity",()=>navigate("Activity"));
 }
 async function dreamsView(content) {
-  el("p","Choose a maintenance task. Checks are diagnostics; reorganization makes live changes and is not an exact replay of a preview.",content);
+  el("p","Choose a Dream task to maintain your wiki, or compact storage separately. Dream checks are diagnostics; Dream reorganization makes live changes and is not an exact replay of a preview.",content);
   const cards=el("div",undefined,content);cards.className="task-grid";const optionsPanel=el("section",undefined,content);
   const tasks=[["Check wiki","plan","Read-only maintenance diagnostics."],["Repair","repair","Repair wiki consistency."],["Apply maintenance","apply","Apply engine maintenance changes."],["Rebuild search","reindex","Rebuild the search index."],["Update indexes","indexes","Refresh wiki index pages."],["Rebuild graph","graph","Rebuild page relationships."],["Automatic maintenance","auto","Diagnose, or explicitly apply repairs."],["Reorganize pages","reorg","Use the model to move, merge or remove pages."],["Compact storage","compact","Offline storage maintenance."]];
   function select(task){
-    optionsPanel.replaceChildren();const [title,mode,description]=task;el("h4",title,optionsPanel);el("p",description,optionsPanel);
+    optionsPanel.replaceChildren();const [title,mode,description]=task;el("h4",(mode==="compact"?"":"Dream · ")+title,optionsPanel);el("p",description,optionsPanel);
     const semantic=["graph","reorg"].includes(mode)?check(optionsPanel,"Use model semantic extraction"):null;if(semantic)disable(semantic,writeReason(true));
     const organize=mode==="reorg"?field(optionsPanel,"Organization",["none","topics"]):null,instructions=mode==="reorg"?field(optionsPanel,"Reorganization guidance"):null,steps=mode==="reorg"?field(optionsPanel,"Maximum model steps",null,"40"):null;if(steps){steps.type="number";steps.min="1";}
     const mutate=mode==="auto"?check(optionsPanel,"Apply repairs (otherwise only preview)"):null;
@@ -701,10 +950,10 @@ async function dreamsView(content) {
     const external=mode!=="plan"?check(optionsPanel,"External CLI readers and writers are stopped"):null;
     const structural=mode==="reorg"?check(optionsPanel,"Allow structural changes after a verified backup"):null;
     if(mode!=="plan")el("p","Page-changing tasks create a verified backup first. Keep external writers stopped while the task runs.",optionsPanel);
-    const actions=row(optionsPanel);disable(button(actions,"Start "+title.toLowerCase(),()=>mode==="compact"?queue("maintenance",{action:"compact",externalProcessesStopped:external.checked}):queue("dreams",{mode,options:{semantic:semantic?.checked||false,organize:organize?.value||"none",instructions:instructions?.value||"",dreammaxsteps:Number(steps?.value||40),compact:compact?.checked||false,dryrun:mode==="plan"||mode==="auto"&&!mutate.checked},confirmation:{acknowledgeStructuralChanges:structural?.checked||false,externalProcessesStopped:external?.checked||false}})),writeReason(mode==="reorg"));
+    const actions=row(optionsPanel);disable(button(actions,(mode==="compact"?"Start ":"Start Dream · ")+title.toLowerCase(),()=>mode==="compact"?queue("maintenance",{action:"compact",externalProcessesStopped:external.checked}):queue("dreams",{mode,options:{semantic:semantic?.checked||false,organize:organize?.value||"none",instructions:instructions?.value||"",dreammaxsteps:Number(steps?.value||40),compact:compact?.checked||false,dryrun:mode==="plan"||mode==="auto"&&!mutate.checked},confirmation:{acknowledgeStructuralChanges:structural?.checked||false,externalProcessesStopped:external?.checked||false}})),writeReason(mode==="reorg"));
     technical({engineMode:mode},optionsPanel);
   }
-  for(const task of tasks){const card=el("section",undefined,cards);button(card,task[0],()=>select(task));el("p",task[2],card);}select(tasks[0]);
+  for(const task of tasks){const card=el("section",undefined,cards);button(card,(task[1]==="compact"?"":"Dream · ")+task[0],()=>select(task));el("p",task[2],card);}select(tasks[0]);
 }
 async function backupsView(content) {
   const section=el("section",undefined,content);el("h4","Backups",section);
@@ -754,4 +1003,26 @@ async function webCommandWizard(selectedId) {
   dialog.addEventListener("input", update); dialog.addEventListener("change", update);
   dialog.addEventListener("close", () => { dialog.remove(); previous?.focus(); }, {once:true});
   update(); dialog.showModal();
+}
+
+async function graphBuildControls(content) {
+  const settings=await StudioApi.wiki("graph/settings"), box=el("section",undefined,content);
+  el("h2","Build graph",box);
+  const extraction=field(box,"Extraction",["structural","semantic"]), modelHelp=field(box,"Model assistance",["off","auto"]), strategy=field(box,"Build strategy",["incremental","full","resume"]);
+  const preset=field(box,"Budget preset",["custom","small","moderate","large","reset"]), calls=field(box,"Maximum calls"), tokens=field(box,"Estimated total tokens"), minutes=field(box,"Elapsed minutes"), force=check(box,"Force extraction (ignore semantic caches)");
+  const review=el("pre",undefined,box), builtIn={extraction:"structural",modelHelp:"off",maxCalls:100,maxTokens:200000,maxMinutes:10};
+  const apply=value=>{extraction.value=value.extraction;modelHelp.value=value.modelHelp;calls.value=String(value.maxCalls);tokens.value=String(value.maxTokens);minutes.value=String(value.maxMinutes);};
+  apply(settings.effective);strategy.value="incremental";
+  const values=()=>({extraction:extraction.value,modelHelp:extraction.value==="structural"?"off":modelHelp.value,strategy:strategy.value,force:force.checked,maxCalls:Number(calls.value),maxTokens:Number(tokens.value),maxMinutes:Number(minutes.value)});
+  function refresh(){
+    modelHelp.disabled=extraction.value==="structural"||currentWiki.access!=="rw";
+    force.disabled=extraction.value!=="semantic"||strategy.value==="resume"||currentWiki.access!=="rw";if(force.disabled)force.checked=false;
+    const v=values();review.textContent=JSON.stringify({effective:v,models:settings.models},null,2)+"\n"+settings.fallback;
+  }
+  preset.onchange=()=>{if(preset.value==="reset"){apply(builtIn);strategy.value="incremental";force.checked=false;}else if(settings.presets[preset.value]){const v=settings.presets[preset.value];calls.value=v.maxCalls;tokens.value=v.maxTokens;minutes.value=v.maxMinutes;}refresh();};
+  [extraction,modelHelp,strategy,calls,tokens,minutes,force].forEach(control=>{control.onchange=refresh;control.oninput=refresh;disable(control,writeReason(false));});
+  disable(preset,writeReason(false));
+  disable(button(box,"Save defaults",async()=>{const v=values();delete v.force;delete v.strategy;await StudioApi.wiki("graph/settings","PUT",v);message("Graph defaults saved");}),writeReason(false));
+  disable(button(box,"Run graph build",()=>queue("graph/rebuild",values())),writeReason(false));
+  refresh();
 }

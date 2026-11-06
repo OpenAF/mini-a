@@ -14,7 +14,7 @@ assert.ok(submitMatch, 'Advanced submit adapter is present');
 const submit = 'async (' + submitMatch[1] + ')=>{' + submitMatch[2] + '\n}';
 async function check(crypto) {
   const requests = [];
-  const context = vm.createContext({ window: {}, URLSearchParams, Uint8Array,
+  const context = vm.createContext({ window: {}, URLSearchParams, Uint8Array, embeddedMode:false,
     history: [], historyIndex: 0, composer: {value:'2+2'}, suggestions: {hidden:false},
     busy: false, api: async data => { requests.push(data); return {accepted:true}; }, poll: async () => {},
     previousSelections:{}, activeScreen:'activity', viewParams:{}, submittedView:null,

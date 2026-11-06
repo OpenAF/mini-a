@@ -7,6 +7,7 @@ if (typeof __miniAPath !== "function") loadLib(String(new java.io.File(String(__
 
 loadLib(__miniAPath("js/core/mini-a-common.js"))
 loadLib(__miniAPath("js/wiki/mini-a-wiki-maintenance.js"))
+loadLib(__miniAPath("js/wiki/mini-a-graph-options.js"))
 
 // Shared argument mapping. Entry points retain explicit access and model policies.
 function __miniAWikiConfigFromArgs(args, overrides) {
@@ -17,7 +18,9 @@ function __miniAWikiConfigFromArgs(args, overrides) {
   var cfg = { fileallow: args.fileallow, access: args.wikiaccess, backend: backend, indexdir: args.wikiindexdir,
     s3artifactprefix: args.wikis3artifactprefix, s3artifactbundle: args.s3artifactbundle,
     usegraph: toBoolean(args.usewikigraph) === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0),
-    wikigraphsemantic: toBoolean(args.wikigraphsemantic) === true }
+    graphTagPolicy: toBoolean(args.dreamwikisurgical) === true && toBoolean(args.usewikigraph) === true,
+    graphModelAvailability: { main: isDef(args.model), decision: isDef(args.modeldec) },
+    wikigraphsemantic: isDef(args.wikigraphsemantic) ? toBoolean(args.wikigraphsemantic) === true : __ }
   ;["wikihttpindexurl", "wikihttptimeout", "wikiartifactrefreshsecs", "wikilexical", "wikiretrievalv2", "wikitelemetry", "wikiretrievalconfig",
     "wikisourceurl", "wikisourcefield", "wikisourceinline", "wikimetacache", "wikigraphcommunity", "wikigraphhintcap", "wikigraphsearchhints",
     "wikigraphmounts", "wikimountgraphttlms", "wikigraphcross", "wikigraphcrossjoin", "wikigraphcrosscap", "wikigraphcrossdepth",
@@ -1947,10 +1950,34 @@ MiniAWikiManager.prototype._withGraphHints = function(hits, options) {
   return isNumber(lim) ? combined.slice(0, lim) : combined
 }
 
+// Shared by Studio, wikiman, CLI, MCP and library callers. Stored alongside wiki state.
+MiniAWikiManager.prototype.graphBuildSettings = function(overrides, save) {
+  var file = this._getIndexRoot() + "/.mini-a-wiki-state/config.json", config = {}
+  if (io.fileExists(file)) config = af.fromJson(io.readFileString(file))
+  if (!isMap(config)) throw new Error("Invalid wiki state configuration")
+  var run = merge({}, overrides || {})
+  var defaults = config.graphBuild || (this._config.wikigraphsemantic === true ? { extraction: "semantic", modelHelp: "auto" } : {})
+  var effective = MiniAGraphBuild.resolve(run, defaults)
+  if (save === true) {
+    if (this._access !== "rw" || this._catalog) throw new Error("Saving graph defaults requires a writable wiki")
+    config.graphBuild = MiniAGraphBuild.preferences(effective)
+    var dir = new java.io.File(file).getParentFile(); dir.mkdirs()
+    var temp = file + "." + java.util.UUID.randomUUID() + ".tmp"
+    try {
+      io.writeFileString(temp, stringify(config, __, ""))
+      java.nio.file.Files.move(new java.io.File(temp).toPath(), new java.io.File(file).toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    } finally { java.nio.file.Files.deleteIfExists(new java.io.File(temp).toPath()) }
+  }
+  var models = MiniAGraphBuild.availability(), configured = this._config.graphModelAvailability || {}
+  Object.keys(configured).forEach(function(key) {if (configured[key]) models[key] = true})
+  return { ok: true, effective: effective, saved: config.graphBuild || {}, presets: clone(MiniAGraphBuild.presets), models: models, fallback: "Semantic extraction always runs deterministically; models are optional. Time limits stop new calls; in-flight calls use their request timeout." }
+}
+
 MiniAWikiManager.prototype.graph = function(op, params) {
   this._maybeRefreshArtifactBundle()
   var action = isString(op) ? op.toLowerCase().trim() : (isObject(params) && isString(params.op) ? params.op.toLowerCase().trim() : "stats")
   var p = isObject(params) ? params : {}
+  if (action === "settings" || action === "defaults") return this.graphBuildSettings(p, action === "defaults")
   if (this._catalog && ["build", "report", "falkor"].indexOf(action) >= 0) return { ok: false, error: this._readOnlyError() }
   var mountGraphRequest = (action === "neighbors" || action === "retrieve") && isString(p.path) && p.path.startsWith("@")
   if (this._catalog && action === "stats" && toBoolean(this._config.usegraph) === true) {
@@ -1981,11 +2008,16 @@ MiniAWikiManager.prototype.graph = function(op, params) {
     if (mutating) return { ok: false, error: "wiki is read-only: graph '" + action + "' requires wikiaccess=rw" }
   }
   if (action === "build") {
-    var st = this._graph.buildStructural(this._graphPages(), p)
+    var effective = this.graphBuildSettings(p).effective
+    var result = this._graph.build(this._graphPages(), merge(p, effective))
     if (p.report === true && p.preview !== true && isFunction(this._graph.saveReport)) this._graph.saveReport()
-    // F5: wikigraphsemantic=true makes graph build default semantic:true (still emits corpus warning)
-    if (p.semantic === true || toBoolean(this._config.wikigraphsemantic) === true) return this._graph.buildSemantic(this._graphPages(), p)
-    return { ok: true, structural: st }
+    return result
+  }
+  if (action === "tags") {
+    var page = this.read(p.path), node = this._graph._state.nodes["doc:" + p.path]
+    if (!page || !node || node.props.revision !== sha1(page.raw)) return { ok: false, error: "stale-graph-evidence: rebuild graph first" }
+    var vocabulary = Object.keys(this._graph._state.nodes).filter(function(id) { return id.indexOf("tag:") === 0 }).map(function(id) { return id.substring(4) })
+    return this._graph.tagSuggestions(p.path, page.meta && page.meta.tags, vocabulary)
   }
   if (action === "report") return isFunction(this._graph.saveReport) ? this._graph.saveReport() : { ok: false, error: "report not supported" }
   if ((action === "neighbors" || action === "retrieve") && isString(p.path) && p.path.startsWith("@")) {
@@ -2009,8 +2041,8 @@ MiniAWikiManager.prototype.graph = function(op, params) {
     return rres
   }
   if (action === "query") return this._graph.query(isString(p.text) ? p.text : (isString(p.query) ? p.query : ""))
-  if (action === "neighbors") return this._graph.neighbors(isString(p.node) ? p.node : (isString(p.path) ? ("doc:" + p.path) : ""))
-  if (action === "path") return this._graph.path(p.from || p.a || "", p.to || p.b || "")
+  if (action === "neighbors") return this._graph.neighbors(isString(p.node) ? p.node : (isString(p.path) ? ("doc:" + p.path) : ""), p)
+  if (action === "path") return this._graph.path(p.from || p.a || "", p.to || p.b || "", p)
   if (action === "communities") return this._graph.detectCommunities()
   if (action === "surprise") return this._graph.crossDocumentSurprise()
   if (action === "stats") return this._graph.stats()
@@ -2440,6 +2472,9 @@ MiniAWikiManager.prototype._initializeGraph = function() {
         communityAlgo: isString(cfg.wikigraphcommunity) ? cfg.wikigraphcommunity : "louvain",
         falkor: isMap(cfg.wikigraphfalkor) ? cfg.wikigraphfalkor : __,
         llmExtractFn: isFunction(cfg.llmExtractFn) ? cfg.llmExtractFn : __,
+        modelExtractors: cfg.modelExtractors,
+        decisionExtractor: cfg.decisionExtractor,
+        modelFingerprint: cfg.modelFingerprint,
         readOnly: this._access !== "rw",
         autosave: isString(cfg.wikigraphautosave) ? cfg.wikigraphautosave : "always",
         saveDebounceMs: isNumber(cfg.wikigraphsavedebouncems) ? cfg.wikigraphsavedebouncems : 5000
@@ -2480,6 +2515,7 @@ MiniAWikiManager.prototype._isArchiveRoot = function(root) {
 MiniAWikiManager.prototype._bootstrapWiki = function() {
   this._bootstrappedFiles = []
   this._bootstrappedEmptyWiki = false
+  if (this._config.skipBootstrap === true) return
   try {
     var pages = this.list("")
     var hasAgents = this._backend.exists("AGENTS.md")
@@ -4222,6 +4258,30 @@ MiniAWikiManager.prototype.retrieve = function(query, options) {
   return out
 }
 
+// Reorg-only guard: the main model chooses edits, but tag additions must be evidenced and bounded.
+MiniAWikiManager.prototype._validateDreamTags = function(path, meta, body) {
+  if (!this._config.graphTagPolicy) return
+  var old = this.read(path)
+  if (!old) return
+  var before = isArray(old.meta.tags) ? old.meta.tags : [], after = isArray(meta.tags) ? meta.tags : []
+  if (before.some(function(tag) { return after.indexOf(tag) < 0 })) throw new Error("Dream tags preserve existing tags; report removals/normalization separately")
+  var added = after.filter(function(tag) {return before.indexOf(tag) < 0})
+  if (!added.length) return
+  if (!this._dreamTagBase) this._dreamTagBase = {}
+  if (!this._dreamTagBase[path]) this._dreamTagBase[path] = before.slice()
+  var base = this._dreamTagBase[path]
+  if (after.filter(function(tag) {return base.indexOf(tag) < 0}).length > 5) throw new Error("Dream allows at most five new tags per page")
+  var proposed = this.graph("tags", {path:path})
+  if (proposed.ok === false) throw new Error(proposed.error)
+  var accepted = [], self = this
+  added.forEach(function(tag) {
+    var suggestion = proposed.additions.filter(function(item) {return item.tag === tag})[0]
+    if (!suggestion || String(body).substring(suggestion.evidence.start,suggestion.evidence.end) !== suggestion.evidence.quote) throw new Error("New dream tag requires current body evidence: " + tag)
+    accepted.push(merge({path:path},suggestion))
+  })
+  return accepted
+}
+
 MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {
   if (this._access !== "rw") return { ok: false, error: this._readOnlyError("wiki is read-only (wikiaccess=ro)") }
   if (!isString(path) || path.trim().length === 0) return { ok: false, error: "path is required" }
@@ -4287,8 +4347,10 @@ MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {
     if (!isString(updatedMeta.type) || updatedMeta.type.trim().length === 0) updatedMeta.type = "concept"
 
     try {
+      var tagReasons = this._validateDreamTags(path, updatedMeta, reparsed.body)
       var updatedRaw = this._serializeFrontmatter(updatedMeta, reparsed.body)
       this._backend.write(path, updatedRaw)
+      if (tagReasons && tagReasons.length) this._dreamTagReasons = (this._dreamTagReasons || []).concat(tagReasons)
       this._invalidateReadCache()
       this._updatePageIndexes(path, updatedRaw, this.parseFrontmatter(updatedRaw))
       this._logWrite(path, updatedMeta)
@@ -4304,7 +4366,9 @@ MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {
   if (opts.preserveRaw === true && isString(metaOrRaw) && isUnDef(body)) {
     try {
       var rawParsed = this.parseFrontmatter(metaOrRaw)
+      var tagReasons = this._validateDreamTags(path, rawParsed.meta, rawParsed.body)
       this._backend.write(path, metaOrRaw)
+      if (tagReasons && tagReasons.length) this._dreamTagReasons = (this._dreamTagReasons || []).concat(tagReasons)
       this._invalidateReadCache()
       this._updatePageIndexes(path, metaOrRaw, rawParsed)
       this._logWrite(path, rawParsed.meta)
@@ -4338,8 +4402,10 @@ MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {
   }
 
   try {
+    var tagReasons = this._validateDreamTags(path, meta, bodyText)
     var content = this._serializeFrontmatter(meta, bodyText)
     this._backend.write(path, content)
+    if (tagReasons && tagReasons.length) this._dreamTagReasons = (this._dreamTagReasons || []).concat(tagReasons)
     this._invalidateReadCache()
     this._updatePageIndexes(path, content, this.parseFrontmatter(content))
     this._logWrite(path, meta)
@@ -5111,7 +5177,13 @@ MiniAWikiManager.prototype._movePages = function(from, to, options) {
   if (!isString(raw)) return { ok: false, error: "page not readable: " + fromPath }
   if (!global.__miniAWikiKnowledge) loadLib(__miniAPath("js/wiki/mini-a-wiki-knowledge.js"))
   global.__miniAWikiKnowledge.install(this)
-  try { return this.knowledgeMove(fromPath, toPath, opts) }
+  try {
+    var moved = this.knowledgeMove(fromPath, toPath, opts)
+    if (moved.ok && this._dreamTagBase && this._dreamTagBase[fromPath]) {
+      this._dreamTagBase[toPath] = this._dreamTagBase[fromPath]; delete this._dreamTagBase[fromPath]
+    }
+    return moved
+  }
   catch(e) { return { ok: false, error: __miniAErrMsg(e), recovery_pending: this.knowledgeMovePending() } }
 
 }

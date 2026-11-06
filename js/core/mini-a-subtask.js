@@ -355,7 +355,7 @@ SubtaskManager.prototype._normalizeWorkers = function(workers) {
 
 SubtaskManager._PARENT_ONLY_CHILD_ARG_NAMES = [
   "validationgoal", "valgoal", "deepresearch", "maxcycles", "validationthreshold", "persistlearnings",
-  "subtasks", "subtasksfile",
+  "subtasks", "subtasksfile", "_webEmbedContext", "webembed", "webembedorigins", "webembedfields", "webembedcontextrequired", "webembedprompt",
   "_forkInheritedKnowledge", "state", "conversation", "historyvm", "historyvmmode", "historyvmshadow", "contextvirtualization", "contextvirtualizationshadow", "resume", "resumefailed", "durable", "runid", "resumerun", "runstatus", "runroot", "parentrunid",
   "usehistory", "historypath", "historykeep", "historykeepperiod", "historykeepcount", "historyretention",
   "historys3bucket", "historys3prefix", "historys3url", "historys3accesskey", "historys3secret",

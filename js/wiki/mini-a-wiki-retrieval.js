@@ -2043,9 +2043,9 @@ MiniAWikiRetrievalV2.prototype._expandGraph = function(candidates, contexts, opt
     var hit=measure("search",function(){return target.engine._graphHit(target.pin,entry.path,opts.query)})
     if (!hit) return
     used.candidates++;used.materializedPassages++;target.source.candidates++
-    hit.page=page;hit.engine=target.engine;hit.snapshot=target.pin;hit.wiki=target.target.name;hit.path=path;hit.graphSupports=supports;hit.graphRoutes=entry.routes || [];hit.expansions=[]
+    hit.page=page;hit.engine=target.engine;hit.snapshot=target.pin;hit.wiki=target.target.name;hit.path=path;hit.graphSupports=supports;hit.graphRoutes=entry.routes || [];hit.graphExplanation=entry.explanation ? {relation:entry.relation,text:entry.explanation,evidenceLayer:entry.evidenceLayer} : null;hit.expansions=[]
     measure("rank",function(){target.engine._rank(hit,opts.query)})
-    hit.scoreComponents.graph=0.25;hit.rankScore+=0.25;hit.retrievalMethod="graph"
+    hit.scoreComponents.graph=entry.evidenceLayer === "grounded" ? 0.5 : entry.evidenceLayer === "inferred" ? 0.1 : 0.25;hit.rankScore+=hit.scoreComponents.graph;hit.retrievalMethod="graph"
     candidates.push(hit);known[path]=true
     if (entry.explicit && depth >= 2) secondHop.push({hit:hit,context:target,supports:entry.supports,routes:hit.graphRoutes})
   }
@@ -2061,6 +2061,7 @@ MiniAWikiRetrievalV2.prototype._expandGraph = function(candidates, contexts, opt
       if(exhausted()){partial(context,"graph-budget");return}
       var suggestion=related[i], route=resolve(context,suggestion.path)
       if(!route || previous && route.cross)continue
+      route.explanation=suggestion.explanation;route.relation=suggestion.relation;route.evidenceLayer=suggestion.evidenceLayer
       route.supports=base.concat(suggestion.supports.map(function(s){return bind(context,s)}))
       if(previous){route.cross=true;route.routes=previous.routes}
       admit(route,context)
@@ -2086,6 +2087,7 @@ MiniAWikiRetrievalV2.prototype._expandGraph = function(candidates, contexts, opt
     if(exhausted()){partial(context,"graph-budget");break}
     try{discover(seed,context)}catch(error){partial(context,Date.now()>=deadline?"graph-budget":"graph-unavailable")}
     if(work.truncated)partial(context,"graph-budget")
+    if(work.staleEvidence)partial(context,"stale-graph-evidence")
   }
   // Compatibility with crossdepth=2: one local hop after an explicit cross link,
   // never another cross link or an unbounded recursive walk.
@@ -2264,6 +2266,8 @@ MiniAWikiRetrievalV2.prototype.search = function(query, options) {
       }
       seen[hit.path] = true
       var result = { path: hit.path, ref: self.manager._agenticRef(hit.path), wiki: hit.wiki, title: String(hit.page.title).substring(0, 512), description: String(hit.page.description).substring(0, 256), summary: String(hit.page.description).substring(0, 256), nativeScore: hit.nativeScore, rankScore: hit.rankScore, score: hit.rankScore, scoreComponents: hit.scoreComponents, retrievalMethod: hit.retrievalMethod, passage: self._reference(hit) }
+      if (hit.graphExplanation) result.graphExplanation = clone(hit.graphExplanation)
+      if (hit.graphSupports) result.graphReferences = hit.graphSupports.map(function(s) {return {path:s.path,revision:s.page.revision}})
       if (opts.compact === false || Number(opts.contextLines) > 0) {
         var pattern = new RegExp(String(query).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
         var snippet = hit.engine.manager._snippetFromContent(hit.text, pattern, Math.min(10, Math.max(0, Number(opts.contextLines) || 0)))
@@ -2398,6 +2402,8 @@ MiniAWikiRetrievalV2.prototype.retrieve = function(query, options, present) {
         var key = hit.path + ":" + r.pageId + ":" + r.revision + ":" + hash
         if (seenText[key]) return
         var record = { path: hit.path, ref: self.manager._agenticRef(hit.path), wiki: hit.wiki, title: hit.page.title, content: text, selectionComponents: hit.selectionComponents, lineStart: r.startLine, lineEnd: r.endLine, charStart: r.charStart, charEnd: r.charEnd, revision: r.revision, passage: self._reference(hit), origin: "wiki-page", applicability: clone(hit.page.metadata.applicability || {}), validity: isMap(hit.page.metadata.validity) ? clone(hit.page.metadata.validity) : null, nativeScore: hit.nativeScore, rankScore: hit.rankScore, score: hit.rankScore, scoreComponents: hit.scoreComponents, retrievalMethod: hit.retrievalMethod }
+        if (hit.graphExplanation) record.graphExplanation = clone(hit.graphExplanation)
+        if (hit.graphSupports) record.graphReferences = hit.graphSupports.map(function(s) {return {path:s.path,revision:s.page.revision}})
         var provenance = MiniAWikiRetrievalV2.trustedProvenance(hit.page.metadata)
         if (Object.keys(provenance).length) record.provenance = provenance
         var window = { text: text, charStart: r.charStart, charEnd: r.charEnd, startLine: r.startLine, headingId: r.headingId }

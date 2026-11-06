@@ -409,10 +409,12 @@ window.MiniAAdvancedUI = function(bridge) {
     }
     busy = true; await poll();
   }
-  async function command(value, attachments) {
+  async function command(value, attachments, embed) {
+    // Capture before any asynchronous confirmation or command expansion.
+    if (embed === undefined && bridge.embedSnapshot) embed = bridge.embedSnapshot();
     if (/^\/(?:clear|reset|restore|rewind|exit|quit)(?:\s|$)/.test(value) && !await resolvePendingChanges()) return false;
     history.push(value); historyIndex = history.length;
-    await mutate({action:'command',command:value,attachments});
+    await mutate({action:'command',command:value,attachments,embed});
   }
   function setEnabled(value) {
     debugGeneration++;
@@ -420,7 +422,7 @@ window.MiniAAdvancedUI = function(bridge) {
     if (!value) setPaneFocused(false);
     document.body.classList.toggle('mini-a-advanced', value);
     toggle.textContent = value ? 'Simple' : 'Advanced';
-    if (value) { const uuid = sessionStorage.getItem(storeKey); if (uuid && !snapshot) bridge.resume(uuid); if (activeScreen === 'debug') renderScreen(); poll().catch(showError); }
+    if (value) { const uuid = bridge.embedded ? null : sessionStorage.getItem(storeKey); if (uuid && !snapshot) bridge.resume(uuid); if (activeScreen === 'debug') renderScreen(); poll().catch(showError); }
   }
   // Keep agent event emojis aligned with MiniA.fnI's console mapping.
   const activityEventEmojis = {
@@ -1892,8 +1894,8 @@ window.MiniAAdvancedUI = function(bridge) {
   });
   setInterval(()=>poll().catch(showError),1000);
   if(sessionStorage.getItem(storeKey))setEnabled(true);
-  return { beforeSessionChange:resolvePendingChanges, enabled:()=>enabled, stop:()=>api({action:'stop'}), submit:async (value, attachments)=>{
-    if (await command(value, attachments) === false) return false;
+  return { beforeSessionChange:resolvePendingChanges, enabled:()=>enabled, busy:()=>busy, stop:()=>api({action:'stop'}), submit:async (value, attachments, embed)=>{
+    if (await command(value, attachments, embed) === false) return false;
     composer.value=''; suggestions.hidden=true;
   }};
 };

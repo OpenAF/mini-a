@@ -917,12 +917,13 @@
 
   var _stubGraphExtractResponse = function() {
     return { summary: "stub summary", relationships: [
-      { from: "Alpha", to: "Beta", type: "RELATES_TO", provenance: "INFERRED", confidence: 0.8 }
+      { from: "Alpha", to: "Beta", type: "RELATES_TO", provenance: "INFERRED", confidence: 0.8, evidence: {quote:"Alpha relates to Beta"} }
     ] }
   }
 
   exports.testDreamWikiApplyDefaultsSemanticWhenGraphEnabled = function() {
     var dir = seedWiki(makeWikiDir())
+    io.writeFileString(dir + "/notes/page0.md", io.readFileString(dir + "/notes/page0.md") + "\nAlpha relates to Beta.\n")
     try {
       var runner = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "apply", usewikigraph: "true" }, function() {})
       runner._setLlm(makeStubLlm(_stubGraphExtractResponse()))

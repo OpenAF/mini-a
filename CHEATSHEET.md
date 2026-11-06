@@ -1617,6 +1617,11 @@ mini-a goal="run command" nosetmcpwd=true
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `onport` | number | - | Start the Mini-A web UI on the provided port |
+| `webembed` | boolean | `false` | Enable the [iframe bridge](docs/WEB-EMBED.md) at `?embed=1` |
+| `webembedorigins` | string/array | - | Exact permitted parent origins; required with `webembed=true` |
+| `webembedfields` | string/object | `{}` | Allowed context fields with a type and optional required flag |
+| `webembedcontextrequired` | boolean | `true` | Require context before embedded goals; false permits prompt-only embedding |
+| `webembedprompt` | boolean | `false` | Allow one same-origin initial draft or submitted goal |
 | `maxpromptchars` | number | `120000` | Maximum accepted prompt size in characters for web mode |
 | `ssequeuetimeout` | number | `120` | Web SSE queue timeout in seconds |
 | `logpromptheaders` | string | - | Comma-separated HTTP request header names to log alongside incoming web prompts |
@@ -2423,3 +2428,5 @@ See the [wiki guide](docs/WIKI.md), [delegation guide](docs/DELEGATION.md), and 
 | --- | --- | --- |
 | `runmaxtokens` | Aggregate model-token admission cap for `orchestration=auto`, including descendants and acceptance review. Provider usage is preferred; missing usage is estimated. In-flight responses may exceed estimates. | `0` (unlimited) |
 | `runmaxtimems` | Aggregate elapsed-time admission cap in milliseconds for `orchestration=auto`. Prevents new calls and dispatch after expiry; existing transport/tool timeouts govern in-flight work. | `0` (unlimited) |
+
+Wiki graph extraction, model budgets, saved defaults and resume controls are documented in [Graph builds](docs/GRAPH-BUILDS.md).

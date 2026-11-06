@@ -1,3 +1,7 @@
+// Resolve the shared, model-free build contract from this package.
+if (typeof __miniAPath !== "function") loadLib(String(new java.io.File(String(__loadedfrom)).getCanonicalFile().getParentFile().getParent()) + "/mini-a-paths.js")
+loadLib(__miniAPath("js/wiki/mini-a-graph-options.js"))
+
 // Author: OpenAI Assistant
 // License: Apache 2.0
 // Description: Optional wiki knowledge-graph layer for Mini-A.
@@ -7,7 +11,7 @@ var MiniAWikiGraph = function(config, loggerFn) {
   this._log = isFunction(loggerFn) ? loggerFn : function() {}
   this._graphDir = isString(this._cfg.graphDir) && this._cfg.graphDir.trim().length > 0 ? String(this._cfg.graphDir).trim() : "./.mini-a-wiki-graph"
   this._communityAlgo = isString(this._cfg.communityAlgo) ? this._cfg.communityAlgo : "louvain"
-  this._llmExtractFn = isFunction(this._cfg.llmExtractFn) ? this._cfg.llmExtractFn : this._defaultSemanticExtract.bind(this)
+  this._llmExtractFn = isFunction(this._cfg.llmExtractFn) ? this._cfg.llmExtractFn : __
   this._falkor = isMap(this._cfg.falkor) ? this._cfg.falkor : __
   this._readOnly = this._cfg.readOnly === true
   this._autosave = isString(this._cfg.autosave) ? String(this._cfg.autosave).toLowerCase().trim() : "always"
@@ -29,6 +33,7 @@ MiniAWikiGraph.prototype._emptyState = function() {
     edges: [],
     summaries: { pages: {}, communities: {} },
     semantic_cache: {},
+    enrichment: {},
     communities: [],
     surprise: []
   }
@@ -122,89 +127,6 @@ MiniAWikiGraph.prototype._semanticSummaryFor = function(payload) {
   return fallback.substring(0, 300)
 }
 
-// Semantic work starts from a compact, deterministic page representation. The optional
-// second call is deliberately opt-in from the extractor (`needsContext:true`).
-MiniAWikiGraph.prototype._compactSemanticPayload = function(page) {
-  var body = isString(page.body) ? page.body : "", lines = body.split(/\r?\n/), headings = [], digests = [], links = [], ids = []
-  lines.forEach(function(line) {
-    var h = line.match(/^#{1,6}\s+(.+)/); if (h) headings.push(h[1].trim())
-    var l = line.match(/\[\[([^\]|#]+)/g) || []; l.forEach(function(x) { links.push(x.replace(/^\[\[|\]\]$/g, "")) })
-    var q = line.match(/\b[A-Z][A-Z0-9_]{2,}\b/g) || []; q.forEach(function(x) { ids.push(x) })
-    if (!/^\s*#/.test(line) && line.trim().length > 20 && digests.length < 8) digests.push(line.trim().substring(0, 240))
-  })
-  var meta = isMap(page.meta) ? page.meta : {}
-  return { path: page.path, title: isString(meta.title) ? meta.title : page.path, description: isString(meta.description) ? meta.description : "", headings: headings.slice(0, 20), tags: isArray(meta.tags) ? meta.tags : [], explicitLinks: links.filter(function(v, i, a) { return a.indexOf(v) === i }).slice(0, 30), identifiers: ids.filter(function(v, i, a) { return a.indexOf(v) === i }).slice(0, 30), sectionDigests: digests, compact: true }
-}
-
-MiniAWikiGraph.prototype._defaultSemanticExtract = function(payload) {
-  var title = this._normalizeConceptName(payload && payload.title)
-  var body = isString(payload && payload.body) ? payload.body : ""
-  if (!body && payload && payload.compact === true) {
-    body = (payload.headings || []).map(function(h) { return "## " + h }).concat((payload.explicitLinks || []).map(function(link) { return "[[" + link + "]]" }), payload.sectionDigests || []).join("\n")
-  }
-  var relationships = []
-  var seen = {}
-  var self = this
-  var addRel = function(from, to, type, confidence) {
-    var src = self._normalizeConceptName(from)
-    var dst = self._normalizeConceptName(to)
-    if (src.length === 0 || dst.length === 0 || src.toLowerCase() === dst.toLowerCase()) return
-    var key = [src.toLowerCase(), dst.toLowerCase(), String(type || "RELATED_TO").toUpperCase()].join("|")
-    if (seen[key]) return
-    seen[key] = true
-    relationships.push({
-      from: src,
-      to: dst,
-      type: isString(type) && type.trim().length > 0 ? type.trim().toUpperCase() : "RELATED_TO",
-      provenance: "AMBIGUOUS",
-      confidence: isNumber(confidence) ? confidence : 0.35
-    })
-  }
-
-  var headingMatches = body.match(/^#{2,6}\s+.+$/gm) || []
-  headingMatches.forEach(function(line) {
-    var heading = self._normalizeConceptName(String(line || "").replace(/^#{1,6}\s+/, ""))
-    if (heading.length > 0 && title.length > 0) addRel(title, heading, "RELATES_TO", 0.3)
-  })
-
-  var wikiLinkRe = /\[\[([^\]]+)\]\]/g
-  var wikiMatch
-  while ((wikiMatch = wikiLinkRe.exec(body)) !== null) {
-    if (title.length === 0) break
-    addRel(title, wikiMatch[1], "REFERENCES", 0.45)
-  }
-
-  var mdLinkRe = /\[([^\]]+)\]\(([^)]+)\)/g
-  var mdMatch
-  while ((mdMatch = mdLinkRe.exec(body)) !== null) {
-    if (title.length === 0) break
-    addRel(title, mdMatch[1], "REFERENCES", 0.45)
-  }
-
-  if (title.length > 0) {
-    var sentenceMatches = body.match(/(^|[.!?]\s+)([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,3})/g) || []
-    sentenceMatches.slice(0, 12).forEach(function(match) {
-      var phrase = self._normalizeConceptName(String(match || "").replace(/^[.!?\s]+/, ""))
-      if (phrase.length > 2) addRel(title, phrase, "MENTIONS", 0.25)
-    })
-  }
-
-  if (relationships.length === 0 && title.length > 0) {
-    var pathName = this._normalizeConceptName(isString(payload && payload.path) ? payload.path.split("/").pop() : "")
-    if (pathName.length > 0 && pathName.toLowerCase() !== title.toLowerCase()) addRel(title, pathName, "ALSO_KNOWN_AS", 0.2)
-  }
-
-  if (relationships.length > 0 && this._cfg._warnedSemanticFallback !== true) {
-    this._cfg._warnedSemanticFallback = true
-    this._log("warn", "[graph] semantic extraction fallback active: using built-in heuristics")
-  }
-
-  return {
-    summary: this._semanticSummaryFor(payload),
-    relationships: relationships
-  }
-}
-
 MiniAWikiGraph.prototype._pageDigest = function(p) {
   var title = isMap(p.meta) && isString(p.meta.title) ? p.meta.title : p.path
   var first = ""
@@ -250,7 +172,7 @@ MiniAWikiGraph.prototype._reindexEdges = function() {
     self._nodeRefs[e.to] = (self._nodeRefs[e.to] || 0) + 1
   })
   this._state.edges = compact
-  var nodes = this._state.nodes
+  var nodes = this._state.nodes, self = this
   Object.keys(nodes).forEach(function(id) {
     nodes[id]._blob = self._nodeBlob(id, nodes[id].props)
   })
@@ -264,7 +186,7 @@ MiniAWikiGraph.prototype._reindexEdges = function() {
 }
 
 MiniAWikiGraph.prototype._indexSemanticOwner = function(edge) {
-  if (String(edge.from).indexOf("concept:") !== 0 || String(edge.to).indexOf("concept:") !== 0 || !edge.props || !isString(edge.props.page)) return
+  if ((String(edge.from).indexOf("concept:") !== 0 && String(edge.to).indexOf("concept:") !== 0) || !edge.props || !isString(edge.props.page)) return
   var path = edge.props.page
   if (!this._semanticByPage[path]) this._semanticByPage[path] = []
   this._semanticByPage[path].push(edge)
@@ -325,7 +247,7 @@ MiniAWikiGraph.prototype._indexPageStructural = function(p) {
     title: isMap(p.meta) && isString(p.meta.title) ? p.meta.title : p.path,
     updated: isMap(p.meta) && isDef(p.meta.updated) ? String(p.meta.updated) : "",
     hash: newHash,
-    revision: p.revision || ""
+    revision: p.revision || newHash
   })
 
   // Published, deterministic discovery keys. Query-time joins reuse the bounded
@@ -394,13 +316,14 @@ MiniAWikiGraph.prototype._indexPageStructural = function(p) {
   if (!isMap(this._state.summaries.pages[p.path])) this._state.summaries.pages[p.path] = {}
   this._state.summaries.pages[p.path].digest = this._pageDigest(p)
   this._state.summaries.pages[p.path].hash = newHash
+  if (!this._state.enrichment[p.path]) this._state.enrichment[p.path] = { hash: newHash, status: "pending", completed: {} }
   return { hash: newHash, docId: docId }
 }
 
 MiniAWikiGraph.prototype._edgeOwnedByPage = function(edge, path) {
   if (!isMap(edge) || !isString(path) || path.length === 0) return false
   if (isMap(edge.props) && isString(edge.props.page) && edge.props.page === path) return true
-  if (edge.type === "HAS_TAG" || edge.type === "SUPERSEDES" || edge.type === "LINKS_TO" || edge.type === "IN_SECTION") {
+  if (edge.type === "HAS_DISCOVERY_KEY" || edge.type === "HAS_TAG" || edge.type === "SUPERSEDES" || edge.type === "LINKS_TO" || edge.type === "IN_SECTION") {
     return edge.from === this._id("doc", path)
   }
   if (edge.type === "ALIAS_OF") return edge.to === this._id("doc", path)
@@ -456,6 +379,7 @@ MiniAWikiGraph.prototype._removePageState = function(path) {
     if ((self._nodeRefs[id] || 0) <= 0 && isMap(self._state.nodes[id]) && self._nodeOwnedByPage(id, self._state.nodes[id], path)) delete self._state.nodes[id]
   })
 
+  if (this._state.enrichment) delete this._state.enrichment[path]
   delete this._state.semantic_cache[path]
   if (isMap(this._state.summaries.pages)) delete this._state.summaries.pages[path]
   return { deleteNodes: beforeNodes.filter(function(id) { return !isMap(self._state.nodes[id]) }), deleteEdges: deleteEdges }
@@ -509,9 +433,10 @@ MiniAWikiGraph.prototype._persist = function(diff) {
 }
 
 MiniAWikiGraph.prototype.buildStructural = function(pages, opts) {
+  if (this._readOnly) return { ok: false, error: "graph is read-only" }
   var options = isMap(opts) ? opts : {}
   var list = isArray(pages) ? pages : []
-  var oldSummaries = this._state.summaries.pages, oldCache = this._state.semantic_cache
+  var oldSummaries = this._state.summaries.pages, oldCache = this._state.semantic_cache, oldEnrichment = this._state.enrichment || {}
   var oldSemanticEdges = []
   var semanticNodeIds = {}
   ;(isArray(this._state.edges) ? this._state.edges : []).forEach(function(e) {
@@ -528,13 +453,14 @@ MiniAWikiGraph.prototype.buildStructural = function(pages, opts) {
 
   this._state = this._emptyState()
   this._reindexEdges()
-  for (var i = 0; i < list.length; i++) this._indexPageStructural(list[i])
+  for (var i = 0; i < list.length; i++) { this._indexPageStructural(list[i]); if (isFunction(options.onStructuralProgress) && (i + 1) % 25 === 0) options.onStructuralProgress(i + 1) }
   var unchanged = {}
   list.forEach(function(page) {
     if (oldSummaries[page.path] && oldSummaries[page.path].hash === this._pageHash(page)) {
       unchanged[page.path] = true
       this._state.summaries.pages[page.path] = clone(oldSummaries[page.path])
       if (oldCache[page.path]) this._state.semantic_cache[page.path] = clone(oldCache[page.path])
+      if (oldEnrichment[page.path]) this._state.enrichment[page.path] = clone(oldEnrichment[page.path])
     }
   }, this)
   Object.keys(semanticNodeIds).forEach(function(nodeId) {
@@ -559,6 +485,7 @@ MiniAWikiGraph.prototype.buildStructural = function(pages, opts) {
 }
 
 MiniAWikiGraph.prototype.updatePage = function(p) {
+  if (this._readOnly) return {ok:false,error:"graph is read-only"}
   if (!isMap(p) || !isString(p.path)) return { ok: false, error: "path is required" }
   var newHash = this._pageHash(p)
   var prev = isMap(this._state.summaries.pages[p.path]) ? this._state.summaries.pages[p.path] : __
@@ -592,6 +519,7 @@ MiniAWikiGraph.prototype.updatePage = function(p) {
 }
 
 MiniAWikiGraph.prototype.removePage = function(path) {
+  if (this._readOnly) return {ok:false,error:"graph is read-only"}
   if (!isString(path) || path.length === 0) return { ok: false, error: "path is required" }
   var removed = this._removePageState(path)
   var placeholder = this._state.nodes[this._id("doc", path)]
@@ -609,103 +537,267 @@ MiniAWikiGraph.prototype.removePage = function(path) {
   return { ok: true, changed: true, stats: this.stats() }
 }
 
-MiniAWikiGraph.prototype.buildSemantic = function(pages, opts) {
-  var options = isMap(opts) ? opts : {}
-  var onProgress = isFunction(options.onProgress) ? options.onProgress : __
-  if (!isFunction(this._llmExtractFn)) return { ok: false, error: "semantic extraction function not configured" }
-  var list = isArray(pages) ? pages : []
-  var chars = 0
-  for (var i = 0; i < list.length; i++) chars += isString(list[i].body) ? list[i].body.length : 0
-  this._log("warn", "[graph] semantic build corpus-check: pages=" + list.length + ", approx_chars=" + chars + ", est_tokens=" + this._estimateTokens("x".repeat(Math.min(chars, 10000))) * Math.max(1, Math.ceil(chars / 10000)))
+// All semantic evidence uses body offsets (UTF-16), one-based body lines and a section ID.
+// Sections are split into bounded windows, so late-page evidence is never truncated away.
+MiniAWikiGraph.prototype._semanticSections = function(page) {
+  var body = String(page.body || ""), lines = body.split(/\n/), out = [], start = 0, line = 1, section = "", text = "", offset = 0
+  var flush = function() { if (text.length) out.push({ section: section, start: start, line: line, text: text }); text = "" }
+  lines.forEach(function(value, index) {
+    var heading = value.match(/^#{1,6}\s+(.+)/)
+    if (heading || text.length + value.length > 6000) { flush(); start = offset; line = index + 1 }
+    if (heading) section = heading[1].trim() + "@" + (index + 1)
+    var remaining = value + (index < lines.length - 1 ? "\n" : "")
+    while (remaining.length > 6000) {
+      flush(); start = offset; line = index + 1; text = remaining.substring(0, 6000); flush()
+      remaining = remaining.substring(6000); offset += 6000; start = offset
+    }
+    text += remaining; offset += remaining.length
+  })
+  flush(); return out
+}
 
-  // Precompute which pages actually need extraction (i.e. will not hit the cache-check
-  // below) so a progress-reporting caller can show an accurate "N/M need extraction" count
-  // instead of one that includes pages skipped instantly on a cache hit. Only done when a
-  // caller actually wants progress — skip the extra pass entirely otherwise.
-  var totalToExtract = 0
-  if (isFunction(onProgress)) {
-    var needsExtraction = list.filter(function(page) {
-      if (!isMap(page) || !isString(page.path)) return false
-      var compact = this._compactSemanticPayload(page)
-      var hash = this._pageHash(page)
-      var cache = isMap(this._state.semantic_cache[page.path]) ? this._state.semantic_cache[page.path] : __
-      return !(isMap(cache) && cache.hash === hash && cache.schema_version === 1 && cache.prompt_version === 1 && cache.model === (options.model || "") && options.force !== true)
-    }.bind(this))
-    totalToExtract = needsExtraction.length
-    if (totalToExtract > 0) this._log("warn", "[graph] semantic build: " + totalToExtract + "/" + list.length + " page(s) need extraction")
+MiniAWikiGraph.prototype._conceptVocabulary = function(pages) {
+  var names = {}, first = {}, self = this
+  pages.forEach(function(page) {
+    var meta = page.meta || {}, title = String(meta.title || page.path.replace(/\.md$/, "").split("/").pop())
+    ;[title].concat(isArray(meta.aliases) ? meta.aliases : []).forEach(function(name) {
+      name = String(name).trim()
+      if (!self._usefulConcept(name)) return
+      if (!names[name]) names[name] = []
+      var id = "concept:page:" + page.path + ":" + title
+      if (!names[name].some(function(x) { return x.id === id })) names[name].push({ id: id, name: title, joinable: false })
+    })
+  })
+  Object.keys(names).sort().forEach(function(name) {
+    var token = (name.match(/[A-Za-z0-9_$][A-Za-z0-9_.$:+#/-]*/) || [""])[0]
+    if (!first[token]) first[token] = []
+    first[token].push(name)
+  })
+  return { names: names, first: first, hash: sha1(stringify(names, __, "")) }
+}
+
+MiniAWikiGraph.prototype._usefulConcept = function(value) {
+  return value.length >= 2 && value.length <= 100 && !/^(the|and|for|with|from|this|that|file|files|page|pages|readme|index|usage|guide|reference|overview|documentation|docs|source|src|tests?|api|configuration|common|example|examples|introduction|notes|true|false|null|undefined|return|var|function|const|let)$/i.test(value)
+}
+
+MiniAWikiGraph.prototype._deterministicMentions = function(page, sections, vocabulary) {
+  var self = this, result = []
+  sections.forEach(function(section) {
+    var seen = {}, count = 0, re = /[A-Za-z_$][A-Za-z0-9_.$:+#/-]*/g, match
+    var add = function(term, index, identity) {
+      if (count >= 64 || !self._usefulConcept(term)) return
+      var id = identity ? identity.id : "concept:id:" + term
+      if (seen[id]) return
+      seen[id] = true; count++
+      result.push({ id: id, name: identity ? identity.name : term, joinable: identity ? identity.joinable : true,
+        props: { page: page.path, revision: page.revision || self._pageHash(page), sourceHash: self._pageHash(page), section: section.section,
+          evidenceLayer: "grounded", method: "deterministic", confidence: 1, evidence: { start: section.start + index, end: section.start + index + term.length, line: section.line + section.text.substring(0, index).split("\n").length - 1, quote: term } } })
+    }
+    while ((match = re.exec(section.text)) !== null) {
+      var token = match[0].replace(/[.:/-]+$/, ""), index = match.index
+      ;(vocabulary.first[token] || []).slice(0, 32).forEach(function(name) {
+        if (section.text.substring(index, index + name.length) !== name || /[A-Za-z0-9_$]/.test(section.text.charAt(index + name.length))) return
+        var choices = vocabulary.names[name]
+        if (choices.length === 1) add(name, index, choices[0])
+      })
+      // Technical names and inline code only; no generic capitalized-prose heuristic.
+      if (!(vocabulary.names[token] && vocabulary.names[token].length > 1) && (/^[A-Z][A-Z0-9_]{1,}$/.test(token) || /[a-z][A-Z]|[A-Za-z][._:$][A-Za-z]|\+\+|#$/.test(token) || section.text.charAt(index - 1) === "`")) add(token, index)
+    }
+  })
+  return result
+}
+
+MiniAWikiGraph.prototype._currentEvidence = function(edge) {
+  var p = edge.props || {}, node = this._state.nodes["doc:" + p.page]
+  return !edge._deleted && p.evidenceLayer === "grounded" && isMap(p.evidence) && !!node && node.props.hash === p.sourceHash && (!p.revision || p.revision === node.props.revision)
+}
+
+MiniAWikiGraph.prototype.build = function(pages, options) {
+  if (this._readOnly) return { ok: false, error: "graph is read-only" }
+  var opts = merge(options || {}, MiniAGraphBuild.resolve(options)), list = pages || [], self = this, started = Date.now()
+  var report = {ok:true,stage:"structural",processed:0,cached:0,pending:0,failed:0,calls:0,estimatedTokens:0,effective:MiniAGraphBuild.resolve(opts)}
+  var progress = function(count) { report.processed=count;report.elapsedMs=Date.now()-started;if(isFunction(opts.onProgress))opts.onProgress(merge(clone(report),{index:count,total:list.length})) }
+  progress(0)
+  if (opts.strategy === "full") this.buildStructural(list, { preview: true, onStructuralProgress:progress })
+  else {
+    var present = {}, autosave = this._autosave; this._autosave = "off"
+    try {
+      list.forEach(function(page,index) { present[page.path] = true; self.updatePage(page); if((index+1)%25===0)progress(index+1) })
+      Object.keys(this._state.summaries.pages).forEach(function(path) { if (!present[path]) self.removePage(path) })
+    } finally { this._autosave = autosave }
   }
+  if (opts.extraction === "semantic") return this.buildSemantic(list, opts)
+  report.pending = Object.keys(this._state.enrichment || {}).filter(function(k) { return self._state.enrichment[k].status !== "complete" }).length
+  report.stage="complete";report.status="complete";report.resumable=report.pending>0;report.structural=this.stats()
+  progress(list.length);this._state.build_status=clone(report)
+  if (opts.preview !== true) this._persist()
+  return report
+}
 
-  var changed = 0, extracted = 0
+MiniAWikiGraph.prototype.buildSemantic = function(pages, options) {
+  if (this._readOnly) return { ok: false, error: "graph is read-only" }
+  options = options || {}
+  var opts = merge(options, MiniAGraphBuild.resolve(merge({ extraction: "semantic", modelHelp: "auto" }, options)))
+  if (opts.extraction === "structural") return this.build(pages, opts)
+  var self = this, list = pages || [], started = Date.now(), vocabulary = this._conceptVocabulary(list)
+  var report = { ok: true, stage: "deterministic", processed: 0, cached: 0, pending: 0, failed: 0, calls: 0, estimatedTokens: 0, changed: 0, effective: MiniAGraphBuild.resolve(opts) }
+  if (isUnDef(this._cfg.modelExtractors) && !isFunction(this._llmExtractFn) && opts.modelHelp === "auto") {
+    var adapters = MiniAGraphBuild.modelAdapters()
+    this._cfg.modelExtractors = adapters.models; this._cfg.decisionExtractor = adapters.decision
+  }
+  var models = this._cfg.modelExtractors || (isFunction(this._llmExtractFn) ? [{ role: "main", fingerprint: this._cfg.modelFingerprint || "custom-v1", extract: this._llmExtractFn }] : [])
+  var fingerprint = sha1(stringify(models.map(function(m) { return [m.role, m.fingerprint || "custom-v1"] }).concat(this._cfg.decisionExtractor ? [["decision", this._cfg.decisionExtractor.fingerprint]] : []), __, ""))
+  var stopped = "", checkpoint = function() {
+    report.pending = list.filter(function(page) { var state = self._state.enrichment[page.path]; return state && state.status !== "complete" }).length
+    report.elapsedMs = Date.now() - started
+    self._state.build_status = clone(report)
+    self._compactEdges(true)
+    self._markDerivedDirty(); self._ensureDerived()
+    if (opts.preview !== true) self.save()
+    if (isFunction(opts.onProgress)) opts.onProgress(merge(clone(report), { index: report.processed, total: list.length, status: stopped || report.stage }))
+  }
+  var call = function(model, payload) {
+    var tokens = self._estimateTokens(stringify(payload, __, "")) + 2048
+    if (isFunction(opts.isCancelled) && opts.isCancelled()) stopped = "cancelled"
+    if (Date.now() - started >= opts.maxMinutes * 60000) stopped = stopped || "time-budget"
+    if (report.calls >= opts.maxCalls) stopped = stopped || "call-budget"
+    if (report.estimatedTokens + tokens > opts.maxTokens) stopped = stopped || "token-budget"
+    if (stopped) return null
+    report.calls++; report.estimatedTokens += tokens
+    try { return model.extract(payload) } catch(e) { return { ok: false, error: "model-extraction-failed" } }
+  }
+  if (!isMap(this._state.enrichment)) this._state.enrichment = {}
+  // Deterministic publication always precedes optional model work.
+  list.forEach(function(page) {
+    if (!self._state.summaries.pages[page.path] || self._state.summaries.pages[page.path].hash !== self._pageHash(page)) { self._removePageState(page.path); self._indexPageStructural(page) }
+    var hash = self._pageHash(page), sections = self._semanticSections(page), key = sha1(hash + vocabulary.hash + ":extractor-2:prompt-2:" + fingerprint)
+    var previous = self._state.enrichment[page.path], unchanged = previous && previous.key === key
+    if (!unchanged || opts.force) {
+      var deterministic = self._deterministicMentions(page, sections, vocabulary)
+      ;(self._semanticByPage[page.path] || []).slice().forEach(function(e) { if (e.props.method === "deterministic" || e.props.sourceHash !== hash || !e.props.evidenceLayer) self._removeEdge(e) })
+      deterministic.forEach(function(m) {
+        self._upsertNode(m.id, "concept", { name: m.name, joinable: m.joinable })
+        self._addEdge("doc:" + page.path, m.id, "MENTIONS", "EXTRACTED", m.props)
+      })
+      self._state.enrichment[page.path] = { key: key, hash: hash, version: 2, promptVersion: 2, modelFingerprint: fingerprint, completed: unchanged && previous ? clone(previous.completed) : {}, status: "pending" }
+      if (opts.force) self._state.enrichment[page.path].completed = {}
+      report.changed++
+    }
+    self._state.summaries.pages[page.path].summary = self._semanticSummaryFor({ body: page.body, title: (page.meta || {}).title })
+    self._state.semantic_cache[page.path] = { hash: hash, schema_version: 2, prompt_version: 2, model: fingerprint, vocabulary: vocabulary.hash }
+  })
+  list.forEach(function(page) {
+    var state = self._state.enrichment[page.path], dependencies = [], seen = {}
+    self._semanticSections(page).forEach(function(section) {
+      ;(self._semanticByPage[page.path] || []).filter(function(e) {return e.props.method === "deterministic" && e.props.section === section.section}).slice(0,16).forEach(function(e) {
+        ;(self._adj[e.to] || []).slice(0,32).forEach(function(other) {
+          var owner = other.props.page, dependency = e.to + ":" + owner
+          if (owner && owner !== page.path && !seen[dependency] && other.props.method === "deterministic" && self._currentEvidence(other)) {
+            seen[dependency] = true; dependencies.push([dependency,other.props.sourceHash])
+          }
+        })
+      })
+    })
+    var dependencyHash = sha1(stringify(dependencies.sort(function(a,b){return a[0].localeCompare(b[0])}),__,""))
+    if (state.dependencyHash && state.dependencyHash !== dependencyHash) {state.completed={};state.status="pending"}
+    state.dependencyHash = dependencyHash
+  })
+  this._markDerivedDirty(); checkpoint()
+  report.stage = "enrichment"
   for (var p = 0; p < list.length; p++) {
-    var page = list[p]
-    if (!isMap(page) || !isString(page.path)) continue
-    var compact = this._compactSemanticPayload(page)
-    var hash = this._pageHash(page)
-    var cache = isMap(this._state.semantic_cache[page.path]) ? this._state.semantic_cache[page.path] : __
-    if (isMap(cache) && cache.hash === hash && cache.schema_version === 1 && cache.prompt_version === 1 && cache.model === (options.model || "") && options.force !== true) {
-      if (isFunction(onProgress)) onProgress({ index: extracted, total: totalToExtract, path: page.path, status: "skipped" })
-      continue
+    var page = list[p], state = this._state.enrichment[page.path], sections = this._semanticSections(page), failed = false
+    if (isFunction(opts.isCancelled) && opts.isCancelled()) stopped = "cancelled"
+    for (var s = 0; s < sections.length; s++) {
+      var section = sections[s], sectionKey = String(section.start)
+      if (state.completed[sectionKey]) { report.cached++; continue }
+      if (opts.modelHelp === "off" || !models.length || stopped) continue
+      var mentions = (this._semanticByPage[page.path] || []).filter(function(e) { return self._currentEvidence(e) && e.props.method === "deterministic" && e.props.section === section.section })
+      var candidates = {}, cross = []
+      mentions.slice(0, 16).forEach(function(e) {
+        ;(self._adj[e.to] || []).slice(0, 32).forEach(function(other) {
+          var owner = other.props.page
+          if (owner && owner !== page.path && !candidates[owner] && other.props.method === "deterministic" && self._currentEvidence(other) && cross.length < 16) { candidates[owner] = true; cross.push({ path: owner, concept: e.to, evidence: other.props.evidence }) }
+        })
+      })
+      var payload = { path: page.path, title: (page.meta || {}).title || page.path, section: section.section, start: section.start, body: section.text, concepts: mentions.map(function(e) { return self._state.nodes[e.to].props.name }), candidates: cross,
+        instruction: "Return {relationships:[{from,to,type,provenance,confidence,evidence:{quote}}]}. Quote exact text from this section supporting both endpoints. Use INFERRED for associations, EXTRACTED only for explicit assertions. Empty relationships is valid. Do not merge identities." }
+      if (cross.length && this._cfg.decisionExtractor) {
+        var classified = call(this._cfg.decisionExtractor, { section: section.text, candidates: cross })
+        if (classified && isArray(classified.paths)) payload.candidates = cross.filter(function(candidate) { return classified.paths.slice(0, 8).indexOf(candidate.path) >= 0 })
+        if (stopped) break
+      }
+      var response = null
+      for (var attempt = 0; attempt < models.length; attempt++) {
+        var attemptResponse = call(models[attempt], payload)
+        if (!attemptResponse) break
+        response = attemptResponse
+        if (response && response.ok !== false && isArray(response.relationships) && response.needsContext !== true && response.relationships.length <= 32 && response.relationships.every(function(rel) {
+          var quote = rel && rel.evidence && rel.evidence.quote
+          return isString(quote) && quote.length > 0 && section.text.indexOf(quote) >= 0 && isString(rel.from) && isString(rel.to) && self._usefulConcept(rel.from) && self._usefulConcept(rel.to) && quote.indexOf(rel.from) >= 0 && quote.indexOf(rel.to) >= 0
+        })) break
+        if (response) response = { ok: false, error: "invalid-extraction" }
+        if (stopped) break
+      }
+      if (stopped && !response) break
+      if (!response || response.ok === false || !isArray(response.relationships) || response.needsContext === true) { failed = true; report.failed++; continue }
+      var validated = [], invalid = false
+      response.relationships.slice(0, 32).forEach(function(rel) {
+        var quote = rel && rel.evidence && rel.evidence.quote, from = rel && rel.from, to = rel && rel.to
+        var at = isString(quote) && quote.length > 0 ? section.text.indexOf(quote) : -1
+        if (!isString(from) || !isString(to) || at < 0 || quote.indexOf(from) < 0 || quote.indexOf(to) < 0 || !self._usefulConcept(from) || !self._usefulConcept(to)) { invalid = true; return }
+        var resolve = function(name) {
+          var known = vocabulary.names[name]
+          return known && known.length === 1 ? known[0].id : "concept:" + (known && known.length > 1 ? "ambiguous:" + page.path + ":" : "id:") + name
+        }
+        validated.push({ from: resolve(from), to: resolve(to), type: /^[A-Z][A-Z0-9_]{0,40}$/.test(rel.type || "") ? rel.type : "RELATED_TO", provenance: rel.provenance === "EXTRACTED" ? "EXTRACTED" : "INFERRED", names: [from, to],
+          props: { page: page.path, revision: page.revision || state.hash, sourceHash: state.hash, section: section.section, window: section.start, method: "model", evidenceLayer: rel.provenance === "EXTRACTED" ? "grounded" : "inferred", confidence: isNumber(rel.confidence) && isFinite(rel.confidence) ? Math.max(0, Math.min(1, rel.confidence)) : 0.5, evidence: { quote: quote, start: section.start + at, end: section.start + at + quote.length, line: section.line + section.text.substring(0, at).split("\n").length - 1 } } })
+      })
+      if (invalid || response.relationships.length > 32) { failed = true; report.failed++; continue }
+      // Commit a window only after complete validation. Failed refreshes retain valid old assertions.
+      ;(this._semanticByPage[page.path] || []).slice().forEach(function(e) { if (e.props.method === "model" && e.props.window === section.start) self._removeEdge(e) })
+      validated.forEach(function(e) {
+        self._upsertNode(e.from, "concept", { name: e.names[0], joinable: e.from.indexOf("concept:id:") === 0 })
+        self._upsertNode(e.to, "concept", { name: e.names[1], joinable: e.to.indexOf("concept:id:") === 0 })
+        self._addEdge(e.from, e.to, e.type, e.provenance, e.props)
+      })
+      state.completed[sectionKey] = true
+      if (sections.every(function(sec) {return state.completed[String(sec.start)]})) state.status = "complete"
+      checkpoint()
     }
-
-    var payload = compact
-    var res = this._llmExtractFn(payload)
-    if (res && res.needsContext === true && options.maxChunks !== 0) {
-      var maxChunks = isNumber(options.maxChunks) ? options.maxChunks : 3
-      payload.selectedChunks = String(page.body || "").split(/\n\s*\n/).slice(0, maxChunks)
-      payload.compact = false
-      res = this._llmExtractFn(payload)
-    }
-    // Extraction must succeed before replacing the previous assertions.
-    this._removePageState(page.path)
-    this._indexPageStructural(page)
-    var rels = isArray(res && res.relationships) ? res.relationships : []
-    for (var r = 0; r < rels.length; r++) {
-      var rel = rels[r]
-      if (!isMap(rel)) continue
-      var from = isString(rel.from) ? rel.from.trim() : ""
-      var to = isString(rel.to) ? rel.to.trim() : ""
-      var type = isString(rel.type) ? rel.type.trim() : "RELATED_TO"
-      if (from.length === 0 || to.length === 0) continue
-      var fromId = this._id("concept", from.toLowerCase())
-      var toId = this._id("concept", to.toLowerCase())
-      this._upsertNode(fromId, "concept", { name: from })
-      this._upsertNode(toId, "concept", { name: to })
-      this._addEdge(fromId, toId, type, this._normalizeProvenance(rel.provenance), { page: page.path, revision: page.revision || "", sourceHash: this._pageHash(page), confidence: isNumber(rel.confidence) ? rel.confidence : __ })
-    }
-    var summary = isString(res && res.summary) ? res.summary.trim() : ""
-    if (summary.length > 0) {
-      if (!isMap(this._state.summaries.pages[page.path])) this._state.summaries.pages[page.path] = {}
-      this._state.summaries.pages[page.path].summary = summary.substring(0, 300)
-    }
-    this._state.semantic_cache[page.path] = { hash: hash, compact_hash: hash, schema_version: 1, prompt_version: 1, model: options.model || "", updated_at: new Date().toISOString() }
-    changed++
-    extracted++
-    if (isFunction(onProgress)) onProgress({ index: extracted, total: totalToExtract, path: page.path, status: "processed" })
+    state.status = sections.every(function(sec) { return state.completed[String(sec.start)] }) ? "complete" : failed ? "failed" : "pending"
+    report.processed++
+    if (isFunction(opts.onProgress)) opts.onProgress(merge(clone(report), { path: page.path, index: report.processed, total: list.length, status: state.status }))
   }
-
-  this._markDerivedDirty()
-  this._ensureDerived()
-  if (options.preview !== true) this._persist()
-  return { ok: true, changed: changed, stats: this.stats() }
+  report.pending = list.filter(function(page) { return self._state.enrichment[page.path].status !== "complete" }).length
+  report.partial = opts.modelHelp === "auto" && report.pending > 0
+  report.resumable = report.pending > 0
+  report.status = stopped || (report.partial ? "partial" : "complete")
+  report.stage = "complete"
+  this._markDerivedDirty(); this._ensureDerived(); this._pruneUnreferencedNodes("")
+  checkpoint()
+  if (opts.preview !== true) this._persist()
+  report.stats = this.stats()
+  return report
 }
 
 MiniAWikiGraph.prototype.detectCommunities = function() {
   var docNodes = Object.keys(this._state.nodes).filter(function(id) { return this._state.nodes[id].type === "document" }.bind(this))
   var byTag = {}
-  var deg = {}
+  var deg = {}, self = this
   ;(isArray(this._state.edges) ? this._state.edges : []).forEach(function(e) {
     if (e._deleted === true) return
-    deg[e.from] = (deg[e.from] || 0) + 1
-    deg[e.to] = (deg[e.to] || 0) + 1
-    if (e.type !== "HAS_TAG") return
+    var weight = e.type === "MENTIONS" && self._currentEvidence(e) ? (e.props.confidence || 0) * 2 / Math.log(2 + (self._adj[e.to] || []).length) : e.type === "HAS_TAG" ? 1 / Math.log(2 + (self._adj[e.to] || []).length) : 1
+    deg[e.from] = (deg[e.from] || 0) + weight
+    deg[e.to] = (deg[e.to] || 0) + weight
+    if (e.type !== "HAS_TAG" && !(e.type === "MENTIONS" && e.from.indexOf("doc:") === 0 && self._currentEvidence(e))) return
     byTag[e.to] = byTag[e.to] || []
     byTag[e.to].push(e.from)
   })
   var groups = {}
   Object.keys(byTag).forEach(function(tagId) {
     var docs = byTag[tagId]
-    if (!isArray(docs) || docs.length === 0) return
-    groups["tag:" + tagId] = docs
+    if (!isArray(docs) || docs.length === 0 || tagId.indexOf("concept:") === 0 && (docs.length < 2 || docs.length > Math.max(20, docNodes.length * 0.2))) return
+    groups[tagId] = docs.filter(function(id, i) { return docs.indexOf(id) === i })
   })
   if (Object.keys(groups).length === 0 && docNodes.length > 0) groups["all"] = docNodes.slice()
   var out = []
@@ -716,7 +808,7 @@ MiniAWikiGraph.prototype.detectCommunities = function() {
     members.forEach(function(id) { memberSet[id] = true })
     var hub = members.slice().sort(function(a, b) { return (deg[b] || 0) - (deg[a] || 0) })[0] || members[0]
     var label = self._state.nodes[hub] && self._state.nodes[hub].props ? (self._state.nodes[hub].props.title || self._state.nodes[hub].props.name || hub) : hub
-    out.push({ id: "c" + (idx + 1), label: label, members: members, coverage: Number((members.length / Math.max(1, docNodes.length)).toFixed(4)), _memberSet: memberSet })
+    out.push({ id: "c" + (idx + 1), label: label, members: members, weight: members.reduce(function(sum,id) {return sum + (deg[id] || 0)},0), coverage: Number((members.length / Math.max(1, docNodes.length)).toFixed(4)), _memberSet: memberSet })
   })
   this._state.communities = out
   this._dirty.communities = false
@@ -760,63 +852,63 @@ MiniAWikiGraph.prototype.crossDocumentSurprise = function() {
 // Bounded one-hop discovery. Shared metadata requires two supported assertions.
 // The caller validates every support revision before disclosing a candidate.
 MiniAWikiGraph.prototype.expansionCandidates = function(path, options) {
-  var opts = options || {}, budget = opts.budget, docId = "doc:" + path, out = [], seen = {}, self = this
-  var support = function(owner) {
-    var node = self._state.nodes["doc:" + owner]
-    return { path: owner, revision: node && node.props && node.props.revision || "" }
+  var opts = options || {}, budget = opts.budget || { used: 0, limit: 256 }, deadline = opts.deadline || Infinity
+  var out = {}, self = this, docId = "doc:" + path, cap = opts.cap || 10
+  var charge = function() { if (Date.now() >= deadline || budget.used >= budget.limit) { budget.truncated = true; return false }; budget.used++; return true }
+  var support = function(owner, edge) { var node = self._state.nodes["doc:" + owner]; return { path: owner, revision: edge ? edge.props.revision : node && node.props.revision || "", evidence: edge && clone(edge.props.evidence), section: edge && edge.props.section } }
+  var add = function(target, relation, supports, score, layer, concept) {
+    if (target === path || isFunction(opts.accept) && !opts.accept(target)) return
+    if (out[target] && out[target].score >= score) return
+    out[target] = { path: target, relation: relation, supports: supports, score: score, evidenceLayer: layer, explanation: relation + (concept ? ": " + concept : "") }
   }
-  var charge = function() {
-    if (Date.now() >= opts.deadline || budget.used >= budget.limit) { budget.truncated = true; return false }
-    budget.used++; return true
-  }
-  var add = function(target, relation, owners) {
-    if (target === path || seen[target] || isFunction(opts.accept) && !opts.accept(target)) return
-    seen[target] = true
-    out.push({ path: target, relation: relation, supports: owners.map(support) })
-  }
-  var edges = this._adj[docId] || []
-  for (var i = 0; i < edges.length; i++) {
-    if (!charge()) break
-    var edge = edges[i]
-    if (edge._deleted) continue
-    var other = edge.from === docId ? edge.to : edge.from
-    if (other.indexOf("doc:") === 0 && (edge.type === "LINKS_TO" || edge.type === "SUPERSEDES")) {
-      add(other.substring(4), edge.type, [edge.from.substring(4)])
-    } else if ((edge.type === "HAS_TAG" || edge.type === "ALIAS_OF") && other.indexOf("doc:") !== 0) {
-      var shared = this._adj[other] || []
-      for (var j = 0; j < shared.length; j++) {
-        if (!charge()) break
-        var next = shared[j], target = next.from === other ? next.to : next.from
-        if (!next._deleted && next.type === edge.type && target.indexOf("doc:") === 0) add(target.substring(4), edge.type === "HAS_TAG" ? "shared_tag" : "shared_alias", [path, target.substring(4)])
-        if (out.length >= opts.cap) { budget.truncated = true; return out }
-      }
-    }
-    if (out.length >= opts.cap) { budget.truncated = true; return out }
-  }
-  // Semantic concepts are tied to their original page revisions, independently
-  // of the current document-node metadata. Never infer ownership from endpoints.
+  // Grounded concept postings first. No pairwise page edges are materialized.
   var semantic = this._semanticByPage[path] || [], concepts = {}
   for (var s = 0; s < semantic.length; s++) {
     if (!charge()) break
     var assertion = semantic[s]
-    if (assertion._deleted || !assertion.props.revision) continue
+    if (!this._currentEvidence(assertion)) continue
     var endpoints = [assertion.from, assertion.to]
     for (var c = 0; c < endpoints.length; c++) {
       var concept = endpoints[c]
-      if (concepts[concept]) continue
+      if (concept.indexOf("concept:") !== 0 || concepts[concept]) continue
       concepts[concept] = true
-      var assertions = this._adj[concept] || []
+      var assertions = this._adj[concept] || [], specificity = 1 / Math.log(2 + assertions.length)
       for (var a = 0; a < assertions.length; a++) {
         if (!charge()) break
         var evidence = assertions[a], owner = evidence.props && evidence.props.page
-        if (evidence._deleted || !owner || owner === path || seen[owner] || !evidence.props.revision || isFunction(opts.accept) && !opts.accept(owner)) continue
-        seen[owner] = true
-        out.push({path:owner,relation:"shared_concept",supports:[{path:path,revision:assertion.props.revision},{path:owner,revision:evidence.props.revision}]})
-        if (out.length >= opts.cap) {budget.truncated = true;return out}
+        if (!owner || !this._currentEvidence(evidence)) continue
+        add(owner, "shared_concept", [support(path, assertion), support(owner, evidence)], 3 + specificity * Math.min(assertion.props.confidence || 0, evidence.props.confidence || 0), "grounded", concept)
       }
     }
   }
-  return out
+  var edges = this._adj[docId] || []
+  for (var i = 0; i < edges.length; i++) {
+    if (!charge()) break
+    var edge = edges[i], other = edge.from === docId ? edge.to : edge.from
+    if (edge._deleted) continue
+    if (other.indexOf("doc:") === 0 && (edge.type === "LINKS_TO" || edge.type === "SUPERSEDES")) add(other.substring(4), edge.type, [support(edge.from.substring(4))], 4, "structural")
+    else if (edge.type === "HAS_TAG" || edge.type === "ALIAS_OF") {
+      var shared = this._adj[other] || []
+      for (var j = 0; j < shared.length; j++) {
+        if (!charge()) break
+        var next = shared[j], target = next.from === other ? next.to : next.from
+        if (!next._deleted && next.type === edge.type && target.indexOf("doc:") === 0) add(target.substring(4), edge.type === "HAS_TAG" ? "shared_tag" : "shared_alias", [support(path), support(target.substring(4))], 1 + 1 / Math.log(2 + shared.length), "structural")
+      }
+    }
+  }
+  // Inference is only a secondary expansion, with source freshness checked independently.
+  if (opts.includeInferred !== false) for (var n = 0; n < semantic.length; n++) {
+    if (!charge()) break
+    var inferred = semantic[n], props = inferred.props || {}, source = this._state.nodes[docId]
+    if (inferred._deleted || props.evidenceLayer !== "inferred" || !props.evidence || !source || source.props.hash !== props.sourceHash) continue
+    var postings = (this._adj[inferred.to] || []).concat(this._adj[inferred.from] || [])
+    for (var k = 0; k < postings.length; k++) {
+      if (!charge()) break
+      var grounded = postings[k]
+      if (this._currentEvidence(grounded)) add(grounded.props.page, "inferred_association", [support(path, inferred), support(grounded.props.page, grounded)], 0.25, "inferred", inferred.to)
+    }
+  }
+  return Object.keys(out).map(function(key) { return out[key] }).sort(function(a, b) { return b.score - a.score || a.path.localeCompare(b.path) }).slice(0, cap)
 }
 
 // Cross-wiki joins use the same bounded adjacency work counter as local traversal.
@@ -833,7 +925,9 @@ MiniAWikiGraph.prototype.expansionJoinKeys = function(path, options) {
       opts.budget.used++
       var edge = edges[i]
       if (edge._deleted) continue
-      if (semantic) {add(edge.from,"concept",edge.props.revision);add(edge.to,"concept",edge.props.revision)}
+      if (semantic && self._currentEvidence(edge)) {
+        ;[edge.from, edge.to].forEach(function(id) { var concept = self._state.nodes[id]; if (concept && concept.type === "concept" && concept.props.joinable === true) add(id,"concept",edge.props.revision) })
+      }
       else if (edge.type === "HAS_TAG") add(edge.to,"tag",node && node.props.revision)
       else if (edge.type === "ALIAS_OF") add(edge.from,"alias",node && node.props.revision)
       else if (edge.type === "HAS_DISCOVERY_KEY") add(edge.to,"discovery",node && node.props.revision)
@@ -856,7 +950,7 @@ MiniAWikiGraph.prototype.expansionMatches = function(keys, options) {
       opts.budget.used++
       var edge = edges[i], owner, revision
       if (edge._deleted) continue
-      if (key.kind === "concept") {owner = edge.props && edge.props.page;revision = edge.props && edge.props.revision}
+      if (key.kind === "concept") {if (!this._currentEvidence(edge)) { if (edge.props && edge.props.evidenceLayer === "grounded") opts.budget.staleEvidence = true; continue }; owner = edge.props && edge.props.page;revision = edge.props && edge.props.revision}
       else {
         var doc = (key.kind === "tag" && edge.type === "HAS_TAG" || key.kind === "discovery" && edge.type === "HAS_DISCOVERY_KEY") ? edge.from : key.kind === "alias" && edge.type === "ALIAS_OF" ? edge.to : ""
         if (doc.indexOf("doc:") !== 0) continue
@@ -909,7 +1003,7 @@ MiniAWikiGraph.prototype.relatedFor = function(paths, opts) {
   srcIds.forEach(function(id) {
     var adj = isArray(self._adj[id]) ? self._adj[id] : []
     adj.forEach(function(e) {
-      if (e.type !== "HAS_TAG") return
+      if (e.type !== "HAS_TAG" && !(e.type === "MENTIONS" && e.from.indexOf("doc:") === 0 && self._currentEvidence(e))) return
       var tagId = e.from === id ? e.to : e.from
       if (String(tagId).startsWith("tag:")) srcTagIds[tagId] = true
     })
@@ -960,7 +1054,7 @@ MiniAWikiGraph.prototype.joinKeys = function() {
   if (isMap(this._joinKeysCache) && this._joinKeysDirty !== true) return this._joinKeysCache
   var tags = {}, aliases = {}, concepts = {}
   var docCount = 0
-  var nodes = this._state.nodes
+  var nodes = this._state.nodes, self = this
   Object.keys(nodes).forEach(function(id) {
     if (isMap(nodes[id]) && nodes[id].type === "document" && id.indexOf("doc:") === 0) docCount++
   })
@@ -970,20 +1064,17 @@ MiniAWikiGraph.prototype.joinKeys = function() {
     if (map[key].indexOf(path) < 0) map[key].push(path)
   }
   // Tags/aliases: doc-side of HAS_TAG (doc→tag) and ALIAS_OF (alias→doc) edges.
-  // Concepts: buildSemantic emits concept→concept edges (js/wiki/mini-a-graph.js:596-607) — there
-  // is no doc→concept edge to walk. The source page instead lives on the edge itself as
-  // props.page, so a concept's docs are collected from every edge that mentions it.
+  // Grounded, current concepts only. Scoped page identities never join across wikis.
   ;(isArray(this._state.edges) ? this._state.edges : []).forEach(function(e) {
     if (!isMap(e) || e._deleted === true) return
     if (e.type === "HAS_TAG" && String(e.from).indexOf("doc:") === 0 && String(e.to).indexOf("tag:") === 0) {
       addKey(tags, String(e.to).substring(4), String(e.from).substring(4))
     } else if (e.type === "ALIAS_OF" && String(e.from).indexOf("alias:") === 0 && String(e.to).indexOf("doc:") === 0) {
       addKey(aliases, String(e.from).substring(6), String(e.to).substring(4))
-    } else if (String(e.from).indexOf("concept:") === 0 && String(e.to).indexOf("concept:") === 0) {
+    } else if (self._currentEvidence(e)) {
       var page = isMap(e.props) && isString(e.props.page) ? e.props.page : ""
       if (page.length > 0) {
-        addKey(concepts, String(e.from).substring(8), page)
-        addKey(concepts, String(e.to).substring(8), page)
+        ;[e.from,e.to].forEach(function(id) { if (nodes[id] && nodes[id].type === "concept" && nodes[id].props.joinable === true) addKey(concepts, id.substring(8), page) })
       }
     }
   })
@@ -1060,17 +1151,49 @@ MiniAWikiGraph.prototype.docsForKeys = function(keys, opts) {
 }
 
 MiniAWikiGraph.prototype.retrieve = function(concepts, opts) {
-  this._ensureDerived()
+  var options = opts || {}, cap = options.cap || 10, budget = options.maxEdges || 256, used = 0, scores = {}, self = this
   var hits = this.query(isArray(concepts) ? concepts.join(" ") : String(concepts || ""))
-  var cap = isMap(opts) && isNumber(opts.cap) ? opts.cap : 3
-  var selected = hits.filter(function(h) { return String(h.id).startsWith("doc:") }).slice(0, cap)
-  return {
-    nodes: selected,
-    pages: selected.map(function(s) {
-      var path = String(s.id).substring(4)
-      return { path: path, summary: isMap(this._state.summaries.pages[path]) ? (this._state.summaries.pages[path].summary || this._state.summaries.pages[path].digest || "") : "" }
-    }.bind(this))
+  var add = function(path, score, evidence, explanation) {
+    var node = self._state.nodes["doc:" + path]
+    if (!node || !self._state.summaries.pages[path]) return
+    var value = scores[path] || { path: path, score: 0, references: [], explanations: [] }
+    value.score += score
+    if (evidence) value.references.push({ path: path, revision: evidence.props.revision, section: evidence.props.section, evidence: clone(evidence.props.evidence) })
+    value.explanations.push(explanation); scores[path] = value
   }
+  hits.forEach(function(hit) {
+    if (hit.type === "document") add(hit.id.substring(4), hit.score, null, "document metadata match")
+    if (hit.type !== "concept") return
+    var edges = self._adj[hit.id] || [], seen = {}
+    for (var i = 0; i < edges.length && used < budget; i++) {
+      used++
+      var edge = edges[i], owner = edge.props.page
+      if (!owner || seen[owner] || !self._currentEvidence(edge)) continue
+      seen[owner] = true
+      add(owner, 3 + hit.score / Math.log(2 + edges.length), edge, "grounded concept: " + hit.props.name)
+    }
+  })
+  var pages = Object.keys(scores).map(function(path) {
+    var entry = scores[path], summary = self._state.summaries.pages[path] || {}
+    entry.summary = summary.summary || summary.digest || ""; return entry
+  }).sort(function(a, b) { return b.score - a.score || a.path.localeCompare(b.path) }).slice(0, cap)
+  return { nodes: pages.map(function(page) { return self._state.nodes["doc:" + page.path] }), pages: pages, work: { edges: used, limit: budget, truncated: used >= budget } }
+}
+
+// Tag suggestions never use HAS_TAG edges as evidence. Existing vocabulary is only a naming preference.
+MiniAWikiGraph.prototype.tagSuggestions = function(path, existing, vocabulary) {
+  var self = this, seen = {}, out = [], tags = existing || [], names = vocabulary || []
+  ;(this._semanticByPage[path] || []).forEach(function(edge) {
+    if (edge.type !== "MENTIONS" || edge.props.method !== "deterministic" || !self._currentEvidence(edge)) return
+    var node = self._state.nodes[edge.to], name = node && node.props.name
+    if (!name || !self._usefulConcept(name)) return
+    var tag = names.filter(function(value) { return String(value).toLowerCase() === name.toLowerCase() })[0] || name
+    if (seen[tag] || tags.some(function(value) { return String(value).toLowerCase() === tag.toLowerCase() })) return
+    seen[tag] = true
+    out.push({ tag: tag, reason: "Body mentions " + name, revision: edge.props.revision, evidence: clone(edge.props.evidence), existingVocabulary: names.indexOf(tag) >= 0 })
+  })
+  out.sort(function(a, b) { return Number(b.existingVocabulary) - Number(a.existingVocabulary) || a.tag.localeCompare(b.tag) })
+  return { path: path, additions: out.slice(0, 5), normalizationSuggestions: tags.filter(function(tag) { return tags.some(function(other) { return other !== tag && String(other).toLowerCase() === String(tag).toLowerCase() }) }).map(function(tag) { return { tag: tag, reason: "Case-variant duplicate; review separately" } }) }
 }
 
 MiniAWikiGraph.prototype.answer = function(question, opts) {
@@ -1093,9 +1216,18 @@ MiniAWikiGraph.prototype.query = function(text) {
   return out.sort(function(a, b) { return b.score - a.score }).slice(0, 20)
 }
 
-MiniAWikiGraph.prototype.neighbors = function(node) {
+MiniAWikiGraph.prototype._edgeMatches = function(edge, id, options) {
+  var opts = options || {}, p = edge.props || {}
+  var match = function(value, allowed) { return isUnDef(allowed) || (isArray(allowed) ? allowed : [allowed]).indexOf(value) >= 0 }
+  return !edge._deleted && (!opts.direction || opts.direction === "both" || opts.direction === "out" && edge.from === id || opts.direction === "in" && edge.to === id) &&
+    match(edge.type, opts.type) && match(edge.provenance, isArray(opts.provenance) ? opts.provenance.map(function(v) { return String(v).toUpperCase() }) : isString(opts.provenance) ? opts.provenance.toUpperCase() : __) &&
+    match(p.evidenceLayer, opts.evidenceLayer) && (isUnDef(opts.minConfidence) || isNumber(p.confidence) && p.confidence >= opts.minConfidence)
+}
+
+MiniAWikiGraph.prototype.neighbors = function(node, options) {
   var id = isString(node) && node.indexOf(":") > 0 ? node : this._id("doc", String(node || ""))
-  return (isArray(this._adj[id]) ? this._adj[id] : []).filter(function(e) { return e._deleted !== true }).map(function(e) {
+  var self = this
+  return (isArray(this._adj[id]) ? this._adj[id] : []).filter(function(e) { return self._edgeMatches(e, id, options) }).map(function(e) {
     return { from: e.from, to: e.to, type: e.type, provenance: e.provenance, props: isMap(e.props) ? clone(e.props) : {} }
   })
 }
@@ -1113,22 +1245,27 @@ MiniAWikiGraph.prototype.docInfo = function(path) {
   }
 }
 
-MiniAWikiGraph.prototype.path = function(a, b) {
+MiniAWikiGraph.prototype.path = function(a, b, options) {
+  var opts = options || {}, depth = {}
   var aid = isString(a) && a.indexOf(":") > 0 ? a : this._id("doc", String(a || ""))
   var bid = isString(b) && b.indexOf(":") > 0 ? b : this._id("doc", String(b || ""))
+  if (!this._state.nodes[aid] || !this._state.nodes[bid]) return []
   var q = [aid]
+  depth[aid] = 0
   var prev = {}
   var seen = {}
   seen[aid] = true
   while (q.length > 0) {
     var cur = q.shift()
     if (cur === bid) break
-    var nbs = isArray(this._adj[cur]) ? this._adj[cur] : []
+    if (isNumber(opts.maxDepth) && depth[cur] >= opts.maxDepth) continue
+    var nbs = this.neighbors(cur, opts)
     for (var i = 0; i < nbs.length; i++) {
       var nx = nbs[i].from === cur ? nbs[i].to : nbs[i].from
       if (seen[nx]) continue
       seen[nx] = true
       prev[nx] = cur
+      depth[nx] = depth[cur] + 1
       q.push(nx)
     }
   }
@@ -1206,6 +1343,8 @@ MiniAWikiGraph.prototype._falkorNodeProps = function(id, node) {
     if (isString(summaryInfo.summary)) props.summary = summaryInfo.summary
     if (isString(summaryInfo.hash)) props.hash = summaryInfo.hash
   }
+  // The generic Falkor helper reserves name/type and coerces some scalar values.
+  props.__miniAProps = stringify(props, __, "")
   return props
 }
 
@@ -1213,11 +1352,17 @@ MiniAWikiGraph.prototype._falkorNodeProps = function(id, node) {
 MiniAWikiGraph.prototype._falkorLink = function(db, edge) {
   var esc = function(s) { return String(s || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'") }
   var type = String(edge.type).replace(/[^A-Za-z0-9_]/g, "_")
-  var props = merge({ provenance: edge.provenance }, edge.props || {})
+  var props = merge({ provenance: edge.provenance, __miniAProps: stringify(edge.props || {}, __, "") }, edge.props || {})
   var assignments = Object.keys(props).filter(function(k) { return /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && isDef(props[k]) }).map(function(k) {
-    return "r." + k + " = " + (isNumber(props[k]) && isFinite(props[k]) ? String(props[k]) : "'" + esc(props[k]) + "'")
+    return "r." + k + " = " + (isNumber(props[k]) && isFinite(props[k]) ? String(props[k]) : "'" + esc(isMap(props[k]) || isArray(props[k]) ? stringify(props[k], __, "") : props[k]) + "'")
   })
   db.query("MATCH (a {id:'" + esc(edge.from) + "'}), (b {id:'" + esc(edge.to) + "'}) MERGE (a)-[r:" + type + " {evidenceKey:'" + esc(this._edgeKey(edge.from,edge.to,edge.type,edge.provenance,edge.props)) + "'}]->(b)" + (assignments.length ? " SET " + assignments.join(", ") : ""))
+}
+
+MiniAWikiGraph.prototype._falkorMetadata = function(db) {
+  var meta = { version: 2, semantic_cache: this._state.semantic_cache, enrichment: this._state.enrichment, build_status: this._state.build_status }
+  var json = stringify(meta, __, "").replace(/\\/g, "\\\\").replace(/'/g, "\\'")
+  db.query("MERGE (m:MiniAGraphState {id:'state'}) SET m.json = '" + json + "'")
 }
 
 MiniAWikiGraph.prototype.falkorSync = function() {
@@ -1237,6 +1382,7 @@ MiniAWikiGraph.prototype.falkorSync = function() {
       if (e._deleted === true) return
       this._falkorLink(db, e)
     }.bind(this))
+    this._falkorMetadata(db)
     return { ok: true, nodes: Object.keys(this._state.nodes).length, edges: this.stats().edges }
   } catch(e) {
     return { ok: false, error: __miniAErrMsg(e) }
@@ -1272,6 +1418,7 @@ MiniAWikiGraph.prototype.falkorApplyDiff = function(diff) {
     ;(isArray(diff.upsertEdges) ? diff.upsertEdges : []).forEach(function(e) {
       this._falkorLink(db, e)
     }.bind(this))
+    this._falkorMetadata(db)
     return { ok: true }
   } catch(e) {
     return { ok: false, error: __miniAErrMsg(e) }
@@ -1376,6 +1523,7 @@ MiniAWikiGraph.prototype.load = function() {
         if (id.length === 0) continue
         var type = isString(node.type) ? node.type : "concept"
         var props = clone(node)
+        if (isString(props.__miniAProps)) props = af.fromJson(props.__miniAProps)
         delete props.id
         delete props.type
         this._upsertNode(id, type, props)
@@ -1395,8 +1543,15 @@ MiniAWikiGraph.prototype.load = function() {
         if (fromId.length === 0 || toId.length === 0) continue
         var relProps = isMap(edgeRow.relProps) ? clone(edgeRow.relProps) : {}
         var provenance = isString(relProps.provenance) ? relProps.provenance : "EXTRACTED"
+        if (isString(relProps.__miniAProps)) relProps = af.fromJson(relProps.__miniAProps)
         delete relProps.provenance
-        this._addEdge(fromId, toId, isString(edgeRow.relType) ? edgeRow.relType : "RELATED_TO", provenance, relProps)
+        if (isString(relProps.evidence)) { try { relProps.evidence = af.fromJson(relProps.evidence) } catch(ignoreEvidence) {} }
+        this._addEdge(fromId, toId, isDef(edgeRow.relType) ? String(edgeRow.relType) : "RELATED_TO", provenance, relProps)
+      }
+      var metadata = db.readOnlyQuery("MATCH (m:MiniAGraphState {id:'state'}) RETURN m.json AS json")
+      if (metadata.length && isDef(metadata[0].json)) {
+        var meta = af.fromJson(String(metadata[0].json))
+        ;["semantic_cache", "enrichment", "build_status"].forEach(function(k) { if (isMap(meta[k])) this._state[k] = meta[k] }, this)
       }
       this._markDerivedDirty()
       this._ensureDerived()

@@ -25,6 +25,11 @@ function MiniAWebPrompt(request) {
     var rawPost = request.files.postData
     if (!isString(rawPost) || rawPost.length > MiniAWebAttachments.maxRequestChars) throw new Error("Request exceeds attachment payload limit")
     var postData = jsonParse(rawPost)
+    var embedSnapshot = null
+    if (Object.prototype.hasOwnProperty.call(postData, "embed")) {
+      if (typeof MiniAWebEmbed === "undefined") throw new Error("Embedding is unavailable")
+      embedSnapshot = MiniAWebEmbed.validate(postData)
+    }
     postData.prompt = __normalizePromptInput(postData.prompt)
     if (isString(postData.displayPrompt)) postData.displayPrompt = __normalizePromptInput(postData.displayPrompt)
     var binaryAttachments = MiniAWebAttachments.validate(postData.attachments, postData.prompt)
@@ -95,6 +100,7 @@ function MiniAWebPrompt(request) {
       var startArgs = merge(effectiveArgs, {
         goal        : __miniAPrefixGoal(postData.prompt, effectiveArgs.goalprefix),
         raw         : true,
+        _webEmbedContext: embedSnapshot ? embedSnapshot.context : null,
         __startupSubmittedAt: submittedAt
       })
       if (!artifacts.enabled() && isMap(postData.skillUsage) && isString(postData.skillUsage.name) && /^[a-z0-9][a-z0-9_-]*$/.test(postData.skillUsage.name)) {

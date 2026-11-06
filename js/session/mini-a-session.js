@@ -667,6 +667,11 @@ function MiniAInteractiveSession(args, adapter) {
     maxauditrecords: { type: "number", description: "Maximum audit records included in a memory dream prompt (default 200)." },
     webadvanced: { type: "boolean", default: false, description: "Enable trusted Advanced web console APIs (generates a token and opens the browser when webtoken is omitted)." },
     webadvancedpath: { type: "string", description: "Local Advanced session journal and preset directory." },
+    webembed: { type: "boolean", default: false, description: "Enable the opt-in iframe context bridge." },
+    webembedorigins: { type: "string", description: "Exact allowed parent origins, comma-separated or JSON/SLON array." },
+    webembedfields: { type: "string", description: "JSON/SLON definitions of allowed parent context fields." },
+    webembedcontextrequired: { type: "boolean", default: true, description: "Require context before embedded goals." },
+    webembedprompt: { type: "boolean", default: false, description: "Allow a same-origin initial plain-goal handoff." },
     verbose        : { type: "boolean", default: false, description: "Print detailed interaction events" },
     debug          : { type: "boolean", default: false, description: "Enable debug logging" },
     debugfile      : { type: "string", description: "Write debug output to this file instead of screen (implies debug=true)" },
@@ -748,7 +753,7 @@ function MiniAInteractiveSession(args, adapter) {
     wikitelemetry: { type: "boolean", description: "Record local aggregate wiki retrieval telemetry (off by default); writable managers persist it, read-only managers keep it in memory." },
     wikilexical    : { type: "string", dataEditor: "map", description: "SLON/JSON Lucene lexical configuration; defaults to {language:'english'} and supports optional synonymsFile." },
     usewikigraph   : { type: "boolean", default: false, description: "Enable the wiki knowledge graph for structural and semantic page relationships." },
-    wikigraphsemantic: { type: "boolean", default: false, description: "Build semantic (embedding-based) edges in addition to structural links when running /graph build." },
+    wikigraphsemantic: { type: "boolean", default: false, description: "Legacy semantic build default; deterministic extraction plus optional budgeted model assistance." },
     wikigraphcommunity: { type: "string", description: "Community detection algorithm for the wiki graph (louvain|leiden)." },
     wikigraphsearchhints: { type: "boolean", description: "Append graph-related pages to wiki search results." },
     wikigraphhintcap: { type: "number", description: "Maximum graph-hint pages appended to search results." },
@@ -1082,7 +1087,7 @@ function MiniAInteractiveSession(args, adapter) {
     { category: "Memory and knowledge", subcategory: "Dream consolidation", names: "dreamwikimaxaffected dryrun maxauditrecords dream dreammaxsteps dreammemorymode dreammode dreamreport dreamwiki dreamwikiapproval dreamwikidryrun dreamwikiinstructions dreamwikilintresultlimit dreamwikillm dreamwikimaxdepth dreamwikiminpages dreamwikimode dreamwikiorganize dreamwikireorg".split(" ") },
     { category: "Delegation and servers", subcategory: "Delegation and subtasks", names: "autodelegation autodelegationmaxperstep autodelegationthreshold delegationhardtimeout delegationmaxdepth delegationmaxretries delegationstalltimeout delegationtimeout forkstatemaxbytes forkpolicy forkdecide maxconcurrent noisytools showdelegate subtasks subtasksfile subtaskssequential usea2a usedelegation".split(" ") },
     { category: "Delegation and servers", subcategory: "Worker registry", names: "workerevictionttl workermode workerreg workerreginterval workerregtoken workerregurl workers workerskills workertags".split(" ") },
-    { category: "Delegation and servers", subcategory: "Web interface", names: "browsercontext onport path ssequeuetimeout web webadvanced webadvancedpath".split(" ") },
+    { category: "Delegation and servers", subcategory: "Web interface", names: "browsercontext onport path ssequeuetimeout web webadvanced webadvancedpath webembed webembedorigins webembedfields webembedcontextrequired webembedprompt".split(" ") },
     { category: "Output and diagnostics", subcategory: "Display and visualizations", names: "format raw showexecs showthinking useascii useasciiviz usecharts usediagrams usemaps usemath usemermaid usestream usesvg usevectors".split(" ") },
     { category: "Output and diagnostics", subcategory: "Files and logging", names: "warnunknownargs auditch debug debugch debugdecch debugfile debuglcch debugtrace debugvalch debugvisualch logpromptheaders metricsch nologtrunc outfile outfileall outputfile toollog verbose".split(" ") }
   ]
@@ -2773,7 +2778,7 @@ function MiniAInteractiveSession(args, adapter) {
               var buildToken = String(graphParts[1] || "").toLowerCase()
               var buildInsert = hasTrailingSpace ? cursor : (cursor - buildToken.length)
               var buildPartial = hasTrailingSpace ? "" : buildToken
-              if ("semantic=true".indexOf(buildPartial) === 0) candidates.add("semantic=true")
+              ["extraction=structural","extraction=semantic","modelHelp=off","modelHelp=auto","strategy=incremental","strategy=full","strategy=resume","force=true","maxCalls=100","maxTokens=200000","maxMinutes=10","preset=small","preset=moderate","preset=large","preset=reset"].forEach(function(value) { if (value.toLowerCase().indexOf(buildPartial) === 0) candidates.add(value) })
               return candidates.isEmpty() ? -1 : Number(buildInsert)
             }
 
@@ -7365,7 +7370,13 @@ function MiniAInteractiveSession(args, adapter) {
         params.from = p[0]
         params.to = p[1]
       }
-      if (sub === "build" && rest.indexOf("semantic=true") >= 0) params.semantic = true
+      if (sub === "build") {
+        parseConsolePathArgs(rest).argv.forEach(function(token) {
+          var at=token.indexOf("="), key=token.substring(0,at)
+          if (at<1 || MiniAGraphBuild.fields.indexOf(key)<0) throw new Error("Graph build options: extraction=structural|semantic modelHelp=off|auto strategy=incremental|full|resume force=true maxCalls=100 maxTokens=200000 maxMinutes=10 preset=small|moderate|large|reset")
+          params[key]=token.substring(at+1)
+        })
+      }
       if (sub === "falkor" && rest.length > 0) params.query = rest
       if (sub === "cross") params.path = consolePathValue(rest)
       var out = wm.graph(sub, params)

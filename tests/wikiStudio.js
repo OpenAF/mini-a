@@ -75,6 +75,23 @@
     assert(io.fileExists(w.root + "/moved.md"),false,"Delete")
     io.writeFileString(w.root + "/large.md", "0123456789"); s.config.maxPageBytes=4; rejects(function(){s.readPage(w,"large.md")},"page_too_large")
   }) }
+  exports.testGraphBuildSettings = function() { fixture(function(s,t) {
+    WikiStudio.privateDir(s.config.home+"/jobs")
+    var w=add(s,t), route=["graph","settings"]
+    var saved=s.jobWikiRoute({method:"PUT",body:{extraction:"semantic",modelHelp:"off",maxCalls:9,maxTokens:5000,maxMinutes:1}},w,route,"admin")
+    assert(saved.effective.maxCalls,9,"Studio saves defaults")
+    var reopened=new WikiStudioServer(s.config)
+    assert(reopened.jobWikiRoute({method:"GET"},w,route,"viewer").effective.maxCalls,9,"Studio defaults survive restart")
+    var runner=new MiniAWikiOps({wikiroot:w.root,wikiaccess:"ro",usewikigraph:true,wikiretrievalv2:false})
+    assert(runner.execute(runner.spec("graph.settings",{}),{}).effective.maxCalls,9,"Manager reads Studio defaults")
+    var request={method:"POST",headers:{"idempotency-key":"graph-options-test"},body:{extraction:"semantic",modelHelp:"off",maxCalls:2}}
+    var job=s.jobWikiRoute(request,w,["graph","rebuild"],"admin")
+    assert(job.params.maxCalls,2,"Studio run override")
+    assert(s.jobWikiRoute({method:"GET"},w,route,"viewer").effective.maxCalls,9,"Studio override not saved")
+    assert(s.jobWikiRoute(request,w,["graph","rebuild"],"admin").id,job.id,"Graph job replay idempotent")
+    rejects(function(){s.jobWikiRoute({method:"POST",headers:{"idempotency-key":"invalid-options"},body:{extraction:"semantic",strategy:"resume",force:true}},w,["graph","rebuild"],"admin")},"invalid_options")
+    rejects(function(){s.jobWikiRoute({method:"PUT",body:{maxCalls:3}},merge(w,{access:"ro"}),route,"admin")},"read_only")
+  }) }
   exports.testGraph = function() { fixture(function(s, t) {
     var w = add(s, t)
     io.writeFileString(w.root + "/one.md", "# One\n[[two]]\n<script>alert(1)</script>")

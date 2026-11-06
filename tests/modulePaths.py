@@ -22,8 +22,23 @@ with tempfile.TemporaryDirectory(prefix='mini-a-module-paths-', dir='/private/tm
     package = root / 'package'
     package.mkdir()
     shutil.copytree(base / 'js', package / 'js', ignore=shutil.ignore_patterns('.openaf_precompiled'))
-    for name in entries + ['mini-a.yaml', 'mini-a-wiki-studio.yaml']:
+    for name in entries + ['mini-a.yaml', 'mini-a-web.yaml', 'mini-a-wiki-studio.yaml']:
         shutil.copy2(base / name, package / name)
+    (package / 'public').mkdir()
+    shutil.copy2(base / 'public/embed-context.js', package / 'public/embed-context.js')
+    # Exercise the full web bootstrap, including compiled-library loading, against
+    # a checkout and copied installation from a caller outside either package.
+    for runtime in [base, package]:
+        run(f'''
+ow.loadOJob()
+ow.oJob.__file = {json.dumps(str(runtime / 'mini-a-web.yaml'))}
+var bootstrap = io.readFileYAML(ow.oJob.__file).jobs.filter(function(job) {{ return job.name === "Load web libraries" }})[0].exec
+new Function(bootstrap)()
+if (__miniABundleRoot !== {json.dumps(str(runtime))}) throw new Error("Web core loaded from another installation")
+MiniAWebEmbed.init({{webembed:true,webembedorigins:"http://localhost:8888",webembedcontextrequired:false}})
+if (!MiniAWebEmbed.config.enabled || typeof MiniAEmbedContext.envelope !== "function") throw new Error("Web assets not package-relative")
+print("MODULE_PATHS_OK")
+''', caller)
     # oJob may retain only the requested basename when resolving an installed job.
     # Exercise the actual startup path resolution, before its first library load.
     for job_file, installed, cwd, expected in [

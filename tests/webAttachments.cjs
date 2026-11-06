@@ -72,6 +72,7 @@ async function browser(advanced, response) {
   let sent, cleared=0, started=0, warning, optimistic;
   const b = vm.createContext({
     isProcessing:false,attachmentsEnabled:true,attachments:[{...upload,preview,binary:true},{name:'notes.txt',content:'notes'}],
+    captureEmbedContext:()=>undefined,embedInitialDraft:false,embedConversationUsed:false,
     promptInput:{value:'Inspect'},advancedUI:advanced?{enabled:()=>true,submit:async(prompt,attachments)=>{sent={prompt,attachments};if(response.error)throw Error(response.error);}}:null,
     currentSessionUuid:'session',lastRawContent:'',lastKnownHistory:[],lastSubmittedPrompt:'',lastFinishedPrompt:'',activeHistoryId:null,
     activeSubmissionStartedAt:0,sawNonFinishedForActiveSubmission:false,lastRenderedRaw:'',streamEnabled:false,

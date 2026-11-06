@@ -122,6 +122,21 @@ help:
     desc     : Local directory for Advanced session journals and presets
     example  : "/var/lib/mini-a/web"
     mandatory: false
+  - name     : webembed
+    desc     : "Enable the opt-in iframe bridge at ?embed=1 (default false). See docs/WEB-EMBED.md."
+    mandatory: false
+  - name     : webembedorigins
+    desc     : "Comma-separated list or JSON/SLON array of exact allowed HTTP(S) parent origins. Required with webembed=true."
+    mandatory: false
+  - name     : webembedfields
+    desc     : "JSON/SLON field definitions: each named field has type string, number, boolean or their [] array forms, and optional required boolean."
+    mandatory: false
+  - name     : webembedcontextrequired
+    desc     : "Require parent context for embedded goals (default true); false permits prompt-only embedding."
+    mandatory: false
+  - name     : webembedprompt
+    desc     : "Permit a same-origin parent to prefill or submit the first plain goal (default false)."
+    mandatory: false
   - name     : webtoken
     desc     : "Shared secret required as an x-mini-a-token header, or ?token= for the SSE stream. Advanced mode generates a fresh token when omitted; Simple mode without a token leaves the server open to anyone who can reach the port."
     example  : "a-long-random-secret"
@@ -1375,6 +1390,7 @@ include:
 - oJobHTTPd.yaml
 
 todo:
+- Load web libraries
 - Init
 - Periodic cleanup of old sessions
 - Shutdown history S3 client
@@ -1383,6 +1399,7 @@ todo:
 - (httpdHealthz   ): "${onport:-8888}"
 - (httpdMetrics   ): "${onport:-8888}"
 - Static content
+- Apply embedding headers
 - (httpdService   ): "${onport:-8888}"
   ((uri          )): /ping
   ((execURI      )): | #js
@@ -1404,6 +1421,7 @@ todo:
         return ow.server.httpd.reply({ error: "unauthorized" })
       }
       var _res = { status: "ok", webadvanced: isDef(global.__advanced), usehistory: global.__usehistory, useattach: global.__useattach, historyretention: args.historyretention, showexecs: global.__showexecs, usestream: global.__usestream, showthinking: global.__showthinking, usemath: global.__usemath }
+      _res.embed = MiniAWebEmbed.config
       return ow.server.httpd.reply(_res)
     } catch(e) {
       printErr(e)
@@ -1885,11 +1903,6 @@ ojob:
   daemon      : true
   argsFromEnvs: true
   loadLibs    :
-  - mini-a.js
-  - js/web/mini-a-web-attachments.js
-  - js/web/mini-a-web-session.js
-  - js/artifacts/mini-a-artifact-policy.js
-  - js/web/mini-a-web-artifacts.js
   - s3.js
   channels    :
     create:
@@ -1898,6 +1911,19 @@ ojob:
     - name: results
 
 jobs:
+# Resolve the requested job before loading facades: an installed oPack may be older
+# than the checkout (or a copied package) that is actually serving this web app.
+- name : Load web libraries
+  exec : | #js
+    var miniALibraryRoot = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent())
+    if (!io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) miniALibraryRoot = getOPackPath("mini-a")
+    if (!isString(miniALibraryRoot) || !io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) throw new Error("Cannot locate the Mini-A package for " + ow.oJob.__file)
+    loadLib(miniALibraryRoot + "/js/mini-a-paths.js")
+    __miniAPackageRoot = __miniAResolvePackageRoot(miniALibraryRoot)
+    ;["js/core/mini-a.js", "js/web/mini-a-web-attachments.js", "js/web/mini-a-web-session.js", "js/web/mini-a-web-embed.js", "js/artifacts/mini-a-artifact-policy.js", "js/web/mini-a-web-artifacts.js"].forEach(function(path) {
+      loadLib(__miniAPath(path), true)
+    })
+
 # ---------------------
 - name : CheckEnv
   exec : | #js
@@ -1962,6 +1988,26 @@ jobs:
     ((browse       )): false
     ((default      )): index.md
 
+- name : Apply embedding headers
+  exec : | #js
+    if (MiniAWebEmbed.config.enabled) {
+      var embedPort = Number(args.onport || 8888)
+      var staticRoute = global.__ojobRoutes[embedPort]["/"]
+      global.__ojobRoutes[embedPort]["/"] = function(request) {
+        // Some oJob-common versions include the query in originalURI when
+        // checking a directory's trailing slash, causing /?embed=1 to redirect
+        // to itself. Keep query parameters intact and normalize only that check.
+        var staticRequest = request
+        if (isString(request.originalURI) && request.originalURI.indexOf("?") >= 0) {
+          staticRequest = merge(request, { originalURI: request.originalURI.split("?")[0] })
+        }
+        return MiniAWebEmbed.protectResponse(staticRoute(staticRequest))
+      }
+      ow.server.httpd.route(global.__ojobHttp[embedPort], global.__ojobRoutes[embedPort], function() {
+        return global.__ojobHttp[embedPort].reply("", "", 401, {})
+      })
+    }
+
 # -----------
 - name : Init
   from :
@@ -1972,6 +2018,9 @@ jobs:
       artifactworkerurl: isString().default(__)
       artifactdir    : isString().default(__)
       webadvanced    : toBoolean().isBoolean().default(false)
+      webembed       : toBoolean().isBoolean().default(false)
+      webembedcontextrequired: toBoolean().isBoolean().default(true)
+      webembedprompt : toBoolean().isBoolean().default(false)
       showexecs       : toBoolean().isBoolean().default(false)
       verbose         : toBoolean().isBoolean().default(false)
       debug           : toBoolean().isBoolean().default(false)
@@ -2264,12 +2313,8 @@ jobs:
       })
     }
     global.__advanced = __
+    MiniAWebEmbed.init(args)
     if (args.webadvanced === true) {
-      var miniALibraryRoot = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent())
-      if (!io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) miniALibraryRoot = getOPackPath("mini-a")
-      if (!isString(miniALibraryRoot) || !io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) throw new Error("Cannot locate the Mini-A package for " + ow.oJob.__file)
-      loadLib(miniALibraryRoot + "/js/mini-a-paths.js")
-      __miniAPackageRoot = __miniAResolvePackageRoot(miniALibraryRoot)
       loadLib(__miniAPath("js/session/mini-a-session.js"))
       loadLib(__miniAPath("js/web/mini-a-advanced.js"))
       global.__advanced = new MiniAAdvanced(args)

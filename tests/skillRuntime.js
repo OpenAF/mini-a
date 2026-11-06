@@ -574,4 +574,82 @@
     ow.test.assert(inv({ useskills: true, useutils: true, utilsdeny: "memoryStore" }).indexOf("mini-a-memory") < 0, true, "Denied tool hides its skill")
   }
 
+  exports.testVisualSkillAvailabilityAndReferences = function() {
+    fixture(function(root) {
+      var makeAgent = function(options) {
+        var agent = new MiniA()
+        agent.fnI = function() {}; agent._trace = function() {}
+        agent._agentState = {}; agent._runtime = { context: [] }
+        agent._getPluginsDiscovery = function() { return { skillsRoots: [] } }
+        agent._resetSkillRuntime(options)
+        agent._createUtilsMcpConfig(merge({ utilsroot: root }, options))
+        agent._skillLocalEnabled = options.useskills === true
+        agent._selectSkillCandidates = function() { throw new Error("Explicit selection must skip the model") }
+        return agent
+      }
+      var visible = function(agent) {
+        return agent._skillUtils._listSkills({}).some(function(item) { return item.name === "mini-a-visual-output" })
+      }
+      ;["usecharts", "usediagrams", "usemaps", "usemath", "useasciiviz", "usesvg"].forEach(function(flag) {
+        var options = { useskills: true, useutils: false }
+        options[flag] = true
+        var agent = makeAgent(options)
+        try { ow.test.assert(visible(agent), true, "Visual skill visible with only " + flag) }
+        finally { agent._stopAgentResources() }
+      })
+      var hidden = makeAgent({ useskills: true, useutils: false })
+      try {
+        hidden.mcpToolNames = []; hidden._utilsToolNames = []
+        ow.test.assert(visible(hidden), false, "Visual skill hidden without renderer or tool")
+        hidden.mcpToolNames = ["printChart"]
+        ow.test.assert(visible(hidden), true, "printChart alone satisfies visual prerequisites")
+      } finally { hidden._stopAgentResources() }
+      var options = { useskills: true, useutils: false, usemath: true, skillsautosearch: false, goal: "$local:mini-a-visual-output Explain the arithmetic mean of the supplied values 12 and 18, including its formula and a short explanation. Preserve the input data and state the result without claiming browser verification." }
+      var agent = makeAgent(options)
+      try {
+        ow.test.assert(agent._consultSkillsForRun(options), [], "Math-only explicit activation succeeds")
+        var record = agent._skillRuntime.records["local:mini-a-visual-output"]
+        ow.test.assert(record.state, "active", "Visual instructions active")
+        ow.test.assert(agent._skillRuntime.metrics.selection_calls, 0, "No automatic selection request")
+        ow.test.assert(record.content.indexOf('"North"'), -1, "Reference examples are not preloaded")
+        var initialChars = agent._skillRuntime.chars
+        var names = ["chartjs.md", "latex-math.md", "leaflet.md", "mermaid.md"]
+        names.forEach(function(name) {
+          var result = agent._skillUtils.skills({ operation: "read", name: "mini-a-visual-output", reference: "references/" + name })
+          ow.test.assert(isUnDef(result.error) && isString(result.body), true, "Declared reference readable: " + name)
+          ow.test.assert(result.body.length > 500 && result.body.length < 4000, true, "Reference fits default read: " + name)
+          ow.test.assert(result.truncated === true, false, "Complete reference returned: " + name)
+        })
+        ow.test.assert(agent._skillRuntime.chars > initialChars && agent._skillRuntime.chars <= 12000, true, "All references fit the existing shared budget")
+        var undeclared = agent._skillUtils.skills({ operation: "read", name: "mini-a-visual-output", reference: "../mini-a-files/SKILL.md" })
+        ow.test.assert(undeclared.error, "skill-reference-not-declared", "Unrelated references remain inaccessible")
+      } finally { agent._stopAgentResources() }
+      var disabled = makeAgent({ useskills: false, usemath: true })
+      try {
+        disabled._consultSkillsForRun({ useskills: false, usemath: true, goal: "$local:mini-a-visual-output" })
+        ow.test.assert(disabled._skillRuntime.chars, 0, "Math does not enable disabled skills")
+      } finally { disabled._stopAgentResources() }
+    })
+  }
+
+  exports.testVisualKnowledgeRendererContracts = function() {
+    var chart = MiniA.buildVisualKnowledge({ useCharts: true })
+    var page = io.readFileString(__miniABundleRoot + "/public/index.md")
+    var plugins = chart.match(/(?:@sgratzl\/)?chartjs-[a-z-]+/g) || []
+    ow.test.assert(plugins.length > 0, true, "Chart guidance documents loaded plugins")
+    plugins.forEach(function(name) {
+      ow.test.assert(page.indexOf(name + "@") >= 0, true, "Advertised plugin has a web loader: " + name)
+    })
+    ow.test.assert(chart.indexOf("top-level") >= 0 && chart.indexOf("dataset.type") >= 0, true, "Mixed charts retain the wrapper's top-level type")
+    var diagrams = MiniA.buildVisualKnowledge({ useDiagrams: true })
+    ow.test.assert(/treemap-meta|zenUML|XYChart|Escape inner quotes with backslashes/.test(diagrams), false, "Unsupported diagram guidance removed")
+    ow.test.assert(diagrams.indexOf("#quot;") >= 0 && diagrams.indexOf("xychart-beta") >= 0 && diagrams.indexOf("treemap-beta") >= 0, true, "Supported syntax documented")
+    var maps = MiniA.buildVisualKnowledge({ useMaps: true })
+    ow.test.assert(maps.indexOf("optional, default: 13") >= 0 && maps.indexOf("dragging?, etc.") < 0, true, "Map defaults and options match wrapper")
+    var math = MiniA.buildVisualKnowledge({ useMath: true })
+    ow.test.assert(math.indexOf("KaTeX-supported") >= 0 && math.indexOf("literal backslashes") >= 0, true, "Math guidance specifies renderer and Markdown escaping")
+    ow.test.assert(math.indexOf("Charts (strict format):"), -1, "Math alone does not emit chart instructions")
+    ow.test.assert(MiniA.buildVisualKnowledge({}), "", "Disabled visuals add no guidance")
+  }
+
 })()

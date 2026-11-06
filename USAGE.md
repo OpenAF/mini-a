@@ -145,6 +145,43 @@ and changed source revisions block affected work with a reported reason.
 Activity records show discovery, selection, activation and blocking; loading
 alone does not prove compliance. See [Virtual Skills](docs/VIRTUAL-SKILLS.md).
 
+### Visual-output skill
+
+The bundled `mini-a-visual-output` skill helps author Chart.js charts, Mermaid
+diagrams, LaTeX math expressions, and Leaflet maps in Mini-A responses. Enable
+`useskills=true` and the relevant renderer: `usecharts=true`, `usediagrams=true`
+(alias `usemermaid=true`), `usemath=true`, or `usemaps=true`. Math alone makes the
+skill available. Existing `usesvg`, `useasciiviz`, and `printChart` availability
+also satisfy its prerequisites. The skill does not enable these capabilities.
+
+```bash
+opack exec mini-a useskills=true skillsautosearch=false usecharts=true goal='Use $local:mini-a-visual-output. Plot these supplied order counts: North 12, South 18.'
+opack exec mini-a useskills=true skillsautosearch=false usemath=true goal='Use $local:mini-a-visual-output. Explain the arithmetic mean with a displayed equation.'
+```
+
+Explicit selection works with automatic search disabled. The main procedure
+directs the agent to read only the relevant `references/chartjs.md`,
+`references/mermaid.md`, `references/latex-math.md`, or `references/leaflet.md`
+through `skills operation=read name=mini-a-visual-output reference=<path>`.
+These local references use the existing shared skill budget and access rules.
+They include common patterns, data checks, and useful fallbacks; standalone
+applications and full LaTeX documents are outside their scope.
+
+Chart/map fences contain static JSON; Mermaid fences contain diagram syntax;
+math uses `$...$` or `$$...$$` outside code fences. Use supplied or retrieved
+data. Keep a complete display equation on one source line, with blank lines
+around it, for compatibility with the current Markdown math extension. Label
+illustrative data when explicitly requested. Compatible formats may be combined when they explain complementary points.
+
+Rich rendering occurs in the web UI; console transcripts preserve source
+text, with console charts available separately through `useasciiviz`.
+Instructions ship locally, but chart adapters/plugins, fallback libraries,
+Leaflet, and KaTeX use CDN assets, and maps use OpenStreetMap tiles. Offline
+instructions therefore do not guarantee offline rendering. JSON validation,
+library parsing, visible rendering, and model adherence are separate checks.
+If rendering is unavailable, retain useful source and provide a table, textual
+explanation, or readable formula.
+
 ### Agent Plugins
 
 Mini-A can also load skills (and MCP servers) bundled as an [Agent Plugins](https://agent-plugins.org) directory (`plugin.json` + `skills/` + `mcp.json`). Use `plugins=<dir1,dir2>` for explicit plugin directories, or `pluginsroot=<dir>` / `pluginsroots=<dir1,dir2>` for directories that each contain many plugin subfolders (default: `.openaf-mini-a/plugins`). These compose with `extraskills`/`mcp=` — they don't replace them — and a plugin's skills never win a name conflict over the default/extra skill directories. See **[docs/AGENT-PLUGINS.md](docs/AGENT-PLUGINS.md)** for the full directory layout, the `PLUGIN_ROOT`/`PLUGIN_DATA` contract, and current limitations.
@@ -4423,6 +4460,14 @@ SBuckets; write tools require `readwrite=true` on the connector. See
 [WorkIQ setup and verification](docs/WORKIQ.md) for the required OpenAF features,
 profiles, tenant options and token mode.
 
+## Embedded web conversations
+
+Use `webembed=true` with explicit `webembedorigins` and `webembedfields` to supply
+parent context to an iframe at `?embed=1`. Add `webembedprompt=true` for a
+same-origin initial draft or submitted goal. Context is required by default;
+`webembedcontextrequired=false` permits prompt-only integration. Both Simple and
+Advanced views are supported. See [configuration, protocol and parent example](docs/WEB-EMBED.md).
+
 ## Advanced web console
 
 Start the existing web server with Advanced mode enabled:
@@ -5035,6 +5080,11 @@ Console parameters appear in `mini-a --help` and interactive `/set` completion. 
 | `ssequeuetimeout` | number | `120` | Web SSE queue timeout in seconds. |
 | `webadvanced` | boolean | `false` | Enable trusted Advanced web console APIs (generates a token and opens the browser when webtoken is omitted). |
 | `webadvancedpath` | string | unset | Local Advanced session journal and preset directory. |
+| `webembed` | boolean | `false` | Enable iframe context at `?embed=1`; see [embedding](docs/WEB-EMBED.md). |
+| `webembedorigins` | string/array | unset | Exact allowed parent origins; required when embedding is enabled. |
+| `webembedfields` | string/object | `{}` | Allowed context field definitions (`type`, optional `required`). |
+| `webembedcontextrequired` | boolean | `true` | Require nonempty context for embedded goals. |
+| `webembedprompt` | boolean | `false` | Permit one same-origin initial plain-goal draft or submission. |
 
 ### Output and diagnostics — Display and visualizations
 
@@ -5209,3 +5259,5 @@ The pre-request **working context only** estimate excludes other request content
 statistics when available; the cost line reports **cumulative session usage**.
 Dynamic tool selection uses isolated, tool-free requests. A valid empty selection
 means no tools are needed; selection failures retain the existing fallback sequence.
+
+Wiki graph extraction, model budgets, saved defaults and resume controls are documented in [Graph builds](docs/GRAPH-BUILDS.md).

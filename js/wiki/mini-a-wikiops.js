@@ -114,7 +114,9 @@ MiniAWikiOps.catalog = (function() {
     add("graph." + op, "Graph", op === "stats" ? "Graph statistics (/graph stats)" : op, false, fields)
   })
   add("graph.filestats", "Graph", "Stored graph file diagnostics (advanced)", false, [], { top: 10 })
-  add("graph.build", "Graph", "Build structural / semantic graph", true, [["semantic", "Semantic extraction", false, "boolean"]])
+  add("graph.build", "Graph", "Build structural / semantic graph", true)
+  add("graph.settings", "Graph", "View graph build defaults", false)
+  add("graph.defaults", "Graph", "Save graph build defaults", true)
   add("graph.report", "Graph", "Write graph report", true)
   add("graph.falkor", "Graph", "FalkorDB query / sync (advanced)", true, [["query", "Query (blank synchronizes)", ""]], {}, "Arbitrary queries are treated as writes; database permissions still apply.")
   add("graph.html", "Graph", "Export offline HTML constellation", true, [["output", "Output HTML file"], ["title", "Title", "Wiki constellation"]])
@@ -140,7 +142,8 @@ MiniAWikiOps.operation = function(id) {
 }
 MiniAWikiOps.prototype.spec = function(id, params) {
   var op = MiniAWikiOps.operation(id), p = merge(clone(op.defaults), MiniAWikiOps.parse(params))
-  if (id === "graph.build" && isUnDef(p.semantic)) p.semantic = toBoolean(this.args.wikigraphsemantic) === true
+  if (id === "graph.build" || id === "graph.defaults") MiniAGraphBuild.resolve(p)
+  if (id === "graph.defaults" && ["force","resume","strategy"].some(function(k){return isDef(p[k])})) throw new Error("Force, resume and strategy are per-run actions, not saved defaults")
   op.fields.forEach(function(f) {
     if (isUnDef(p[f[0]]) && isDef(f[2])) p[f[0]] = f[2]
     if (isUnDef(p[f[0]]) || (isUnDef(f[2]) && String(p[f[0]]).trim() === "")) throw new Error("Required parameter: " + f[0])
@@ -202,7 +205,7 @@ MiniAWikiOps.prototype.unavailable = function(spec) {
   if ((id === "wiki.compact" || id === "wiki.indexstats" || id === "graph.filestats" || id === "graph.html" || id.indexOf("absorb.") === 0) && (backend !== "fs" || archive || cfg.__catalog)) return "Requires a local filesystem wiki"
   if (id === "dream.auto" && (backend !== "fs" || archive || cfg.__catalog || this.args.wikitarget)) return "Auto requires a local primary filesystem wiki"
   if (id === "wiki.compact" && toBoolean(cfg.wikiretrievalv2) === false) return "Compaction requires Retrieval V2"
-  if (id.indexOf("graph.") === 0 && id !== "graph.html" && id !== "graph.filestats" && toBoolean(cfg.usegraph) !== true) return "Enable usewikigraph=true in session settings"
+  if (id.indexOf("graph.") === 0 && id !== "graph.html" && id !== "graph.filestats" && id !== "graph.settings" && id !== "graph.defaults" && toBoolean(cfg.usegraph) !== true) return "Enable usewikigraph=true in session settings"
   if (cfg.__catalog && (id.indexOf("dream.") === 0 || id.indexOf("ingest.") === 0 || id.indexOf("graph.") === 0 && id !== "graph.stats")) return "Select a concrete wiki target"
   return ""
 }
@@ -251,7 +254,8 @@ MiniAWikiOps.prototype._execute = function(spec, gates) {
     if (id === "dream.reorg" && (!(gates && toBoolean(gates.backupconfirmed) === true) || toBoolean(this.args.dreamwikireorg) !== true || this.args.dreamwikiapproval !== "auto")) throw new Error("Reorg requires backupconfirmed=true, dreamwikireorg=true and dreamwikiapproval=auto")
     if (id === "wiki.compact" && MiniAWikiOps.mutates(spec) && toBoolean(p.offline) !== true) throw new Error("Compaction requires params.offline=true after stopping other readers and writers")
     var a = merge({}, this.args), cfg = this.targetConfig(), group = id.split(".")[0], action = id.split(".")[1]
-    if (id === "graph.build") cfg.wikigraphsemantic = p.semantic
+
+    if (id === "graph.build" || id === "graph.defaults") cfg.skipBootstrap = true
     delete a.wikiman; delete a.wikitarget
     if (this.args.wikitarget) {
       // Services that accept CLI arguments must receive the selected mount, never the primary.
@@ -321,12 +325,20 @@ MiniAWikiOps.prototype._execute = function(spec, gates) {
     wm = __miniAWikiCreatePrimary(cfg, function(level, msg) { self.log(msg) })
     if (MiniAWikiOps.mutates(spec) && wm._access !== "rw") throw new Error("Selected backend is read-only")
     if (group === "graph") {
-      if (action === "build" && p.semantic === true) {
-        global.__mini_a_dreams_lib_mode = true
-        loadLib(__miniAPath("mini-a-dreams.js"))
-        var graphDream = new MiniADreams(a, this.log), graphConfig = graphDream._buildWikiConfig()
-        if (isFunction(graphConfig.llmExtractFn)) wm._graph._llmExtractFn = graphConfig.llmExtractFn
-        p.onProgress = graphDream._wikiGraphProgressFn()
+      if (action === "settings" || action === "defaults") return wm.graphBuildSettings(p, action === "defaults")
+      if (action === "build") {
+        var settings = wm.graphBuildSettings(p)
+        p = merge(p, settings.effective)
+        this.log(stringify(settings, __, ""))
+        if (p.extraction === "semantic" && p.modelHelp === "auto") {
+          global.__mini_a_dreams_lib_mode = true
+          loadLib(__miniAPath("mini-a-dreams.js"))
+          var graphDream = new MiniADreams(a, this.log)
+          wm._graph._cfg.modelExtractors = graphDream._graphExtractors()
+          wm._graph._cfg.decisionExtractor = graphDream._graphDecisionExtractor()
+        }
+        p.onProgress = this.onGraphProgress || function(progress) { self.log(stringify(progress, __, "")) }
+        p.isCancelled = this.isCancelled
       }
       if (action === "falkor" && !String(p.query || "").trim()) delete p.query
       return wm.graph(action, p)

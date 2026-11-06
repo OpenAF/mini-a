@@ -3,6 +3,10 @@ help:
     Run the same wiki operations as mini-a wikiman=true without interactive menus.
     ojob utils/wikiOps.yaml operation=wiki.lint wikiroot=/path/to/wiki
     ojob utils/wikiOps.yaml operation=wiki.reindex wikiroot=/path/to/wiki wikiaccess=rw confirm=true
+    Graph params: extraction=structural|semantic, modelHelp=off|auto, strategy=incremental|full|resume,
+    force, maxCalls, maxTokens, maxMinutes, preset. graph.settings reads shared defaults;
+    graph.defaults saves extraction/assistance/budgets. Full retains valid caches; force bypasses
+    them; resume continues pending sections. Structural and modelHelp=off make zero model calls.
     Parameters use JSON/SLON. Mutations require confirm=true. Reorg also requires
     backupconfirmed=true dreamwikireorg=true dreamwikiapproval=auto.
     Secrets may be supplied using existing configuration or shell environment expansion.

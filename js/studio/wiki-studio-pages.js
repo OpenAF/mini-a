@@ -2,12 +2,12 @@
 if (typeof __miniAPath !== "function") loadLib(String(new java.io.File(String(__loadedfrom)).getCanonicalFile().getParentFile().getParent()) + "/mini-a-paths.js")
 
 loadLib(__miniAPath("js/wiki/mini-a-wikiops.js"))
-WikiStudioServer.prototype.manager = function(w, write, fn) {
+WikiStudioServer.prototype.manager = function(w, write, fn, options) {
   this.registry.verify(w)
   // Scan before giving a manager permission to write other pages (logs, backlinks,
   // indexes); do not let hidden symlinks or aliases redirect engine writes.
   WikiStudio.scan(w.root, true)
-  var wm = new MiniAWikiManager({ backend: "fs", root: w.root, access: write ? "rw" : "ro", usegraph: w.graph.enabled === true, wikigraphsemantic: false, wikiretrievalv2: w.retrieval.v2 !== false })
+  var wm = new MiniAWikiManager({ skipBootstrap: options && options.skipBootstrap === true, backend: "fs", root: w.root, access: write ? "rw" : "ro", usegraph: w.graph.enabled === true, wikiretrievalv2: w.retrieval.v2 !== false })
   try { return fn(wm) } finally { wm.close() }
 }
 WikiStudioServer.prototype.checkPage = function(w, path) {
@@ -43,7 +43,7 @@ WikiStudioServer.prototype.validateMarkdown = function(content) {
 }
 WikiStudioServer.prototype.wikiRoute = function(req, w, parts, role) {
   var self = this, q = req.query || {}, body = req.body || {}, route = parts.join("/"), read = req.method === "GET"
-  if (this.jobWikiRoute && ["dreams", "ingestions", "absorptions", "graph/rebuild", "backups", "changes", "maintenance", "sources"].indexOf(route) >= 0 || this.jobWikiRoute && /^backups\//.test(route)) return this.jobWikiRoute(req, w, parts, role)
+  if (this.jobWikiRoute && ["dreams", "ingestions", "absorptions", "graph/rebuild", "graph/settings", "backups", "changes", "maintenance", "sources"].indexOf(route) >= 0 || this.jobWikiRoute && /^backups\//.test(route)) return this.jobWikiRoute(req, w, parts, role)
   return WikiStudio.lock(this.config.home, w.id, function() {
     self.registry.verify(w)
     if (self.assertIdle) self.assertIdle(w.id)
@@ -97,7 +97,7 @@ WikiStudioServer.prototype.wikiRoute = function(req, w, parts, role) {
       if (route === "lint") params = { limit: paging.limit, offset: paging.offset }
       if (route === "graph/related") { WikiStudio.assert(isString(q.node) && q.node.length <= 600, 400, "invalid_node", "Node ID required"); params = { node: q.node } }
       WikiStudio.scan(w.root, true)
-      var ops = new MiniAWikiOps({ wikiroot: w.root, wikiaccess: "ro", usewikigraph: w.graph.enabled, wikigraphsemantic: false, wikiretrievalv2: w.retrieval.v2 !== false }), res = ops.execute(ops.spec(op, params))
+      var ops = new MiniAWikiOps({ wikiroot: w.root, wikiaccess: "ro", usewikigraph: w.graph.enabled, wikiretrievalv2: w.retrieval.v2 !== false }), res = ops.execute(ops.spec(op, params))
       WikiStudio.assert(res && res.ok !== false, 422, "engine_error", "Wiki operation failed", res)
       if (route === "overview") {
         var inventory = WikiStudio.scan(w.root,false)
