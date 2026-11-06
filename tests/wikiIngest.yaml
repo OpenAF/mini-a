@@ -2,6 +2,10 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA Wiki Ingest Tests::DreamRepairOwnership
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testDreamRepairOwnership
+
 - name: MiniA Wiki Ingest Tests::OwnershipSerializationOrder
   to: oJob Test
   exec: args.func = require("tests/wikiIngestReconcile.js").testOwnershipSerializationOrder
@@ -407,6 +411,7 @@ jobs:
   exec: args.func = require("tests/wikiIngestReconcile.js").testPreparedRecoveryWithIncompleteOrigin
 
 todo:
+- MiniA Wiki Ingest Tests::DreamRepairOwnership
 - MiniA Wiki Ingest Tests::OwnershipSerializationOrder
 - MiniA Wiki Ingest Tests::OwnershipSerializationRecovery
 - MiniA Wiki Ingest Tests::OwnershipChangesStillConflict

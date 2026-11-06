@@ -1753,7 +1753,7 @@ MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
       body = lines.join("\n")
     }
     if (changed) {
-      var wr = wm.write(path, meta, body)
+      var wr = wm.knowledgeWriteRepair(path, meta, body, wm.knowledgePageSignature(page))
       if (isMap(wr) && wr.ok === true) {
         pageIssues[path].forEach(function(i) { markFixed(i, { reason: "frontmatter-heading-normalized" }) })
         if (h1s.length > 0) {
@@ -1788,7 +1788,7 @@ MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
         return "[" + label + "](" + linkPath + "#" + rn.newAnchor + ")"
       })
       if (rewrites.length > 0 && newBody !== pg.body) {
-        var wrAnchor = wm.write(srcPage, pg.meta, newBody)
+        var wrAnchor = wm.knowledgeWriteRepair(srcPage, pg.meta, newBody, wm.knowledgePageSignature(pg))
         if (isMap(wrAnchor) && wrAnchor.ok === true) {
           rewrites.forEach(function(rw) {
             markFixed({ type: "inbound_anchor_rewrite", page: srcPage, target: rw.target },
@@ -1910,7 +1910,7 @@ MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
       })
     }
     if (replacedCount === 0 || body === page.body) { result.skipped.push(copyIssue(issue, { reason: "link-not-rewritable" })); return }
-    var wr = wm.write(issue.page, page.meta, body)
+    var wr = wm.knowledgeWriteRepair(issue.page, page.meta, body, wm.knowledgePageSignature(page))
     if (isMap(wr) && wr.ok === true) markFixed(issue, { resolved: found.candidate.path, strategy: found.strategy, reason: found.strategy })
   })
 

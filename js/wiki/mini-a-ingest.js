@@ -1122,7 +1122,7 @@ MiniAIngest.prototype.run = function() {
         if (bindings.length === 1) { pagePath = bindings[0]; page = self._page(wm, pagePath); prev.bindingRepair = true }
         else if (bindings.length > 1) { result.conflicts.push({ source: src.id, reason: "multiple moved page bindings" }); return }
       }
-      if ((paths[pagePath] && paths[pagePath] !== key) || (!prev && page) || (prev && page && (!prev.signature || self._signature(page) !== prev.signature))) {
+      if ((paths[pagePath] && paths[pagePath] !== key) || (!prev && page)) {
         result.conflicts.push({ source: src.id, page: pagePath, reason: "page ownership or local edit conflict" }); return
       }
       paths[pagePath] = key
@@ -1138,7 +1138,9 @@ MiniAIngest.prototype.run = function() {
       oldChunks.forEach(function(c) { if (!chunks.some(function(n) { return c.id === n.id })) result.planned_chunks_removed++ })
       var intact = prev && oldChunks.length === chunks.length && chunks.every(function(c) { return byId[c.id] && byId[c.id].hash === c.hash && manifest.chunks[c.id] && manifest.chunks[c.id].generation === prev.generation && manifest.chunks[c.id].page === pagePath && manifest.chunks[c.id].sourceKey === key && manifest.chunks[c.id].hash === c.hash && sha1(String(manifest.chunks[c.id].text || "")) === c.hash })
       var candidate = { src: src, key: key, hash: hash, content: content, chunks: chunks, path: pagePath, before: self._signature(page), legacyRetiredIds: legacyRetiredIds }
+      // Destination edits only conflict when reconciliation would replace the page.
       if (toBoolean(a.ingestforce) !== true && prev && prev.sourceHash === hash && prev.fingerprint === fingerprint && !prev.legacyRepair && !prev.bindingRepair && page && intact) { unchanged.push(candidate); return }
+      if (prev && page && self._signature(page) !== prev.signature) { result.conflicts.push({ source: src.id, page: pagePath, reason: "page ownership or local edit conflict" }); return }
       result.sources_changed++
       if (prev && (!page || prev.legacyRepair || prev.bindingRepair || !intact)) result.planned_repairs.push(pagePath)
       var needs = mode === "distill" || mode === "auto" && chunks.some(function(c) { return wm.knowledgeNeedsDistillation(c).needs })
@@ -1174,6 +1176,7 @@ MiniAIngest.prototype.run = function() {
       // Old records with no resolved local links already match their original source hash.
       var previousLinksHash = manifest.sources[p.key].sourceLinksHash || p.hash
       if (previousLinksHash === p.sourceLinksHash) { result.skipped_unchanged++; return }
+      if (self._signature(self._page(wm, p.path)) !== manifest.sources[p.key].signature) { result.conflicts.push({ source: p.src.id, page: p.path, reason: "page ownership or local edit conflict" }); return }
       p.needs = mode === "distill" || mode === "auto" && p.chunks.some(function(c) { return wm.knowledgeNeedsDistillation(c).needs })
       pending.push(p); result.sources_changed++; result.planned_writes.push(p.path)
     })

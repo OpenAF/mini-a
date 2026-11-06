@@ -395,6 +395,28 @@
     var ids = Object.keys(f.state().chunks); r = f.run({ ingestsourceid: 'second-origin' }); assert(r.ok, true, stringify(r)); assert(r.written.length, 5, 'other origin receives new mappings')
     assert(Object.keys(f.state().chunks).length, ids.length * 2, 'equal relative paths across origins cannot collide')
   }) }
+  exports.testDreamRepairOwnership = function() { fixture(function(f) {
+    loadLib(__miniAPath('js/memory/mini-a-dreams.js'))
+    f.write('a.md', '# A\n\n# Second\n\nOriginal')
+    assert(f.run().ok, true, 'initial ingestion')
+    var wm = new MiniAWikiManager({ backend: 'fs', root: f.wiki, access: 'rw' })
+    var dreams = new MiniADreams({}, function() {})
+    try {
+      dreams._repairWikiLint(wm, { issues: [{ type: 'multiple_h1', page: 'docs/a.md' }] })
+      assert(wm.read('docs/a.md').body.indexOf('## Second') >= 0, true, 'Dream repairs headings')
+    } finally { wm.close() }
+    assert(f.run().skipped_unchanged, 1, 'repaired page skipped')
+    f.write('a.md', '# A\n\nChanged source')
+    assert(f.run().ok, true, 'changed source replaces managed repair')
+    io.writeFileString(f.wiki + '/docs/a.md', f.body('docs/a.md') + '\n# Manual')
+    var before = f.body('docs/a.md')
+    assert(f.run().skipped_unchanged, 1, 'unchanged source preserves manual edit')
+    assert(f.body('docs/a.md'), before, 'skip leaves page untouched')
+    wm = new MiniAWikiManager({ backend: 'fs', root: f.wiki, access: 'rw' })
+    try { dreams._repairWikiLint(wm, { issues: [{ type: 'multiple_h1', page: 'docs/a.md' }] }) } finally { wm.close() }
+    f.write('a.md', '# A\n\nAnother source change')
+    assert(f.run().conflicts.length, 1, 'Dream does not adopt manual edits')
+  }) }
   exports.testManualEditConflicts = function() { fixture(function(f) {
     f.initial(); io.writeFileString(f.wiki + '/docs/a.md', f.body('docs/a.md') + '\nMANUAL EDIT'); f.write('a.md', '# A\n\nNew source'); io.rm(f.src + '/b.md')
     var r = f.run({ ingestforce: true, ingestprune: true }); assert(r.ok, false, 'force does not bypass conflict'); assert(r.conflicts.length, 1, 'edit reported'); assert(r.removed.length, 0, 'conflict blocks destructive phase'); assert(f.body('docs/a.md').indexOf('MANUAL EDIT') >= 0, true, 'manual edit preserved')

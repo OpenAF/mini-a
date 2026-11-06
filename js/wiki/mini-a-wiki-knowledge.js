@@ -64,6 +64,30 @@ MiniAWikiManager.prototype.knowledgePageSignature = function(page) {
   })
   return sha1(stringify(stable, __, "") + "\n" + String(page.body || "").trim())
 }
+// Managed repairs may advance ownership only from a verified ingestion baseline.
+// Never adopt an existing manual edit, even when the repair itself succeeds.
+MiniAWikiManager.prototype.knowledgeWriteRepair = function(path, meta, body, expectedSignature) {
+  if (this._access !== "rw") return { ok: false, error: "wiki-read-only" }
+  var lock = __miniAWikiWriterLock(this._getIndexRoot())
+  try {
+    if (this._knowledgeJournalPending()) return { ok: false, error: "ingest-pending" }
+    var state = this.knowledgeLoadState()
+    if (state._corrupt) return { ok: false, error: "ingest-state-corrupt" }
+    var raw = this._backend.read(path)
+    var before = isString(raw) ? this.knowledgePageSignature(this.parseFrontmatter(raw)) : ""
+    if (isString(expectedSignature) && before !== expectedSignature) return { ok: false, error: "repair-page-changed" }
+    var owners = Object.keys(state.sources).filter(function(k) { return state.sources[k].page === path })
+    var owner = owners.length === 1 ? state.sources[owners[0]] : null
+    var verified = owner && owner.signature && owner.signature === before
+    var result = this.write(path, meta, body)
+    if (!result || result.ok !== true || !verified) return result
+    var actual = this._backend.read(path)
+    owner.signature = this.knowledgePageSignature(this.parseFrontmatter(actual))
+    // Failure leaves the old signature authoritative, so later overwrites remain blocked.
+    if (!this.knowledgeSaveState(state)) throw new Error("repair ownership manifest persistence failed")
+    return result
+  } finally { lock.release() }
+}
 MiniAWikiManager.prototype.knowledgeMovePending = function() {
   return io.fileExists(this._getIndexRoot() + "/.mini-a-wiki-move/journal.json")
 }
