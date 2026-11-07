@@ -832,12 +832,12 @@ mini-a goal="iterative research task" usememory=true memoryinject=full
 
 # Persist global memory to a file channel across runs
 mini-a goal="iterative research task" \
-  memorych="(name: mini_a_global_mem, type: file, options: (file: '/tmp/mini-a-memory.json'))"
+  memorych="(name: mini_a_global_mem, type: file, options: (file: '/tmp/js/memory/mini-a-memory.json'))"
 
 # Separate channels for session vs global memory
 mini-a goal="long research" \
   memorych="(name: global_mem, type: file, options: (file: '/tmp/mini-a-global.json'))" \
-  memorysessionch="(name: session_mem, type: file, options: (file: '/tmp/mini-a-session.json'))" \
+  memorysessionch="(name: session_mem, type: file, options: (file: '/tmp/js/session/mini-a-session.json'))" \
   memorysessionid="research-2024"
 
 # Session-only scope (no global writes)
@@ -849,7 +849,7 @@ mini-a goal="analyze all source files" useshell=true \
 
 # Reuse persisted global memory from a previous run (automatic on restart)
 mini-a goal="continue from where we left off" \
-  memorych="(name: mini_a_global_mem, type: file, options: (file: '/tmp/mini-a-memory.json'))"
+  memorych="(name: mini_a_global_mem, type: file, options: (file: '/tmp/js/memory/mini-a-memory.json'))"
 
 # User-local persistent memory shorthand (home-dir file channels, auto-creates directory)
 # Also enables auto-promotion (facts,decisions,summaries) and 30-day staleness sweep
@@ -874,7 +874,7 @@ mini-a memoryman=true usememory=true memoryuser=true
 # Open memory manager against explicit channels + session namespace
 mini-a memoryman=true usememory=true \
   memorych="(name: global_mem, type: file, options: (file: '/tmp/mini-a-global.json'))" \
-  memorysessionch="(name: session_mem, type: file, options: (file: '/tmp/mini-a-session.json'))" \
+  memorysessionch="(name: session_mem, type: file, options: (file: '/tmp/js/session/mini-a-session.json'))" \
   memorysessionid="demo-session"
 ```
 
@@ -1294,12 +1294,12 @@ Use `mini-a dream=true` with the same channel and model arguments you used durin
 ```bash
 # Memory dream only (dry-run preview)
 mini-a dream=true dryrun=true \
-  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/js/memory/mini-a-memory.json))' \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 
 # Full memory dream (writes back)
 mini-a dream=true \
-  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/js/memory/mini-a-memory.json))' \
   auditch='(name: mini_a_audit, type: file, options: (file: /tmp/mini-a-audit.log))' \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 
@@ -1310,7 +1310,7 @@ mini-a dream=true \
 
 # Combined memory + wiki dream
 mini-a dream=true \
-  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/js/memory/mini-a-memory.json))' \
   usewiki=true wikiroot=/shared/wiki \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 
@@ -1362,7 +1362,7 @@ global.__mini_a_dreams_lib_mode = true
 loadLib("mini-a-dreams.js")
 
 var dreamer = new MiniADreams({
-  memorych: "(name: mini_a_global_mem, type: file, options: (file: '/tmp/mini-a-memory.json'))",
+  memorych: "(name: mini_a_global_mem, type: file, options: (file: '/tmp/js/memory/mini-a-memory.json'))",
   auditch: "(name: mini_a_audit, type: file, options: (file: '/tmp/mini-a-audit.log'))",
   usewiki: true,
   wikiroot: "/shared/wiki",
@@ -1617,6 +1617,11 @@ mini-a goal="run command" nosetmcpwd=true
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `onport` | number | - | Start the Mini-A web UI on the provided port |
+| `webembed` | boolean | `false` | Enable the [iframe bridge](docs/WEB-EMBED.md) at `?embed=1` |
+| `webembedorigins` | string/array | - | Exact permitted parent origins; required with `webembed=true` |
+| `webembedfields` | string/object | `{}` | Allowed context fields with a type and optional required flag |
+| `webembedcontextrequired` | boolean | `true` | Require context before embedded goals; false permits prompt-only embedding |
+| `webembedprompt` | boolean | `false` | Allow one same-origin initial draft or submitted goal |
 | `maxpromptchars` | number | `120000` | Maximum accepted prompt size in characters for web mode |
 | `ssequeuetimeout` | number | `120` | Web SSE queue timeout in seconds |
 | `logpromptheaders` | string | - | Comma-separated HTTP request header names to log alongside incoming web prompts |
@@ -1653,7 +1658,7 @@ mini-a goal="run command" nosetmcpwd=true
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `adaptiverouting` | boolean | `false` | Enable rule-based route selection (`mini-a-router.js`) — chooses between direct/proxy/shell/utility/delegation based on intent, payload size, latency, and route history |
+| `adaptiverouting` | boolean | `false` | Enable rule-based route selection (`js/core/mini-a-router.js`) — chooses between direct/proxy/shell/utility/delegation based on intent, payload size, latency, and route history |
 | `routerorder` | string | - | Comma-separated preferred route order (e.g. `mcp_direct_call,mcp_proxy_path,shell_execution`) |
 | `routerallow` | string | - | Comma-separated allowlist of route types the router may use |
 | `routerdeny` | string | - | Comma-separated denylist of route types the router must not use |
@@ -2099,7 +2104,7 @@ mini-a ➤ Follow these instructions @docs/guide.md and apply rules from @polici
 # Evaluation
 
 ```bash
-mini-a eval=true evalfile=evals/core.yaml evalout=/tmp/mini-a-eval.json
+mini-a eval=true evalfile=evals/core.yaml evalout=/tmp/js/core/mini-a-eval.json
 mini-a eval=true evalfile=evals/core.yaml evalbaseline=evals/baseline.json
 ```
 
@@ -2254,6 +2259,7 @@ These grouped tables complete the parameter entries above. `unset` means no expl
 | `memorymd` | boolean | `false` | Store global memory as path-keyed markdown strings in memorych (one .md record per entry) |
 | `memorypersistevery` | number | `1` | Persist the memory store every Nth mutation instead of every single append/upsert (1 = unchanged synchronous behavior) |
 | `memoryreflect` | boolean | `true` | After a successful run, make one extra LLM call to extract durable memories (default true when usememory=true) |
+| `memoryreflectmode` | string | `background` | Schedule eligible reflection in the background; `sync` waits for reflection before returning |
 | `memoryreflectmin` | number | `2` | Minimum total tool/shell calls a run must have made to qualify for reflection |
 | `memoryreflectmodel` | string | unset | Model config for the reflection pass (falls back to OAF_REFLECT_MODEL, then the low-cost model, then the main model) |
 | `memoryrelevantcap` | number | `8` | Maximum durable memory entries auto-injected when memoryinject=relevant |
@@ -2345,6 +2351,9 @@ These grouped tables complete the parameter entries above. `unset` means no expl
 | --- | --- | --- | --- |
 | `path` | string | unset | Static asset path used by the web UI/worker modes. |
 | `webadvanced` | boolean | `false` | Enable trusted Advanced web console APIs (generates a token and opens the browser when webtoken is omitted). |
+| `webartifacts` | boolean | `false` | Web-only: enable isolated artifact generation. |
+| `artifactworkerurl` | string | unset | Web-only: private worker URL ending in `/artifact-worker`. |
+| `artifactdir` | string | private default | Web-only: private artifact storage directory; 24 hour expiry. |
 | `webadvancedpath` | string | unset | Local Advanced session journal and preset directory. |
 
 ### Output and diagnostics — Display and visualizations
@@ -2422,3 +2431,22 @@ See the [wiki guide](docs/WIKI.md), [delegation guide](docs/DELEGATION.md), and 
 | --- | --- | --- |
 | `runmaxtokens` | Aggregate model-token admission cap for `orchestration=auto`, including descendants and acceptance review. Provider usage is preferred; missing usage is estimated. In-flight responses may exceed estimates. | `0` (unlimited) |
 | `runmaxtimems` | Aggregate elapsed-time admission cap in milliseconds for `orchestration=auto`. Prevents new calls and dispatch after expiry; existing transport/tool timeouts govern in-flight work. | `0` (unlimited) |
+
+Wiki graph extraction, model budgets, saved defaults and resume controls are documented in [Graph builds](docs/GRAPH-BUILDS.md).
+
+### Additional runtime and launcher options
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `acceptancereview` | boolean | `false` | Review final answers before acceptance. |
+| `acceptanceoptimization` | boolean | `true` | Skip semantic acceptance review when a required deterministic check fails. |
+| `proxyargrepair` | boolean | `true` | Repair unambiguous read-only proxy operation aliases. |
+| `orchestrationcontext` | string | `auto` | Automatic strategy context: auto, interactive, or batch. |
+| `usejsonschema` | string | `auto` | Schema responses: auto or off. |
+| `wikihydrate` | boolean | `false` | Console shortcut: create/update a wiki from `source=<folder>` using `utils/wikiHydrate.yaml`. |
+| `wikidream` | boolean | `false` | Console shortcut: run wiki Dream maintenance. |
+| `wikiquery` | boolean | `false` | Console shortcut: query an existing wiki. |
+| `shellguard` | string | `auto` | Shell decision guard: auto, off, or decide (required decision model). |
+| `shellguardask` | string | `medium` | Minimum shell risk requiring approval: low, medium, high, critical. |
+| `shellguarddeny` | string | `critical` | Minimum shell risk denied without approval. |
+| `shellguardtimeout` | number | `5000` | Shell decision request timeout in milliseconds. |

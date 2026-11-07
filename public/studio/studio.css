@@ -1,0 +1,78 @@
+/* Wiki Studio follows the Mini-A web Advanced palette (green surfaces, rose accent) and respects the OS colour scheme. */
+:root{color-scheme:light dark;--bg:#fafbfa;--panel:#f6f8f6;--ink:#24352a;--muted:#556e5e;--line:#e3e6e4;--border:#d3d8d5;--nav:#f5f7f5;--button:#f1f4f2;--control:#ccd3ce;--hover:#e8eeea;--hover-border:#769c82;--accent:#923764;--accent-bg:#92376410;--accent-border:#92376450;--green:#16723a;--success:#426c24;--success-bg:#426c2410;--error:#ac3434;--field:#fff;--glow:#27824b33;--value:#496b24}
+@media(prefers-color-scheme:dark){:root{--bg:#0d0f0e;--panel:#131814;--ink:#e0e8e2;--muted:#a1b3a6;--line:#262c28;--border:#2d332f;--nav:#121613;--button:#191f1b;--control:#343d37;--hover:#242e27;--hover-border:#6c957a;--accent:#ffafd7;--accent-bg:#ffafd715;--accent-border:#ffafd750;--green:#00d75f;--success:#afd787;--success-bg:#afd78712;--error:#ff8b8b;--field:#090c0a;--glow:#5fd78733;--value:#d7ffaf}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px system-ui,sans-serif}
+header{padding:16px 28px;border-bottom:1px solid var(--line);background:linear-gradient(var(--nav),var(--bg))}h1{margin:0;font-size:22px;display:flex;align-items:center;gap:8px}.studio-logo{display:block;white-space:pre;font:700 12px/1.1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);letter-spacing:0}.studio-logo-dot{color:var(--green)}h1>span:last-child{font-size:22px}header p{color:var(--muted);margin:4px 0 0}
+main{padding:20px;max-width:1600px;margin:auto}h2,h3,h4{display:flex;align-items:center;gap:8px;margin:.4rem 0 .6rem}
+.studio-icon{flex:none;opacity:.8;transition:opacity .15s ease;pointer-events:none}button:hover .studio-icon,h1 .studio-icon,h2 .studio-icon,h3 .studio-icon{opacity:1}@media(prefers-reduced-motion:reduce){.studio-icon{transition:none}}
+button,input,select,textarea{font:inherit;border:1px solid var(--control);border-radius:6px;padding:.4rem .65rem;background:var(--field);color:var(--ink)}
+button{display:inline-flex;align-items:center;gap:.4rem;background:var(--button);color:inherit;cursor:pointer;font-size:13px}button:hover{background:var(--hover);border-color:var(--hover-border)}button:disabled{opacity:.5;cursor:default}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--glow)}
+label{display:inline-flex;gap:8px;align-items:center;margin:6px 8px 6px 0}.row,nav{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:12px 0}
+nav{padding:.5rem .75rem;border:1px solid var(--line);border-radius:8px;background:var(--nav)}nav button{background:transparent;border-color:transparent;color:var(--muted);white-space:nowrap}nav button:hover{color:var(--ink);background:var(--hover)}
+section,.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px;margin:12px 0}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:550px;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px;font:12px/1.5 ui-monospace,monospace}
+textarea{width:100%;min-height:55vh;font:14px/1.6 ui-monospace,monospace;tab-size:2}.split{display:grid;grid-template-columns:240px minmax(0,1fr);gap:16px}.editor{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+aside button{display:flex;width:100%;text-align:left;margin-bottom:4px;overflow-wrap:anywhere}iframe{width:100%;height:76vh;border:1px solid var(--border);border-radius:8px}
+.studio-disclosure>.disclosure-toggle{cursor:pointer;color:var(--muted)}.muted{color:var(--muted)}.error{color:var(--error)}.selected{border-color:var(--accent);background:var(--accent-bg);color:var(--accent);font-weight:600}#message{min-height:1.5em}a{color:var(--accent)}
+.badge{display:inline-flex;align-items:center;gap:6px;margin:4px 0;padding:2px 10px;border-radius:12px;background:var(--button);color:var(--muted);font-size:12px;text-transform:capitalize}.badge[data-state=running]{background:var(--accent-bg);color:var(--accent)}.badge[data-state=completed],.badge[data-state=succeeded],.badge[data-state=done]{background:var(--success-bg);color:var(--success)}.badge[data-state=failed],.badge[data-state=error]{color:var(--error)}
+dialog{background:var(--bg);color:var(--ink);border:1px solid var(--border);border-radius:8px}
+@media(max-width:800px){main{padding:12px}.split,.editor{grid-template-columns:1fr}aside{max-height:220px;overflow:auto}textarea{min-height:45vh}label{flex-wrap:wrap}}
+.json-view{overflow:auto;max-height:550px;margin:8px 0}.json-fallback{white-space:pre-wrap;font:13px ui-monospace,monospace}
+.njsmap_table{width:100%;border-collapse:collapse;font-size:13px;background:var(--panel);color:var(--ink)}
+.njsmap_tablecell,.njsmap_tablehead{padding:6px 8px;border:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
+.njsmap_tablehead{text-align:center;font-weight:700}.njsmap_table td:first-child:not(.njsmap_tablehead) span{font-weight:700;color:var(--muted)}
+.njsmap_valueNumber,.njsmap_valueBool{color:var(--value)}.njsmap_table a{color:var(--accent)}
+
+.studio-activity{position:sticky;top:8px;z-index:20;padding:12px 16px;margin:0 0 12px;border:1px solid var(--accent-border);border-radius:8px;background:var(--panel);color:var(--accent);box-shadow:0 3px 12px var(--glow)}
+.studio-activity[hidden]{display:none}.studio-activity progress{width:100px;flex-shrink:0}progress{accent-color:var(--green)}.job-activity{border-left:3px solid var(--green);padding:12px;margin:12px 0;background:var(--success-bg)}.job-activity progress{width:100%;height:8px}.job-activity p{margin:8px 0 0}
+@media(prefers-reduced-motion:reduce){progress:indeterminate{appearance:none;background:var(--border)}progress:indeterminate::-webkit-progress-bar{background:var(--border)}progress:indeterminate::-moz-progress-bar{animation:none;background:var(--green)}}
+
+.web-command-wizard{width:min(760px,95vw);max-height:90vh;overflow:auto}.web-command-wizard textarea{min-height:120px;height:150px}.web-command-wizard>label{display:flex}
+
+/* Shared workspace rhythm and task-oriented controls. */
+[hidden]{display:none!important}
+main{max-width:1680px;padding:24px}
+h3{margin:0 0 16px}h4{margin:0 0 12px}p{line-height:1.55;margin:8px 0 16px}
+section,.card{padding:20px;margin:16px 0 24px}
+.row,nav{gap:8px;margin:16px 0;align-items:center}
+label{display:flex;flex-direction:column;align-items:stretch;gap:8px;margin:0 0 16px;max-width:640px;font-weight:500}
+.row>label{margin:0;flex:1 1 220px}.row>button{align-self:end;min-height:36px}
+input,select{min-height:36px;min-width:0}input[type=file]{max-width:100%}
+.check-field{flex-direction:row;align-items:center;font-weight:400;margin:12px 0;max-width:100%}.check-field input{min-height:0;margin:0;flex:none}
+button{min-height:34px;padding:8px 12px}section>button,.card>button,#view>button,td>button,#workspace>button,dialog>button{margin:0 8px 8px 0}
+button:has(.studio-icon){white-space:normal}button.primary{background:var(--green);color:var(--bg);border-color:var(--green)}button.danger{color:var(--error)}
+.control-reason{display:block;margin:4px 8px 12px 0;font-weight:400;max-width:340px}.row>.control-reason{flex-basis:100%}
+nav button[aria-current=page]{border-color:var(--accent-border);background:var(--accent-bg);color:var(--accent)}
+.studio-disclosure{margin:16px 0}.studio-disclosure>.disclosure-toggle{padding:8px 0}.studio-disclosure[data-open=true]>.disclosure-toggle{margin-bottom:12px}
+.table-scroll{overflow:auto;max-width:100%}.studio-table{width:100%;border-collapse:collapse;font-size:13px}.studio-table th{text-align:left;font-weight:600;color:var(--muted);white-space:nowrap}.studio-table td,.studio-table th{padding:12px 16px;border-bottom:1px solid var(--line);vertical-align:top}.studio-table td{overflow-wrap:anywhere}.studio-table .check-field{margin:0;font-size:0}.studio-table .check-field input{width:16px;height:16px}.studio-table td:last-child{min-width:180px}
+.split{display:flex;gap:24px;align-items:stretch}.split>aside{width:300px;min-width:200px;max-width:50%;flex:none;resize:horizontal;overflow:auto;max-height:75vh;border:1px solid var(--border);border-radius:8px;background:var(--panel);padding:8px}.split>#page-editor{min-width:0;flex:1}
+aside button{width:auto;display:inline-flex;margin:0}.page-tree{min-width:180px;font-size:14px}.page-tree [role=group]{padding-left:18px}.tree-label{display:flex;align-items:center;gap:4px;min-height:32px;padding:4px 6px;border-radius:4px;cursor:pointer;white-space:nowrap}.tree-label>span:last-child{display:flex;gap:8px;align-items:center;min-width:0}.tree-arrow{width:18px;flex:none;text-align:center;cursor:pointer}.page-tree [role=treeitem]{outline:none}.page-tree [role=treeitem][aria-selected=true]>.tree-label{background:var(--accent-bg);color:var(--accent)}.page-tree [role=treeitem]:focus-visible>.tree-label{outline:2px solid var(--green);outline-offset:-2px}.tree-label:hover{background:var(--hover)}.tree-more{margin:8px!important}
+.page-preview{padding:24px;border:1px solid var(--border);border-radius:8px;max-width:100%;overflow-wrap:anywhere;min-height:45vh}.page-preview h1,.page-preview h2,.page-preview h3{margin:24px 0 16px}.breadcrumbs{overflow-wrap:anywhere;color:var(--muted);font-size:13px}.breadcrumbs button{font-size:13px}.editor.single{grid-template-columns:1fr}.editor article{padding:16px;overflow-wrap:anywhere;min-width:0}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px}.metrics section{display:flex;flex-direction:column;margin:0;gap:8px}.metrics strong{font-size:30px}.metrics span{color:var(--muted)}.task-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}.task-grid section{margin:0}.task-grid p{margin:8px 0 0;color:var(--muted)}.chart-frame{height:300px;position:relative;max-width:100%;margin-top:16px}
+.background-job{padding:12px 16px;border:1px solid var(--border);border-left:3px solid var(--green);border-radius:8px;background:var(--panel)}.background-job.error{border-left-color:var(--error)}.background-job span{flex:1}.background-job button{align-self:center}.job-dialog{width:min(960px,95vw);max-height:90vh;overflow:auto;padding:24px}dialog::backdrop{background:#0008}dialog form{max-width:640px}dialog h3{white-space:pre-line;line-height:1.5}
+@media(max-width:800px){main{padding:12px}.split{display:block}.split>aside{width:100%;max-width:100%;min-width:0;resize:vertical;height:260px;max-height:60vh;margin-bottom:16px}.editor{grid-template-columns:1fr}.row>label{flex-basis:100%}.row>button{align-self:center}.page-preview{padding:16px}section,.card{padding:16px}.studio-table td,.studio-table th{padding:10px}.task-grid{grid-template-columns:1fr}}
+
+#message:empty{display:none}.row>label:has(input[type=checkbox]){flex-basis:auto}.check-field>input{width:auto}.page-preview h1{font-size:26px}.row>label:has(input[type=password]){max-width:640px}
+
+.studio-activity>.disclosure-toggle{color:var(--accent);padding:0;cursor:pointer}
+.studio-activity>.disclosure-toggle:focus-visible{outline:2px solid var(--green);outline-offset:4px}
+.studio-activity>.disclosure-toggle progress{vertical-align:middle;margin:0 8px}
+.studio-activity>.disclosure-toggle .muted{font-size:12px;margin-left:8px}
+.studio-activity ul{max-height:240px;overflow:auto;margin:12px 0 0;padding-left:24px;color:var(--ink)}
+.studio-activity li{padding:6px 0;overflow-wrap:anywhere}
+.studio-activity li span{display:block;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+
+/* Keep disclosure rows easy to activate on iPad/iPhone without double-tap zoom. */
+.studio-disclosure>.disclosure-toggle{min-height:44px;padding:12px 0;touch-action:manipulation}
+.studio-disclosure>.disclosure-toggle:focus-visible{outline:2px solid var(--green);outline-offset:3px}
+.studio-activity>.disclosure-toggle{min-height:44px;padding:10px 0}
+@media(pointer:coarse){button,input,select{min-height:44px}input[type=checkbox],.check-field input{width:22px;height:22px;min-height:22px}}
+
+.studio-disclosure>.disclosure-toggle{display:flex;width:100%;gap:8px;align-items:center;text-align:left;background:transparent;border:0;border-radius:4px;box-shadow:none;margin:0;white-space:normal;font:inherit}
+.studio-disclosure>.disclosure-toggle::before{content:"▸";flex:none}
+.studio-disclosure[data-open=true]>.disclosure-toggle::before{content:"▾"}
+.studio-disclosure:not([data-open=true])>:not(.disclosure-toggle):not(#studio-activity-cancel){display:none!important}
+
+#studio-activity-cancel{margin:4px 0;min-height:44px}
+.studio-activity li button{margin:4px 0}

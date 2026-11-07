@@ -20,7 +20,7 @@ def run_server(descriptor, root, work, transport="stdio"):
     source = (REPO / 'mcps' / descriptor).read_text()
     if os.getenv('WIKI_TRANSPORT_DEBUG') == 'true':
         source = source.replace('logToConsole: false', 'logToConsole: true')
-        source = source.replace('    loadLib("mini-a-mcp-wiki.js")', '    print("TRANSPORT_INIT"); loadLib("mini-a-mcp-wiki.js")')
+        source = source.replace('    loadLib("js/wiki/mini-a-mcp-wiki.js")', '    print("TRANSPORT_INIT"); loadLib("js/wiki/mini-a-mcp-wiki.js")')
     if os.getenv('WIKI_TRANSPORT_NO_UNIQUE') == 'true':
         source = source.replace('  unique      :\n    pidFile     : .mcp-wiki.pid\n    killPrevious: true\n', '').replace('  unique      :\n    pidFile     : .mcp-wiki-safe.pid\n    killPrevious: true\n', '')
     source = source.replace('pidFile     : .mcp-wiki.pid', 'pidFile     : ' + str(work / 'trusted.pid'))
@@ -240,7 +240,7 @@ with tempfile.TemporaryDirectory(prefix='wiki-v2-transport-') as temporary:
                                   + 'Background text.\n' * 100
                                   + '\n# Specific\ntransportparameter is the exact late answer.\n')
     script = work / 'build.js'
-    script.write_text('load("mini-a-common.js");load("mini-a-wiki.js");var m=new MiniAWikiManager('
+    script.write_text('load("js/core/mini-a-common.js");load("js/wiki/mini-a-wiki.js");var m=new MiniAWikiManager('
                       + json.dumps({'backend': 'fs', 'root': str(root), 'access': 'rw', 'wikiretrievalv2': True})
                       + ',function(){});try{var r=m.reindex();if(!r.ok)throw new Error(stringify(r))}finally{m.close()}')
     subprocess.run(['oaf', '-f', str(script)], cwd=REPO, check=True, capture_output=True, text=True)

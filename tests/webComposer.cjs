@@ -54,6 +54,7 @@ input.disabled=true;assert.equal(key({ctrlKey:true}),false);input.disabled=false
 const submitSource=page.slice(page.indexOf('    async function handleSubmit()'),page.indexOf('    async function pollOnce()'));
 Object.assign(context, {
   isProcessing:false, attachmentsEnabled:true,attachments:[{binary:true,name:'test.png',mediaType:'image/png',base64:'fixture'}],
+  captureEmbedContext:()=>undefined,embedInitialDraft:false,embedConversationUsed:false,
   advancedUI:null, currentSessionUuid:'fixture',activeHistoryId:null,lastRawContent:'',lastSubmittedPrompt:'',lastFinishedPrompt:'',
   activeSubmissionStartedAt:0,sawNonFinishedForActiveSubmission:false,lastRenderedRaw:'',streamEnabled:false,
   buildPromptWithAttachments:value=>value,buildAttachmentDisplayPrompt:value=>value,buildOptimisticUserPromptBlock:()=>'<p>draft</p>',

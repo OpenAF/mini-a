@@ -1,6 +1,6 @@
 (function() {
   load("mini-a.js")
-  load("mini-a-subtask.js")
+  load("js/core/mini-a-subtask.js")
   var assert = function(actual, expected, message) { ow.test.assert(actual, expected, message) }
   var throws = function(fn) { var caught = false; try { fn() } catch(e) { caught = true }; assert(caught, true, "Must fail closed") }
   var task = function(id, dependencies, writes) { return { id: id, objective: "Return ready", dependencies: dependencies || [], resources: { reads: [], writes: writes || [] }, criteria: [{ id: "ready", requirement: "Return ready", method: "answer", assertion: { equals: "ready" } }] } }
@@ -62,6 +62,29 @@
       assert(client.tools.sort(), ["execution-task", "proxy-dispatch", "result_head", "subtask-status"], "Both tiers retain configured controls without adding unrelated tools")
       assert(client.__miniAProxyDispatchRegistered, true, "Proxy marker reflects actual registration")
     })
+    a._selectMcpToolsDynamically = function() { return [] }
+    a._registerMcpToolsForGoal({ goal: "And the next five days?", mcpdynamic: true, mcpproxy: true, mcpproxynative: true })
+    ;[a.llm, a.lc_llm].forEach(function(client) {
+      assert(client.tools.sort(), ["execution-task", "proxy-dispatch", "subtask-status"], "An empty follow-up selection preserves configured transport and coordination tools")
+      assert(client.__miniAProxyDispatchRegistered, true, "Proxy remains registered after an empty selection")
+    })
+  }) }
+  exports.testConversationCopyPreservesNativeToolArguments = function() { fixture(function(a) {
+    var original = [{role:"assistant",content:"",tool_calls:[{id:"weather",function:{name:"proxy-dispatch",arguments:{action:"call",arguments:{location:"Braga"}}}}]},
+      {role:"tool",tool_call_id:"weather",tool_name:"proxy-dispatch",content:"weather evidence"}]
+    var copied, exports = 0, imports = 0
+    var source = {__type:"ollama",getConversation:function(){return original},exportConversation:function(){exports++; return [{role:"assistant",toolCalls:[]}]}}
+    var target = {__type:"ollama",setConversation:function(value){copied=value},importConversation:function(){imports++}}
+    var client = function(gpt) {return {getGPT:function(){return gpt}}}
+    assert(a._copyConversationBetweenLlms(client(source),client(target)),true,"Same-provider copy succeeds")
+    assert(copied,original,"Native tool arguments, IDs and results remain exact")
+    copied[0].tool_calls[0].function.arguments.arguments.location="Lisbon"
+    assert(original[0].tool_calls[0].function.arguments.arguments.location,"Braga","Copied history does not alias the source")
+    assert(exports,0,"Same-provider copy bypasses neutral conversion")
+    target.__type="openai"
+    assert(a._copyConversationBetweenLlms(client(source),client(target)),true,"Cross-provider copy still succeeds")
+    assert(exports,1,"Cross-provider copy exports neutral history")
+    assert(imports,1,"Cross-provider copy imports neutral history")
   }) }
   exports.testUndispatchedNativeCallsHaveSpecificBoundedRecovery = function() { fixture(function(a) {
     a.mcpToolNames = ["proxy-dispatch", "result_head"]
@@ -537,7 +560,7 @@
     a._getMiniAHomeDir = function() { return root }
     a._memoryConfig = { enabled: true }; a._memoryScope = "session"
     var args = { memoryreflect: true }, requests = 0, writes = 0
-    var Queue = require("mini-a-reflection-queue.js").MiniAReflectionQueue
+    var Queue = require("js/memory/mini-a-reflection-queue.js").MiniAReflectionQueue
     var q = new Queue(root + "/reflection-queue")
     var id = q.enqueue(a._reflectionDestination(args), { runId: "run", sessionId: "session", scope: "session" })
     var factory = function() {
@@ -555,7 +578,7 @@
     } finally { io.rm(root) }
   }) }
   exports.testReflectionQueueBoundsRetainedJobs = function() {
-    var Queue = require("mini-a-reflection-queue.js").MiniAReflectionQueue
+    var Queue = require("js/memory/mini-a-reflection-queue.js").MiniAReflectionQueue
     var root = io.createTempFile("mini-a-reflection-bound-", ".queue")
     io.rm(root)
     var q = new Queue(root)
@@ -584,7 +607,7 @@
     assert(missing._reflectionUnavailable, true, "Unavailable in-memory destination is deferred")
   }) }
   exports.testReflectionQueueClaimsAndRetries = function() {
-    var Queue = require("mini-a-reflection-queue.js").MiniAReflectionQueue
+    var Queue = require("js/memory/mini-a-reflection-queue.js").MiniAReflectionQueue
     var root = io.createTempFile("mini-a-reflection-", ".queue")
     io.rm(root)
     var q = new Queue(root)
@@ -609,7 +632,7 @@
     } finally { io.rm(root) }
   }
   exports.testReflectionQueueRecoversExpiredClaims = function() {
-    var Queue = require("mini-a-reflection-queue.js").MiniAReflectionQueue
+    var Queue = require("js/memory/mini-a-reflection-queue.js").MiniAReflectionQueue
     var root = io.createTempFile("mini-a-reflection-", ".queue")
     io.rm(root)
     var q = new Queue(root)
@@ -1057,7 +1080,7 @@
     assert(e.state.tasks.a.status, "unknown", "Revising approach cannot erase unresolved side effects")
   }
   exports.testExecutionEvalMetrics = function() {
-    load("mini-a-eval.js")
+    load("js/core/mini-a-eval.js")
     var e = new MiniAExecution()
     e.put(task("a")); e.state.outcome = "partial"; e.state.budget.spent = 99
     var metrics = new MiniAEval()._normalizeMetrics({}, 20, { execution: e.snapshot() })
@@ -1211,7 +1234,7 @@
     assert(a._execution.state.budget.cap, 5000, "Startup and executor use the same allocation")
   }) }
   exports.testDelegationEvalIgnoresPreviousProcessTotals = function() {
-    load("mini-a-eval.js")
+    load("js/core/mini-a-eval.js")
     var total = 9, owned = 0, manager
     var evaluator = new MiniAEval({ agentFactory: function() { return {
       init: function() { total = 0; manager = "new-manager" },
@@ -1343,10 +1366,10 @@
     } }
     a.llm=a._createBareLlmInstance(); a.lc_llm=a._createBareLlmInstance()
     a._registerMcpToolsForGoal({goal:"hello",mcpdynamic:true,mcpproxy:true,mcpproxynative:true})
-    assert(registrations,0,"Empty selection registers no proxy tools on either tier")
-    assert(a._useToolsActualMain,false,"Main has no native tools"); assert(a._useToolsActualLC,false,"LC has no native tools")
+    assert(registrations,2,"Empty selection preserves the configured proxy transport on both tiers")
+    assert(a._useToolsActualMain,true,"Main retains proxy access"); assert(a._useToolsActualLC,true,"LC retains proxy access")
     a._registerMcpToolsForGoal({goal:"hello",mcpdynamic:false,mcpproxy:true,mcpproxynative:true})
-    assert(registrations,2,"Disabled dynamic selection registers both tiers")
+    assert(registrations,4,"Disabled dynamic selection registers both tiers")
     assert(selections,1,"Disabled selection never invokes selector")
   }) }
 
@@ -1357,7 +1380,7 @@
     plain("Plain "); plain("chatbot reply")
     assert(visible.trim(),"Plain chatbot reply","Plain text remains visible")
     assert(a._shouldDisableStreamingForOllamaToolCallTurn({type:"ollama"},true,true),true,"Ollama tools still disable wire JSON")
-    var source=io.readFileString("mini-a.js")
+    var source=io.readFileString("js/core/mini-a.js")
     assert(source.indexOf('onDelta = chatbotStructuredResponse')>=0,true,"Chatbot renderer follows contract")
     assert(source.indexOf('var _baseOnDelta = this._createStreamDeltaHandler')>=0,true,"Executor always parses envelope")
     assert(source.indexOf('Mode preset: ')>=0 && source.indexOf(' | Provider: ')>=0 && source.indexOf(' | Model: ')>=0,true,"Resolved provider and mode labeled")

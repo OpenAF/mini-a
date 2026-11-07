@@ -567,8 +567,26 @@ through Tika, and describes PNG/JPEG through the configured vision model. Extrac
 failures and truncated documents leave their source pages untouched. The default
 `ingestmaxfilekb=512` input limit applies to these formats.
 Other passive structured formats advertised by oafp are converted to Markdown with
-a JSON code block before the normal wiki writer stores a `.md` page. Image inspection
-still calls the vision model in `normalize` and `raw` modes.
+a JSON code block before the normal wiki writer stores a `.md` page. Uncached image inspection
+uses the vision model even in `normalize` and `raw` modes. Images and later
+distillation share one operation budget and actual-call count. A zero budget defers
+uncached images; dry-run never calls a provider or writes extraction caches. Deferral
+preserves the last destination page.
+
+Successful image descriptions are cached privately under
+`.mini-a-wiki-ingest/extractions/<scope>/<sourceKey>.json`, using the raw image digest,
+effective non-secret visual-model settings and extraction version. Credential changes
+alone do not invalidate this cache. Image bytes are checked before and after extraction
+and again before publication or pruning; prune checks never invoke vision. The existing
+extracted-text hashes and page ownership signatures remain unchanged. `ingestforce=true`
+refreshes an image once per source per run and still obeys budgets and edit protection.
+
+Vision input estimates use the wiki token estimator over the prepared prompt, detail
+and transmitted image representation, plus a one-fifth output reserve. These are budget
+estimates, not provider-billed token usage. `wikimaxprompttokens` applies separately to
+the textual prompt, so an encoded image does not consume that text-only cap. Factory-created
+vision and distillation clients are closed after use; caller-injected clients retain their
+conversations and remain open.
 
 ```sh
 ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=/tmp/wiki ingestmode=auto
@@ -638,8 +656,8 @@ empty authorization applies only after complete discovery of an empty folder.
 Inventory revalidation detects changes before deletion; it does not make the source
 filesystem an atomic snapshot. Do not modify the source during reconciliation.
 
-All modes rebuild complete pages. `normalize`, `raw`, and structured `auto` use no
-model. Distillation receives every current source chunk, including after section
+All modes rebuild complete pages. For text sources, `normalize`, `raw`, and structured
+`auto` use no model. Distillation receives every current source chunk, including after section
 removals or `ingestforce=true`. Prompt overhead counts toward `wikimaxprompttokens`
 and `wikiingestbudget`/`wikillmbudget`. By default, a context-limit error
 triggers split-and-synthesize recovery; if recovery cannot finish, ingestion
@@ -781,15 +799,16 @@ change that freshness contract.
 ## Model prompt and operation limits
 
 These settings appear in console help and in `ojob mini-a-ingest.yaml -jobhelp`.
-They bound ingestion distillation estimates, including prompt overhead and estimated
-output. They do not cap vision extraction calls or all model activity in a session.
+Operation budgets cover vision extraction and distillation estimates, including
+prompt overhead and estimated output. The distillation call limit is per source;
+these settings do not cap all model activity across a session.
 
 | Parameter | Type | Default | Behavior |
 | --- | --- | --- | --- |
 | `wikimaxprompttokens` | number | `0` | Zero/unset tries the complete source then splits on provider context overflow. Positive values impose a hard estimated input cap and defer oversized sources. |
 | `wikiingestmaxcalls` | number | `32` | Maximum distillation model calls per source, including failed attempts and synthesis. `0` disables recovery after the initial call. |
 | `wikillmbudget` | number | `-1` | Fallback estimated input-plus-output token budget for one ingestion invocation; negative/unset means unlimited. |
-| `wikiingestbudget` | number | fallback | A nonnegative value overrides `wikillmbudget` for ingestion; `0` defers distillation work. Negative/unset values use the fallback. |
+| `wikiingestbudget` | number | fallback | A nonnegative value overrides `wikillmbudget` for ingestion; `0` defers uncached image extraction and distillation work. Negative/unset values use the fallback. |
 | `wikidreambudget` | number | not enforced | Reserved by the budget helper; the current dream runner does not use it. Use `dreammaxsteps` for the auto/reorg step budget. |
 | `dreamwikimaxaffected` | number | `100` | Bounds the affected-page set in dream plan/dry-run previews. |
 | `wikimetacache` | boolean | `true` | Cache parsed page metadata; `false` reads metadata afresh. |

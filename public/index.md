@@ -381,13 +381,31 @@
         height: auto !important;
     }
 
+    .svg-rendered-block { position: relative; --svg-control-bg: #f1f5f9; --svg-control-text: #475569; --svg-control-border: #cbd5e1; }
+    body.markdown-body-dark .svg-rendered-block { --svg-control-bg: #252b36; --svg-control-text: #d1d9e6; --svg-control-border: #475569; }
+    .svg-viewport { overflow: auto; }
+    .svg-image-stage { width: 100%; }
+    .svg-image-stage img { margin-inline: auto; }
+    .svg-actions { position: absolute; top: 4px; right: 4px; z-index: 1; }
+    .svg-actions summary { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; list-style: none; cursor: pointer; border: 1px solid var(--svg-control-border); border-radius: 5px; color: var(--svg-control-text); background: var(--svg-control-bg); font-size: 18px; }
+    .svg-actions summary::-webkit-details-marker { display: none; }
+    .svg-controls { position: absolute; top: 32px; right: 0; display: flex; flex-direction: column; gap: 2px; width: 150px; padding: 4px; border: 1px solid var(--svg-control-border); border-radius: 6px; background: var(--svg-control-bg); box-shadow: 0 3px 10px #0002; }
+    .svg-rendered-block .svg-controls button { display: flex; align-items: center; width: 100%; min-height: 32px; border: 0; border-radius: 4px; padding: 5px 8px; cursor: pointer; text-align: left; font-size: 12px; color: var(--svg-control-text); background: var(--svg-control-bg); }
+    .svg-controls button:disabled { opacity: .4; cursor: default; }
+    .svg-actions[open], details.mermaid-diagram-controls[open] { z-index: 5; }
+    .mermaid-image-preview { margin: 12px 0; padding: 10px; border: 1px solid var(--svg-control-border); border-radius: 8px; }
+    .svg-controls button, .svg-actions summary, .mermaid-control-btn, .mermaid-diagram-controls summary { touch-action: manipulation; }
+    .svg-controls button:hover { filter: brightness(.94); }
+    .svg-controls button:focus-visible, .svg-actions summary:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+    .svg-export-status { display: block; font-size: 12px; color: var(--svg-control-text); }
+    .svg-export-status:empty { display: none; }
     .mermaid-diagram {
         position: relative;
         text-align: center;
         padding: 1rem;
         border-radius: 0.5rem;
         margin: 1rem 0;
-        overflow: hidden;
+        overflow: visible;
     }
 
     .mermaid-panzoom-viewport {
@@ -416,57 +434,42 @@
 
     .mermaid-diagram-controls {
         position: absolute;
-        bottom: 0.65rem;
-        right: 0.65rem;
-        display: flex;
-        gap: 0.45rem;
+        top: 4px;
+        right: 4px;
         z-index: 2;
+        color: #475569;
     }
-
+    .mermaid-diagram-controls summary {
+        display: flex; align-items: center; justify-content: center;
+        width: 28px; height: 28px; list-style: none; cursor: pointer;
+        border: 1px solid #cbd5e1; border-radius: 5px;
+        background: #f1f5f9; font-size: 18px;
+    }
+    .mermaid-diagram-controls summary::-webkit-details-marker { display: none; }
     .mermaid-control-group {
-        display: flex;
-        border: 1px solid rgba(148, 156, 166, 0.45);
-        border-radius: 0.8rem;
-        overflow: hidden;
-        background: rgba(255, 255, 255, 0.92);
-        box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+        position: absolute; top: 32px; right: 0;
+        display: flex; flex-direction: column; gap: 2px; width: 150px;
+        padding: 4px; border: 1px solid #cbd5e1; border-radius: 6px;
+        background: #f1f5f9; box-shadow: 0 3px 10px #0002;
     }
-
-    body.markdown-body-dark .mermaid-control-group {
-        background: rgba(26, 29, 35, 0.94);
-        border-color: rgba(255,255,255,0.12);
+    body.markdown-body-dark .mermaid-diagram-controls { color: #d1d9e6; }
+    body.markdown-body-dark .mermaid-control-group,
+    body.markdown-body-dark .mermaid-diagram-controls summary {
+        background: #252b36; border-color: #475569;
     }
-
     .mermaid-control-btn {
-        border: none;
-        background: transparent;
-        color: inherit;
-        width: 1.65rem;
-        height: 1.65rem;
-        font-size: 1.1rem;
-        line-height: 1;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
+        border: 0; border-radius: 4px; background: transparent; color: inherit;
+        width: 100%; min-height: 32px; padding: 5px 8px;
+        font-size: 12px; text-align: left; cursor: pointer;
+    }
+    .mermaid-control-btn:hover { background: rgba(51, 144, 255, 0.16); }
+    .mermaid-control-btn:focus-visible, .mermaid-diagram-controls summary:focus-visible {
+        outline: 2px solid currentColor; outline-offset: 2px;
     }
 
-    .mermaid-control-btn + .mermaid-control-btn {
-        border-left: 1px solid rgba(148, 156, 166, 0.45);
-    }
-
-    body.markdown-body-dark .mermaid-control-btn + .mermaid-control-btn {
-        border-left-color: rgba(255,255,255,0.12);
-    }
-
-    .mermaid-control-btn:hover {
-        background: rgba(51, 144, 255, 0.16);
-    }
-
-    .mermaid-reset-icon {
-        width: 0.85rem;
-        height: 0.85rem;
-    }
+    .mermaid-export-status { display: block; font-size: 12px; }
+    .mermaid-export-status:empty { display: none; }
+    .mermaid-fullscreen .mermaid-export-status { position: absolute; bottom: 12px; left: 12px; right: 12px; z-index: 3; }
 
     .mermaid-fullscreen {
         position: fixed;
@@ -511,13 +514,26 @@
     }
 
     .mermaid-fullscreen .mermaid-diagram-controls {
-        bottom: max(1rem, env(safe-area-inset-bottom));
+        top: max(1rem, env(safe-area-inset-top));
         right: max(1rem, env(safe-area-inset-right));
     }
 
     .mermaid-fullscreen .mermaid-control-btn {
-        width: 2.75rem;
-        height: 2.75rem;
+        min-height: 2.75rem;
+    }
+
+    .diagram-action-icon { flex: 0 0 14px; width: 14px; height: 14px; opacity: .8; pointer-events: none; }
+    .svg-controls button, .mermaid-control-btn { display: flex; align-items: center; gap: 8px; }
+    .mermaid-fullscreen .mermaid-diagram-controls { max-width: calc(100% - 2rem); }
+    .mermaid-fullscreen .mermaid-control-group { position: static; flex-direction: row; flex-wrap: wrap; width: auto; }
+    .mermaid-fullscreen .mermaid-control-btn { width: 36px; min-height: 36px; justify-content: center; padding: 8px; }
+    .mermaid-fullscreen .diagram-action-label { display: none; }
+
+    @media (pointer: coarse) {
+        .svg-actions summary, .mermaid-diagram-controls summary { width: 44px; height: 44px; }
+        .svg-controls, .mermaid-control-group { top: 48px; }
+        .svg-rendered-block .svg-controls button, .mermaid-control-btn { min-height: 44px; }
+        .mermaid-fullscreen .mermaid-control-btn { width: 44px; min-height: 44px; }
     }
 
     /* ========== LEAFLET MAPS ========== */
@@ -683,6 +699,7 @@
     body.markdown-body-dark #composerDialog #inputSection { background: #1a1d23; }
     #composerDialog[open] { display: flex; flex-direction: column; gap: 8px; }
     #composerHint { margin: 0; font-size: .8rem; }
+    #composerNotice { margin: .25rem 0; font-size: .85rem; }
     #composerDialog #inputSection { flex: 1; min-height: 0; margin: 0; display: grid; grid-template-columns: auto 1fr auto; grid-template-rows: minmax(0,1fr) auto; }
     #composerDialog .prompt-wrapper { grid-column: 1 / -1; grid-row: 1; display: flex; flex-direction: column; height: 100%; min-height: 0; padding-top: 0; }
     #composerDialog #promptInput { flex: 1; min-height: 0; max-height: none; height: 100% !important; overflow-y: auto !important; font-size: 16px; }
@@ -1856,6 +1873,7 @@
             <div id="attachmentsContainer" class="attachments-container" aria-live="polite"></div>
             <button id="expandPromptBtn" type="button" title="Expand input" aria-label="Expand input" aria-expanded="false" aria-controls="promptInput"></button>
             <textarea id="promptInput" placeholder="Enter your prompt..." rows="1" disabled></textarea>
+            <p id="composerNotice" role="alert" hidden></p>
         </div>
         <button id="submitBtn" title="Send" aria-label="Send" type="button"></button>
         <button id="clearBtn" title="Clear" aria-label="Clear" type="button"></button>
@@ -1863,7 +1881,7 @@
     </div>
 </div>
 
-<dialog id="composerDialog" aria-label="Expanded prompt input"><p id="composerHint">Enter for a new line · Ctrl/Cmd+Enter to send · Escape to collapse</p><p id="composerNotice" role="alert" hidden></p></dialog>
+<dialog id="composerDialog" aria-label="Expanded prompt input"><p id="composerHint">Enter for a new line · Ctrl/Cmd+Enter to send · Escape to collapse</p></dialog>
 
 <div id="attachmentModal" class="attachment-modal" aria-hidden="true">
     <div class="attachment-modal-content" role="dialog" aria-modal="true" aria-labelledby="attachmentModalTitle">
@@ -2106,6 +2124,10 @@
     }
 
     /* ========== GLOBAL STATE VARIABLES ========== */
+    const embeddedMode = new URLSearchParams(window.location.search).get('embed') === '1';
+    let embedBridge = null;
+    let embedInitialDraft = false;
+    let embedConversationUsed = false;
     let currentSessionUuid = null;
     let pollingInterval = null;
     let pingInterval = null;
@@ -2147,8 +2169,12 @@
     let pollInFlight = false;
     let pollQueued = false;
     let pollErrorCount = 0;
+    let transcriptPollUuid = null;
+    let transcriptRevision = null;
+    let transcriptContent = "";
     let streamErrorCount = 0;
     let activeSubmissionStartedAt = 0;
+    let activeSubmissionRunId = null;
     let sawNonFinishedForActiveSubmission = false;
 
     // Store session uuid in global in-memory variable (no localStorage persistence)
@@ -2207,6 +2233,36 @@
         }
 
         return cleanPath;
+    }
+
+    function captureEmbedContext() {
+        if (!embeddedMode) return undefined;
+        if (!embedBridge) throw new Error('Parent app connection is not ready');
+        return embedBridge.snapshot();
+    }
+
+    async function configureEmbedding(config) {
+        if (!embeddedMode) return;
+        if (!config || config.enabled !== true) throw new Error('Embedding is disabled on this server');
+        for (const name of ['embed-context.js', 'embed.js']) {
+            await new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = resolveAppUrl(name + '?raw=true');
+                script.onload = resolve; script.onerror = reject; document.head.append(script);
+            });
+        }
+        embedBridge = MiniAEmbedBridge({
+            config,
+            canStart: () => !embedConversationUsed && !isProcessing && !(advancedUI && advancedUI.busy()) && !lastRawContent && !lastKnownHistory.length && !promptInput.value && !attachments.length,
+            start: async (text, mode) => {
+                embedInitialDraft = true;
+                promptInput.value = text;
+                autoResizeTextarea();
+                if (mode === 'submit' && await handleSubmit() !== true) throw new Error('Initial goal was not accepted; check the iframe before retrying manually');
+                if (mode === 'draft') promptInput.focus();
+            }
+        });
+        window.addEventListener('pagehide', () => { if (embedBridge) embedBridge.dispose(); });
     }
 
     // Optional shared-token auth (webtoken=... server arg). Off by default: getWebToken()
@@ -2282,7 +2338,7 @@
             let uuid = (typeof window !== 'undefined') ? window.mini_a_session_uuid : null;
 
             // If URL has ?uuid=... prefer and persist it
-            if (typeof window !== 'undefined' && window.location && window.location.search) {
+            if (!embeddedMode && typeof window !== 'undefined' && window.location && window.location.search) {
                 const params = new URLSearchParams(window.location.search);
                 const urlUuid = params.get('uuid');
                 if (urlUuid && typeof urlUuid === 'string' && urlUuid.length > 0) {
@@ -2964,6 +3020,7 @@
 
             lastKnownHistory = events;
             currentSessionUuid = newUuid;
+            transcriptPollUuid = null; activeSubmissionRunId = null;
             if (typeof window !== 'undefined') {
                 window.mini_a_session_uuid = newUuid;
             }
@@ -2990,6 +3047,9 @@
     async function handleRetryLastAnswer() {
         if (isProcessing) return;
 
+        let embed;
+        try { embed = captureEmbedContext(); }
+        catch (error) { composerNotice(error.message); return; }
         try {
             const events = getCurrentConversationEvents();
             if (!events.length) {
@@ -3034,12 +3094,16 @@
             const response = await fetch(resolveAppUrl('prompt'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
-                body: JSON.stringify({ prompt: promptForRetry, uuid: retryUuid })
+                body: JSON.stringify({ prompt: promptForRetry, uuid: retryUuid, embed })
             });
 
             if (!response.ok) throw new Error('Failed to resubmit prompt');
 
-            await response.json();
+            const receipt = await response.json();
+            if (receipt.error || receipt.busy) throw new Error(receipt.error || 'Session busy');
+            activeSubmissionRunId = receipt.runId || null;
+            activeSubmissionStartedAt = Date.now();
+            sawNonFinishedForActiveSubmission = false;
             startProcessing();
             if (streamEnabled) startStream(currentSessionUuid);
             startPolling();
@@ -3146,6 +3210,7 @@
         captureActivityDisclosures();
         lastRenderedHtml = processedHtml;
         resultsDiv.innerHTML = processedHtml;
+        renderGeneratedFiles(resultsDiv, currentSessionUuid);
         restoreActivityDisclosures();
 
         // Apply streaming class and animation
@@ -3664,14 +3729,15 @@
         });
     }
 
-    function openMermaidFullscreen(svg, originalViewBoxAttr, originalPreserveAspectRatio) {
+    function openMermaidFullscreen(svg, originalViewBoxAttr, originalPreserveAspectRatio, svgText, imageKind) {
         const dialog = document.createElement('dialog');
         dialog.className = 'mermaid-fullscreen';
-        dialog.setAttribute('aria-label', 'Full-screen Mermaid diagram. Pinch to zoom and drag to pan.');
+        const kind = imageKind || (typeof svgText === 'string' ? 'SVG' : 'Mermaid');
+        dialog.setAttribute('aria-label', 'Full-screen ' + kind + ' diagram. Pinch to zoom and drag to pan.');
         const stage = document.createElement('div');
         stage.className = 'mermaid-fullscreen-stage';
         const picture = document.createElement('img');
-        picture.alt = 'Mermaid diagram';
+        picture.alt = kind + ' diagram';
         picture.draggable = false;
         // An image keeps SVG IDs isolated from the inline diagram and preserves its view.
         const copy = svg.cloneNode(true);
@@ -3683,14 +3749,9 @@
         const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(copy)], { type: 'image/svg+xml' }));
         picture.src = url;
         stage.appendChild(picture);
-        const controls = document.createElement('div');
-        controls.className = 'mermaid-diagram-controls';
-        controls.innerHTML = '<div class="mermaid-control-group">' +
-            '<button type="button" class="mermaid-control-btn" data-action="zoom-out" aria-label="Zoom out">−</button>' +
-            '<button type="button" class="mermaid-control-btn" data-action="zoom-in" aria-label="Zoom in">+</button>' +
-            '<button type="button" class="mermaid-control-btn" data-action="reset" aria-label="Recenter diagram" title="Recenter diagram">↺</button>' +
-            '<button type="button" class="mermaid-control-btn" data-action="close" aria-label="Close full-screen diagram" title="Close full-screen diagram">×</button></div>';
+        const controls = createMermaidActionMenu(true, kind);
         dialog.append(stage, controls);
+        const exportStatus = addMermaidExportStatus(dialog);
         const previousFocus = document.activeElement;
         const previousOverflow = document.body.style.overflow;
         document.body.appendChild(dialog);
@@ -3752,6 +3813,11 @@
             const button = event.target.closest('button[data-action]');
             if (!button) return;
             const action = button.getAttribute('data-action');
+            if (action.startsWith('download-')) {
+                if (typeof svgText === 'string') exportSvgDiagram(svgText, action, button, exportStatus, kind === 'Mermaid' ? 'mermaid' : 'diagram');
+                else exportMermaidDiagram(svg, originalViewBoxAttr, originalPreserveAspectRatio, action, button, exportStatus);
+                return;
+            }
             if (action === 'close') { dialog.close(); return; }
             if (action === 'reset') { scale = 1; x = 0; y = 0; }
             if (action === 'zoom-in') zoom(1.2);
@@ -3769,6 +3835,65 @@
         controls.querySelector('[data-action="close"]').focus();
     }
 
+    function addMermaidExportStatus(container) {
+        const status = document.createElement('span');
+        status.className = 'mermaid-export-status';
+        status.setAttribute('role', 'status');
+        container.appendChild(status);
+        return status;
+    }
+
+    async function exportMermaidDiagram(svg, originalViewBox, originalAspectRatio, action, button, status) {
+        if (button.disabled) return;
+        button.disabled = true; status.textContent = '';
+        try {
+            const copy = svg.cloneNode(true);
+            if (originalViewBox) copy.setAttribute('viewBox', originalViewBox);
+            else copy.removeAttribute('viewBox');
+            if (originalAspectRatio) copy.setAttribute('preserveAspectRatio', originalAspectRatio);
+            else copy.removeAttribute('preserveAspectRatio');
+            copy.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+            const bounds = (originalViewBox || '').trim().split(/[\s,]+/).map(Number);
+            const rect = svg.getBoundingClientRect();
+            const width = bounds.length === 4 && bounds[2] > 0 ? bounds[2] : rect.width;
+            const height = bounds.length === 4 && bounds[3] > 0 ? bounds[3] : rect.height;
+            copy.setAttribute('width', width); copy.setAttribute('height', height);
+            copy.style.maxWidth = 'none'; copy.style.width = width + 'px'; copy.style.height = height + 'px';
+            // Mermaid embeds its theme styles; preserve inherited label fonts as well.
+            const style = getComputedStyle(svg);
+            copy.style.fontFamily = style.fontFamily; copy.style.fontSize = style.fontSize;
+            copy.style.color = style.color;
+            const text = new XMLSerializer().serializeToString(copy);
+            if (action === 'download-png') await downloadSvgAsPng(text, 'mermaid.png');
+            else downloadDiagramBlob(new Blob([text], { type: 'image/svg+xml;charset=utf-8' }), 'mermaid.svg');
+        } catch (_) {
+            status.textContent = 'Diagram export failed. Try again or download the SVG.';
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    function createMermaidActionMenu(fullscreen, kind = 'Mermaid') {
+        const menu = document.createElement(fullscreen ? 'div' : 'details');
+        menu.className = 'mermaid-diagram-controls';
+        if (fullscreen) {
+            menu.setAttribute('role', 'toolbar');
+            menu.setAttribute('aria-label', kind + ' controls');
+        }
+        const actions = [
+            ['zoom-out', 'Zoom out'], ['zoom-in', 'Zoom in'], ['reset', 'Reset view'],
+            ['download-svg', 'Download SVG'], ['download-png', 'Download PNG'],
+            fullscreen ? ['close', 'Close full screen'] : ['fullscreen', 'Open full screen']
+        ];
+        menu.innerHTML = (fullscreen ? '' : '<summary aria-label="Mermaid actions" title="Mermaid actions">⋯</summary>') +
+            '<div class="mermaid-control-group">' +
+            actions.map(([action, label]) => '<button type="button" class="mermaid-control-btn" data-action="' +
+                action + '" aria-label="' + label + '" title="' + label + '">' +
+                diagramActionIcon(action) + '<span class="diagram-action-label">' + label + '</span></button>').join('') + '</div>';
+        if (!fullscreen) bindDiagramMenu(menu);
+        return menu;
+    }
+
     function addMermaidPanZoomLayer(container) {
         if (!container) return;
 
@@ -3783,26 +3908,12 @@
         content.appendChild(svg);
         viewport.appendChild(content);
 
-        const controls = document.createElement('div');
-        controls.className = 'mermaid-diagram-controls';
-        controls.innerHTML = [
-            '<div class="mermaid-control-group">',
-            '<button type="button" class="mermaid-control-btn" data-action="fullscreen" aria-label="Open diagram full screen" title="Open full screen">⛶</button>',
-            '<button type="button" class="mermaid-control-btn" data-action="reset" aria-label="Reset mermaid view" title="Reset view">',
-            '<svg class="mermaid-reset-icon" viewBox="0 0 16 16" aria-hidden="true">',
-            '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
-            '</svg>',
-            '</button>',
-            '</div>',
-            '<div class="mermaid-control-group">',
-            '<button type="button" class="mermaid-control-btn" data-action="zoom-out" aria-label="Zoom out" title="Zoom out">−</button>',
-            '<button type="button" class="mermaid-control-btn" data-action="zoom-in" aria-label="Zoom in" title="Zoom in">+</button>',
-            '</div>'
-        ].join('');
+        const controls = createMermaidActionMenu(false);
 
         container.innerHTML = '';
         container.appendChild(viewport);
         container.appendChild(controls);
+        const exportStatus = addMermaidExportStatus(container);
 
         const minScale = 0.35;
         const maxScale = 3;
@@ -3895,13 +4006,17 @@
         controls.addEventListener('click', (event) => {
             const btn = event.target.closest('button[data-action]');
             if (!btn) return;
+            controls.open = false;
+            controls.querySelector('summary').focus();
 
             const rect = viewport.getBoundingClientRect();
             const cx = rect.width / 2;
             const cy = rect.height / 2;
             const action = btn.getAttribute('data-action');
 
-            if (action === 'fullscreen') {
+            if (action.startsWith('download-')) {
+                exportMermaidDiagram(svg, originalViewBoxAttr, originalPreserveAspectRatio, action, btn, exportStatus);
+            } else if (action === 'fullscreen') {
                 openMermaidFullscreen(svg, originalViewBoxAttr, originalPreserveAspectRatio);
             } else if (action === 'zoom-in') {
                 zoomAt(1.2, cx, cy);
@@ -4063,8 +4178,257 @@
         }
     }
 
+    // File bytes are fetched only after a deliberate click, with header auth.
+    async function renderGeneratedFiles(root, session) {
+        if (!root || !session) return;
+        root.setAttribute('data-artifact-session', session);
+        const previous = root.querySelector('.generated-files');
+        const ticket = {}; root._artifactRequest = ticket;
+        const panel = document.createElement('section');
+        panel.className = 'generated-files';
+        try {
+            const response = await fetch(resolveAppUrl('artifacts'), {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uuid: session })
+            });
+            if (!root.isConnected || root._artifactRequest !== ticket || root.getAttribute('data-artifact-session') !== session) return;
+            if (!response.ok) { if (previous) previous.remove(); root.removeAttribute('data-artifact-session'); return; }
+            const data = await response.json();
+            if (!root.isConnected || root._artifactRequest !== ticket || root.getAttribute('data-artifact-session') !== session) return;
+            if (!Array.isArray(data.files) || !data.files.length) { if (previous) previous.remove(); return; }
+            const signature = JSON.stringify(data.files);
+            if (previous && previous._artifactSignature === signature) return;
+            panel._artifactSignature = signature;
+            if (previous) previous.remove();
+            root.appendChild(panel);
+            const heading = document.createElement('h4'); heading.textContent = 'Generated files'; panel.appendChild(heading);
+            for (const file of data.files) {
+                const row = document.createElement('div');
+                const label = document.createElement('span');
+                label.textContent = file.name + ' · ' + Math.ceil(file.size / 1024) + ' KiB · ' +
+                    (file.status === 'published' ? 'expires ' + new Date(file.expires).toLocaleString() : file.status);
+                row.appendChild(label);
+                if (file.status === 'published' && file.expires > Date.now()) {
+                    const download = document.createElement('button'); download.type = 'button'; download.textContent = 'Download';
+                    download.addEventListener('click', async () => {
+                        download.disabled = true;
+                        try {
+                            const result = await fetch(resolveAppUrl('artifacts'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uuid: session, id: file.id }) });
+                            if (!result.ok) throw new Error('File unavailable');
+                            const url = URL.createObjectURL(await result.blob());
+                            const link = document.createElement('a'); link.href = url; link.download = file.name;
+                            document.body.appendChild(link); link.click(); link.remove();
+                            setTimeout(() => URL.revokeObjectURL(url), 1000);
+                        } catch (_) { download.textContent = 'Unavailable'; }
+                        finally { download.disabled = false; }
+                    });
+                    row.appendChild(download);
+                }
+                panel.appendChild(row);
+            }
+        } catch (_) { panel.remove(); }
+    }
+
+    setInterval(() => {
+        document.querySelectorAll('[data-artifact-session]').forEach(root => renderGeneratedFiles(root, root.getAttribute('data-artifact-session')));
+    }, 3000);
+
+    // Shared by Simple and Advanced. Export only the validated preview bytes.
+    function addSvgDownloadControl(container, svgText, kind = 'SVG') {
+        const filename = kind === 'Mermaid' ? 'mermaid' : 'diagram';
+        if (container.querySelector('.svg-download-button')) return;
+        const control = document.createElement('button');
+        control.type = 'button';
+        control.className = 'svg-download-button';
+        control.title = 'Download SVG';
+        control.setAttribute('aria-label', 'Download SVG');
+        control.innerHTML = diagramActionIcon('download-svg') + '<span>Download SVG</span>';
+        control.addEventListener('click', () => {
+            downloadDiagramBlob(new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' }), filename + '.svg');
+        });
+        const controls = document.createElement('div');
+        controls.className = 'svg-controls';
+        controls.setAttribute('role', 'group');
+        controls.setAttribute('aria-label', kind + ' controls');
+        const image = container.querySelector('img');
+        if (image) {
+            let scale = 1, baseWidth = 0;
+            const resizeButton = (label, icon, action) => {
+                const button = document.createElement('button');
+                button.type = 'button'; button.className = 'svg-resize-button';
+                button.title = label; button.setAttribute('aria-label', label);
+                button.innerHTML = diagramActionIcon(icon) + '<span>' + label + '</span>';
+                button.addEventListener('click', action); controls.appendChild(button);
+                return button;
+            };
+            const resize = next => {
+                if (!baseWidth) baseWidth = image.getBoundingClientRect().width;
+                if (!baseWidth) return;
+                scale = Math.max(.25, Math.min(3, next));
+                image.style.width = (baseWidth * scale) + 'px';
+                image.style.maxWidth = 'none';
+                smaller.disabled = scale <= .25;
+                larger.disabled = scale >= 3;
+            };
+            const smaller = resizeButton(kind === 'SVG' ? 'Shrink SVG' : 'Zoom out', 'zoom-out', () => resize(scale - .25));
+            const larger = resizeButton(kind === 'SVG' ? 'Enlarge SVG' : 'Zoom in', 'zoom-in', () => resize(scale + .25));
+            resizeButton(kind === 'SVG' ? 'Reset SVG size' : 'Reset view', 'reset', () => {
+                scale = 1; baseWidth = 0;
+                image.style.width = ''; image.style.maxWidth = '100%';
+                smaller.disabled = false; larger.disabled = false;
+            });
+        }
+        controls.appendChild(control);
+        const png = document.createElement('button');
+        png.type = 'button'; png.className = 'svg-png-button';
+        png.innerHTML = diagramActionIcon('download-png') + '<span>Download PNG</span>'; png.title = 'Download PNG (2×, transparent)';
+        png.setAttribute('aria-label', png.title);
+        const status = document.createElement('span');
+        status.className = 'svg-export-status'; status.setAttribute('role', 'status');
+        png.addEventListener('click', async () => {
+            png.disabled = true; status.textContent = '';
+            try {
+                await downloadSvgAsPng(svgText, filename + '.png');
+            } catch (_) {
+                status.textContent = 'PNG export failed. Try again or download the SVG.';
+            } finally {
+                png.disabled = false;
+            }
+        });
+        controls.appendChild(png);
+        const fullscreen = document.createElement('button');
+        fullscreen.type = 'button'; fullscreen.title = 'Open full screen';
+        fullscreen.setAttribute('aria-label', 'Open full screen');
+        fullscreen.innerHTML = diagramActionIcon('fullscreen') + '<span>Open full screen</span>';
+        fullscreen.addEventListener('click', () => {
+            // Restore focus to the visible menu trigger when the dialog closes.
+            menu.open = false; trigger.focus();
+            const svg = new DOMParser().parseFromString(svgText, 'image/svg+xml').documentElement;
+            openMermaidFullscreen(svg, svg.getAttribute('viewBox'), svg.getAttribute('preserveAspectRatio'), svgText, kind);
+        });
+        controls.appendChild(fullscreen);
+        const menu = document.createElement('details');
+        menu.className = 'svg-actions';
+        const trigger = document.createElement('summary');
+        trigger.textContent = '⋯'; trigger.title = kind + ' actions';
+        trigger.setAttribute('aria-label', kind + ' actions');
+        menu.appendChild(trigger); menu.appendChild(controls);
+        bindDiagramMenu(menu);
+        controls.addEventListener('click', event => {
+            if (event.target.closest('button') && event.target.closest('button') !== fullscreen) { menu.open = false; trigger.focus(); }
+        });
+        container.appendChild(menu);
+        container.appendChild(status);
+    }
+
+    function bindDiagramMenu(menu) {
+        // Safari can blur a summary without focusing the tapped button. Closing on
+        // a null relatedTarget removes the button before its click is dispatched.
+        menu.addEventListener('focusout', event => {
+            if (event.relatedTarget && !menu.contains(event.relatedTarget)) menu.open = false;
+        });
+        menu.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && menu.open) {
+                event.preventDefault(); event.stopPropagation();
+                menu.open = false; menu.querySelector('summary').focus();
+            }
+        });
+        if (!bindDiagramMenu.outsideListener) {
+            document.addEventListener('pointerdown', event => {
+                document.querySelectorAll('details.svg-actions[open], details.mermaid-diagram-controls[open]').forEach(openMenu => {
+                    if (!openMenu.contains(event.target)) openMenu.open = false;
+                });
+            }, true);
+            bindDiagramMenu.outsideListener = true;
+        }
+    }
+
+    function renderMermaidPreview(container, svgText) {
+        const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+        const svg = doc.documentElement;
+        if (doc.querySelector('parsererror') || svg.localName !== 'svg' || svg.namespaceURI !== 'http://www.w3.org/2000/svg') {
+            throw new Error('Invalid Mermaid SVG');
+        }
+        const bounds = (svg.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+        if (bounds.length === 4 && bounds.every(Number.isFinite) && bounds[2] > 0 && bounds[3] > 0) {
+            svg.setAttribute('width', bounds[2]); svg.setAttribute('height', bounds[3]);
+            svg.style.width = bounds[2] + 'px'; svg.style.height = bounds[3] + 'px'; svg.style.maxWidth = 'none';
+        }
+        const text = new XMLSerializer().serializeToString(svg);
+        container.className = 'svg-rendered-block mermaid-image-preview';
+        const viewport = document.createElement('div'); viewport.className = 'svg-viewport';
+        const stage = document.createElement('div'); stage.className = 'svg-image-stage';
+        const image = document.createElement('img'); image.alt = 'Rendered Mermaid diagram';
+        // SVG image documents isolate styles/IDs and disable scripts and external
+        // resources, retaining isolation without putting controls inside an iframe.
+        image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(text);
+        image.style.display = 'block'; image.style.maxWidth = '100%'; image.style.height = 'auto';
+        stage.appendChild(image); viewport.appendChild(stage); container.appendChild(viewport);
+        addSvgDownloadControl(container, text, 'Mermaid');
+    }
+
+    function diagramActionIcon(action) {
+        const paths = {
+            'zoom-out': 'M5 12h14',
+            'zoom-in': 'M5 12h14M12 5v14',
+            reset: 'M3 10a9 9 0 1 1 2 8M3 4v6h6',
+            fullscreen: 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5',
+            close: 'm6 6 12 12M6 18 18 6',
+            'download-svg': 'm8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 16',
+            'download-png': 'M3 3h18v18H3zM3 17l6-6 4 4 3-3 5 5M15 7h.01'
+        };
+        return '<svg class="diagram-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="' + paths[action] + '"/></svg>';
+    }
+
+    async function exportSvgDiagram(svgText, action, button, status, filename = 'diagram') {
+        if (button.disabled) return;
+        button.disabled = true; status.textContent = '';
+        try {
+            if (action === 'download-png') await downloadSvgAsPng(svgText, filename + '.png');
+            else downloadDiagramBlob(new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' }), filename + '.svg');
+        } catch (_) {
+            status.textContent = 'Diagram export failed. Try again or download the SVG.';
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    function downloadDiagramBlob(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url; link.download = filename;
+        try {
+            document.body.appendChild(link); link.click();
+        } finally {
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+    }
+
+    async function downloadSvgAsPng(svgText, filename) {
+        const raster = new Image();
+        await new Promise((resolve, reject) => {
+            raster.onload = resolve;
+            raster.onerror = () => reject(new Error('Unable to load SVG'));
+            // Data URLs also allow browser rasterization of Mermaid HTML labels.
+            raster.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgText);
+        });
+        const width = raster.naturalWidth, height = raster.naturalHeight;
+        if (!width || !height) throw new Error('SVG has no dimensions');
+        const scale = Math.min(2, 8192 / width, 8192 / height, Math.sqrt(16777216 / width / height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.floor(width * scale));
+        canvas.height = Math.max(1, Math.floor(height * scale));
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('Canvas unavailable');
+        context.drawImage(raster, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        if (!blob) throw new Error('PNG encoding failed');
+        downloadDiagramBlob(blob, filename);
+    }
+
     function sanitizeSvgContent(rawSvg) {
-        if (typeof rawSvg !== 'string') return '';
+        if (typeof rawSvg !== 'string' || rawSvg.length > 2 * 1024 * 1024) return '';
 
         let sanitized = rawSvg.trim();
         if (sanitized.length === 0) return '';
@@ -4133,7 +4497,39 @@
             return match;
         });
 
-        return sanitized;
+        if (/<!DOCTYPE|<!ENTITY|<\?/i.test(sanitized) || typeof DOMParser === 'undefined') return '';
+        sanitized = sanitized.replace(/<svg\b([^>]*)>/i, (tag, attributes) => /\bxmlns\s*=/.test(attributes) ? tag : '<svg xmlns="http://www.w3.org/2000/svg"' + attributes + '>');
+        const doc = new DOMParser().parseFromString(sanitized, 'image/svg+xml');
+        if (doc.querySelector('parsererror') || doc.documentElement.localName !== 'svg') return '';
+        const tags = new Set('svg g defs title desc path rect circle ellipse line polyline polygon text tspan textPath clipPath mask linearGradient radialGradient stop pattern marker symbol use'.split(' '));
+        const attrs = new Set('xmlns xmlns:xlink id class viewBox width height x y x1 y1 x2 y2 cx cy r rx ry d points transform fill fill-opacity fill-rule stroke stroke-width stroke-opacity stroke-linecap stroke-linejoin stroke-dasharray stroke-dashoffset opacity font-family font-size font-weight font-style text-anchor dominant-baseline alignment-baseline dx dy rotate textLength lengthAdjust preserveAspectRatio gradientUnits gradientTransform offset stop-color stop-opacity spreadMethod clip-path clip-rule mask maskUnits maskContentUnits patternUnits patternContentUnits patternTransform marker-start marker-mid marker-end markerWidth markerHeight refX refY orient markerUnits href xlink:href'.split(' '));
+        const nodes = [doc.documentElement, ...doc.documentElement.querySelectorAll('*')];
+        if (nodes.length > 10000) return '';
+        for (const node of nodes) {
+            if (node.namespaceURI !== 'http://www.w3.org/2000/svg' || !tags.has(node.localName)) return '';
+            for (const attr of [...node.attributes]) {
+                if (attr.name === 'style') {
+                    // Preserve passive presentation styles as SVG attributes.
+                    for (const declaration of attr.value.split(';')) {
+                        if (!declaration.trim()) continue;
+                        const colon = declaration.indexOf(':');
+                        const name = declaration.slice(0, colon).trim();
+                        const value = declaration.slice(colon + 1).trim();
+                        if (colon < 1 || !/^(fill|fill-opacity|stroke|stroke-width|stroke-opacity|opacity|font-family|font-size|font-weight|font-style|text-anchor|dominant-baseline)$/.test(name) ||
+                            /[\\<>\u0000-\u001f]|url|expression|@|:/i.test(value)) return '';
+                        node.setAttribute(name, value);
+                    }
+                    node.removeAttributeNode(attr);
+                    continue;
+                }
+                if (!attrs.has(attr.name)) { node.removeAttributeNode(attr); continue; }
+                const value = attr.value.trim();
+                if ((attr.localName === 'href' && !/^#[\w.-]+$/.test(value)) ||
+                    (/url\s*\(/i.test(value) && !/^url\(\s*#[\w.-]+\s*\)$/.test(value)) ||
+                    /[\\\u0000-\u001f]|javascript:|data:|https?:/i.test(value) && attr.name !== 'xmlns' && attr.name !== 'xmlns:xlink') return '';
+            }
+        }
+        return new XMLSerializer().serializeToString(doc.documentElement);
     }
 
     function validateSvgXmlContent(svgText) {
@@ -4171,14 +4567,14 @@
         }
     }
 
-    function renderSvgBlocks() {
-        if (!resultsDiv) return;
+    function renderSvgBlocks(root = resultsDiv) {
+        if (!root) return;
 
         const isDark = typeof _isD !== 'undefined' && _isD;
         const background = isDark ? '#101218' : '#f8fafc';
         const border = isDark ? 'rgba(230,230,230,0.2)' : 'rgba(33,37,41,0.18)';
 
-        const svgBlocks = resultsDiv.querySelectorAll('pre code.language-svg, pre code.svg');
+        const svgBlocks = root.querySelectorAll('pre code.language-svg, pre code.svg');
         svgBlocks.forEach((block) => {
             if (block.dataset.svgRendered === 'true') return;
 
@@ -4223,7 +4619,7 @@
             wrapper.style.borderRadius = '8px';
             wrapper.style.padding = '10px';
             wrapper.style.margin = '12px 0';
-            wrapper.style.overflow = 'auto';
+            wrapper.style.overflow = 'visible';
             wrapper.setAttribute('data-svg-source', sanitizedSvg);
 
             const image = document.createElement('img');
@@ -4233,12 +4629,17 @@
             image.style.maxWidth = '100%';
             image.style.height = 'auto';
 
-            wrapper.appendChild(image);
+            const viewport = document.createElement('div');
+            viewport.className = 'svg-viewport';
+            const stage = document.createElement('div');
+            stage.className = 'svg-image-stage';
+            stage.appendChild(image); viewport.appendChild(stage); wrapper.appendChild(viewport);
+            addSvgDownloadControl(wrapper, sanitizedSvg);
             pre.replaceWith(wrapper);
             block.dataset.svgRendered = 'true';
         });
 
-        const rendered = resultsDiv.querySelectorAll('.svg-rendered-block[data-svg-source]');
+        const rendered = root.querySelectorAll('.svg-rendered-block[data-svg-source]');
         rendered.forEach((container) => {
             container.style.background = background;
             container.style.border = '1px solid ' + border;
@@ -5055,18 +5456,24 @@
         await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = resolveAppUrl('data-editor.js?raw=true'); script.onload = resolve; script.onerror = reject; document.head.append(script); });
         await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = resolveAppUrl('advanced.js?raw=true'); script.onload = resolve; script.onerror = reject; document.head.append(script); });
         advancedUI = window.MiniAAdvancedUI({
+            embedded: embeddedMode,
+            embedSnapshot: captureEmbedContext,
             openComposer,
             composerExpanded,
             renderMarkdown: renderConversationMarkdown,
+            renderSvgBlocks,
+            renderMermaidPreview,
+            renderGeneratedFiles,
             url: resolveAppUrl,
             newRequestId: generateNewSessionUuid,
             uuid: () => { if (!currentSessionUuid) currentSessionUuid = getOrCreateSessionUuid(); return currentSessionUuid; },
-            resume: uuid => { currentSessionUuid = uuid; window.mini_a_session_uuid = uuid; },
+            resume: uuid => { currentSessionUuid = uuid; transcriptPollUuid = null; activeSubmissionRunId = null; window.mini_a_session_uuid = uuid; },
             refresh: () => { pollOnce(); },
             trackRun: data => {
                 if (data.busy && data.kind === 'prompt' && !isProcessing) {
                     lastSubmittedPrompt = '';
                     activeSubmissionStartedAt = Date.now();
+                    activeSubmissionRunId = data.runId || null;
                     sawNonFinishedForActiveSubmission = false;
                     startProcessing();
                     if (streamEnabled) startStream(currentSessionUuid);
@@ -5083,6 +5490,7 @@
     }
 
     async function configureFeatureAvailability() {
+        let embeddingInfo = null;
         let shouldEnableHistory = true;
         let shouldEnableAttachments = false;
         let shouldEnableStream = false;
@@ -5098,6 +5506,7 @@
             }
 
             const data = await response.json();
+            embeddingInfo = data.embed;
             if (data.webadvanced === true) await enableAdvancedUI();
             if (typeof data.usehistory === 'boolean') {
                 shouldEnableHistory = data.usehistory;
@@ -5137,6 +5546,10 @@
             refreshHistoryPanel();
         } else if (historyList) {
             historyList.innerHTML = '';
+        }
+        if (embeddedMode) {
+            try { await configureEmbedding(embeddingInfo); }
+            catch (error) { composerNotice(error.message || 'Unable to initialize embedding'); }
         }
     }
 
@@ -5349,6 +5762,7 @@
         }
 
         currentSessionUuid = entry.uuid;
+        transcriptPollUuid = null; activeSubmissionRunId = null;
 
         const savedContent = upgradeActivityTranscript(entry.content || '', lastKnownHistory);
         const htmlContent = renderConversationMarkdown(savedContent);
@@ -5941,6 +6355,7 @@
 
     function stopProcessing(sendStopRequest = false) {
         isProcessing = false;
+        activeSubmissionRunId = null;
         pollErrorCount = 0;
         streamErrorCount = 0;
         promptInput.disabled = false;
@@ -6060,11 +6475,14 @@
 
         composerNotice('');
         const rawPrompt = promptInput.value || '';
+        let embed;
+        try { embed = captureEmbedContext(); }
+        catch (error) { composerNotice(error.message); return false; }
         const binaryAttachments = attachmentsEnabled ? attachments.filter(item => item.binary).map(({name, mediaType, base64, preview}) => ({name, mediaType, base64, preview})) : [];
         if (binaryAttachments.length && !rawPrompt.trim()) { notifyAttachmentWarning('Enter a question or instruction for the attached files.'); composerNotice('Enter a question or instruction for the attached files.'); return; }
-        if (advancedUI && advancedUI.enabled()) {
+        if (advancedUI && advancedUI.enabled() && !embedInitialDraft) {
             if (!rawPrompt.trim()) return;
-            try { if (await advancedUI.submit(buildPromptWithAttachments(rawPrompt, attachmentsEnabled ? attachments : []), binaryAttachments) === false) return; clearAttachments(); setComposerExpanded(false); autoResizeTextarea(); }
+            try { if (await advancedUI.submit(buildPromptWithAttachments(rawPrompt, attachmentsEnabled ? attachments : []), binaryAttachments, embed) === false) return; embedConversationUsed = true; clearAttachments(); setComposerExpanded(false); autoResizeTextarea(); }
             catch (error) { console.error(error); alert(error.message); }
             return;
         }
@@ -6089,7 +6507,7 @@
             const response = await fetch(resolveAppUrl('prompt'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
-                body: JSON.stringify({ prompt: finalPrompt, uuid: currentSessionUuid, browserContext, attachments: binaryAttachments })
+                body: JSON.stringify({ prompt: finalPrompt, uuid: currentSessionUuid, browserContext, attachments: binaryAttachments, embed })
             });
 
             if (!response.ok) throw new Error('Failed to submit prompt');
@@ -6104,18 +6522,23 @@
                 return;
             }
             lastRenderedRaw = '';
+            embedInitialDraft = false;
+            embedConversationUsed = true;
             activeSubmissionStartedAt = Date.now();
+            activeSubmissionRunId = data.runId || null;
             sawNonFinishedForActiveSubmission = false;
             setComposerExpanded(false);
             startProcessing();
             if (streamEnabled) startStream(currentSessionUuid);
             startPolling();
+            return true;
 
         } catch (error) {
             composerNotice(error.message || 'Error submitting prompt. Please try again.');
             console.error('Error submitting prompt:', error);
             await updateResultsContent('<p style="color: red;">' + escapeHtml(error.message || 'Error submitting prompt. Please try again.') + '</p>');
             forceRenderChartBlocks();
+            return false;
         }
     }
 
@@ -6125,6 +6548,11 @@
             return;
         }
         const pollUuid = currentSessionUuid;
+        if (transcriptPollUuid !== pollUuid) {
+            transcriptPollUuid = pollUuid;
+            transcriptRevision = null;
+            transcriptContent = "";
+        }
         if (!pollUuid) {
             return;
         }
@@ -6141,7 +6569,7 @@
             const response = await fetch(resolveAppUrl('result'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
-                body: JSON.stringify({ uuid: pollUuid }),
+                body: JSON.stringify({ uuid: pollUuid, ifTranscriptRevision: transcriptRevision }),
                 signal: controller ? controller.signal : undefined
             });
 
@@ -6156,8 +6584,14 @@
             if (pollUuid !== currentSessionUuid) {
                 return;
             }
+            if (activeSubmissionRunId && data.runId && data.runId !== activeSubmissionRunId) {
+                scheduleImmediatePoll(120);
+                return;
+            }
 
                 pollErrorCount = 0;
+                if (data.transcriptRevision) transcriptRevision = data.transcriptRevision;
+                if (typeof data.content === "string") transcriptContent = data.content;
 
                 if (Array.isArray(data.history)) {
                     lastKnownHistory = sanitizeHistoryEvents(data.history);
@@ -6180,7 +6614,7 @@
                 }
 
                 // Only update content if it has actually changed to prevent chart flickering
-                const rawContent = data.content || '';
+                const rawContent = typeof data.content === 'string' ? data.content : transcriptContent;
                 const contentForDisplay = ensurePromptVisibleUntilAcknowledged(rawContent, lastSubmittedPrompt, promptAcknowledged);
                 if (data.status !== 'finished' && contentForDisplay !== lastRawContent) {
                     lastRawContent = contentForDisplay;
@@ -6197,6 +6631,7 @@
                 const isStaleFinished = !!(
                     data &&
                     data.status === 'finished' &&
+                    (!data.runId || (activeSubmissionRunId && data.runId !== activeSubmissionRunId)) &&
                     hasActivePrompt &&
                     !promptAcknowledged &&
                     !sawNonFinishedForActiveSubmission
@@ -6211,14 +6646,15 @@
                 if (data.status === 'finished') {
                     // Completed server content is authoritative. Stream previews can
                     // omit or alter passages and must not be appended or saved here.
-                    const finalContent = contentForDisplay;
+                    const unsuccessful = data.outcome === 'failure' || data.outcome === 'cancelled';
+                    const finalContent = contentForDisplay + (unsuccessful ? '<p role="alert" class="run-error">' + escapeHtml(data.error || (data.outcome === 'cancelled' ? 'Request cancelled.' : 'Request failed.')) + '</p>' : '');
                     conversationFinished = true;
                     setPlanningMode(false);
                     stopStream();
                     lastRawContent = finalContent;
                     await renderRawContent(finalContent);
-                    if (currentSessionUuid && historyEnabled !== false) {
-                        const historyData = Object.assign({}, data, { content: finalContent });
+                    if (!unsuccessful && currentSessionUuid && historyEnabled !== false) {
+                        const historyData = Object.assign({}, data, { content: finalContent, history: lastKnownHistory });
                         const savedEntry = addConversationToHistory(currentSessionUuid, lastSubmittedPrompt, historyData);
                         if (savedEntry) {
                             activeHistoryId = savedEntry.id;
@@ -6227,6 +6663,7 @@
                     lastFinishedPrompt = lastSubmittedPrompt || lastFinishedPrompt;
                     lastSubmittedPrompt = '';
                     activeSubmissionStartedAt = 0;
+                    activeSubmissionRunId = null;
                     sawNonFinishedForActiveSubmission = false;
                     removePreview();
                     // Force close and hide plan panel when final answer is provided
@@ -6518,6 +6955,7 @@
     /* ========== EVENT HANDLERS ========== */
     async function handleClearClick() {
         if (advancedUI && !await advancedUI.beforeSessionChange()) return;
+        embedInitialDraft = false;
         resetActivityDisclosure = true;
         const uuidToClear = currentSessionUuid || 
             (typeof window !== 'undefined' ? window.mini_a_session_uuid : null);
@@ -6545,6 +6983,7 @@
         lastRawContent = '';
         lastRenderedRaw = '';
         lastKnownHistory = [];
+        transcriptPollUuid = null; activeSubmissionRunId = null;
         lastFinishedPrompt = '';
         lastSubmittedPrompt = '';
         hideScrollToBottomButton();
@@ -6606,7 +7045,7 @@
         const uuid = getOrCreateSessionUuid();
         if (uuid) {
             currentSessionUuid = uuid;
-            refreshCurrentConversationView();
+            if (!embeddedMode) refreshCurrentConversationView();
         }
         if (attachBtn) attachBtn.disabled = false;
         if (fileInput) fileInput.disabled = false;

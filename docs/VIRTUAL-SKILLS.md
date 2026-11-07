@@ -89,8 +89,8 @@ Four hard rules, enforced throughout this feature:
 - Never return a full skill body from search -- only compact metadata.
 - Never recursively preload every referenced/related skill.
 
-The intended interaction shape (see `mini-a-mcp-skills.js` /
-`mini-a-skills.js`):
+The intended interaction shape (see `js/skills/mini-a-mcp-skills.js` /
+`js/skills/mini-a-skills.js`):
 
 ```
 Agent: recommend(task="diagnose Kafka consumer pauses during rebalances")
@@ -190,7 +190,7 @@ Skill-to-skill relationships (`requires`, `related`, `supersedes`, `uses`,
 `alternative`, ...) are expressed the same way any other wiki relationship is:
 shared `tags`, `aliases`, `supersedes`, and explicit Markdown/`wiki:` links. There
 is no second graph -- `related()`/`skills-related` calls straight into the
-existing wiki graph (`mini-a-graph.js`) and its cross-wiki join machinery, so
+existing wiki graph (`js/wiki/mini-a-graph.js`) and its cross-wiki join machinery, so
 `kubernetes-debug-pods` linking to `kubectl-basics` or sharing a `kubernetes` tag
 with `kubernetes-dns-debug` in another mount is discoverable without any
 skill-specific graph code.
@@ -206,7 +206,7 @@ Those operations remain under Mini-A's normal permissions and approval policy.
 ## The normalized skill model
 
 Internally, every skill search/open/related result is shaped as (see
-`mini-a-skills.js`):
+`js/skills/mini-a-skills.js`):
 
 ```js
 {
@@ -240,7 +240,7 @@ object without changing any caller.
 - Front matter is parsed generically (`af.fromYAML`) -- new fields always
   round-trip through `read()`/`open()`, no matter how old the wiki engine's own
   code is.
-- `_buildPageRecord` (in `mini-a-wiki.js`) additionally lifts skill fields into
+- `_buildPageRecord` (in `js/wiki/mini-a-wiki.js`) additionally lifts skill fields into
   the *cached* per-page metadata record used by `list(withMeta)` and the search
   decoration path. This cache is versioned (`__MINI_A_WIKI_META_RECORD_VERSION`):
   upgrading mini-a self-heals any existing cached wiki the first time each page
@@ -255,7 +255,7 @@ object without changing any caller.
 
 ## Ranking
 
-One function, one weights table (`mini-a-skills.js`,
+One function, one weights table (`js/skills/mini-a-skills.js`,
 `__MINI_A_SKILL_RANK_WEIGHTS` / `__miniAComputeSkillScore`):
 
 ```
@@ -301,7 +301,7 @@ MCP-capable agent) needs nothing beyond a normal MCP connection to this server -
 ### Safe / public mode
 
 `mcps/mcp-skills-safe.yaml` reuses the exact restricted-retrieval state machine
-from `mcp-wiki-safe.yaml` (`MiniAMcpWikiRestriction` in `mini-a-mcp-wiki.js`):
+from `mcp-wiki-safe.yaml` (`MiniAMcpWikiRestriction` in `js/wiki/mini-a-mcp-wiki.js`):
 opaque references, per-window search/read/char budgets, per-page cooldowns, and
 an optional shared (e.g. Redis) channel for multi-replica deployments. It exposes
 `search`, `open`, `read`, `related` -- never a raw path, never the full skill
@@ -506,7 +506,7 @@ an error. `related()` reuses the existing cross-wiki graph join
 
 ## Observability
 
-`mini-a-skills.js` tracks counters only (`__miniASkillMetricsSnapshot()`):
+`js/skills/mini-a-skills.js` tracks counters only (`__miniASkillMetricsSnapshot()`):
 searches, recommends, opens, reads, sections read, related calls, and characters
 returned. Skill body content is never logged. Debug logging (when a `logFn` is
 wired in, e.g. via `mcp-skills.yaml`'s `[mcp-skills]` prefix) looks like:
@@ -569,13 +569,13 @@ latency against your own corpus before sizing a deployment.
 
 | File | Role |
 |---|---|
-| `mini-a-wiki.js` | Extended `_buildPageRecord`/`_metaFor` to cache skill frontmatter fields (additive, versioned, backward compatible). |
-| `mini-a-skills.js` | The facade: normalized model, ranking, context/search/recommend/open/read/related, `MiniAWikiSkillProvider`. |
-| `mini-a-mcp-skills.js` | MCP bootstrap reusing `mini-a-mcp-wiki.js`'s init and restricted-retrieval engine. |
+| `js/wiki/mini-a-wiki.js` | Extended `_buildPageRecord`/`_metaFor` to cache skill frontmatter fields (additive, versioned, backward compatible). |
+| `js/skills/mini-a-skills.js` | The facade: normalized model, ranking, context/search/recommend/open/read/related, `MiniAWikiSkillProvider`. |
+| `js/skills/mini-a-mcp-skills.js` | MCP bootstrap reusing `js/wiki/mini-a-mcp-wiki.js`'s init and restricted-retrieval engine. |
 | `mcps/mcp-skills.yaml` | Unrestricted MCP server. |
 | `mcps/mcp-skills-safe.yaml` | Restricted/opaque-reference MCP server. |
 | `mini-a.js` | `_initSkillWiki`, `useskillswiki`/`skillwiki*`/`skillsauto*`/`skillsmax*` args. |
-| `mini-a-utils.js` | `MiniUtilsTool.prototype.skillwiki` (the LLM-facing tool) with bounded consultation. |
+| `js/core/mini-a-utils.js` | `MiniUtilsTool.prototype.skillwiki` (the LLM-facing tool) with bounded consultation. |
 | `mini-a-con.js` | `/skills search\|recommend\|open\|read\|related\|context` console subcommands. |
 | `tests/skills.js`, `tests/skills.yaml` | Unit + multi-mount integration tests, including safe-mode opaque-reference behavior. |
 

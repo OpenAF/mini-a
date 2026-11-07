@@ -409,10 +409,12 @@ window.MiniAAdvancedUI = function(bridge) {
     }
     busy = true; await poll();
   }
-  async function command(value, attachments) {
+  async function command(value, attachments, embed) {
+    // Capture before any asynchronous confirmation or command expansion.
+    if (embed === undefined && bridge.embedSnapshot) embed = bridge.embedSnapshot();
     if (/^\/(?:clear|reset|restore|rewind|exit|quit)(?:\s|$)/.test(value) && !await resolvePendingChanges()) return false;
     history.push(value); historyIndex = history.length;
-    await mutate({action:'command',command:value,attachments});
+    await mutate({action:'command',command:value,attachments,embed});
   }
   function setEnabled(value) {
     debugGeneration++;
@@ -420,7 +422,7 @@ window.MiniAAdvancedUI = function(bridge) {
     if (!value) setPaneFocused(false);
     document.body.classList.toggle('mini-a-advanced', value);
     toggle.textContent = value ? 'Simple' : 'Advanced';
-    if (value) { const uuid = sessionStorage.getItem(storeKey); if (uuid && !snapshot) bridge.resume(uuid); if (activeScreen === 'debug') renderScreen(); poll().catch(showError); }
+    if (value) { const uuid = bridge.embedded ? null : sessionStorage.getItem(storeKey); if (uuid && !snapshot) bridge.resume(uuid); if (activeScreen === 'debug') renderScreen(); poll().catch(showError); }
   }
   // Keep agent event emojis aligned with MiniA.fnI's console mapping.
   const activityEventEmojis = {
@@ -1204,12 +1206,14 @@ window.MiniAAdvancedUI = function(bridge) {
       if (!tags.has(child.tagName)) { child.replaceWith(document.createTextNode(child.textContent)); continue; }
       for (const attribute of [...child.attributes]) {
         const safeLink = child.tagName === 'A' && attribute.name === 'href' && /^(https?:\/\/|mailto:|#)/i.test(attribute.value);
-        const safeClass = child.tagName === 'CODE' && attribute.name === 'class' && /^language-[\w-]+$/.test(attribute.value);
+        const safeClass = child.tagName === 'CODE' && attribute.name === 'class' && attribute.value.split(/\s+/).find(value => /^language-[\w-]+$/.test(value));
+        if (safeClass) child.setAttribute('class', safeClass);
         if (!safeLink && !safeClass) child.removeAttribute(attribute.name);
       }
       if (child.tagName === 'A') child.setAttribute('rel','noopener noreferrer');
     }
     node.append(template.content);
+    if (bridge.renderSvgBlocks) bridge.renderSvgBlocks(node);
     for (const code of node.querySelectorAll('code.language-mermaid')) {
       if (!window.mermaid) continue;
       const source = code.textContent;
@@ -1217,9 +1221,15 @@ window.MiniAAdvancedUI = function(bridge) {
         window.mermaid.initialize({startOnLoad:false,securityLevel:'strict',theme:document.body.classList.contains('markdown-body-dark')?'dark':'default'});
         const rendered = await window.mermaid.render('advanced-diagram-' + bridge.newRequestId(), source);
         if (!node.isConnected) return;
-        const frame = el('iframe'); frame.title = 'Mermaid preview'; frame.setAttribute('sandbox','');
-        frame.srcdoc = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'">' + rendered.svg;
-        code.parentElement.after(frame);
+        if (bridge.renderMermaidPreview) {
+          const preview = el('div');
+          bridge.renderMermaidPreview(preview, rendered.svg);
+          code.parentElement.after(preview);
+        } else {
+          const frame = el('iframe'); frame.title = 'Mermaid preview'; frame.setAttribute('sandbox','');
+          frame.srcdoc = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'">' + rendered.svg;
+          code.parentElement.after(frame);
+        }
       }).catch(() => { /* Keep the original diagram source readable. */ });
     }
     return node;
@@ -1229,7 +1239,8 @@ window.MiniAAdvancedUI = function(bridge) {
     const controls = el('div', undefined, 'advanced-actions');
     const draw = () => content.replaceChildren(raw ? el('pre', text) : markdown(text));
     controls.append(button('Rendered / Raw', () => { raw = !raw; draw(); }), button('Copy', () => navigator.clipboard.writeText(text)), button('Download', () => download(text, name)));
-    container.append(controls, content); draw(); return container;
+    container.append(controls, content); draw();
+    return container;
   }
   function helpScreen(skillsOnly = false) {
     const search = input(skillsOnly ? 'Search local skills' : 'Search Help', skillsOnly && !/^(search|remote|recommend|open|read|related|context)( |$)/.test(viewParams.args || '') ? viewParams.args || '' : ''); search.setAttribute('aria-label', search.placeholder);
@@ -1364,7 +1375,7 @@ window.MiniAAdvancedUI = function(bridge) {
   function renderBlock(block) {
     const value = block.value, meta = block.meta || {}, container = el('section',undefined,'advanced-result-block');
     if (block.type === 'markdown') { if (meta.ref) container.append(el('h4',meta.ref)); if (meta.path) container.append(el('h4',meta.path),breadcrumbs(meta.path)); if (meta.page) container.append(structuredMap(meta.page)); container.append(reader(String(value || ''))); }
-    else if (block.type === 'answer') { container.append(reader(String(value.answer || ''),meta.raw === true)); const goal = el('details'); goal.append(el('summary','Previous goal'),el('pre',value.goal || '')); container.append(goal); }
+    else if (block.type === 'answer') { container.append(reader(String(value.answer || ''),meta.raw === true)); if (bridge.renderGeneratedFiles) bridge.renderGeneratedFiles(container, bridge.uuid()); const goal = el('details'); goal.append(el('summary','Previous goal'),el('pre',value.goal || '')); container.append(goal); }
     else if (block.type === 'context') container.append(contextResult(value));
     else if (block.type === 'graph') container.append(graphResult(value,meta));
     else if (block.type === 'recoveries') container.append(recoveryResult(value));
@@ -1890,8 +1901,8 @@ window.MiniAAdvancedUI = function(bridge) {
   });
   setInterval(()=>poll().catch(showError),1000);
   if(sessionStorage.getItem(storeKey))setEnabled(true);
-  return { beforeSessionChange:resolvePendingChanges, enabled:()=>enabled, stop:()=>api({action:'stop'}), submit:async (value, attachments)=>{
-    if (await command(value, attachments) === false) return false;
+  return { beforeSessionChange:resolvePendingChanges, enabled:()=>enabled, busy:()=>busy, stop:()=>api({action:'stop'}), submit:async (value, attachments, embed)=>{
+    if (await command(value, attachments, embed) === false) return false;
     composer.value=''; suggestions.hidden=true;
   }};
 };

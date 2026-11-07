@@ -122,6 +122,21 @@ help:
     desc     : Local directory for Advanced session journals and presets
     example  : "/var/lib/mini-a/web"
     mandatory: false
+  - name     : webembed
+    desc     : "Enable the opt-in iframe bridge at ?embed=1 (default false). See docs/WEB-EMBED.md."
+    mandatory: false
+  - name     : webembedorigins
+    desc     : "Comma-separated list or JSON/SLON array of exact allowed HTTP(S) parent origins. Required with webembed=true."
+    mandatory: false
+  - name     : webembedfields
+    desc     : "JSON/SLON field definitions: each named field has type string, number, boolean or their [] array forms, and optional required boolean."
+    mandatory: false
+  - name     : webembedcontextrequired
+    desc     : "Require parent context for embedded goals (default true); false permits prompt-only embedding."
+    mandatory: false
+  - name     : webembedprompt
+    desc     : "Permit a same-origin parent to prefill or submit the first plain goal (default false)."
+    mandatory: false
   - name     : webtoken
     desc     : "Shared secret required as an x-mini-a-token header, or ?token= for the SSE stream. Advanced mode generates a fresh token when omitted; Simple mode without a token leaves the server open to anyone who can reach the port."
     example  : "a-long-random-secret"
@@ -529,6 +544,15 @@ help:
     desc     : Maximum shell output size in characters
     example  : "12000"
     mandatory: false
+  - name     : webartifacts
+    desc     : Enable isolated generated-file downloads; requires a private worker, strong webtoken and usesandbox
+    mandatory: false
+  - name     : artifactworkerurl
+    desc     : Private per-instance worker URL ending in /artifact-worker
+    mandatory: false
+  - name     : artifactdir
+    desc     : Private durable artifact directory (24 hour expiry)
+    mandatory: false
   - name     : usesandbox
     desc     : Built-in shell sandbox preset (off, auto, linux, macos, windows)
     example  : "auto"
@@ -701,7 +725,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : adaptiverouting
-    desc     : Enable rule-based route selection via mini-a-router.js
+    desc     : Enable rule-based route selection via js/core/mini-a-router.js
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
@@ -750,7 +774,7 @@ help:
     mandatory: false
   - name     : memorysessionch
     desc     : SLON/JSON channel definition or native file path for session memory persistence
-    example  : "(name: mini_a_session_mem, type: file, options: (file: '/tmp/mini-a-session.json'))"
+    example  : "(name: mini_a_session_mem, type: file, options: (file: '/tmp/js/session/mini-a-session.json'))"
     mandatory: false
   - name     : memorymaxpersection
     desc     : Maximum memory entries kept per section
@@ -1366,6 +1390,7 @@ include:
 - oJobHTTPd.yaml
 
 todo:
+- Load web libraries
 - Init
 - Periodic cleanup of old sessions
 - Shutdown history S3 client
@@ -1374,10 +1399,18 @@ todo:
 - (httpdHealthz   ): "${onport:-8888}"
 - (httpdMetrics   ): "${onport:-8888}"
 - Static content
+- Apply embedding headers
 - (httpdService   ): "${onport:-8888}"
   ((uri          )): /ping
   ((execURI      )): | #js
+    if (global.__artifactRequired && !MiniAWebArtifacts.enabled()) return ow.server.httpd.reply({ status: "unavailable" }, 503)
     return ow.server.httpd.reply({ status: "ok" })
+
+# Generated artifacts require header authentication even when stream tokens use URLs.
+- (httpdService   ): "${onport:-8888}"
+  ((uri          )): /artifacts
+  ((execURI      )): | #js
+    return MiniAWebArtifacts.route(request)
 
 # Info about the server
 - (httpdService   ): "${onport:-8888}"
@@ -1388,6 +1421,7 @@ todo:
         return ow.server.httpd.reply({ error: "unauthorized" })
       }
       var _res = { status: "ok", webadvanced: isDef(global.__advanced), usehistory: global.__usehistory, useattach: global.__useattach, historyretention: args.historyretention, showexecs: global.__showexecs, usestream: global.__usestream, showthinking: global.__showthinking, usemath: global.__usemath }
+      _res.embed = MiniAWebEmbed.config
       return ow.server.httpd.reply(_res)
     } catch(e) {
       printErr(e)
@@ -1404,6 +1438,10 @@ todo:
       var raw = request.files.postData
       if (!isString(raw) || raw.length > MiniAWebAttachments.maxRequestChars) throw "Invalid advanced request"
       var data = jsonParse(raw)
+      if (typeof MiniAWebArtifacts !== "undefined" && MiniAWebArtifacts.enabled()) {
+        if (data.action === "stop") MiniAWebArtifacts.cancel(data.uuid)
+        MiniAWebArtifacts.guardAdvanced(data)
+      }
       if (raw.length > 150000 && (!isArray(data.attachments) || !data.attachments.length)) throw "Invalid advanced request"
       return ow.server.httpd.reply(global.__advanced.request(data))
     } catch(e) { return ow.server.httpd.reply({ error: String(e) }) }
@@ -1422,11 +1460,12 @@ todo:
       }
       var mutationToken = global._mini_a_web_reserve(postData.uuid)
       if (isUnDef(mutationToken)) return ow.server.httpd.reply({ error: "session busy", uuid: postData.uuid, busy: true })
+      if (typeof MiniAWebArtifacts !== "undefined" && (postData.force || (!global.__usehistory && isUnDef(global.__advanced)))) MiniAWebArtifacts.remove(postData.uuid)
       // Starting a new Advanced conversation keeps the previous console history.
       if (isDef(global.__advanced) && isDef(global.__advanced.sessions[postData.uuid])) {
         var advancedSession = global.__advanced.sessions[postData.uuid]
         if (postData.force) {
-          advancedSession.runtime.execute("/clear")
+          if (typeof MiniAWebArtifacts === "undefined" || !MiniAWebArtifacts.enabled()) advancedSession.runtime.execute("/clear")
           global.__advanced.removeSession(postData.uuid)
         } else {
           advancedSession.runtime.saveConversation()
@@ -1439,7 +1478,7 @@ todo:
       if (!global.__usehistory || postData.force) {
         log("Clearing session " + postData.uuid)
         if (isDef(global.__res[ postData.uuid ])) {
-          delete global.__res[ postData.uuid ]
+          global._mini_a_web_transcript(postData.uuid, "clear")
         }
         if (isDef(global.__conversations[ postData.uuid ])) {
           if (isObject(global.__conversations[ postData.uuid ]._historyVm)) {
@@ -1485,6 +1524,7 @@ todo:
 - (httpdService   ): "${onport:-8888}"
   ((uri          )): /prepare
   ((execURI      )): | #js
+    if (typeof MiniAWebArtifacts !== "undefined" && MiniAWebArtifacts.enabled()) return ow.server.httpd.reply({ prepared: false })
     if (!global._mini_a_web_checkToken(request)) return ow.server.httpd.reply({ error: "unauthorized" })
     try {
       var raw = request.files.postData
@@ -1516,6 +1556,7 @@ todo:
       }
 
       if (isDef(postData.request) && postData.request == "stop") {
+        if (typeof MiniAWebArtifacts !== "undefined") MiniAWebArtifacts.cancel(postData.uuid)
         global.__attachmentStops = global.__attachmentStops || {}
         if (isDef(global.__runTokens[postData.uuid])) global.__attachmentStops[postData.uuid] = global.__runTokens[postData.uuid]
         var _stopConv = global.__conversations[ postData.uuid ]
@@ -1527,7 +1568,11 @@ todo:
           }
         }
       }
-      var _res = { content: "", status: "processing", phase: "execution", history: [] }
+      var snapshot = global._mini_a_web_transcript(postData.uuid, "snapshot", postData.ifTranscriptRevision)
+      var _res = { content: "", status: "processing", phase: "execution", history: [], transcriptRevision: snapshot.revision || null }
+      var unchanged = isDef(postData.ifTranscriptRevision) && postData.ifTranscriptRevision === snapshot.revision
+      var rendered = snapshot.rendered
+      var runOutcome = snapshot.outcome
       var __attachmentLangMap = {
         md: 'markdown', markdown: 'markdown', json: 'json', yaml: 'yaml', yml: 'yaml',
         csv: 'csv', tsv: 'tsv', xml: 'xml', html: 'html', htm: 'html', css: 'css', scss: 'scss', less: 'less',
@@ -1590,7 +1635,7 @@ todo:
 
         return html
       }
-      if (isDef(global.__res[ postData.uuid ])) {
+      if (snapshot.exists) {
         // Update last activity
         global.__lastActivity[ postData.uuid ] = Date.now()
         var activeConversation = isDef(global.__conversations) ? global.__conversations[ postData.uuid ] : __
@@ -1600,6 +1645,10 @@ todo:
         var planState = isDef(global.__planState) ? global.__planState[ postData.uuid ] : __
         var hasActivePlan = isDef(planState) && isArray(planState.items) && planState.items.length > 0
 
+        if (!unchanged && rendered && rendered.revision === snapshot.revision) {
+          _res.content = rendered.content
+          _res.history = rendered.history
+        } else if (!unchanged) {
         // Append all messages to content
         var _history = []
         var activityLines = []
@@ -1614,8 +1663,8 @@ todo:
           activityLines = []
           activityWarnings = 0
         }
-        for (var i = 0; i < global.__res[ postData.uuid ].length; i++) {
-          var r = global.__res[ postData.uuid ][i]
+        for (var i = 0; i < snapshot.entries.length; i++) {
+          var r = snapshot.entries[i]
           if (isDef(r.event)) {
             var _h = { event: r.event }
             if (isDef(r.message)) _h.message = r.message
@@ -1625,12 +1674,8 @@ todo:
           if (r.event == "final") {
             flushActivity(true)
             activityId++
-            if (i == global.__res[ postData.uuid ].length - 1) {
-              _res.status = "finished"
-              _res.phase = "finished"
-            }
             _res.content += "\n" + r.message + "\n"
-            //delete global.__res[ postData.uuid ]
+            //global._mini_a_web_transcript(postData.uuid, "clear")
             //break
           } else {
             if (r.event == "👤" || r.event == "user") {
@@ -1649,6 +1694,8 @@ todo:
         }
         flushActivity(false)
         _res.history = _history
+        if (global.__transcriptRevisions[postData.uuid] === snapshot.revision) global.__renderedTranscripts[postData.uuid] = { revision: snapshot.revision, content: _res.content, history: _history }
+        }
         if (hasActivePlan) {
           _res.plan = {
             active     : true,
@@ -1682,6 +1729,15 @@ todo:
         }
       }
 
+      if (runOutcome) {
+        _res.outcome = runOutcome.outcome
+        _res.runId = runOutcome.runId
+        if (runOutcome.error) _res.error = runOutcome.error
+        if (runOutcome.outcome !== "processing") { _res.status = "finished"; _res.phase = "finished" }
+      } else if (snapshot.busy !== true && snapshot.lastEvent === "final") {
+        _res.status = "finished"; _res.phase = "finished"; _res.outcome = "success"
+      }
+      if (unchanged) { delete _res.content; delete _res.history }
       return ow.server.httpd.reply(_res)
     } catch(e) {
       printErr(e)
@@ -1826,7 +1882,7 @@ todo:
         sanitized.push(entry)
       }
 
-      global.__res[ postData.uuid ] = sanitized
+      global._mini_a_web_transcript(postData.uuid, "replace", sanitized)
       if (isObject(global.__conversations[ postData.uuid ]) && isObject(global.__conversations[ postData.uuid ]._historyVm)) {
         try { global.__conversations[ postData.uuid ]._historyVm.deleteOwnedStore() } catch(ignoreLoadedHistoryVm) {}
       }
@@ -1862,9 +1918,6 @@ ojob:
   daemon      : true
   argsFromEnvs: true
   loadLibs    :
-  - mini-a.js
-  - mini-a-web-attachments.js
-  - mini-a-web-session.js
   - s3.js
   channels    :
     create:
@@ -1873,6 +1926,19 @@ ojob:
     - name: results
 
 jobs:
+# Resolve the requested job before loading facades: an installed oPack may be older
+# than the checkout (or a copied package) that is actually serving this web app.
+- name : Load web libraries
+  exec : | #js
+    var miniALibraryRoot = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent())
+    if (!io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) miniALibraryRoot = getOPackPath("mini-a")
+    if (!isString(miniALibraryRoot) || !io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) throw new Error("Cannot locate the Mini-A package for " + ow.oJob.__file)
+    loadLib(miniALibraryRoot + "/js/mini-a-paths.js")
+    __miniAPackageRoot = __miniAResolvePackageRoot(miniALibraryRoot)
+    ;["js/core/mini-a.js", "js/web/mini-a-web-attachments.js", "js/web/mini-a-web-session.js", "js/web/mini-a-web-embed.js", "js/artifacts/mini-a-artifact-policy.js", "js/web/mini-a-web-artifacts.js"].forEach(function(path) {
+      loadLib(__miniAPath(path), true)
+    })
+
 # ---------------------
 - name : CheckEnv
   exec : | #js
@@ -1880,6 +1946,7 @@ jobs:
     if (isUnDef(getEnv("OAF_MODEL")) && !hasModelOverride) {
       throw "OAF_MODEL environment variable not set. Please export OAF_MODEL or provide model= with your model configuration before starting the Mini-A web server."
     }
+    global.__artifactRequired = toBoolean(args.webartifacts) === true
     global.__webTokenGenerated = false
     if (toBoolean(args.webadvanced) === true && (isUnDef(args.onport) || String(args.onport).trim() === "")) {
       // webadvanced implies the web view: pick a free port (prefer 8888) when none was requested.
@@ -1928,7 +1995,7 @@ jobs:
 # ---------------------
 - name : Static content
   exec : | #js
-    args.path = io.fileExists("public/index.md") ? io.fileInfo("public").canonicalPath : getOPackPath("mini-a") + "/public"
+    args.path = __miniAPath("public")
   to   :
   - (httpdFileBrowse): "${onport:-8888}"
     ((uri          )): /
@@ -1936,13 +2003,39 @@ jobs:
     ((browse       )): false
     ((default      )): index.md
 
+- name : Apply embedding headers
+  exec : | #js
+    if (MiniAWebEmbed.config.enabled) {
+      var embedPort = Number(args.onport || 8888)
+      var staticRoute = global.__ojobRoutes[embedPort]["/"]
+      global.__ojobRoutes[embedPort]["/"] = function(request) {
+        // Some oJob-common versions include the query in originalURI when
+        // checking a directory's trailing slash, causing /?embed=1 to redirect
+        // to itself. Keep query parameters intact and normalize only that check.
+        var staticRequest = request
+        if (isString(request.originalURI) && request.originalURI.indexOf("?") >= 0) {
+          staticRequest = merge(request, { originalURI: request.originalURI.split("?")[0] })
+        }
+        return MiniAWebEmbed.protectResponse(staticRoute(staticRequest))
+      }
+      ow.server.httpd.route(global.__ojobHttp[embedPort], global.__ojobRoutes[embedPort], function() {
+        return global.__ojobHttp[embedPort].reply("", "", 401, {})
+      })
+    }
+
 # -----------
 - name : Init
   from :
   - CheckEnv
   check:
     in:
+      webartifacts   : toBoolean().isBoolean().default(false)
+      artifactworkerurl: isString().default(__)
+      artifactdir    : isString().default(__)
       webadvanced    : toBoolean().isBoolean().default(false)
+      webembed       : toBoolean().isBoolean().default(false)
+      webembedcontextrequired: toBoolean().isBoolean().default(true)
+      webembedprompt : toBoolean().isBoolean().default(false)
       showexecs       : toBoolean().isBoolean().default(false)
       verbose         : toBoolean().isBoolean().default(false)
       debug           : toBoolean().isBoolean().default(false)
@@ -2235,9 +2328,10 @@ jobs:
       })
     }
     global.__advanced = __
+    MiniAWebEmbed.init(args)
     if (args.webadvanced === true) {
-      loadLib("mini-a-session.js")
-      loadLib("mini-a-advanced.js")
+      loadLib(__miniAPath("js/session/mini-a-session.js"))
+      loadLib(__miniAPath("js/web/mini-a-advanced.js"))
       global.__advanced = new MiniAAdvanced(args)
     }
     global.__res = {}
@@ -2288,6 +2382,47 @@ jobs:
         }
       } finally { global.__sessionLock.unlock() }
     }
+    // All transcript mutations share revision/cache invalidation, including history imports.
+    global._mini_a_web_transcript = function(uuid, operation, value) {
+      global.__sessionLock.lock()
+      try {
+        global.__transcriptRevisions = global.__transcriptRevisions || {}
+        global.__renderedTranscripts = global.__renderedTranscripts || {}
+        if (operation === "append") {
+          if (!isArray(global.__res[uuid])) global.__res[uuid] = []
+          global.__res[uuid].push(value)
+        } else if (operation === "replace") {
+          global.__res[uuid] = value.slice()
+          if (global.__runOutcomes) delete global.__runOutcomes[uuid]
+        }
+        else if (operation === "clear") {
+          delete global.__res[uuid]
+          if (global.__runOutcomes) delete global.__runOutcomes[uuid]
+        }
+        if (operation !== "snapshot") {
+          if (operation === "clear") delete global.__transcriptRevisions[uuid]
+          else global.__transcriptRevisions[uuid] = genUUID()
+          delete global.__renderedTranscripts[uuid]
+        }
+        if (!global.__transcriptRevisions[uuid] && operation !== "clear" && (isArray(global.__res[uuid]) || global.__runOutcomes && global.__runOutcomes[uuid])) global.__transcriptRevisions[uuid] = genUUID()
+        var entries = isArray(global.__res[uuid]) ? global.__res[uuid] : []
+        var revision = global.__transcriptRevisions[uuid]
+        var cached = global.__renderedTranscripts[uuid]
+        var needsEntries = operation === "snapshot" && value !== revision && (!cached || cached.revision !== revision)
+        return { revision: revision, rendered: cached, exists: isArray(global.__res[uuid]), entries: needsEntries ? entries.slice() : [], lastEvent: entries.length ? entries[entries.length - 1].event : null, outcome: global.__runOutcomes && global.__runOutcomes[uuid], busy: global.__busy && global.__busy[uuid] }
+      } finally { global.__sessionLock.unlock() }
+    }
+    global._mini_a_web_outcome = function(uuid, token, outcome, error) {
+      global.__sessionLock.lock()
+      try {
+        if (!global._mini_a_web_owns(uuid, token)) return false
+        global.__runOutcomes = global.__runOutcomes || {}
+        var previous = global.__runOutcomes[uuid]
+        if (previous && previous.runId === token && previous.outcome !== "processing") return false
+        global.__runOutcomes[uuid] = { runId: token, outcome: outcome, error: error || null }
+        return true
+      } finally { global.__sessionLock.unlock() }
+    }
     global._mini_a_web_dispose = function(uuid) {
       var agent = global.__conversations[uuid]
       var prepared = global.__preparedConversations && global.__preparedConversations[uuid]
@@ -2305,6 +2440,7 @@ jobs:
     global._mini_a_web_isValidUuid = (u) => isString(u) && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(u)
 
     global._mini_a_web_checkToken = (request) => {
+      if (global.__artifactRequired && !MiniAWebArtifacts.enabled()) return false
       if (isUnDef(global.__webtoken)) return true
       var _h = isMap(request) && isMap(request.header) ? request.header["x-mini-a-token"] : __
       if (isString(_h) && _h === global.__webtoken) return true
@@ -2389,6 +2525,8 @@ jobs:
 
     args.browsercontext = browserContext
     MiniA.applyLibEnvDefault(args)
+    if (typeof MiniAWebArtifacts !== "undefined") MiniAWebArtifacts.init(args)
+    else if (toBoolean(args.webartifacts) === true) throw new Error("Artifact broker unavailable")
     global.maArgs = merge(args, {})
     var needsWorkerRegBootstrap = isNumber(args.workerreg)
     if (needsWorkerRegBootstrap) {
@@ -2791,6 +2929,7 @@ jobs:
         toDelete.push(uuid)
       }
     }
+    if (typeof MiniAWebArtifacts !== "undefined") MiniAWebArtifacts.cleanup()
     for (var i = 0; i < toDelete.length; i++) {
       var uuid = toDelete[i]
       var expiryToken = global._mini_a_web_reserve(uuid)
@@ -2810,13 +2949,14 @@ jobs:
         delete global.__advanced.sessions[uuid]
       }
       delete global.__lastActivity[ uuid ]
-      delete global.__res[ uuid ]
+      global._mini_a_web_transcript(uuid, "clear")
       global._mini_a_web_dispose(uuid)
       if (isDef(global.__planState) && isDef(global.__planState[ uuid ])) delete global.__planState[ uuid ]
       if (isDef(global.__subagentState) && isDef(global.__subagentState[ uuid ])) delete global.__subagentState[ uuid ]
       if ((global.__usehistory || global.maArgs.historyvm === true || global.maArgs.historyvmshadow === true) && !global.__historykeep && !advancedExpiry && isFunction(global._mini_a_web_deleteHistory)) {
         try {
           global._mini_a_web_deleteHistory(uuid)
+          if (typeof MiniAWebArtifacts !== "undefined") MiniAWebArtifacts.remove(uuid)
         } catch(cleanErr) {
           logErr(cleanErr)
         }

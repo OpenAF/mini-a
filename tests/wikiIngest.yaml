@@ -2,6 +2,26 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA Wiki Ingest Tests::ImageBudgetDryRunAndCache
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestImages.js").testImageBudgetDryRunAndCache
+
+- name: MiniA Wiki Ingest Tests::ImageBudgetSharedWithDistillation
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestImages.js").testImageBudgetSharedWithDistillation
+
+- name: MiniA Wiki Ingest Tests::ImagePruneAndByteValidation
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestImages.js").testImagePruneAndByteValidation
+
+- name: MiniA Wiki Ingest Tests::IngestClientOwnership
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestImages.js").testIngestClientOwnership
+
+- name: MiniA Wiki Ingest Tests::DreamRepairOwnership
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testDreamRepairOwnership
+
 - name: MiniA Wiki Ingest Tests::OwnershipSerializationOrder
   to: oJob Test
   exec: args.func = require("tests/wikiIngestReconcile.js").testOwnershipSerializationOrder
@@ -407,6 +427,11 @@ jobs:
   exec: args.func = require("tests/wikiIngestReconcile.js").testPreparedRecoveryWithIncompleteOrigin
 
 todo:
+- MiniA Wiki Ingest Tests::ImageBudgetDryRunAndCache
+- MiniA Wiki Ingest Tests::ImageBudgetSharedWithDistillation
+- MiniA Wiki Ingest Tests::ImagePruneAndByteValidation
+- MiniA Wiki Ingest Tests::IngestClientOwnership
+- MiniA Wiki Ingest Tests::DreamRepairOwnership
 - MiniA Wiki Ingest Tests::OwnershipSerializationOrder
 - MiniA Wiki Ingest Tests::OwnershipSerializationRecovery
 - MiniA Wiki Ingest Tests::OwnershipChangesStillConflict

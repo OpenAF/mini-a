@@ -1,6 +1,6 @@
 // OpenAF filesystem and reader integration; no provider calls or dependency installs.
-load('mini-a-web-attachments.js')
-load('mini-a-utils.js')
+load('js/web/mini-a-web-attachments.js')
+load('js/core/mini-a-utils.js')
 function check(value, message) { if (!value) throw new Error(message) }
 function rejects(fn, pattern) {
   var error

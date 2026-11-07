@@ -1,7 +1,7 @@
 // Run: node tests/visualModel.cjs (no provider requests).
 load('mini-a.js')
 global.__mini_a_ingest_lib_mode = true
-load('mini-a-ingest.js')
+load('js/wiki/mini-a-ingest.js')
 function check(value, message) { if (!value) throw new Error(message) }
 var originalEnv = getEnv
 var env = {}, configs = [], paths = [], closed = 0, debugChannels = [], imageMimeCapability = false

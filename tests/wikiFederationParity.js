@@ -1,5 +1,5 @@
 (function() {
-  load('mini-a-common.js'); load('mini-a-wiki.js')
+  load('js/core/mini-a-common.js'); load('js/wiki/mini-a-wiki.js')
   var temp = function() { return String(io.createTempDir('wiki-federation-parity-')) }
   var catalog = function(mounts) { return __miniAWikiCreatePrimary(__miniAWikiPrimaryConfig({wikiretrievalv2:true,usegraph:true}, __, mounts), function(){}) }
   exports.testLateMount = function() {

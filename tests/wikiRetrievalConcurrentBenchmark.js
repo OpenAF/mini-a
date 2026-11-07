@@ -1,9 +1,9 @@
 // Bounded same-JVM reader load on one real local-FS Lucene generation.
-load("mini-a-common.js"); load("mini-a-wiki.js")
+load("js/core/mini-a-common.js"); load("js/wiki/mini-a-wiki.js")
 var pages=Math.max(10,Number(getEnv("WIKI_BENCH_PAGES"))||1000), callers=Math.max(2,Number(getEnv("WIKI_BENCH_CALLERS"))||4), calls=Math.max(2,Number(getEnv("WIKI_BENCH_CALLS"))||30)
 var dir=String(io.createTempDir("wiki-concurrent-")), manager, times=new java.util.concurrent.ConcurrentLinkedQueue(), errors=new java.util.concurrent.ConcurrentLinkedQueue()
 var ready=new java.util.concurrent.CountDownLatch(callers), start=new java.util.concurrent.CountDownLatch(1), threads=[]
-var source={wiki:sha1(io.readFileString("mini-a-wiki.js")),retrieval:sha1(io.readFileString("mini-a-wiki-retrieval.js")),harness:sha1(io.readFileString("tests/wikiRetrievalConcurrentBenchmark.js"))}
+var source={wiki:sha1(io.readFileString("js/wiki/mini-a-wiki.js")),retrieval:sha1(io.readFileString("js/wiki/mini-a-wiki-retrieval.js")),harness:sha1(io.readFileString("tests/wikiRetrievalConcurrentBenchmark.js"))}
 try {
   for(var i=0;i<pages;i++)io.writeFileString(dir+"/page-"+i+".md","# Concurrent reference\nconcurrentparameter"+i+" controls expiry.")
   manager=new MiniAWikiManager({backend:"fs",root:dir,access:"rw",wikiretrievalv2:true},function(){})

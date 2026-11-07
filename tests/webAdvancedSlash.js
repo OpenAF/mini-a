@@ -1,7 +1,7 @@
 // OpenAF integration checks for the real shared runtime, disk journal and async adapter.
 // Run: oaf -f tests/webAdvanced.js (no model requests).
-load('mini-a-session.js')
-load('mini-a-advanced.js')
+load('js/session/mini-a-session.js')
+load('js/web/mini-a-advanced.js')
 var testRoot = String(io.createTempFile('mini-a-advanced-tests-', '.dir'))
 io.rm(testRoot); io.mkdir(testRoot)
 testRoot = String(new java.io.File(testRoot).getCanonicalPath())
@@ -14,6 +14,9 @@ global._mini_a_web_isValidUuid = function(id) { return /^[a-z0-9-]+$/.test(id) }
 global._mini_a_web_reserve = function(id) { if (global.__busy[id]) return __; global.__busy[id] = true; return global.__runTokens[id] = genUUID() }
 global._mini_a_web_release = function(id, token) { if (global.__runTokens[id] === token) { delete global.__busy[id]; delete global.__runTokens[id] } }
 global._mini_a_web_dispose = function(id) { delete global.__conversations[id] }
+var webYaml = io.readFileString('mini-a-web.yaml')
+global.__sessionLock = new java.util.concurrent.locks.ReentrantLock()
+eval(webYaml.substring(webYaml.indexOf('    global._mini_a_web_transcript ='), webYaml.indexOf('    global._mini_a_web_outcome =')).replace(/^    /gm, ''))
 var submitted=[]
 var MiniAWebPrompt = function(req) { submitted.push(jsonParse(req.files.postData)) }
 try {

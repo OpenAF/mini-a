@@ -1,6 +1,6 @@
 (function() {
   load("mini-a.js")
-  load("mini-a-eval.js")
+  load("js/core/mini-a-eval.js")
 
   var config = { type: "gemini", model: "fixture", key: "private-fixture" }
   var caps = { structured: { implemented: true, contract: "verified", availability: "unknown", questionTypes: ["score", "choice", "boolean"], probabilities: false } }

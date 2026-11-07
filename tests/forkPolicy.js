@@ -1,6 +1,6 @@
 (function() {
   load("mini-a.js")
-  load("mini-a-subtask.js")
+  load("js/core/mini-a-subtask.js")
   var assert = function(actual, expected, message) { ow.test.assert(actual, expected, message) }
   var throws = function(fn, fragment) {
     var error = ""
@@ -285,7 +285,7 @@
     assert(__miniAParseDelegate("auto report").options.forkpolicy, "auto", "Explicit auto modifier")
     assert(__miniAParseDelegate("-- clean workspace").goal, "clean workspace", "Literal modifier escaped")
     assert(isUnDef(__miniAParseDelegate("ordinary goal").options.fork), true, "Omission stays omitted")
-    var source = io.readFileString("mini-a-session.js"), begin = source.indexOf("  function getDelegateSubcommandCompletions()"), end = source.indexOf("\n  }", begin) + 4
+    var source = io.readFileString("js/session/mini-a-session.js"), begin = source.indexOf("  function getDelegateSubcommandCompletions()"), end = source.indexOf("\n  }", begin) + 4
     var complete = new Function("return (" + source.substring(begin, end) + ")")()
     assert(complete().join(","), "fork,clean,auto,--", "Terminal and browser completion inventory includes modifiers and literal escape")
   }
@@ -301,7 +301,7 @@
     f.manager.destroy()
   }
   exports.testProjectionDoesNotCallModels = function() {
-    load("mini-a-history-vm.js")
+    load("js/memory/mini-a-history-vm.js")
     var a = new MiniA(), calls = 0, seen
     a._syncContextSources = function() { calls++; throw "Must not refresh model-ranked sources" }
     a._historyVm = { contextVirtualization: true, objects: [
@@ -393,7 +393,7 @@
     } finally { f.manager.destroy() }
   }
   exports.testPairedEvaluationContracts = function() {
-    load("mini-a-eval.js")
+    load("js/core/mini-a-eval.js")
     // Distinct held-out facts/terms from the policy unit fixtures above.
     var scenarios = [
       { name: "memory fact", goal: "release signing", expected: { equals: "MARIGOLD" }, required: "MARIGOLD", decision: "memory" },
@@ -549,7 +549,7 @@
     } finally { f.manager.destroy() }
   }
   exports.testStartupTriggerPreservesIntentAndLegacyDefaults = function() {
-    var f = fixture({}, state()), records = [], source = io.readFileString("mini-a.js")
+    var f = fixture({}, state()), records = [], source = io.readFileString("js/core/mini-a.js")
     f.agent._agentState.workingMemorySession = { facts: [{ v: "SESSION_ONLY" }] }
     f.agent._startupSubtaskIds = []
     var begin = source.indexOf("      _startupGoals.forEach(function(entry) {"), end = source.indexOf("      if (_startupGoals.length > 0", begin)

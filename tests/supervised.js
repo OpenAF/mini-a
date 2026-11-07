@@ -1,6 +1,6 @@
 (function() {
   load("mini-a.js")
-  load("mini-a-subtask.js")
+  load("js/core/mini-a-subtask.js")
   var assert = function(actual, expected, text) { ow.test.assert(actual, expected, text) }
   var throws = function(fn) { var caught = false; try { fn() } catch(e) { caught = true }; assert(caught, true, "Must fail closed") }
   var withFixture = function(fn) {

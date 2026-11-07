@@ -1,6 +1,6 @@
 (function() {
   load("mini-a.js")
-  load("mini-a-subtask.js")
+  load("js/core/mini-a-subtask.js")
 
   var createAgent = function() {
     return new MiniA()
@@ -168,7 +168,7 @@
   }
 
   exports.testWikiContinuationAndBudgetForwarding = function() {
-    var agent=createAgent(), source=io.readFileString("mini-a.js")
+    var agent=createAgent(), source=io.readFileString("js/core/mini-a.js")
     var params={op:"read",wiki:"mounted",path:"@mounted/page.md",startLine:7,endLine:11,charOffset:13,charStart:4,charEnd:200,revision:"revision",maxQueries:2,maxCandidates:3,expandGraph:false}
     var normalized=agent._normalizeActionParams("wiki",params)
     ;["wiki","charOffset","charStart","charEnd","revision","maxQueries","maxCandidates","expandGraph"].forEach(function(key){ow.test.assert(normalized[key],params[key],"flattened field preserved: "+key)})
@@ -184,7 +184,7 @@
   }
 
   exports.testMountedWikiDiscoveryReplay = function() {
-    load("mini-a-wiki.js")
+    load("js/wiki/mini-a-wiki.js")
     var root=String(io.createTempDir("mounted-dispatch-")), writer, agent, requests=0, searches=0, reads=0
     try {
       io.mkdir(root+"/noise");io.mkdir(root+"/opacks")
@@ -214,7 +214,7 @@
   }
 
   exports.testJsonWikiDispatchReplay = function() {
-    load("mini-a-wiki.js")
+    load("js/wiki/mini-a-wiki.js")
     var root = String(io.createTempFile("mini-a-dispatch-", ""))
     io.rm(root); io.mkdir(root)
     io.writeFileString(root + "/fixture.md", "---\ntitle: fixture-hit\n---\n# Evidence\nfixture-evidence-739")
@@ -255,7 +255,7 @@
   }
 
   exports.testFlattenedBuiltInDispatchReplay = function() {
-    load("mini-a-wiki.js")
+    load("js/wiki/mini-a-wiki.js")
     var root = String(io.createTempFile("mini-a-flat-dispatch-", ""))
     io.rm(root); io.mkdir(root)
     io.writeFileString(root + "/fixture.md", "# Evidence\nfixture-evidence-739")
@@ -452,8 +452,8 @@
   }
 
   exports.testAutomaticNoteBudgetRecovery = function() {
-    load("mini-a-history-vm.js")
-    var agent = createAgent(), source = io.readFileString("mini-a.js")
+    load("js/memory/mini-a-history-vm.js")
+    var agent = createAgent(), source = io.readFileString("js/core/mini-a.js")
     var root = String(java.nio.file.Files.createTempDirectory("mini-a-budget-test-").toAbsolutePath())
     var vm = new MiniAHistoryVM({ enabled: true, contextVirtualization: true, conversationPath: root + "/conversation.json" })
     try {
@@ -517,7 +517,7 @@
   }
 
   exports.testLargeSummaryChunksAndMergeStayBounded = function() {
-    var agent = createAgent(), source = io.readFileString("mini-a.js"), inputs = []
+    var agent = createAgent(), source = io.readFileString("js/core/mini-a.js"), inputs = []
     agent.fnI = function() {}
     agent._use_lc = true; agent.lc_llm = {}; agent.llm = {}
     agent._withExponentialBackoff = function(fn) { return fn() }
@@ -595,7 +595,7 @@
   }
 
   exports.testSummaryMaintenanceUsesSafeBoundary = function() {
-    var source = io.readFileString("mini-a.js")
+    var source = io.readFileString("js/core/mini-a.js")
     var begin = source.indexOf("    var finalizeToolExecution =")
     var end = source.indexOf("    this._finalizeToolExecution = finalizeToolExecution", begin)
     ow.test.assert(begin >= 0 && end > begin, true, "Locate tool finalizer")
@@ -604,7 +604,7 @@
   }
 
   exports.testContextTokenCacheRefreshesAfterTextReads = function() {
-    var agent = createAgent(), source = io.readFileString("mini-a.js")
+    var agent = createAgent(), source = io.readFileString("js/core/mini-a.js")
     var begin = source.indexOf("    var markContextDirty = () => {")
     var end = source.indexOf("    var getEffectiveContextBudget", begin)
     var factory = new Function("runtime", source.substring(begin, end) + "\nreturn { dirty: markContextDirty, text: getCachedContextText, tokens: getCachedContextTokens };")
@@ -2321,6 +2321,19 @@
       ow.test.assert(result.returnedMatches > 0 && result.returnedMatches <= 5, true, "grep should honor both match and text budgets")
       ow.test.assert(result.limited, true, "grep should mark limited responses")
       ow.test.assert(String(result.content[0].text).indexOf("LIMITED") >= 0, true, "grep response should explain the applied match cap")
+
+      // Mistaken parameter names must not silently degrade to stat
+      var fn = proxyConfig.options.fns["proxy-dispatch"]
+      var viaQuery = fn({ action: "readresult", resultFile: tempPath, query: "line 7" })
+      ow.test.assert(viaQuery.op, "grep", "query without op should be treated as grep pattern")
+      ow.test.assert(viaQuery.matchCount > 0, true, "query alias should find matches")
+      var viaType = fn({ action: "readresult", resultFile: tempPath, type: "head", limit: 1, lines: 2 })
+      ow.test.assert(viaType.op, "head", "type alias should select op")
+      var badOp = fn({ action: "readresult", resultFile: tempPath, op: "bogus" })
+      ow.test.assert(isString(badOp.error) && badOp.error.indexOf("Unknown readresult op") >= 0, true, "unknown op should return an error")
+      var plainStat = fn({ action: "readresult", resultFile: tempPath })
+      ow.test.assert(plainStat.op, "stat", "no params should still default to stat")
+      ow.test.assert(String(plainStat.content[0].text).indexOf("Hint:") >= 0, true, "stat should include a usage hint")
     } finally {
       try { io.rm(tempPath) } catch(ignoreCleanupErr) {}
     }
@@ -2432,6 +2445,32 @@
       ow.test.assert(slice.content[0].text, saved.substring(range.fromChar - 1, range.toChar), "Slice original saved response")
       ow.test.assert(calls, 1, "Recovery needs only one fetch")
     } finally { io.rm(fetched.resultFile) }
+  }
+
+  exports.testProxyPromptToolListKeepsUserToolsVisible = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    var tools = []
+    for (var i = 0; i < 35; i++) tools.push({ name: "builtin_" + (i < 10 ? "0" : "") + i, description: "built-in " + i, _builtin: true })
+    tools.push({ name: "web-search", description: "Search the web", _builtin: false })
+    tools.push({ name: "zz-user-tool", description: "User tool", _builtin: false })
+    var text = agent._formatProxyPromptToolList(tools)
+    var listed = text.split("... and ")[0]
+    ow.test.assert(listed.indexOf("web-search") >= 0, true, "User MCP tool must be listed even when built-ins exceed the cap")
+    ow.test.assert(listed.indexOf("zz-user-tool") >= 0, true, "User MCP tools sort ahead of built-ins regardless of name")
+    ow.test.assert(text.indexOf("... and 7 more: builtin_28, builtin_29") >= 0, true, "Overflow names the hidden tools")
+    ow.test.assert(listed.indexOf("builtin_28") < 0, true, "Hidden built-ins are not in the described list")
+
+    var small = agent._formatProxyPromptToolList([{ name: "b", description: "x", _builtin: true }, { name: "a", description: "y" }])
+    ow.test.assert(small.indexOf("more") < 0, true, "No overflow line under the cap")
+
+    var dummyCfg = { id: "mock-builtin", type: "dummy", options: {
+      fns: { "noop": function() { return {} } },
+      fnsMeta: { "noop": { name: "noop", description: "noop", inputSchema: { type: "object", properties: {} } } }
+    } }
+    agent._createMcpProxyConfig([dummyCfg], {})
+    var entry = agent._getMcpProxyState().catalog.filter(function(e) { return e.tool.name === "noop" })[0]
+    ow.test.assert(isMap(entry) && entry.builtin === true, true, "In-process dummy connections are flagged as built-in in the catalog")
   }
 
   exports.testResultAliasToolsExposedWithStdutils = function() {
@@ -4382,7 +4421,7 @@
   }
 
   exports.testTargetedSchemaDiagnostics = function() {
-    load("mini-a-utils.js")
+    load("js/core/mini-a-utils.js")
     var meta = MiniUtilsTool.getMetadataByFn()
     var issues = MiniA._toolArgIssues(meta.filesystemModify.inputSchema, { operation: "edit", path: "target", pattern: "old" })
     ow.test.assert(issues[0].path, "replacement", "Operation-specific missing field identified")
@@ -5781,7 +5820,7 @@
     var agent = createAgent()
     agent.fnI = function() {}
     // Exercise the actual loop's retry normalization with deterministic adapter outputs.
-    var source = io.readFileString("mini-a.js")
+    var source = io.readFileString("js/core/mini-a.js")
     var begin = source.indexOf("            var lcRetryRmsg = lcRetryResponseWithStats.response")
     var end = source.indexOf("\n          }\n\n          if (lcRetryStopRequested", begin)
     ow.test.assert(begin >= 0 && end > begin, true, "Locate the loop retry normalization")

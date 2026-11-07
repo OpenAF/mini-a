@@ -1,7 +1,7 @@
 {
   "sources": {
-    "mini-a-wiki-retrieval.js": "8fc7302edbfee665761b08889e519bfcd69fc85a",
-    "mini-a-mcp-wiki.js": "f7805790f4a06050caa3db0cc28e3a3651b4847c",
+    "js/wiki/mini-a-wiki-retrieval.js": "8fc7302edbfee665761b08889e519bfcd69fc85a",
+    "js/wiki/mini-a-mcp-wiki.js": "f7805790f4a06050caa3db0cc28e3a3651b4847c",
     "tests/wikiRetrievalV2.js": "c990006873b66aa7e2d5da995d3788f817676acc"
   },
   "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",

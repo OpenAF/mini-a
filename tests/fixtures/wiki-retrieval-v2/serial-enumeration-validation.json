@@ -1,8 +1,8 @@
 {
   "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",
   "sources": {
-    "mini-a-wiki.js": "9c7c8623fdd5d018a68511698d29424b7a2b9bf1",
-    "mini-a-wiki-retrieval.js": "5494e227823f49845c364f8767c3eeb11689e36a",
+    "js/wiki/mini-a-wiki.js": "9c7c8623fdd5d018a68511698d29424b7a2b9bf1",
+    "js/wiki/mini-a-wiki-retrieval.js": "5494e227823f49845c364f8767c3eeb11689e36a",
     "tests/wikiRetrievalV2.js": "d6e6569931d1357a90705b3458fc3f0a62b3ca7c"
   },
   "focused": {

@@ -14,7 +14,11 @@ checkout = Path(__file__).resolve().parents[1]
 manifest = (checkout / '.package.yaml').read_text()
 files = [line[2:] for line in manifest.split('files:\n', 1)[1].split('filesHash:', 1)[0].splitlines() if line.startswith('- ')]
 bundled = sorted(str(path.relative_to(checkout)) for path in (checkout / 'skills').rglob('*') if path.is_file())
-assert len(bundled) == 13, bundled
+assert bundled, 'No bundled skills found'
+assert sorted(name for name in files if name.startswith('skills/')) == bundled, 'Package skill inventory differs from disk'
+visual_refs = ['chartjs.md', 'latex-math.md', 'leaflet.md', 'mermaid.md']
+for name in visual_refs:
+    assert f'skills/mini-a-visual-output/references/{name}' in bundled, f'Missing visual reference: {name}'
 for name in bundled:
     assert name in files, f'Missing package file: {name}'
     digest = hashlib.sha1((checkout / name).read_bytes()).hexdigest()
@@ -43,25 +47,45 @@ var expected = %s
 if (__miniABundleRoot !== expected) throw new Error("Wrong agent root: " + __miniABundleRoot)
 var tool = agent._skillUtils
 var names = tool._listSkills({}).map(function(item) { return item.name }).sort()
-if (names.join(",") !== "mini-a-runtime-diagnostics,mini-a-skill-authoring,mini-a-wiki-retrieval") throw new Error("Wrong inventory: " + names)
-names.forEach(function(name) {
+var required = ["mini-a-runtime-diagnostics", "mini-a-skill-authoring", "mini-a-wiki-retrieval"]
+required.forEach(function(name) { if (names.indexOf(name) < 0) throw new Error("Missing skill: " + name) })
+if (names.indexOf("mini-a-visual-output") >= 0) throw new Error("Visual skill visible without prerequisites")
+required.forEach(function(name) {
+  agent._resetSkillRuntime({})
+  tool._skillRuntime = agent._skillRuntime
   var rendered = tool.skills({ operation: "render", name: name })
   if (!isString(rendered.rendered)) throw new Error("Failed render " + name)
   if (rendered.referencedFiles.length !== 1) throw new Error("Missing offline reference " + name)
   var support = tool.skills({operation: "read", name: name, reference: rendered.referencedFiles[0].relativePath})
   if (!isString(support.body) || support.body.length < 100) throw new Error("Failed offline reference " + name)
 })
-load(expected + "/mini-a-session.js")
-var session = MiniAInteractiveSession({useskills: true, homedir: %s, usehistory: false}, {
+var visualOptions = { useskills: true, usemath: true, useutils: false, skillsautosearch: false, goal: "$local:mini-a-visual-output" }
+agent._resetSkillRuntime(visualOptions)
+agent._createUtilsMcpConfig(merge({ utilsroot: String(java.lang.System.getProperty("user.home")) }, visualOptions))
+agent._skillLocalEnabled = true
+if (agent._consultSkillsForRun(visualOptions).length) throw new Error("Failed visual activation")
+tool = agent._skillUtils
+var visual = tool._listSkills({}).filter(function(item) { return item.name === "mini-a-visual-output" })[0]
+if (!visual || visual.templatePath.indexOf(expected + "/skills/") !== 0) throw new Error("Visual skill resolved outside executing package")
+var record = agent._skillRuntime.records["local:mini-a-visual-output"]
+if (!record || record.state !== "active" || record.content.indexOf('"North"') >= 0) throw new Error("Visual activation did not stay progressive")
+%s.forEach(function(name) {
+  var support = tool.skills({ operation: "read", name: "mini-a-visual-output", reference: "references/" + name })
+  if (!isString(support.body) || support.body.length < 500 || support.truncated || support.error) throw new Error("Failed visual reference " + name)
+})
+if (agent._skillRuntime.chars > 12000 || agent._skillRuntime.metrics.selection_calls !== 0) throw new Error("Visual skill exceeded defaults")
+load(expected + "/js/session/mini-a-session.js")
+var session = MiniAInteractiveSession({useskills: true, usemath: true, homedir: %s, usehistory: false}, {
   print: function() {}, error: function() {}, event: function() {}, view: function() {},
   validateOption: function() {}, ask: function() {}, goal: function() {}, commandResult: function() {}
 })
 try {
   if (session.commands().indexOf("mini-a-wiki-retrieval") < 0) throw new Error("Console bundle missing")
+  if (session.commands().indexOf("mini-a-visual-output") < 0) throw new Error("Console math-only visual skill missing")
   if (__miniASessionBundleRoot !== expected) throw new Error("Wrong console package root")
 } finally { session.dispose() }
 print("Bundle verified: " + expected)
-''' % (json.dumps(str(unrelated)), json.dumps(str(runtime / 'mini-a.js')), json.dumps(str(unrelated)), json.dumps(str(runtime)), json.dumps(str(unrelated)))
+''' % (json.dumps(str(unrelated)), json.dumps(str(runtime / 'mini-a.js')), json.dumps(str(unrelated)), json.dumps(str(runtime)), json.dumps(visual_refs), json.dumps(str(unrelated)))
         result = subprocess.run(['oaf', '-c', code], cwd=unrelated, text=True, capture_output=True, timeout=120)
         assert result.returncode == 0 and 'Bundle verified:' in result.stdout, result.stdout + result.stderr
         print(result.stdout.strip())

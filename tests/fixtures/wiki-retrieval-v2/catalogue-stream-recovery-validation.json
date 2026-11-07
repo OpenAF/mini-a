@@ -1,6 +1,6 @@
 {
   "sources": {
-    "mini-a-wiki-retrieval.js": "2300b2aba04bc8480235f3486398aee2253d9c31",
+    "js/wiki/mini-a-wiki-retrieval.js": "2300b2aba04bc8480235f3486398aee2253d9c31",
     "tests/wikiRetrievalV2.js": "29869d61cc1ac84ce8142c11d9f90965bee4fa4d",
     "tests/wikiRetrievalV2.yaml": "565b7afb260bd3ddee6150858b742b67784d2dce",
     "tests/wiki.yaml": "60b432e390a5af4b4fe7675bdfa08868d9a7e1ea"

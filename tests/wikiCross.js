@@ -1,6 +1,6 @@
 (function() {
-  load("mini-a-common.js")
-  load("mini-a-wiki.js")
+  load("js/core/mini-a-common.js")
+  load("js/wiki/mini-a-wiki.js")
 
   var createTestDir = function() {
     var testDir = java.io.File.createTempFile("miniwikicross-test-", "").getCanonicalPath()
@@ -124,17 +124,17 @@
       var extractOnlyFor = function(targetPath, fromTitle) {
         return function(payload) {
           if (!isMap(payload) || payload.path !== targetPath) return { relationships: [] }
-          return { relationships: [{ from: fromTitle, to: "Kubernetes", type: "RELATES_TO" }] }
+          return { relationships: [{ from: fromTitle, to: "Kubernetes", type: "RELATES_TO", provenance:"EXTRACTED", evidence:{quote:fromTitle + " uses Kubernetes"} }] }
         }
       }
       var b = buildWiki(dir2, [
-        { path: "target.md", meta: { title: "Target Page" }, body: "# Target Page\nunique-b-concept-keyword" },
+        { path: "target.md", meta: { title: "Target Page" }, body: "# Target Page\nunique-b-concept-keyword\nTarget Page uses Kubernetes" },
         filler(1), filler(2), filler(3), filler(4)
       ], { llmExtractFn: extractOnlyFor("target.md", "Target Page") })
       b.graph("build", { semantic: true })
 
       var a = buildWiki(dir1, [
-        { path: "x.md", meta: { title: "X Page" }, body: "# X Page\nno cross links here" }
+        { path: "x.md", meta: { title: "X Page" }, body: "# X Page\nno cross links here\nX Page uses Kubernetes" }
       ], { llmExtractFn: extractOnlyFor("x.md", "X Page") })
       a.graph("build", { semantic: true })
       a.attach("b", { backend: "fs", root: dir2 })
@@ -173,15 +173,15 @@
         filler(1), filler(2), filler(3), filler(4)
       ])
       var a = buildWiki(dir1, [
-        { path: "a.md", meta: { title: "A Page", tags: ["ops"] }, body: "# A Page\nonlyinlocal-keyword" }
+        { path: "a.md", meta: { title: "A Page", tags: ["ops"] }, body: "# A Page\nonlyinlocalunique" }
       ])
       a.attach("b", { backend: "fs", root: dir2 })
 
-      var hits = a.search("onlyinlocal-keyword", { forceScan: true })
+      var hits = a.search("onlyinlocalunique", { expandGraph: true })
       ow.test.assert(hits.some(function(h) { return h.path === "a.md" }), true, "local page should match lexically")
       var crossHit = hits.filter(function(h) { return isString(h.path) && h.path.indexOf("@b/") === 0 })[0]
       ow.test.assert(isDef(crossHit), true, "a query that only text-matches locally should still surface a mount page via shared graph state")
-      ow.test.assert(isString(crossHit.description) && crossHit.description.indexOf("[Related pages (graph @b)]") === 0, true, "cross-wiki hint description must keep the exact mount-graph-hint prefix (mcp-wiki-safe.yaml sniffs on it)")
+      ow.test.assert(crossHit.retrievalMethod === "graph", true, "graph discovery is explicit in the structured retrieval result")
     } finally { cleanupTestDir(dir1); cleanupTestDir(dir2) }
   }
 

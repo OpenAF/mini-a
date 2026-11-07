@@ -1,9 +1,9 @@
 // Real Lucene publication after simulated batch source removals. No ingest prune.
-load("mini-a-common.js");load("mini-a-wiki.js")
+load("js/core/mini-a-common.js");load("js/wiki/mini-a-wiki.js")
 var pages=Math.max(10,Number(getEnv("WIKI_BENCH_PAGES"))||1000), samples=Math.max(2,Number(getEnv("WIKI_BENCH_SAMPLES"))||10)
 var retired=Math.max(1,Math.min(pages-1,Number(getEnv("WIKI_BENCH_RETIRED"))||Math.floor(pages/2)))
 var dir=String(io.createTempDir("wiki-retirement-")), manager, observations=[]
-var report={kind:"batch-source-retirement-publication",backend:"local-fs",liveProvider:false,scope:"simulated backend removals and real derived publication; excludes source removal IO, ingest ownership/journaling and fixture construction",pages:pages,retiredPages:retired,samples:samples,runtime:getVersion(),jvm:String(java.lang.System.getProperty("java.version")),sourceSha1:{wiki:sha1(io.readFileString("mini-a-wiki.js")),retrieval:sha1(io.readFileString("mini-a-wiki-retrieval.js")),harness:sha1(io.readFileString("tests/wikiRetrievalRetirementBenchmark.js"))}}
+var report={kind:"batch-source-retirement-publication",backend:"local-fs",liveProvider:false,scope:"simulated backend removals and real derived publication; excludes source removal IO, ingest ownership/journaling and fixture construction",pages:pages,retiredPages:retired,samples:samples,runtime:getVersion(),jvm:String(java.lang.System.getProperty("java.version")),sourceSha1:{wiki:sha1(io.readFileString("js/wiki/mini-a-wiki.js")),retrieval:sha1(io.readFileString("js/wiki/mini-a-wiki-retrieval.js")),harness:sha1(io.readFileString("tests/wikiRetrievalRetirementBenchmark.js"))}}
 var clock=function(){return Number(java.lang.System.nanoTime())/1000000}
 try {
   for(var round=0;round<samples;round++) {

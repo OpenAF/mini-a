@@ -1,5 +1,5 @@
 (function() {
-  load("mini-a-common.js")
+  load("js/core/mini-a-common.js")
   load("utils/wikiJobsLib.js")
 
   var repo = String(new java.io.File(".").getCanonicalPath())
@@ -229,7 +229,7 @@
   }
 
   exports.testSessionShortcuts = function() {
-    load("mini-a-session.js")
+    load("js/session/mini-a-session.js")
     var r = MiniAWikiShortcut({ wikihydrate: true, wikiroot: "w", source: "s" })
     ow.test.assert(r.kind + "/" + r.job, "hydrate/utils/wikiHydrate.yaml", "key=value routes to the hydrate job")
     ow.test.assert(isUnDef(r.args.wikihydrate) && r.args.wikiroot === "w" && r.args.source === "s", true, "the shortcut key is removed and other args are kept")

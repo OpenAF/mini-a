@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync('mini-a-session.js', 'utf8');
+const source = fs.readFileSync('js/session/mini-a-session.js', 'utf8');
 const start = source.indexOf('  function printHelp(');
 const end = source.indexOf('\n  var __skillWikiSubcommands', start);
 let output;

@@ -47,7 +47,7 @@ help:
     mandatory: false
   - name     : evalout
     desc     : Optional JSON path for the full machine-readable evaluation report
-    example  : "/tmp/mini-a-eval.json"
+    example  : "/tmp/js/core/mini-a-eval.json"
     mandatory: false
   - name     : mcp
     desc     : A MCP connection object (or array of objects) using OpenAF's $mcp() function in SLON or JSON format
@@ -646,7 +646,7 @@ help:
     mandatory: false
     options  : ["manual", "auto"]
   - name     : adaptiverouting
-    desc     : Enable rule-based route selection via mini-a-router.js
+    desc     : Enable rule-based route selection via js/core/mini-a-router.js
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
@@ -1027,7 +1027,7 @@ help:
     mandatory: false
   - name     : memorysessionch
     desc     : SLON/JSON channel definition or native file path for session memory persistence
-    example  : "(name: mini_a_session_mem, type: file, options: (file: '/tmp/mini-a-session.json'))"
+    example  : "(name: mini_a_session_mem, type: file, options: (file: '/tmp/js/session/mini-a-session.json'))"
     mandatory: false
   - name     : memorymaxpersection
     desc     : Maximum memory entries kept per section
@@ -1584,7 +1584,6 @@ ojob:
   #logToConsole: false   # to change when finished
   loadLibs    :
   - mini-a.js
-  - mini-a-eval.js
 
 jobs:
 # -------------------------
@@ -2242,6 +2241,12 @@ jobs:
       dreamreport    : isString.default(__)
   exec : | #js
     if (args.eval === true) {
+      var miniALibraryRoot = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent())
+      if (!io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) miniALibraryRoot = getOPackPath("mini-a")
+      if (!isString(miniALibraryRoot) || !io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) throw new Error("Cannot locate the Mini-A package for " + ow.oJob.__file)
+      loadLib(miniALibraryRoot + "/js/mini-a-paths.js")
+      __miniAPackageRoot = __miniAResolvePackageRoot(miniALibraryRoot)
+      loadLib(__miniAPath("js/core/mini-a-eval.js"))
       if (!isString(args.evalfile) || args.evalfile.trim().length === 0) throw "evalfile is required when eval=true"
       var _eval = new MiniAEval({ fileallow: args.fileallow })
       var _evalFiles = new MiniAFileAccess(args.fileallow)

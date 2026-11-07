@@ -1,6 +1,6 @@
 (function() {
-  load("mini-a-common.js")
-  load("mini-a-wiki.js")
+  load("js/core/mini-a-common.js")
+  load("js/wiki/mini-a-wiki.js")
   exports.testContracts = function() {
     var wm = new MiniAWikiManager({ backend: "fs", root: "/tmp", access: "ro", wikiretrievalv2: false })
     var raw = "---\ntitle: Test\n---\n# Section\n" + new Array(90).join("é") + "\n# Next\nsecret"
@@ -59,7 +59,7 @@
     ow.test.assert(contextual.contextBefore[0].length <= 17,true,"grep preceding context does not bypass fragment cap")
     ow.test.assert(contextual.contextAfter[0].length <= 17,true,"grep following context does not bypass fragment cap")
     ow.test.assert(contextual.contextTruncated,true,"bounded surrounding context reports omission")
-    load("mini-a-utils.js")
+    load("js/core/mini-a-utils.js")
     var forwarded, utility = {_ensureInitialized:function(){},_wikiAgenticRetrieval:true,_wikiManager:{agenticRead:function(path,opts){forwarded=opts;return {path:path,body:"fragment"}},grep:function(path,pattern,opts){forwarded=opts;return {matches:[]}}}}
     MiniUtilsTool.prototype.wiki.call(utility,{operation:"read",path:"example.md",charOffset:7,revision:"bound",maxChars:9})
     ow.test.assert(forwarded.charOffset,7,"shared utility read preserves continuation position")
@@ -67,7 +67,7 @@
     ow.test.assert(forwarded.maxChars,9,"shared utility read preserves character budget")
     MiniUtilsTool.prototype.wiki.call(utility,{operation:"grep",path:"example.md",pattern:"term",maxChars:17})
     ow.test.assert(forwarded.maxChars,17,"shared utility grep forwards fragment budget")
-    load("mini-a-skills.js")
+    load("js/skills/mini-a-skills.js")
     var skillManager = { _getBackendIdentity: function() { return "cursor-test" }, open: function() { return {frontmatter:{type:"skill"}} }, agenticRead: function(ref, opts) { return {body:String(opts.charOffset || 0)} } }
     var provider = new MiniAWikiSkillProvider(skillManager)
     ow.test.assert(provider.read("wiki:skill.md",{revision:"pinned",charOffset:0}).body,"0","skill cursor first fragment")
@@ -75,7 +75,7 @@
     wm.close()
   }
   exports.testIndexedLanguageAndTelemetry = function() {
-    load("mini-a-wiki-knowledge.js")
+    load("js/wiki/mini-a-wiki-knowledge.js")
     var dir = java.io.File.createTempFile("wiki-contract-", "").getCanonicalPath()
     io.rm(dir); io.mkdir(dir)
     try {

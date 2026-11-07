@@ -1,9 +1,9 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const c = vm.createContext({global:{__useattach:true},__ : undefined,
+const c = vm.createContext({__miniAPath: p => p,global:{__useattach:true},__ : undefined,
   isDef:x=>x!=null,isUnDef:x=>x==null,isArray:Array.isArray,isString:x=>typeof x==='string',isMap:x=>x!=null&&typeof x==='object'&&!Array.isArray(x)});
-vm.runInContext(fs.readFileSync('mini-a-web-attachments.js','utf8'),c);
+vm.runInContext(fs.readFileSync('js/web/mini-a-web-attachments.js','utf8'),c);
 const a = c.MiniAWebAttachments;
 const upload = {name:'picture.png',base64:Buffer.from([137,80,78,71,13,10,26,10]).toString('base64')};
 assert.equal(a.validate([upload],'Inspect')[0].size,8);
@@ -57,7 +57,7 @@ assert.ok(html.indexOf('Inspect')<html.indexOf('<img'));
 assert.doesNotMatch(c.formatUserPromptHtml('```attachment x.png\nmini-a-image-preview:https://example.com/x\n```'),/<img/);
 const server=fs.readFileSync('mini-a-web.yaml','utf8');
 const serverStart=server.indexOf('      function __formatUserMessage(');
-const serverEnd=server.indexOf('      if (isDef(global.__res',serverStart);
+const serverEnd=server.indexOf('      if (snapshot.exists)',serverStart);
 Object.assign(c,{__escapeHtml:c.escapeHtml,__escapeAttr:c.escapeHtml,__detectAttachmentLang:()=> 'png',af:{fromBytes2String:x=>x,toBase64Bytes:s=>Buffer.from(s).toString('base64')}});
 vm.runInContext(server.slice(serverStart,serverEnd),c);
 assert.equal(c.__formatUserMessage(display),html);
@@ -72,6 +72,7 @@ async function browser(advanced, response) {
   let sent, cleared=0, started=0, warning, optimistic;
   const b = vm.createContext({
     isProcessing:false,attachmentsEnabled:true,attachments:[{...upload,preview,binary:true},{name:'notes.txt',content:'notes'}],
+    captureEmbedContext:()=>undefined,embedInitialDraft:false,embedConversationUsed:false,
     promptInput:{value:'Inspect'},advancedUI:advanced?{enabled:()=>true,submit:async(prompt,attachments)=>{sent={prompt,attachments};if(response.error)throw Error(response.error);}}:null,
     currentSessionUuid:'session',lastRawContent:'',lastKnownHistory:[],lastSubmittedPrompt:'',lastFinishedPrompt:'',activeHistoryId:null,
     activeSubmissionStartedAt:0,sawNonFinishedForActiveSubmission:false,lastRenderedRaw:'',streamEnabled:false,

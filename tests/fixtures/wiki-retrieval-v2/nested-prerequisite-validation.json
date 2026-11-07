@@ -1,6 +1,6 @@
 {
   "sources": {
-    "mini-a-wiki-retrieval.js": "936e33e2142fd43d423b64ba9da93da1d416fdec",
+    "js/wiki/mini-a-wiki-retrieval.js": "936e33e2142fd43d423b64ba9da93da1d416fdec",
     "tests/wikiRetrievalV2.js": "08541daa738fc17f4376e1cedc26a92d07fd9aee"
   },
   "runtime": "OpenAF 20260913 / JVM 26.0.2 / Lucene 10.5.0",

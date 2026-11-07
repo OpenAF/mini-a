@@ -1,7 +1,7 @@
 (function() {
-  load("mini-a-utils.js")
-  load("mini-a-common.js")
-  load("mini-a-wiki.js")
+  load("js/core/mini-a-utils.js")
+  load("js/core/mini-a-common.js")
+  load("js/wiki/mini-a-wiki.js")
 
   // Helper to create a test directory
   var createTestDir = function() {
@@ -41,8 +41,8 @@
   }
 
   exports.testWikiSkillRenderedBudget = function() {
-    load("mini-a-skill-runtime.js")
-    load("mini-a-skills.js")
+    load("js/skills/mini-a-skill-runtime.js")
+    load("js/skills/mini-a-skills.js")
     var makeTool = function(template, pending) {
       var tool = new MiniUtilsTool({}), wm = {}
       tool._skillWikiManager = wm
