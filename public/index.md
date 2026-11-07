@@ -3209,7 +3209,7 @@
 
         captureActivityDisclosures();
         lastRenderedHtml = processedHtml;
-        resultsDiv.innerHTML = processedHtml;
+        replaceResultsPreservingMermaid(processedHtml);
         renderGeneratedFiles(resultsDiv, currentSessionUuid);
         restoreActivityDisclosures();
 
@@ -3233,7 +3233,9 @@
                 });
 
                 // Add animation to last element
-                lastElement.classList.add('streaming-content');
+                if (!lastElement.matches('.mermaid-diagram') && !lastElement.querySelector('.mermaid-diagram')) {
+                    lastElement.classList.add('streaming-content');
+                }
             }
         } else {
             resultsDiv.classList.remove('streaming');
@@ -4078,67 +4080,105 @@
         resetView();
     }
 
-    async function renderMermaidDiagrams() {
-        if (typeof window.mermaid === 'undefined') return;
+    // Reuse diagram nodes before publishing new HTML so streaming retains diagrams and their controls.
+    function replaceResultsPreservingMermaid(html) {
+      var reusable = new Map()
+      var selector = '.mermaid-diagram[data-mermaid-source], pre code.language-mermaid, pre code.mermaid'
 
-        try {
-            // Update theme based on current dark mode state
-            const isDark = document.body.classList.contains('markdown-body-dark') || _isD === true || (typeof __isDark !== 'undefined' && __isDark);
-            await window.mermaid.initialize({
-                startOnLoad: false,
-                theme: isDark ? 'dark' : 'default',
-                suppressErrorRendering: true  // Suppress error messages in rendered output
-            });
-
-            // Find all code blocks with language 'mermaid'
-            const mermaidBlocks = resultsDiv.querySelectorAll('pre code.language-mermaid, pre code.mermaid');
-
-            for (let i = 0; i < mermaidBlocks.length; i++) {
-                const block = mermaidBlocks[i];
-                if (block.dataset.mermaidRendered === 'true') continue;
-
-                const code = block.textContent;
-                const pre = block.parentElement;
-
-                try {
-                    // Validate syntax first using parse
-                    if (typeof window.mermaid.parse === 'function') {
-                        const parseResult = await window.mermaid.parse(code, { suppressErrors: true });
-                        if (!parseResult) {
-                            // Invalid syntax, keep original code block
-                            console.warn('Mermaid syntax validation failed, keeping original code block');
-                            block.dataset.mermaidRendered = 'true';
-                            continue;
-                        }
-                    }
-
-                    // Create a container for the diagram
-                    const container = document.createElement('div');
-                    container.className = 'mermaid-diagram';
-                    container.style.textAlign = 'center';
-                    container.style.padding = '1rem';
-                    container.style.background = isDark ? '#0f1115' : '#f8f9fa';
-                    container.style.borderRadius = '0.5rem';
-                    container.style.margin = '1rem 0';
-                    container.setAttribute('data-mermaid-source', code);
-
-                    // Render the diagram
-                    const { svg } = await window.mermaid.render('mermaid-' + Date.now() + '-' + i, code);
-                    container.innerHTML = svg;
-                    addMermaidPanZoomLayer(container);
-
-                    // Replace the pre/code block with the rendered diagram
-                    pre.replaceWith(container);
-                    block.dataset.mermaidRendered = 'true';
-                } catch (error) {
-                    console.error('Failed to render Mermaid diagram:', error);
-                    // Mark as rendered to avoid retry loops, keep original code block
-                    block.dataset.mermaidRendered = 'true';
-                }
-            }
-        } catch (error) {
-            console.error('Mermaid rendering error:', error);
+      resultsDiv.querySelectorAll(selector).forEach(function(node) {
+        var rendered = node.classList.contains('mermaid-diagram')
+        var source = rendered ? node.getAttribute('data-mermaid-source') : node.textContent
+        var nodes = reusable.get(source)
+        if (!nodes) {
+          nodes = []
+          reusable.set(source, nodes)
         }
+        nodes.push(rendered ? node : node.parentElement)
+      })
+
+      var next = document.createElement('div')
+      next.innerHTML = html
+      next.querySelectorAll('pre code.language-mermaid, pre code.mermaid').forEach(function(block) {
+        var nodes = reusable.get(block.textContent)
+        if (nodes && nodes.length > 0) {
+          block.parentElement.replaceWith(nodes.shift())
+        } else if (typeof window.mermaid !== 'undefined') {
+          // Reserve the source block's space without flashing raw Mermaid syntax.
+          block.parentElement.style.visibility = 'hidden'
+        }
+      })
+      resultsDiv.replaceChildren(...next.childNodes)
+    }
+
+    // Render new diagrams while allowing pending work to survive subsequent answer updates.
+    async function renderMermaidDiagrams() {
+      if (typeof window.mermaid === 'undefined') return
+
+      try {
+        // Update theme based on current dark mode state
+        var isDark = document.body.classList.contains('markdown-body-dark') || _isD === true || (typeof __isDark !== 'undefined' && __isDark)
+        await window.mermaid.initialize({
+          startOnLoad: false,
+          theme: isDark ? 'dark' : 'default',
+          suppressErrorRendering: true  // Suppress error messages in rendered output
+        })
+
+        // Find all code blocks with language 'mermaid'
+        var mermaidBlocks = resultsDiv.querySelectorAll('pre code.language-mermaid, pre code.mermaid')
+
+        for (var i = 0; i < mermaidBlocks.length; i++) {
+          var block = mermaidBlocks[i]
+          if (!resultsDiv.contains(block) || block.dataset.mermaidRendered === 'true' || block.dataset.mermaidRendered === 'pending') continue
+
+          var code = block.textContent
+          var pre = block.parentElement
+          block.dataset.mermaidRendered = 'pending'
+
+          try {
+            // Validate syntax first using parse
+            if (typeof window.mermaid.parse === 'function') {
+              var parseResult = await window.mermaid.parse(code, { suppressErrors: true })
+              if (!parseResult) {
+                // Invalid syntax, keep original code block
+                console.warn('Mermaid syntax validation failed, keeping original code block')
+                block.dataset.mermaidRendered = 'true'
+                pre.style.visibility = ''
+                continue
+              }
+            }
+
+            // Create a container for the diagram
+            var container = document.createElement('div')
+            container.className = 'mermaid-diagram'
+            container.style.textAlign = 'center'
+            container.style.padding = '1rem'
+            container.style.background = isDark ? '#0f1115' : '#f8f9fa'
+            container.style.borderRadius = '0.5rem'
+            container.style.margin = '1rem 0'
+            container.setAttribute('data-mermaid-source', code)
+
+            // Render the diagram
+            var { svg } = await window.mermaid.render('mermaid-' + Date.now() + '-' + i, code)
+            container.innerHTML = svg
+            addMermaidPanZoomLayer(container)
+
+            // Replace the pre/code block with the rendered diagram
+            if (resultsDiv.contains(pre)) pre.replaceWith(container)
+            block.dataset.mermaidRendered = 'true'
+            pre.style.visibility = ''
+          } catch (error) {
+            console.error('Failed to render Mermaid diagram:', error)
+            // Mark as rendered to avoid retry loops, keep original code block
+            block.dataset.mermaidRendered = 'true'
+            pre.style.visibility = ''
+          }
+        }
+      } catch (error) {
+        console.error('Mermaid rendering error:', error)
+        resultsDiv.querySelectorAll('pre code.language-mermaid, pre code.mermaid').forEach(function(block) {
+          block.parentElement.style.visibility = ''
+        })
+      }
     }
 
     async function reRenderMermaidDiagrams() {
