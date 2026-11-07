@@ -108,6 +108,7 @@ MiniAWikiOps.catalog = (function() {
   add("wiki.upgrade", "Pages & structure", "Upgrade wiki instructions", true)
   add("wiki.reindex", "Indexes & storage", "Rebuild search index", true)
   add("wiki.compact", "Indexes & storage", "Preview / apply compaction", true, [], { dryRun: true, offline: false }, "Apply requires all other readers and writers to be stopped.")
+  add("wiki.export", "Indexes & storage", "Export wiki to ZIP", false, [["output", "Output ZIP file (new file, absolute path)"], ["nobundle", "Store index folders loose instead of a nested mini-a-wiki-index.zip", false, "boolean"]], { nobundle: false }, "Packages pages plus the validated search/graph index for other Mini-A instances (for example an S3 bucket). Requires a published Retrieval V2 index; the wiki is not modified.")
   ;["stats", "query", "retrieve", "answer", "neighbors", "path", "communities", "surprise", "cross", "export"].forEach(function(op) {
     var fields = []
     if (op === "query" || op === "retrieve" || op === "answer") fields = [["query", "Query"]]
@@ -156,7 +157,7 @@ MiniAWikiOps.prototype.spec = function(id, params) {
   Object.keys(p).forEach(function(k) {
     if (/^(wiki|dream|ingest|absorb|__)/.test(k) || ["confirm", "backupconfirmed", "model", "modeldec", "usedecide", "libs", "usewiki", "usewikigraph"].indexOf(k) >= 0) throw new Error("Use configuration arguments, not params, for " + k)
   })
-  ;["dryRun", "dryrun", "offline", "semantic", "withMeta", "force", "prune", "allowemptyprune", "independent"].forEach(function(k) {
+  ;["dryRun", "dryrun", "offline", "semantic", "withMeta", "force", "prune", "allowemptyprune", "independent", "nobundle"].forEach(function(k) {
     if (isDef(p[k])) {
       if ([true, false, "true", "false"].indexOf(p[k]) < 0) throw new Error("Expected boolean parameter: " + k)
       p[k] = toBoolean(p[k]) === true
@@ -206,7 +207,7 @@ MiniAWikiOps.prototype.unavailable = function(spec) {
   var id = spec.operation, backend = String(cfg.backend || "fs"), archive = /\.(zip|okt)$/i.test(String(cfg.root || ""))
   var writable = cfg.access === "rw" && !cfg.__catalog && backend !== "http" && backend !== "https" && !archive
   if ((MiniAWikiOps.mutates(spec) || id === "wiki.compact") && id !== "graph.html" && !(id === "absorb.plan" && this.args.absorboutput) && !writable) return "Requires a writable primary wiki; mounts, archives and HTTP wikis are read-only"
-  if ((id.indexOf("wiki.folder") === 0 || id === "wiki.compact" || id === "wiki.indexstats" || id === "graph.filestats" || id === "graph.html" || id.indexOf("absorb.") === 0) && (backend !== "fs" || archive || cfg.__catalog)) return "Requires a local filesystem wiki"
+  if ((id.indexOf("wiki.folder") === 0 || id === "wiki.compact" || id === "wiki.indexstats" || id === "wiki.export" || id === "graph.filestats" || id === "graph.html" || id.indexOf("absorb.") === 0) && (backend !== "fs" || archive || cfg.__catalog)) return "Requires a local filesystem wiki"
   if (id.indexOf("wiki.folder") === 0 && this.args.wikitarget) return "Folder operations require a local primary wiki; mounted wikis are read-only"
   if (id === "dream.auto" && (backend !== "fs" || archive || cfg.__catalog || this.args.wikitarget)) return "Auto requires a local primary filesystem wiki"
   if (id === "wiki.compact" && toBoolean(cfg.wikiretrievalv2) === false) return "Compaction requires Retrieval V2"
@@ -275,6 +276,13 @@ MiniAWikiOps.prototype._execute = function(spec, gates) {
     if (id === "graph.html") {
       if (io.fileExists(p.output)) throw new Error("Output already exists; choose a new HTML filename")
       return this.utility("wikiGraph", { dir: cfg.root, output: p.output, title: p.title })
+    }
+    if (id === "wiki.export") {
+      if (io.fileExists(p.output)) throw new Error("Output already exists; choose a new ZIP filename")
+      new MiniAFileAccess(this.args.fileallow).assert(p.output)
+      cfg.access = "ro"; cfg.wikiretrievalv2 = true
+      wm = __miniAWikiCreatePrimary(cfg, function(level, msg) { self.log(msg) })
+      return wm.exportWiki(p.output, { nobundle: p.nobundle === true })
     }
     if (id === "wiki.indexstats") {
       if (!new java.io.File(String(cfg.indexdir || cfg.root)).isDirectory()) throw new Error("Index directory does not exist")

@@ -8,6 +8,7 @@ WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
     if (req.method === "GET") return WikiStudioServer.paginate(this.sourceList(w).map(WikiStudioServer.publicSource), req.query || {})
     if (req.method === "POST") { WikiStudio.authorize(role, "admin", w); return this.sourceAdd(w, body) }
   }
+  if (this.exportRoute && (route === "exports" || /^exports\//.test(route))) return this.exportRoute(req, w, parts, role)
   if (this.backupRoute && (route === "backups" || /^backups\//.test(route) || route === "changes")) return this.backupRoute(req, w, parts, role)
   if (route === "graph/settings") {
     if (req.method !== "GET") WikiStudio.authorize(role, "admin", w)
@@ -77,7 +78,7 @@ var wikiStudioRunWorker = function(config, id) {
   function phase(name, message) { jobs.update(id, { status: name === "running" ? "running" : name, phase: name }); jobs.event(id, name, message) }
   try {
     WikiStudio.wikiLock(config.home, j.wikiId, function() {
-      var w = registry.verify(registry.get(j.wikiId)); WikiStudio.authorize(j.role, "admin", w)
+      var w = registry.verify(registry.get(j.wikiId)); WikiStudio.authorize(j.role, "admin", j.operation === "wiki.export" ? __ : w)
       WikiStudio.assert(w.root === j.root && w.identity === j.rootIdentity, 409, "root_changed", "Job root identity no longer matches registry")
       if (jobs.get(id).cancelRequested) { jobs.update(id, {status:"cancelled",phase:"cancelled"}); return }
       phase("preflight", "Checking root identity and file boundaries")

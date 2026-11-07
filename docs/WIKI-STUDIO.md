@@ -237,6 +237,16 @@ Deleting/cancelling a saved plan never undoes pages already written. Plan may
 need a configured model; apply reuses the saved plan rather than regenerating it.
 Real-model synthesis was not tested by this implementation.
 
+## Exporting a wiki
+
+Maintenance → **Export** creates a ZIP of the wiki's pages plus the validated search index and graph for use on other Mini-A instances (for example, unzip it and upload everything to an S3 prefix; see [Exporting a wiki to a ZIP](WIKI.md#exporting-a-wiki-to-a-zip)). By default the index is one nested `mini-a-wiki-index.zip`; tick *Keep index folders loose* to store the index folders directly instead. Exports are admin-only, work on read-only wikis, never change the wiki, and need a published index (reindex first) and no pending ingestion.
+
+The job writes to `<studio home>/exports/<wiki>/<job>/` and the UI downloads it through an authenticated streaming route. The five most recent exports per wiki are kept; others can be deleted from the same tab.
+
+- `POST /api/v1/wikis/{id}/exports` body `{"nobundle":false}` (Idempotency-Key required) → job
+- `GET /api/v1/wikis/{id}/exports`, `DELETE /api/v1/wikis/{id}/exports/{exportId}` with `{"confirmation":"{exportId}"}`
+- `GET /api/v1/wikis/{id}/exports/{exportId}/download` → `application/zip` (bearer header; the token is never accepted in the URL)
+
 ## Dreams, backups and recovery
 
 | Mode | Meaning | Studio safeguards |

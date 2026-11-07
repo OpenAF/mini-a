@@ -151,6 +151,7 @@ WikiStudioServer.prototype.handle = function(ex) {
       })
       var req = { method: method, path: path, query: query, headers: headers, requestId: id, role: role }
       if (this.streamUpload && path === "/api/v1/uploads" && method === "POST") { this.audit(id,role,"POST /api/v1/uploads"); result = this.streamUpload(req, ex.getRequestBody()) }
+      else if (this.streamExport && method === "GET" && /^\/api\/v1\/wikis\/[^/]+\/exports\/[a-f0-9-]{36}\/download$/.test(path)) { this.streamExport(req, ex, role); return }
       else if (this.streamEvents && /^\/api\/v1\/jobs\/[a-z0-9-]+\/events$/.test(path) && method === "GET") { this.streamEvents(req, ex); return }
       else {
         var stream = ex.getRequestBody(), out = new java.io.ByteArrayOutputStream(), buffer = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 8192), n, size = 0

@@ -1365,7 +1365,9 @@ MiniAWikiManager.prototype._hydrateArtifactBundle = function(remoteMetaFn, downl
       var supported = /^(?:\.mini-a-wiki-lucene\/[A-Za-z0-9_.-]+|\.mini-a-wiki-graph\/graph\.json|\.mini-a-wiki-serving\/(?:current\.json|previous\.json|[a-f0-9-]{36}\/(?:manifest\.json|catalog\.json|index\/[A-Za-z0-9_.-]+|blocks\/[a-f0-9]{40}\.md|catalogue\/(?:pages|passages|reverseLinks|moveReverse|blockRefs)\/[a-f0-9]{2}\.json)))$/.test(name)
       if (entry.isDirectory()) { zip.closeEntry(); continue }
       // A full wiki archive may include source Markdown; it is never extracted.
-      if (!supported && (!/\.md$/.test(name) || name.startsWith(".mini-a-"))) throw "unsupported bundle layout"
+      // Visible content (pages, attachments, a nested index bundle) is skipped; engine/hidden paths must be supported.
+      var visible = !name.split("/").some(function(part) { return part.charAt(0) === "." })
+      if (!supported && !visible && (!/\.md$/.test(name) || name.startsWith(".mini-a-"))) throw "unsupported bundle layout"
       var output = __, target = new java.io.File(dir, name)
       if (supported) { io.mkdir(String(target.getParent())); output = new java.io.FileOutputStream(target) }
       try {
@@ -2391,8 +2393,19 @@ MiniAWikiManager.prototype.configure = function(config) {
   this._instanceNonce = sha1(this._getBackendIdentity() + "|" + String(new Date().getTime()) + "|" + String(Math.random())).substring(0, 12)
   if (cfg.maintenanceSourceOnly === true) return // authoritative Markdown only; never a retrieval fallback
   if (this._archiveRoot && toBoolean(cfg.wikiretrievalv2) === true && isString(cfg.indexdir) && cfg.indexdir.trim().length) {
-    var archive = String(this._backend.root)
-    this._hydrateArtifactBundle(function() { var f = new java.io.File(archive); return { etag: String(java.nio.file.Files.getLastModifiedTime(f.toPath())) + ":" + Number(f.length()) } }, function() { return new java.io.FileInputStream(archive) }, "archive", archive)
+    var archive = String(this._backend.root), nestedBundle = false
+    // A default-mode wiki export keeps its index in a nested mini-a-wiki-index.zip.
+    try {
+      var archiveFile = new java.util.zip.ZipFile(archive)
+      try { nestedBundle = archiveFile.getEntry("mini-a-wiki-index.zip") !== null && archiveFile.getEntry(".mini-a-wiki-serving/current.json") === null && archiveFile.getEntry(".mini-a-wiki-lucene/") === null } finally { archiveFile.close() }
+    } catch(ignoreNested) {}
+    this._hydrateArtifactBundle(function() { var f = new java.io.File(archive); return { etag: String(java.nio.file.Files.getLastModifiedTime(f.toPath())) + ":" + Number(f.length()) } }, function() {
+      if (!nestedBundle) return new java.io.FileInputStream(archive)
+      var holder = new java.util.zip.ZipFile(archive), temp = java.io.File.createTempFile("mini-a-nested-", ".zip"), source = holder.getInputStream(holder.getEntry("mini-a-wiki-index.zip"))
+      try { java.nio.file.Files.copy(source, temp.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING) } finally { source.close(); holder.close() }
+      temp.deleteOnExit()
+      return new java.io.FileInputStream(temp)
+    }, "archive", archive)
   }
   this._hydrateS3Artifacts()
   if (this._backendType === "http") this._hydrateHttpArtifacts()
@@ -5731,6 +5744,7 @@ MiniAWikiManager.prototype.assembleContext = function(query, options) {
 MiniAWikiManager.prototype._assembleContextPlaceholder = MiniAWikiManager.prototype.assembleContext
 
 loadLib(__miniAPath("js/wiki/mini-a-wiki-folders.js"), true)
+loadLib(__miniAPath("js/wiki/mini-a-wiki-export.js"), true)
 
 // Hold one shared lock across complete operations, including link rewrites and
 // publication. Nested manager operations and journal recovery are reentrant.

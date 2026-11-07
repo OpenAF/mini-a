@@ -2771,7 +2771,8 @@ MiniAWikiRetrievalV2.prototype._bundleBase = function(manifest, catalog) {
   delete base.catalogue.parent; base.merkleFormat = "canonical-json-v1"; base.merkle = MiniAWikiRetrievalV2.manifestMerkle(base)
   return { manifest:base, texts:texts }
 }
-MiniAWikiRetrievalV2.prototype.exportBundle = function(destination) {
+MiniAWikiRetrievalV2.prototype.exportBundle = function(destination, options) {
+  var includeGraph = isMap(options) && options.includeGraph === true, graphIncluded = false
   var snapshot, zip, output, temporary = String(destination) + ".tmp-" + java.util.UUID.randomUUID(), self = this, exportStage = "current"
   try {
     if (this.manager._knowledgeJournalPending && this.manager._knowledgeJournalPending()) throw new Error("ingest-pending")
@@ -2824,11 +2825,21 @@ MiniAWikiRetrievalV2.prototype.exportBundle = function(destination) {
         zip.closeEntry(); fileCount++
       })
     })
+    if (includeGraph) {
+      var graphFile = this.manager._getIndexRoot() + "/.mini-a-wiki-graph/graph.json"
+      if (io.fileExists(graphFile)) {
+        if (java.nio.file.Files.isSymbolicLink(new java.io.File(graphFile).toPath())) throw new Error("unsafe-graph-file")
+        var graphText = io.readFileString(graphFile)
+        if (!isMap(af.fromJson(graphText))) throw new Error("invalid-graph")
+        expectedFiles[".mini-a-wiki-graph/graph.json"] = MiniAWikiRetrievalV2.digestText(graphText)
+        zip.putNextEntry(new java.util.zip.ZipEntry(".mini-a-wiki-graph/graph.json")); zip.write(new java.lang.String(graphText).getBytes("UTF-8")); zip.closeEntry(); fileCount++; graphIncluded = true
+      }
+    }
     zip.close(); zip = null; output = null
     var preflight = this._verifyBundleFile(temporary, expectedFiles)
     if (!preflight.ok) return preflight
     java.nio.file.Files.move(new java.io.File(temporary).toPath(), target.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-    return { ok: true, generation: snapshot.generation, fallbackGeneration: generations.length > 1 ? generations[1].generation : __, files: fileCount + (generations.length > 1 ? 1 : 0), bytes: Number(target.length()), preflight: preflight, delivery: "unverified" }
+    return { ok: true, generation: snapshot.generation, fallbackGeneration: generations.length > 1 ? generations[1].generation : __, files: fileCount + (generations.length > 1 ? 1 : 0), bytes: Number(target.length()), preflight: preflight, graph: graphIncluded, delivery: "unverified" }
   } catch(e) { return { ok: false, error: __miniAErrMsg(e), code: __miniAErrMsg(e).split(":")[0], stage: exportStage } }
   finally { try { if (zip) zip.close(); else if (output) output.close() } catch(ignoreZip) {}; try { java.nio.file.Files.deleteIfExists(new java.io.File(temporary).toPath()) } catch(ignoreFile) {}; if (snapshot) this.release(snapshot) }
 }

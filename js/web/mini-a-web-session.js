@@ -449,7 +449,7 @@ function MiniAWebPrompt(request) {
       }
 
       if (!global._mini_a_web_owns(uuid, runToken)) return
-      if (global.__attachmentStops[uuid] === runToken || lma._stopRequested === true || lma.state === "stop") return
+      if (global.__attachmentStops[uuid] === runToken || lma._stopRequested === true) return // state === "stop" is also set on normal completion, so it can't signal a user stop
       // start() can return a string, a structured result, or no result on failure.
       // Keep typed answers intact and never dereference an absent result.
       if (artifactBinding && !artifactBinding.live()) throw new Error("Generation cancelled")

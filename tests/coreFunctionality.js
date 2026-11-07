@@ -6,6 +6,16 @@
     return new MiniA()
   }
 
+  exports.testStreamEnvelopeTextNeverStringifiesChunks = function() {
+    var agent = createAgent()
+    var ev = function(c, t) { return { model: "m", message: { role: "assistant", content: c, thinking: t }, done: false } }
+    var thinkingOnly = { content: "", events: [ ev("", '{"action":"final",'), ev("", '"answer":"ok"}') ] }
+    ow.test.assert(agent._extractPrimaryResponseText(thinkingOnly), '{"action":"final","answer":"ok"}', "Thinking-only stream envelope yields the thinking text")
+    ow.test.assert(agent._extractPrimaryResponseText({ content: "hi", events: [ ev("hi", "x") ] }), "hi", "Content wins over thinking")
+    var empty = agent._extractResponseTextCandidates({ content: "", events: [ ev("", "") ] })
+    ow.test.assert(empty.length, 0, "Empty stream envelope is never stringified into a candidate")
+  }
+
   exports.testNativeReportWithEmbeddedJsonCompletes = function() {
     var report = '# Impact report\n\n```json\n[{"value":4320,"label":"Branch insertions"}]\n```\n\nReview complete.'
     var agent = createAgent(), requests = 0

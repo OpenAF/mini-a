@@ -995,7 +995,35 @@ function __miniAExtractResponseTextCandidates(rawResponse) {
     }
   }
 
-  if (texts.length === 0 && isMap(rawResponse)) addText(stringify(rawResponse, __, ""))
+  // Streaming adapters return { content, events }. Reasoning models (e.g. Ollama
+  // thinking models) can leave content empty and put everything in the events'
+  // thinking deltas; rebuild text from the events and never stringify the envelope,
+  // which would surface the raw chunk array as the model's answer.
+  var isStreamEnvelope = isMap(rawResponse) && isArray(rawResponse.events)
+  if (isStreamEnvelope && texts.length === 0) {
+    var evContent = "", evThinking = ""
+    rawResponse.events.forEach(function(ev) {
+      if (!isMap(ev)) return
+      if (isMap(ev.message)) {
+        if (isString(ev.message.content)) evContent += ev.message.content
+        if (isString(ev.message.thinking)) evThinking += ev.message.thinking
+        else if (isString(ev.message.reasoning)) evThinking += ev.message.reasoning
+      }
+      if (isArray(ev.choices)) {
+        ev.choices.forEach(function(choice) {
+          if (!isMap(choice) || !isMap(choice.delta)) return
+          if (isString(choice.delta.content)) evContent += choice.delta.content
+          if (isString(choice.delta.reasoning_content)) evThinking += choice.delta.reasoning_content
+          else if (isString(choice.delta.reasoning)) evThinking += choice.delta.reasoning
+          else if (isString(choice.delta.thinking)) evThinking += choice.delta.thinking
+        })
+      }
+    })
+    addText(evContent)
+    addText(evThinking)
+  }
+
+  if (texts.length === 0 && isMap(rawResponse) && !isStreamEnvelope) addText(stringify(rawResponse, __, ""))
   return texts
 }
 

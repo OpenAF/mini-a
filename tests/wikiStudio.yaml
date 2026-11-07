@@ -54,6 +54,9 @@ jobs:
 - name: Studio backups and restore
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testBackups
+- name: Studio wiki exports
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testExports
 - name: Studio dream safety
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testDreamSafety
@@ -70,6 +73,7 @@ todo:
 - Studio explorer
 - Studio planned absorption
 - Studio backups and restore
+- Studio wiki exports
 - Studio dream safety
 - Studio hydration
 - Studio source boundaries

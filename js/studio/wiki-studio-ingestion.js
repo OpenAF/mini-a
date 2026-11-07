@@ -55,6 +55,7 @@ WikiStudio.executeSource = function(config,w,job,logFn,backup) {
   var op=job.operation,p=job.params
   if(op==="backup.snapshot") return {ok:true,backupId:WikiStudio.snapshot(config,w,job.id).id}
   if(op==="backup.restore") return WikiStudio.restore(config,w,job,backup)
+  if(op==="wiki.export") return WikiStudio.exportWiki(config,w,job,logFn)
   var a={wikiroot:w.root,wikiaccess:"rw",usewikigraph:w.graph.enabled,wikigraphsemantic:p.semantic===true,wikiretrievalv2:true},params={}
   if(op==="ingest.run") {
     WikiStudio.assert(WikiStudio.inside(p.staging,config.home+"/sources/uploads"),400,"invalid_source","Source staging leaves trusted area")

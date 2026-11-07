@@ -164,3 +164,66 @@ WikiStudio.backupDeletion = function(config, w, backup, jobs) {
   })
   return { allowed: !reason, reason: reason }
 }
+
+// ── Wiki ZIP exports (pages + portable index for other Mini-A instances) ─────
+// Files live under <home>/exports/<wikiId>/<jobId>/ and are delivered by the
+// authenticated streaming download route; the most recent few are retained.
+WikiStudio.exportKeep = 5
+WikiStudio.exportDir = function(config, wikiId, id) {
+  WikiStudio.assert(/^[a-f0-9-]{36}$/.test(id), 400, "invalid_export", "Invalid export ID")
+  return config.home + "/exports/" + wikiId + "/" + id
+}
+WikiStudio.exportWiki = function(config, w, job, logFn) {
+  var dir = WikiStudio.exportDir(config, w.id, job.id), output = dir + "/export.zip"
+  WikiStudio.privateDir(config.home + "/exports"); WikiStudio.privateDir(config.home + "/exports/" + w.id); WikiStudio.privateDir(dir)
+  var runner = new MiniAWikiOps({ wikiroot: w.root, wikiaccess: "ro", usewikigraph: w.graph.enabled, wikiretrievalv2: true }, logFn)
+  var result = runner.execute(runner.spec("wiki.export", { output: output, nobundle: (job.params || {}).nobundle === true }), {})
+  if (!result || result.ok === false) { try { io.rm(dir) } catch(ignoreRm) {}; return result || { ok: false, error: "export failed" } }
+  WikiStudio.atomic(dir + "/export.json", { version: 1, id: job.id, wikiId: w.id, createdAt: WikiStudio.now(), mode: result.mode, size: result.bytes, pages: result.pages, generation: result.generation, graph: result.graph === true })
+  var all = io.listFiles(config.home + "/exports/" + w.id).files.filter(function(f) { return f.isDirectory && /^[a-f0-9-]{36}$/.test(f.filename) }).map(function(f) { return WikiStudio.json(f.filepath + "/export.json") }).filter(function(x) { return x && x.id })
+  all.sort(function(a, b) { return b.createdAt.localeCompare(a.createdAt) }).slice(WikiStudio.exportKeep).forEach(function(old) { try { io.rm(WikiStudio.exportDir(config, w.id, old.id)) } catch(ignoreOld) {} })
+  delete result.output; delete result.usage
+  result.exportId = job.id
+  return result
+}
+WikiStudioServer.prototype.exportRoute = function(req, w, parts, role) {
+  var c = this.config, jobs = this.jobs || new WikiStudioJobs(c), body = req.body || {}, self = this
+  WikiStudio.authorize(role, "admin")
+  var base = c.home + "/exports/" + w.id
+  if (parts.length === 1 && req.method === "GET") {
+    var items = io.fileExists(base) ? io.listFiles(base).files.filter(function(f) { return f.isDirectory && /^[a-f0-9-]{36}$/.test(f.filename) }).map(function(f) { return WikiStudio.json(f.filepath + "/export.json") }).filter(function(x) { return x && x.id && x.wikiId === w.id }) : []
+    return WikiStudioServer.paginate(items.sort(function(a, b) { return b.createdAt.localeCompare(a.createdAt) }), req.query || {})
+  }
+  if (parts.length === 1 && req.method === "POST") {
+    WikiStudio.fields(body, ["nobundle"])
+    WikiStudio.assert(!isDef(body.nobundle) || isBoolean(body.nobundle), 400, "invalid_options", "nobundle must be boolean")
+    return WikiStudio.wikiLock(c.home, w.id, function() { self.registry.verify(w); return WikiStudioJobs.publicJob(jobs.submit(w, "wiki.export", { nobundle: body.nobundle === true }, req.headers["idempotency-key"], role)) })
+  }
+  if (parts.length === 2 && req.method === "DELETE") {
+    WikiStudio.fields(body, ["confirmation"])
+    WikiStudio.assert(body.confirmation === parts[1], 400, "confirmation_required", "Confirm the export ID")
+    var dir = WikiStudio.exportDir(c, w.id, parts[1]), info = WikiStudio.json(dir + "/export.json")
+    WikiStudio.assert(info && info.wikiId === w.id && info.id === parts[1], 404, "export_not_found", "Export not found")
+    WikiStudio.noLinks(dir); io.rm(dir)
+    return { deleted: parts[1] }
+  }
+  WikiStudio.fail(405, "method_not_allowed", "Unknown export route or method")
+}
+// Streams one finished export. handle() has already authenticated the bearer token.
+WikiStudioServer.prototype.streamExport = function(req, ex, role) {
+  var m = /^\/api\/v1\/wikis\/([^/]+)\/exports\/([a-f0-9-]{36})\/download$/.exec(req.path), c = this.config
+  WikiStudio.assert(m, 404, "not_found", "Route not found")
+  WikiStudio.authorize(role, "admin")
+  var w = this.registry.verify(this.registry.get(m[1])), dir = WikiStudio.exportDir(c, w.id, m[2]), file = dir + "/export.zip", info = WikiStudio.json(dir + "/export.json")
+  WikiStudio.assert(info && info.wikiId === w.id && info.id === m[2], 404, "export_not_found", "Export not found")
+  WikiStudio.noLinks(file)
+  var f = new java.io.File(file)
+  WikiStudio.assert(f.isFile() && Number(f.length()) === info.size, 409, "corrupt_export", "Export file is missing or changed")
+  this.audit(req.requestId, role, "GET " + req.path, w.id)
+  var label = String(w.name || w.id).replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").substring(0, 60) || "wiki"
+  var headers = ex.getResponseHeaders()
+  headers.set("Content-Type", "application/zip"); headers.set("Content-Disposition", 'attachment; filename="' + label + "-" + String(info.createdAt).substring(0, 10) + '.zip"')
+  ex.sendResponseHeaders(200, Number(f.length()))
+  var input = new java.io.FileInputStream(f), out = ex.getResponseBody(), buf = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 65536), n
+  try { while ((n = input.read(buf)) !== -1) out.write(buf, 0, n) } finally { input.close(); ex.close() }
+}

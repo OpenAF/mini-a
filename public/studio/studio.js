@@ -51,6 +51,12 @@ const StudioActivity = {
     }
   }
 };
+// A fetch rejected before any HTTP response (Safari: "Load failed", Chrome:
+// "Failed to fetch"), e.g. a reused keep-alive socket the server already
+// closed, or a backgrounded tab. Never a user cancel or an HTTP error status.
+function isTransientNetworkError(error) {
+  return !!error && error.name === "TypeError" && error.status === undefined;
+}
 const StudioApi = {
   token: "",
   tail: Promise.resolve(),
@@ -102,7 +108,7 @@ const StudioApi = {
     for (let attempt = 0; ; attempt++) {
       await new Promise(resolve => setTimeout(resolve, attempt ? attempt * 500 : 0));
       try { return await this.request(path, "GET", undefined, { silent: true }); }
-      catch (error) { if (error.status !== 423 || attempt >= 3) throw error; }
+      catch (error) { if (!(error.status === 423 || isTransientNetworkError(error)) || attempt >= 3) throw error; }
     }
   },
   async raw(path, options = {}, consume) {
@@ -718,11 +724,18 @@ async function queue(suffix, body) {
   button(status,"View activity",()=>jobDetail(job.id),"jobs");
   const cancel=jobCancelButton(status,job.id);
   // Automatic refreshes have their own progress UI; do not toggle the page banner.
+  // The job runs server-side regardless of this poll, so transient network
+  // failures only pause status updates (bounded at ~10 minutes of failures).
+  let networkFailures=0;
   async function poll(){
-    try {const latest=await StudioApi.request("jobs/"+job.id,"GET",undefined,{silent:true});trackedJobs.set(job.id,latest);text.textContent=human(latest.operation)+" · "+human(latest.status)+(latest.phase!==latest.status?" · "+human(latest.phase):"");
+    try {const latest=await StudioApi.request("jobs/"+job.id,"GET",undefined,{silent:true});networkFailures=0;trackedJobs.set(job.id,latest);text.textContent=human(latest.operation)+" · "+human(latest.status)+(latest.phase!==latest.status?" · "+human(latest.phase):"");
       cancel.disabled=!!(cancel.pending||cancel.requested||latest.cancelRequested||terminalStates.includes(latest.status));
       if(terminalStates.includes(latest.status)){if(["failed","partial","recovery-required","interrupted"].includes(latest.status))status.classList.add("error");button(status,"Dismiss",()=>status.remove(),"cross");return latest;}
-    }catch(e){text.textContent=e.message;button(status,"Dismiss",()=>status.remove(),"cross");return {status:"unavailable"};}
+    }catch(e){
+      if(!isTransientNetworkError(e)||++networkFailures>120){text.textContent=e.message;button(status,"Dismiss",()=>status.remove(),"cross");return {status:"unavailable"};}
+      text.textContent=human(job.operation)+" · Reconnecting… (the job keeps running on the server)";
+      return new Promise(resolve=>setTimeout(()=>resolve(poll()),Math.min(5000,1500*networkFailures)));
+    }
     return new Promise(resolve=>setTimeout(()=>resolve(poll()),1500));
   }
   job.finished=poll();job.wikiId=wikiId;return job;
@@ -778,13 +791,13 @@ async function jobDetail(id) {
   graphProgress.hidden=true;
   el("disclosure-toggle","Technical details",details);
   const detailBody=el("div",undefined,details);
-  let cursor=0, detailValue;
+  let cursor=0, detailValue, networkFailures=0;
   const updateText=(node,text)=>{if(node.textContent!==text)node.textContent=text;};
   dialog.addEventListener("close",()=>{dialog.remove();previous?.focus();destroyDetachedCharts();},{once:true});dialog.showModal();
   async function refresh(){
     if(!dialog.isConnected)return;
     try {
-      const job=await StudioApi.request("jobs/"+id,"GET",undefined,{silent:true});if(!dialog.isConnected)return;
+      const job=await StudioApi.request("jobs/"+id,"GET",undefined,{silent:true});networkFailures=0;if(!dialog.isConnected)return;
       updateText(title,human(job.operation));updateText(state,human(job.status)+" · "+date(job.createdAt));
       warning.hidden=!job.warning;updateText(warning,job.warning||"");
       changed.hidden=job.changedPageCount===undefined;updateText(changed,job.changedPageCount===undefined?"":job.changedPageCount+" pages changed");
@@ -806,7 +819,10 @@ async function jobDetail(id) {
         technical(changes,summary,"Before and after changes");
         if(["partial","interrupted","recovery-required"].includes(job.status)&&!job.recoveryReviewedAt){el("p","Resolve engine recovery or restore a snapshot before marking this job reviewed. This action does not undo changes or remove journals.",summary);button(summary,"Mark recovery reviewed",async()=>{if(!(await askConfirmation("Have you resolved and checked recovery for this job? This acknowledges recovery; it does not repair the wiki.")))return;await StudioApi.request("jobs/"+id+"/review-recovery","POST",{confirmation:id});dialog.close();message("Recovery reviewed. History is eligible for cleanup when no journals remain.");});}
       }else setTimeout(refresh,1500);
-    }catch(error){el("p",error.message,summary).className="error";}
+    }catch(error){
+      if(isTransientNetworkError(error)&&++networkFailures<=120){updateText(phase,"Reconnecting… the job keeps running on the server.");phase.hidden=false;setTimeout(refresh,Math.min(5000,1500*networkFailures));return;}
+      el("p",error.message,summary).className="error";
+    }
   }
   await refresh();
 }
@@ -970,7 +986,7 @@ active.forEach(j=>button(content,human(j.operation)+" · "+human(j.status),()=>j
 async function maintenanceView(content){
   el("p","Mini-A’s Dream feature checks, repairs and reorganizes your wiki. Open Dream tasks to choose an action.",content);
   const tabs=row(content),panel=el("div",undefined,content);
-  for(const [label,render] of [["Dream tasks",()=>dreamsView(panel)],["Health",()=>summaryView(panel,true)],["Backups",()=>backupsView(panel)],["Recovery",()=>recoveryView(panel)]])button(tabs,label,async()=>{panel.replaceChildren();destroyDetachedCharts();await render();});
+  for(const [label,render] of [["Dream tasks",()=>dreamsView(panel)],["Health",()=>summaryView(panel,true)],["Backups",()=>backupsView(panel)],["Export",()=>exportsView(panel)],["Recovery",()=>recoveryView(panel)]])button(tabs,label,async()=>{panel.replaceChildren();destroyDetachedCharts();await render();});
   await dreamsView(panel);
 }
 async function recoveryView(content){
@@ -996,6 +1012,21 @@ async function dreamsView(content) {
     technical({engineMode:mode},optionsPanel);
   }
   for(const task of tasks){const card=el("section",undefined,cards);button(card,(task[1]==="compact"?"":"Dream · ")+task[0],()=>select(task));el("p",task[2],card);}select(tasks[0]);
+}
+async function exportsView(content) {
+  const section=el("section",undefined,content);el("h4","Export wiki",section);
+  el("p","Create a ZIP with every page plus the search index and graph, ready to use on another Mini-A instance — for example unzip it and upload all files to an S3 bucket prefix. The wiki is not changed.",section);
+  const loose=check(section,"Keep index folders loose (do not create mini-a-wiki-index.zip)");
+  el("small","Default: pages plus a single mini-a-wiki-index.zip for S3 or HTTP hosting. Loose: the index folders are stored directly inside the ZIP.",section).className="muted";
+  const refresh=async()=>{content.replaceChildren();destroyDetachedCharts();await exportsView(content);};
+  button(section,"Create export",async()=>{const job=await queue("exports",{nobundle:loose.checked});await job.finished;if(section.isConnected)await refresh();},"download");
+  button(section,"Refresh",refresh);
+  const items=await allItems(wikiPath("exports")),table=dataTable(section,["Created","Layout","Pages","Size","Actions"]);
+  if(!items.length)el("p","No exports yet. The five most recent exports are kept.",section);
+  for(const item of items){const r=el("tr",undefined,table);el("td",date(item.createdAt),r);el("td",item.mode==="folders"?"Loose index folders":"Nested mini-a-wiki-index.zip",r);el("td",String(item.pages),r);el("td",bytes(item.size),r);const actions=el("td",undefined,r);
+    button(actions,"Download",async()=>{const blob=await StudioApi.raw(wikiPath("exports/"+item.id+"/download"),{},response=>response.blob()),url=URL.createObjectURL(blob),a=el("a",undefined,actions);a.href=url;a.download=currentWiki.id+"-"+String(item.createdAt).slice(0,10)+".zip";a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);},"download");
+    button(actions,"Delete",async()=>{if(!(await askConfirmation("Delete the export from "+date(item.createdAt)+" ("+bytes(item.size)+")?")))return;await StudioApi.wiki("exports/"+item.id,"DELETE",{confirmation:item.id});await refresh();});
+  }
 }
 async function backupsView(content) {
   const section=el("section",undefined,content);el("h4","Backups",section);

@@ -1,6 +1,7 @@
 include:
 - oJobTest.yaml
 - tests/wikiRetrievalV2.yaml
+- tests/wikiExport.yaml
 
 jobs:
 - name: MiniA Wiki Tests::ConsoleWikiOperations

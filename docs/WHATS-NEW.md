@@ -2,6 +2,10 @@
 
 ## Recent Updates
 
+### Export a wiki to a portable ZIP
+
+`wiki.export` (wikiman → Indexes & storage, Wiki Studio → Maintenance → Export, or `ojob utils/wikiOps.yaml operation=wiki.export`) packages pages plus the validated search index and graph for other Mini-A instances, such as an S3 bucket. By default the index is a nested `mini-a-wiki-index.zip`; `nobundle=true` stores the index folders loose. See [Exporting a wiki to a ZIP](WIKI.md#exporting-a-wiki-to-a-zip).
+
 ### Wiki lifecycle in three commands
 
 `mini-a wikihydrate=true wikiroot=... source=...`, `mini-a wikidream=true wikiroot=...` and the new `mini-a wikiquery=true wikiroot=... [onport=8888|goal=...]` (also `--wiki-hydrate`, `--wiki-dream`, `--wiki-query`, or `ojob utils/wikiQuery.yaml`) create, reorganize and query a local wiki. Querying is read-only and uses the new `wiki` mode preset. A new [wiki quickstart](WIKI-QUICKSTART.md) walks through the whole flow.

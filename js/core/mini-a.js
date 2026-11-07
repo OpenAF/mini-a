@@ -22439,6 +22439,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           var _streamChunkedText = _streamRawChunks.join("")
           if (_streamChunkedText.trim().length > 0) rmsg = _streamChunkedText
         }
+        // An empty streaming envelope must not reach parsing/printing as a map:
+        // it would be stringified and shown as raw provider chunks.
+        if (isMap(rmsg) && isArray(rmsg.events)) rmsg = _streamThinkingBuf.length > 0 ? _streamThinkingBuf.join("") : ""
       }
       if (args.usestream === true && this._isIncompleteJsonObjectErrorPayload(rmsg) && _streamRawChunks.length > 0) {
         var recoveredFromStream = this._recoverJsonFromStreamChunks(_streamRawChunks, { waitMs: 750, pollMs: 50 })

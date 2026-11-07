@@ -1,4 +1,9 @@
 jobs:
+- name: MiniA Core Tests::StreamEnvelopeTextNeverStringifiesChunks
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testStreamEnvelopeTextNeverStringifiesChunks
+
 - name: MiniA Core Tests::NativeFinalWithPrefixedAction
   from: MiniA Core Tests::Init
   to: oJob Test
@@ -1245,6 +1250,7 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Core Tests::StreamEnvelopeTextNeverStringifiesChunks
 - MiniA Core Tests::NativeFinalWithPrefixedAction
 - MiniA Core Tests::SubtaskForkUtf8Budget
 - MiniA Core Tests::SubtaskWatchdogCancelBoundAndMetric

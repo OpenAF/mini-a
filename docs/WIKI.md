@@ -416,6 +416,26 @@ At process startup Mini-A compares HTTP `ETag` or `Last-Modified` metadata with 
 
 S3 continues to support `wikis3artifactprefix` containing individual Lucene and graph objects. Set `s3artifactbundle=true` to instead consume one `<wikis3artifactprefix>/mini-a-wiki-index.zip`. Mini-A checks S3 object metadata before downloading it, making this useful for read-only consumers with many Lucene segment files. `wikiartifactrefreshsecs` also supports this bundle form; individual artifact trees remain startup-only to avoid mixing Lucene generations. S3 itself still uses native object listing for page catalogs.
 
+## Exporting a wiki to a ZIP
+
+`wiki.export` packages a local filesystem wiki as one ZIP: every page and attachment plus the validated Retrieval V2 serving generations (current and previous) and, when present, the graph (`.mini-a-wiki-graph/graph.json`). The wiki is never modified, and read-only sessions can export. It is available in `wikiman=true` (Indexes & storage → *Export wiki to ZIP*), in Wiki Studio (Maintenance → Export), and noninteractively:
+
+```
+ojob utils/wikiOps.yaml wikiroot=/path/to/wiki operation=wiki.export 'params={"output":"/path/export.zip"}'
+```
+
+| Layout | How to get it | Contents |
+| --- | --- | --- |
+| Bundle (default) | `params={"output":"…"}` | Pages plus a single `mini-a-wiki-index.zip` |
+| Loose (opt-in) | add `"nobundle":true` | Pages plus the index folders stored directly (`.mini-a-wiki-serving/…`, `.mini-a-wiki-graph/graph.json`); no `mini-a-wiki-index.zip` |
+
+Both layouts carry identical, checksum-verified index content (the same builder as `bundlePath` publication, which compacts delta generations); only the packaging differs. Engine-internal state (`-meta`, `-state`, `-ingest`, locks) is deliberately not exported because other instances reject it. Use the result as follows:
+- **S3**: unzip and upload everything to one prefix, then read with `wikibackend=s3 wikiprefix=<prefix> wikis3artifactprefix=<prefix> s3artifactbundle=true` (bundle layout).
+- **HTTP**: publish the unzipped files; the bundle is fetched from `<wikiurl>/mini-a-wiki-index.zip`.
+- **Directly**: either layout opens as an archive wiki, `wikiroot=export.zip wikiindexdir=<cache> wikiretrievalv2=true`.
+
+Export refuses, with a hint, when the wiki has no published Retrieval V2 index (`no-retrieval-publication`: run `/wiki reindex`), an ingestion is pending (`ingest-pending`: resume or discard it), the destination exists or lies inside the wiki, a page changes while exporting (`wiki-changed-during-export`), or a root page is named `mini-a-wiki-index.zip` in bundle layout. The same size/file-count budgets as bundle hydration apply.
+
 ## Search scan budget, read cache, and parallel scan
 
 The `wikisearch*` settings in this section configure direct `MiniAWikiManager` instances. They are currently not forwarded by the shared CLI configuration adapter.

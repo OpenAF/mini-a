@@ -298,6 +298,33 @@
     rejects(function(){WikiStudio.checkBackup(s.config,w,backup.id)},"corrupt_backup")
     rejects(function(){WikiStudio.checkBackup(s.config,merge(w,{id:"other"}),backup.id)},"foreign_backup")
   }) }
+  exports.testExports = function() { fixture(function(s,t) {
+    var w=add(s,t);WikiStudio.privateDir(s.config.home+"/jobs");WikiStudio.privateDir(s.config.home+"/audit")
+    io.writeFileString(w.root+"/page.md","# Page\nexportroutineneedle\n")
+    var wm=new MiniAWikiManager({root:w.root,backend:"fs",access:"rw",wikiretrievalv2:true});try{assert(wm.reindex().ok,true,"fixture index builds")}finally{wm.close()}
+    function run(nobundle){var id=WikiStudio.id();return WikiStudio.exportWiki(s.config,w,{id:id,params:{nobundle:nobundle}},function(){})}
+    var first=run(false)
+    assert(first.ok!==false&&first.mode==="bundle",true,"export job succeeds: "+stringify(first,__,""))
+    assert(isUnDef(first.output)&&isUnDef(first.usage),true,"server paths are not returned to the client")
+    var list=s.exportRoute({method:"GET",query:{}},w,["exports"],"admin")
+    assert(list.total,1,"export listed");assert(list.items[0].id,first.exportId,"listed export matches job")
+    rejects(function(){s.exportRoute({method:"GET",query:{}},w,["exports"],"viewer")},"forbidden")
+    var status=0,length=-1,headers={},sink=new java.io.ByteArrayOutputStream()
+    var ex={getResponseHeaders:function(){return {set:function(k,v){headers[k]=String(v)}}},sendResponseHeaders:function(c,l){status=c;length=Number(l)},getResponseBody:function(){return sink},close:function(){}}
+    s.streamExport({path:"/api/v1/wikis/"+w.id+"/exports/"+first.exportId+"/download",requestId:"r1"},ex,"admin")
+    assert(status,200,"download streams");assert(headers["Content-Type"],"application/zip","zip content type");assert(Number(sink.size()),length,"all bytes streamed")
+    assert(/attachment; filename="Alpha-/.test(headers["Content-Disposition"]),true,"attachment filename uses wiki name")
+    rejects(function(){s.streamExport({path:"/api/v1/wikis/"+w.id+"/exports/"+first.exportId+"/download",requestId:"r2"},ex,"viewer")},"forbidden")
+    rejects(function(){s.streamExport({path:"/api/v1/wikis/"+w.id+"/exports/"+WikiStudio.id()+"/download",requestId:"r3"},ex,"admin")},"export_not_found")
+    io.writeFileString(WikiStudio.exportDir(s.config,w.id,first.exportId)+"/export.zip","tampered")
+    rejects(function(){s.streamExport({path:"/api/v1/wikis/"+w.id+"/exports/"+first.exportId+"/download",requestId:"r4"},ex,"admin")},"corrupt_export")
+    rejects(function(){s.exportRoute({method:"DELETE",body:{confirmation:"wrong"}},w,["exports",first.exportId],"admin")},"confirmation_required")
+    assert(s.exportRoute({method:"DELETE",body:{confirmation:first.exportId}},w,["exports",first.exportId],"admin").deleted,first.exportId,"export deleted")
+    assert(s.exportRoute({method:"GET",query:{}},w,["exports"],"admin").total,0,"list empty after delete")
+    var loose=run(true);assert(loose.mode,"folders","loose export honours nobundle")
+    for(var i=0;i<6;i++)run(false)
+    assert(s.exportRoute({method:"GET",query:{limit:"50"}},w,["exports"],"admin").total,WikiStudio.exportKeep,"only the most recent exports are retained")
+  }) }
   exports.testDreamSafety = function() { fixture(function(s,t) {
     var w=add(s,t);WikiStudio.privateDir(s.config.home+"/jobs");s.jobs=new WikiStudioJobs(s.config)
     rejects(function(){s.jobWikiRoute({method:"POST",headers:{"idempotency-key":"reorg-key-123"},body:{mode:"reorg",options:{}}},w,["dreams"],"admin")},"confirmation_required")
