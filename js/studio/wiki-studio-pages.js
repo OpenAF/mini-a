@@ -43,7 +43,7 @@ WikiStudioServer.prototype.validateMarkdown = function(content) {
 }
 WikiStudioServer.prototype.wikiRoute = function(req, w, parts, role) {
   var self = this, q = req.query || {}, body = req.body || {}, route = parts.join("/"), read = req.method === "GET"
-  if (this.jobWikiRoute && ["dreams", "ingestions", "absorptions", "graph/rebuild", "graph/settings", "backups", "changes", "maintenance", "sources", "folders/preview", "folders/move", "folders/delete", "exports"].indexOf(route) >= 0 || this.jobWikiRoute && /^(backups|exports)\//.test(route)) return this.jobWikiRoute(req, w, parts, role)
+  if (this.jobWikiRoute && ["dreams", "ingestions", "absorptions", "graph/rebuild", "graph/settings", "backups", "changes", "maintenance", "sources", "folders/preview", "folders/move", "folders/delete", "selection/preview", "selection/move", "selection/delete", "exports"].indexOf(route) >= 0 || this.jobWikiRoute && /^(backups|exports|sources)\//.test(route)) return this.jobWikiRoute(req, w, parts, role)
   return WikiStudio.wikiLock(this.config.home, w.id, function() {
     self.registry.verify(w)
     if (self.assertIdle) self.assertIdle(w.id)
@@ -55,6 +55,18 @@ WikiStudioServer.prototype.wikiRoute = function(req, w, parts, role) {
         return {name:f.filename,path:(path ? path+"/" : "")+f.filename,kind:f.isDirectory ? "folder" : "page"}
       }).sort(function(a,b) { return (a.kind === b.kind ? 0 : a.kind === "folder" ? -1 : 1) || a.name.toLowerCase().localeCompare(b.name.toLowerCase()) || a.name.localeCompare(b.name) })
       return WikiStudioServer.paginate(entries,q)
+    }
+    if (route === "folders" && req.method === "POST") {
+      WikiStudio.authorize(role, "editor", w)
+      WikiStudio.assert(WikiStudio.pending(w.root).length===0,423,"recovery_pending","Pending journal; recover before creating folders")
+      WikiStudio.fields(body, ["path"])
+      WikiStudio.assert(isString(body.path) && body.path.length > 0, 400, "path_required", "Choose a folder path")
+      WikiStudio.safeFile(w.root, body.path + "/index.md")
+      WikiStudio.assert(!io.fileExists(w.root + "/" + body.path + "/index.md"), 409, "folder_exists", "Folder already exists")
+      WikiStudio.scan(w.root, true)
+      var created = self.manager(w, true, function(wm) { return wm.createFolder(body.path) })
+      WikiStudio.assert(created && created.ok !== false, /folder-exists/.test(String(created && created.error)) ? 409 : 422, /folder-exists/.test(String(created && created.error)) ? "folder_exists" : "engine_error", "Folder could not be created")
+      return created
     }
     if (route === "page" && read) return self.readPage(w, q.path)
     if (route === "graph/html" && read && self.graphHtml) return self.graphHtml(w)

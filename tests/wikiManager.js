@@ -315,7 +315,7 @@
     fixture(function(root) {
       function prompts(args) {
         var seen = []
-        var man = new MiniAWikiMan(args, {print:function(){},ask:function(){throw new Error("Unexpected text prompt")},choose:function(prompt){seen.push(prompt);return prompt === "Select wiki" ? 0 : 7}})
+        var man = new MiniAWikiMan(args, {print:function(){},ask:function(){throw new Error("Unexpected text prompt")},choose:function(prompt,labels){seen.push(prompt);return prompt === "Select wiki" ? 0 : labels.length - 1}})
         man.run()
         return seen
       }
@@ -323,6 +323,57 @@
       assert(prompts({wikiroot:root,wikimounts:[]}),["Wiki operations"],"Empty mount list needs no picker")
       assert(prompts({wikiroot:root,wikimounts:[{name:"docs",root:root}]}),["Select wiki","Wiki operations"],"Configured mounts retain selection")
       assert(prompts({wikiroot:root,wikimounts:[{name:"docs",root:root}],wikitarget:"docs"}),["Wiki operations"],"Explicit mounted target remains selected")
+    })
+  }
+  exports.testBrowseOrganize = function() {
+    fixture(function(root, runner) {
+      io.mkdir(root + "/a"); io.mkdir(root + "/dest")
+      io.writeFileString(root + "/dest/index.md", "# Dest\n") // folders are sections: browse lists them through their pages
+      io.writeFileString(root + "/a/one.md", "# One\n[Home](../home.md)\n")
+      io.writeFileString(root + "/a/two.md", "# Two\n")
+      io.writeFileString(root + "/a/three.md", "# Three\n")
+      io.writeFileString(root + "/home.md", "# Home\n[One](a/one.md)\n")
+      var plan, shown, man = function(args, steps) {
+        plan = steps.slice(); shown = []
+        return new MiniAWikiMan(args, {
+          print: function(v) { shown.push(v) },
+          ask: function() { return plan.shift() },
+          choose: function(prompt, labels) {
+            var want = plan.shift()
+            if (isString(want)) return labels.length - 1 // Back
+            var i = labels.findIndex(function(l) { return want.test(l) })
+            assert(i >= 0, true, "Expected a choice matching " + want + " in " + JSON.stringify(labels))
+            return i
+          }
+        })
+      }
+      var args = { wikiroot: root, wikiaccess: "rw", wikiretrievalv2: false, usewikigraph: false }
+      // Mark two pages in a/, walk to dest/, move them there (selection transaction), create a folder, then back out.
+      man(args, [/📁 a\//, /one\.md/, /two\.md/, /\.\.  \(wiki root\)/, /📁 dest\//, /Move 2 marked here/, /Yes/,
+        /New folder here/, "fresh", /Yes/, "back"]).organize()
+      assert(io.fileExists(root + "/dest/one.md") && io.fileExists(root + "/dest/two.md"), true, "Marked pages moved")
+      assert(io.fileExists(root + "/a/one.md") || io.fileExists(root + "/a/two.md"), false, "Sources removed")
+      assert(io.fileExists(root + "/a/three.md"), true, "Unmarked page kept")
+      assert(io.readFileString(root + "/home.md").indexOf("dest/one.md") >= 0, true, "Incoming link rewritten")
+      assert(io.fileExists(root + "/dest/fresh/index.md"), true, "New folder is a section with index.md")
+      // One page takes the plain page-move path.
+      var m1 = man(args, [/📁 a\//, /three\.md/, /\.\.  \(wiki root\)/, /📁 dest\//, /Move 1 marked here/, /Yes/, "back"])
+      m1.organize()
+      assert(io.fileExists(root + "/dest/three.md"), true, "Single page moved")
+      assert(m1.history.some(function(h) { return h.operation === "wiki.move" }), true, "Single page uses wiki.move")
+      // A folder in the selection requires typing the exact confirmation to delete.
+      io.mkdir(root + "/gone"); io.writeFileString(root + "/gone/x.md", "# X\n")
+      var m2 = man(args, [/Mark\/unmark a subfolder/, /gone/, /home\.md/, /Delete 2 marked/, /Yes/, "wrong", "back"])
+      m2.organize()
+      assert(io.fileExists(root + "/gone/x.md"), true, "Wrong confirmation changes nothing")
+      var m3 = man(args, [/📁 gone\//, /Mark this folder/, /\.\.  \(wiki root\)/, /📁 dest\//, /one\.md/, /Delete 2 marked/, /Yes/, "delete 2 items", "back"])
+      m3.organize()
+      assert(io.fileExists(root + "/gone") || io.fileExists(root + "/dest/one.md"), false, "Typed confirmation deletes the selection")
+      // Read-only wikis can browse but never offer mutations.
+      var seen = []
+      var ro = new MiniAWikiMan({ wikiroot: root, wikiaccess: "ro", wikiretrievalv2: false }, { print: function() {}, ask: function() { return "" }, choose: function(p, labels) { seen = seen.concat(labels); return labels.length - 1 } })
+      ro.organize()
+      assert(seen.some(function(l) { return /New folder|Move \d+ marked|Delete \d+ marked/.test(l) }), false, "Read-only browse offers no mutations")
     })
   }
   exports.testCategoryUX = function() {

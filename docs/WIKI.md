@@ -47,6 +47,13 @@ Use `/wiki init` to scaffold, `/wiki write <path> <content>` to edit, and
 `/wiki lint` to inspect consistency. Check `/wiki backlinks <path>` before moving
 or deleting a page. Mounts remain read-only; edits target the primary wiki.
 
+To reorganize, use **Browse & organize** in `wikiman=true` or the Pages explorer in
+Wiki Studio: create folders (a folder is a section with an `index.md`), mark several
+pages and folders, then move or delete them in one previewed, snapshotted
+transaction that rewrites links once (local filesystem wikis; one page uses the
+ordinary page move). Programmatic API: `createFolder`, `previewSelection`,
+`moveSelection`, `deleteSelection` on `MiniAWikiManager`.
+
 ### Ingest and synchronize
 
 Use [repeated ingestion](#safe-repeated-ingestion) for imported documents and source

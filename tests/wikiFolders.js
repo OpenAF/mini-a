@@ -152,4 +152,106 @@
     var reader=new MiniAWikiManager({root:root,backend:"fs",access:"ro",wikiretrievalv2:true,usegraph:true})
     try { assert(reader.search("CobaltQuokka").some(function(hit){return hit.path === "old/nested/café page.md"}),true,"Fresh reader searches restored snapshot") } finally { reader.close() }
   }) }
+  function selectionSeed(wm, root) {
+    io.mkdir(root + "/a/deep"); io.mkdir(root + "/b"); io.mkdir(root + "/dest")
+    io.writeFileString(root + "/a/index.md", "# A\n[One](one.md)\n")
+    io.writeFileString(root + "/a/one.md", "# One\n[Two](../b/two.md)\n![Img](pic.bin)\n")
+    io.writeFileString(root + "/a/pic.bin", "bin")
+    io.writeFileString(root + "/a/deep/leaf.md", "# Leaf\n[One](../one.md)\n")
+    io.writeFileString(root + "/b/two.md", "# Two\n[One](../a/one.md)\n[Leaf](../a/deep/leaf.md)\n")
+    io.writeFileString(root + "/home.md", "# Home\n[One](a/one.md) [Two](b/two.md)\n")
+    assert(wm.reindex().ok,true,"Initial index")
+  }
+  exports.testSelectionMove = function() { ;[false,true].forEach(function(v2) { fixture(v2,function(wm,root) {
+    selectionSeed(wm,root)
+    var items = ["a/one.md","b/two.md","a/deep"]
+    var preview = wm.previewSelection(items,"dest")
+    assert(preview.ok,true,"Selection preview: " + JSON.stringify(preview))
+    assert(preview.entries.length,3,"Preview lists every entry")
+    assert(preview.entries.filter(function(e){return e.kind==="folder"}).length,1,"Folder entry typed")
+    assert(wm.moveSelection(items,"dest",{}).ok,false,"Missing revision rejected")
+    var moved = wm.moveSelection(items,"dest",{expectedRevision:preview.revision})
+    assert(moved.ok,true,"Selection moved: " + JSON.stringify(moved))
+    assert(io.fileExists(root + "/dest/one.md") && io.fileExists(root + "/dest/two.md") && io.fileExists(root + "/dest/deep/leaf.md"),true,"All entries moved")
+    assert(io.fileExists(root + "/a/one.md") || io.fileExists(root + "/b/two.md"),false,"Sources gone")
+    var one = io.readFileString(root + "/dest/one.md"), two = io.readFileString(root + "/dest/two.md"), leaf = io.readFileString(root + "/dest/deep/leaf.md")
+    assert(one.indexOf("[Two](two.md)") >= 0,true,"Link between two moved pages rebased: " + one)
+    assert(one.indexOf("../a/pic.bin") >= 0,true,"Link to unmoved asset rebased: " + one)
+    assert(two.indexOf("[One](one.md)") >= 0 && two.indexOf("[Leaf](deep/leaf.md)") >= 0,true,"Moved page links rebased: " + two)
+    assert(leaf.indexOf("[One](../one.md)") >= 0,true,"Link inside moved folder to co-moved page kept relative: " + leaf)
+    var home = io.readFileString(root + "/home.md")
+    assert(home.indexOf("dest/one.md") >= 0 && home.indexOf("dest/two.md") >= 0,true,"Incoming links rewritten: " + home)
+    assert(io.readFileString(root + "/a/index.md").indexOf("../dest/one.md") >= 0 || io.readFileString(root + "/a/index.md").indexOf("dest/one.md") >= 0,true,"Link from section index rewritten")
+    var root2 = wm.moveSelection(["dest/one.md","dest/two.md"],"",{expectedRevision:wm.previewSelection(["dest/one.md","dest/two.md"],"").revision})
+    assert(root2.ok,true,"Move to wiki root: " + JSON.stringify(root2))
+    assert(io.fileExists(root + "/one.md") && io.fileExists(root + "/two.md"),true,"Root targets have no leading slash")
+  }) }) }
+  exports.testSelectionGuards = function() { fixture(false,function(wm,root) {
+    selectionSeed(wm,root)
+    var err = function(r,code,msg) { assert(r.ok,false,msg + " rejected"); assert(String(r.error).indexOf(code) >= 0,true,msg + " code " + code + ": " + r.error) }
+    err(wm.previewSelection([],"dest"),"selection-empty","Empty selection")
+    err(wm.previewSelection(["a","a/one.md"],"dest"),"selection-overlap","Nested overlap")
+    err(wm.previewSelection(["a/one.md","a/one.md"],"dest"),"selection-overlap","Duplicate")
+    io.writeFileString(root + "/b/one.md","# Other\n")
+    err(wm.previewSelection(["a/one.md","b/one.md"],"dest"),"selection-destination-collision","Same basename collision")
+    err(wm.previewSelection(["a/index.md"],"dest"),"selection-protected","Standalone index.md")
+    err(wm.previewSelection(["a/missing.md"],"dest"),"selection-not-found","Missing source")
+    err(wm.previewSelection(["a/one.md"],"nope"),"selection-destination-not-found","Missing destination")
+    err(wm.previewSelection(["a"],"a/deep"),"selection-destination-inside-source","Destination inside source")
+    err(wm.previewSelection(["a","b"],"b"),"selection-destination-inside-source","Destination is selected folder")
+    io.writeFileString(root + "/dest/two.md","# Existing\n")
+    err(wm.previewSelection(["b/two.md"],"dest"),"selection-destination-exists","Existing target")
+    err(wm.previewSelection(["../x"],"dest"),"unsafe","Traversal")
+    var before = __miniAWikiFolder.revision(__miniAWikiFolder.scan(root))
+    var preview = wm.previewSelection(["a/one.md"],"dest")
+    io.writeFileString(root + "/home.md","# changed\n")
+    err(wm.moveSelection(["a/one.md"],"dest",{expectedRevision:preview.revision}),"selection-stale-preview","Stale preview")
+    assert(io.fileExists(root + "/a/one.md"),true,"Stale preview changes nothing")
+    var ro = new MiniAWikiManager({backend:"fs",root:root,access:"ro",skipBootstrap:true})
+    try { err(ro.moveSelection(["a/one.md"],"dest",{expectedRevision:preview.revision}),"read-only","Read-only manager") } finally { ro.close() }
+  }) }
+  exports.testSelectionDelete = function() { fixture(false,function(wm,root) {
+    selectionSeed(wm,root)
+    var items = ["a/one.md","b"]
+    var preview = wm.previewSelection(items,null)
+    assert(preview.ok,true,"Delete preview: " + JSON.stringify(preview))
+    assert(preview.confirmation,"delete 2 items","Typed confirmation text")
+    assert(preview.incomingLinks.length > 0,true,"Surviving incoming links reported")
+    var bad = wm.deleteSelection(items,{expectedRevision:preview.revision,confirmation:"a/one.md"})
+    assert(bad.ok,false,"Wrong confirmation rejected"); assert(io.fileExists(root + "/a/one.md"),true,"Wrong confirmation changes nothing")
+    var done = wm.deleteSelection(items,{expectedRevision:preview.revision,confirmation:"delete 2 items"})
+    assert(done.ok,true,"Selection deleted: " + JSON.stringify(done))
+    assert(io.fileExists(root + "/a/one.md") || io.fileExists(root + "/b"),false,"Entries removed")
+    assert(io.fileExists(root + "/a/index.md") && io.fileExists(root + "/a/deep/leaf.md"),true,"Unselected content kept")
+    assert(isString(done.recoveryId) && done.recoveryId.length > 0,true,"Recovery snapshot recorded")
+    assert(wm.previewSelection(["dest/x.md"],null).ok,false,"Missing selection source rejected after delete")
+  }) }
+  exports.testSelectionRestoreFromSnapshot = function() { fixture(false,function(wm,root) {
+    selectionSeed(wm,root)
+    var items = ["a/one.md","b/two.md","a/deep"], before = __miniAWikiFolder.revision(__miniAWikiFolder.scan(root))
+    var preview = wm.previewSelection(items,"dest"), original = wm.reindex
+    wm.reindex = function() { return {ok:false,error:"injected publication failure"} }
+    var failed = wm.moveSelection(items,"dest",{expectedRevision:preview.revision})
+    assert(failed.ok,false,"Publication failure is not success"); assert(failed.recovery_pending,true,"Recovery retained")
+    var journal = af.fromJson(io.readFileString(root + "/.mini-a-wiki-folders/pending.json"))
+    assert(journal.entries.length,3,"Journal records every selection entry")
+    assert(io.fileExists(root + "/dest/one.md") && io.fileExists(root + "/dest/two.md") && io.fileExists(root + "/dest/deep/leaf.md"),true,"Files moved before the failure")
+    assert(wm.previewSelection(["dest/one.md"],"b").ok,false,"Pending transaction blocks further selections")
+    wm.reindex = original
+    var restored = wm.restoreFolder(failed.recoveryId)
+    assert(restored.ok,true,"Verified rollback: " + JSON.stringify(restored))
+    assert(__miniAWikiFolder.revision(__miniAWikiFolder.scan(root)),before,"Complete pre-move inventory restored")
+  }) }
+  exports.testCreateFolder = function() { fixture(false,function(wm,root) {
+    var made = wm.createFolder("topics/new area")
+    assert(made.ok,true,"Folder created: " + JSON.stringify(made))
+    assert(made.index,"topics/new area/index.md","Index path reported")
+    assert(io.fileExists(root + "/topics/new area/index.md"),true,"index.md written")
+    assert(wm.tree("",3).sections.length > 0,true,"New folder visible in tree")
+    var again = wm.createFolder("topics/new area")
+    assert(again.ok,false,"Existing folder rejected"); assert(String(again.error).indexOf("folder-exists") >= 0,true,"Exists code")
+    ;["../x",".mini-a-hidden","a/.git","@mount/x",""].forEach(function(bad) { assert(wm.createFolder(bad).ok,false,"Rejected: " + bad) })
+    var ro = new MiniAWikiManager({backend:"fs",root:root,access:"ro",skipBootstrap:true})
+    try { assert(ro.createFolder("x").ok,false,"Read-only rejected") } finally { ro.close() }
+  }) }
 })()

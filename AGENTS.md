@@ -13,7 +13,12 @@ Internal JavaScript is grouped under `js/core`, `js/session`, `js/web`, `js/memo
 Always export `OAF_MODEL="(type: ..., model: ..., key: ...)"` (and optionally `OAF_LC_MODEL`) before running.
 
 ## Coding Style & Naming Conventions
-JavaScript executes inside OpenAF; keep two-space indentation and prefer `var` with camelCase names to match the existing code. Class-like helpers use PascalCase (e.g., `MiniA`), internal state uses `_` prefixes, and metrics keys stay snake_case. YAML files follow two-space indents with lower-case keys. Avoid introducing external dependencies without coordination—runtime expects the OpenAF standard library.
+JavaScript executes inside OpenAF; keep two-space indentation and prefer `var` with camelCase names to match the existing code. Class-like helpers use PascalCase (e.g., `MiniA`), internal state uses `_` prefixes, and metrics keys stay snake_case. Follow the layout of OpenAF's own `js/openaf.js` (keeping two-space indentation instead of its tabs) for new and edited code, including browser code under `public/`:
+- One statement per line; no semicolons at line ends; spaces around operators, after commas and keywords (`if (x) {`), and inside object literals (`{ a: 1 }`). Do not pack several statements onto one line; reformat dense code you touch.
+- Use `var` and `function` declarations; keep arrow functions for short inline callbacks (`map`, `filter`, `forEach`).
+- Break long call chains one call per line, aligned under the first call, as in `_wikiPathFor` in `js/wiki/mini-a-ingest.js`.
+- Use `isDef`/`isUnDef`/`isString`-style checks (explicit `typeof`/`length` checks in browser code) rather than truthiness when a value can be `""` or `0`.
+- Put a short `//` comment above each function or logical block saying what it does or why (not how); separate blocks with a blank line. Public library functions may carry `<odoc>` blocks like `js/openaf.js`. YAML files follow two-space indents with lower-case keys. Avoid introducing external dependencies without coordination—runtime expects the OpenAF standard library.
 
 ## Testing Guidelines
 Automated tests exist for utility modules under `tests/`. Run the mini-a-utils test suite with `ojob tests/miniAUtils.yaml` to verify file operations, mathematical operations, and time operations. When adding new functionality to `js/core/mini-a-utils.js`, extend the corresponding test file (`tests/miniAUtils.js`) and update the job configuration (`tests/miniAUtils.yaml`) with new test cases.

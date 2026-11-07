@@ -15,6 +15,12 @@ jobs:
 - name: Studio recursive folders
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testFolders
+- name: Studio selections
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testSelections
+- name: Studio create folder
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testCreateFolder
 - name: Studio graph build settings
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testGraphBuildSettings
@@ -68,6 +74,8 @@ todo:
 - Studio inventory and lock namespaces
 - Studio oversized outcomes
 - Studio recursive folders
+- Studio selections
+- Studio create folder
 - Studio graph build settings
 - Studio cleanup
 - Studio explorer

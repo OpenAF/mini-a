@@ -20,7 +20,7 @@ var MiniAWikiMan = function(args, ui) {
 // Decorate labels only: operation IDs, category matching and menu indices stay stable.
 MiniAWikiMan.menuLabel = function(label) {
   var names = {
-    "Inspect": "🔎", "Pages & structure": "📝", "Indexes & storage": "🗂️", "Graph": "🕸️",
+    "Inspect": "🔎", "Browse & organize": "📂", "Pages & structure": "📝", "Indexes & storage": "🗂️", "Graph": "🕸️",
     "Dream": "💤", "Ingestion & absorption": "📥", "Session": "⚙️", "Exit": "👋", "Back": "🔙",
     "Advanced options: off": "⚙️", "Advanced options: on": "⚙️", "Show last result details": "📋", "Show last command line": "💻", "No": "❌", "Yes": "✅", "fs": "📁", "s3": "☁️", "s3fs": "☁️", "es": "🔎", "http": "🌐",
     "Configured primary / federation overview": "📚", "Set up another primary": "✨",
@@ -32,7 +32,7 @@ MiniAWikiMan.menuLabel = function(label) {
   var actions = {
     context: "ℹ️", indexstats: "📊", list: "📋", tree: "🌳", browse: "📂", read: "📖",
     search: "🔎", backlinks: "🔗", lint: "🩺", mounts: "📚", init: "✨", write: "✏️",
-    move: "📦", delete: "🗑️", indexes: "🗂️", upgrade: "⬆️", reindex: "🔄", compact: "🗜️",
+    move: "📦", folderCreate: "📁", selectionPreview: "📋", selectionMove: "📦", selectionDelete: "🗑️", delete: "🗑️", indexes: "🗂️", upgrade: "⬆️", reindex: "🔄", compact: "🗜️",
     stats: "📊", filestats: "🗄️", query: "🔎", retrieve: "📖", answer: "💬", neighbors: "🔗",
     path: "🧭", communities: "👥", surprise: "✨", cross: "🌐", export: "📤", build: "🛠️",
     report: "📋", falkor: "🗄️", html: "🌐", plan: "📝", apply: "✅", repair: "🔧",
@@ -373,17 +373,112 @@ MiniAWikiMan.prototype.showCurrentWiki = function() {
   var summary = af.toCSLON(MiniAWikiOps.sanitize(header, this.args))
   this.ui.print(ow.format.withSideLine(summary, MiniAWikiMan.consoleWidth(), "FG(220)", "RESET", ow.format.withSideLineThemes().doubleLineBothSides))
 }
+// Interactive file-manager style browser: walk folders, mark pages/folders, then move, delete or create
+// folders. Marks survive navigation, so "mark here, walk there, Move marked here" works like cut and paste.
+MiniAWikiMan.prototype.organize = function() {
+  var self = this, runner = self.runner(), path = "", offset = 0, size = 30, marked = [], kinds = {}
+  var strip = function(p) { return String(p || "").replace(/\/+$/, "") }
+  var base = function(p) { return p.substring(p.lastIndexOf("/") + 1) }
+  var join = function(dir, name) { return (dir ? dir + "/" : "") + name }
+  var parentOf = function(p) { return p.indexOf("/") < 0 ? "" : p.substring(0, p.lastIndexOf("/")) }
+  var call = function(id, params) {
+    var spec = runner.spec(id, params), reason = runner.unavailable(spec)
+    if (reason) throw new Error(reason)
+    return runner.execute(spec, {})
+  }
+  var reasonFor = function(id, params) { return runner.unavailable(runner.spec(id, params)) }
+  var writeReason = reasonFor("wiki.folderCreate", { path: "x" }), selectionReason = reasonFor("wiki.selectionMove", { items: ["x"], to: "" })
+  var effective = function() { return marked.filter(function(m) { return !marked.some(function(o) { return o !== m && m.indexOf(o + "/") === 0 }) }) }
+  var toggle = function(p, kind) { var i = marked.indexOf(p); if (i >= 0) marked.splice(i, 1); else { marked.push(p); kinds[p] = kind } }
+  var mutate = function(id, params, gates) {
+    var spec = runner.spec(id, params)
+    self.show({ operation: id, target: runner.args.wikitarget || runner.args.wikiroot || runner.args.wikiurl || runner.args.wikibucket, access: runner.args.wikiaccess, params: spec.params })
+    if (!self.yes("Execute this operation?")) return null
+    return self.record(runner, spec, merge({ confirm: true }, gates || {}))
+  }
+  // One page uses the page operations; several items or any folder use one previewed, snapshotted transaction.
+  var transfer = function(items, destination) {
+    var deleting = destination === null, single = items.length === 1 && kinds[items[0]] !== "folder"
+    if (single) return deleting ? mutate("wiki.delete", { path: items[0] }) : mutate("wiki.move", { from: items[0], to: join(destination, base(items[0])) })
+    if (selectionReason) throw new Error(selectionReason)
+    var preview = call("wiki.selectionPreview", { items: items, to: deleting ? "" : destination, "delete": deleting })
+    self.show(preview)
+    if (!preview.ok) return null
+    if (!self.yes((deleting ? "Delete" : "Move") + " these " + items.length + " items after creating a verified recovery snapshot?")) return null
+    var params = { items: items, expectedRevision: preview.revision }
+    if (deleting) {
+      params.confirmation = self.input('Type "' + preview.confirmation + '" to delete')
+      if (params.confirmation !== preview.confirmation) { self.show("Confirmation did not match; nothing changed."); return null }
+    } else params.to = destination
+    return self.record(runner, runner.spec(deleting ? "wiki.selectionDelete" : "wiki.selectionMove", params), { confirm: true })
+  }
+  var done = function(result, items) { if (result && result.ok !== false) items.forEach(function(p) { var i = marked.indexOf(p); if (i >= 0) marked.splice(i, 1) }) }
+  if (writeReason) self.show("Browsing only: " + writeReason)
+  while (true) {
+    var listing = call("wiki.browse", { path: path })
+    if (listing && listing.ok === false) throw new Error(listing.error || "Cannot browse " + (path || "the wiki root"))
+    var sections = (listing.child_sections || []).filter(function(c) { return c.name && c.name.charAt(0) !== "@" && String(c.path).charAt(0) !== "@" })
+    var pages = (listing.direct_pages || []).filter(function(c) { return !/(^|\/)index\.md$/i.test(c.path) })
+    var mark = function(p) { return marked.indexOf(p) >= 0 || marked.some(function(o) { return p.indexOf(o + "/") === 0 }) ? "[x] " : "[ ] " }
+    var rows = []
+    if (path) rows.push({ label: "⬆️  ..  (" + (parentOf(path) || "wiki root") + ")", run: function() { path = parentOf(path); offset = 0 } })
+    sections.forEach(function(c) {
+      var folder = strip(c.path)
+      rows.push({ label: mark(folder) + "📁 " + c.name + "/  (" + c.page_count + " pages)", run: function() { path = folder; offset = 0 } })
+    })
+    pages.forEach(function(c) {
+      rows.push({ label: mark(c.path) + "📄 " + base(c.path), run: function() { toggle(c.path, "file") } })
+    })
+    var navigation = rows.slice(0, path ? 1 : 0), content = rows.slice(path ? 1 : 0), shown = content.slice(offset, offset + size)
+    var choices = navigation.concat(shown)
+    if (offset > 0) choices.push({ label: "◀ Previous " + size, run: function() { offset = Math.max(0, offset - size) } })
+    if (offset + size < content.length) choices.push({ label: "▶ Next " + size + " (" + (content.length - offset - size) + " more)", run: function() { offset += size } })
+    var chosen = effective()
+    if (!writeReason) {
+      choices.push({ label: "➕ New folder here", run: function() {
+        var name = self.input("New folder name inside " + (path || "the wiki root")), made = mutate("wiki.folderCreate", { path: join(path, name.replace(/^\/+|\/+$/g, "")) })
+        if (made && made.ok !== false) offset = 0
+      } })
+    }
+    if (path) choices.push({ label: (marked.indexOf(path) >= 0 ? "☐ Unmark" : "☑ Mark") + " this folder", run: function() { toggle(path, "folder") } })
+    if (sections.length) choices.push({ label: "☑ Mark/unmark a subfolder…", run: function() {
+      var pick = self.ui.choose("Subfolder", sections.map(function(c) { return mark(strip(c.path)) + "📁 " + c.name }).concat(["🔙 Back"]))
+      if (pick >= 0 && pick < sections.length) toggle(strip(sections[pick].path), "folder")
+    } })
+    if (pages.length) choices.push({ label: "☑ Mark all pages here", run: function() { pages.forEach(function(c) { if (marked.indexOf(c.path) < 0) { marked.push(c.path); kinds[c.path] = "file" } }) } })
+    if (chosen.length && !writeReason) {
+      var heavy = chosen.length > 1 || chosen.some(function(m) { return kinds[m] === "folder" }), gate = heavy && selectionReason ? " [unavailable: requires a local filesystem wiki]" : ""
+      choices.push({ label: "📦 Move " + chosen.length + " marked here (" + (path || "wiki root") + ")" + gate, run: function() { done(transfer(chosen.slice(), path), chosen) } })
+      choices.push({ label: "🗑️  Delete " + chosen.length + " marked" + gate, run: function() { done(transfer(chosen.slice(), null), chosen) } })
+    }
+    if (chosen.length === 1 && kinds[chosen[0]] !== "folder" && !writeReason) {
+      choices.push({ label: "✏️  Rename marked page", run: function() {
+        var to = self.input("New path for " + chosen[0], chosen[0]); if (to === chosen[0]) return
+        done(mutate("wiki.move", { from: chosen[0], to: to }), chosen)
+      } })
+    }
+    if (chosen.length) choices.push({ label: "✖ Clear " + marked.length + " mark(s)", run: function() { marked = [] } })
+    choices.push({ label: "🔙 Back", run: null })
+    self.separator()
+    self.ui.print(ansiColor("BOLD", "📂 /" + path) + (marked.length ? ansiColor("FG(41)", "   " + marked.length + " marked: " + marked.slice(0, 3).join(", ") + (marked.length > 3 ? ", …" : "")) : ""))
+    var pick = self.ui.choose("Browse & organize", choices.map(function(c) { return c.label }))
+    if (pick < 0 || pick >= choices.length || !choices[pick].run) return
+    try { choices[pick].run() }
+    catch(e) { if (String(e.message || e) !== "cancelled") self.ui.print(ansiColor("FG(196)", "❌ Operation failed: " + MiniAWikiOps.sanitize(String(e.message || e), self.args))) }
+  }
+}
 MiniAWikiMan.prototype.run = function() {
   this.ui.print(ansiColor("BOLD", " ._ _ " + ansiColor("FG(41)", "o") + "._ " + ansiColor("FG(41)", "o") + "   _\n | | ||| ||~~(_|") + ansiColor("FG(218)", " Wiki operations manager"))
-  var self = this, groups = ["Inspect", "Pages & structure", "Indexes & storage", "Graph", "Dream", "Ingestion & absorption", "Session", "Exit"]
+  var self = this, groups = ["Inspect", "Browse & organize", "Pages & structure", "Indexes & storage", "Graph", "Dream", "Ingestion & absorption", "Session", "Exit"]
   try {
     try { this.runner().targetConfig(); if (!this.args.wikitarget && this.mounts().length > 0) this.selectTarget() } catch(e) { this.show(String(e.message || e)); this.setup() }
     while (true) {
       this.showCurrentWiki()
       var selected = this.choose("Wiki operations", groups)
-      if (selected < 0 || selected === 7) break
+      if (selected < 0 || groups[selected] === "Exit") break
       try {
-        if (selected === 6) { this.session(); continue }
+        if (groups[selected] === "Session") { this.session(); continue }
+        if (groups[selected] === "Browse & organize") { this.organize(); continue }
         this.category(groups[selected])
       } catch(e) { if (String(e.message || e) !== "cancelled") this.ui.print(ansiColor("FG(196)", "❌ Operation failed: " + MiniAWikiOps.sanitize(String(e.message || e), this.args))) }
     }

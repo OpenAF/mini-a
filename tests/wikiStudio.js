@@ -186,6 +186,43 @@
     assert(WikiStudio.pending(w.root)[0].kind,"folder","Folder recovery surfaced")
     rejects(function(){route("preview",{source:"new"})},"folder_preflight")
   }) }
+  exports.testSelections = function() { fixture(function(s,t) {
+    var w=add(s,t);WikiStudio.privateDir(s.config.home+"/jobs");s.jobs=new WikiStudioJobs(s.config)
+    io.mkdir(w.root+"/a");io.mkdir(w.root+"/b");io.mkdir(w.root+"/dest")
+    io.writeFileString(w.root+"/a/one.md","# One\n[Two](../b/two.md)\n");io.writeFileString(w.root+"/b/two.md","# Two\n");io.writeFileString(w.root+"/home.md","# Home\n[One](a/one.md)\n")
+    var route=function(action,body,role,key){return s.wikiRoute({method:"POST",headers:{"idempotency-key":key||"selection-request-123"},body:body},w,["selection",action],role||"admin")}
+    var run=function(job){s.jobs.update(job.id,{status:"acquiring-lock"});wikiStudioRunWorker(s.config,job.id);return s.jobs.get(job.id)}
+    rejects(function(){route("preview",{items:["a/one.md"],destination:"dest"},"editor")},"forbidden")
+    rejects(function(){route("preview",{items:[],destination:"dest"})},"invalid_items")
+    rejects(function(){route("preview",{items:["../x"],destination:"dest"})},"unsafe_path")
+    rejects(function(){route("preview",{items:["a/one.md","a/one.md"],destination:"dest"})},"selection_preflight")
+    var preview=route("preview",{items:["a/one.md","b/two.md"],destination:"dest"})
+    assert(preview.entries.length,2,"Selection preview lists entries")
+    rejects(function(){route("move",{items:["a/one.md","b/two.md"],destination:"dest"})},"preview_required")
+    var job=route("move",{items:["a/one.md","b/two.md"],destination:"dest",expectedRevision:preview.revision})
+    var done=run(job)
+    assert(done.status,"completed","Worker publishes selection move: "+JSON.stringify(done))
+    assert(!!done.backupId,true,"Selection move retains a verified backup")
+    assert(io.fileExists(w.root+"/dest/one.md")&&io.fileExists(w.root+"/dest/two.md"),true,"Items moved")
+    assert(io.readFileString(w.root+"/home.md").indexOf("dest/one.md")>=0,true,"Incoming link rewritten")
+    var del=route("preview",{items:["dest/one.md","dest/two.md"]})
+    assert(del.operation,"selection-delete","Missing destination previews deletion")
+    rejects(function(){route("delete",{items:["dest/one.md","dest/two.md"],expectedRevision:del.revision,confirmation:"dest/one.md"})},"confirmation_required")
+    done=run(route("delete",{items:["dest/one.md","dest/two.md"],expectedRevision:del.revision,confirmation:"delete 2 items"},"admin","selection-request-456"))
+    assert(done.status,"completed","Worker deletes selection")
+    assert(io.fileExists(w.root+"/dest/one.md"),false,"Selection deleted")
+  }) }
+  exports.testCreateFolder = function() { fixture(function(s,t) {
+    var w=add(s,t)
+    var make=function(path,role,wiki){return s.wikiRoute({method:"POST",body:{path:path}},wiki||w,["folders"],role||"editor")}
+    var made=make("topics/new")
+    assert(made.index,"topics/new/index.md","Folder created as a section")
+    assert(io.fileExists(w.root+"/topics/new/index.md"),true,"index.md written")
+    rejects(function(){make("topics/new")},"folder_exists")
+    rejects(function(){make("../x")},"unsafe_path")
+    rejects(function(){make("x","viewer")},"forbidden")
+    rejects(function(){make("y","editor",merge(w,{access:"ro"}))},"read_only")
+  }) }
   exports.testGraphBuildSettings = function() { fixture(function(s,t) {
     WikiStudio.privateDir(s.config.home+"/jobs")
     var w=add(s,t), route=["graph","settings"]
@@ -261,6 +298,40 @@
     var local=s.sourceAdd(w,{id:"local",name:"Local",type:"git",directoryId:"checkout"})
     assert(local.type,"git","Allowlisted local checkout adapter")
     assert(!!local.files["doc.md"],true,"Directory snapshot inventory")
+    // YouTube captions: the operator chooses the Markdown (page) file name.
+    assert(WikiStudio.markdownFileName("My Talk.md"),"my-talk.md","File names use page slug rules")
+    rejects(function(){WikiStudio.markdownFileName("index")},"invalid_filename")
+    rejects(function(){WikiStudio.markdownFileName("../")},"invalid_filename")
+    var realYoutube=WikiStudioOutbound.youtube
+    WikiStudioOutbound.youtube=function(){return {name:"youtube-abc.md",markdown:"# Talk\n\nTranscript\n",origin:"https://www.youtube.com/watch?v=abc"}}
+    try {
+      var named=s.sourceAdd(w,{id:"talk",name:"Talk",type:"youtube",video:"abc",filename:"Keynote 2026"})
+      assert(Object.keys(named.files).join(),"keynote-2026.md","Chosen caption file name is staged")
+      var unnamed=s.sourceAdd(w,{id:"talk2",name:"Talk 2",type:"youtube",video:"abc"})
+      assert(Object.keys(unnamed.files).join(),"youtube-abc.md","Default caption file name kept")
+      rejects(function(){s.sourceAdd(w,{id:"talk3",name:"Talk 3",type:"youtube",video:"abc",filename:"log"})},"invalid_filename")
+      rejects(function(){s.sourceAdd(w,{id:"web2",name:"Web",type:"web",url:"https://example.com/",filename:"x"})},"invalid_source")
+      var spec=s.sourceOperation(w,"ingestions",{sourceId:"talk",revision:named.revision,options:{section:"talks/2026"}})
+      assert(spec.params.section,"talks/2026","Chosen wiki folder reaches the engine")
+    } finally { WikiStudioOutbound.youtube=realYoutube }
+
+    // Deleting a source removes its record and every sealed upload revision
+    var second=WikiStudio.id()
+    s.streamUpload({role:"admin",headers:{"x-upload-id":second,"x-upload-path":"source.md"}},new java.io.ByteArrayInputStream(WikiStudio.bytes("# Second\n")))
+    var updated=s.sourceAdd(w,{id:"docs",name:"Documents",type:"upload",uploadId:second})
+    assert(updated.lineage.join(),id,"Update keeps prior revision in lineage")
+    rejects(function(){s.sourceDelete(w,"docs",{})},"confirmation_required")
+    rejects(function(){s.sourceDelete(w,"missing",{confirmation:"missing"})},"source_not_found")
+    s.jobs={list:function(){return [{wikiId:w.id,operation:"ingest.run",params:{sourceId:"docs"},status:"running"}]}}
+    rejects(function(){s.sourceDelete(w,"docs",{confirmation:"docs"})},"source_busy")
+    delete s.jobs
+    var deleted=s.sourceDelete(w,"docs",{confirmation:"docs"})
+    assert(deleted.revisionsRemoved,2,"Both upload revisions removed")
+    assert(s.sourceGet(w,"docs"),null,"Source record removed")
+    assert(io.fileExists(s.config.home+"/sources/uploads/"+id),false,"Old revision files removed")
+    assert(io.fileExists(s.config.home+"/sources/uploads/"+second),false,"Current revision files removed")
+    assert(s.sourceList(w).some(function(x){return x.id==="docs"}),false,"Library no longer lists the source")
+    assert(s.sourceList(w).some(function(x){return x.id==="local"}),true,"Other sources remain")
   }) }
   exports.testHydration = function() { fixture(function(s,t) {
     var w=add(s,t),id=WikiStudio.id();WikiStudio.privateDir(s.config.home+"/sources");WikiStudio.privateDir(s.config.home+"/jobs")
@@ -280,6 +351,26 @@
     var managed=Object.keys(unchanged).filter(function(p){return !/(^|\/)(index|log|AGENTS)\.md$/.test(p)})[0]
     var edited=io.readFileString(w.root+"/"+managed)+"\nManual operator edit\n";io.writeFileString(w.root+"/"+managed,edited)
     run(false,"manual-conflict-123");assert(io.readFileString(w.root+"/"+managed),edited,"Ingestion never silently overwrites manual source-page edits")
+
+    // Ad-hoc imports cannot take over a library source ID
+    var clash=WikiStudio.id()
+    s.streamUpload({role:"admin",headers:{"x-upload-id":clash,"x-upload-path":"x.md"}},new java.io.ByteArrayInputStream(WikiStudio.bytes("# X\n")))
+    rejects(function(){s.sourceAdd(w,{id:"lessons",name:"Lessons",type:"upload",uploadId:clash,adhoc:true})},"source_exists")
+    rejects(function(){s.sourceAdd(w,{id:"bad",name:"Bad",type:"upload",uploadId:clash,adhoc:"yes"})},"invalid_source")
+
+    // Ad-hoc import: a preview keeps the source, a successful import discards it
+    var once=WikiStudio.id()
+    s.streamUpload({role:"admin",headers:{"x-upload-id":once,"x-upload-path":"note.md"}},new java.io.ByteArrayInputStream(WikiStudio.bytes("# Note\n\nA one-off note.\n")))
+    var adhoc=s.sourceAdd(w,{id:"once",name:"Once",type:"upload",uploadId:once,adhoc:true})
+    assert(adhoc.adhoc,true,"Ad-hoc flag recorded")
+    function runOnce(preview,key){var spec=s.sourceOperation(w,"ingestions",{sourceId:"once",revision:once,preview:preview,options:{mode:"raw",semantic:false,section:"notes"}});var j=s.jobs.submit(w,spec.operation,spec.params,key,"admin");s.jobs.update(j.id,{status:"acquiring-lock"});wikiStudioRunWorker(s.config,j.id);return s.jobs.get(j.id)}
+    assert(runOnce(true,"adhoc-preview-1").status,"completed","Ad-hoc preview")
+    assert(!!s.sourceGet(w,"once"),true,"Preview keeps the ad-hoc source")
+    var onceApplied=runOnce(false,"adhoc-apply-1");assert(onceApplied.status,"completed","Ad-hoc import: "+JSON.stringify(onceApplied))
+    assert(!!WikiStudio.scan(w.root,false)["notes/note.md"],true,"Ad-hoc import produced the page")
+    assert(s.sourceGet(w,"once"),null,"Ad-hoc source discarded after import")
+    assert(io.fileExists(s.config.home+"/sources/uploads/"+once),false,"Ad-hoc staged files discarded")
+    assert(!!s.sourceGet(w,"lessons"),true,"Library sources are kept after import")
   }) }
   exports.testBackups = function() { fixture(function(s,t) {
     var w=add(s,t);WikiStudio.privateDir(s.config.home+"/jobs")

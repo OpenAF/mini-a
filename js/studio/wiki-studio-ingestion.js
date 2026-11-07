@@ -86,6 +86,13 @@ WikiStudioServer.prototype.sourceUpdateRun = function(w, job, result) {
   return WikiStudio.sourceLock(this.config.home, w.id, p.sourceId, function() {
     var record = self.sourceGet(w, p.sourceId)
     if (!record || record.revision !== p.revision) return false
+
+    // A successful ad-hoc import is done with its source: discard it instead of keeping it
+    if (record.adhoc === true && !p.dryrun && isMap(result) && result.ok !== false) {
+      self.sourcePurge(w, record)
+      return true
+    }
+
     record.lastRun = job.id
     record.lastStatus = result.ok === false ? "failed" : p.dryrun ? "previewed" : "ingested"
     record.lastInventoryChecksum = p.inventoryChecksum

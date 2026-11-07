@@ -2,6 +2,18 @@
 
 ## Recent Updates
 
+### Delete sources from the Studio library
+
+Import → Source library now has a **Delete** action per source. It removes the source record and its staged revisions after confirmation; pages already imported remain. **Add source** also offers **Ad-hoc import**, which imports files, a webpage or captions once and then discards the source instead of keeping it in the library. See [Wiki Studio](WIKI-STUDIO.md#sources-uploads-and-incremental-hydration).
+
+### Choose where imported sources land in Studio
+
+The Studio import step now shows a **Wiki folder** box with a **Choose folder…** picker and a list of the page paths new files will get. YouTube captions accept an optional **Markdown file name** (default `youtube-<video id>.md`). See [Wiki Studio](WIKI-STUDIO.md#sources-uploads-and-incremental-hydration).
+
+### Create folders and move several pages at once
+
+Wiki Studio and `wikiman=true` can now create folders (sections with an `index.md`) and move or delete a mixed selection of pages and folders in one verified transaction (preview, recovery snapshot, links rewritten once). Studio adds multi-select, a folder picker, drag-and-drop, a context menu and move/rename/delete while reading; wikiman adds *Browse & organize*. See `docs/WIKI-STUDIO.md` and `USAGE.md`.
+
 ### Export a wiki to a portable ZIP
 
 `wiki.export` (wikiman → Indexes & storage, Wiki Studio → Maintenance → Export, or `ojob utils/wikiOps.yaml operation=wiki.export`) packages pages plus the validated search index and graph for other Mini-A instances, such as an S3 bucket. By default the index is a nested `mini-a-wiki-index.zip`; `nobundle=true` stores the index folders loose. See [Exporting a wiki to a ZIP](WIKI.md#exporting-a-wiki-to-a-zip).

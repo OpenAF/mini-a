@@ -80,6 +80,22 @@ WikiStudio.pagePath = function(value, markdown) {
   if (markdown !== false) WikiStudio.assert(/\.md$/i.test(value), 400, "unsafe_path", "A Markdown path is required")
   return value
 }
+// Normalizes a single Markdown file name using the same slug rules ingestion applies
+// to page names (e.g. "My Talk" -> "my-talk.md"). Reserved wiki page names are refused.
+WikiStudio.markdownFileName = function(value) {
+  WikiStudio.assert(isString(value) && value.length <= 120, 400, "invalid_filename", "Use a file name of at most 120 characters")
+
+  var slug = String(value).trim()
+             .replace(/\.md$/i, "")
+             .toLowerCase()
+             .replace(/[^a-z0-9_-]+/g, "-")
+             .replace(/-+/g, "-")
+             .replace(/^-|-$/g, "")
+
+  WikiStudio.assert(slug.length > 0, 400, "invalid_filename", "Use letters or digits in the file name")
+  WikiStudio.assert(["index", "log", "agents"].indexOf(slug) < 0, 400, "invalid_filename", "index, log and AGENTS are reserved page names")
+  return slug + ".md"
+}
 WikiStudio.safeFile = function(root, relative, markdown) {
   WikiStudio.pagePath(relative, markdown)
   var full = root + "/" + relative

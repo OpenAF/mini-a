@@ -165,19 +165,40 @@ MiniAWikiManager.prototype._rewriteFolderLinks = function(raw, page, nextPage, m
   }).join("")
 }
 
-MiniAWikiManager.prototype._folderPlan = function(from, to) {
-  if (this._catalog || this._backendType !== "fs" || this._archiveRoot) throw new Error("folder-operations-require-local-filesystem")
-  var source = __miniAWikiFolder.path(this, from), destination = to === null ? null : __miniAWikiFolder.path(this, to)
-  if (!source.isDirectory()) throw new Error("folder-not-found")
-  if (destination && (to === from || to.indexOf(from + "/") === 0)) throw new Error("folder-destination-inside-source")
-  if (destination && destination.exists()) throw new Error("folder-destination-exists")
-  if (destination && !destination.getParentFile().isDirectory()) throw new Error("folder-destination-parent-not-found")
-  if (__miniAWikiFolder.pending(this)) throw new Error("folder-recovery-pending")
-  var self = this, inventory = __miniAWikiFolder.scan(this._backend.root), mapping = Object.create(null), pages = [], updates = Object.create(null), incoming = [], files = 0, folders = 0
+// A transfer is a list of {from, to|null} entries; each source is a file or a folder.
+// "folder" keeps the historical single-folder error codes, "selection" is used for batches.
+MiniAWikiManager.prototype._transferPlan = function(entries, opts) {
+  var prefix = opts && opts.codePrefix || "selection", fail = function(code, extra) { return new Error(prefix + "-" + code + (extra ? ": " + extra : "")) }
+  if (this._catalog || this._backendType !== "fs" || this._archiveRoot) throw fail("operations-require-local-filesystem")
+  if (!isArray(entries) || !entries.length) throw fail("empty")
+  var deleting = entries[0].to === null, sources = Object.create(null), targets = Object.create(null), self = this
+  entries.forEach(function(e) {
+    if ((e.to === null) !== deleting) throw fail("mixed-operations")
+    var src = __miniAWikiFolder.path(self, e.from), dst = e.to === null ? null : __miniAWikiFolder.path(self, e.to)
+    if (!src.exists()) throw fail("not-found", prefix === "folder" ? __ : e.from)
+    if (prefix === "folder" && !src.isDirectory()) throw fail("not-found")
+    if (src.isFile() && (/(^|\/)(AGENTS|index|log)\.md$/i.test(e.from))) throw fail("protected", e.from)
+    if (sources[e.from]) throw fail("overlap", e.from)
+    sources[e.from] = true
+    if (dst) {
+      if (e.to === e.from || e.to.indexOf(e.from + "/") === 0) throw fail("destination-inside-source", prefix === "folder" ? __ : e.to)
+      if (dst.exists()) throw fail("destination-exists", prefix === "folder" ? __ : e.to)
+      if (!dst.getParentFile().isDirectory()) throw fail("destination-parent-not-found", prefix === "folder" ? __ : e.to)
+      if (targets[e.to]) throw fail("destination-collision", e.to)
+      targets[e.to] = true
+    }
+  })
+  Object.keys(sources).forEach(function(p) { entries.forEach(function(e) { if (e.from !== p && e.from.indexOf(p + "/") === 0) throw fail("overlap", e.from) }) })
+  if (!deleting) Object.keys(targets).forEach(function(t) { var parent = t.indexOf("/") < 0 ? "" : t.substring(0, t.lastIndexOf("/")); for (var d = parent; d; d = d.indexOf("/") < 0 ? "" : d.substring(0, d.lastIndexOf("/"))) if (sources[d]) throw fail("destination-in-selection", t) })
+  if (__miniAWikiFolder.pending(this)) throw fail("recovery-pending")
+  var inventory = __miniAWikiFolder.scan(this._backend.root), mapping = Object.create(null), pages = [], updates = Object.create(null), incoming = [], files = 0, folders = 0
+  var target = Object.create(null); entries.forEach(function(e) { target[e.from] = e.to })
+  var owner = function(p) { for (var d = p; d; d = d.indexOf("/") < 0 ? "" : d.substring(0, d.lastIndexOf("/"))) if (d in target) return d; return null }
   Object.keys(inventory).sort().forEach(function(p) {
-    if (p !== from && p.indexOf(from + "/") !== 0) return
-    if (p.split("/").some(function(s) { return /^\.mini-a|^\.git$/i.test(s) }) || self._isHiddenPath(p)) throw new Error("protected-folder-content: " + p)
-    mapping[p] = to === null ? null : to + p.substring(from.length)
+    var from = owner(p)
+    if (from === null) return
+    if (p.split("/").some(function(s) { return /^\.mini-a|^\.git$/i.test(s) }) || self._isHiddenPath(p)) throw prefix === "folder" ? new Error("protected-folder-content: " + p) : fail("protected", p)
+    mapping[p] = target[from] === null ? null : target[from] + p.substring(from.length)
     if (inventory[p].directory) folders++
     else { files++; if (/\.md$/i.test(p)) pages.push(p) }
   })
@@ -186,32 +207,84 @@ MiniAWikiManager.prototype._folderPlan = function(from, to) {
     var raw = io.readFileString(self._backend.root + "/" + p), refs = Object.create(null), next = mapping[p] || p
     var after = self._rewriteFolderLinks(raw, p, next, mapping, refs)
     if (!Object.prototype.hasOwnProperty.call(mapping, p) && Object.keys(refs).length) incoming.push({path:p, targets:Object.keys(refs).sort()})
-    if (to !== null && raw !== after) updates[p] = {path:next, before:raw, raw:after}
+    if (!deleting && raw !== after) updates[p] = {path:next, before:raw, raw:after}
   })
   var revisionInventory = {}
   Object.keys(inventory).forEach(function(p) { if (!/^\.mini-a/.test(p)) revisionInventory[p] = inventory[p] })
-  return { preview: {ok:true, operation:to === null ? "delete" : "move", source:from, destination:to, pages:pages.length, files:files, folders:folders, incomingLinks:incoming, revision:__miniAWikiFolder.revision(revisionInventory)}, inventory:inventory, mapping:mapping, pages:pages, updates:updates }
+  var preview = prefix === "folder"
+    ? {ok:true, operation:deleting ? "delete" : "move", source:entries[0].from, destination:entries[0].to, pages:pages.length, files:files, folders:folders, incomingLinks:incoming, revision:__miniAWikiFolder.revision(revisionInventory)}
+    : {ok:true, operation:deleting ? "selection-delete" : "selection-move", entries:entries.map(function(e) { return {from:e.from, to:e.to, kind:inventory[e.from] && inventory[e.from].directory ? "folder" : "file"} }), pages:pages.length, files:files, folders:folders, incomingLinks:incoming, revision:__miniAWikiFolder.revision(revisionInventory), confirmation:deleting ? "delete " + entries.length + (entries.length === 1 ? " item" : " items") : ""}
+  return { preview: preview, inventory:inventory, mapping:mapping, pages:pages, updates:updates, entries:entries }
+}
+MiniAWikiManager.prototype._folderPlan = function(from, to) {
+  return this._transferPlan([{from:from, to:to}], {codePrefix:"folder"})
 }
 MiniAWikiManager.prototype.previewFolder = function(from, to) {
   try { return this._folderPlan(from, isDef(to) ? to : null).preview } catch(e) { return {ok:false,error:__miniAErrMsg(e)} }
 }
 MiniAWikiManager.prototype.moveFolder = function(from, to, options) { return this._changeFolder(from, to, options) }
 MiniAWikiManager.prototype.deleteFolder = function(from, options) { return this._changeFolder(from, null, options) }
-MiniAWikiManager.prototype._changeFolder = function(from, to, options) {
-  var opts = options || {}, lock, journal, root = this._backend && this._backend.root, priorBatch, priorOrigins, stateCaptured = false
+MiniAWikiManager.prototype._changeFolder = function(from, to, options) { return this._changeTransfer([{from:from, to:to}], options, "folder") }
+
+// Selections: several files and/or folders moved or deleted in one verified transaction.
+MiniAWikiManager.prototype._selectionEntries = function(items, destination) {
+  var self = this
+  if (!isArray(items) || !items.length) throw new Error("selection-empty")
+  if (items.length > 500) throw new Error("selection-too-large")
+  var list = items.map(function(i) { if (!isString(i)) throw new Error("selection-invalid-item"); return i.trim().replace(/\/+$/, "") })
+  if (destination === null || !isDef(destination)) return list.map(function(from) { return {from:from, to:null} })
+  var dest = String(destination).trim().replace(/^\/+|\/+$/g, "")
+  if (dest) {
+    var folder = __miniAWikiFolder.path(this, dest)
+    if (!folder.isDirectory()) throw new Error("selection-destination-not-found: " + dest)
+    list.forEach(function(from) { if (dest === from || dest.indexOf(from + "/") === 0) throw new Error("selection-destination-inside-source: " + from) })
+  }
+  return list.map(function(from) { return {from:from, to:(dest ? dest + "/" : "") + from.substring(from.lastIndexOf("/") + 1)} })
+}
+MiniAWikiManager.prototype.previewSelection = function(items, destination) {
+  try { return this._transferPlan(this._selectionEntries(items, destination), {codePrefix:"selection"}).preview } catch(e) { return {ok:false,error:__miniAErrMsg(e)} }
+}
+MiniAWikiManager.prototype.moveSelection = function(items, destination, options) {
+  try { if (!isString(destination)) throw new Error("selection-destination-required"); return this._changeTransfer(this._selectionEntries(items, destination), options, "selection") } catch(e) { return {ok:false,error:__miniAErrMsg(e)} }
+}
+MiniAWikiManager.prototype.deleteSelection = function(items, options) {
+  try { return this._changeTransfer(this._selectionEntries(items, null), options, "selection") } catch(e) { return {ok:false,error:__miniAErrMsg(e)} }
+}
+// A folder is a section: <folder>/index.md. Works on any writable backend.
+MiniAWikiManager.prototype.createFolder = function(path, options) {
+  if (this._access !== "rw") return { ok: false, error: this._readOnlyError("wiki is read-only (wikiaccess=ro)") }
   try {
-    if (this._access !== "rw") throw new Error("folder-wiki-read-only")
+    var section = this._normalizeSectionPath(path)
+    var folder = section.replace(/\/$/, "")
+    if (!folder || /^\.mini-a|(^|\/)\.(mini-a|git)/i.test(folder) || this._isHiddenPath(section + "index.md")) throw new Error("protected-folder-path")
+    if (this._backend.exists(section + "index.md")) throw new Error("folder-exists: " + folder)
+    var done = this.init(folder)
+    if (!done || done.ok !== true) return done || { ok: false, error: "folder-create-failed" }
+    return { ok: true, path: folder, index: section + "index.md", created: done.created }
+  } catch(e) { return { ok: false, error: __miniAErrMsg(e) } }
+}
+MiniAWikiManager.prototype._changeTransfer = function(entries, options, codePrefix) {
+  var opts = options || {}, lock, journal, root = this._backend && this._backend.root, priorBatch, priorOrigins, stateCaptured = false
+  var from = entries[0].from, to = entries[0].to, prefix = codePrefix || "selection"
+  try {
+    if (this._access !== "rw") throw new Error(prefix + "-wiki-read-only")
     if (this._backendType !== "fs" || this._catalog || this._archiveRoot) throw new Error("folder-operations-require-local-filesystem")
     lock = __miniAWikiWriterLock(root)
     priorBatch = this._servingBatchChanges; priorOrigins = this._servingMoveOrigins; stateCaptured = true
-    var plan = this._folderPlan(from, to), self = this
-    if (!opts.expectedRevision || opts.expectedRevision !== plan.preview.revision) throw new Error("folder-stale-preview")
-    if (to === null && opts.confirmation !== from) throw new Error("folder-exact-source-confirmation-required")
+    var plan = this._transferPlan(entries, {codePrefix:prefix}), self = this
+    if (!opts.expectedRevision || opts.expectedRevision !== plan.preview.revision) throw new Error(prefix + "-stale-preview")
+    if (to === null && opts.confirmation !== (prefix === "folder" ? from : plan.preview.confirmation)) throw new Error(prefix === "folder" ? "folder-exact-source-confirmation-required" : "selection-confirmation-required")
     if (isMap(priorBatch)) throw new Error("folder-conflicting-batch")
     if (!global.__miniAWikiKnowledge) loadLib(__miniAPath("js/wiki/mini-a-wiki-knowledge.js"))
     global.__miniAWikiKnowledge.install(this)
     var state = this.knowledgeLoadState()
     if (state._corrupt) throw new Error("folder-corrupt-ownership")
+    if (prefix !== "folder" && to !== null) {
+      // Mirrors knowledgeMove: never land on a path an ingestion source still owns.
+      var targetPaths = Object.create(null)
+      Object.keys(plan.mapping).forEach(function(p) { if (plan.mapping[p]) targetPaths[plan.mapping[p]] = true })
+      Object.keys(state.sources).forEach(function(key) { var owned = state.sources[key].page; if (targetPaths[owned] && !Object.prototype.hasOwnProperty.call(plan.mapping, owned)) throw new Error("selection-target-owned-by-ingestion: " + owned) })
+    }
     var owners = {}
     Object.keys(state.sources).forEach(function(key) {
       var owner = state.sources[key], old = owner.page, next = plan.mapping[old], update = plan.updates[old]
@@ -227,7 +300,7 @@ MiniAWikiManager.prototype._changeFolder = function(from, to, options) {
     })
     // Drop affected derivatives; untouched enrichment remains reusable.
     var affected = function(p) { return Object.prototype.hasOwnProperty.call(plan.mapping, p) || !!plan.updates[p] }
-    ;[state.pages, state.summaries.pages, state.summaries.sections].forEach(function(map) { Object.keys(map || {}).forEach(function(p) { if (affected(p) || p === "" || p === "index.md" || from.indexOf(p.replace(/\/$/, "") + "/") === 0 || to !== null && to.indexOf(p.replace(/\/$/, "") + "/") === 0 || (map[p].passageSupports || []).some(function(ref) { return affected(ref.page) })) delete map[p] }) })
+    ;[state.pages, state.summaries.pages, state.summaries.sections].forEach(function(map) { Object.keys(map || {}).forEach(function(p) { if (affected(p) || p === "" || p === "index.md" || entries.some(function(en) { var sec = p.replace(/\/$/, "") + "/"; return en.from.indexOf(sec) === 0 || en.to !== null && en.to.indexOf(sec) === 0 }) || (map[p].passageSupports || []).some(function(ref) { return affected(ref.page) })) delete map[p] }) })
     ;["facts", "concepts"].forEach(function(kind) { Object.keys(state[kind] || {}).forEach(function(k) { if ((state[kind][k].passageSupports || []).some(function(ref) { return affected(ref.page) })) state[kind][k].invalidated = true }) })
     ;[state.dependencies, state.derivativeRegistry.byPage].forEach(function(map) { Object.keys(map || {}).forEach(function(p) { if (affected(p)) delete map[p] }) })
     var id = String(java.util.UUID.randomUUID()), snapshot = root + ".mini-a-folder-recovery/" + id
@@ -239,13 +312,15 @@ MiniAWikiManager.prototype._changeFolder = function(from, to, options) {
     __miniAWikiFolder.copy(root, snapshot, plan.inventory)
     if (__miniAWikiFolder.revision(__miniAWikiFolder.scan(snapshot)) !== __miniAWikiFolder.revision(plan.inventory)) throw new Error("folder-snapshot-incomplete")
     var backup = isFunction(opts.snapshot) ? opts.snapshot() : null
-    if (this._folderPlan(from, to).preview.revision !== plan.preview.revision || __miniAWikiFolder.revision(__miniAWikiFolder.scan(root)) !== __miniAWikiFolder.revision(plan.inventory)) throw new Error("folder-changed-during-snapshot")
-    journal = {version:1,id:id,root:root,source:from,destination:to,snapshot:snapshot,backupId:backup && backup.id,phase:"prepared",inventory:plan.inventory,mapping:plan.mapping,preview:plan.preview}
+    if (this._transferPlan(entries, {codePrefix:prefix}).preview.revision !== plan.preview.revision || __miniAWikiFolder.revision(__miniAWikiFolder.scan(root)) !== __miniAWikiFolder.revision(plan.inventory)) throw new Error("folder-changed-during-snapshot")
+    journal = {version:1,id:id,root:root,source:from,destination:to,entries:entries,snapshot:snapshot,backupId:backup && backup.id,phase:"prepared",inventory:plan.inventory,mapping:plan.mapping,preview:plan.preview}
     var journalPath = root + "/.mini-a-wiki-folders/pending.json"
     __miniAWikiMaintenanceJson(journalPath, journal)
     if (isFunction(opts.onProgress)) opts.onProgress("Applying recursive folder changes")
-    if (to === null) __miniAWikiFolder.remove(new java.io.File(root + "/" + from))
-    else java.nio.file.Files.move(new java.io.File(root + "/" + from).toPath(), new java.io.File(root + "/" + to).toPath())
+    entries.slice().sort(function(x, y) { return x.from < y.from ? -1 : 1 }).forEach(function(en) {
+      if (en.to === null) __miniAWikiFolder.remove(new java.io.File(root + "/" + en.from))
+      else java.nio.file.Files.move(new java.io.File(root + "/" + en.from).toPath(), new java.io.File(root + "/" + en.to).toPath())
+    })
     Object.keys(plan.updates).forEach(function(p) { var update = plan.updates[p]; self._backend.write(update.path, update.raw) })
     if (!this.knowledgeSaveState(state)) throw new Error("folder-ownership-save-failed")
     this._invalidateReadCache()

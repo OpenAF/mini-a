@@ -165,10 +165,18 @@ cannot replace the status or revision of a newer registration. Upload quota chec
 traverse file metadata without re-reading previous uploads. Sealing and ingestion
 still hash all source bytes.
 
-The destination section defaults to the stable source ID, rather than the internal
-upload directory name. Change **Advanced options → Destination section** to override
-it; an empty field uses the source ID. Source layout preserves uploaded folder paths
-beneath that section. Existing pages are not moved automatically; to keep updating
+The **Wiki folder** box in step 3 sets where imported pages go. It defaults to the
+stable source ID (not the internal upload directory name). Type a folder path such as
+`talks/2026`, or use **Choose folder…** to pick or create one in the wiki tree. An
+empty field uses the source ID; the wiki root cannot be used. Below the field, Studio
+lists the expected page paths for new pages. **Preview changes** confirms them.
+Source layout (Advanced options) preserves uploaded folder paths beneath that folder;
+flat layout puts every page directly in it. The source name is a display label only.
+
+For **YouTube captions**, the optional **Markdown file name** sets the page name
+(default `youtube-<video id>.md`). It is lower-cased with the same slug rules
+ingestion uses for page names (`My Talk` → `my-talk.md`). `index`, `log` and
+`AGENTS` are reserved. Existing pages are not moved automatically; to keep updating
 an older import under `files` (or `expanded` for ZIPs), explicitly use that section.
 
 Stage first, then choose Preview or Apply; filenames never select a destination.
@@ -372,7 +380,7 @@ curl -X POST -H 'Authorization: Bearer <STUDIO_TOKEN>' \
 
 Routes: `/health`, `/session`, `/wikis` (GET/POST), `/wikis/:id`
 (GET/PATCH/DELETE unregister); under a wiki: `/overview`, `/tree`, `/pages`,
-`/page`, `/pages/move`, `/search`, `/backlinks`, `/lint`, `/graph/stats`,
+`/page`, `/pages/move`, `/folders` (POST, creates `<path>/index.md`), `/selection/{preview,move,delete}`, `/search`, `/backlinks`, `/lint`, `/graph/stats`,
 `/graph/related`, `/graph/html`, `/graph/rebuild`, `/sources`, `/ingestions`,
 `/absorptions`, `/dreams`, `/maintenance`, `/backups`, `/backups/:id/restore`,
 `/changes?jobId=...`; globally `/uploads`, `/jobs`, `/jobs/:id`,
@@ -419,6 +427,9 @@ select a file to read it, and choose **Edit** to change Markdown. Arrow keys,
 Home/End, Enter and type-ahead navigate the tree. Folder contents load in pages of
 100, including empty folders. Search results retain the tree and offer **Reveal
 in tree**. The Graph viewer is available from the Pages toolbar.
+Drag the divider between the tree and the page view to resize the sidebar (or
+focus it and use Left/Right, Shift for larger steps, Home/End for min/max,
+Enter or double-click to reset). The width is remembered per browser.
 
 The main navigation groups existing capabilities into Overview, Pages, Import,
 Maintenance, Activity and Settings. Overview shows counts and current activity;
@@ -441,7 +452,16 @@ flowchart LR
 
 Webpage and YouTube inputs each have their own adjacent download action. Source
 name/ID are part of the selected method. Choose **Update source** in the library
-to create another revision of an existing source. Preview estimates engine
+to create another revision of an existing source, or **Delete** to remove it
+from the library (`DELETE /api/v1/wikis/<id>/sources/<sourceId>` with
+`{"confirmation": "<sourceId>"}`). Deletion removes the source record and all
+its staged upload revisions; pages already imported stay in the wiki. It is
+refused while an import of that source is queued or running. Tick **Ad-hoc
+import** when adding a source to import it once without keeping it: it goes
+through the same preview and import, and after a successful import its record
+and staged files are discarded (API: `"adhoc": true` on `POST .../sources`).
+A failed or abandoned ad-hoc source stays in the library, marked ad-hoc, until
+it is imported or deleted. Preview estimates engine
 changes; it is not a guarantee of identical future model output. Changing
 options invalidates the preview. Application checks that the source revision is
 still current. Advanced options retain modes, layout, filters, pruning and
@@ -503,6 +523,16 @@ reorganization and live remote downloads require separate configured checks.
 ### Graph build controls
 
 Graph exposes structural/semantic extraction, off/automatic model assistance, incremental/full/resume strategy, force, presets, custom budgets, and shared saved defaults. See [Graph builds](GRAPH-BUILDS.md). Semantic extraction works without models. `GET /graph/settings` displays effective defaults; `PUT /graph/settings` saves them for a writable wiki. `POST /graph/rebuild` accepts the shared build options. Graph cancellation checkpoints completed work and stops scheduling calls; an in-flight request uses its configured timeout.
+
+## Organizing pages and folders
+
+The Pages explorer works like a file manager:
+
+- **New folder** creates a section (`<folder>/index.md`), so it appears in tree and browse on every backend. Use the toolbar, the folder panel, the context menu or the picker's *New folder here…*.
+- **Select** pages and folders with the checkboxes, Ctrl/Cmd-click (toggle), Shift-click (range), Space (toggle), Ctrl/Cmd+A (siblings) and Esc (clear). `index.md` pages are never selectable; selecting a folder covers its content. A selection bar offers **Move to…**, **Delete…** and **Clear**.
+- **Move to…** opens a folder picker. You can also **drag** the focused or selected items onto a folder (or the *wiki root* strip that appears while dragging), or use **Move N selected here** in a folder panel.
+- **Right-click**, Shift+F10, the Menu key or the `⋯` button open a context menu: Open, New page/folder here, Rename / move…, Move to…, Delete…. Rename / move, Move to folder… and Delete are also available while reading a page.
+- A **single page** uses the page endpoints (any writable backend). **Several items, or anything containing a folder,** run one previewed selection job: `selection/preview` lists every `from → to`, the surviving incoming links and a revision; `selection/move` and `selection/delete` need that revision (deletion also needs the typed confirmation `delete N items`), take a verified recovery snapshot, rewrite links once and publish indexes once. Selection jobs need a local filesystem wiki and an administrator, like folder jobs.
 
 ## Recursive folder operations
 

@@ -133,16 +133,29 @@ WikiStudioServer.prototype.migrateSources = function() {
   })
 }
 WikiStudioServer.prototype.sourceAdd = function(w, body) {
-  WikiStudio.fields(body, ["id", "name", "type", "uploadId", "directoryId", "url", "video", "lang"]); WikiStudio.name(body.id)
+  WikiStudio.fields(body, ["id", "name", "type", "uploadId", "directoryId", "url", "video", "lang", "filename", "adhoc"]); WikiStudio.name(body.id)
+
+  // Ad-hoc sources are imported once and then discarded instead of kept in the library
+  WikiStudio.assert(isUnDef(body.adhoc) || isBoolean(body.adhoc), 400, "invalid_source", "Ad-hoc must be true or false")
+  var adhoc = body.adhoc === true
+
+  // Optional caption file name: it becomes the page name inside the chosen wiki folder
+  var fileName
+  if (isDef(body.filename) && String(body.filename).trim().length > 0) {
+    WikiStudio.assert(body.type === "youtube", 400, "invalid_source", "A file name can only be chosen for YouTube captions")
+    fileName = WikiStudio.markdownFileName(body.filename)
+  }
+
   var sourceType=body.type, origin
   if(body.type==="web"||body.type==="youtube") {
     WikiStudio.assert(isString(body.name)&&body.name.length<=120,400,"invalid_source","Provide a source display name")
     var fetched=body.type==="web"?(WikiStudio.assert(isString(body.url)&&body.url.length<=2048,400,"invalid_url","Provide a URL"),WikiStudioOutbound.webpage(body.url)):(WikiStudio.assert(isString(body.video),400,"invalid_video","Provide a YouTube URL or video ID"),WikiStudioOutbound.youtube(body.video,body.lang))
+    if (isDef(fileName)) fetched.name = fileName
     var webUpload=WikiStudio.id(),webStage=this.config.home+"/sources/uploads/"+webUpload+"/files"
     WikiStudio.privateDir(webStage)
     try{var webDest=WikiStudio.safeFile(webStage,fetched.name,true);java.nio.file.Files.write(WikiStudio.path(webDest),new java.lang.String(fetched.markdown).getBytes("UTF-8"))}catch(e){io.rm(String(new java.io.File(webStage).getParent()));throw e}
     origin=fetched.origin
-    body={id:body.id,name:body.name,type:"upload",uploadId:webUpload}
+    body={id:body.id,name:body.name,type:"upload",uploadId:webUpload,adhoc:adhoc}
   }
   if(body.type==="directory"||body.type==="git") {
     var selected=(this.config.directories||[]).filter(function(d){return d.id===body.directoryId})[0]
@@ -155,7 +168,7 @@ WikiStudioServer.prototype.sourceAdd = function(w, body) {
     var count=0,total=0
     var copy=function(dir,depth){WikiStudio.assert(depth<16,413,"source_limit","Source depth exceeded");var entries=io.listFiles(dir).files;entries.forEach(function(f){if(String(f.filename).charAt(0)==="."||/^AGENTS\.md$/i.test(f.filename))return;WikiStudio.noLinks(f.filepath);if(f.isDirectory){copy(f.filepath,depth+1);return}if(!/\.(md|txt|pdf)$/i.test(f.filename))return;count++;var bytes=Number(new java.io.File(f.filepath).length());total+=bytes;WikiStudio.assert(count<=2000&&total<=67108864&&bytes<=8388608,413,"source_limit","Source byte/count limit exceeded");var rel=String(f.filepath).substring(selected.path.length+1),dest=WikiStudio.safeFile(stage,rel,false);WikiStudio.privateDir(String(new java.io.File(dest).getParent()));java.nio.file.Files.copy(WikiStudio.path(f.filepath),WikiStudio.path(dest))})}
     try{copy(selected.path,0)}catch(e){io.rm(String(new java.io.File(stage).getParent()));throw e}
-    body={id:body.id,name:body.name,type:"upload",uploadId:uploadId}
+    body={id:body.id,name:body.name,type:"upload",uploadId:uploadId,adhoc:adhoc}
   }
   WikiStudio.assert(body.type === "upload", 501, "adapter_unavailable", "Remote Git clones are disabled; webpage and YouTube adapters require type web/youtube. Upload a reviewed checkout instead.")
   WikiStudio.assert(isString(body.name) && body.name.length <= 120 && /^[a-f0-9-]{36}$/.test(String(body.uploadId)), 400, "invalid_source", "Provide a source name and upload revision UUID")
@@ -163,6 +176,7 @@ WikiStudioServer.prototype.sourceAdd = function(w, body) {
   return WikiStudio.sourceLock(this.config.home, w.id, body.id, function() {
     return WikiStudio.lock(self.config.home, "upload-" + body.uploadId, function() {
       var existing = self.sourceGet(w, body.id)
+      WikiStudio.assert(!adhoc || !existing || existing.adhoc === true, 409, "source_exists", "A library source already uses this ID; choose another ID for an ad-hoc import")
       WikiStudio.assert(!io.fileExists(dir + "/sealed.json"), 409, "upload_sealed", "Upload is already sealed")
       WikiStudio.assert(io.fileExists(dir + "/files"), 404, "upload_not_found", "Upload not found")
       var inventory = WikiStudio.scan(dir + "/files", true), zips = Object.keys(inventory).filter(function(p) { return /\.zip$/i.test(p) }), staging = dir + "/files"
@@ -174,10 +188,58 @@ WikiStudioServer.prototype.sourceAdd = function(w, body) {
         inventory = WikiStudio.scan(staging, true)
       }
       var source = { id: body.id, wikiId: w.id, name: body.name, type: sourceType, origin: origin, revision: body.uploadId, inventoryChecksum: WikiStudio.fingerprint(inventory), staging: staging, createdAt: WikiStudio.now(), lineage: existing ? (existing.lineage || []).concat([existing.revision]).slice(-100) : [], files: inventory, status: "staged" }
+      if (adhoc) source.adhoc = true
       WikiStudio.atomic(dir + "/sealed.json", { wikiId: w.id, sourceId: source.id, checksum: source.inventoryChecksum })
       WikiStudio.atomic(self.sourcePath(w, source.id), source)
       return WikiStudioServer.publicSource(source)
     })
   })
+}
+// Remove a source from the library: its record and its staged upload revisions.
+// Pages already imported into the wiki stay; queued or running imports block deletion.
+WikiStudioServer.prototype.sourceDelete = function(w, id, body) {
+  var self = this, home = this.config.home
+  WikiStudio.name(id)
+  WikiStudio.fields(body, ["confirmation"])
+  WikiStudio.assert(body.confirmation === id, 400, "confirmation_required", "Confirm deletion by exact source ID")
+  return WikiStudio.lock(home, "queue", function() {
+    return WikiStudio.sourceLock(home, w.id, id, function() {
+      var record = self.sourceGet(w, id)
+      WikiStudio.assert(record, 404, "source_not_found", "Source not found")
+
+      // An unfinished import still needs the staged files
+      var busy = self.jobs && self.jobs.list().some(function(j) {
+        return j.wikiId === w.id && j.operation === "ingest.run" && isMap(j.params) && j.params.sourceId === id && WikiStudioJobs.terminal.indexOf(j.status) < 0
+      })
+      WikiStudio.assert(!busy, 423, "source_busy", "An import of this source is queued or running; wait for it to finish")
+
+      return { id: id, deleted: true, revisionsRemoved: self.sourcePurge(w, record) }
+    })
+  })
+}
+
+// Remove a source record and its sealed upload revisions; the caller holds the source lock
+WikiStudioServer.prototype.sourcePurge = function(w, record) {
+  var home = this.config.home
+
+  // Unregister first so an interrupted cleanup never leaves a record pointing at missing files
+  var file = this.sourcePath(w, record.id)
+  WikiStudio.noLinks(file)
+  io.rm(file)
+
+  // Remove only upload revisions sealed for this wiki and source
+  var revisions = (record.lineage || []).concat([record.revision])
+  var removed = 0
+  revisions.forEach(function(revision) {
+    if (!isString(revision) || !/^[a-f0-9-]{36}$/.test(revision)) return
+    var dir = home + "/sources/uploads/" + revision
+    if (!io.fileExists(dir)) return
+    var seal = WikiStudio.json(dir + "/sealed.json", null)
+    if (!isMap(seal) || seal.wikiId !== w.id || seal.sourceId !== record.id) return
+    WikiStudio.noLinks(dir)
+    io.rm(dir)
+    removed++
+  })
+  return removed
 }
 WikiStudioServer.publicSource = function(s) { var out = JSON.parse(JSON.stringify(s)); delete out.staging; return out }

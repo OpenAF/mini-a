@@ -102,6 +102,10 @@ MiniAWikiOps.catalog = (function() {
   add("wiki.folderPreview", "Pages & structure", "Preview folder operation", false, [["from", "Source folder path"], ["to", "Destination folder (empty for deletion)", ""]])
   add("wiki.folderMove", "Pages & structure", "Move/rename folder", true, [["from", "Source folder path"], ["to", "Destination folder path"]])
   add("wiki.folderDelete", "Pages & structure", "Delete folder", true, [["from", "Source folder path"]])
+  add("wiki.folderCreate", "Pages & structure", "Create folder (section with index.md)", true, [["path", "New folder path"]])
+  add("wiki.selectionPreview", "Pages & structure", "Preview move/delete of selected items", false, [["items", "Pages/folders (array or comma-separated)"], ["to", "Destination folder (empty for the wiki root)", ""], ["delete", "Preview deletion instead of a move?", false, "boolean"]])
+  add("wiki.selectionMove", "Pages & structure", "Move selected pages/folders", true, [["items", "Pages/folders (array or comma-separated)"], ["to", "Destination folder (empty for the wiki root)", ""]])
+  add("wiki.selectionDelete", "Pages & structure", "Delete selected pages/folders", true, [["items", "Pages/folders (array or comma-separated)"]])
   add("wiki.folderRestore", "Pages & structure", "Restore pending folder snapshot", true, [["id", "Exact recovery ID (stop other readers first)"]])
   add("wiki.delete", "Pages & structure", "Delete a page", true, [["path", "Page path"]])
   add("wiki.indexes", "Pages & structure", "Regenerate directory indexes", true)
@@ -140,6 +144,11 @@ MiniAWikiOps.catalog = (function() {
   })
   return ops
 })()
+// Selection items arrive as an array (Studio, wikiman) or as typed text separated by commas/newlines.
+MiniAWikiOps.items = function(value) {
+  var list = isArray(value) ? value : String(isDef(value) ? value : "").split(/[,\n]/)
+  return list.map(function(v) { return String(v).trim() }).filter(function(v) { return v.length > 0 })
+}
 MiniAWikiOps.operation = function(id) {
   var op = MiniAWikiOps.catalog.filter(function(o) { return o.id === id })[0]
   if (!op) throw new Error("Unknown wiki operation: " + id)
@@ -207,8 +216,9 @@ MiniAWikiOps.prototype.unavailable = function(spec) {
   var id = spec.operation, backend = String(cfg.backend || "fs"), archive = /\.(zip|okt)$/i.test(String(cfg.root || ""))
   var writable = cfg.access === "rw" && !cfg.__catalog && backend !== "http" && backend !== "https" && !archive
   if ((MiniAWikiOps.mutates(spec) || id === "wiki.compact") && id !== "graph.html" && !(id === "absorb.plan" && this.args.absorboutput) && !writable) return "Requires a writable primary wiki; mounts, archives and HTTP wikis are read-only"
-  if ((id.indexOf("wiki.folder") === 0 || id === "wiki.compact" || id === "wiki.indexstats" || id === "wiki.export" || id === "graph.filestats" || id === "graph.html" || id.indexOf("absorb.") === 0) && (backend !== "fs" || archive || cfg.__catalog)) return "Requires a local filesystem wiki"
-  if (id.indexOf("wiki.folder") === 0 && this.args.wikitarget) return "Folder operations require a local primary wiki; mounted wikis are read-only"
+  var folderOp = /^wiki\.(folder(?!Create)|selection)/.test(id)
+  if ((folderOp || id === "wiki.compact" || id === "wiki.indexstats" || id === "wiki.export" || id === "graph.filestats" || id === "graph.html" || id.indexOf("absorb.") === 0) && (backend !== "fs" || archive || cfg.__catalog)) return "Requires a local filesystem wiki"
+  if (folderOp && this.args.wikitarget) return "Folder operations require a local primary wiki; mounted wikis are read-only"
   if (id === "dream.auto" && (backend !== "fs" || archive || cfg.__catalog || this.args.wikitarget)) return "Auto requires a local primary filesystem wiki"
   if (id === "wiki.compact" && toBoolean(cfg.wikiretrievalv2) === false) return "Compaction requires Retrieval V2"
   if (id.indexOf("graph.") === 0 && id !== "graph.html" && id !== "graph.filestats" && id !== "graph.settings" && id !== "graph.defaults" && toBoolean(cfg.usegraph) !== true) return "Enable usewikigraph=true in session settings"
@@ -396,6 +406,10 @@ MiniAWikiOps.prototype._execute = function(spec, gates) {
     if (action === "folderPreview") return wm.previewFolder(p.from, p.to || null)
     if (action === "folderMove") return wm.moveFolder(p.from, p.to, p)
     if (action === "folderDelete") return wm.deleteFolder(p.from, p)
+    if (action === "folderCreate") return wm.createFolder(p.path)
+    if (action === "selectionPreview") return wm.previewSelection(MiniAWikiOps.items(p.items), toBoolean(p["delete"]) === true ? null : String(p.to || ""))
+    if (action === "selectionMove") return wm.moveSelection(MiniAWikiOps.items(p.items), String(p.to || ""), p)
+    if (action === "selectionDelete") return wm.deleteSelection(MiniAWikiOps.items(p.items), p)
     if (action === "folderRestore") return wm.restoreFolder(p.id)
     if (action === "move") return wm.move(p.from, p.to, p)
     if (action === "init") return wm.init(p.path || "")

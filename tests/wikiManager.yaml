@@ -99,16 +99,41 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/wikiManager.js").testCategoryUX
 
+- name: MiniA Wiki Manager Tests::BrowseOrganize
+  to: oJob Test
+  exec: args.func = require("tests/wikiManager.js").testBrowseOrganize
+
 - name: MiniA Wiki Manager Tests::ReplayPresentation
   to: oJob Test
   exec: args.func = require("tests/wikiManager.js").testReplayPresentation
+- name: MiniA Wiki Manager Tests::SelectionMove
+  to: oJob Test
+  exec: args.func = require("tests/wikiFolders.js").testSelectionMove
+- name: MiniA Wiki Manager Tests::SelectionGuards
+  to: oJob Test
+  exec: args.func = require("tests/wikiFolders.js").testSelectionGuards
+- name: MiniA Wiki Manager Tests::SelectionDelete
+  to: oJob Test
+  exec: args.func = require("tests/wikiFolders.js").testSelectionDelete
+- name: MiniA Wiki Manager Tests::SelectionRestoreFromSnapshot
+  to: oJob Test
+  exec: args.func = require("tests/wikiFolders.js").testSelectionRestoreFromSnapshot
+- name: MiniA Wiki Manager Tests::CreateFolder
+  to: oJob Test
+  exec: args.func = require("tests/wikiFolders.js").testCreateFolder
 
 todo:
+- MiniA Wiki Manager Tests::BrowseOrganize
 - MiniA Wiki Manager Tests::FolderMalformedLinks
 - MiniA Wiki Manager Tests::FolderConfirmations
 - MiniA Wiki Manager Tests::FolderSemanticAndReferences
 - MiniA Wiki Manager Tests::RecursiveFolders
 - MiniA Wiki Manager Tests::FolderGuardsAndRecovery
+- MiniA Wiki Manager Tests::SelectionMove
+- MiniA Wiki Manager Tests::SelectionGuards
+- MiniA Wiki Manager Tests::SelectionDelete
+- MiniA Wiki Manager Tests::SelectionRestoreFromSnapshot
+- MiniA Wiki Manager Tests::CreateFolder
 - MiniA Wiki Manager Tests::GraphBuildNoMarkdownAndDreamTags
 - MiniA Wiki Manager Tests::GraphBuildControls
 - MiniA Wiki Manager Tests::MutationGates

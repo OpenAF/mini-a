@@ -197,10 +197,18 @@ function initializeDisclosure(node) {
   });
   node.open = false;
 }
+// Expand/collapse chevron as inline SVG (Unicode triangles render inconsistently across OSes/fonts).
+// CSS rotates it 90deg when the owning control is expanded. Self-contained so it is usable before ICONS loads.
+function chevronIcon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", width: 14, height: 14, fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true", focusable: "false", class: "studio-chevron" })) svg.setAttribute(k, v);
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path"); path.setAttribute("d", "m9 6 6 6-6 6"); svg.append(path); return svg;
+}
 function bindDisclosure(toggle) {
   if (toggle.dataset.disclosureBound) return;
   toggle.dataset.disclosureBound = "true";
   toggle.type = "button";
+  toggle.prepend(chevronIcon());
   const panel = toggle.parentElement;
   initializeDisclosure(panel);
   toggle.setAttribute("aria-expanded", String(panel.open));
@@ -318,7 +326,7 @@ let activeView = "Pages", navigationVersion = 0, navigating = false;
 const pageStates = new Map(), importPanes = new Map(), charts = new Set();
 const terminalStates = ["completed", "failed", "partial", "recovery-required", "interrupted", "cancelled"];
 function pageState() {
-  if (!pageStates.has(currentWiki.id)) pageStates.set(currentWiki.id, {expanded: new Set([""]), selected: "", folder: "", scroll: 0});
+  if (!pageStates.has(currentWiki.id)) pageStates.set(currentWiki.id, {expanded: new Set([""]), selected: "", folder: "", scroll: 0, marked: new Set()});
   return pageStates.get(currentWiki.id);
 }
 function row(parent) { const node = el("div", undefined, parent); node.className = "row"; return node; }
@@ -515,42 +523,264 @@ function renderMarkdown(raw, parent) {
     block.append(document.createTextNode(body.slice(last)));
   }
 }
+// Mirrors WikiStudio.markdownFileName: the page slug used for a chosen caption file name
+function markdownSlug(value) {
+  return String(value || "").trim()
+         .replace(/\.md$/i, "")
+         .toLowerCase()
+         .replace(/[^a-z0-9_-]+/g, "-")
+         .replace(/-+/g, "-")
+         .replace(/^-|-$/g, "")
+}
+
+var isFolderPath = function(value) { return typeof value === "string" && value.length > 0 }
+
+// Mirrors MiniAIngest._wikiPathFor for a staged source file (only new pages; pages
+// imported before from the same source keep their current location)
+function expectedPagePath(folder, rel, layout) {
+  var keep = layout !== "flat"
+  var slug = String(rel)
+             .replace(/\.[^./]+$/, "")
+             .replace(/[^A-Za-z0-9/_-]+/g, "-")
+             .replace(/\/+/g, keep ? "/" : "-")
+             .replace(/-+/g, "-")
+             .replace(/^-|-$/g, "")
+             .toLowerCase()
+
+  if (keep) slug = slug.split("/").map(part => part.replace(/^-|-$/g, "") || "page").join("/")
+  if (slug.length === 0) slug = "page"
+  return folder + "/" + slug + ".md"
+}
+const parentOf = path => path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+// Folder-only destination picker. Resolves to a folder path ("" is the wiki root) or null when cancelled.
+async function pickFolder(title, excluded = [], hint = "", opts = {}) {
+  const acceptLabel = opts.accept || "Move here", allowRoot = opts.allowRoot !== false;
+  const previous = document.activeElement, dialog = el("dialog", undefined, document.body), form = el("form", undefined, dialog);
+  form.method = "dialog"; const heading = el("h3", title, form); heading.id = "studio-picker-title"; dialog.setAttribute("aria-labelledby", heading.id);
+  if (hint) el("p", hint, form).className = "muted";
+  const box = el("div", undefined, form); box.className = "page-tree picker"; box.setAttribute("role", "tree"); box.setAttribute("aria-label", "Destination folders");
+  const status = el("p", "", form); status.className = "muted"; status.setAttribute("role", "status");
+  const actions = el("div", undefined, form); actions.className = "row";
+  const newFolder = withIcon(el("button", "New folder here…", actions), "add"); newFolder.type = "button";
+  const cancel = withIcon(el("button", "Cancel", actions), "cross"); cancel.type = "button"; cancel.onclick = () => dialog.close("cancel");
+  const accept = withIcon(el("button", acceptLabel, actions), "check"); accept.value = "accept"; accept.disabled = true; accept.classList.add("primary");
+  const blocked = path => excluded.some(x => path === x || path.startsWith(x + "/"));
+  let chosen = null; const expanded = new Set([""]);
+  function mark() {
+    box.querySelectorAll('[role="treeitem"]').forEach(n => n.setAttribute("aria-selected", String(n.dataset.path === chosen)));
+    accept.disabled = chosen === null;
+    status.textContent = chosen === null ? "Choose a destination folder." : "Destination: " + (chosen || "wiki root");
+  }
+  async function node(parent, path, name, level) {
+    const item = el("div", undefined, parent); item.setAttribute("role", "treeitem"); item.setAttribute("aria-level", String(level)); item.dataset.path = path;
+    const label = el("div", undefined, item); label.className = "tree-label";
+    const open = expanded.has(path), rootBlocked = path === "" && !allowRoot, disabled = rootBlocked || path !== "" && blocked(path);
+    const arrow = el("button", undefined, label); arrow.append(chevronIcon()); arrow.type = "button"; arrow.className = "tree-arrow-btn"; arrow.setAttribute("aria-label", (open ? "Collapse " : "Expand ") + (name || "root")); arrow.setAttribute("aria-expanded", String(open));
+    arrow.onclick = safely(async () => { if (expanded.has(path)) expanded.delete(path); else expanded.add(path); await render(); });
+    const pick = withIcon(el("button", name, label), "folder"); pick.type = "button"; pick.className = "picker-name"; pick.disabled = disabled;
+    if (disabled) pick.title = rootBlocked ? "Choose or create a folder; the wiki root cannot be used here" : "A selected folder cannot be its own destination";
+    pick.onclick = () => { chosen = path; mark(); };
+    if (open) {
+      const group = el("div", undefined, item); group.setAttribute("role", "group");
+      const folders = (await allItems(wikiPath("children?path=" + encodeURIComponent(path)))).filter(e => e.kind === "folder");
+      for (const e of folders) await node(group, e.path, e.name, level + 1);
+    }
+  }
+  async function render() { box.replaceChildren(); await node(box, "", currentWiki.name + " (wiki root)", 1); mark(); }
+  newFolder.onclick = safely(async () => {
+    const parent = chosen ?? "", name = await askText("New folder inside " + (parent || "the wiki root"), "new-folder"); if (!name) return;
+    const path = (parent ? parent + "/" : "") + name.replace(/^\/+|\/+$/g, "");
+    await StudioApi.wiki("folders", "POST", { path }); expanded.add(parent); chosen = path; await render();
+  });
+  const result = new Promise(resolve => dialog.addEventListener("close", () => { const value = dialog.returnValue === "accept" ? chosen : null; dialog.remove(); previous?.focus?.(); resolve(value); }, { once: true }));
+  try { await render(); } catch (error) { dialog.remove(); throw error; }
+  dialog.showModal(); (box.querySelector(".picker-name:not(:disabled)") || cancel).focus(); return result;
+}
+// Keyboard-accessible popup menu. `anchor` is an element or {x, y}; entries are {label, action, disabled?, danger?} or "-".
+function showMenu(anchor, entries) {
+  document.querySelectorAll(".studio-menu").forEach(n => n.remove());
+  const previous = document.activeElement, menu = el("div", undefined, document.body); menu.className = "studio-menu"; menu.setAttribute("role", "menu");
+  const outside = event => { if (!menu.contains(event.target)) close(false); };
+  function close(restore = true) { menu.remove(); document.removeEventListener("pointerdown", outside, true); if (restore) previous?.focus?.(); }
+  for (const entry of entries) {
+    if (entry === "-") { el("hr", undefined, menu); continue; }
+    const b = el("button", entry.label, menu); b.type = "button"; b.setAttribute("role", "menuitem"); b.tabIndex = -1;
+    if (entry.disabled) { b.disabled = true; b.title = entry.disabled; }
+    if (entry.danger) b.classList.add("danger");
+    b.onclick = safely(async () => { close(false); await entry.action(); });
+  }
+  menu.addEventListener("keydown", event => {
+    const enabled = [...menu.querySelectorAll("button:not(:disabled)")], at = enabled.indexOf(document.activeElement);
+    if (event.key === "Escape" || event.key === "Tab") { event.preventDefault(); close(); }
+    else if (event.key === "ArrowDown") { event.preventDefault(); enabled[(at + 1) % enabled.length]?.focus(); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); enabled[(at - 1 + enabled.length) % enabled.length]?.focus(); }
+    else if (event.key === "Home") { event.preventDefault(); enabled[0]?.focus(); }
+    else if (event.key === "End") { event.preventDefault(); enabled.at(-1)?.focus(); }
+  });
+  document.addEventListener("pointerdown", outside, true);
+  const box = anchor instanceof Element ? anchor.getBoundingClientRect() : { left: anchor.x, bottom: anchor.y };
+  menu.style.left = Math.max(4, Math.min(box.left, window.innerWidth - 240)) + "px"; menu.style.top = Math.max(4, Math.min(box.bottom, window.innerHeight - menu.offsetHeight - 4)) + "px";
+  (menu.querySelector("button:not(:disabled)") || menu).focus();
+}
 async function pagesView(content) {
-  const state=pageState(), toolbar=row(content);
+  const state=pageState(), toolbar=row(content), kinds=new Map();
   const search=field(toolbar,"Search pages"); search.type="search";
   const scope=field(toolbar,"Search in",["This wiki","All registered wikis"]);
   button(toolbar,"Graph",()=>showGraph(content),"graph");
   const split=el("div",undefined,content);split.className="split";
   const aside=el("aside",undefined,split);aside.setAttribute("aria-label","Page explorer");
-  const tree=el("div",undefined,aside);tree.className="page-tree";tree.setAttribute("role","tree");tree.setAttribute("aria-label","Folders and pages");tree.id="page-list";
+  const bar=el("div",undefined,aside);bar.className="selection-bar";bar.hidden=true;bar.setAttribute("role","toolbar");bar.setAttribute("aria-label","Selection actions");const rootDrop=el("div","Drop here to move to the wiki root",aside);rootDrop.className="root-drop";rootDrop.hidden=true;const tree=el("div",undefined,aside);tree.setAttribute("aria-multiselectable","true");tree.className="page-tree";tree.setAttribute("role","tree");tree.setAttribute("aria-label","Folders and pages");tree.id="page-list";
   const results=el("section",undefined,aside);results.hidden=true;
+  const splitter=el("div",undefined,split);splitter.className="split-handle";splitter.tabIndex=0;splitter.setAttribute("role","separator");splitter.setAttribute("aria-orientation","vertical");splitter.setAttribute("aria-label","Resize page explorer");splitter.title="Drag to resize (double-click to reset)";
   const editor=el("div",undefined,split);editor.id="page-editor";
+  (()=>{
+    const KEY="miniaStudioTreeWidth",MIN=160,DEF=300;
+    const maxW=()=>Math.max(MIN,(split.clientWidth||0)-320);
+    const apply=(w,save)=>{if(!aside.style)return;w=Math.round(Math.max(MIN,Math.min(maxW(),w)));aside.style.width=w+"px";splitter.setAttribute("aria-valuemin",MIN);splitter.setAttribute("aria-valuemax",Math.round(maxW()));splitter.setAttribute("aria-valuenow",w);if(save)try{localStorage.setItem(KEY,String(w));}catch(e){}};
+    let saved=DEF;try{saved=Number(localStorage.getItem(KEY))||DEF;}catch(e){}
+    (typeof requestAnimationFrame==="function"?requestAnimationFrame:setTimeout)(()=>apply(saved,false));
+    splitter.addEventListener("pointerdown",ev=>{
+      if(ev.button!==0)return;ev.preventDefault();splitter.setPointerCapture(ev.pointerId);
+      const x0=ev.clientX,w0=aside.getBoundingClientRect().width;split.classList.add("resizing");
+      const move=e=>apply(w0+e.clientX-x0,false);
+      const up=e=>{splitter.removeEventListener("pointermove",move);splitter.removeEventListener("pointerup",up);splitter.removeEventListener("pointercancel",up);split.classList.remove("resizing");apply(aside.getBoundingClientRect().width,true);};
+      splitter.addEventListener("pointermove",move);splitter.addEventListener("pointerup",up);splitter.addEventListener("pointercancel",up);
+    });
+    splitter.addEventListener("dblclick",()=>apply(DEF,true));
+    splitter.addEventListener("keydown",e=>{const w=aside.getBoundingClientRect().width,step=e.shiftKey?80:20;
+      if(e.key==="ArrowLeft")apply(w-step,true);else if(e.key==="ArrowRight")apply(w+step,true);else if(e.key==="Home")apply(MIN,true);else if(e.key==="End")apply(maxW(),true);else if(e.key==="Enter")apply(DEF,true);else return;e.preventDefault();});
+  })();
   el("p","Select a page to read it, or select a folder to browse its files.",editor);
   let lastFocus, typeBuffer="", typeAt=0;
   function focus(item) { tree.querySelectorAll('[role="treeitem"]').forEach(n=>n.tabIndex=-1);item.tabIndex=0;item.focus();lastFocus=item; }
   function select(item,path) { state.selected=path;tree.querySelectorAll('[role="treeitem"]').forEach(n=>n.setAttribute("aria-selected",String(n===item))); }
+  const expandTo=path=>{const parts=path.split("/");for(let i=1;i<=parts.length;i++)state.expanded.add(parts.slice(0,i).join("/"));};
+  const effective=()=>{const all=[...state.marked];return all.filter(p=>!all.some(o=>o!==p&&p.startsWith(o+"/")));};
+  const treeItems=()=>[...tree.querySelectorAll('[role="treeitem"]')];
+  const checkOf=n=>n.querySelector(":scope>.tree-label>.tree-check");
+  let anchor=null,dragged=null;
+  function paintMarks(){
+    for(const n of treeItems()){const p=n.dataset.path,c=checkOf(n),marked=state.marked.has(p),implied=!marked&&[...state.marked].some(o=>p.startsWith(o+"/"));n.classList.toggle("marked",marked);n.classList.toggle("implied",implied);if(c){c.checked=marked||implied;c.disabled=implied;}}
+    tree.classList.toggle("has-marks",state.marked.size>0);drawBar();
+  }
+  function toggleMark(path,on){if(on)state.marked.add(path);else state.marked.delete(path);anchor=treeItems().find(n=>n.dataset.path===path)||anchor;paintMarks();}
+  function clearMarks(){state.marked.clear();paintMarks();}
+  function rangeMark(item){const visible=treeItems().filter(n=>!n.parentElement.closest("[hidden]")&&checkOf(n)),b=visible.indexOf(item),a=visible.indexOf(anchor||item);if(b<0)return;for(let i=Math.min(a<0?b:a,b);i<=Math.max(a<0?b:a,b);i++)state.marked.add(visible[i].dataset.path);paintMarks();}
+  function markSiblings(item){for(const n of treeItems())if(n.parentElement===item.parentElement&&checkOf(n))state.marked.add(n.dataset.path);paintMarks();}
+  function drawBar(){
+    bar.replaceChildren();bar.hidden=!state.marked.size;if(!state.marked.size)return;
+    const chosen=effective(),ro=writeReason();el("strong",chosen.length+" selected",bar);
+    const lock=b=>{if(ro){b.disabled=true;b.title=ro;}return b;};
+    lock(button(bar,"Move to…",()=>moveTo(chosen),"move"));lock(button(bar,"Delete…",()=>transfer(chosen,null)));button(bar,"Clear",clearMarks,"cross");
+    if(ro)el("small",ro,bar).className="muted control-reason";
+  }
+  async function moveTo(list){
+    const folders=list.filter(p=>kinds.get(p)==="folder"),dest=await pickFolder("Move "+list.length+" item"+(list.length>1?"s":"")+" to…",folders,list.length===1?list[0]:list.length+" selected items");
+    if(dest!==null)await transfer(list,dest);
+  }
+  async function moveOnePage(path,destFolder,newPath){
+    const wikiId=currentWiki.id,target=newPath||((destFolder?destFolder+"/":"")+path.slice(path.lastIndexOf("/")+1));
+    if(target===path){message("The page is already there.");return;}
+    if(!(await askConfirmation("Move "+path+" → "+target+"?\nLinks to it in other pages are updated. A recovery snapshot is taken first.")))return;
+    const page=await StudioApi.wiki("page?path="+encodeURIComponent(path));
+    await StudioApi.wiki("pages/move","POST",{source:path,destination:target,expectedRevision:page.revision});
+    if(currentWiki.id!==wikiId)return;
+    state.marked.delete(path);expandTo(parentOf(target));state.selected=target;activePage=null;await refresh();await loadPage(target);message("Moved to "+target);
+  }
+  async function deleteOnePage(path){
+    if(!(await askConfirmation("Delete "+path+"?\nLinks to it in other pages stay for lint to report. A recovery snapshot is taken first.")))return;
+    const wikiId=currentWiki.id,page=await StudioApi.wiki("page?path="+encodeURIComponent(path));
+    await StudioApi.wiki("page?path="+encodeURIComponent(path),"DELETE",{expectedRevision:page.revision,confirmation:path});
+    if(currentWiki.id!==wikiId)return;
+    state.marked.delete(path);if(activePage?.path===path){activePage=null;editor.replaceChildren();}state.selected="";await refresh();message("Deleted "+path);
+  }
+  // One page uses the page endpoints (any backend, no whole-wiki transaction). Several items or any folder
+  // use one previewed, snapshotted selection job so links and indexes are rewritten once.
+  async function transfer(list,destination){
+    if(!list.length)return;
+    if(!(await mayLeave()))return;
+    dirty=false;
+    const wikiId=currentWiki.id,deleting=destination===null;
+    if(list.length===1&&kinds.get(list[0])!=="folder"){await (deleting?deleteOnePage(list[0]):moveOnePage(list[0],destination));return;}
+    if(list.length===1){const only=list[0];await changeFolder(only,deleting,deleting?undefined:(destination?destination+"/":"")+only.slice(only.lastIndexOf("/")+1));return;}
+    if(studioSession?.role!=="admin"){message("Moving or deleting several items or folders requires an administrator.",true);return;}
+    const body={items:list,destination},preview=await StudioApi.wiki("selection/preview","POST",body);
+    activePage=null;editing=false;editor.replaceChildren();
+    el("h4",deleting?"Delete preview":"Move preview",editor);
+    const ul=el("ul",undefined,editor);for(const e of preview.entries)el("li",e.to===null?e.from+" ("+e.kind+")":e.from+" → "+e.to,ul);
+    const impact=preview.pages+" pages, "+preview.files+" files, "+preview.folders+" folders affected.\n"+preview.incomingLinks.length+" other pages link into the selection"+(deleting?" and keep dangling links for lint to report.":" and will be rewritten.")+"\nA verified recovery snapshot is created first.";
+    el("p",impact,editor);for(const link of preview.incomingLinks)el("p",link.path+" → "+link.targets.join(", "),editor);
+    if(!(await askConfirmation(impact+"\n"+(deleting?"Delete these items?":"Move these items?")))){editor.replaceChildren();return;}
+    let confirmation="";
+    if(deleting){confirmation=await askText('Type "'+preview.confirmation+'" to delete');if(confirmation!==preview.confirmation){message("Confirmation did not match; nothing changed.");return;}}
+    if(currentWiki.id!==wikiId||!editor.isConnected)return;
+    const job=await queue(deleting?"selection/delete":"selection/move",{...body,expectedRevision:preview.revision,confirmation}),finished=await job.finished;
+    if(finished.status!=="completed"){message("Selection "+(deleting?"delete":"move")+" "+human(finished.status)+". Open Activity for details and recovery snapshots.",true);return;}
+    if(currentWiki.id!==wikiId||!editor.isConnected)return;
+    state.marked.clear();state.selected="";editor.replaceChildren();
+    if(!deleting){expandTo(destination);state.folder=destination;}
+    await refresh();el("h4",deleting?"Selection deleted":"Selection moved",editor);el("p",list.length+" item(s) "+(deleting?"deleted.":"moved to "+(destination||"the wiki root")+"."),editor);
+  }
+  async function newPageAt(folder){if(!(await mayLeave()))return;const path=await askText("New Markdown path",(folder?folder+"/":"")+"new-page.md");if(!path)return;activePage={path,content:"# New page\n",revision:null,creating:true};editing=true;dirty=true;drawEditor();}
+  async function newFolderAt(parent){
+    const name=await askText("New folder path (created as a section with an index.md)",(parent?parent+"/":"")+"new-folder");if(!name)return;
+    const made=await StudioApi.wiki("folders","POST",{path:name.replace(/^\/+|\/+$/g,"")});
+    expandTo(made.path);state.selected=made.path;state.folder=made.path;await refresh();message("Created folder "+made.path);
+  }
+  async function renameItem(path,folder){
+    if(folder){await changeFolder(path,false);return;}
+    const target=await askText("New path for "+path,path);if(target&&target!==path)await moveOnePage(path,null,target);
+  }
+  function openMenu(item,anchor){
+    const path=item.dataset.path,folder=item.dataset.kind==="folder",group=state.marked.has(path),targets=group?effective():[path],n=targets.length,ro=writeReason(),where=folder?path:parentOf(path);
+    showMenu(anchor,[
+      {label:"Open",action:()=>item.studioActivate()},"-",
+      {label:"New page here",disabled:ro,action:()=>newPageAt(where)},
+      {label:"New folder here",disabled:ro,action:()=>newFolderAt(where)},"-",
+      ...(n===1?[{label:"Rename / move…",disabled:ro,action:()=>renameItem(path,folder)}]:[]),
+      {label:n>1?"Move "+n+" selected to…":"Move to…",disabled:ro,action:()=>moveTo(targets)},
+      {label:n>1?"Delete "+n+" selected…":"Delete…",danger:true,disabled:ro,action:()=>transfer(targets,null)}
+    ]);
+  }
+  function startDrag(event,path){dragged=state.marked.has(path)?effective():[path];event.dataTransfer.effectAllowed="move";event.dataTransfer.setData("text/plain",dragged.join("\n"));tree.classList.add("dragging");rootDrop.hidden=false;}
+  function endDrag(){dragged=null;tree.classList.remove("dragging");rootDrop.hidden=true;rootDrop.classList.remove("drop-target");tree.querySelectorAll(".drop-target").forEach(n=>n.classList.remove("drop-target"));}
+  const validDrop=dest=>!!dragged&&!writeReason()&&dragged.every(p=>p!==dest&&!dest.startsWith(p+"/"))&&!dragged.every(p=>parentOf(p)===dest);
+  function dragOver(event,dest,node){if(validDrop(dest)){event.preventDefault();event.dataTransfer.dropEffect="move";node.classList.add("drop-target");}}
+  async function dropOn(event,dest,node){event.preventDefault();node.classList.remove("drop-target");const ok=validDrop(dest),list=dragged;endDrag();if(ok)await transfer(list,dest);}
+  rootDrop.ondragover=event=>dragOver(event,"",rootDrop);rootDrop.ondragleave=()=>rootDrop.classList.remove("drop-target");rootDrop.ondrop=safely(event=>dropOn(event,"",rootDrop));
   async function branch(parent,path,level,offset=0) {
     const response=await StudioApi.wiki("children?path="+encodeURIComponent(path)+"&offset="+offset+"&limit=100");
     for(const entry of response.items) {
       const item=el("div",undefined,parent);item.setAttribute("role","treeitem");item.setAttribute("aria-level",String(level));item.setAttribute("aria-selected",String(state.selected===entry.path));item.tabIndex=lastFocus?-1:0;lastFocus=lastFocus||item;item.dataset.path=entry.path;
       const label=el("div",undefined,item);label.className="tree-label";label.title=entry.path;
-      const folder=entry.kind==="folder", arrow=el("span",folder?"▸":"",label);arrow.className="tree-arrow";arrow.setAttribute("aria-hidden","true");withIcon(el("span",entry.name,label),folder?"folder":"pages");
+      const folder=entry.kind==="folder", arrow=el("span",undefined,label);if(folder)arrow.append(chevronIcon());arrow.className="tree-arrow";arrow.setAttribute("aria-hidden","true");kinds.set(entry.path,entry.kind);item.dataset.kind=entry.kind;
+      let check=null;if(folder||!/^index\.md$/i.test(entry.name)){check=el("input",undefined,label);check.type="checkbox";check.className="tree-check";check.tabIndex=-1;check.setAttribute("aria-label","Select "+entry.path);check.checked=state.marked.has(entry.path);check.onclick=event=>event.stopPropagation();check.onchange=()=>toggleMark(entry.path,check.checked);}
+      withIcon(el("span",entry.name,label),folder?"folder":"pages");
+      const more=el("button","⋯",label);more.type="button";more.className="tree-menu-btn";more.tabIndex=-1;more.setAttribute("aria-label","Actions for "+entry.path);more.onclick=event=>{event.stopPropagation();openMenu(item,more);};
       let group,loaded=false;
       async function expand(open) {
-        item.setAttribute("aria-expanded",String(open));arrow.textContent=open?"▾":"▸";group.hidden=!open;
-        if(open){state.expanded.add(entry.path);if(!loaded){await branch(group,entry.path,level+1);loaded=true;}}else state.expanded.delete(entry.path);
+        item.setAttribute("aria-expanded",String(open));group.hidden=!open;
+        if(open){state.expanded.add(entry.path);if(!loaded){await branch(group,entry.path,level+1);loaded=true;paintMarks();}}else state.expanded.delete(entry.path);
       }
       if(folder){group=el("div",undefined,item);group.setAttribute("role","group");group.hidden=true;item.setAttribute("aria-expanded","false");arrow.onclick=safely(async event=>{event.stopPropagation();focus(item);await expand(group.hidden);});}
       const activate=async()=>{if(!(await mayLeave()))return;dirty=false;editing=false;focus(item);select(item,entry.path);if(folder){state.folder=entry.path;activePage=null;editor.replaceChildren();el("h4",entry.path,editor);el("p","Expand this folder to select a page. Its index.md file is its landing page.",editor);folderActions(entry.path);await expand(true);}else{state.folder=entry.path.includes("/")?entry.path.slice(0,entry.path.lastIndexOf("/")):"";await loadPage(entry.path);}};
-      item.studioActivate=activate;label.onclick=safely(activate);
+      item.studioActivate=activate;
+      label.onclick=safely(async event=>{if((event.metaKey||event.ctrlKey)&&check){event.preventDefault();toggleMark(entry.path,!state.marked.has(entry.path));return;}if(event.shiftKey&&check){event.preventDefault();rangeMark(item);return;}await activate();});
+      label.oncontextmenu=event=>{event.preventDefault();openMenu(item,{x:event.clientX,y:event.clientY});};
+      label.draggable=true;label.addEventListener("dragstart",event=>startDrag(event,entry.path));label.addEventListener("dragend",endDrag);
+      if(folder){label.addEventListener("dragover",event=>dragOver(event,entry.path,label));label.addEventListener("dragleave",()=>label.classList.remove("drop-target"));label.addEventListener("drop",safely(event=>dropOn(event,entry.path,label)));}
       item.addEventListener("keydown",safely(async event=>{
         if(event.target!==item)return;
         const visible=[...tree.querySelectorAll('[role="treeitem"]')].filter(n=>!n.closest('[hidden]')),index=visible.indexOf(item);let next;
         if(event.key==="ArrowDown")next=visible[index+1];else if(event.key==="ArrowUp")next=visible[index-1];else if(event.key==="Home")next=visible[0];else if(event.key==="End")next=visible.at(-1);
         else if(event.key==="ArrowRight"&&folder){if(group.hidden)await expand(true);else next=group.querySelector('[role="treeitem"]');}
         else if(event.key==="ArrowLeft"){if(folder&&!group.hidden)await expand(false);else next=item.parentElement.closest('[role="treeitem"]');}
-        else if(event.key==="Enter"||event.key===" ")await activate();
-        else if(event.key.length===1&&!event.metaKey&&!event.ctrlKey){if(Date.now()-typeAt>700)typeBuffer="";typeAt=Date.now();typeBuffer+=event.key.toLowerCase();next=[...visible.slice(index+1),...visible.slice(0,index+1)].find(n=>n.querySelector('.tree-label').textContent.replace(/^[▸▾]/,"").toLowerCase().startsWith(typeBuffer));}
+        else if(event.key==="Enter")await activate();
+        else if(event.key===" "){if(check)toggleMark(entry.path,!state.marked.has(entry.path));else await activate();}
+        else if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="a")markSiblings(item);
+        else if(event.key==="Escape"&&state.marked.size)clearMarks();
+        else if(event.key==="ContextMenu"||(event.shiftKey&&event.key==="F10"))openMenu(item,more);
+        else if(event.key.length===1&&!event.metaKey&&!event.ctrlKey){if(Date.now()-typeAt>700)typeBuffer="";typeAt=Date.now();typeBuffer+=event.key.toLowerCase();next=[...visible.slice(index+1),...visible.slice(0,index+1)].find(n=>n.querySelector('.tree-label').textContent.toLowerCase().startsWith(typeBuffer));}
         else return;
         event.preventDefault();event.stopPropagation();if(next)focus(next);
       }));
@@ -562,11 +792,9 @@ async function pagesView(content) {
       const more=button(parent,"Load more in "+(path||currentWiki.name),async()=>{more.remove();await branch(parent,path,level,offset+response.items.length);});more.classList.add("tree-more");}
     if(!response.items.length&&!offset)el("p","Empty folder",parent).className="muted";
   }
-  function folderActions(source) {
-    const actions=row(editor);
-    async function changeFolder(deleting) {
+  async function changeFolder(source,deleting,preset) {
       const wikiId=currentWiki.id;
-      const destination=deleting?null:await askText("Move/rename folder — destination path",source);
+      const destination=deleting?null:preset||await askText("Move/rename folder — destination path",source);
       if(!deleting&&!destination)return;
       const preview=await StudioApi.wiki("folders/preview","POST",{source,destination});
       const impact=source+(destination?" → "+destination:"")+"\n"+preview.pages+" pages, "+preview.files+" files, "+preview.folders+" folders (including empty folders).\n"+preview.incomingLinks.length+" surviving pages link into this folder.\nA verified recovery snapshot will be created before changes.";
@@ -584,16 +812,21 @@ async function pagesView(content) {
       state.selected=state.folder;state.expanded.add(state.folder);activePage=null;editor.replaceChildren();
       if(state.folder){await tree.reveal(state.folder);const selected=[...tree.querySelectorAll('[role="treeitem"]')].find(n=>n.dataset.path===state.folder);if(selected)await selected.studioActivate();}
       else {await refresh();el("h4",currentWiki.name,editor);el("p","Folder deleted. Select a page or folder in Explorer.",editor);}
-    }
-    const reason=writeReason()||(studioSession?.role!=="admin"?"Folder operations require an administrator":"");
-    disable(button(actions,"Move/rename folder",()=>changeFolder(false)),reason);
-    disable(button(actions,"Delete folder",()=>changeFolder(true)),reason);
   }
-  async function refresh(){state.scroll=aside.scrollTop;lastFocus=null;tree.replaceChildren();await branch(tree,"",1);aside.scrollTop=state.scroll;}
-  tree.studioRefresh=refresh;
+  function folderActions(source) {
+    const actions=row(editor),reason=writeReason()||(studioSession?.role!=="admin"?"Folder operations require an administrator":"");
+    disable(button(actions,"Move/rename folder",()=>changeFolder(source,false)),reason);
+    disable(button(actions,"Delete folder",()=>changeFolder(source,true)),reason);
+    const create=row(editor);
+    disable(button(create,"New page here",()=>newPageAt(source)),writeReason());
+    disable(button(create,"New folder here",()=>newFolderAt(source),"folder"),writeReason());
+    if(state.marked.size)disable(button(create,"Move "+effective().length+" selected here",()=>transfer(effective(),source),"move"),writeReason());
+  }
+  async function refresh(){state.scroll=aside.scrollTop;lastFocus=null;tree.replaceChildren();await branch(tree,"",1);paintMarks();aside.scrollTop=state.scroll;}
+  tree.studioRefresh=refresh;tree.studioTransfer=transfer;tree.studioMoveTo=moveTo;tree.studioRename=path=>renameItem(path,false);
   tree.reveal=async path=>{const parts=path.split("/");for(let i=1;i<parts.length;i++)state.expanded.add(parts.slice(0,i).join("/"));state.selected=path;await refresh();const item=[...tree.querySelectorAll('[role="treeitem"]')].find(n=>n.dataset.path===path);if(item){focus(item);item.scrollIntoView({block:"nearest"});}else message("This folder has more entries. Use Load more to reveal the selected page.");};
   button(toolbar,"Refresh",refresh);
-  const newPage=button(toolbar,"New page",async()=>{if(!(await mayLeave()))return;const path=await askText("New Markdown path",(state.folder?state.folder+"/":"")+"new-page.md");if(!path)return;activePage={path,content:"# New page\n",revision:null,creating:true};editing=true;dirty=true;drawEditor();});disable(newPage,writeReason());
+  const newPage=button(toolbar,"New page",()=>newPageAt(state.folder));disable(newPage,writeReason());disable(button(toolbar,"New folder",()=>newFolderAt(state.folder),"folder"),writeReason());
   async function searchPages(offset=0){
     const query=search.value.trim();results.replaceChildren();results.hidden=!query;if(!query)return;
     el("h4","Search results",results);
@@ -626,6 +859,9 @@ function drawEditor() {
   if(!editing) {
     const toolbar=row(editor);disable(button(toolbar,"Edit",()=>{editing=true;drawEditor();},"edit"),writeReason());
     button(toolbar,"Reveal in tree",()=>document.getElementById("page-list").reveal(page.path),"tree");
+    {const list=document.getElementById("page-list"),ro=writeReason(),lock=b=>{if(ro){b.disabled=true;b.title=ro;}return b;};
+      lock(button(toolbar,"Rename / move",()=>list.studioRename(page.path),"move"));lock(button(toolbar,"Move to folder…",()=>list.studioMoveTo([page.path]),"folder"));lock(button(toolbar,"Delete",()=>list.studioTransfer([page.path],null)));
+      if(ro)el("small",ro,toolbar).className="muted control-reason";}
     const article=el("article",undefined,editor);article.className="page-preview";renderMarkdown(page.content,article);
     technical({metadata:page.metadata,links:page.links,sourceIds:page.sourceIds,warnings:page.warnings},editor,"Page details and provenance");
     StudioApi.wiki("backlinks?path="+encodeURIComponent(page.path)).then(result=>{if(article.isConnected)technical(result,editor,"Incoming links");}).catch(e=>message(e.message,true));
@@ -834,11 +1070,18 @@ async function sourcesView(content) {
     body.replaceChildren();const sources=await allItems(wikiPath("sources"));
     if(!sources.length){el("p","No sources yet. Add files, a webpage or video captions to begin.",body);button(body,"Add your first source",()=>prepare());return;}
     const table=dataTable(body,["Source","Revision","Status","Actions"]);
-    for(const source of sources){const r=el("tr",undefined,table);el("td",source.name,r);el("td",String(source.revision).slice(0,12),r);el("td",human(source.lastStatus||source.status),r);const actions=el("td",undefined,r);button(actions,"Preview and import",()=>review(source));button(actions,"Update source",()=>prepare(source));button(actions,"Details",()=>{body.replaceChildren();button(body,"Back to sources",library);technical(source,body,"Inventory and revision lineage").open=true;});}
+    for(const source of sources){const r=el("tr",undefined,table);el("td",source.name,r);el("td",String(source.revision).slice(0,12),r);el("td",human(source.lastStatus||source.status)+(source.adhoc?" · ad-hoc (not kept)":""),r);const actions=el("td",undefined,r);button(actions,"Preview and import",()=>review(source));button(actions,"Update source",()=>prepare(source));button(actions,"Details",()=>{body.replaceChildren();button(body,"Back to sources",library);technical(source,body,"Inventory and revision lineage").open=true;});button(actions,"Delete",()=>removeSource(source));}
   }
   async function prepare(existing){
     body.replaceChildren();el("h4",existing?"Update source: "+existing.name:"1. Choose a source",body);
     const method=field(body,"Source method",["Files or ZIP","Folder","Webpage","YouTube captions","Local directory / checkout"]);
+
+    // Ad-hoc imports go straight to preview and import, and are discarded once imported
+    var adhoc = null
+    if (!existing) {
+      adhoc = check(body, "Ad-hoc import (don't keep this source in the library)")
+      el("p", "The files are imported once; after a successful import the source and its staged files are discarded, so it cannot be updated or re-imported later.", body).className = "muted"
+    }
     const panel=el("section",undefined,body);
     function draw(){
       panel.replaceChildren();el("h4","2. Prepare "+method.value.toLowerCase(),panel);
@@ -849,14 +1092,39 @@ async function sourcesView(content) {
       async function stage(payload){
         if(!name.value.trim()||!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id.value))throw new Error("Enter a source name and a valid lower-case source ID.");
         if(!existing){const known=await allItems(wikiPath("sources"));if(known.some(source=>source.id===id.value))throw new Error("That source ID already exists. Choose Update source from the library.");}
-        const source=await StudioApi.wiki("sources","POST",{id:id.value,name:name.value.trim(),...payload});await review(source);
+        const source=await StudioApi.wiki("sources","POST",{id:id.value,name:name.value.trim(),...payload,...(adhoc?.checked?{adhoc:true}:{})});await review(source);
       }
       if(method.value==="Webpage"){
         const url=field(inputRow,"Webpage URL");url.type="url";url.placeholder="https://example.com/article";
         submit=button(inputRow,"Download webpage",()=>stage({type:"web",url:url.value.trim()}),"download");
       }else if(method.value==="YouTube captions"){
         const video=field(inputRow,"YouTube URL or video ID"),lang=field(inputRow,"Caption language",null,"en");
-        submit=button(inputRow,"Download captions",()=>stage({type:"youtube",video:video.value.trim(),lang:lang.value.trim()||"en"}),"download");
+
+        // Optional page file name; an update proposes the file name of the previous revision
+        var previous = existing?.type === "youtube" ? Object.keys(existing.files || {}) : []
+        var fileName = field(inputRow, "Markdown file name (optional)", null, previous.length === 1 ? previous[0].replace(/\.md$/i, "") : "")
+        fileName.placeholder = "youtube-<video id>"
+        var named = el("p", "", panel)
+        named.className = "muted"
+        var showName = function() {
+          var slug = markdownSlug(fileName.value)
+          if (fileName.value.trim().length > 0 && slug.length === 0) {
+            named.textContent = "Use letters or digits in the file name."
+          } else {
+            named.textContent = "Saved as " + (slug.length > 0 ? slug : "youtube-<video id>") + ".md inside the wiki folder you choose in step 3."
+          }
+        }
+        fileName.oninput = showName
+        showName()
+
+        submit = button(inputRow, "Download captions", function() {
+          var slug = markdownSlug(fileName.value)
+          if (fileName.value.trim().length > 0 && slug.length === 0) throw new Error("Use letters or digits in the file name.")
+
+          var payload = { type: "youtube", video: video.value.trim(), lang: lang.value.trim() || "en" }
+          if (slug.length > 0) payload.filename = slug + ".md"
+          return stage(payload)
+        }, "download")
       }else if(method.value==="Local directory / checkout"){
         const dirs=studioSession.adapters.directory||[];
         if(!dirs.length){el("p","Configure studiosourcedirs to select a trusted local directory or Git checkout.",inputRow);return;}
@@ -880,15 +1148,61 @@ async function sourcesView(content) {
     }
     method.onchange=draw;draw();
   }
+  // Removes a source from the library; pages already imported stay in the wiki
+  async function removeSource(source){
+    const confirmed=await askConfirmation("Delete source "+source.name+" ("+source.id+") from the library? Its staged files and revisions are removed permanently. Pages already imported into the wiki stay unchanged.");
+    if(!confirmed)return;
+    await StudioApi.wiki("sources/"+encodeURIComponent(source.id),"DELETE",{confirmation:source.id});
+    message("Deleted source "+source.name);
+    await library();
+  }
   async function review(source){
     body.replaceChildren();el("h4","3. Preview changes · "+source.name,body);
     el("p","Review this source revision before importing. Preview reports engine estimates; application revalidates the current source.",body);
+    if (source.adhoc) el("p", "Ad-hoc import: this source is discarded after a successful import and will not appear in the library.", body).className = "muted"
+
+    // Destination wiki folder: visible up front, typed or picked from the wiki tree
+    var destination = el("section", undefined, body)
+    destination.className = "import-destination"
+    el("h4", "Wiki folder", destination)
+    var where = row(destination)
+    var section = field(where, "Import into folder", null, source.id)
+    section.placeholder = source.id
+    button(where, "Choose folder…", async function() {
+      var picked = await pickFolder("Import " + source.name + " into…", [], "Pick an existing folder or create a new one. Pages are created inside it.", { accept: "Import here", allowRoot: false })
+      if (isFolderPath(picked)) {
+        section.value = picked
+        section.dispatchEvent(new Event("input", { bubbles: true }))
+      }
+    }, "folder")
+    var destinationNote = el("p", "", destination)
+    destinationNote.className = "muted"
+    var expected = el("ul", undefined, destination)
+    expected.className = "expected-pages"
+
     const advanced=el("disclosure",undefined,body);el("disclosure-toggle","Advanced options",advanced);
-    const mode=field(advanced,"Processing",["auto","normalize","raw","distill"]),layout=field(advanced,"Layout",["source","flat"]),section=field(advanced,"Destination section",null,source.id),include=field(advanced,"Include patterns"),exclude=field(advanced,"Exclude patterns");
-    el("p","Destination section defaults to the source ID ("+source.id+"). Enter another section to override it.",advanced);
+    const mode=field(advanced,"Processing",["auto","normalize","raw","distill"]),layout=field(advanced,"Layout",["source","flat"]),include=field(advanced,"Include patterns"),exclude=field(advanced,"Exclude patterns");
+    el("p","Source layout keeps the source's sub-folders inside the wiki folder; flat puts every page directly in it.",advanced).className="muted";
+
+    var folder = function() { return section.value.trim().replace(/^\/+|\/+$/g, "") }
+
+    // Lists the page paths new source files are expected to get in the chosen folder
+    function showDestination() {
+      var target = folder() || source.id
+      var files = Object.keys(source.files || {}).filter(p => !/\.zip$/i.test(p)).sort()
+      var shown = files.slice(0, 8)
+
+      destinationNote.textContent = (folder().length > 0 ? "" : "Empty uses the source ID. ")
+        + "Pages are created under " + target + "/. Pages imported before from this source keep their current location; Preview changes shows the final paths."
+      expected.replaceChildren()
+      shown.forEach(p => el("li", expectedPagePath(target, p, layout.value), expected))
+      if (files.length > shown.length) el("li", "… and " + (files.length - shown.length) + " more", expected)
+    }
+    showDestination()
+
     const semantic=check(advanced,"Semantic extraction"),prune=check(advanced,"Remove source-owned pages missing from this revision");disable(semantic,writeReason(true));
     const actions=row(body),result=el("div",undefined,body);let approved=null,working=false;
-    const options=()=>({mode:mode.value,layout:layout.value,section:section.value,include:include.value,exclude:exclude.value,semantic:semantic.checked,prune:prune.checked});
+    const options=()=>({mode:mode.value,layout:layout.value,section:folder(),include:include.value,exclude:exclude.value,semantic:semantic.checked,prune:prune.checked});
     const signature=()=>JSON.stringify(options());
     const preview=button(actions,"Preview changes",async()=>{
       working=true;preview.disabled=true;apply.disabled=true;const requested=signature();result.replaceChildren();el("p","Preparing preview…",result);
@@ -902,9 +1216,21 @@ async function sourcesView(content) {
       const latest=await allItems(wikiPath("sources"));if(latest.find(x=>x.id===source.id)?.revision!==source.revision){approved=null;apply.disabled=true;throw new Error("Source revision changed. Select the current source from the library and preview again.");}
       if(prune.checked&&!(await askConfirmation("Remove source-owned pages missing from this revision? Engine conflict checks still protect manual edits.")))return;
       apply.disabled=true;const job=await queue("ingestions",{sourceId:source.id,revision:source.revision,preview:false,options:options(),confirmation:{acknowledgePrune:prune.checked}});approved=null;
-      const finished=await job.finished;if(result.isConnected){result.replaceChildren();el("h4",human(finished.status),result);outcome(result,finished.result);button(result,"Inspect activity",()=>jobDetail(job.id));}
+      const finished=await job.finished;if(result.isConnected){result.replaceChildren();el("h4",human(finished.status),result);outcome(result,finished.result);button(result,"Inspect activity",()=>jobDetail(job.id));if(source.adhoc&&finished.status==="completed")el("p","Ad-hoc source discarded; it is no longer in the library.",result).className="muted";}
     });apply.disabled=true;
-    advanced.addEventListener("input",()=>{approved=null;apply.disabled=true;if(!working){result.replaceChildren();el("p","Options changed. Preview again before importing.",result);}});
+    // Any destination or option change refreshes the expected paths and requires a new preview
+    var changed = function() {
+      showDestination()
+      approved = null
+      apply.disabled = true
+      if (!working) {
+        result.replaceChildren()
+        el("p", "Options changed. Preview again before importing.", result)
+      }
+    }
+    advanced.addEventListener("input", changed)
+    advanced.addEventListener("change", changed)
+    destination.addEventListener("input", changed)
     technical(source,body,"Source revision details");
   }
   await library();
