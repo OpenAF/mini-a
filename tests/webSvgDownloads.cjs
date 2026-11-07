@@ -78,7 +78,7 @@ assert.ok(link.clicked && link.removed);assert.equal(revoked,undefined);timer();
     return node;
   };
   await png.listeners.click();
-  assert.equal(canvas.width, 1600); assert.equal(canvas.height, 800);
+  assert.equal(canvas.width, 800); assert.equal(canvas.height, 400);
   assert.equal(blob.type, 'image/png');
   assert.equal(body.children.at(-1).download, 'diagram.png');
   assert.equal(png.disabled, false);

@@ -667,10 +667,6 @@ function MiniAInteractiveSession(args, adapter) {
     maxauditrecords: { type: "number", description: "Maximum audit records included in a memory dream prompt (default 200)." },
     webadvanced: { type: "boolean", default: false, description: "Enable trusted Advanced web console APIs (generates a token and opens the browser when webtoken is omitted)." },
     webadvancedpath: { type: "string", description: "Local Advanced session journal and preset directory." },
-    webextensions: { type: "boolean", default: false, description: "Enable opt-in isolated Web Extensions." },
-    webextensionsconfig: { type: "string", description: "Operator-owned Web Extensions configuration file." },
-    webextensionsonly: { type: "boolean", default: false, description: "Start a model-free extension workspace." },
-    webextensionsagent: { type: "boolean", default: false, description: "Enable document tools for explicitly selected artifacts." },
     webembed: { type: "boolean", default: false, description: "Enable the opt-in iframe context bridge." },
     webembedorigins: { type: "string", description: "Exact allowed parent origins, comma-separated or JSON/SLON array." },
     webembedfields: { type: "string", description: "JSON/SLON definitions of allowed parent context fields." },
@@ -1091,7 +1087,7 @@ function MiniAInteractiveSession(args, adapter) {
     { category: "Memory and knowledge", subcategory: "Dream consolidation", names: "dreamwikimaxaffected dryrun maxauditrecords dream dreammaxsteps dreammemorymode dreammode dreamreport dreamwiki dreamwikiapproval dreamwikidryrun dreamwikiinstructions dreamwikilintresultlimit dreamwikillm dreamwikimaxdepth dreamwikiminpages dreamwikimode dreamwikiorganize dreamwikireorg".split(" ") },
     { category: "Delegation and servers", subcategory: "Delegation and subtasks", names: "autodelegation autodelegationmaxperstep autodelegationthreshold delegationhardtimeout delegationmaxdepth delegationmaxretries delegationstalltimeout delegationtimeout forkstatemaxbytes forkpolicy forkdecide maxconcurrent noisytools showdelegate subtasks subtasksfile subtaskssequential usea2a usedelegation".split(" ") },
     { category: "Delegation and servers", subcategory: "Worker registry", names: "workerevictionttl workermode workerreg workerreginterval workerregtoken workerregurl workers workerskills workertags".split(" ") },
-    { category: "Delegation and servers", subcategory: "Web interface", names: "browsercontext onport path ssequeuetimeout web webadvanced webadvancedpath webembed webembedorigins webembedfields webembedcontextrequired webembedprompt webextensions webextensionsconfig webextensionsonly webextensionsagent".split(" ") },
+    { category: "Delegation and servers", subcategory: "Web interface", names: "browsercontext onport path ssequeuetimeout web webadvanced webadvancedpath webembed webembedorigins webembedfields webembedcontextrequired webembedprompt".split(" ") },
     { category: "Output and diagnostics", subcategory: "Display and visualizations", names: "format raw showexecs showthinking useascii useasciiviz usecharts usediagrams usemaps usemath usemermaid usestream usesvg usevectors".split(" ") },
     { category: "Output and diagnostics", subcategory: "Files and logging", names: "warnunknownargs auditch debug debugch debugdecch debugfile debuglcch debugtrace debugvalch debugvisualch logpromptheaders metricsch nologtrunc outfile outfileall outputfile toollog verbose".split(" ") }
   ]

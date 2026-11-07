@@ -224,14 +224,14 @@ MiniAAdvanced.prototype._get = function(uuid) {
   return state
 }
 
-MiniAAdvanced.prototype.emit = function(state, type, value, requestId) {
+MiniAAdvanced.prototype.emit = function(state, type, value) {
   state.lock.lock()
   try {
-    var record = { sequence: state.sequence + 1, timestamp: new Date().toISOString(), runId: isDef(requestId) ? requestId : state.operation, type: type, value: this.safe(value, __, type === "command-result" || type === "result-part") }
+    var record = { sequence: state.sequence + 1, timestamp: new Date().toISOString(), runId: state.operation, type: type, value: this.safe(value, __, type === "command-result" || type === "result-part") }
     var offset = io.fileExists(state.journal) ? Number(new java.io.File(state.journal).length()) : 0
     io.writeFileString(state.journal, stringify(record, __, "") + "\n", __, true)
     state.offsets.push(offset)
-    if (type === "command-result" && record.runId) state.nativeResults[record.runId] = true
+    if (type === "command-result" && state.operation) state.nativeResults[state.operation] = true
     state.sequence++
     global.__lastActivity[state.uuid] = Date.now()
   } finally { state.lock.unlock() }
@@ -480,16 +480,6 @@ MiniAAdvanced.prototype.request = function(data) {
   if (binaryAttachments.length && (data.action !== "command" || /^\s*[/$]/.test(data.command))) throw new Error("Binary attachments require an ordinary goal, not a slash or skill command")
   var token = global._mini_a_web_reserve(state.uuid)
   if (isUnDef(token)) return { busy: true }
-  var documentRequest = data.action === "command" && (isDef(data.artifactReferences) || isDef(data.artifactPermissions))
-  if (documentRequest) {
-    try {
-      if (typeof MiniAWebDocumentAgent === "undefined") throw new Error("Document agent tools are disabled")
-      MiniAWebDocumentAgent.prepare({ header: { "x-mini-a-token": global.__webtoken } }, data, state.uuid)
-    } catch(documentError) {
-      global._mini_a_web_release(state.uuid, token)
-      throw documentError
-    }
-  }
   var receipt = { accepted: true, requestId: data.requestId, view: data.action === "command" ? this.safe(state.runtime.commandView(data.command), __, true) : { name: "settings", params: {} } }
   state.receipts[data.requestId] = receipt
   var receiptKeys = Object.keys(state.receipts)
@@ -595,29 +585,8 @@ MiniAAdvanced.prototype.request = function(data) {
         var goal = state.goal
         state.goal = null
         var promptData = { uuid: state.uuid, prompt: goal.prompt, skillUsage: goal.skillUsage, displayPrompt: goal.displayPrompt, advancedRequestId: data.requestId, attachments: data.attachments }
-        if (isDef(data.artifactReferences)) promptData.artifactReferences = data.artifactReferences
-        if (isDef(data.artifactPermissions)) promptData.artifactPermissions = data.artifactPermissions
         if (embedSnapshot) promptData.embed = embedSnapshot
-        var submitted
-        try { submitted = self.submitPrompt({ header: { "x-mini-a-token": global.__webtoken }, files: { postData: stringify(promptData, __, "") } }) }
-        catch(submissionFailure) {
-          if (!documentRequest) throw submissionFailure
-          submitted = { data: { error: __miniAErrMsg(submissionFailure) } }
-        }
-        if (documentRequest) {
-          // A selected document can change between command acceptance and goal
-          // expansion. Surface the prompt route's rejection in this command's
-          // journal without borrowing a newer operation's correlation ID.
-          var submission, submissionError
-          try { submission = submitted && isString(submitted.data) ? jsonParse(submitted.data) : submitted && submitted.data }
-          catch(ignoreSubmissionParse) {}
-          if (!isMap(submission)) submissionError = "Unable to submit the document-scoped goal"
-          else if (submission.error || submission.busy) submissionError = String(submission.error || "This conversation is busy")
-          if (submissionError) {
-            self.emit(state, "error", submissionError, data.requestId)
-            self.emit(state, "command-result", { version: 1, command: data.command, view: receipt.view.name, params: receipt.view.params, status: "failed", blocks: [], messages: [{ type: "error", value: submissionError }] }, data.requestId)
-          }
-        }
+        self.submitPrompt({ header: { "x-mini-a-token": global.__webtoken }, files: { postData: stringify(promptData, __, "") } })
       }
     }
   }).catch(function(e) { state.operation = null; global._mini_a_web_release(state.uuid, token); self.emit(state, "error", String(e)) })

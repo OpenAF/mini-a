@@ -2,13 +2,6 @@
 
 Mini-A can consume plugins that follow the [Agent Plugins](https://agent-plugins.org) 1.0.0 standard — a vendor-neutral directory format for packaging `skills/` and `mcp.json` MCP servers together. Mini-A acts as a **client** of this standard: it discovers plugin directories, adds their `skills/` folders to the existing skills machinery, and converts their `mcp.json` servers into ordinary MCP connections. There is no separate "plugin" concept beyond that — a loaded plugin's skills show up exactly like any other skill, and its MCP servers show up exactly like any other MCP connection.
 
-[Web Extensions](WEB-EXTENSIONS.md) are a separate opt-in capability. A directory may
-also contain `mini-a-web.json` and `web/`, or contain only those web files. The web
-manifest does not add fields to `plugin.json` or change its validation. Web enablement
-does not activate skills/MCP; Agent Plugin enablement does not approve browser code.
-Both discovery paths reuse directory resolution, while grants and private saved
-documents remain separate from `PLUGIN_DATA`.
-
 ---
 
 ## Directory layout

@@ -2351,10 +2351,6 @@ These grouped tables complete the parameter entries above. `unset` means no expl
 | --- | --- | --- | --- |
 | `path` | string | unset | Static asset path used by the web UI/worker modes. |
 | `webadvanced` | boolean | `false` | Enable trusted Advanced web console APIs (generates a token and opens the browser when webtoken is omitted). |
-| `webextensions` | boolean | `false` | Enable [isolated local Web Extensions](docs/WEB-EXTENSIONS.md), with explicit package approval. |
-| `webextensionsconfig` | string | unset | Operator-owned JSON configuration for packages, local mounts and limits. |
-| `webextensionsonly` | boolean | `false` | Model-free Simple workspace; requires `webextensions=true`. |
-| `webextensionsagent` | boolean | `false` | Enable per-prompt saved-document tools and explicit creation/editing grants. |
 | `webartifacts` | boolean | `false` | Web-only: enable isolated artifact generation. |
 | `artifactworkerurl` | string | unset | Web-only: private worker URL ending in `/artifact-worker`. |
 | `artifactdir` | string | private default | Web-only: private artifact storage directory; 24 hour expiry. |

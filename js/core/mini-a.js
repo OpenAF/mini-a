@@ -19056,7 +19056,6 @@ MiniA.prototype.init = function(args) {
       // This binding is installed only by the authenticated web prompt handler.
       // Replace every tool source, including plugins and restored MCP settings.
       if (this._artifactBinding) aggregatedMcpConfigs = [MiniAWebArtifacts.config(this._artifactBinding)]
-      if (this._webDocumentBinding && typeof MiniAWebDocumentAgent !== "undefined") aggregatedMcpConfigs.push(MiniAWebDocumentAgent.config(this._webDocumentBinding))
 
       // If mcpproxy is enabled, wrap all MCP configs into a single proxy
       if (toBoolean(args.mcpproxy) === true && aggregatedMcpConfigs.length > 0) {

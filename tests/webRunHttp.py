@@ -46,7 +46,6 @@ MiniA.prototype.start = function(args) {
     sleep(100);
   }
   if (/failure/.test(args.goal)) throw new Error("Fixture provider failure");
-  this.state = "stop"; // Successful MiniA completion also ends in the stop state.
   return {answer:"Fixture answer"};
 };
 '''
@@ -95,10 +94,6 @@ MiniA.prototype.start = function(args) {
                     assert result['outcome'] == expected, result
                     assert result['runId'] == receipt['runId'], result
                     assert ('error' in result) == (expected != 'success'), result
-                    if expected == 'success':
-                        assert 'Fixture answer' in result['content'], result
-                        assert any(event.get('event') == 'final' and event.get('message') == 'Fixture answer'
-                                   for event in result['history']), result
                     revision = result['transcriptRevision']
                     unchanged = request(base, 'result', {'uuid': session, 'ifTranscriptRevision': revision})
                     assert unchanged['status'] == 'finished' and unchanged['outcome'] == expected
