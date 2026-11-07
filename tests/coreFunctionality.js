@@ -2321,6 +2321,19 @@
       ow.test.assert(result.returnedMatches > 0 && result.returnedMatches <= 5, true, "grep should honor both match and text budgets")
       ow.test.assert(result.limited, true, "grep should mark limited responses")
       ow.test.assert(String(result.content[0].text).indexOf("LIMITED") >= 0, true, "grep response should explain the applied match cap")
+
+      // Mistaken parameter names must not silently degrade to stat
+      var fn = proxyConfig.options.fns["proxy-dispatch"]
+      var viaQuery = fn({ action: "readresult", resultFile: tempPath, query: "line 7" })
+      ow.test.assert(viaQuery.op, "grep", "query without op should be treated as grep pattern")
+      ow.test.assert(viaQuery.matchCount > 0, true, "query alias should find matches")
+      var viaType = fn({ action: "readresult", resultFile: tempPath, type: "head", limit: 1, lines: 2 })
+      ow.test.assert(viaType.op, "head", "type alias should select op")
+      var badOp = fn({ action: "readresult", resultFile: tempPath, op: "bogus" })
+      ow.test.assert(isString(badOp.error) && badOp.error.indexOf("Unknown readresult op") >= 0, true, "unknown op should return an error")
+      var plainStat = fn({ action: "readresult", resultFile: tempPath })
+      ow.test.assert(plainStat.op, "stat", "no params should still default to stat")
+      ow.test.assert(String(plainStat.content[0].text).indexOf("Hint:") >= 0, true, "stat should include a usage hint")
     } finally {
       try { io.rm(tempPath) } catch(ignoreCleanupErr) {}
     }
@@ -2432,6 +2445,32 @@
       ow.test.assert(slice.content[0].text, saved.substring(range.fromChar - 1, range.toChar), "Slice original saved response")
       ow.test.assert(calls, 1, "Recovery needs only one fetch")
     } finally { io.rm(fetched.resultFile) }
+  }
+
+  exports.testProxyPromptToolListKeepsUserToolsVisible = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    var tools = []
+    for (var i = 0; i < 35; i++) tools.push({ name: "builtin_" + (i < 10 ? "0" : "") + i, description: "built-in " + i, _builtin: true })
+    tools.push({ name: "web-search", description: "Search the web", _builtin: false })
+    tools.push({ name: "zz-user-tool", description: "User tool", _builtin: false })
+    var text = agent._formatProxyPromptToolList(tools)
+    var listed = text.split("... and ")[0]
+    ow.test.assert(listed.indexOf("web-search") >= 0, true, "User MCP tool must be listed even when built-ins exceed the cap")
+    ow.test.assert(listed.indexOf("zz-user-tool") >= 0, true, "User MCP tools sort ahead of built-ins regardless of name")
+    ow.test.assert(text.indexOf("... and 7 more: builtin_28, builtin_29") >= 0, true, "Overflow names the hidden tools")
+    ow.test.assert(listed.indexOf("builtin_28") < 0, true, "Hidden built-ins are not in the described list")
+
+    var small = agent._formatProxyPromptToolList([{ name: "b", description: "x", _builtin: true }, { name: "a", description: "y" }])
+    ow.test.assert(small.indexOf("more") < 0, true, "No overflow line under the cap")
+
+    var dummyCfg = { id: "mock-builtin", type: "dummy", options: {
+      fns: { "noop": function() { return {} } },
+      fnsMeta: { "noop": { name: "noop", description: "noop", inputSchema: { type: "object", properties: {} } } }
+    } }
+    agent._createMcpProxyConfig([dummyCfg], {})
+    var entry = agent._getMcpProxyState().catalog.filter(function(e) { return e.tool.name === "noop" })[0]
+    ow.test.assert(isMap(entry) && entry.builtin === true, true, "In-process dummy connections are flagged as built-in in the catalog")
   }
 
   exports.testResultAliasToolsExposedWithStdutils = function() {

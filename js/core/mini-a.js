@@ -1016,6 +1016,26 @@ MiniA._destroyAllMcpConnections = function() {
   })
 }
 
+// Renders the proxy-dispatch tool catalog for the system prompt. User/plugin MCP
+// tools sort ahead of Mini-A built-ins so the cap never hides them, and tools past
+// the cap are still named so the model knows they exist without calling list.
+MiniA.prototype._formatProxyPromptToolList = function(tools) {
+  var MAX_PROMPT_TOOLS = 30
+  var MAX_HIDDEN_NAMES = 40
+  var ordered = (isArray(tools) ? tools : []).slice().sort(function(a, b) {
+    if ((a._builtin === true) !== (b._builtin === true)) return a._builtin === true ? 1 : -1
+    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+  })
+  var shown = ordered.slice(0, MAX_PROMPT_TOOLS).map(function(t) { return { name: t.name, description: t.description || "" } })
+  var overflow = ""
+  if (ordered.length > MAX_PROMPT_TOOLS) {
+    var hiddenNames = ordered.slice(MAX_PROMPT_TOOLS).map(function(t) { return t.name })
+    overflow = "\n... and " + hiddenNames.length + " more: " + hiddenNames.slice(0, MAX_HIDDEN_NAMES).join(", ") +
+      (hiddenNames.length > MAX_HIDDEN_NAMES ? ", ..." : "") + " (use action=search or action=list for details)"
+  }
+  return af.toTOON(shown) + overflow
+}
+
 MiniA.prototype._getMcpProxyState = function() {
   return isObject(this._mcpProxyState) ? this._mcpProxyState : global.__mcpProxyState__
 }
@@ -14102,12 +14122,16 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         var entry = state.connections[id]
         if (!isObject(entry)) return
         var alias = entry.alias
+        // In-process (dummy) connections are Mini-A built-ins (utils, history VM,
+        // delegation, shell); everything else was configured by the user or a plugin.
+        var isBuiltin = isMap(entry.descriptor) && entry.descriptor.type === "dummy"
         if (!isArray(entry.tools)) entry.tools = []
         entry.tools.forEach(function(tool) {
           var toolClone = helpers.deepClone ? helpers.deepClone(tool) : tool
           state.catalog.push({
             connectionId   : id,
             connectionAlias: alias,
+            builtin        : isBuiltin,
             tool           : toolClone
           })
           if (isMap(state.toolToConnections)) {
@@ -14271,7 +14295,23 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
       if (resultFilePath.length === 0) {
         return { error: "readresult requires 'resultFile' parameter with the path returned by a prior call." }
       }
-      var rop = isString(params.op) ? params.op.trim().toLowerCase() : "stat"
+      var _validRops = ["stat", "read", "head", "tail", "slice", "grep"]
+      var rop = isString(params.op) ? params.op.trim().toLowerCase() : ""
+      // Tolerate common parameter mix-ups (type→op, query→pattern) instead of silently falling back to stat.
+      if (rop.length === 0 && isString(params.type) && _validRops.indexOf(params.type.trim().toLowerCase()) >= 0) rop = params.type.trim().toLowerCase()
+      if (!isString(params.pattern) && isString(params.query) && params.query.length > 0) {
+        params = merge(params, { pattern: params.query })
+        if (rop.length === 0) rop = "grep"
+      }
+      if (rop.length === 0) {
+        if (isString(params.pattern) && params.pattern.length > 0) rop = "grep"
+        else if (isDef(params.fromChar) || isDef(params.toChar) || isDef(params.fromLine) || isDef(params.toLine) || isDef(params.start) || isDef(params.end)) rop = "slice"
+        else if (isNumber(params.lines)) rop = "head"
+        else rop = "stat"
+      }
+      if (_validRops.indexOf(rop) < 0) {
+        return { error: "Unknown readresult op '" + rop + "'. Use one of: " + _validRops.join(", ") + " (parameter name is 'op'; grep uses 'pattern')." }
+      }
       var ropMaxBytes = isNumber(params.maxBytes) && params.maxBytes >= 0 ? Math.floor(params.maxBytes) : 0
       try {
         var spilledRaw = io.readFileString(parent._resultFilePath(resultFilePath))
@@ -14280,6 +14320,11 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         if (rop === "stat") {
           var statLineCount = spilledRaw.split("\n").length
           var statText = "File: " + resultFilePath + "\nSize: " + spilledByteSize + " bytes (~" + Math.ceil(spilledByteSize / 4) + " tokens)\nLines: " + statLineCount
+          if (spilledByteSize > 4000 && spilledByteSize / statLineCount > 2000) {
+            statText += "\nHint: few, very long lines. Use op='grep' with 'pattern' (follow returned next), or op='slice' with fromChar/toChar. Parameters are 'op' and 'pattern' (not 'type'/'query')."
+          } else {
+            statText += "\nHint: next use op='head'|'tail' (lines), op='grep' (pattern) or op='slice' (fromLine/toLine or fromChar/toChar)."
+          }
           return {
             action: "readresult", op: "stat", resultFile: resultFilePath,
             byteSize: spilledByteSize, lineCount: statLineCount,
@@ -19512,20 +19557,16 @@ MiniA.prototype._buildRunPrompt = function(args) {
           proxyState.catalog.forEach(function(entry) {
             if (isMap(entry) && isMap(entry.tool) && isString(entry.tool.name) && entry.tool.name !== "proxy-dispatch") {
               if ((!shellViaActionPreferred || entry.tool.name !== "shell") && proxyNames.indexOf(entry.tool.name) >= 0) {
-                proxyToolsWithDesc.push({ name: entry.tool.name, description: entry.tool.description || "" })
+                proxyToolsWithDesc.push({ name: entry.tool.name, description: entry.tool.description || "", _builtin: entry.builtin === true })
               }
             }
           })
-          proxyToolsWithDesc.sort(function(a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0 })
         }
-        var MAX_PROMPT_TOOLS = 30
         // Minimal profile (small/low-cost models) keeps the tool list to names only —
         // full TOON-encoded descriptions are reserved for balanced/verbose profiles.
         if (proxyToolsWithDesc.length > 0 && promptProfile !== "minimal") {
-          var sliced = proxyToolsWithDesc.slice(0, MAX_PROMPT_TOOLS)
-          var overflow = proxyToolsWithDesc.length > MAX_PROMPT_TOOLS ? "\n... and " + (proxyToolsWithDesc.length - MAX_PROMPT_TOOLS) + " more (use action=list to see all)" : ""
           try {
-            proxyToolsList = af.toTOON(sliced) + overflow
+            proxyToolsList = this._formatProxyPromptToolList(proxyToolsWithDesc)
           } catch(_) {
             proxyToolsList = proxyNames.join(", ")
           }
