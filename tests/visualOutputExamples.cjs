@@ -9,7 +9,8 @@ const root = path.resolve(__dirname, '..');
 const skill = path.join(root, 'skills/mini-a-visual-output');
 const names = ['chartjs', 'mermaid', 'latex-math', 'leaflet'];
 const references = names.map(name => fs.readFileSync(path.join(skill, 'references', name + '.md'), 'utf8'));
-const blocks = references.flatMap(text => [...text.matchAll(/```(chart|mermaid|leaflet)\n([\s\S]*?)\n```/g)]
+const basics = fs.readFileSync(path.join(skill, 'references/mermaid-basics.md'), 'utf8');
+const blocks = [...references, basics].flatMap(text => [...text.matchAll(/```(chart|mermaid|leaflet)\n([\s\S]*?)\n```/g)]
   .map(match => ({ language: match[1], source: match[2] })));
 const charts = blocks.filter(block => block.language === 'chart').map(block => JSON.parse(block.source));
 const maps = blocks.filter(block => block.language === 'leaflet').map(block => JSON.parse(block.source));
@@ -59,7 +60,7 @@ const expressions = [...math.matchAll(/\$\$([^$]+)\$\$|\$([^$]+)\$/g)].map(match
 assert.equal(expressions.length, 5);
 references.forEach(text => assert.ok(text.length < 4000, 'Reference fits one default read'));
 const body = fs.readFileSync(path.join(skill, 'SKILL.md'), 'utf8').replace(/^---\n[\s\S]*?\n---\n/, '');
-assert.ok(body.length + references.reduce((sum, text) => sum + text.length, 0) < 12000);
+assert.ok(body.length + references[1].length + basics.length < 12000, 'Selected Mermaid references fit the shared budget');
 console.log('Visual references: four chart configs, three diagrams, math examples, map coordinates, and content budgets checked.');
 
 if (process.argv[2] === '--browser-dir') {
@@ -73,8 +74,15 @@ if (process.argv[2] === '--browser-dir') {
   const renderer = [
     between('    let converter;', '    const PREVIEW_ID'),
     between('    function openMermaidFullscreen(', '    // File bytes are fetched'),
+    between('    function diagramActionIcon(', '    async function exportSvgDiagram('),
+    between('    function bindDiagramMenu(', '    function renderMermaidPreview('),
     between('    function addLeafletMarkers(', '    /**\n     * Attempts to force')
   ].join('\n');
+  const pluginCharts = [
+    { type: 'treemap', data: { datasets: [{ tree: [6, 4, 3] }] } },
+    { type: 'sankey', data: { datasets: [{ data: [{ from: 'Inbox', to: 'Work', flow: 6 }, { from: 'Inbox', to: 'Home', flow: 4 }] }] } },
+    { type: 'matrix', data: { datasets: [{ data: [{ x: 1, y: 1, v: 3 }, { x: 2, y: 1, v: 5 }], width: 30, height: 30 }] } }
+  ];
   fs.writeFileSync(path.join(output, 'index.html'), `<!doctype html><html><head><meta charset="utf-8"><title>Visual skill examples</title>
 <style>${css}\nbody {display:block; padding:24px; font:16px system-ui;} #examples {max-width:960px; margin:auto;} #report {white-space:pre-wrap;} .markdown-body-dark {background:#0f1115;color:#e6e6e6;} .leaflet-map {height:400px;}</style>
 </head><body><h1>Visual skill examples</h1><p>Actual reference examples and Mini-A web renderers. CDN access is required.</p>
@@ -83,6 +91,7 @@ ${loaders}<script>
 var _isD = false, chartResizeTimer = null, chartResizeHandlerBound = false;
 const resultsDiv = document.getElementById('examples');
 const markdown = ${JSON.stringify(markdown).replace(/</g, '\\u003c')};
+const pluginCharts = ${JSON.stringify(pluginCharts)};
 const expectedExpressions = ${JSON.stringify(expressions).replace(/</g, '\\u003c')};
 ${renderer}
 const report = document.getElementById('report');
@@ -100,20 +109,34 @@ async function showTheme(dark) {
   _isD = dark;
   document.body.classList.toggle('markdown-body-dark', dark);
   resultsDiv.innerHTML = converter.makeHtml(markdown);
+  pluginCharts.forEach(function(config) {
+    var pre = document.createElement('pre')
+    var code = document.createElement('code')
+    code.className = 'language-chart'
+    code.textContent = JSON.stringify(config)
+    pre.appendChild(code)
+    resultsDiv.appendChild(pre)
+  })
   renderChartBlocks();
   await renderMermaidDiagrams();
   renderLeafletMaps();
   await waitFor(() => resultsDiv.querySelector('.leaflet-map')?.__leafletInstance, 'Map initialization failed');
-  check(resultsDiv.querySelectorAll('.chartjs-chart canvas').length === 4, 'Expected four rendered charts');
-  check(resultsDiv.querySelectorAll('.mermaid-diagram svg').length === 3, 'Expected three rendered diagrams');
+  check(resultsDiv.querySelectorAll('.chartjs-chart canvas').length === 7, 'Expected four core charts and three updated plugin charts');
+  check(resultsDiv.querySelectorAll('.mermaid-panzoom-content > svg').length === 3, 'Expected three rendered diagrams');
   check(resultsDiv.querySelectorAll('.leaflet-map').length === 1, 'Expected one rendered map');
   check(resultsDiv.querySelectorAll('.katex').length === 5, 'Expected five rendered math expressions');
   const renderedExpressions = [...resultsDiv.querySelectorAll('.katex annotation')].map(el => el.textContent.trim());
   check(JSON.stringify(renderedExpressions) === JSON.stringify(expectedExpressions), 'Math source changed during Markdown rendering: ' + JSON.stringify(renderedExpressions));
   check(!resultsDiv.querySelector('.katex-error'), 'Math rendering error');
+  check(window.Chart.version === '4.6.1', 'Expected pinned Chart.js engine');
+  check(window.katex.version === '0.19.1', 'Expected pinned KaTeX engine');
+  check(window.L.version === '1.9.4', 'Expected stable Leaflet engine');
+  ['boxplot', 'violin', 'treemap', 'sankey', 'matrix', 'graph', 'choropleth', 'bubbleMap'].forEach(type => {
+    check(window.Chart.registry.getController(type), 'Missing plugin controller: ' + type);
+  });
   check(!resultsDiv.querySelector('pre code'), 'An example was left as unrendered source');
   await waitFor(() => resultsDiv.querySelectorAll('.leaflet-tile-loaded').length > 0, 'No visible map tiles loaded');
-  return (dark ? 'Dark' : 'Light') + ': 4 charts, 3 diagrams, 5 math expressions, 1 map and loaded tiles.';
+  return (dark ? 'Dark' : 'Light') + ': Chart.js 4.6.1 (7 charts and all plugin controllers), KaTeX 0.19.1 (5 expressions), Leaflet 1.9.4 (1 map and loaded tiles), 3 diagrams.';
 }
 document.getElementById('light').onclick = () => showTheme(false).catch(error => { report.textContent = error.stack; });
 document.getElementById('dark').onclick = () => showTheme(true).catch(error => { report.textContent = error.stack; });
@@ -123,7 +146,7 @@ document.getElementById('dark').onclick = () => showTheme(true).catch(error => {
   const results = [await showTheme(false), await showTheme(true)];
   report.textContent = 'PASS\\n' + results.join('\\n');
   document.body.dataset.testResult = 'passed';
-})().catch(error => { report.textContent = 'FAIL: ' + error.stack; document.body.dataset.testResult = 'failed'; });
+})().catch(error => { report.textContent = 'FAIL: ' + error.message + '\\n' + error.stack; document.body.dataset.testResult = 'failed'; });
 </script></body></html>`);
   console.log('Browser fixture:', path.join(output, 'index.html'));
 }

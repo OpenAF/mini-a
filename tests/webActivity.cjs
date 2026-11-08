@@ -133,10 +133,11 @@ for (const name of ['createMarkdownConverter', 'escapeHtml', 'preprocessChartBlo
 }
 let mathOptions;
 rendering.window = {
-  showdownKatex: options => {
-    mathOptions = options;
-    return () => [];
-  }
+  renderMathInElement() {}
+};
+rendering.createMathMarkdownExtension = options => {
+  mathOptions = options;
+  return () => [];
 };
 vm.runInContext('createMarkdownConverter(true);', rendering);
 assert.deepEqual(Array.from(mathOptions.delimiters, delimiter => ({

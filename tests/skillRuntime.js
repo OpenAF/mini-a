@@ -612,15 +612,23 @@
         ow.test.assert(record.state, "active", "Visual instructions active")
         ow.test.assert(agent._skillRuntime.metrics.selection_calls, 0, "No automatic selection request")
         ow.test.assert(record.content.indexOf('"North"'), -1, "Reference examples are not preloaded")
-        var initialChars = agent._skillRuntime.chars
-        var names = ["chartjs.md", "latex-math.md", "leaflet.md", "mermaid.md"]
+        var names = ["chartjs.md", "latex-math.md", "leaflet.md", "mermaid.md", "mermaid-basics.md", "mermaid-structure.md", "mermaid-planning.md", "mermaid-data.md", "mermaid-analysis.md", "mermaid-grammars.md"]
         names.forEach(function(name) {
+          // Each request loads only its visual family within the shared budget.
+          agent._resetSkillRuntime(options)
+          ow.test.assert(agent._consultSkillsForRun(options), [], "Fresh progressive activation succeeds")
+          var initialChars = agent._skillRuntime.chars
+          if (name.indexOf("mermaid-") === 0) {
+            var index = agent._skillUtils.skills({ operation: "read", name: "mini-a-visual-output", reference: "references/mermaid.md" })
+            ow.test.assert(index.truncated === true, false, "Capability index is complete")
+          }
           var result = agent._skillUtils.skills({ operation: "read", name: "mini-a-visual-output", reference: "references/" + name })
           ow.test.assert(isUnDef(result.error) && isString(result.body), true, "Declared reference readable: " + name)
           ow.test.assert(result.body.length > 500 && result.body.length < 4000, true, "Reference fits default read: " + name)
           ow.test.assert(result.truncated === true, false, "Complete reference returned: " + name)
+          ow.test.assert(agent._skillRuntime.chars > initialChars && agent._skillRuntime.chars <= 12000, true, "Selected references fit the existing shared budget")
+          ow.test.assert(agent._skillRuntime.records["local:mini-a-visual-output"].content.indexOf("classDiagram\n"), -1, "Unselected example bodies are not preloaded")
         })
-        ow.test.assert(agent._skillRuntime.chars > initialChars && agent._skillRuntime.chars <= 12000, true, "All references fit the existing shared budget")
         var undeclared = agent._skillUtils.skills({ operation: "read", name: "mini-a-visual-output", reference: "../mini-a-files/SKILL.md" })
         ow.test.assert(undeclared.error, "skill-reference-not-declared", "Unrelated references remain inaccessible")
       } finally { agent._stopAgentResources() }
@@ -644,6 +652,9 @@
     var diagrams = MiniA.buildVisualKnowledge({ useDiagrams: true })
     ow.test.assert(/treemap-meta|zenUML|XYChart|Escape inner quotes with backslashes/.test(diagrams), false, "Unsupported diagram guidance removed")
     ow.test.assert(diagrams.indexOf("#quot;") >= 0 && diagrams.indexOf("xychart-beta") >= 0 && diagrams.indexOf("treemap-beta") >= 0, true, "Supported syntax documented")
+    ow.test.assert(diagrams.indexOf("Only use diagram types listed above"), -1, "Diagram types are not a closed whitelist")
+    ow.test.assert(diagrams.indexOf("12.0.0") >= 0 && diagrams.indexOf("references/mermaid.md") >= 0, true, "Versioned progressive guidance is available")
+    ow.test.assert(diagrams.indexOf("If the version or support is uncertain, default to flowchart or sequenceDiagram") >= 0, true, "Uncertain syntax retains a safe fallback")
     var maps = MiniA.buildVisualKnowledge({ useMaps: true })
     ow.test.assert(maps.indexOf("optional, default: 13") >= 0 && maps.indexOf("dragging?, etc.") < 0, true, "Map defaults and options match wrapper")
     var math = MiniA.buildVisualKnowledge({ useMath: true })

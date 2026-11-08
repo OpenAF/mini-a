@@ -4,14 +4,14 @@
 <!-- Chart.js + adapters/plugins: deterministic, version-aware loader -->
 <script>
     (function() {
-        const CDN_CHART_V4 = 'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js';
-        const ADAPTER_V4 = 'https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js';
-        const ADAPTER_V3 = 'https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2/dist/chartjs-adapter-date-fns.bundle.min.js';
+        var chartVersion = '4.6.1'
+        var chartUrl = 'https://cdn.jsdelivr.net/npm/chart.js@' + chartVersion + '/dist/chart.umd.min.js'
+        var adapterUrl = 'https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js'
         const PLUGINS = [
             'https://cdn.jsdelivr.net/npm/@sgratzl/chartjs-chart-boxplot@4.4.5/build/index.umd.min.js',
-            'https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@3.1.0/dist/chartjs-chart-treemap.min.js',
-            'https://cdn.jsdelivr.net/npm/chartjs-chart-sankey@0.14.0/dist/chartjs-chart-sankey.min.js',
-            'https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@3.0.0/dist/chartjs-chart-matrix.min.js',
+            'https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@4.2.2/dist/chartjs-chart-treemap.min.js',
+            'https://cdn.jsdelivr.net/npm/chartjs-chart-sankey@0.19.1/dist/chartjs-chart-sankey.min.js',
+            'https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@3.1.0/dist/chartjs-chart-matrix.min.js',
             'https://cdn.jsdelivr.net/npm/chartjs-chart-graph@4.3.5/build/index.umd.min.js',
             'https://cdn.jsdelivr.net/npm/chartjs-chart-geo@4.3.6/build/index.umd.min.js'
         ];
@@ -31,20 +31,8 @@
             });
         }
 
-        function getChartMajor() {
-            try {
-                if (window.Chart && window.Chart.version) {
-                    const major = parseInt(String(window.Chart.version).split('.')[0], 10);
-                    return isNaN(major) ? undefined : major;
-                }
-            } catch (_) {}
-            return undefined;
-        }
-
+        // Load the pinned date adapter after normalizing the Chart.js engine.
         function loadAdapterForChart() {
-            const major = getChartMajor();
-            // Prefer v4 adapter; if we detect v3, use v2 adapter
-            const adapterUrl = major && major < 4 ? ADAPTER_V3 : ADAPTER_V4;
             return addScript(adapterUrl).then(() => {
                 window.__chartjsAdapterReady = true;
                 console.log('Chart.js date adapter loaded:', adapterUrl);
@@ -73,20 +61,19 @@
             console.log('Chart.js ready (with adapter and plugins).');
         }
 
-        function ensureV4OrUseLocalLoaded() {
-            const major = getChartMajor();
-            // If local is not v4, prefer CDN v4 to match plugin set
-            if (!major || major < 4) {
-                console.warn('Local Chart.js not v4; loading CDN v4 for compatibility.');
-                return addScript(CDN_CHART_V4);
+        // Older local v4 bundles also need an upgrade to the tested release.
+        function ensurePinnedChart() {
+            if (!window.Chart || String(window.Chart.version) !== chartVersion) {
+                console.warn('Loading the pinned Chart.js release:', chartVersion)
+                return addScript(chartUrl)
             }
-            return Promise.resolve();
+            return Promise.resolve()
         }
 
-        // Start: attempt local Chart.js, then normalize to v4 if needed, then adapter + plugins.
+        // Prefer a matching local engine, then load the adapter and compatible plugins.
         addScript('js/chart.js')
-            .catch(() => addScript(CDN_CHART_V4))
-            .then(() => ensureV4OrUseLocalLoaded())
+            .catch(() => addScript(chartUrl))
+            .then(() => ensurePinnedChart())
             .then(() => loadAdapterForChart())
             .then(() => loadPluginsSequentially())
             .then(finalize)
@@ -110,7 +97,7 @@
             if (!mermaidLib || typeof mermaidLib.initialize !== 'function') throw new Error('Invalid local Mermaid bundle');
         } catch (error) {
             console.warn('Local Mermaid unavailable, loading from CDN:', error);
-            const module = await import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs');
+            const module = await import('https://cdn.jsdelivr.net/npm/mermaid@12.0.0/dist/mermaid.esm.min.mjs');
             mermaidLib = module.default || module;
         }
     }
@@ -182,6 +169,9 @@
 
             // Update all divs to dark theme (except chat-container)
             document.querySelectorAll('div').forEach(div => {
+                // SVG renderers own label backgrounds and colors, including HTML inside foreignObject.
+                if (typeof div.closest === 'function' && div.closest('svg')) return
+
                 const isChatContainer = div.classList.contains('chat-container');
                 const isHistoryElement = div.id === 'historyPanel' || div.id === 'historyOverlay' || (typeof div.closest === 'function' && div.closest('#historyPanel'));
                 const isAttachmentModal = div.id === 'attachmentModal';
@@ -259,6 +249,9 @@
 
             // Update all divs to light theme (except chat-container)
             document.querySelectorAll('div').forEach(div => {
+                // SVG renderers own label backgrounds and colors, including HTML inside foreignObject.
+                if (typeof div.closest === 'function' && div.closest('svg')) return
+
                 const isChatContainer = div.classList.contains('chat-container');
                 const isHistoryElement = div.id === 'historyPanel' || div.id === 'historyOverlay' || (typeof div.closest === 'function' && div.closest('#historyPanel'));
                 const isAttachmentModal = div.id === 'attachmentModal';
@@ -1937,21 +1930,36 @@
             "disableForced4SpacesIndentedSublists": true
         };
 
-        if (enableMath && typeof window.showdownKatex === 'function') {
+        if (enableMath && typeof window.renderMathInElement === 'function') {
             try {
-                converterOptions.extensions = [window.showdownKatex({
+                converterOptions.extensions = [createMathMarkdownExtension({
                     throwOnError: false,
+                    trust: false,
                     delimiters: [
                         { left: '$$', right: '$$', display: true },
                         { left: '$', right: '$', display: false }
                     ]
                 })];
             } catch (error) {
-                console.warn('Failed to initialize showdown-katex extension:', error);
+                console.warn('Failed to initialize the KaTeX Markdown extension:', error);
             }
         }
 
         return new showdown.Converter(converterOptions);
+    }
+
+    // Render converted Markdown with the current KaTeX engine, skipping code and pre blocks.
+    function createMathMarkdownExtension(options) {
+      return function() {
+        return [{
+          type: 'output',
+          filter: function(html) {
+            var body = new DOMParser().parseFromString(html, 'text/html').body
+            window.renderMathInElement(body, options)
+            return body.innerHTML
+          }
+        }]
+      }
     }
 
     function ensureMathCssLoaded() {
@@ -1960,7 +1968,7 @@
         const link = document.createElement('link');
         link.id = cssId;
         link.rel = 'stylesheet';
-        link.href = 'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css';
+        link.href = 'https://cdn.jsdelivr.net/npm/katex@0.19.1/dist/katex.min.css';
         document.head.appendChild(link);
     }
 
@@ -1995,13 +2003,13 @@
         mathSupportPromise = (async () => {
             ensureMathCssLoaded();
             await loadScriptWithFallback([
-                'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js'
+                'https://cdn.jsdelivr.net/npm/katex@0.19.1/dist/katex.min.js'
             ]);
             await loadScriptWithFallback([
-                'https://cdn.jsdelivr.net/npm/showdown-katex/dist/showdown-katex.min.js'
+                'https://cdn.jsdelivr.net/npm/katex@0.19.1/dist/contrib/auto-render.min.js'
             ]);
-            if (typeof window.showdownKatex !== 'function') {
-                throw new Error('showdown-katex extension is unavailable after script loading');
+            if (!window.katex || window.katex.version !== '0.19.1' || typeof window.renderMathInElement !== 'function') {
+                throw new Error('The pinned KaTeX engine or auto-render helper is unavailable')
             }
             mathRenderingEnabled = true;
             converter = createMarkdownConverter(true);

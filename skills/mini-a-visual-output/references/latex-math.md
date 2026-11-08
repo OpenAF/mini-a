@@ -1,5 +1,7 @@
 # LaTeX math in responses
 
+The web UI targets **KaTeX 0.19.1**, with matching JavaScript, CSS/fonts and official auto-render helper. The Markdown bridge uses that engine rather than a separate bundled KaTeX version. Trust remains disabled.
+
 Use `usemath=true`. Mini-A renders mathematical expressions through KaTeX in the web UI; this is not a full LaTeX document compiler. Write inline `$...$` or display `$$...$$` outside code fences. Do not emit a `latex` fence, document preamble, `\documentclass`, or package imports for rendered response math.
 
 ## Inline formula

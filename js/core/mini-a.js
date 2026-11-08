@@ -1205,8 +1205,10 @@ MiniA.buildVisualKnowledge = function(options) {
   if (useDiagrams) {
     visualParts.push(
       "Diagrams:\n" +
-      "  - Use ```mermaid``` fences. Built-in types: flowchart / graph (graph TD|LR|TB), sequenceDiagram, classDiagram, stateDiagram / stateDiagram-v2, erDiagram, journey (user journey), gantt, pie, requirementDiagram, gitGraph, mindmap, timeline, quadrantChart, sankey (CSV-style data), xychart-beta (bar and line charts), block (for block diagrams), packet (for network diagrams), kanban (for Kanban boards), architecture-beta (for system architecture diagrams), radar-beta (for radar charts) and treemap-beta (for treemap diagrams). Availability depends on the loaded Mermaid version.\n" +
-      "  - CRITICAL RULE: Only use diagram types listed above. If uncertain about a type, default to flowchart or sequenceDiagram.\n" +
+      "  - Use ```mermaid``` fences and syntax supported by the deployed Mermaid renderer. Mini-A's documented compatibility baseline and web CDN fallback are Mermaid 12.0.0; an installed renderer may differ.\n" +
+      "  - With skills enabled, read mini-a-visual-output reference references/mermaid.md for the versioned capability index, then load only the relevant example file. Examples are starting points, not a closed list of allowed diagram types.\n" +
+      "  - Use an additional diagram type or newer syntax only when support is established for the deployed renderer; never invent keywords. If the version or support is uncertain, default to flowchart or sequenceDiagram, or explain the relationships in text.\n" +
+      "  - Diagram-specific keywords include xychart-beta, treemap-beta, sankey-beta and block-beta. Preserve strict security mode; external diagrams or icon packs need explicit host registration.\n" +
       "  - Keep labels concise; prefer directional edges for processes.\n" +
       "  - For flowcharts, wrap node/box labels in DOUBLE QUOTES to protect punctuation and spaces:\n" +
       "    • CORRECT: A[\"Label\"], B(\"Label\"), C{\"Decision\"}, D[[\"Subroutine\"]], E[(\"Database\")]\n" +
@@ -1237,7 +1239,7 @@ MiniA.buildVisualKnowledge = function(options) {
       "  - Use only static values; do not include functions or dynamic callbacks (no `ctx => ...`, no `function(){}`); configs are treated as data and code is not executed.\n" +
       "  - Provide complete, deterministic data inline (no async or fetching).\n" +
       "  - IMPORTANT: When working with datetime values, keep them as strings in ISO format or as timestamp numbers. Do not use Date objects or date parsing functions in the chart configuration.\n\n" +
-      "Available core chart types (Chart.js 4):\n" +
+      "Available core chart types (Chart.js 4.6.1):\n" +
       "  - bar\n" +
       "  - line (use fill for area charts)\n" +
       "  - scatter\n" +
@@ -1341,7 +1343,7 @@ MiniA.buildVisualKnowledge = function(options) {
   if (useMath) {
     visualParts.push(
       "Math formulas:\n" +
-      "  - Use KaTeX-supported LaTeX math expressions in markdown output, not full LaTeX documents or package imports.\n" +
+      "  - Use KaTeX-supported LaTeX math expressions (renderer version 0.19.1) in markdown output, not full LaTeX documents or package imports.\n" +
       "  - Use inline math as `$...$` and standalone equations as `$$...$$`.\n" +
       "  - Keep each complete `$$...$$` expression on one Markdown source line with blank lines around it for compatibility with the Markdown math extension; use `\\cr` for aligned/matrix rows so Markdown does not collapse backslash row separators.\n" +
       "  - Balance delimiters, braces, and environments. Use literal backslashes in Markdown math, escaping them only when serializing a JSON string. Avoid wrapping formulas inside code fences.\n" +

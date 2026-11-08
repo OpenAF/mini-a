@@ -167,6 +167,21 @@ These local references use the existing shared skill budget and access rules.
 They include common patterns, data checks, and useful fallbacks; standalone
 applications and full LaTeX documents are outside their scope.
 
+The Mermaid reference is a capability index for the 12.0.0 compatibility
+baseline, matching the web CDN fallback. It points to six separate example files
+for flows/schedules, software structures, planning, data/layout, analysis, and
+railroad grammars. Read the index and only the relevant family file, rather than
+loading the whole catalogue. These are examples, not a fixed whitelist: other
+types or newer syntax can be used when support is established for the deployed
+renderer. The rolling Mermaid website can describe a newer minor release.
+
+The other web renderer pins are Chart.js 4.6.1, KaTeX 0.19.1, and Leaflet
+1.9.4 (latest stable releases checked on 2026-11-08). An older local Chart.js
+bundle is replaced by the pinned CDN engine before loading its adapter/plugins.
+KaTeX uses matching engine, CSS/fonts and official auto-render assets; the
+Markdown bridge does not bundle an older math engine. Leaflet 2 remains beta,
+so maps retain the stable 1.9.4 API and matching assets.
+
 Chart/map fences contain static JSON; Mermaid fences contain diagram syntax;
 math uses `$...$` or `$$...$$` outside code fences. Use supplied or retrieved
 data. Keep a complete display equation on one source line, with blank lines

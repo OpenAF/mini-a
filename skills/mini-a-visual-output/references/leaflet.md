@@ -1,5 +1,7 @@
 # Leaflet response maps
 
+The web UI targets **Leaflet 1.9.4**, the latest stable release when reviewed. Leaflet 2 is still beta and changes the JavaScript API; its examples do not apply to this wrapper. CSS, JavaScript and default icon URLs share the 1.9.4 pin.
+
 Use `usemaps=true` and a `leaflet` fence containing strict JSON. This is Mini-A's map configuration, not an arbitrary Leaflet program. No JavaScript, callbacks, geocoding, external data fetches, or custom tile URLs in the config. Map tiles themselves use the UI's OpenStreetMap layer and require network access.
 
 ## Markers, line, and coverage circle

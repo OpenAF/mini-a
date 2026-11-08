@@ -1,5 +1,7 @@
 # Chart.js response charts
 
+The web UI targets **Chart.js 4.6.1**, including when a local oPack supplies an older engine. Core, adapter and plugin CDN URLs are pinned to tested releases. Use this version's configuration grammar.
+
 Use `usecharts=true` and a `chart` fence (`chartjs` and `chart.js` are aliases). Supply a complete static JSON configuration with a top-level `type` and `data.datasets`. No JavaScript, callbacks, `new Chart`, HTML canvas, Date objects, or fetching. Examples below use illustrative data; replace it with supplied or retrieved values.
 
 ## Common patterns
@@ -31,6 +33,8 @@ Mixed charts keep a supported top-level type and override individual datasets; `
 ## Compatibility and checks
 
 Core types are bar, line, scatter, bubble, pie, doughnut, polarArea, and radar. The web loader also requests boxplot/violin, treemap, sankey, matrix, graph, and geo plugins plus the time adapter. Those depend on successful asset loading; financial, wordcloud, and sunburst plugins are not bundled by this UI.
+
+Pinned companion releases: date-fns adapter 3.0.0; boxplot/violin 4.4.5; treemap 4.2.2; sankey 0.19.1; matrix 3.1.0; graph 4.3.5; geo 4.3.6. A core Chart.js upgrade does not by itself add plugin-specific features.
 
 Check JSON parsing, finite numeric values, matching category/data lengths, and required point fields (`r` for bubbles). Represent missing observations as `null`, not invented zeroes. Keep titles, dataset labels, units, and a short caption; optional `canvas: {"width":640,"height":360}` controls size. Avoid relying on color alone.
 

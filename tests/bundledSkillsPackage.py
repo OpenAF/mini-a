@@ -17,6 +17,7 @@ bundled = sorted(str(path.relative_to(checkout)) for path in (checkout / 'skills
 assert bundled, 'No bundled skills found'
 assert sorted(name for name in files if name.startswith('skills/')) == bundled, 'Package skill inventory differs from disk'
 visual_refs = ['chartjs.md', 'latex-math.md', 'leaflet.md', 'mermaid.md']
+visual_refs += [f'mermaid-{group}.md' for group in ['basics', 'structure', 'planning', 'data', 'analysis', 'grammars']]
 for name in visual_refs:
     assert f'skills/mini-a-visual-output/references/{name}' in bundled, f'Missing visual reference: {name}'
 for name in bundled:
@@ -70,8 +71,15 @@ if (!visual || visual.templatePath.indexOf(expected + "/skills/") !== 0) throw n
 var record = agent._skillRuntime.records["local:mini-a-visual-output"]
 if (!record || record.state !== "active" || record.content.indexOf('"North"') >= 0) throw new Error("Visual activation did not stay progressive")
 %s.forEach(function(name) {
+  agent._resetSkillRuntime(visualOptions)
+  if (agent._consultSkillsForRun(visualOptions).length) throw new Error("Failed progressive activation")
+  if (name.indexOf("mermaid-") === 0) {
+    var index = tool.skills({ operation: "read", name: "mini-a-visual-output", reference: "references/mermaid.md" })
+    if (index.error || index.truncated) throw new Error("Failed capability index")
+  }
   var support = tool.skills({ operation: "read", name: "mini-a-visual-output", reference: "references/" + name })
   if (!isString(support.body) || support.body.length < 500 || support.truncated || support.error) throw new Error("Failed visual reference " + name)
+  if (agent._skillRuntime.chars > 12000) throw new Error("Selected references exceeded defaults")
 })
 if (agent._skillRuntime.chars > 12000 || agent._skillRuntime.metrics.selection_calls !== 0) throw new Error("Visual skill exceeded defaults")
 load(expected + "/js/session/mini-a-session.js")
