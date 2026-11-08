@@ -2920,7 +2920,7 @@ jobs:
 - name : Periodic cleanup of old sessions
   type : periodic
   typeArgs:
-    interval: 300000  # every 5 minutes
+    timeInterval: 300000  # every 5 minutes
   args :
     historyretention: toNumber().isNumber().default(600)  # 10 minutes
     ssequeuetimeout: toNumber().isNumber().default(120)   # SSE queue timeout in seconds (2 minutes)
@@ -2928,7 +2928,7 @@ jobs:
     if (isDef(global.__advanced)) global.__advanced.pruneHistory()
     var toDelete = []
     for (var uuid in global.__lastActivity) {
-      // If no activity for more than 5 minutes, delete session
+      // Release idle sessions after the configured retention period.
       if (now() - global.__lastActivity[ uuid ] > args.historyretention * 1000) {
         toDelete.push(uuid)
       }
