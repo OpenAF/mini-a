@@ -67,7 +67,9 @@ radar-beta
 
 ## Treemap
 
-Indent quoted groups and leaves; only leaves receive numeric values. The keyword is `treemap-beta`.
+Use `treemap-beta` for weighted hierarchies whose rectangle areas represent quantities. Indent quoted group and leaf labels; every leaf requires an explicit numeric value (`"Label": value`), while groups have no value. A list of names without quantities is not a treemap: use a mindmap or flowchart instead. Never invent weights, including arbitrary equal values, to make a hierarchy render. If a treemap is specifically requested without values, ask for them.
+
+Use treemap grammar throughout. Do not copy mindmap bare-label outlines or root shapes, or flowchart nodes, arrows and subgraphs into its body. A different opening keyword alone does not convert a hierarchy to a treemap.
 
 ```mermaid
 treemap-beta

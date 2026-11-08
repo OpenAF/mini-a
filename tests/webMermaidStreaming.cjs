@@ -59,7 +59,7 @@ class Element {
     const found = []
     for (const child of this.childNodes) {
       if ((selector.includes('.mermaid-diagram[') && child.className === 'mermaid-diagram') ||
-          (child.tag === 'code' && child.parentElement.tag === 'pre')) found.push(child)
+          (selector.includes('pre code') && child.tag === 'code' && child.parentElement.tag === 'pre')) found.push(child)
       found.push(...child.querySelectorAll(selector))
     }
     return found
@@ -73,6 +73,7 @@ const context = vm.createContext({
   console: { warn() {}, error() {} },
   document: { createElement: tag => new Element(tag), body: new Element('body') },
   addMermaidPanZoomLayer: node => { node.controls = { zoom: 1, open: false } },
+  destroyChartContainer: () => {},
   window: { mermaid: {
     initialize() {},
     parse: async source => source !== 'invalid',

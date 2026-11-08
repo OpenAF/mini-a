@@ -17,4 +17,8 @@ This catalogue is a starting point, not an allowlist. Additional types, aliases 
 
 Keep strict security mode. ZenUML needs external registration; custom icon packs also need host registration. Prefer built-in icons, theme defaults and concise labels. Never weaken security or invent a diagram keyword to force a render.
 
+Choose one diagram grammar per fence, identified by its opening keyword. Use only constructs supported by that family: do not transplant node shapes, edges, subgraphs, title declarations or label rules from another family. Changing a header does not convert the body; rewrite the entire diagram in the selected grammar. Put separate diagrams in separate fences.
+
+Treemaps encode quantities as rectangle areas: every leaf needs an explicit numeric value. Use a mindmap or flowchart for an unweighted hierarchy. Never invent measurements or assign arbitrary equal weights to force a treemap. If a treemap is specifically required but values are missing, ask for the quantities. Read the selected family's reference before authoring unfamiliar syntax.
+
 Check identifiers, brackets and diagram-specific rules. Use the loaded library to parse/render when available; parsing alone does not prove visible rendering. If support is uncertain or rendering fails, simplify to flowchart/sequence syntax or explain the relationships in text. Claim rendering only after observing it.

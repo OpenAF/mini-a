@@ -623,6 +623,8 @@ Mini‑A includes a simple web UI you can use from your browser. The static page
 
 Mermaid diagrams include an **Open full screen** (⛶) control. This opens a viewer that fills the browser area: pinch with two fingers to zoom, drag with one finger to pan, or use the zoom and recenter buttons. Desktop users can also drag and zoom with the mouse wheel. Close with **×** or **Escape** to return to the conversation with the inline diagram's view preserved.
 
+Chart.js response charts have a **⋯ Chart actions** menu with zoom in/out, reset, PNG download and full-screen controls. Zoom enlarges the live chart inside a scrollable viewport; it keeps the configured data and axis limits. Tooltips, legend toggles and chart click interactions remain available, including in full screen. Close with **×** or **Escape** to return to the inline chart. Unchanged charts retain their instance and view while the response streams. PNG downloads capture the complete current canvas, including the current legend visibility, with a transparent background unless the chart itself paints one.
+
 Quick steps:
 
 1) Export your model config

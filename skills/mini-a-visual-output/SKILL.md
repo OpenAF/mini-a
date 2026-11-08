@@ -17,6 +17,7 @@ Use for responses with enabled renderers. The system prompt defines output forma
    - `usemaps`: @references/leaflet.md
 3. Trace values/coordinates to supplied or retrieved evidence; never invent missing data. Use labelled illustrative data only when requested. Reference examples are synthetic.
 4. Chart/map fences require strict JSON without code or callbacks; Mermaid uses diagram syntax; math uses `$...$`/`$$...$$` outside code fences. `usesvg` allows custom SVG illustrations; prefer supported charts/diagrams for standard data/structures.
+   For Mermaid, use one diagram grammar per fence. Treemaps require numeric quantities for every leaf; use a mindmap or flowchart for an unweighted hierarchy. Never invent weights to force a treemap.
 5. `useasciiviz` answer charts use `oafPrintChart` JSON fences. Interim `printChart` calls do not replace final charts. Console transcripts preserve browser visual source.
 6. Check syntax, data, labels, and units; add a short caption. Claim rendering only after observing it. If unavailable or failed, retain useful source and provide a table, textual explanation, or readable formula.
 

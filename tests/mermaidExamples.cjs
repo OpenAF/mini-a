@@ -78,6 +78,8 @@ body { display:block; padding:24px; font:16px system-ui; }
 var _isD = false
 var __isDark = false
 var resultsDiv = document.getElementById('results')
+// This fixture contains Mermaid diagrams only; chart lifecycle has a separate suite.
+function destroyChartContainer() {}
 var examples = ${data}
 var report = document.getElementById('report')
 var renderCalls = 0

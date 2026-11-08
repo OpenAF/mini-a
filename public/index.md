@@ -367,15 +367,23 @@
     .chartjs-chart {
         position: relative;
         max-width: 100%;
-        overflow-x: auto;
+        box-sizing: border-box;
+        overflow: visible;
         zoom: 1.1;
     }
 
     .chartjs-chart canvas {
         display: block;
         width: 100%;
-        height: auto !important;
+        height: 100%;
     }
+
+    .chart-viewport { width: 100%; height: 100%; overflow: auto; }
+    .chart-stage { position: relative; margin: auto; }
+    .chart-status { position: absolute; bottom: 0; left: 1rem; right: 1rem; font-size: 12px; pointer-events: none; }
+    .chart-status:empty { display: none; }
+    .chart-fullscreen .chart-viewport { position: absolute; inset: 64px 16px 32px; width: auto; height: auto; }
+    .chart-fullscreen .chart-status { bottom: 8px; }
 
     .svg-rendered-block { position: relative; --svg-control-bg: #f1f5f9; --svg-control-text: #475569; --svg-control-border: #cbd5e1; }
     body.markdown-body-dark .svg-rendered-block { --svg-control-bg: #252b36; --svg-control-text: #d1d9e6; --svg-control-border: #475569; }
@@ -2373,21 +2381,7 @@
     function destroyRenderedCharts() {
         if (!resultsDiv) return;
         const containers = resultsDiv.querySelectorAll('.chartjs-chart');
-        containers.forEach(container => {
-            if (container.__chartInstance && typeof container.__chartInstance.destroy === 'function') {
-                try {
-                    container.__chartInstance.destroy();
-                } catch (error) {
-                    console.error('Failed to destroy Chart.js instance:', error);
-                }
-            }
-            if (container.__chartInstance) {
-                delete container.__chartInstance;
-            }
-            if (container.__chartCanvasPrefs) {
-                delete container.__chartCanvasPrefs;
-            }
-        });
+        containers.forEach(destroyChartContainer)
     }
 
     function updateCopyActionsVisibility() {
@@ -3207,8 +3201,6 @@
         const wasAtBottom = isAtBottom();
         const currentScrollBtn = document.getElementById('scrollToBottomBtn');
         const wasScrollBtnVisible = (currentScrollBtn && currentScrollBtn.classList.contains('show')) || !autoScrollEnabled;
-
-        destroyRenderedCharts();
 
         // Post-process to restore any chart blocks that were preprocessed
         const processedHtml = postprocessSvgBlocks(postprocessChartBlocks(htmlContent));
@@ -4094,7 +4086,16 @@
     // Reuse diagram nodes before publishing new HTML so streaming retains diagrams and their controls.
     function replaceResultsPreservingMermaid(html) {
       var reusable = new Map()
+      var charts = new Map()
       var selector = '.mermaid-diagram[data-mermaid-source], pre code.language-mermaid, pre code.mermaid'
+
+      // Keep each live chart independently, including repeated identical configurations.
+      resultsDiv.querySelectorAll('.chartjs-chart[data-chart-source]').forEach(function(container) {
+        var source = container.getAttribute('data-chart-source')
+        var matches = charts.get(source) || []
+        matches.push(container)
+        charts.set(source, matches)
+      })
 
       resultsDiv.querySelectorAll(selector).forEach(function(node) {
         var rendered = node.classList.contains('mermaid-diagram')
@@ -4118,6 +4119,12 @@
           block.parentElement.style.visibility = 'hidden'
         }
       })
+      next.querySelectorAll('pre code').forEach(function(block) {
+        var matches = charts.get(block.textContent.trim())
+        if (matches && matches.length > 0) block.parentElement.replaceWith(matches.shift())
+      })
+      // Reused charts have moved to next; only removed or changed charts remain to clean up.
+      resultsDiv.querySelectorAll('.chartjs-chart').forEach(destroyChartContainer)
       resultsDiv.replaceChildren(...next.childNodes)
     }
 
@@ -5077,6 +5084,182 @@
         return null;
     }
 
+    // Close detached viewers and release Chart.js listeners before discarding a chart.
+    function destroyChartContainer(container) {
+      if (container.__chartDialog) container.__chartDialog.close()
+      if (container.__chartInstance) {
+        try {
+          container.__chartInstance.destroy()
+        } catch (error) {
+          console.error('Failed to destroy Chart.js instance:', error)
+        }
+      }
+      delete container.__chartInstance
+      delete container.__chartViewport
+      delete container.__chartStage
+      delete container.__chartCanvasPrefs
+    }
+
+    // Resize the live canvas within its scrolling viewport without replacing the chart instance.
+    function resizeChartView(container, requestedZoom) {
+      var viewport = container.__chartViewport
+      var stage = container.__chartStage
+      var chart = container.__chartInstance
+      if (!viewport || !stage || !chart) return
+
+      var width = Math.max(1, viewport.clientWidth)
+      var height = Math.max(1, viewport.clientHeight)
+      var ratio = chart.currentDevicePixelRatio || window.devicePixelRatio || 1
+      var maximum = Math.min(4, 8192 / (width * ratio), 8192 / (height * ratio), Math.sqrt(16777216 / (width * height * ratio * ratio)))
+      var zoom = Math.min(maximum, Math.max(0.5, typeof requestedZoom === 'number' ? requestedZoom : container.__chartZoom || 1))
+      var oldWidth = stage.clientWidth || width
+      var oldHeight = stage.clientHeight || height
+      var centerX = (viewport.scrollLeft + width / 2) / oldWidth
+      var centerY = (viewport.scrollTop + height / 2) / oldHeight
+      container.__chartZoom = zoom
+      stage.style.width = Math.floor(width * zoom) + 'px'
+      stage.style.height = Math.floor(height * zoom) + 'px'
+      chart.resize(Math.floor(width * zoom), Math.floor(height * zoom))
+      viewport.scrollLeft = Math.max(0, centerX * width * zoom - width / 2)
+      viewport.scrollTop = Math.max(0, centerY * height * zoom - height / 2)
+      var menus = [container.__chartMenu, container.__chartFullscreenMenu]
+      menus.forEach(function(menu) {
+        if (!menu) return
+        menu.querySelector('[data-action="zoom-in"]').disabled = zoom >= maximum
+        menu.querySelector('[data-action="zoom-out"]').disabled = zoom <= Math.min(0.5, maximum)
+      })
+    }
+
+    // Save the chart's current live canvas, preserving its transparent background.
+    function downloadChartPng(container) {
+      var chart = container.__chartInstance
+      if (!chart) return
+      var status = container.__chartStatus
+      status.textContent = ''
+      chart.canvas.toBlob(function(blob) {
+        if (!blob) {
+          status.textContent = 'PNG export failed. Try again.'
+          return
+        }
+        try {
+          downloadDiagramBlob(blob, 'chart.png')
+        } catch (error) {
+          status.textContent = 'PNG export failed. Try again.'
+        }
+      }, 'image/png')
+    }
+
+    // Share the diagram action styling while exposing only supported chart actions.
+    function createChartActionMenu(container, fullscreen) {
+      var menu = document.createElement(fullscreen ? 'div' : 'details')
+      menu.className = 'mermaid-diagram-controls chart-controls'
+      if (fullscreen) {
+        menu.setAttribute('role', 'toolbar')
+        menu.setAttribute('aria-label', 'Chart controls')
+      } else {
+        var summary = document.createElement('summary')
+        summary.textContent = '⋯'
+        summary.setAttribute('aria-label', 'Chart actions')
+        summary.title = 'Chart actions'
+        menu.appendChild(summary)
+        bindDiagramMenu(menu)
+      }
+      var group = document.createElement('div')
+      group.className = 'mermaid-control-group'
+      var actions = [
+        ['zoom-out', 'Zoom out'], ['zoom-in', 'Zoom in'], ['reset', 'Reset view'],
+        ['download-png', 'Download PNG'],
+        fullscreen ? ['close', 'Close full screen'] : ['fullscreen', 'Open full screen']
+      ]
+      actions.forEach(function(action) {
+        var button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'mermaid-control-btn'
+        button.setAttribute('data-action', action[0])
+        button.setAttribute('aria-label', action[1])
+        button.title = action[1]
+        button.innerHTML = diagramActionIcon(action[0]) + '<span class="diagram-action-label">' + action[1] + '</span>'
+        group.appendChild(button)
+      })
+      menu.appendChild(group)
+      menu.addEventListener('click', function(event) {
+        var button = event.target.closest('button[data-action]')
+        if (!button) return
+        var action = button.getAttribute('data-action')
+        if (!fullscreen) {
+          menu.open = false
+          menu.querySelector('summary').focus()
+        }
+        if (action === 'zoom-in') resizeChartView(container, container.__chartZoom * 1.25)
+        if (action === 'zoom-out') resizeChartView(container, container.__chartZoom / 1.25)
+        if (action === 'reset') {
+          resizeChartView(container, 1)
+          container.__chartViewport.scrollLeft = 0
+          container.__chartViewport.scrollTop = 0
+        }
+        if (action === 'download-png') {
+          try {
+            downloadChartPng(container)
+          } catch (error) {
+            container.__chartStatus.textContent = 'PNG export failed. Try again.'
+          }
+        }
+        if (action === 'fullscreen') openChartFullscreen(container)
+        if (action === 'close' && container.__chartDialog) container.__chartDialog.close()
+      })
+      return menu
+    }
+
+    // Move the same live canvas into a modal and restore it on close, including Escape.
+    function openChartFullscreen(container) {
+      if (container.__chartDialog || !container.__chartInstance) return
+      var dialog = document.createElement('dialog')
+      dialog.className = 'mermaid-fullscreen chart-fullscreen'
+      dialog.setAttribute('aria-label', 'Full-screen interactive chart')
+      var viewport = container.__chartViewport
+      var status = container.__chartStatus
+      var previousFocus = document.activeElement
+      var previousOverflow = document.body.style.overflow
+      container.__chartFullscreenMenu = createChartActionMenu(container, true)
+      dialog.append(viewport, container.__chartFullscreenMenu, status)
+      document.body.appendChild(dialog)
+      document.body.style.overflow = 'hidden'
+      container.__chartDialog = dialog
+      dialog.addEventListener('close', function() {
+        container.append(viewport, status)
+        delete container.__chartDialog
+        delete container.__chartFullscreenMenu
+        dialog.remove()
+        document.body.style.overflow = previousOverflow
+        if (container.__chartInstance && container.isConnected) resizeChartView(container)
+        if (previousFocus && previousFocus.isConnected) previousFocus.focus()
+      }, { once: true })
+      dialog.showModal()
+      resizeChartView(container)
+      container.__chartFullscreenMenu.querySelector('[data-action="close"]').focus()
+    }
+
+    // Keep native Chart.js hit testing, tooltips and legend interactions on the original canvas.
+    function addChartControls(container, chart) {
+      var canvas = chart.canvas
+      var viewport = document.createElement('div')
+      viewport.className = 'chart-viewport'
+      var stage = document.createElement('div')
+      stage.className = 'chart-stage'
+      stage.appendChild(canvas)
+      viewport.appendChild(stage)
+      container.appendChild(viewport)
+      container.__chartViewport = viewport
+      container.__chartStage = stage
+      container.__chartZoom = 1
+      container.__chartMenu = createChartActionMenu(container, false)
+      container.__chartStatus = document.createElement('span')
+      container.__chartStatus.className = 'chart-status'
+      container.__chartStatus.setAttribute('role', 'status')
+      container.append(container.__chartMenu, container.__chartStatus)
+      resizeChartView(container)
+    }
+
     function layoutChartContainer(container, canvasSettings) {
         if (!container) return;
 
@@ -5107,7 +5290,7 @@
             layoutChartContainer(container, container.__chartCanvasPrefs);
             if (container.__chartInstance && typeof container.__chartInstance.resize === 'function') {
                 try {
-                    container.__chartInstance.resize();
+                    resizeChartView(container)
                 } catch (error) {
                     console.error('Failed to resize Chart.js instance:', error);
                 }
@@ -5244,9 +5427,11 @@
                 const ctx = canvas.getContext('2d');
                 const chartInstance = new window.Chart(ctx, themedConfig);
                 container.__chartInstance = chartInstance;
+                addChartControls(container, chartInstance)
                 pre.remove();
             } catch (error) {
                 console.error('Failed to render Chart.js block:', error);
+                destroyChartContainer(container)
                 container.remove();
             }
         });
@@ -5288,16 +5473,7 @@
     function resetRenderedChartsForTheme() {
         const chartContainers = document.querySelectorAll('.chartjs-chart');
         chartContainers.forEach(container => {
-            try {
-                if (container.__chartInstance && typeof container.__chartInstance.destroy === 'function') {
-                    container.__chartInstance.destroy();
-                }
-            } catch (error) {
-                console.error('Failed to destroy Chart.js instance during theme change:', error);
-            }
-            if (container.__chartInstance) {
-                delete container.__chartInstance;
-            }
+            destroyChartContainer(container)
 
             const pre = document.createElement('pre');
             const code = document.createElement('code');

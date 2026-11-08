@@ -905,6 +905,13 @@ menu, including in full-screen mode. Exports include the complete diagram with
 its current theme, regardless of preview zoom or pan. PNG uses the same 2×
 transparent-background default and size limits described above.
 
+Chart.js response charts also have a collapsed “⋯” menu with zoom in/out,
+reset, PNG download and full-screen controls. Zoom enlarges the chart within a
+scrollable viewport while preserving its data and axis limits. The live canvas
+keeps native tooltips, legend toggles and click interactions in both views.
+PNG downloads capture the complete current canvas. Unchanged charts keep their
+state during streamed response updates.
+
 ### Optional document-generation libraries
 
 The container image is maintained in `openaf-dockers/mini-a`. Document-generation

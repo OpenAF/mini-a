@@ -76,6 +76,7 @@ if (process.argv[2] === '--browser-dir') {
     between('    function openMermaidFullscreen(', '    // File bytes are fetched'),
     between('    function diagramActionIcon(', '    async function exportSvgDiagram('),
     between('    function bindDiagramMenu(', '    function renderMermaidPreview('),
+    between('    function downloadDiagramBlob(', '    async function downloadSvgAsPng('),
     between('    function addLeafletMarkers(', '    /**\n     * Attempts to force')
   ].join('\n');
   const pluginCharts = [

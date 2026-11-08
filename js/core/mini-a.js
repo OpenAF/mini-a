@@ -1209,6 +1209,8 @@ MiniA.buildVisualKnowledge = function(options) {
       "  - With skills enabled, read mini-a-visual-output reference references/mermaid.md for the versioned capability index, then load only the relevant example file. Examples are starting points, not a closed list of allowed diagram types.\n" +
       "  - Use an additional diagram type or newer syntax only when support is established for the deployed renderer; never invent keywords. If the version or support is uncertain, default to flowchart or sequenceDiagram, or explain the relationships in text.\n" +
       "  - Diagram-specific keywords include xychart-beta, treemap-beta, sankey-beta and block-beta. Preserve strict security mode; external diagrams or icon packs need explicit host registration.\n" +
+      "  - Use one diagram grammar per fence. Never mix node, edge, hierarchy, title or label syntax from different diagram families; changing the opening keyword requires rewriting the body in that grammar.\n" +
+      "  - Treemaps require an explicit numeric quantity for every leaf. Use a mindmap or flowchart for an unweighted hierarchy; never invent weights or arbitrary equal values to force a treemap. If a treemap is specifically required and quantities are missing, ask for them.\n" +
       "  - Keep labels concise; prefer directional edges for processes.\n" +
       "  - For flowcharts, wrap node/box labels in DOUBLE QUOTES to protect punctuation and spaces:\n" +
       "    • CORRECT: A[\"Label\"], B(\"Label\"), C{\"Decision\"}, D[[\"Subroutine\"]], E[(\"Database\")]\n" +
