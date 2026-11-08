@@ -9767,6 +9767,7 @@ MiniA.prototype._normalizeWikiArgs = function(args) {
   var _wikiGraphCrossMinKeyLen = isNumber(args.wikigraphcrossminkeylen) ? args.wikigraphcrossminkeylen : Number(args.wikigraphcrossminkeylen)
   if (isNaN(_wikiGraphCrossMinKeyLen)) _wikiGraphCrossMinKeyLen = __
   args.wikigraphcrossminkeylen = _$(_wikiGraphCrossMinKeyLen, "args.wikigraphcrossminkeylen").isNumber().default(3)
+  args.wikigraphproximity = _$(toBoolean(args.wikigraphproximity), "args.wikigraphproximity").isBoolean().default(false)
   args.wikigraphautosave = _$(args.wikigraphautosave, "args.wikigraphautosave").isString().default("always")
   if (["always", "debounced", "off"].indexOf(String(args.wikigraphautosave).toLowerCase().trim()) < 0) args.wikigraphautosave = "always"
   else args.wikigraphautosave = String(args.wikigraphautosave).toLowerCase().trim()

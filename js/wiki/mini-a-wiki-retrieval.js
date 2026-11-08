@@ -2098,6 +2098,26 @@ MiniAWikiRetrievalV2.prototype._expandGraph = function(candidates, contexts, opt
     try{discover(next.hit,next.context,next)}catch(error){partial(next.context,Date.now()>=deadline?"graph-budget":"graph-unavailable")}
     if(work.truncated)partial(next.context,"graph-budget")
   }
+
+  // Optional proximity re-ranking (wikigraphproximity=true): graph-discovered hits gain up to
+  // 0.25 by personalized PageRank from the same wiki's lexical seeds, within the edge budget.
+  if (toBoolean(cfg.wikigraphproximity) === true && work.used < work.limit && Date.now() < deadline) {
+    contexts.forEach(function(context) {
+      var graph = context.graph
+      if (!graph || !isFunction(graph.proximity)) return
+      var mine = function(hit) { return hit.engine === context.engine && hit.wiki === context.target.name && isMap(hit.record) }
+      var seedPaths = seeds.filter(mine).map(function(hit) { return hit.record.path })
+      var graphHits = candidates.filter(function(hit) { return mine(hit) && hit.retrievalMethod === "graph" })
+      if (seedPaths.length === 0 || graphHits.length === 0) return
+      var scores = graph.proximity(seedPaths, { budget: work, deadline: deadline })
+      graphHits.forEach(function(hit) {
+        var bonus = Number((0.25 * (scores[hit.record.path] || 0)).toFixed(4))
+        if (bonus <= 0) return
+        hit.scoreComponents.proximity = bonus
+        hit.rankScore += bonus
+      })
+    })
+  }
   used.graphEdges=work.used
 }
 

@@ -36,7 +36,7 @@ help:
 ojob:
   logToConsole: false
   catch: |
-    logErr("❌ " + (isMap(exception) && isDef(exception.stage) ? exception.stage + " failed: " + stringify(exception.result, __, "") : exception))
+    logErr("❌ " + (isMap(exception) && isDef(exception.stage) ? exception.stage + " failed: " + af.toSLON(exception.result) : exception))
     exit(1)
 todo:
 - Query wiki

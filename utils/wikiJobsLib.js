@@ -293,7 +293,7 @@ var wikiJobsQueryReadiness = function(root) {
 
 // Print a stage failure and exit 1.
 var wikiJobsFail = function(stage, detail, backup) {
-  logErr("❌ " + stage + " failed" + (isDef(detail) ? ": " + (isString(detail) ? detail : stringify(detail, __, "")) : ""))
+  logErr("❌ " + stage + " failed" + (isDef(detail) ? ": " + (isString(detail) ? detail : af.toSLON(detail)) : ""))
   if (isDef(backup)) logWarn("🗄️  Pre-dream backup: " + backup)
   exit(1)
 }

@@ -54,7 +54,7 @@ MiniADreams.prototype._wikiGraphProgressFn = function() {
   var self = this
   return function(info) {
     if (!isMap(info)) return
-    self._log("[dreams:wiki] Graph: " + stringify(info, __, ""))
+    self._log("[dreams:wiki] Graph: " + af.toSLON(info))
   }
 }
 
@@ -2025,7 +2025,9 @@ MiniADreams.prototype._finalizeWiki = function(wm, result, options) {
     var tRe = Date.now()
     var existingProof = isFunction(opts.verifyServing) ? opts.verifyServing() : __
     if (existingProof && !existingProof.ok && /unsupported|capability-unavailable|lucene-unavailable/.test(existingProof.code || "")) throw new Error(existingProof.error)
-    var ri = existingProof && existingProof.ok && !existingProof.skipped ? merge(existingProof, { reused_publication: true }) : wm.reindex()
+    // The graph build below covers the graph; reindex only rebuilds search.
+    var reindexOpts = self._wikiGraphEnabled() ? { skipGraph: true } : __
+    var ri = existingProof && existingProof.ok && !existingProof.skipped ? merge(existingProof, { reused_publication: true }) : wm.reindex(reindexOpts)
     if (isMap(ri) && ri.ok === false && isFunction(wm.recoverServing) && wm._isServingRecoveryError(ri.code || ri.error)) ri = wm.recoverServing()
     report.publication = ri
     report.reindexed = isMap(ri) && ri.ok === true
@@ -2042,7 +2044,10 @@ MiniADreams.prototype._finalizeWiki = function(wm, result, options) {
       var semanticOn = self._effectiveWikiGraphSemantic(opts.mode)
       var gr = wm.graph("build", { semantic: semanticOn, onProgress: semanticOn ? self._wikiGraphProgressFn() : __ })
       report.graph = isMap(gr) && gr.ok === false ? ("failed: " + gr.error) : "rebuilt"
+      // Budget-stopped semantic builds resume from their completed sections on the next run.
+      if (isMap(gr) && gr.ok !== false) report.graph_build = { status: gr.status, pending: gr.pending, resumable: gr.resumable === true, calls: gr.calls, cached: gr.cached }
       if (report.graph === "rebuilt") self._log("[dreams:wiki] Knowledge graph rebuilt in " + ((Date.now() - tG) / 1000).toFixed(1) + "s.")
+      if (isMap(gr) && gr.resumable === true) self._log("[dreams:wiki] Knowledge graph enrichment is partial (" + gr.pending + " page(s) pending, status=" + gr.status + "); the next build resumes from completed sections.")
     } catch(eG) {
       report.graph = "failed"
       report.errors.push("graph: " + __miniAErrMsg(eG))

@@ -2278,6 +2278,7 @@ These grouped tables complete the parameter entries above. `unset` means no expl
 | `wikigraphcrossjoin` | string | `link,tag,alias,concept` | CSV of enabled cross-wiki join kinds: link, tag, alias, concept. |
 | `wikigraphcrossmaxdf` | number | `0.25` | Skip a shared tag/alias/concept join key present on more than this fraction of a mount's docs. |
 | `wikigraphcrossminkeylen` | number | `3` | Minimum length for a shared join key to be used for cross-wiki matching. |
+| `wikigraphproximity` | boolean | `false` | Re-rank graph-discovered Retrieval V2 hits by personalized PageRank proximity to the query's lexical seeds (bounded by the graph edge budget). |
 
 ### Memory and knowledge — Wiki retrieval and maintenance
 

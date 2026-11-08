@@ -102,3 +102,109 @@ aside button{width:auto;display:inline-flex;margin:0}.page-tree{min-width:180px;
 .page-tree.picker [role=treeitem][aria-selected=true]>.tree-label{background:var(--accent-bg);box-shadow:inset 3px 0 0 var(--accent)}
 @media(pointer:coarse){.tree-check,.tree-menu-btn{opacity:1}.tree-check{width:22px;height:22px}}
 .import-destination{border:1px solid var(--border,#ddd);border-radius:8px;padding:8px 12px;margin:8px 0}.import-destination h4{margin:0 0 6px}.expected-pages{margin:4px 0 0;padding-left:20px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;overflow-wrap:anywhere}
+.badge.task-tag{text-transform:none}.badge.suggested{background:var(--accent-bg);color:var(--accent);text-transform:none;margin:0}
+.dream-suggestions-panel{border-left:3px solid var(--accent);margin:8px 0 28px}.dream-suggestions-head{align-items:center;gap:12px;flex-wrap:wrap}.dream-suggestions-head h4{margin:0}.dream-suggestions-head small{flex:1}.dream-suggestions-panel>p{margin:12px 0 0}
+.dream-suggestions{margin:16px 0 0;padding:0;list-style:none;display:flex;flex-direction:column}.dream-suggestions li{display:flex;gap:16px;align-items:baseline;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--line)}.dream-suggestions li:first-child{border-top:0;padding-top:0}.dream-suggestions li button{flex:none;min-width:170px}.dream-suggestions li span{flex:1;min-width:220px;line-height:1.5}
+.dream-layout{display:grid;grid-template-columns:minmax(300px,420px) minmax(0,1fr);gap:32px;align-items:start}
+.dream-groups{display:flex;flex-direction:column}.dream-group{padding:20px 0;border-top:1px solid var(--line)}.dream-group:first-child{padding-top:0;border-top:0}
+.dream-group-head{display:flex;gap:12px;align-items:flex-start;margin-bottom:12px}.dream-group-head h4{margin:0 0 2px}.dream-step{flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--button);border:1px solid var(--border);color:var(--muted);font-size:12px;font-weight:600}
+.dream-task-list{display:flex;flex-direction:column;gap:8px;margin-left:36px}
+.dream-task{display:flex;flex-direction:column;align-items:flex-start;gap:4px;width:100%;text-align:left;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--ink);cursor:pointer;font:inherit}
+.dream-task:hover{border-color:var(--hover-border);background:var(--hover)}.dream-task[aria-pressed=true]{border-color:var(--accent);background:var(--accent-bg);box-shadow:inset 3px 0 0 var(--accent)}.dream-task .muted{font-size:13px;line-height:1.4}
+.dream-task-title{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.dream-details{position:sticky;top:16px;margin:0;max-height:calc(100vh - 32px);overflow:auto}.dream-details h3{margin:2px 0 8px}.dream-kicker{text-transform:uppercase;letter-spacing:.06em;font-size:11px}.dream-tags{gap:8px;margin-bottom:8px}
+.dream-note{padding:12px 16px;border-radius:8px;background:var(--button);margin:0 0 16px}.dream-note p{margin:4px 0 0}
+.dream-block{padding-top:16px;margin-top:16px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:10px}.dream-block h4{margin:0}.dream-block>label{max-width:520px}
+.dream-actions{margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
+@media(max-width:1000px){.dream-layout{grid-template-columns:1fr;gap:8px}.dream-details{position:static;max-height:none}.dream-task-list{margin-left:0}}
+.dream-why{background:var(--accent-bg);border-left:3px solid var(--accent)}
+.link-button{border:0;background:none;padding:0;color:var(--accent);font:inherit;cursor:pointer;text-decoration:underline}.dream-suggestions-panel{padding-top:16px}.dream-suggestions-head .row,.dream-suggestions-head{margin:0}
+
+/* Wiki root picker and the Add wiki root field. */
+.add-wiki .root-input {
+  margin: 4px 0;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+}
+.add-wiki .root-input input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.add-wiki .root-status {
+  display: block;
+  margin-bottom: 12px;
+  overflow-wrap: anywhere;
+}
+.root-picker {
+  width: min(720px, 95vw);
+  max-height: 90vh;
+  overflow: auto;
+}
+.root-picker pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.root-picker .breadcrumbs {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.root-picker-go,
+.root-picker-new {
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+.root-picker-go input,
+.root-picker-new input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.root-picker-list {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  max-height: 45vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.root-picker-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.root-picker-list li:last-child {
+  border-bottom: 0;
+}
+.root-picker-list li > button:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.root-picker .badge {
+  text-transform: none;
+  white-space: nowrap;
+}
+.root-picker .row > button,
+.root-picker .row > form {
+  align-self: center;
+}
+.root-picker-actions {
+  justify-content: flex-end;
+  gap: 8px;
+}
+.wiki-broken {
+  margin: 4px 0;
+}
+.wiki-broken .badge {
+  text-transform: none;
+}
+.search-hit .badge {
+  text-transform: none;
+  white-space: nowrap;
+}

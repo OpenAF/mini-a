@@ -14,7 +14,7 @@ try {
   var remote=new MiniAWikiGraph(config,function(level,msg){print(level+": "+msg)}), edges=remote._state.edges.filter(function(e){return e.type==="MENTIONS"})
   check(edges.length===first.length,"remote assertions round trip")
   check(edges.every(function(e){return isMap(e.props.evidence)&&e.props.evidence.quote.length>0}),"nested evidence round trip")
-  check(remote._state.nodes["concept:id:TLS"].props.name === "TLS" && remote._state.nodes["concept:id:TLS"].props.joinable === true,"concept name and boolean metadata round trip")
+  check(remote._state.nodes["concept:id:tls"].props.name === "TLS" && remote._state.nodes["concept:id:tls"].props.joinable === true,"concept name and boolean metadata round trip")
   check(remote._state.enrichment["a.md"].status==="pending","remote enrichment state round trip")
   check(remote._state.semantic_cache["b.md"].schema_version===2,"remote cache versions round trip")
   remote.removePage("a.md")

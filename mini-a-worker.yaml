@@ -1231,7 +1231,7 @@ jobs:
           log("[worker-reg] Registered with " + baseUrl + " as " + myUrl)
           return true
         }
-        logWarn("[worker-reg] Registration response from " + baseUrl + ": " + stringify(resp, __, ""))
+        logWarn("[worker-reg] Registration response from " + baseUrl + ": " + af.toSLON(resp))
         return false
       } catch(e) {
         logWarn("[worker-reg] Failed to register with " + baseUrl + ": " + e)
@@ -1273,7 +1273,7 @@ jobs:
         if (isMap(resp) && resp.status === "ok") {
           log("[worker-reg] Deregistered from " + baseUrl)
         } else {
-          logWarn("[worker-reg] Deregister response from " + baseUrl + ": " + stringify(resp, __, ""))
+          logWarn("[worker-reg] Deregister response from " + baseUrl + ": " + af.toSLON(resp))
         }
       } catch(e) {
         logWarn("[worker-reg] Failed to deregister from " + baseUrl + ": " + e)

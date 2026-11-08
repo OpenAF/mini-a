@@ -33,7 +33,7 @@
       var g = new MiniAWikiGraph({graphDir:dir,llmExtractFn:extract}), input = pages()
       input.forEach(function(page) {page.body = "Foo uses Bar"})
       g.buildStructural(input); g.buildSemantic(input)
-      var assertions = function(graph) { return graph._state.edges.filter(function(e) {return !e._deleted && e.from === "concept:id:Foo"}) }
+      var assertions = function(graph) { return graph._state.edges.filter(function(e) {return !e._deleted && e.from === "concept:id:foo"}) }
       ow.test.assert(assertions(g).length, 2, "identical assertions retain both source pages")
       g = new MiniAWikiGraph({graphDir:dir,llmExtractFn:extract})
       ow.test.assert(assertions(g).length, 2, "save/load preserves both assertions")
@@ -48,7 +48,7 @@
       ow.test.assert(calls, 3, "only changed page is extracted")
       g.removePage("a.md")
       ow.test.assert(assertions(g).length, 1, "deletion preserves independent support")
-      ow.test.assert(g.joinKeys().concepts["id:Foo"].join(","), "b.md", "concept joins retain surviving source")
+      ow.test.assert(g.joinKeys().concepts["id:foo"].join(","), "b.md", "concept joins retain surviving source")
       var queries = []; g._falkorLink({query:function(q){queries.push(q)}}, assertions(g)[0])
       ow.test.assert(queries[0].indexOf("evidenceKey:") >= 0, true, "Falkor relationship identity includes source assertion")
     } finally { io.rm(dir) }

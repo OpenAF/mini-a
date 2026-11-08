@@ -1529,6 +1529,10 @@ help:
   - name     : wikigraphcrossminkeylen
     desc     : "Minimum length for a shared join key to be used for cross-wiki matching."
     mandatory: false
+  - name     : wikigraphproximity
+    desc     : "Re-rank graph-discovered Retrieval V2 hits by personalized PageRank proximity to the query's lexical seeds (bounded by the graph edge budget)."
+    mandatory: false
+    options  : ["true", "false"]
   - name     : wikigraphfalkorgraph
     desc     : "FalkorDB graph name for wiki graph."
     mandatory: false

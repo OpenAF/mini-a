@@ -96,6 +96,47 @@ does not initialize existing content. Creation calls Mini-A's supported init.
 Symlinks, hard-linked files, root identity changes and hidden page paths are
 rejected. Use canonical paths on macOS (for example `/private/tmp`, not `/tmp`).
 
+Next to **Absolute root**, **Browse…** opens a folder picker limited to the
+configured `studioallowroots`. It shows only visible, non-linked sub-folders.
+Folders already registered (or overlapping a registered wiki) are badged and
+cannot be picked, and folders that already contain `index.md` are marked. **New
+folder** only proposes a path: nothing is written until you click **Add wiki**,
+which then creates the folder (and any missing parents) and initializes it, so
+abandoned picks leave no empty directories. Studio decides between "register
+existing" and "create" from whether the path exists. New folders require `rw`.
+Choosing a folder fills an empty Stable ID and Display name from its name.
+Before you add or re-point a wiki, the picker summarizes an existing folder by
+name only: Markdown page and folder counts, and whether it already has
+`index.md`, `AGENTS.md`, a search index or a graph. In the folder list,
+Up/Down move, Right or Enter opens, Left or Backspace goes up a level, and
+Home/End jump. The last browsed folder is remembered for the browser session
+(`sessionStorage`) and used when the root field is empty.
+
+**Change root** (in Settings, or on the dashboard when a wiki's folder is missing
+or was replaced) re-points a registration at another existing folder beneath an
+allowroot. Files are not moved or copied. Studio records the new filesystem
+identity and keeps `previousRoot` in the registry entry. A wiki's own current
+root never counts as an overlap, and new (virtual) folders are not offered.
+
+### Search modes
+
+The Pages view's **Search with** selector works for one wiki or all registered
+wikis:
+
+- **Index**: the full-text search index (`wiki.search`), as before.
+- **Graph**: pages that the knowledge-graph snapshot links to matching concepts
+  or page metadata (`graph.retrieve`). This needs graph enabled in Settings and a
+  built snapshot (Maintenance → build graph). Otherwise coverage reports
+  `unavailable` with the reason; the request does not fail.
+- **Combined**: both rankings merged by reciprocal rank fusion keyed on page
+  path. Each hit is tagged `index`, `graph` or `index + graph`, and its graph
+  explanations appear on hover. Raw scores from the two engines are never
+  compared.
+
+Graph and combined modes rank at most the top 200 pages per wiki, so paging
+stops there. Change root is refused (423) while the wiki has queued or running
+jobs, because jobs record the root when they are submitted.
+
 Settings supports display-name and ro/rw changes. Unregister removes only the
 registry entry; it never deletes wiki data. Graph enabled/disabled is also
 available through PATCH. Lexical configuration editing is not exposed yet.
@@ -496,6 +537,10 @@ backup. No automatic retention policy is enabled.
 
 Additional HTTP interfaces (same authentication and path protections):
 
+- `PATCH /api/v1/wikis/:id` with `{"root":"/abs/existing/folder"}`: Change root. This is the one request that skips the identity check, so a moved wiki can be repaired. `GET /api/v1/wikis` items carry `rootState` (`ok`, `missing`, `changed`, `unavailable`).
+- `GET /api/v1/wikis/:id/search?q=&mode=index|graph|combined` and `GET /api/v1/search?q=&mode=...`: graph/combined hits carry `matchedBy`, `ranks`, `fused`, `explanations`. Per-engine `coverage` is included.
+- `GET /api/v1/roots/browse?path=&for=<wikiId>`: `for` excludes that wiki's own root from overlap checks (Change root). `current.contents` summarizes an existing folder.
+- `GET /api/v1/roots/browse?path=`: root picker. With no `path`, lists `allowRoots`. With a path beneath one, returns `current` plus up to 500 visible child directories (`items`), each with `exists`, `looksLikeWiki`, `registeredAs`, `selectable` and `reason`. Paths that do not exist are reported, never created.
 - `GET /api/v1/wikis/:id/children?path=&limit=100&offset=0`: immediate folder/file entries, folders first.
 - `DELETE /api/v1/jobs/:id`: `{wikiId, confirmation:"delete-history"}`.
 - `DELETE /api/v1/jobs`: `{wikiId, ids:[...], confirmation:"delete-history"}`; exact IDs are confirmed, with eligibility rechecked under locks.

@@ -47,8 +47,8 @@ try {
   assert(stages[0]==="structural"&&stages[stages.length-1]==="complete","structural progress reports stages")
   g.build(pages,semantic);assert(calls===0,"semantic off zero calls")
   var mentions=g._state.edges.filter(function(e){return e.type==="MENTIONS"})
-  assert(mentions.some(function(e){return e.to==="concept:id:ECONNREFUSED"}),"late section evidence")
-  assert(mentions.some(function(e){return e.to==="concept:id:Node.js"})&&mentions.some(function(e){return e.to==="concept:id:C++"}),"punctuation preserved")
+  assert(mentions.some(function(e){return e.to==="concept:id:econnrefused"}),"late section evidence")
+  assert(mentions.some(function(e){return e.to==="concept:id:node.js"})&&mentions.some(function(e){return e.to==="concept:id:c++"}),"punctuation preserved")
   mentions.forEach(function(e){var p=pages.filter(function(x){return x.path===e.props.page})[0];assert(p.body.substring(e.props.evidence.start,e.props.evidence.end)===e.props.evidence.quote,"evidence offsets")})
   var count=mentions.length;g.build(pages,semantic);assert(g._state.edges.filter(function(e){return e.type==="MENTIONS"}).length===count,"idempotent")
   var candidates=g.expansionCandidates("a.md",{cap:5,budget:{used:0,limit:256},deadline:Date.now()+1000})
@@ -56,7 +56,7 @@ try {
   var result=g.retrieve("conn.ReceiveFunc",{cap:10,maxEdges:20});assert(result.pages.length===2&&result.work.edges<=20&&result.pages[0].references.length>0,"retrieval references and work cap")
   var tags=g.tagSuggestions("a.md",["network"],["tls"]);assert(tags.additions.length<=5&&tags.additions[0].tag==="tls","tag vocabulary preference")
   assert(tags.additions.every(function(t){return t.tag!=="network"}),"tags do not justify tags")
-  var legacy={from:"concept:id:Node.js",to:"concept:id:Legacy",type:"RELATED_TO",provenance:"EXTRACTED",props:{page:"b.md",revision:pages[1].revision}}
+  var legacy={from:"concept:id:node.js",to:"concept:id:Legacy",type:"RELATED_TO",provenance:"EXTRACTED",props:{page:"b.md",revision:pages[1].revision}}
   g._upsertNode(legacy.to,"concept",{name:"Legacy"});g._addEdge(legacy.from,legacy.to,legacy.type,legacy.provenance,legacy.props)
   assert(!g._currentEvidence(legacy),"legacy not verified")
   var scope=graph("scope"), homonyms=[page("one.md","Mercury",{title:"Mercury"}),page("two.md","Mercury",{title:"Mercury"}),page("use.md","Mercury and mercury are ambiguous.",{title:"Consumer"})]
@@ -91,7 +91,9 @@ try {
   var changedInput=graph("dependencies",{modelExtractors:models}), sourcePair=[page("origin.md","TLS connects sockets."),page("peer.md","TLS protects TCP.")]
   changedInput.build(sourcePair,{extraction:"semantic",modelHelp:"auto"})
   sourcePair[1]=page("peer.md","TLS protects HTTP.")
-  assert(changedInput.build(sourcePair,{extraction:"semantic",modelHelp:"auto",strategy:"resume"}).calls===2,"indexed cross-page input changes invalidate dependent cache")
+  assert(changedInput.build(sourcePair,{extraction:"semantic",modelHelp:"auto",strategy:"resume"}).calls===1,"peer edit leaving the dependent model input unchanged reuses its cache")
+  sourcePair[1]=page("peer.md","Plain prose only.")
+  assert(changedInput.build(sourcePair,{extraction:"semantic",modelHelp:"auto",strategy:"resume"}).calls===2,"indexed cross-page candidate changes invalidate dependent cache")
   changedInput._cfg.modelExtractors=[{role:"lc",fingerprint:"stub2",extract:stub}]
   assert(changedInput.build(sourcePair,{extraction:"semantic",modelHelp:"auto"}).calls===2,"model fingerprint invalidates caches")
   var retry=graph("malformed-fallback",{modelExtractors:[{role:"lc",extract:function(){return {relationships:[{from:"TLS",to:"HTTP",evidence:{quote:"invented"}}]}}},{role:"main",extract:function(){return {relationships:[]}}}]})
@@ -103,5 +105,148 @@ try {
   assert(f.path(edge.from,edge.to,{direction:"out",type:"USES",evidenceLayer:"grounded",minConfidence:0.95}).length===0,"path confidence")
   assert(f.path(edge.from,edge.to,{direction:"out",type:"USES",evidenceLayer:"grounded",minConfidence:0.8}).length===2,"path evidence filters")
   var queries=[];f._falkorLink({query:function(q){queries.push(q)}},edge);assert(queries[0].indexOf('"quote"')>=0&&queries[0].indexOf("evidenceKey")>=0,"Falkor nested evidence encoding")
+
+  // Rebuild economics: new vocabulary only invalidates pages that mention it.
+  var seenPaths = []
+  var tracking = [{ role: "lc", fingerprint: "track", extract: function(payload) { seenPaths.push(payload.path); return { relationships: [] } } }]
+  var econ = graph("economics", { modelExtractors: tracking })
+  var econPages = [page("alpha.md", "Alpha talks about TLS.", { title: "Alpha" }), page("beta.md", "Beta mentions Gamma soon.", { title: "Beta" })]
+  econ.build(econPages, { extraction: "semantic", modelHelp: "auto" })
+  seenPaths = []
+  econPages.push(page("gamma.md", "Gamma is new.", { title: "Gamma" }))
+  econ.build(econPages, { extraction: "semantic", modelHelp: "auto" })
+  assert(seenPaths.indexOf("alpha.md") < 0, "a new title does not re-extract pages that never mention it")
+  assert(seenPaths.indexOf("beta.md") >= 0 && seenPaths.indexOf("gamma.md") >= 0, "the mentioning page and the new page are extracted")
+
+  // Section-level reuse: editing one section re-extracts only that section and rebases the others.
+  var sectionCalls = []
+  var sectionModel = [{ role: "lc", fingerprint: "sections", extract: function(payload) {
+    sectionCalls.push(payload.section)
+    if (payload.body.indexOf("TLS uses HTTP") >= 0) return { relationships: [{ from: "TLS", to: "HTTP", type: "USES", provenance: "EXTRACTED", confidence: 0.9, evidence: { quote: "TLS uses HTTP" } }] }
+    return { relationships: [] }
+  } }]
+  var sec = graph("sections", { modelExtractors: sectionModel })
+  var secPage = page("doc.md", "# One\nIntro prose.\n# Two\nTLS uses HTTP here.\n", { title: "Doc" })
+  sec.build([secPage], { extraction: "semantic", modelHelp: "auto" })
+  assert(sectionCalls.length === 2, "two sections extracted initially")
+  sectionCalls = []
+  secPage = page("doc.md", "# One\nIntro prose, now edited and longer.\n# Two\nTLS uses HTTP here.\n", { title: "Doc" })
+  sec.build([secPage], { extraction: "semantic", modelHelp: "auto" })
+  assert(sectionCalls.length === 1 && sectionCalls[0].indexOf("One") === 0, "only the edited section is re-extracted")
+  var rebased = sec._state.edges.filter(function(e) { return !e._deleted && e.props.method === "model" })
+  assert(rebased.length === 1 && sec._currentEvidence(rebased[0]), "unchanged section keeps a current model assertion")
+  assert(secPage.body.substring(rebased[0].props.evidence.start, rebased[0].props.evidence.end) === "TLS uses HTTP", "rebased evidence offsets point at the quote")
+  var reloadedSec = graph("sections", { modelExtractors: sectionModel })
+  sectionCalls = []
+  reloadedSec.build([secPage], { extraction: "semantic", modelHelp: "auto" })
+  assert(sectionCalls.length === 0, "reload keeps section completions")
+  secPage = page("doc.md", "# One\nIntro prose, now edited and longer.\n# Two\nTLS uses HTTP here, edited.\n", { title: "Doc" })
+  sectionCalls = []
+  reloadedSec.build([secPage], { extraction: "structural" })
+  reloadedSec.build([secPage], { extraction: "semantic", modelHelp: "auto" })
+  assert(sectionCalls.length === 1 && sectionCalls[0].indexOf("Two") === 0, "carry survives a structural update before the semantic build")
+
+  // Legacy (v2) enrichment is adopted without new model calls.
+  var legacyCalls = 0
+  var legacyModels = [{ role: "lc", fingerprint: "legacy", extract: function() { legacyCalls++; return { relationships: [] } } }]
+  var leg = graph("legacy", { modelExtractors: legacyModels })
+  var legPage = page("old.md", "Legacy body text.", { title: "Old" })
+  leg.build([legPage], { extraction: "semantic", modelHelp: "auto" })
+  var legFingerprint = sha1(stringify([["lc", "legacy"]], __, ""))
+  var legHash = leg._pageHash(legPage)
+  leg._state.enrichment["old.md"] = { key: sha1(legHash + leg._conceptVocabulary([legPage]).legacyHash + ":extractor-2:prompt-2:" + legFingerprint), hash: legHash, version: 2, completed: { "0": true }, status: "complete" }
+  legacyCalls = 0
+  leg.build([legPage], { extraction: "semantic", modelHelp: "auto" })
+  assert(legacyCalls === 0 && leg._state.enrichment["old.md"].version === 3, "legacy completions migrate without model calls")
+
+  // A legacy key computed against an older vocabulary keeps its model edges until re-extraction.
+  var legacyRel = [{ role: "lc", fingerprint: "legacy2", extract: function() { legacyCalls++; return { relationships: [{ from: "TLS", to: "HTTP", type: "USES", provenance: "EXTRACTED", confidence: 0.9, evidence: { quote: "TLS uses HTTP" } }] } } }]
+  var stale = graph("legacy-stale", { modelExtractors: legacyRel })
+  var stalePage = page("old.md", "TLS uses HTTP.", { title: "Old" })
+  stale.build([stalePage], { extraction: "semantic", modelHelp: "auto" })
+  var staleModel = function() { return stale._state.edges.filter(function(e) { return !e._deleted && e.props.method === "model" }) }
+  staleModel().forEach(function(e) { delete e.props.windowKey; e.props.window = 0 })
+  stale._state.enrichment["old.md"] = { key: "from-an-older-vocabulary", hash: stale._pageHash(stalePage), version: 2, completed: { "0": true }, status: "complete" }
+  legacyCalls = 0
+  var staleRun = stale.build([stalePage], { extraction: "semantic", modelHelp: "auto", maxCalls: 1, maxTokens: 1 })
+  assert(legacyCalls === 0 && staleRun.pending === 1, "mismatched legacy key leaves the section pending")
+  assert(staleModel().length === 1 && isString(staleModel()[0].props.windowKey), "mismatched legacy key keeps and re-keys its model edges")
+  stale.build([stalePage], { extraction: "semantic", modelHelp: "auto" })
+  assert(legacyCalls === 1 && staleModel().length === 1, "re-extraction replaces the migrated edge once")
+
+  // Batches flush once: one save and one derived recompute.
+  var batch = graph("batch-window")
+  batch.build([page("seed.md", "# Seed")], { extraction: "structural" })
+  var saves = 0, derived = 0, save = batch.save, communities = batch.detectCommunities
+  batch.save = function() { saves++; return save.apply(this, arguments) }
+  batch.detectCommunities = function() { derived++; return communities.apply(this, arguments) }
+  batch.beginBatch()
+  for (var bi = 0; bi < 20; bi++) batch.updatePage(page("p" + bi + ".md", "# P" + bi + "\nBody " + bi, { title: "P" + bi, tags: ["shared"] }))
+  batch.removePage("seed.md")
+  assert(saves === 0 && derived === 0, "no saves or derived recompute inside a batch")
+  batch.endBatch()
+  assert(saves === 1 && derived === 1, "endBatch flushes exactly once")
+  assert(graph("batch-window").stats().nodes === batch.stats().nodes, "batch flush is persisted")
+
+  // Concept keys fold case, possessives and regular plurals; acronyms keep their letters.
+  var keys = graph("keys")
+  assert(keys._conceptKey("OpenAF") === keys._conceptKey("openaf") && keys._conceptKey("openaf's") === "openaf", "case and possessive folding")
+  assert(keys._conceptKey("Connections") === "connection" && keys._conceptKey("policies") === "policy", "regular plurals fold")
+  assert(keys._conceptKey("TLS") === "tls" && keys._conceptKey("Kubernetes") === "kubernetes" && keys._conceptKey("getUsers") === "getusers", "acronyms, -es words and identifiers keep their letters")
+
+  // Shared emphasised terms become joinable vocabulary.
+  var vocab = keys._conceptVocabulary([page("x.md", "Use **Retrieval V2** here.", { title: "X" }), page("y.md", "Also **Retrieval V2**.", { title: "Y" }), page("z.md", "Only **Solo Term**.", { title: "Z" })])
+  assert(isArray(vocab.names["Retrieval V2"]) && vocab.names["Retrieval V2"][0].joinable === true && isUnDef(vocab.names["Solo Term"]), "emphasis on two or more pages joins vocabulary")
+
+  // query(): IDF ranking puts the rare-word match first; the token index follows changes.
+  var q = graph("query")
+  var qPages = []
+  for (var qi = 0; qi < 6; qi++) qPages.push(page("common" + qi + ".md", "# Common " + qi, { title: "Common " + qi, tags: ["shared"] }))
+  qPages.push(page("rare.md", "# Rare", { title: "Rare zeppelin", tags: ["shared"] }))
+  q.build(qPages, { extraction: "structural" })
+  var qDocs = q.query("zeppelin common").filter(function(h) { return h.type === "document" })
+  assert(qDocs[0].id === "doc:rare.md" && qDocs[0].score > qDocs[1].score, "rare word outranks a common word")
+  assert(q.query("zeppel").some(function(h) { return h.id === "doc:rare.md" }), "substring word still matches")
+  q.updatePage(page("late.md", "# Late", { title: "Late airship" }))
+  assert(q.query("airship").some(function(h) { return h.id === "doc:late.md" }), "token index refreshes after an update")
+
+  // Communities: deterministic label propagation, one community per page, no catch-all group.
+  var cg = graph("communities")
+  var cPages = [
+    page("a1.md", "# A1", { title: "A1", tags: ["alpha"] }), page("a2.md", "# A2", { title: "A2", tags: ["alpha"] }), page("a3.md", "# A3", { title: "A3", tags: ["alpha"] }),
+    page("b1.md", "# B1", { title: "B1", tags: ["beta"] }), page("b2.md", "# B2", { title: "B2", tags: ["beta"] }),
+    page("lonely.md", "# Lonely", { title: "Lonely" })
+  ]
+  cg.build(cPages, { extraction: "structural" })
+  var comms = cg.detectCommunities()
+  var shape = function(list) { return list.map(function(c) { return c.members.join(",") }).join("|") }
+  assert(comms.length === 2 && shape(comms) === "doc:a1.md,doc:a2.md,doc:a3.md|doc:b1.md,doc:b2.md", "tag groups become separate communities")
+  assert(shape(cg.detectCommunities()) === shape(comms), "communities are deterministic")
+  assert(!comms.some(function(c) { return c._memberSet["doc:lonely.md"] }), "isolated pages are not forced into a community")
+
+  // Expansion: several shared concepts outrank a single one.
+  var ex = graph("expansion")
+  ex.build([
+    page("src.md", "Uses `FooLib` and `BarLib` and `BazLib`.", { title: "Src" }),
+    page("many.md", "Also `FooLib` and `BarLib` and `BazLib`.", { title: "Many" }),
+    page("one.md", "Only `FooLib` here.", { title: "One" })
+  ], semantic)
+  var exHits = ex.expansionCandidates("src.md", { cap: 5, budget: { used: 0, limit: 512 }, deadline: Date.now() + 5000 })
+  assert(exHits.length === 2 && exHits[0].path === "many.md" && exHits[0].score > exHits[1].score, "shared-concept scores accumulate")
+
+  // Proximity: ranks pages by connection strength to the seeds and respects the work budget.
+  var px = graph("proximity")
+  px.build([
+    page("seed.md", "# Seed", { title: "Seed", tags: ["t1", "t2"] }),
+    page("close.md", "# Close", { title: "Close", tags: ["t1", "t2"] }),
+    page("far.md", "# Far", { title: "Far", tags: ["t2"] }),
+    page("none.md", "# None", { title: "None", tags: ["t3"] })
+  ], { extraction: "structural" })
+  var prox = px.proximity(["seed.md"], { budget: { used: 0, limit: 1024 } })
+  assert(prox["close.md"] === 1 && prox["far.md"] > 0 && prox["far.md"] < 1 && isUnDef(prox["none.md"]) && isUnDef(prox["seed.md"]), "proximity ranks connected pages")
+  var tiny = { used: 0, limit: 2 }
+  px.proximity(["seed.md"], { budget: tiny })
+  assert(tiny.used <= 2 && tiny.truncated === true, "proximity stays within its budget")
+  assert(isArray(px.similarConcepts("concept:id:x")) && px.similarConcepts("concept:id:x").length === 0, "embedding seam is a no-op by default")
   print("PASS graph build acceptance: "+checked+" assertions")
 } finally { io.rm(root) }

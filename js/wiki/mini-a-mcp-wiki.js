@@ -581,6 +581,7 @@ function __miniAMcpWikiBuildConfig(args, options) {
     wikigraphcrossdepth : isNumber(Number(args.wikigraphcrossdepth)) ? Number(args.wikigraphcrossdepth) : 1,
     wikigraphcrossmaxdf : isNumber(Number(args.wikigraphcrossmaxdf)) ? Number(args.wikigraphcrossmaxdf) : 0.25,
     wikigraphcrossminkeylen: isNumber(Number(args.wikigraphcrossminkeylen)) ? Number(args.wikigraphcrossminkeylen) : 3,
+    wikigraphproximity  : toBoolean(args.wikigraphproximity) === true,
     wikigraphautosave   : isString(args.wikigraphautosave) && args.wikigraphautosave.trim().length > 0 ? args.wikigraphautosave.trim() : "always",
     wikigraphsavedebouncems: isNumber(Number(args.wikigraphsavedebouncems)) ? Number(args.wikigraphsavedebouncems) : 5000,
     wikilintstreamthreshold: isNumber(Number(args.wikilintstreamthreshold)) ? Number(args.wikilintstreamthreshold) : 2000,

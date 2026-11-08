@@ -41,6 +41,77 @@ WikiStudioServer.prototype.validateMarkdown = function(content) {
     try { var parsed = af.fromYAML(front[1]); WikiStudio.assert(isMap(parsed), 422, "invalid_frontmatter", "Frontmatter must be a YAML map") } catch(e) { WikiStudio.fail(422, "invalid_frontmatter", "Invalid YAML frontmatter") }
   }
 }
+// Graph and combined search for one wiki. Graph hits come from graph.retrieve (pages grounded by
+// concept/metadata matches); combined fuses index and graph rankings by reciprocal rank, so scores
+// from the two engines are never compared directly. Called inside wikiRoute's wiki lock.
+WikiStudioServer.prototype.modeSearch = function(w, q) {
+  var mode = String(q.mode)
+  WikiStudio.assert(["graph", "combined"].indexOf(mode) >= 0, 400, "invalid_mode", "Search mode must be index, graph or combined")
+  WikiStudio.assert(isString(q.q) && q.q.trim().length > 0 && q.q.length <= 1000, 400, "invalid_query", "Search query required (max 1000 characters)")
+  var paging = WikiStudioServer.paginate([], q), depth = Math.min(200, paging.offset + paging.limit)
+  WikiStudio.scan(w.root, true)
+  var coverage = {}, indexHits = [], graphHits = []
+
+  // Graph side: unavailable graphs are reported in coverage instead of failing the request.
+  if (w.graph.enabled !== true) coverage.graph = { outcome: "unavailable", warning: "Graph is disabled for this wiki in Settings" }
+  else if (!io.fileExists(w.root + "/.mini-a-wiki-graph/graph.json")) coverage.graph = { outcome: "unavailable", warning: "No graph snapshot yet; build the graph from Maintenance to enable graph search" }
+  else {
+    var gops = new MiniAWikiOps({ wikiroot: w.root, wikiaccess: "ro", usewikigraph: true, wikiretrievalv2: w.retrieval.v2 !== false })
+    var gres = gops.execute(gops.spec("graph.retrieve", { query: q.q, cap: depth }))
+    if (gres && gres.ok !== false && isArray(gres.pages)) {
+      graphHits = gres.pages.map(function(page) { return { path: page.path, score: page.score, summary: page.summary || "", explanations: (page.explanations || []).slice(0, 5) } })
+      coverage.graph = { outcome: gres.work && gres.work.truncated ? "partial" : "complete", warning: gres.work && gres.work.truncated ? "Graph traversal budget reached; lower-ranked pages may be missing" : null }
+    } else coverage.graph = { outcome: "unavailable", warning: "Graph search failed: " + String((gres && gres.error) || "unknown error") }
+  }
+
+  // Index side only for combined mode.
+  if (mode === "combined") {
+    var iops = new MiniAWikiOps({ wikiroot: w.root, wikiaccess: "ro", usewikigraph: false, wikiretrievalv2: w.retrieval.v2 !== false })
+    var ires = iops.execute(iops.spec("wiki.search", { query: q.q, limit: depth, offset: 0 }))
+    if (ires && ires.ok !== false) {
+      indexHits = isArray(ires.results) ? ires.results : []
+      // The engine reports outcomes such as "hits"/"no-hits"; only partial or truncated runs are incomplete.
+      var incomplete = ires.outcome === "partial" || ires.truncated === true
+      coverage.index = { outcome: incomplete ? "partial" : "complete", warning: incomplete ? (ires.warning || "Index search coverage is incomplete") : null }
+    } else coverage.index = { outcome: "unavailable", warning: "Index search failed: " + String((ires && ires.error) || "unknown error") }
+  }
+
+  // Reciprocal-rank fusion keyed by page path; each hit records which engines matched it.
+  var merged = {}, order = [], k = 60
+  function fold(hits, source) {
+    hits.forEach(function(hit, i) {
+      if (!isString(hit.path)) return
+      var entry = merged[hit.path]
+      if (isUnDef(entry)) { entry = merged[hit.path] = { path: hit.path, matchedBy: [], ranks: {}, fused: 0 }; order.push(hit.path) }
+      entry.matchedBy.push(source)
+      entry.ranks[source] = i + 1
+      entry.fused += 1 / (k + i + 1)
+      if (source === "index") ["title", "description", "snippet", "line", "score"].forEach(function(f) { if (isDef(hit[f]) && isUnDef(entry[f])) entry[f] = hit[f] })
+      if (source === "graph") { entry.graphScore = hit.score; entry.explanations = hit.explanations; if (isUnDef(entry.description) && hit.summary) entry.description = hit.summary }
+    })
+  }
+  fold(indexHits, "index")
+  fold(graphHits, "graph")
+  var results = order.map(function(path) { return merged[path] })
+  results.sort(function(a, b) { return b.fused - a.fused || b.matchedBy.length - a.matchedBy.length || a.path.localeCompare(b.path) })
+  results.forEach(function(r) { r.fused = Math.round(r.fused * 1e6) / 1e6 })
+  var page = results.slice(paging.offset, paging.offset + paging.limit)
+  var partial = Object.keys(coverage).some(function(key) { return coverage[key].outcome !== "complete" })
+  var warnings = Object.keys(coverage).map(function(key) { return coverage[key].warning }).filter(function(v) { return isString(v) && v.length > 0 })
+  return {
+    ok: true,
+    mode: mode,
+    results: page,
+    total: results.length,
+    offset: paging.offset,
+    limit: paging.limit,
+    truncated: paging.offset + paging.limit < results.length || results.length >= depth && depth < 200,
+    outcome: partial ? "partial" : "complete",
+    coverage: coverage,
+    warning: warnings.length ? warnings.join(" ") : (partial ? "Search coverage is incomplete; absence is not established." : null)
+  }
+}
+
 WikiStudioServer.prototype.wikiRoute = function(req, w, parts, role) {
   var self = this, q = req.query || {}, body = req.body || {}, route = parts.join("/"), read = req.method === "GET"
   if (this.jobWikiRoute && ["dreams", "ingestions", "absorptions", "graph/rebuild", "graph/settings", "backups", "changes", "maintenance", "sources", "folders/preview", "folders/move", "folders/delete", "selection/preview", "selection/move", "selection/delete", "exports"].indexOf(route) >= 0 || this.jobWikiRoute && /^(backups|exports|sources)\//.test(route)) return this.jobWikiRoute(req, w, parts, role)
@@ -98,6 +169,7 @@ WikiStudioServer.prototype.wikiRoute = function(req, w, parts, role) {
     }
     if (read) {
       if (route === "graph/stats" && (!w.graph.enabled || !io.fileExists(w.root + "/.mini-a-wiki-graph/graph.json"))) return { stats: { enabled: w.graph.enabled, snapshotAvailable: false }, source: "markdown-links-fallback", freshness: "No active extracted graph snapshot. The graph viewer uses current Markdown links.", semantic: "Not inferred; semantic extraction is opt-in" }
+      if (route === "search" && isDef(q.mode) && q.mode !== "index") return self.modeSearch(w, q)
       var operations = { overview: "wiki.context", tree: "wiki.tree", pages: "wiki.list", search: "wiki.search", backlinks: "wiki.backlinks", lint: "wiki.lint", "graph/stats": "graph.stats", "graph/related": "graph.neighbors" }, op = operations[route]
       WikiStudio.assert(op, 404, "not_found", "Route not found")
       var params = {}, paging = WikiStudioServer.paginate([], q)

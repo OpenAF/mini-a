@@ -310,16 +310,390 @@ async function dashboard(offset = 0) {
   withIcon(el("h2", "Your wikis", host), "logo");
   button(host, "Build web command", () => webCommandWizard(), "open");
   if (!wikis.items.length) el("p", "Register an existing wiki or create one in an operator-allowlisted directory.", host);
-  wikis.items.forEach(wiki => { const b = withIcon(el("button", wiki.name + " · " + wiki.access, host), wiki.access === "rw" ? "edit" : "lock"); b.onclick = safely(() => openWiki(wiki)); });
+  wikis.items.forEach(wiki => dashboardWiki(host, wiki));
   if (offset) button(host,"Previous wikis",()=>dashboard(Math.max(0,offset-100)));
   if (wikis.truncated) button(host,"Next wikis",()=>dashboard(offset+100));
-  const form = el("form", undefined, host); form.className = "card"; withIcon(el("h3", "Add wiki", form), "add");
+  addWikiForm(host);
+}
+
+// One dashboard entry; a moved or replaced root offers Change root instead of opening.
+function dashboardWiki(host, wiki) {
+  const broken = wiki.rootState && wiki.rootState !== "ok";
+  const entry = broken ? row(host) : host;
+  const open = withIcon(el("button", wiki.name + " · " + wiki.access, entry), wiki.access === "rw" ? "edit" : "lock");
+  if (!broken) {
+    open.onclick = safely(() => openWiki(wiki));
+    return;
+  }
+  entry.classList.add("wiki-broken");
+  open.disabled = true;
+  open.title = "Root folder needs attention: " + wiki.root;
+  const labels = { missing: "root folder missing", changed: "root folder replaced", unavailable: "backend unavailable" };
+  el("span", labels[wiki.rootState] || wiki.rootState, entry).className = "badge";
+  if (wiki.rootState !== "unavailable") button(entry, "Change root…", () => changeRoot(wiki), "folder");
+}
+
+// Re-point a registered wiki at another existing folder after showing what that folder holds.
+async function changeRoot(wiki, reopen = false) {
+  const missing = wiki.rootState === "missing";
+  const start = missing ? wiki.root.slice(0, wiki.root.lastIndexOf("/")) : wiki.root;
+  const picked = await rootPicker(start, { forWiki: wiki.id, existingOnly: true, title: "Change root for " + wiki.name });
+  if (picked === null) return;
+  if (picked.currentRoot && !missing && wiki.rootState !== "changed") { message("That folder is already this wiki's root."); return; }
+  const summary = describeContents(picked.contents);
+  const warning = picked.contents && !picked.contents.hasIndex ? " It has no index.md, so it may not be this wiki." : "";
+  if (!(await askConfirmation("Point " + wiki.name + " at " + picked.path + "? " + summary + warning + " Files are not moved or copied."))) return;
+  await StudioApi.request("wikis/" + encodeURIComponent(wiki.id), "PATCH", { root: picked.path });
+  // Settings reopens the wiki; the dashboard just refreshes. The message goes last so navigation keeps it.
+  if (reopen) await openWiki(await StudioApi.request("wikis/" + encodeURIComponent(wiki.id)));
+  else await dashboard();
+  message("Root changed for " + wiki.name + " to " + picked.path);
+}
+
+// Human summary of describeRoot contents (bounded scan; never reads page text).
+function describeContents(contents) {
+  if (!contents) return "";
+  const parts = [contents.markdownFiles + (contents.truncated ? "+" : "") + " Markdown page" + (contents.markdownFiles === 1 ? "" : "s"), contents.folders + " folder" + (contents.folders === 1 ? "" : "s")];
+  const marks = [];
+  if (contents.hasIndex) marks.push("index.md");
+  if (contents.hasAgents) marks.push("AGENTS.md");
+  if (contents.hasSearchIndex) marks.push("search index");
+  if (contents.hasGraph) marks.push("graph");
+  return "Contains " + parts.join(", ") + (marks.length ? "; has " + marks.join(", ") : "; no wiki files yet") + ".";
+}
+
+// Add-wiki form: the root is typed or picked, and "create" is derived from whether the folder exists.
+function addWikiForm(host) {
+  const form = el("form", undefined, host);
+  form.className = "card add-wiki";
+  withIcon(el("h3", "Add wiki", form), "add");
   const fields = {};
-  for (const [key, title] of [["id", "Stable ID"], ["name", "Display name"], ["root", "Absolute root"]]) { const label = el("label", title, form); fields[key] = el("input", undefined, label); fields[key].required = true; }
-  const label = el("label", "Access", form); fields.access = el("select", undefined, label); ["rw", "ro"].forEach(s => { const o = el("option", s, fields.access); o.value = s; });
-  const createLabel = el("label", "Create new directory", form); const create = el("input", undefined, createLabel); create.type = "checkbox";
+  for (const [key, title] of [["id", "Stable ID"], ["name", "Display name"]]) {
+    const label = el("label", title, form);
+    fields[key] = el("input", undefined, label);
+    fields[key].required = true;
+  }
+  fields.id.title = "Lower-case letters, digits, underscores or hyphens";
+
+  // Root path with a Browse button and a live status line.
+  const rootLabel = el("label", "Absolute root", form);
+  const rootRow = row(rootLabel);
+  rootRow.classList.add("root-input");
+  fields.root = el("input", undefined, rootRow);
+  fields.root.required = true;
+  fields.root.placeholder = "/path/beneath/an/allowroot/my-wiki";
+  fields.root.spellcheck = false;
+  button(rootRow, "Browse…", async () => {
+    const picked = await rootPicker(fields.root.value.trim());
+    if (picked === null) return;
+    fields.root.value = picked.path;
+    autoFill(picked.path);
+    showStatus(picked);
+  }, "folder");
+  const status = el("small", "", form);
+  status.className = "muted root-status";
+  status.setAttribute("role", "status");
+
+  const accessLabel = el("label", "Access", form);
+  fields.access = el("select", undefined, accessLabel);
+  ["rw", "ro"].forEach(value => {
+    const option = el("option", value, fields.access);
+    option.value = value;
+  });
   withIcon(el("button", "Add wiki", form), "add");
-  form.onsubmit = safely(async event => { event.preventDefault(); const body = Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, v.value])); body.create = create.checked; await StudioApi.register(body); message("Wiki registered"); await dashboard(); });
+
+  // Fill ID and name from the folder name unless the user typed their own.
+  const auto = { id: "", name: "" };
+  function autoFill(path) {
+    const base = path.replace(/\/+$/, "").split("/").pop() || "";
+    const id = base.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^[^a-z0-9]+/, "").replace(/-+$/, "").substring(0, 64);
+    if (fields.id.value === "" || fields.id.value === auto.id) { fields.id.value = id; auto.id = id; }
+    if (fields.name.value === "" || fields.name.value === auto.name) { fields.name.value = base; auto.name = base; }
+  }
+
+  // Reflect the server's view of the root: existing, to be created, or blocked.
+  let lastStatus = null;
+  function showStatus(info) {
+    lastStatus = info;
+    const roOption = fields.access.querySelector("option[value=ro]");
+    roOption.disabled = false;
+    if (info === null) { status.textContent = ""; return; }
+    if (!info.selectable) { status.textContent = "Not allowed: " + info.reason; status.classList.add("error"); return; }
+    status.classList.remove("error");
+    if (info.exists) {
+      const lead = info.looksLikeWiki ? "Existing wiki folder; it will be registered as-is. " : "Existing folder; it will be registered without initializing content. ";
+      const empty = info.contents && info.contents.markdownFiles === 0 ? " Registering an empty folder gives an empty wiki; leave it as a new folder name instead to initialize it." : "";
+      status.textContent = lead + describeContents(info.contents) + empty;
+    }
+    else {
+      status.textContent = "New folder: it will be created and initialized as a wiki (requires rw).";
+      roOption.disabled = true;
+      fields.access.value = "rw";
+    }
+  }
+  async function rootStatus(path) {
+    const result = await StudioApi.request("roots/browse?path=" + encodeURIComponent(path), "GET", undefined, { silent: true });
+    return result.current;
+  }
+  let checkTimer = null, checkVersion = 0;
+  fields.root.addEventListener("input", () => {
+    clearTimeout(checkTimer);
+    const version = ++checkVersion, path = fields.root.value.trim();
+    if (!path.startsWith("/")) { showStatus(null); return; }
+    checkTimer = setTimeout(async () => {
+      try {
+        const info = await rootStatus(path);
+        if (version === checkVersion) showStatus(info);
+      } catch (error) {
+        if (version === checkVersion) { lastStatus = null; status.textContent = "Not allowed: " + error.message; status.classList.add("error"); }
+      }
+    }, 350);
+  });
+  fields.root.addEventListener("change", () => autoFill(fields.root.value.trim()));
+
+  // Recheck the root at submit time so "create" always matches the filesystem.
+  form.onsubmit = safely(async event => {
+    event.preventDefault();
+    const path = fields.root.value.trim();
+    const info = await rootStatus(path);
+    showStatus(info);
+    if (!info.selectable) throw new Error(info.reason);
+    const body = { id: fields.id.value.trim(), name: fields.name.value.trim(), root: info.path, access: fields.access.value, create: !info.exists };
+    await StudioApi.register(body);
+    message(body.create ? "Wiki created and registered" : "Wiki registered");
+    await dashboard();
+  });
+}
+
+// Remember the last browsed folder for this browser session only; storage may be unavailable.
+const ROOT_PICKER_KEY = "mini-a-studio.rootPicker.last";
+function lastPickerFolder() {
+  try { return sessionStorage.getItem(ROOT_PICKER_KEY) || ""; } catch (_) { return ""; }
+}
+function rememberPickerFolder(path) {
+  try { if (path) sessionStorage.setItem(ROOT_PICKER_KEY, path); } catch (_) { /* per-viewer convenience only */ }
+}
+
+// Modal folder browser limited to studioallowroots; resolves to the chosen entry or null.
+// options: forWiki (re-point: own root is not a clash), existingOnly (no virtual folders), title.
+function rootPicker(initial, options = {}) {
+  return new Promise(resolve => {
+    const forQuery = options.forWiki ? "for=" + encodeURIComponent(options.forWiki) : "";
+    const browsePath = path => "roots/browse?" + [path ? "path=" + encodeURIComponent(path) : "", forQuery].filter(Boolean).join("&");
+    // Picking a row remembers the listing it came from; picking the current folder remembers its parent.
+    // Rows carry no contents summary, so fetch the folder's details before handing it back.
+    const pick = async (entry, listing) => {
+      rememberPickerFolder(listing);
+      chosen = entry;
+      if (entry.exists && !entry.contents) {
+        try { chosen = (await StudioApi.request(browsePath(entry.path), "GET", undefined, { silent: true })).current; } catch (_) { /* keep the row entry */ }
+      }
+      dialog.close();
+    };
+    const previous = document.activeElement;
+    const dialog = el("dialog", undefined, document.body);
+    dialog.className = "root-picker";
+    const heading = el("h3", options.title || "Choose wiki root", dialog);
+    heading.id = "root-picker-title";
+    dialog.setAttribute("aria-labelledby", heading.id);
+    const body = el("div", undefined, dialog);
+    const problem = el("p", "", dialog);
+    problem.className = "error";
+    problem.setAttribute("role", "alert");
+    const footer = row(dialog);
+    footer.classList.add("root-picker-actions");
+    let chosen = null, state = null;
+
+    // Close always resolves exactly once and restores focus.
+    dialog.addEventListener("close", () => {
+      dialog.remove();
+      previous?.focus();
+      resolve(chosen);
+    }, { once: true });
+
+    // Load one directory (or the allowroot list when path is empty) and redraw.
+    // Errors stay inside the dialog because the page message line is behind the modal.
+    async function load(path) {
+      try {
+        state = await StudioApi.request(browsePath(path), "GET", undefined, { silent: true });
+        problem.textContent = "";
+        render();
+        if (state.path) rememberPickerFolder(state.path);
+      } catch (error) {
+        problem.textContent = error.message;
+      }
+    }
+
+    function render() {
+      body.replaceChildren();
+      footer.replaceChildren();
+      if (!state.allowRoots.length) {
+        el("p", "No allowed parent directories are configured, so Studio cannot browse for a root.", body);
+        el("p", "Restart Studio with a dedicated, visible data directory as an allowroot, for example:", body);
+        el("pre", "ojob mini-a-wiki-studio.yaml studioallowroots='[\"/absolute/path/to/wikis\"]'", body);
+        el("p", "Use canonical paths (on macOS /private/tmp, not /tmp). Hidden and system directories are refused.", body).className = "muted";
+        button(footer, "Close", () => dialog.close(), "cross");
+        return;
+      }
+      if (state.path === null) renderRoots();
+      else renderFolder();
+      button(footer, "Cancel", () => dialog.close(), "cross");
+      (body.querySelector(".root-picker-open, .root-picker-list button") || body.querySelector("input"))?.focus();
+    }
+
+    // Top level: one entry per configured allowroot.
+    function renderRoots() {
+      el("p", "Pick an allowed parent directory to browse. Wiki roots must be beneath one of these.", body);
+      const list = el("ul", undefined, body);
+      list.className = "root-picker-list";
+      state.allowRoots.forEach(root => {
+        const item = el("li", undefined, list);
+        const open = withIcon(el("button", root.path, item), "folder");
+        open.type = "button";
+        open.onclick = () => load(root.path);
+      });
+    }
+
+    // Folder level: breadcrumb, typed path, children with badges, new-folder and use actions.
+    function renderFolder() {
+      const current = state.current;
+      const crumbs = row(body);
+      crumbs.classList.add("breadcrumbs");
+      const top = button(crumbs, "Allowed roots", () => load(""), "back");
+      top.classList.add("link-button");
+      const rel = state.path.substring(state.allowRoot.length).split("/").filter(Boolean);
+      // The allowroot shows as its folder name; hover reveals the full path.
+      const rootName = state.allowRoot.split("/").pop();
+      const segments = [[rootName, state.allowRoot]].concat(rel.map((name, i) => [name, state.allowRoot + "/" + rel.slice(0, i + 1).join("/")]));
+      segments.forEach(([name, path], i) => {
+        el("span", "/", crumbs);
+        const crumb = el(i === segments.length - 1 ? "strong" : "button", name, crumbs);
+        crumb.title = path;
+        if (i < segments.length - 1) {
+          crumb.type = "button";
+          crumb.className = "link-button";
+          crumb.onclick = () => load(path);
+        }
+      });
+
+      const go = el("form", undefined, body);
+      go.className = "row root-picker-go";
+      const typed = el("input", undefined, go);
+      typed.value = state.path;
+      typed.spellcheck = false;
+      typed.setAttribute("aria-label", "Folder path");
+      withIcon(el("button", "Go", go), "open");
+      go.onsubmit = event => {
+        event.preventDefault();
+        load(typed.value.trim());
+      };
+
+      const summary = el("p", "", body);
+      summary.className = "muted";
+      if (!current.exists) summary.textContent = options.existingOnly ? "This folder does not exist. Change root needs an existing folder." : "This folder does not exist yet. It is created only when you add the wiki.";
+      else if (current.registeredAs) summary.textContent = "Registered as wiki " + current.registeredAs + ".";
+      else if (!current.selectable) summary.textContent = current.reason;
+      else summary.textContent = (current.currentRoot ? "This is the wiki's current root. " : "") + describeContents(current.contents);
+
+      if (current.exists) {
+        const list = el("ul", undefined, body);
+        list.className = "root-picker-list";
+        if (!state.items.length) el("li", "No sub-folders.", list).className = "muted";
+        state.items.forEach(entry => folderRow(list, entry));
+        listKeyboard(list);
+        if (state.truncated) el("p", "Only the first 500 folders are shown; type a path to go further.", body).className = "muted";
+      }
+
+      const tools = row(body);
+      if (state.parent !== null) button(tools, "Up one level", () => load(state.parent), "back");
+      if (!options.existingOnly) newFolderControl(tools);
+
+      const use = button(footer, current.exists ? "Use this folder" : "Use this new folder", () => pick(current, state.parent || state.path), "check");
+      use.classList.add("primary");
+      const blocked = !current.selectable ? current.reason : options.existingOnly && !current.exists ? "Choose an existing folder" : "";
+      if (blocked) {
+        use.disabled = true;
+        use.title = blocked;
+      }
+    }
+
+    // One child directory: open it, or pick it directly when allowed.
+    function folderRow(list, entry) {
+      const item = el("li", undefined, list);
+      const open = withIcon(el("button", entry.name, item), "folder");
+      open.type = "button";
+      open.className = "root-picker-open";
+      open.title = "Open " + entry.path;
+      open.onclick = () => load(entry.path);
+      if (entry.currentRoot) el("span", "current root", item).className = "badge";
+      else if (entry.registeredAs) el("span", "wiki: " + entry.registeredAs, item).className = "badge";
+      else if (entry.looksLikeWiki) el("span", "has index.md", item).className = "badge";
+      if (!entry.selectable && !entry.registeredAs) {
+        const blocked = el("span", "blocked", item);
+        blocked.className = "badge";
+        blocked.title = entry.reason;
+      }
+      if (entry.selectable) {
+        const use = button(item, "Use", () => pick(entry, state.path), "check");
+        use.setAttribute("aria-label", "Use " + entry.path);
+      }
+    }
+
+    // Arrow keys move between folders, Right/Enter opens, Left/Backspace goes up, Home/End jump.
+    function listKeyboard(list) {
+      const folders = [...list.querySelectorAll(".root-picker-open")];
+      folders.forEach((node, i) => { node.tabIndex = i === 0 ? 0 : -1; });
+      list.addEventListener("keydown", event => {
+        const index = folders.indexOf(document.activeElement);
+        const move = target => {
+          if (!folders[target]) return;
+          event.preventDefault();
+          folders.forEach(node => { node.tabIndex = -1; });
+          folders[target].tabIndex = 0;
+          folders[target].focus();
+        };
+        if (event.key === "ArrowDown") move(index < 0 ? 0 : index + 1);
+        else if (event.key === "ArrowUp") move(index < 0 ? 0 : index - 1);
+        else if (event.key === "Home") move(0);
+        else if (event.key === "End") move(folders.length - 1);
+        else if (event.key === "ArrowRight" && index >= 0) { event.preventDefault(); folders[index].click(); }
+        else if ((event.key === "ArrowLeft" || event.key === "Backspace") && state.parent !== null) { event.preventDefault(); load(state.parent); }
+      });
+    }
+
+    // Inline "New folder" input; the folder stays virtual until the wiki is added.
+    function newFolderControl(parent) {
+      const form = el("form", undefined, parent);
+      form.className = "row root-picker-new";
+      const name = el("input", undefined, form);
+      name.placeholder = "new-folder-name";
+      name.setAttribute("aria-label", "New folder name");
+      name.title = "A visible folder name without slashes";
+      withIcon(el("button", "New folder", form), "add");
+      form.onsubmit = event => {
+        event.preventDefault();
+        const value = name.value.trim();
+        if (!/^[^/.\x00-\x1f][^/\x00-\x1f]{0,254}$/.test(value)) {
+          problem.textContent = "Use a visible folder name without slashes.";
+          return;
+        }
+        // Existing names simply open that folder; new names become a virtual path.
+        load(state.path + "/" + value);
+      };
+    }
+
+    dialog.showModal();
+    // Start at the typed path when it is browsable, otherwise at the allowroot list.
+    (async () => {
+      const start = initial && initial.startsWith("/") ? initial : lastPickerFolder();
+      try {
+        state = await StudioApi.request(browsePath(start), "GET", undefined, { silent: true });
+      } catch (_) {
+        state = await StudioApi.request(browsePath(""), "GET", undefined, { silent: true });
+      }
+      render();
+    })().catch(error => { message(error.message, true); dialog.close(); });
+  });
 }
 let currentWiki, activePage, dirty = false, graphBlob, studioSession, editing = false;
 let activeView = "Pages", navigationVersion = 0, navigating = false;
@@ -362,8 +736,14 @@ function metricChart(parent, title, values, unit = "Count") {
 function destroyDetachedCharts() { for (const chart of charts) if (!chart.canvas?.isConnected) { chart.destroy(); charts.delete(chart); } }
 function outcome(parent, result) {
   if (!result) return;
-  const scalar = Object.entries(result).filter(([k,v]) => ["string","number","boolean"].includes(typeof v) && !/^(?:id|version)$/.test(k));
-  for (const [key,value] of scalar) el("p", human(key) + ": " + String(value), parent);
+  // Summary fields (ok, status, dryrun, discovered, ...) render as one nJSMap table instead of loose lines
+  var scalar = Object.entries(result)
+                     .filter(([k, v]) => ["string", "number", "boolean"].includes(typeof v) && !/^(?:id|version)$/.test(k))
+  if (scalar.length > 0) {
+    var summary = jsonView(Object.fromEntries(scalar.map(([k, v]) => [human(k), v])), parent)
+    summary.classList.add("outcome-summary")
+  }
+
   for (const key of ["changes","findings","issues","conflicts","warnings","proposals"]) if (Array.isArray(result[key]) && result[key].length) {
     const section = el("section",undefined,parent); el("h4",human(key),section);
     result[key].slice(0,100).forEach(item => { if (typeof item === "string") el("p",item,section); else { el("p",[item.path,item.action || item.type || item.classification,item.message || item.reason].filter(Boolean).join(" · ") || human(key),section); if (item.unifiedDiff) el("pre",item.unifiedDiff,section); technical(item,section); } });
@@ -488,6 +868,7 @@ async function showView(name, content) {
     el("p", "Manage how this wiki is registered in Studio.", content);
     technical(currentWiki, content);
     button(content, "Build web command", () => webCommandWizard(currentWiki.id), "open");
+    button(content, "Change root…", () => changeRoot(currentWiki, true), "folder");
     button(content, "Rename display name", async () => { const name = await askText("Display name", currentWiki.name); if (name) { await StudioApi.wiki("", "PATCH", { name }); currentWiki.name = name; await openWiki(currentWiki); } }, "edit");
     button(content, currentWiki.access === "rw" ? "Make read-only" : "Enable writes", async () => { const access = currentWiki.access === "rw" ? "ro" : "rw"; await StudioApi.wiki("", "PATCH", { access }); currentWiki.access = access; importPanes.delete(currentWiki.id); await openWiki(currentWiki); }, currentWiki.access === "rw" ? "lock" : "unlock");
     button(content, "Unregister (keep all files)", async () => { if (await askConfirmation("Remove this registry entry? Wiki files will remain.")) { await StudioApi.wiki("", "DELETE"); await dashboard(); } });
@@ -626,6 +1007,17 @@ async function pagesView(content) {
   const state=pageState(), toolbar=row(content), kinds=new Map();
   const search=field(toolbar,"Search pages"); search.type="search";
   const scope=field(toolbar,"Search in",["This wiki","All registered wikis"]);
+  // Index = full-text search index; Graph = pages grounded in the knowledge graph; Combined = both, rank-fused.
+  const mode=field(toolbar,"Search with",["Index","Graph","Combined"]);
+  mode.title="Index: full-text search index. Graph: pages linked to matching graph concepts and metadata. Combined: both, merged by rank.";
+  const graphOff=currentWiki.graph?.enabled!==true;
+  function syncModes(){
+    const local=scope.value==="This wiki";
+    [...mode.options].forEach(option=>{option.disabled=local&&graphOff&&option.value!=="Index";});
+    if(mode.selectedOptions[0]?.disabled)mode.value="Index";
+    mode.title=local&&graphOff?"Graph is disabled for this wiki in Settings; only index search is available.":"Index: full-text search index. Graph: pages linked to matching graph concepts and metadata. Combined: both, merged by rank.";
+  }
+  scope.onchange=syncModes;syncModes();
   button(toolbar,"Graph",()=>showGraph(content),"graph");
   const split=el("div",undefined,content);split.className="split";
   const aside=el("aside",undefined,split);aside.setAttribute("aria-label","Page explorer");
@@ -830,10 +1222,14 @@ async function pagesView(content) {
   async function searchPages(offset=0){
     const query=search.value.trim();results.replaceChildren();results.hidden=!query;if(!query)return;
     el("h4","Search results",results);
-    const response=await StudioApi.request((scope.value==="All registered wikis"?"search":wikiPath("search"))+"?q="+encodeURIComponent(query)+"&limit=100&offset="+offset);
+    const modeParam=mode.value==="Index"?"":"&mode="+mode.value.toLowerCase();
+    const response=await StudioApi.request((scope.value==="All registered wikis"?"search":wikiPath("search"))+"?q="+encodeURIComponent(query)+"&limit=100&offset="+offset+modeParam);
     if(response.warning)el("p",response.warning,results);if(response.coverage)technical(response.coverage,results,"Search coverage");
     const items=response.results||response.items||[];
-    for(const hit of items){const r=row(results);button(r,(hit.wikiId?hit.wikiId+" / ":"")+hit.path,async()=>{if(!(await mayLeave()))return;dirty=false;if(hit.wikiId&&hit.wikiId!==currentWiki.id){await openWiki(await StudioApi.request("wikis/"+hit.wikiId));}await loadPage(hit.path);});button(r,"Reveal in tree",async()=>{if(hit.wikiId&&hit.wikiId!==currentWiki.id){await openWiki(await StudioApi.request("wikis/"+hit.wikiId));}await document.getElementById("page-list").reveal(hit.path);});}
+    for(const hit of items){const r=row(results);r.classList.add("search-hit");
+      // Graph and combined hits say which engine matched and why.
+      if(hit.matchedBy){const tag=el("span",hit.matchedBy.length>1?"index + graph":hit.matchedBy[0],r);tag.className="badge";if(hit.explanations?.length)tag.title=hit.explanations.join("; ");}
+      button(r,(hit.wikiId?hit.wikiId+" / ":"")+hit.path,async()=>{if(!(await mayLeave()))return;dirty=false;if(hit.wikiId&&hit.wikiId!==currentWiki.id){await openWiki(await StudioApi.request("wikis/"+hit.wikiId));}await loadPage(hit.path);});button(r,"Reveal in tree",async()=>{if(hit.wikiId&&hit.wikiId!==currentWiki.id){await openWiki(await StudioApi.request("wikis/"+hit.wikiId));}await document.getElementById("page-list").reveal(hit.path);});}
     if(!items.length)el("p","No matching pages in the reported search coverage.",results);
     if(offset)button(results,"Previous results",()=>searchPages(Math.max(0,offset-100)));if(response.truncated)button(results,"More results",()=>searchPages(offset+100));
   }
@@ -1309,35 +1705,373 @@ active.forEach(j=>button(content,human(j.operation)+" · "+human(j.status),()=>j
   }
   el("p",graph.freshness,content);technical(info,content,"Wiki context");technical(graph,content,"Graph details");technical(lint,content,"Complete check result");
 }
-async function maintenanceView(content){
-  el("p","Mini-A’s Dream feature checks, repairs and reorganizes your wiki. Open Dream tasks to choose an action.",content);
-  const tabs=row(content),panel=el("div",undefined,content);
-  for(const [label,render] of [["Dream tasks",()=>dreamsView(panel)],["Health",()=>summaryView(panel,true)],["Backups",()=>backupsView(panel)],["Export",()=>exportsView(panel)],["Recovery",()=>recoveryView(panel)]])button(tabs,label,async()=>{panel.replaceChildren();destroyDetachedCharts();await render();});
-  await dreamsView(panel);
+// Maintenance: Dream tasks plus health, backups, export and recovery tabs
+async function maintenanceView(content) {
+  el("p", "Mini-A’s Dream feature checks, repairs and reorganizes your wiki. Dream tasks suggests what to run based on the latest health check.", content)
+  var tabs = row(content)
+  var panel = el("div", undefined, content)
+  var renderers = {
+    "Dream tasks": () => dreamsView(panel, openTab),
+    "Health": () => summaryView(panel, true),
+    "Backups": () => backupsView(panel),
+    "Export": () => exportsView(panel),
+    "Recovery": () => recoveryView(panel)
+  }
+
+  // Replace the panel with the named tab
+  async function openTab(label) {
+    tabButtons.forEach((b, name) => b.classList.toggle("selected", name === label))
+    panel.replaceChildren()
+    destroyDetachedCharts()
+    await renderers[label]()
+  }
+
+  var tabButtons = new Map()
+  Object.keys(renderers).forEach(label => tabButtons.set(label, button(tabs, label, () => openTab(label))))
+  await openTab("Dream tasks")
+}
+// Dream task catalogue: what each engine mode does, when to choose it and what it touches
+var DREAM_TASKS = {
+  plan: {
+    title: "Check wiki",
+    short: "Read-only check that lists what needs attention.",
+    summary: "Read-only health check. Lists findings and previews what Repair, index updates and the graph rebuild would change.",
+    when: "Start here when unsure, before any page-changing task, or after a large import.",
+    effect: "Read-only",
+    model: "No model"
+  },
+  repair: {
+    title: "Repair",
+    short: "Fix reported findings only, without rebuilds.",
+    summary: "Fixes deterministic findings only: broken links and anchors, heading levels, missing front matter, missing or stale index pages and orphaned pages. Search and graph are not rebuilt.",
+    when: "Check wiki reports fixable findings and you want just those fixes, quickly.",
+    effect: "Edits pages",
+    model: "No model"
+  },
+  apply: {
+    title: "Apply maintenance",
+    short: "Fix findings and refresh indexes, search and graph.",
+    summary: "Everything Repair does, plus an AGENTS.md upgrade and a refresh of index pages, search and graph in one pass.",
+    when: "Routine maintenance. The usual choice when there are fixable findings.",
+    effect: "Edits pages and rebuilds",
+    model: "No model"
+  },
+  auto: {
+    title: "Automatic maintenance",
+    short: "Resume interrupted work, repair and verify.",
+    summary: "Journaled, verified maintenance: resumes interrupted imports, moves or absorptions, runs repair cycles, asks the model for repairs when one is configured, then rebuilds and verifies.",
+    when: "A previous job was interrupted, or you want unattended maintenance with verification. Leave Apply repairs unchecked to preview only.",
+    effect: "Preview, or edits pages",
+    model: "Uses model if configured"
+  },
+  reindex: {
+    title: "Rebuild search",
+    short: "Refresh search after outside edits.",
+    summary: "Rebuilds the search index only. Pages are not changed.",
+    when: "Search misses pages or shows outdated text, typically after pages were edited outside Studio.",
+    effect: "Rebuilds search",
+    model: "No model"
+  },
+  indexes: {
+    title: "Update indexes",
+    short: "Regenerate every folder landing page.",
+    summary: "Regenerates every folder's index page from the current folder structure. Broader than Repair, which only fixes reported index findings.",
+    when: "Folder landing pages list the wrong pages after moves, deletes or manual reorganization.",
+    effect: "Rewrites index pages",
+    model: "No model"
+  },
+  graph: {
+    title: "Rebuild graph",
+    short: "Refresh page relationships.",
+    summary: "Rebuilds page relationships. Optional semantic extraction uses the model to infer concepts beyond Markdown links.",
+    when: "No graph snapshot exists yet, or the Graph view looks outdated after edits.",
+    effect: "Rebuilds graph",
+    model: "Model optional"
+  },
+  reorg: {
+    title: "Reorganize pages",
+    short: "Model moves, merges or removes pages.",
+    summary: "Lets the model move, merge or remove pages to improve structure. Live edit, not a replay of a preview.",
+    when: "Near-duplicate or weakly linked pages, or a folder structure that no longer fits the content. Run Check wiki first.",
+    effect: "Moves, merges or deletes pages",
+    model: "Requires model"
+  },
+  compact: {
+    title: "Compact storage",
+    short: "Reclaim space while the wiki is offline.",
+    summary: "Offline compaction of the wiki storage. Pages are not changed.",
+    when: "After large imports or deletions, to reclaim space. Stop external CLI readers and writers first.",
+    effect: "Storage only",
+    model: "No model"
+  }
+}
+
+// Dream task groups, ordered as the usual workflow: diagnose, fix, refresh, restructure, storage
+var DREAM_TASK_GROUPS = [
+  { title: "Find out what needs attention", hint: "Safe to run any time. Nothing is changed.", tasks: ["plan"] },
+  { title: "Fix problems", hint: "Edit pages to resolve findings. A verified backup is taken first.", tasks: ["apply", "repair", "auto"] },
+  { title: "Refresh derived data", hint: "Rebuild what Mini-A derives from your pages. Page content stays the same.", tasks: ["reindex", "indexes", "graph"] },
+  { title: "Restructure with the model", hint: "Larger structural changes driven by the model. Review findings first.", tasks: ["reorg"] },
+  { title: "Storage", hint: "Housekeeping for the files behind the wiki.", tasks: ["compact"] }
+]
+
+// Lint finding types that the deterministic repair pass fixes
+var DREAM_REPAIRABLE = ["broken_link", "heading_hierarchy", "index_missing_links", "invalid_anchor", "missing_frontmatter", "missing_index", "stale_index", "structural_orphan"]
+
+// Lint finding types that only a model-driven reorganization can address
+var DREAM_STRUCTURAL = ["near_duplicate", "semantic_orphan"]
+
+// Derive task suggestions, with the reason for each, from a gathered health snapshot
+function dreamSuggestions(snapshot) {
+  var out = []
+  if (!snapshot) return out
+  var reports = snapshot.reports
+  var info = reports[0].status === "fulfilled" ? reports[0].value : null
+  var lint = reports[1].status === "fulfilled" ? reports[1].value : null
+  var graph = reports[2].status === "fulfilled" ? reports[2].value : null
+
+  // Pending recovery comes first: page-changing tasks should wait for it
+  var pending = info && info.studio && Array.isArray(info.studio.pendingRecovery) ? info.studio.pendingRecovery.length : 0
+  if (pending > 0) out.push({ view: "Recovery", reason: pending + " pending recovery item(s). Review them in Recovery before running page-changing tasks." })
+
+  if (!lint) {
+    out.push({ mode: "plan", reason: "The last health check could not be gathered. Check wiki shows what needs attention without changing anything." })
+    return out
+  }
+
+  // Count findings by type and describe the most frequent ones
+  var counts = {}
+  ;(lint.issues || []).forEach(issue => {
+    var type = issue.type || issue.code || issue.kind || "other"
+    counts[type] = (counts[type] || 0) + 1
+  })
+  var scope = lint.truncated ? " among the loaded findings" : ""
+  var describe = types => types.filter(t => counts[t] > 0)
+                               .sort((a, b) => counts[b] - counts[a])
+                               .map(t => counts[t] + " " + human(t).toLowerCase())
+                               .join(", ")
+  var total = types => types.reduce((n, t) => n + (counts[t] || 0), 0)
+
+  // Deterministic findings: Apply fixes and refreshes, Repair only fixes
+  var fixable = total(DREAM_REPAIRABLE)
+  if (fixable > 0) {
+    out.push({ mode: "apply", reason: fixable + " fixable finding(s)" + scope + " (" + describe(DREAM_REPAIRABLE) + "). Apply maintenance fixes them and refreshes indexes, search and graph." })
+    out.push({ mode: "repair", inline: false, reason: "Same " + fixable + " fixable finding(s), when you only want the fixes without rebuilds." })
+  }
+
+  // Structural findings need the model
+  var structural = total(DREAM_STRUCTURAL)
+  if (structural > 0) out.push({ mode: "reorg", reason: structural + " structural finding(s)" + scope + " (" + describe(DREAM_STRUCTURAL) + "). Reorganize pages can merge or relink them; review them in Health first." })
+
+  // Stale pages are a content question no Dream task answers
+  if ((counts.stale || 0) > 0) out.push({ view: "Health", reason: counts.stale + " page(s) have not been updated for a long time. Review their content; no Dream task updates facts." })
+
+  // A missing graph snapshot means the Graph view falls back to Markdown links
+  if (graph && graph.source === "markdown-links-fallback") out.push({ mode: "graph", reason: "No extracted graph snapshot yet; the Graph view only shows Markdown links." })
+
+  if (!out.length) out.push({ mode: "plan", reason: "No findings in the last health check. Nothing urgent; run Check wiki periodically and Rebuild search after editing pages outside Studio." })
+  return out
+}
+
+// Dream tasks: grouped task cards, data-driven suggestions and the selected task's options.
+// openTab, when given by the Maintenance view, switches to its Health or Recovery tab.
+async function dreamsView(content, openTab) {
+  var suggestionsHost = el("section", undefined, content)
+  suggestionsHost.className = "dream-suggestions-panel"
+  var layout = el("div", undefined, content)
+  layout.className = "dream-layout"
+  var groupsHost = el("div", undefined, layout)
+  groupsHost.className = "dream-groups"
+  var optionsPanel = el("section", undefined, layout)
+  optionsPanel.className = "dream-details"
+  var selectedMode = "plan"
+  var suggestions = []
+  var wikiId = currentWiki.id
+  var entry = SummaryCache.entry(wikiId)
+  var rendered
+  var whyHost
+
+  // Reasons a task is currently suggested
+  function reasonsFor(mode) {
+    return suggestions.filter(s => s.mode === mode)
+                      .map(s => s.reason)
+  }
+
+  // Render the suggestion list from the cached health snapshot
+  function drawSuggestions() {
+    suggestionsHost.replaceChildren()
+    var head = row(suggestionsHost)
+    head.classList.add("dream-suggestions-head")
+    el("h4", "Suggested for this wiki", head)
+    var label = entry.snapshot ? "From the health check of " + date(entry.snapshot.gatheredAt) : "Gathering wiki health…"
+    if (entry.pending && entry.snapshot) label += " · Refreshing…"
+    el("small", label, head).className = "muted"
+    disable(button(head, "Refresh health", () => SummaryCache.load(wikiId, true), "refresh"), entry.pending ? "Refreshing" : "")
+    if (!entry.snapshot) {
+      el("p", "Not sure where to start? Check wiki is read-only and lists what needs attention.", suggestionsHost).className = "muted"
+      return
+    }
+    var list = el("ul", undefined, suggestionsHost)
+    list.className = "dream-suggestions"
+    suggestions.filter(s => s.inline !== false).forEach(s => {
+      var item = el("li", undefined, list)
+      var target = s.mode ? DREAM_TASKS[s.mode].title : s.view
+      button(item, s.mode ? target : "Open " + target, () => s.mode ? select(s.mode, true) : openTab ? openTab(s.view) : navigate("Maintenance"))
+      var text = el("span", s.reason, item)
+      if (s.mode === "apply" && reasonsFor("repair").length) {
+        var alt = el("small", " Only want the fixes? ", text)
+        alt.className = "muted"
+        var link = el("button", "Use Repair instead", alt)
+        link.type = "button"
+        link.className = "link-button"
+        link.onclick = () => select("repair", true)
+      }
+    })
+  }
+
+  // Render why the selected task is suggested, if it is
+  function drawWhy() {
+    if (!whyHost) return
+    whyHost.replaceChildren()
+    var reasons = reasonsFor(selectedMode)
+    if (!reasons.length) return
+    var note = el("div", undefined, whyHost)
+    note.className = "dream-note dream-why"
+    el("strong", "Why it is suggested", note)
+    reasons.forEach(reason => el("p", reason, note))
+  }
+
+  // Render the task groups as separated, numbered blocks of selectable tasks
+  function drawGroups() {
+    groupsHost.replaceChildren()
+    DREAM_TASK_GROUPS.forEach((group, index) => {
+      var block = el("div", undefined, groupsHost)
+      block.className = "dream-group"
+      var head = el("div", undefined, block)
+      head.className = "dream-group-head"
+      el("span", String(index + 1), head).className = "dream-step"
+      var text = el("div", undefined, head)
+      el("h4", group.title, text)
+      el("small", group.hint, text).className = "muted"
+      var list = el("div", undefined, block)
+      list.className = "dream-task-list"
+      group.tasks.forEach(mode => {
+        var task = DREAM_TASKS[mode]
+        var option = el("button", undefined, list)
+        option.type = "button"
+        option.className = "dream-task"
+        option.setAttribute("aria-pressed", String(mode === selectedMode))
+        option.onclick = () => select(mode, true)
+        var top = el("span", undefined, option)
+        top.className = "dream-task-title"
+        el("strong", task.title, top)
+        if (reasonsFor(mode).length) el("span", "Suggested", top).className = "badge suggested"
+        el("span", task.short, option).className = "muted"
+      })
+    })
+  }
+
+  // Render the selected task's explanation and options; the job payloads are unchanged
+  function select(mode, fromList) {
+    selectedMode = mode
+    drawGroups()
+    optionsPanel.replaceChildren()
+    var task = DREAM_TASKS[mode]
+    var title = task.title
+
+    // What the task is and when to pick it
+    el("small", mode === "compact" ? "Storage task" : "Dream task", optionsPanel).className = "muted dream-kicker"
+    el("h3", title, optionsPanel)
+    var tags = row(optionsPanel)
+    tags.classList.add("dream-tags")
+    el("span", task.effect, tags).className = "badge task-tag"
+    el("span", task.model, tags).className = "badge task-tag"
+    el("p", task.summary, optionsPanel)
+    var when = el("div", undefined, optionsPanel)
+    when.className = "dream-note"
+    el("strong", "When to use", when)
+    el("p", task.when, when)
+    whyHost = el("div", undefined, optionsPanel)
+    drawWhy()
+
+    // Task options, shown only for tasks that have them
+    var hasOptions = !["plan", "compact"].includes(mode)
+    var optionsBlock = hasOptions ? el("div", undefined, optionsPanel) : null
+    if (optionsBlock) {
+      optionsBlock.className = "dream-block"
+      el("h4", "Options", optionsBlock)
+    }
+    var semantic = ["graph", "reorg"].includes(mode) ? check(optionsBlock, "Use model semantic extraction") : null
+    if (semantic) disable(semantic, writeReason(true))
+    var organize = mode === "reorg" ? field(optionsBlock, "Organization", ["none", "topics"]) : null
+    var instructions = mode === "reorg" ? field(optionsBlock, "Reorganization guidance") : null
+    var steps = mode === "reorg" ? field(optionsBlock, "Maximum model steps", null, "40") : null
+    if (steps) {
+      steps.type = "number"
+      steps.min = "1"
+    }
+    var mutate = mode === "auto" ? check(optionsBlock, "Apply repairs (otherwise only preview)") : null
+    var compact = !["plan", "compact"].includes(mode) ? check(optionsBlock, "Compact storage after success") : null
+
+    // Safety confirmations for tasks that change the wiki
+    var safetyBlock = mode !== "plan" ? el("div", undefined, optionsPanel) : null
+    if (safetyBlock) {
+      safetyBlock.className = "dream-block"
+      el("h4", "Before you start", safetyBlock)
+      el("small", "A verified backup is created first. Keep external writers stopped while the task runs.", safetyBlock).className = "muted"
+    }
+    var external = safetyBlock ? check(safetyBlock, "External CLI readers and writers are stopped") : null
+    var structural = mode === "reorg" ? check(safetyBlock, "Allow structural changes after a verified backup") : null
+
+    // Start the task
+    var actions = row(optionsPanel)
+    var start = () => {
+      if (mode === "compact") return queue("maintenance", { action: "compact", externalProcessesStopped: external.checked })
+      return queue("dreams", {
+        mode,
+        options: {
+          semantic: semantic?.checked || false,
+          organize: organize?.value || "none",
+          instructions: instructions?.value || "",
+          dreammaxsteps: Number(steps?.value || 40),
+          compact: compact?.checked || false,
+          dryrun: mode === "plan" || mode === "auto" && !mutate.checked
+        },
+        confirmation: {
+          acknowledgeStructuralChanges: structural?.checked || false,
+          externalProcessesStopped: external?.checked || false
+        }
+      })
+    }
+    actions.classList.add("dream-actions")
+    disable(button(actions, (mode === "compact" ? "Start " : "Start Dream · ") + title.toLowerCase(), start), writeReason(mode === "reorg"))
+    technical({ engineMode: mode }, optionsPanel)
+    if (fromList && window.matchMedia("(max-width: 1000px)").matches) optionsPanel.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
+
+  // Refresh suggestions whenever the shared health snapshot changes
+  function update() {
+    if (rendered === entry.snapshot && rendered) {
+      drawSuggestions()
+      return
+    }
+    rendered = entry.snapshot
+    suggestions = dreamSuggestions(entry.snapshot)
+    drawSuggestions()
+    drawGroups()
+    drawWhy()
+  }
+
+  entry.listeners.add({ host: suggestionsHost, update })
+  update()
+  select(selectedMode)
+  SummaryCache.load(wikiId)
 }
 async function recoveryView(content){
   el("p","Review engine recovery before retrying partial work. Cancelling a job does not roll back changes.",content);
   button(content,"Inspect ingestion recovery",()=>queue("ingestions",{action:"recovery"}));const recovery=field(content,"Ingestion recovery ID");
   for(const action of ["resume","discard"])disable(button(content,human(action)+" ingestion recovery",async()=>{if(await askConfirmation(human(action)+" this recovery journal? Discarding a journal does not undo imported pages."))await queue("ingestions",{action,recoveryId:recovery.value});}),writeReason());
   el("p","For absorption, use the saved plan controls in Import from another wiki. Backups can restore a verified earlier state.",content);button(content,"Open activity",()=>navigate("Activity"));
-}
-async function dreamsView(content) {
-  el("p","Choose a Dream task to maintain your wiki, or compact storage separately. Dream checks are diagnostics; Dream reorganization makes live changes and is not an exact replay of a preview.",content);
-  const cards=el("div",undefined,content);cards.className="task-grid";const optionsPanel=el("section",undefined,content);
-  const tasks=[["Check wiki","plan","Read-only maintenance diagnostics."],["Repair","repair","Repair wiki consistency."],["Apply maintenance","apply","Apply engine maintenance changes."],["Rebuild search","reindex","Rebuild the search index."],["Update indexes","indexes","Refresh wiki index pages."],["Rebuild graph","graph","Rebuild page relationships."],["Automatic maintenance","auto","Diagnose, or explicitly apply repairs."],["Reorganize pages","reorg","Use the model to move, merge or remove pages."],["Compact storage","compact","Offline storage maintenance."]];
-  function select(task){
-    optionsPanel.replaceChildren();const [title,mode,description]=task;el("h4",(mode==="compact"?"":"Dream · ")+title,optionsPanel);el("p",description,optionsPanel);
-    const semantic=["graph","reorg"].includes(mode)?check(optionsPanel,"Use model semantic extraction"):null;if(semantic)disable(semantic,writeReason(true));
-    const organize=mode==="reorg"?field(optionsPanel,"Organization",["none","topics"]):null,instructions=mode==="reorg"?field(optionsPanel,"Reorganization guidance"):null,steps=mode==="reorg"?field(optionsPanel,"Maximum model steps",null,"40"):null;if(steps){steps.type="number";steps.min="1";}
-    const mutate=mode==="auto"?check(optionsPanel,"Apply repairs (otherwise only preview)"):null;
-    const compact=!["plan","compact"].includes(mode)?check(optionsPanel,"Compact storage after success"):null;
-    const external=mode!=="plan"?check(optionsPanel,"External CLI readers and writers are stopped"):null;
-    const structural=mode==="reorg"?check(optionsPanel,"Allow structural changes after a verified backup"):null;
-    if(mode!=="plan")el("p","Page-changing tasks create a verified backup first. Keep external writers stopped while the task runs.",optionsPanel);
-    const actions=row(optionsPanel);disable(button(actions,(mode==="compact"?"Start ":"Start Dream · ")+title.toLowerCase(),()=>mode==="compact"?queue("maintenance",{action:"compact",externalProcessesStopped:external.checked}):queue("dreams",{mode,options:{semantic:semantic?.checked||false,organize:organize?.value||"none",instructions:instructions?.value||"",dreammaxsteps:Number(steps?.value||40),compact:compact?.checked||false,dryrun:mode==="plan"||mode==="auto"&&!mutate.checked},confirmation:{acknowledgeStructuralChanges:structural?.checked||false,externalProcessesStopped:external?.checked||false}})),writeReason(mode==="reorg"));
-    technical({engineMode:mode},optionsPanel);
-  }
-  for(const task of tasks){const card=el("section",undefined,cards);button(card,(task[1]==="compact"?"":"Dream · ")+task[0],()=>select(task));el("p",task[2],card);}select(tasks[0]);
 }
 async function exportsView(content) {
   const section=el("section",undefined,content);el("h4","Export wiki",section);
@@ -1359,13 +2093,50 @@ async function backupsView(content) {
   el("p","Verification checks snapshot integrity automatically. Manual and automatic snapshots can be removed when no active work or recovery depends on them.",section);
   disable(button(section,"Create snapshot",async()=>{const job=await queue("backups",{});await job.finished;if(section.isConnected){content.replaceChildren();destroyDetachedCharts();await backupsView(content);}}),writeReason());
   button(section,"Refresh",async()=>{content.replaceChildren();destroyDetachedCharts();await backupsView(content);});
-  const backups=await allItems(wikiPath("backups")),table=dataTable(section,["Created","Origin","Size","Verification","Actions"]);
+  const backups=await allItems(wikiPath("backups"));
+
+  // Reload the tab after a change
+  async function reload(){content.replaceChildren();destroyDetachedCharts();await backupsView(content);}
+
+  // Delete the given snapshots, warning when no verified restore point would remain
+  async function remove(ids){
+    const chosen=backups.filter(b=>ids.includes(b.id));
+    if(!chosen.length){message("Select one or more snapshots to delete.",true);return;}
+    const last=chosen.some(b=>b.verified)&&backups.filter(b=>b.verified&&!ids.includes(b.id)).length===0;
+    const total=chosen.reduce((sum,b)=>sum+(Number(b.size)||0),0);
+    const what=chosen.length===1?"the "+date(chosen[0].createdAt)+" snapshot ("+bytes(chosen[0].size)+")":chosen.length+" snapshots ("+bytes(total)+")";
+    if(!(await askConfirmation("Permanently delete "+what+"?"+(last?" No verified backup will remain. You will have no verified restore point.":""))))return;
+    if(chosen.length===1)await StudioApi.wiki("backups/"+chosen[0].id,"DELETE",{confirmation:chosen[0].id,acknowledgeLast:last});
+    else await StudioApi.wiki("backups","DELETE",{ids:chosen.map(b=>b.id),confirmation:"delete-backups",acknowledgeLast:last});
+    await reload();
+  }
+
+  // Selection toolbar for bulk deletion
+  const selection=new Set(),boxes=[],eligible=backups.filter(b=>b.deletion?.allowed);
+  const toolbar=row(section),all=check(toolbar,"Select all eligible");
+  const deleteSelected=disable(button(toolbar,"Delete selected",()=>remove([...selection]),"trash"),writeReason()||(eligible.length?"":"No snapshots can be deleted now"));
+  // Keep the select-all box and the delete button in step with the row boxes
+  function sync(){
+    all.checked=eligible.length>0&&selection.size===eligible.length;
+    all.indeterminate=selection.size>0&&selection.size<eligible.length;
+    if(!deleteSelected.title)deleteSelected.disabled=selection.size===0;
+    deleteSelected.textContent="";
+    withIcon(deleteSelected,"trash").append(selection.size?"Delete selected ("+selection.size+")":"Delete selected");
+  }
+  all.disabled=!!writeReason()||!eligible.length;
+  all.onchange=()=>{for(const [id,box] of boxes){if(box.disabled)continue;box.checked=all.checked;all.checked?selection.add(id):selection.delete(id);}sync();};
+
+  const table=dataTable(section,["Select","Created","Origin","Size","Verification","Actions"]);
   if(!backups.length)el("p","No snapshots yet.",section);
-  for(const backup of backups){const r=el("tr",undefined,table);el("td",date(backup.createdAt),r);el("td",human(backup.origin),r);el("td",bytes(backup.size),r);el("td",backup.verified?"Integrity checked at creation":"Not verified",r);const actions=el("td",undefined,r);
+  for(const backup of backups){const r=el("tr",undefined,table),cell=el("td",undefined,r),box=check(cell,"Select "+date(backup.createdAt));
+    box.disabled=!!writeReason()||!backup.deletion?.allowed;box.title=box.disabled?(writeReason()||backup.deletion?.reason||"Unavailable"):"";
+    box.onchange=()=>{box.checked?selection.add(backup.id):selection.delete(backup.id);sync();};boxes.push([backup.id,box]);
+    el("td",date(backup.createdAt),r);el("td",human(backup.origin),r);el("td",bytes(backup.size),r);el("td",backup.verified?"Integrity checked at creation":"Not verified",r);const actions=el("td",undefined,r);
     disable(button(actions,"Restore",async()=>{if(!(await askConfirmation("Stop external readers and writers. Restore replaces the wiki tree after creating a verified pre-restore backup. Continue?")))return;const overview=await StudioApi.wiki("overview"),fingerprint=overview.studio.fingerprint;await queue("backups/"+backup.id+"/restore",{expectedFingerprint:fingerprint,confirmation:backup.id+":"+fingerprint,externalProcessesStopped:true});}),writeReason()||(!backup.verified?"Snapshot is not verified":""));
-    disable(button(actions,"Delete",async()=>{const last=backup.verified&&backups.filter(b=>b.verified).length===1;if(!(await askConfirmation("Permanently delete the "+date(backup.createdAt)+" snapshot ("+bytes(backup.size)+")?"+(last?" This is the last verified backup. You will have no verified restore point.":""))))return;await StudioApi.wiki("backups/"+backup.id,"DELETE",{confirmation:backup.id,acknowledgeLast:last});content.replaceChildren();destroyDetachedCharts();await backupsView(content);}),writeReason()||(backup.deletion?.allowed?"":backup.deletion?.reason||"Unavailable"));
+    disable(button(actions,"Delete",()=>remove([backup.id])),writeReason()||(backup.deletion?.allowed?"":backup.deletion?.reason||"Unavailable"));
     technical(backup,actions);
   }
+  sync();
   const sizes={};backups.slice(0,10).forEach(b=>sizes[date(b.createdAt)+" · "+b.id.slice(0,8)]=Math.round(b.size/1024));metricChart(content,"Storage used by the 10 most recent snapshots",sizes,"KiB");
 }
 

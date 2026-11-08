@@ -5,7 +5,7 @@ var MiniAWebArtifacts = (function() {
   var lock = new java.util.concurrent.locks.ReentrantLock(), ttl = 24 * 60 * 60 * 1000
   function fail(message) { throw new Error(message) }
   function uuid(value) { if (!/^[a-f0-9-]{36}$/i.test(String(value))) fail('Invalid identifier'); return String(value) }
-  function logEvent(event, item) { log('[artifacts] ' + stringify({event:event, id:item.id, session:item.session, size:item.size, format:item.format}, __, '')) }
+  function logEvent(event, item) { log('[artifacts] ' + af.toSLON({ event: event, id: item.id, session: item.session, size: item.size, format: item.format })) }
   function atomic(path, bytes) {
     var temporary = path + '.tmp-' + genUUID()
     try {

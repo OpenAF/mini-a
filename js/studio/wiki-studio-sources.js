@@ -128,7 +128,7 @@ WikiStudioServer.prototype.migrateSources = function() {
       if (!self.sourceGet({id:seal.wikiId}, seal.sourceId)) report.warnings.push({wikiId:seal.wikiId, sourceId:seal.sourceId, upload:f.filename, code:"missing_source_registration", message:"Registration may have been overwritten in the legacy layout; restore a verified record or register a fresh upload"})
     })
     WikiStudio.atomic(base + "/records/migration-report.json", report)
-    report.warnings.forEach(function(warning) { logWarn("Studio source migration: " + JSON.stringify(warning)) })
+    report.warnings.forEach(function(warning) { logWarn("Studio source migration: " + af.toSLON(warning)) })
     return report
   })
 }

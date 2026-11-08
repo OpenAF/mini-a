@@ -721,6 +721,13 @@
       wm.write("target.md",{title:"Related"},"# Details\nConceptual supporting evidence SharedProtocol")
       wm._graph.buildSemantic(wm._graphPages(),{modelHelp:"off"})
       ow.test.assert(wm.agenticSearch("graphneedle",{expandGraph:true}).results.some(function(r){return r.path==="target.md"}),true,"source-bound shared concepts discover supporting pages")
+      var graphHit=function(res){return res.results.filter(function(r){return r.path==="target.md"})[0]}
+      var noProximity=graphHit(wm.agenticSearch("graphneedle",{expandGraph:true}))
+      ow.test.assert(isUnDef(noProximity.scoreComponents.proximity),true,"proximity is off by default")
+      wm._config.wikigraphproximity=true
+      var withProximity=graphHit(wm.agenticSearch("graphneedle",{expandGraph:true}))
+      delete wm._config.wikigraphproximity
+      ow.test.assert(withProximity.scoreComponents.proximity>0 && withProximity.rankScore>noProximity.rankScore,true,"wikigraphproximity adds a bounded proximity component")
       var semantic=wm._graph._semanticByPage["seed.md"], revisions=semantic.map(function(edge){return edge.props.revision})
       semantic.forEach(function(edge){edge.props.revision="obsolete"})
       ow.test.assert(wm.agenticSearch("graphneedle",{expandGraph:true}).results.some(function(r){return r.path==="target.md"}),false,"semantic assertion revision must match, even when document node is current")

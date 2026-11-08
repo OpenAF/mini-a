@@ -187,7 +187,7 @@ var wikiStudioExecute = function(config, w, job, logFn, backup) {
   if (operation === "graph.build") {
     var jobs = new WikiStudioJobs(config)
     runner.isCancelled = function() { return jobs.get(job.id).cancelRequested === true }
-    runner.onGraphProgress = function(progress) { jobs.update(job.id, { progress: progress }); logFn(JSON.stringify(progress)) }
+    runner.onGraphProgress = function(progress) { jobs.update(job.id, { progress: progress }); logFn(af.toSLON(progress)) }
   }
   var result = runner.execute(runner.spec(operation,params), {confirm:true,backupconfirmed:!!backup})
   if (result.ok !== false && p.compact && operation !== "dream.plan" && !p.dryrun) {

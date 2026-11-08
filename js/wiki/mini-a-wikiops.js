@@ -354,7 +354,7 @@ MiniAWikiOps.prototype._execute = function(spec, gates) {
       if (action === "build") {
         var settings = wm.graphBuildSettings(p)
         p = merge(p, settings.effective)
-        this.log(stringify(settings, __, ""))
+        this.log(af.toSLON(settings))
         if (p.extraction === "semantic" && p.modelHelp === "auto") {
           global.__mini_a_dreams_lib_mode = true
           loadLib(__miniAPath("mini-a-dreams.js"))
@@ -362,7 +362,7 @@ MiniAWikiOps.prototype._execute = function(spec, gates) {
           wm._graph._cfg.modelExtractors = graphDream._graphExtractors()
           wm._graph._cfg.decisionExtractor = graphDream._graphDecisionExtractor()
         }
-        p.onProgress = this.onGraphProgress || function(progress) { self.log(stringify(progress, __, "")) }
+        p.onProgress = this.onGraphProgress || function(progress) { self.log(af.toSLON(progress)) }
         p.isCancelled = this.isCancelled
       }
       if (action === "falkor" && !String(p.query || "").trim()) delete p.query

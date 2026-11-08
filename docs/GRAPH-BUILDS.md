@@ -26,13 +26,34 @@ The legacy `semantic=true` maps to semantic extraction with automatic assistance
 
 Incremental builds update changed or missing work and remove deleted evidence. Page batches
 calculate communities and scores after the batch completes; direct single-page updates
-still return current statistics. Semantic checkpoints preserve evidence and progress, with
-derived statistics recomputed on reload. Full
-builds reconstruct structural state while retaining valid enrichment. Force ignores
-semantic caches. Resume revalidates the current pages and continues unfinished
-sections; it never runs automatically. Resume plus force, and structural resume/force,
-are rejected. Model failures remain pending; an empty validated relationship array is
-successful work. Failed refreshes preserve valid assertions for unchanged sources.
+still return current statistics. Wiki page writes (ingest journals, editor saves) update the
+graph lazily: an ingest journal runs inside one graph batch (`beginBatch()`/`endBatch()`), so
+it costs one `graph.json` save and one community recomputation instead of one per page.
+Page removal touches only the page's own edges. Loading a graph defers communities and
+surprise scores until first use. Semantic checkpoints preserve evidence and progress, saved
+at most every 15 seconds or 250 committed sections and at stage boundaries, with derived
+statistics recomputed on reload. Full builds reconstruct structural state while retaining
+valid enrichment. Force ignores semantic caches.
+
+Model work is content-addressed per section. A section is identified by its heading name
+and text. It is complete while the hash of its model input (section text, mentioned
+concepts, path-ordered cross-page candidates, model fingerprint and prompt version) is
+unchanged. Editing one section re-extracts only that section. Model assertions of
+unchanged sections in an edited page are carried across the edit (also through ingest or
+structural updates before the semantic build) and rebased onto the new revision with
+corrected evidence offsets. Deterministic mentions depend only on the vocabulary entries
+a page actually looks up, so adding or renaming a page re-scans pages (CPU only) but
+re-extracts only those that mention the changed name. A peer page edit invalidates a
+section only when that section's candidate set changes. Pre-v3 enrichment of unchanged
+pages is migrated without model calls (offset completions become section ids; model
+assertions move to normalized concept ids).
+
+Every incremental semantic build continues unfinished sections, so `strategy=resume` is
+an explicit equivalent that also rejects stale options. Dream/ingest finalization reports
+`graph_build` (status, pending, resumable, calls, cached) and logs when enrichment stays
+partial. Resume plus force, and structural resume/force, are rejected. Model failures
+remain pending; an empty validated relationship array is successful work. Failed
+refreshes preserve valid assertions for unchanged sources.
 
 Both interactive interfaces show effective settings and configured model availability
 before a build. They expose presets, custom budgets, per-run overrides, and **Save
@@ -73,12 +94,32 @@ unambiguous aliases and technical identifiers. It preserves identifiers such as 
 carries a source hash/revision, section, exact quote, UTF-16 body offsets and one-based
 body line. These locations are relative to the body, excluding frontmatter.
 
-Concept identity is conservative: page concepts are scoped; technical identifier spelling
-is preserved; ambiguous aliases are not merged. Extraction method (`deterministic` or
+Concept identity is conservative: page concepts are scoped and ambiguous aliases are not
+merged. Free concept ids (`concept:id:<key>`) are case-folded and drop a possessive
+`'s`, so `OpenAF`, `openaf` and `openaf's` join. The last prose word also loses a regular
+plural (`connections` → `connection`, `policies` → `policy`). Acronyms and identifiers
+(`TLS`, `getUsers`, `conn.ReceiveFunc`, `C++`) are only case-folded; node names keep the
+original spelling. Besides titles and aliases, the vocabulary includes short `**bold**`
+and inline-code terms used on two or more pages, as joinable concepts. A page title
+always claims its name first. Extraction method (`deterministic` or
 `model`) is separate from the grounded/inferred evidence layer. Current grounded support
 ranks ahead of inferred expansion. Cross-wiki joins use bounded postings of explicitly
-joinable concepts and retain source namespaces. No mount is mutated. Communities use
-sparse shared concepts and tags instead of pairwise page edges.
+joinable concepts and retain source namespaces. No mount is mutated. Shared-concept
+expansion adds an IDF weight for every shared concept, so several rare shared concepts
+outrank one common concept. Concepts on more than 25% of the pages (wikis of 20 or more
+pages) are skipped.
+
+Communities use deterministic multi-level Louvain (modularity local moving plus
+aggregation) over explicit links and IDF-weighted shared tags and grounded concepts, without
+materializing pairwise page edges. Each page belongs to at most one community, and isolated
+pages to none. `wikigraphcommunity=louvain` (default) and `label` select it.
+
+`graph op=query` uses a lazily rebuilt token index with summed-IDF scoring (a word still
+matches any indexed token containing it). `wikigraphproximity=true` adds a bounded
+personalized-PageRank proximity component to Retrieval V2 graph hits (see
+[WIKI-RETRIEVAL-V2.md](WIKI-RETRIEVAL-V2.md)). `similarConcepts(conceptId, k)` is an
+extension seam for a future embedding layer: it returns `[]` unless a `similarConceptsFn`
+graph option is configured.
 
 Ordinary builds never edit Markdown. During Dream reorg, `graph op=tags path=...` supplies
 up to five body-evidenced suggestions, preferring existing vocabulary. The main model
@@ -87,7 +128,8 @@ Normalization/removal suggestions are reported separately. Tag edges cannot just
 Reorg finalization refreshes graph and search artifacts.
 
 The graph envelope remains version 2 and edge keys remain
-`[from,to,type,provenance,page,section]`. Extraction/cache state is versioned separately.
+`[from,to,type,provenance,page,section]`. Extraction/cache state is versioned separately
+(enrichment version 3; `semantic_carry` holds pending carried model work of edited pages).
 Legacy graphs remain navigable, but assertions without current evidence are not verified
 retrieval support. Rebuild semantic extraction to refresh them. OpenAF keeps generic
 storage and traversal; `neighbors`, `path` and `traverse` share direction, type,
@@ -106,3 +148,9 @@ corpus. It requires at least 10% relative graph-query Recall@10 improvement, at 
 It uses deterministic empty-output model stubs. Live-provider behavior and real FalkorDB
 server acceptance require separate environment-specific validation. See the recorded
 [implementation validation](GRAPH-BUILDS-VALIDATION.md) for this change.
+
+### Model routing
+
+Structural builds and previews make no model calls. Semantic builds with model help try `OAF_LC_MODEL` first, then `model=` / `OAF_MODEL` if extraction fails validation or needs context. Graph candidate classification uses the bounded Decide API with `modeldec=` / `OAF_DECIDE_MODEL`; `usedecide=false` disables it. Failed or unsupported classification retains the original candidates. Classification never establishes evidence. Decision calls share graph budgets; build reports include `callsByRole`.
+
+Dream auto-repair uses Decide for bounded link choices and the main model for generative repair. Dream reorganization and memory consolidation use the main model.

@@ -148,6 +148,12 @@ a posting cut short by the work budget cannot pass that filter. Depth defaults t
 one. `wikigraphcrossdepth=2` permits one additional local hop after an explicit
 cross link, preserving the original support chain and consuming the same caps.
 It never follows a further cross link or starts an unrestricted recursive walk.
+
+`wikigraphproximity=true` (default off) adds a proximity component to
+graph-discovered hits: a personalized PageRank walk from the query's lexical seeds
+over links, tags and grounded concepts (hub features are not traversed), charged to
+the same `maxGraphEdges` budget. The best-connected hit gains up to `0.25`, reported
+as `scoreComponents.proximity`.
 At disclosure, both source and destination permissions/revisions and explicit
 mount routing are checked again; changing or detaching a route invalidates its
 hint. Every citation retains the destination wiki and generation.

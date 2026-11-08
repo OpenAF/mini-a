@@ -32,21 +32,27 @@ WikiStudioServer.prototype.dispatch = function(req) {
   if (read && p.length === 3 && p[2] === "health") return { ok: true, version: 1 }
   if (read && p.length === 3 && p[2] === "session") return { role: role, version: 1, webJob: c.base + "/mini-a-web.yaml", canTestWiki: String(getEnv("OAF_MODEL") || "").trim().length > 0, csrf: "bearer-header-and-same-origin", backends: { fs: "supported", mounts: "unavailable in Studio", s3: "unavailable in Studio", es: "unavailable in Studio", http: "unavailable in Studio", archive: "unavailable in Studio" }, adapters: { upload: true, directory: (c.directories||[]).map(function(d){return{id:d.id}}), git: "allowlisted-local-checkout-only", url: true, youtube: true }, limits: { pageBytes: c.maxPageBytes } }
   if (p[2] === "wikis" && p.length === 3) {
-    if (read) return WikiStudioServer.paginate(this.registry.list().map(function(w) { return self.publicWiki(w, role) }), q)
+    // The list carries each root's health so the dashboard can offer Change root for moved wikis.
+    if (read) return WikiStudioServer.paginate(this.registry.list().map(function(w) { var out = self.publicWiki(w, role); out.rootState = self.registry.rootState(w); return out }), q)
     if (req.method === "POST") { WikiStudio.authorize(role, "admin"); return this.publicWiki(this.registry.add(body), role) }
+  }
+  // Root picker: browse directories beneath studioallowroots for wiki registration.
+  if (read && p.length === 4 && p[2] === "roots" && p[3] === "browse") {
+    WikiStudio.authorize(role, "admin")
+    return this.registry.browse(q)
   }
   if(read&&p.length===3&&p[2]==="search") {
     WikiStudio.assert(isString(q.q)&&q.q.length>0&&q.q.length<=1000,400,"invalid_query","A search query is required")
     var hits=[],coverage=[],wikis=this.registry.list()
     wikis.slice(0,20).forEach(function(w){
       try {
-        var result=self.wikiRoute({method:"GET",query:{q:q.q,limit:100}},self.registry.verify(w),["search"],role)
+        var result=self.wikiRoute({method:"GET",query:{q:q.q,limit:100,mode:q.mode}},self.registry.verify(w),["search"],role)
         var items=isArray(result)?result:result.results||[]
         items.forEach(function(hit){var decorated=JSON.parse(JSON.stringify(hit));decorated.wikiId=w.id;decorated.sourceNamespace=w.id+":";hits.push(decorated)})
-        coverage.push({wikiId:w.id,outcome:result.outcome||"not-reported",warning:result.warning||null,sources:result.sources||null,truncated:result.truncated===true})
+        coverage.push({wikiId:w.id,outcome:result.outcome||"not-reported",warning:result.warning||null,sources:result.sources||result.coverage||null,truncated:result.truncated===true})
       } catch(e){coverage.push({wikiId:w.id,outcome:"unavailable",warning:e.status?e.message:"Wiki search unavailable"})}
     })
-    hits.sort(function(a,b){return Number(b.score||0)-Number(a.score||0)||a.wikiId.localeCompare(b.wikiId)||String(a.path).localeCompare(String(b.path))})
+    hits.sort(function(a,b){var fusedMode=isDef(a.fused)||isDef(b.fused);return (fusedMode?Number(b.fused||0)-Number(a.fused||0):Number(b.score||0)-Number(a.score||0))||a.wikiId.localeCompare(b.wikiId)||String(a.path).localeCompare(String(b.path))})
     var aggregate=WikiStudioServer.paginate(hits,q);aggregate.coverage=coverage;aggregate.warning="Coordinated per-wiki search; absence does not establish complete coverage.";aggregate.wikisOmitted=Math.max(0,wikis.length-20);return aggregate
   }
   if (p[2] === "audit" && p.length === 3 && read) {
@@ -56,11 +62,15 @@ WikiStudioServer.prototype.dispatch = function(req) {
     return WikiStudioServer.paginate(events.reverse(), q)
   }
   if (p[2] === "wikis" && p.length >= 4) {
-    var w = this.registry.verify(this.registry.get(p[3]))
+    // Re-pointing a root is the repair for a failed verify(), so that one request skips it.
+    var repointing = p.length === 4 && req.method === "PATCH" && isDef(body.root)
+    var w = repointing ? this.registry.get(p[3]) : this.registry.verify(this.registry.get(p[3]))
     if (p.length === 4) {
       if (read) return this.publicWiki(w, role)
       WikiStudio.authorize(role, "admin")
       return WikiStudio.wikiLock(c.home, w.id, function() {
+        // Jobs capture the root at submit time, so a re-point waits until no job is queued or running.
+        if (repointing && self.assertIdle) self.assertIdle(w.id)
         if (req.method === "PATCH") return self.registry.update(w.id, body, false)
         if (req.method === "DELETE") return self.registry.update(w.id, {}, true)
         WikiStudio.fail(405, "method_not_allowed", "Method not allowed")

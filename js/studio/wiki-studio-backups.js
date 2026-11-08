@@ -116,25 +116,18 @@ WikiStudioServer.prototype.backupRoute = function(req,w,parts,role) {
     return WikiStudio.json(jobs.dir(j.id)+"/changes.json",{changes:[],warning:"No finalized comparison is available"})
   }
   WikiStudio.authorize(role,"admin",w)
-  if (parts.length === 2 && req.method === "DELETE") {
-    WikiStudio.fields(body,["confirmation","acknowledgeLast"])
-    WikiStudio.assert(body.confirmation === parts[1],400,"confirmation_required","Confirm the snapshot ID")
-    return WikiStudio.wikiLock(c.home,w.id,function() {
+  // Delete one snapshot (backups/<id>) or a selected set (backups with ids[])
+  if ((parts.length === 2 || route === "backups") && req.method === "DELETE") {
+    var single = parts.length === 2
+    WikiStudio.fields(body, single ? ["confirmation", "acknowledgeLast"] : ["ids", "confirmation", "acknowledgeLast"])
+    var ids = single ? [parts[1]] : body.ids
+    if (single) WikiStudio.assert(body.confirmation === parts[1], 400, "confirmation_required", "Confirm the snapshot ID")
+    else WikiStudio.assert(isArray(ids) && ids.length > 0 && ids.length <= 1000 && body.confirmation === "delete-backups", 400, "confirmation_required", "Confirm the selected snapshots")
+    ids.forEach(function(id) { WikiStudio.assert(isString(id), 400, "invalid_backup", "Invalid backup ID") })
+    ids = ids.filter(function(id, i) { return ids.indexOf(id) === i })
+    return WikiStudio.wikiLock(c.home, w.id, function() {
       self.registry.verify(w)
-      return WikiStudio.lock(c.home,"queue",function() {
-        var dir = WikiStudio.backupPath(c,w,parts[1]), info = WikiStudio.json(dir+"/manifest.json")
-        WikiStudio.assert(info && info.wikiId === w.id && info.id === parts[1],404,"backup_not_found","Snapshot not found")
-        var eligibility = WikiStudio.backupDeletion(c,w,info,jobs)
-        WikiStudio.assert(eligibility.allowed,409,"backup_protected",eligibility.reason)
-        var verified = io.listFiles(c.home+"/backups/"+w.id).files.filter(function(f) { return f.isDirectory && /^[a-f0-9-]{36}$/.test(f.filename) }).map(function(f) { return WikiStudio.json(f.filepath+"/manifest.json",{}) }).filter(function(b) { return b.verified })
-        WikiStudio.assert(!info.verified || verified.length > 1 || body.acknowledgeLast === true,409,"last_backup","Confirm deletion of the last verified snapshot")
-        WikiStudio.noLinks(dir); io.listFiles(dir).files.forEach(function(f) { WikiStudio.noLinks(f.filepath); WikiStudio.assert(f.isFile,400,"unsafe_backup","Unexpected snapshot directory") })
-        var trash = c.home+"/deleted-history/backup-"+info.id
-        WikiStudio.privateDir(c.home+"/deleted-history");WikiStudio.noLinks(trash)
-        java.nio.file.Files.move(WikiStudio.path(dir),WikiStudio.path(trash),java.nio.file.StandardCopyOption.ATOMIC_MOVE)
-        io.rm(trash)
-        return {deleted:info.id}
-      })
+      return WikiStudio.lock(c.home, "queue", function() { return WikiStudio.deleteBackups(c, w, ids, jobs, body.acknowledgeLast === true, single) })
     })
   }
   WikiStudio.assert(req.method==="POST",405,"method_not_allowed","Use POST")
@@ -155,6 +148,44 @@ function jobsOrigin(config, jobId) {
   var j = /^[a-f0-9-]{36}$/.test(jobId) ? WikiStudio.json(config.home + "/jobs/" + jobId + "/job.json") : null
   return j && j.operation === "backup.snapshot" ? "manual" : "automatic"
 }
+// Validate every requested snapshot first, then remove them; nothing is deleted if any check fails
+WikiStudio.deleteBackups = function(config, w, ids, jobs, acknowledgeLast, single) {
+  var root = config.home + "/backups/" + w.id
+  var targets = ids.map(function(id) {
+    var dir = WikiStudio.backupPath(config, w, id)
+    var info = WikiStudio.json(dir + "/manifest.json")
+    WikiStudio.assert(info && info.wikiId === w.id && info.id === id, 404, "backup_not_found", "Snapshot not found: " + id)
+    var eligibility = WikiStudio.backupDeletion(config, w, info, jobs)
+    WikiStudio.assert(eligibility.allowed, 409, "backup_protected", single ? eligibility.reason : id + ": " + eligibility.reason)
+    WikiStudio.noLinks(dir)
+    io.listFiles(dir).files.forEach(function(f) {
+      WikiStudio.noLinks(f.filepath)
+      WikiStudio.assert(f.isFile, 400, "unsafe_backup", "Unexpected snapshot directory")
+    })
+    return { dir: dir, info: info }
+  })
+
+  // Deleting every remaining verified snapshot needs explicit acknowledgement
+  var verified = io.listFiles(root).files
+                   .filter(function(f) { return f.isDirectory && /^[a-f0-9-]{36}$/.test(f.filename) })
+                   .map(function(f) { return WikiStudio.json(f.filepath + "/manifest.json", {}) })
+                   .filter(function(b) { return b.verified })
+  var remaining = verified.filter(function(b) { return ids.indexOf(b.id) < 0 })
+  var removesVerified = targets.some(function(t) { return t.info.verified })
+  WikiStudio.assert(!removesVerified || remaining.length > 0 || acknowledgeLast, 409, "last_backup", single ? "Confirm deletion of the last verified snapshot" : "Confirm deletion of all remaining verified snapshots")
+
+  // Move each snapshot out of the inventory atomically before removing it
+  WikiStudio.privateDir(config.home + "/deleted-history")
+  var deleted = targets.map(function(t) {
+    var trash = config.home + "/deleted-history/backup-" + t.info.id
+    WikiStudio.noLinks(trash)
+    java.nio.file.Files.move(WikiStudio.path(t.dir), WikiStudio.path(trash), java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+    io.rm(trash)
+    return t.info.id
+  })
+  return single ? { deleted: deleted[0] } : { deleted: deleted }
+}
+
 WikiStudio.backupDeletion = function(config, w, backup, jobs) {
   var reason = "", inventory = jobs.list()
   if (WikiStudio.pending(w.root).length) reason = "Resolve pending wiki recovery before deleting snapshots"

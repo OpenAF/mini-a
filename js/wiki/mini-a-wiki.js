@@ -24,7 +24,7 @@ function __miniAWikiConfigFromArgs(args, overrides) {
   ;["wikihttpindexurl", "wikihttptimeout", "wikiartifactrefreshsecs", "wikilexical", "wikiretrievalv2", "wikitelemetry", "wikiretrievalconfig",
     "wikisourceurl", "wikisourcefield", "wikisourceinline", "wikimetacache", "wikigraphcommunity", "wikigraphhintcap", "wikigraphsearchhints",
     "wikigraphmounts", "wikimountgraphttlms", "wikigraphcross", "wikigraphcrossjoin", "wikigraphcrosscap", "wikigraphcrossdepth",
-    "wikigraphcrossmaxdf", "wikigraphcrossminkeylen", "wikigraphautosave", "wikigraphsavedebouncems", "wikilintstreamthreshold", "wikilintmaxpairs"
+    "wikigraphcrossmaxdf", "wikigraphcrossminkeylen", "wikigraphproximity", "wikigraphautosave", "wikigraphsavedebouncems", "wikilintstreamthreshold", "wikilintmaxpairs"
   ].forEach(function(key) { cfg[key] = args[key] })
   cfg.wikigraphfalkor = { host: args.wikigraphfalkorhost, port: args.wikigraphfalkorport, graph: args.wikigraphfalkorgraph, user: args.wikigraphfalkoruser, pass: args.wikigraphfalkorpass }
   if (backend === "s3" || backend === "s3fs") {
@@ -1723,21 +1723,43 @@ MiniAWikiManager.prototype._searchIndexStatus = function() {
   return idx.type + (idx.writable ? "" : "-readonly")
 }
 
+// _graphUpdatePage: re-index one page; derived stats stay lazy (computed on next read).
 MiniAWikiManager.prototype._graphUpdatePage = function(path, raw, parsed) {
   if (!isObject(this._graph) || !isFunction(this._graph.updatePage)) return
   try {
-    this._graph.updatePage(this._graphPayloadFromRecord(path, raw, parsed))
+    var payload = this._graphPayloadFromRecord(path, raw, parsed)
+    if (isFunction(this._graph._updatePage)) this._graph._updatePage(payload, true)
+    else this._graph.updatePage(payload)
   } catch(e) {
     this._logFn("warn", "Failed to update graph page index: " + __miniAErrMsg(e))
   }
 }
 
+// _graphRemovePage: drop one page from the graph; derived stats stay lazy.
 MiniAWikiManager.prototype._graphRemovePage = function(path) {
   if (!isObject(this._graph) || !isFunction(this._graph.removePage)) return
   try {
-    this._graph.removePage(path)
+    if (isFunction(this._graph._removePage)) this._graph._removePage(path, true)
+    else this._graph.removePage(path)
   } catch(e) {
     this._logFn("warn", "Failed to remove graph page index: " + __miniAErrMsg(e))
+  }
+}
+
+// _graphBatch: run fn with graph saves and derived recomputation deferred to one flush.
+MiniAWikiManager.prototype._graphBatch = function(fn) {
+  var graph = isObject(this._graph) && isFunction(this._graph.beginBatch) ? this._graph : __
+  if (isDef(graph)) graph.beginBatch()
+  try {
+    return fn()
+  } finally {
+    if (isDef(graph)) {
+      try {
+        graph.endBatch()
+      } catch(e) {
+        this._logFn("warn", "Failed to flush graph batch: " + __miniAErrMsg(e))
+      }
+    }
   }
 }
 
@@ -1878,7 +1900,8 @@ MiniAWikiManager.prototype.reindex = function(options) {
     var rebuilt = this._rebuildSearchIndex({ resetLucene: !manifestStatus.compatible || !!(options && options.resetLucene) }, pageDocs)
     if (!isMap(rebuilt) || rebuilt.ok !== true) return isMap(rebuilt) ? rebuilt : { ok: false, error: "failed to rebuild lexical index" }
     this._writeLexicalManifest()
-    this._rebuildGraphIndex(pageDocs)
+    // Callers that run a graph build right after (dream/ingest finalize) skip this pass.
+    if (!(isMap(options) && options.skipGraph === true)) this._rebuildGraphIndex(pageDocs)
     return { ok: true }
   } catch(e) {
     return { ok: false, error: __miniAErrMsg(e) }

@@ -33,6 +33,15 @@ jobs:
 - name: Studio registry
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testRegistry
+- name: Studio root browse
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testRootBrowse
+- name: Studio change root
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testChangeRoot
+- name: Studio search modes
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testSearchModes
 - name: Studio authorization
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testAuth
@@ -60,6 +69,9 @@ jobs:
 - name: Studio backups and restore
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testBackups
+- name: Studio bulk backup deletion
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testBulkBackupDelete
 - name: Studio wiki exports
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testExports
@@ -81,6 +93,7 @@ todo:
 - Studio explorer
 - Studio planned absorption
 - Studio backups and restore
+- Studio bulk backup deletion
 - Studio wiki exports
 - Studio dream safety
 - Studio hydration
@@ -89,6 +102,9 @@ todo:
 - Studio graph
 - Studio pages
 - Studio registry
+- Studio root browse
+- Studio change root
+- Studio search modes
 - Studio authorization
 - Studio paths
 - Studio atomic persistence

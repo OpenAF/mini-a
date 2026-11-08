@@ -155,6 +155,10 @@ help:
     desc     : Minimum length for a shared join key to be used for cross-wiki matching
     example  : "3"
     mandatory: false
+  - name     : wikigraphproximity
+    desc     : "Re-rank graph-discovered Retrieval V2 hits by personalized PageRank proximity to the query's lexical seeds (bounded by the graph edge budget)."
+    example  : "false"
+    mandatory: false
   - name     : audit
     desc     : "If true (or env OJOB_MCP_AUDIT), logs every MCP tool call (tool name and arguments, handled generically by oJobMCP.yaml) plus every page actually fetched from a remote wikibackend (s3, http, es) -- backend, resolved location (s3://bucket/key, URL, or es:index/path), and byte count -- via OpenAF's log() function. The latter also covers pages fetched internally while serving search/lint/list, not just the top-level read tool call."
     example  : "false"
@@ -524,6 +528,7 @@ jobs:
       wikigraphcrossdepth : toNumber.isNumber.default(__)
       wikigraphcrossmaxdf : toNumber.isNumber.default(__)
       wikigraphcrossminkeylen: toNumber.isNumber.default(__)
+      wikigraphproximity  : toBoolean.isBoolean.default(__)
       label               : isString.default("wiki")
       wikimounts          : isString.default(__)
       audit               : default(__)

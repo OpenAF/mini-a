@@ -108,6 +108,100 @@
     s.registry.update("alpha", {}, true); assert(io.fileExists(w.root), true, "Unregister preserves data")
     assert(s.registry.list().length, 0, "Unregistered")
   }) }
+  // Root picker lists allowroots, child directories with badges, virtual paths, and refuses escapes.
+  exports.testRootBrowse = function() { fixture(function(s, t) {
+    var top = s.registry.browse({})
+    assert(top.allowRoots.length, 1, "Allowroots listed without a path")
+    assert(top.allowRoots[0].selectable, false, "An allowroot itself is not a selectable wiki root")
+    WikiStudio.privateDir(t + "/wikis/.hidden"); WikiStudio.privateDir(t + "/wikis/plain"); WikiStudio.privateDir(t + "/wikis/plain/deeper")
+    io.writeFileString(t + "/wikis/plain/index.md", "# Plain\n"); io.writeFileString(t + "/wikis/notes.txt", "x")
+    add(s, t)
+    var listing = s.registry.browse({ path: t + "/wikis" })
+    var names = listing.items.map(function(i) { return i.name })
+    assert(names.join(","), "existing,plain", "Only visible child directories, sorted")
+    assert(listing.parent, null, "Allowroot has no browsable parent")
+    var existing = listing.items[0], plain = listing.items[1]
+    assert(existing.registeredAs, "alpha", "Registered wiki badge")
+    assert(existing.selectable, false, "Registered root is not selectable")
+    assert(plain.looksLikeWiki, true, "index.md marks a wiki-looking folder")
+    assert(plain.selectable, true, "Free folder is selectable")
+    var nested = s.registry.browse({ path: t + "/wikis/existing" })
+    assert(nested.current.code, "duplicate_wiki", "Browsing inside a registered wiki explains the overlap")
+    var virtual = s.registry.browse({ path: t + "/wikis/new-one/child" })
+    assert(virtual.current.exists, false, "Virtual new folder reported as missing")
+    assert(virtual.current.selectable, true, "Virtual new folder is selectable")
+    assert(virtual.items.length, 0, "Virtual folder has no children")
+    assert(io.fileExists(t + "/wikis/new-one"), false, "Browsing never creates directories")
+    rejects(function() { s.registry.browse({ path: t }) }, "root_not_allowed")
+    rejects(function() { s.registry.browse({ path: t + "/wikis/../state" }) }, "invalid_root")
+    rejects(function() { s.registry.browse({ path: "relative/path" }) }, "invalid_root")
+    java.nio.file.Files.createSymbolicLink(WikiStudio.path(t + "/wikis/link"), WikiStudio.path(t + "/state"))
+    rejects(function() { s.registry.browse({ path: t + "/wikis/link" }) }, "unsafe_path")
+    assert(s.registry.browse({ path: t + "/wikis" }).items.some(function(i) { return i.name === "link" }), false, "Symlinked directories are hidden")
+    var routed = s.dispatch({ method: "GET", path: "/api/v1/roots/browse", query: { path: t + "/wikis" }, headers: {}, role: "admin" })
+    assert(routed.items.length, 2, "Browse route dispatches to the registry")
+    var created = s.registry.add({ id: "fresh", name: "Fresh", root: virtual.current.path, access: "rw", create: true })
+    assert(new java.io.File(created.root).isDirectory(), true, "Nested virtual folders are created on registration")
+  }) }
+  // Change root re-points a moved wiki, refreshes identity, excludes its own old root and needs an existing folder.
+  exports.testChangeRoot = function() { fixture(function(s, t) {
+    var w = add(s, t)
+    io.writeFileString(w.root + "/index.md", "# Existing\n")
+    var picker = s.registry.browse({ path: t + "/wikis", for: "alpha" })
+    var own = picker.items.filter(function(i) { return i.name === "existing" })[0]
+    assert(own.currentRoot, true, "Picker marks the wiki's current root")
+    assert(own.selectable, true, "Own root does not clash when re-pointing")
+    var detail = s.registry.browse({ path: w.root }).current.contents
+    assert(detail.hasIndex, true, "Contents pre-check sees index.md")
+    assert(detail.markdownFiles, 1, "Contents pre-check counts Markdown pages")
+    java.nio.file.Files.move(WikiStudio.path(w.root), WikiStudio.path(t + "/wikis/moved"))
+    assert(s.registry.rootState(s.registry.get("alpha")), "missing", "Moved root reported as missing")
+    rejects(function() { s.registry.verify(s.registry.get("alpha")) }, "root_missing")
+    var listed = s.dispatch({ method: "GET", path: "/api/v1/wikis", query: {}, headers: {}, role: "admin" })
+    assert(listed.items[0].rootState, "missing", "Dashboard list carries root state")
+    rejects(function() { s.dispatch({ method: "PATCH", path: "/api/v1/wikis/alpha", query: {}, body: { root: t + "/wikis/not-there" }, headers: {}, role: "admin" }) }, "invalid_root")
+    rejects(function() { s.registry.update("alpha", { root: t + "/wikis" }, false) }, "root_not_allowed")
+    s.assertIdle = function() { WikiStudio.fail(423, "wiki_maintenance", "busy") }
+    rejects(function() { s.dispatch({ method: "PATCH", path: "/api/v1/wikis/alpha", query: {}, body: { root: t + "/wikis/moved" }, headers: {}, role: "admin" }) }, "wiki_maintenance")
+    delete s.assertIdle
+    var result = s.dispatch({ method: "PATCH", path: "/api/v1/wikis/alpha", query: {}, body: { root: t + "/wikis/moved" }, headers: {}, role: "admin" })
+    assert(result.wiki.root, t + "/wikis/moved", "Root re-pointed through the API")
+    assert(s.registry.rootState(s.registry.get("alpha")), "ok", "Identity refreshed so verify passes")
+    assert(s.registry.get("alpha").previousRoot, w.root, "Previous root kept for audit")
+    WikiStudio.privateDir(t + "/wikis/other")
+    s.registry.add({ id: "beta", name: "Beta", root: t + "/wikis/other", access: "rw" })
+    rejects(function() { s.registry.update("alpha", { root: t + "/wikis/other" }, false) }, "duplicate_wiki")
+  }) }
+  // Index, graph and combined search modes, including graph-unavailable coverage and the all-wikis fan-out.
+  exports.testSearchModes = function() { fixture(function(s, t) {
+    var w = add(s, t)
+    io.writeFileString(w.root + "/kafka.md", "---\ntitle: Kafka streaming\n---\n# Kafka streaming\nApache Kafka streams events. See [[zookeeper]].\n")
+    io.writeFileString(w.root + "/zookeeper.md", "# Zookeeper\nCoordination used by Kafka clusters.\n")
+    io.writeFileString(w.root + "/cooking.md", "# Cooking\nPasta.\n")
+    var ops = new MiniAWikiOps({ wikiroot: w.root, wikiaccess: "rw", usewikigraph: true })
+    ops.execute(ops.spec("wiki.reindex", {}), { confirm: true })
+    var search = function(mode) { return s.wikiRoute({ method: "GET", query: { q: "kafka", mode: mode } }, w, ["search"], "admin") }
+    var before = search("graph")
+    assert(before.coverage.graph.outcome, "unavailable", "Graph search without a snapshot reports unavailable instead of failing")
+    assert(before.results.length, 0, "No graph hits without a snapshot")
+    ops.execute(ops.spec("graph.build", { extraction: "structural", modelHelp: "off" }), { confirm: true })
+    var index = search("index")
+    assert(index.results[0].path, "kafka.md", "Index search ranks the Kafka page first")
+    var graph = search("graph")
+    assert(graph.results.some(function(r) { return r.path === "kafka.md" && r.matchedBy.join() === "graph" }), true, "Graph search returns grounded pages")
+    var combined = search("combined")
+    assert(combined.results[0].path, "kafka.md", "Combined search ranks pages found by both engines first")
+    assert(combined.results[0].matchedBy.join(","), "index,graph", "Combined hit records both engines")
+    assert(combined.results.some(function(r) { return r.path === "cooking.md" }), false, "Unrelated pages are not returned")
+    assert(combined.outcome, "complete", "Index outcome 'hits' is not treated as partial")
+    rejects(function() { s.wikiRoute({ method: "GET", query: { q: "kafka", mode: "magic" } }, w, ["search"], "admin") }, "invalid_mode")
+    var all = s.dispatch({ method: "GET", path: "/api/v1/search", query: { q: "kafka", mode: "combined" }, headers: {}, role: "admin" })
+    assert(all.items[0].wikiId, "alpha", "All-wikis search passes the mode through")
+    assert(isDef(all.items[0].matchedBy), true, "All-wikis combined hits keep engine provenance")
+    s.registry.update("alpha", { graph: { enabled: false } }, false)
+    var disabled = s.wikiRoute({ method: "GET", query: { q: "kafka", mode: "graph" } }, s.registry.get("alpha"), ["search"], "admin")
+    assert(disabled.coverage.graph.warning.indexOf("disabled") >= 0, true, "Disabled graph is explained")
+  }) }
   exports.testAuth = function() { fixture(function(s) {
     rejects(function() { s.auth({ host: "127.0.0.1:18891" }, "GET") }, "unauthorized")
     var h = { host: "127.0.0.1:18891", authorization: "Bearer " + s.config.token }
@@ -134,6 +228,7 @@
     new java.io.File(t + "/outside").delete()
     new java.io.File(w.root).renameTo(new java.io.File(w.root + "-old")); io.mkdir(w.root)
     rejects(function() { s.registry.verify(w) }, "root_changed")
+    assert(s.registry.rootState(w), "changed", "Replaced folder at the same path is reported as changed")
   }) }
   exports.testAtomicAndLocks = function() { fixture(function(s, t) {
     var file = s.config.home + "/example.json"; WikiStudio.atomic(file, {one:1}); WikiStudio.atomic(file, {two:2})
@@ -388,6 +483,27 @@
     io.writeFileString(WikiStudio.backupPath(s.config,w,backup.id)+"/snapshot.zip","corruption")
     rejects(function(){WikiStudio.checkBackup(s.config,w,backup.id)},"corrupt_backup")
     rejects(function(){WikiStudio.checkBackup(s.config,merge(w,{id:"other"}),backup.id)},"foreign_backup")
+  }) }
+  // Bulk snapshot deletion validates the whole selection before removing anything
+  exports.testBulkBackupDelete = function() { fixture(function(s,t) {
+    var w=add(s,t);WikiStudio.privateDir(s.config.home+"/jobs");s.jobs=new WikiStudioJobs(s.config)
+    io.writeFileString(w.root+"/page.md","# Page\n")
+    var a=WikiStudio.snapshot(s.config,w,"a"),b=WikiStudio.snapshot(s.config,w,"b"),c=WikiStudio.snapshot(s.config,w,"c")
+    function remove(body,role){return s.backupRoute({method:"DELETE",body:body},w,["backups"],role||"admin")}
+    rejects(function(){remove({ids:[a.id,b.id],confirmation:"wrong"})},"confirmation_required")
+    rejects(function(){remove({ids:[],confirmation:"delete-backups"})},"confirmation_required")
+    rejects(function(){remove({ids:[a.id],confirmation:"delete-backups"},"viewer")},"forbidden")
+    rejects(function(){remove({ids:[a.id,"not-an-id"],confirmation:"delete-backups"})},"invalid_backup")
+    assert(io.fileExists(WikiStudio.backupPath(s.config,w,a.id)),true,"Invalid selection deletes nothing")
+    var j=s.jobs.submit(w,"dream.repair",{},"bulk-backup-123","admin");s.jobs.update(j.id,{status:"recovery-required",backupId:c.id})
+    rejects(function(){remove({ids:[a.id,c.id],confirmation:"delete-backups"})},"backup_protected")
+    assert(io.fileExists(WikiStudio.backupPath(s.config,w,a.id)),true,"Protected member blocks the whole selection")
+    s.jobs.update(j.id,{status:"completed"})
+    assert(remove({ids:[a.id,b.id,a.id],confirmation:"delete-backups"}).deleted.length,2,"Selected snapshots deleted once each")
+    assert(io.fileExists(WikiStudio.backupPath(s.config,w,a.id))||io.fileExists(WikiStudio.backupPath(s.config,w,b.id)),false,"Selected snapshot directories removed")
+    assert(io.fileExists(WikiStudio.backupPath(s.config,w,c.id)),true,"Unselected snapshot kept")
+    rejects(function(){remove({ids:[c.id],confirmation:"delete-backups"})},"last_backup")
+    assert(remove({ids:[c.id],confirmation:"delete-backups",acknowledgeLast:true}).deleted[0],c.id,"Last verified snapshot deleted with acknowledgement")
   }) }
   exports.testExports = function() { fixture(function(s,t) {
     var w=add(s,t);WikiStudio.privateDir(s.config.home+"/jobs");WikiStudio.privateDir(s.config.home+"/audit")

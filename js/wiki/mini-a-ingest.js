@@ -725,6 +725,8 @@ MiniAIngest.prototype._applyJournal = function(wm, journal, path, result) {
       wm._servingBatchChanges = {}
       journal.operations.forEach(function(op) { wm._servingBatchChanges[op.path] = true })
     }
+    // One graph save and one derived recompute for the whole journal, not one per page.
+    if (isFunction(wm._graphBatch)) return wm._graphBatch(function() { return self._applyJournalPages(wm, journal, path, result) })
     return this._applyJournalPages(wm, journal, path, result)
   } finally { wm._servingBatchChanges = previous; wm._deferServingExport = previousExport }
 }
