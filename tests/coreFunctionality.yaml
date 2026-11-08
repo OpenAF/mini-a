@@ -1062,6 +1062,21 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testResultAliasToolsExposedWithStdutils
 
+- name: MiniA Core Tests::ProxyCallRoutesResultAliasesAndNestedTool
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testProxyCallRoutesResultAliasesAndNestedTool
+
+- name: MiniA Core Tests::NativeToolFinalTextDetectsInlineActionEnvelope
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testNativeToolFinalTextDetectsInlineActionEnvelope
+
+- name: MiniA Core Tests::ShellMcpToolNameMatchesRegistration
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testShellMcpToolNameMatchesRegistration
+
 - name: MiniA Core Tests::ProxyDispatchSchemaOmitsReadresultParamsWhenStdutilsEnabled
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -1448,6 +1463,9 @@ todo:
 - MiniA Core Tests::ResultExcerptRecovery
 - MiniA Core Tests::ResultWebSpillRecovery
 - MiniA Core Tests::ResultAliasToolsExposedWithStdutils
+- MiniA Core Tests::ProxyCallRoutesResultAliasesAndNestedTool
+- MiniA Core Tests::NativeToolFinalTextDetectsInlineActionEnvelope
+- MiniA Core Tests::ShellMcpToolNameMatchesRegistration
 - MiniA Core Tests::ProxyDispatchSchemaOmitsReadresultParamsWhenStdutilsEnabled
 - MiniA Core Tests::ResultAliasToolsBypassInlineLimitGuard
 - MiniA Core Tests::ShouldWarnUnknownArgsOnlyForConsoleMode

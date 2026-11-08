@@ -160,6 +160,9 @@
      * Updates body classes, code blocks, divs, and form elements
      */
     function __refreshDarkMode() {
+        // Only redraw existing diagrams when the effective theme changes.
+        var previousDarkMode = document.body.classList.contains('markdown-body-dark')
+
         // Determine current dark mode state
         if (typeof __isDark === 'undefined') {
             _isD = document.body.classList.contains('markdown-body-dark');
@@ -241,7 +244,7 @@
             }
 
             // Re-render mermaid diagrams with dark theme
-            if (typeof reRenderMermaidDiagrams === 'function') {
+            if (previousDarkMode !== Boolean(_isD) && typeof reRenderMermaidDiagrams === 'function') {
                 reRenderMermaidDiagrams().catch(err => console.error('Failed to re-render mermaid diagrams:', err));
             }
         } else {
@@ -317,7 +320,7 @@
             }
 
             // Re-render mermaid diagrams with light theme
-            if (typeof reRenderMermaidDiagrams === 'function') {
+            if (previousDarkMode !== Boolean(_isD) && typeof reRenderMermaidDiagrams === 'function') {
                 reRenderMermaidDiagrams().catch(err => console.error('Failed to re-render mermaid diagrams:', err));
             }
         }
@@ -7268,10 +7271,6 @@
         __applyDarkModeIfNeeded();
         __syncAttachmentModalTheme();
 
-        if (typeof renderMermaidDiagrams === 'function') {
-            resetMermaidDiagramsForTheme();
-            setTimeout(() => renderMermaidDiagrams(), 100);
-        }
 
         if (typeof renderChartBlocks === 'function') {
             resetRenderedChartsForTheme();

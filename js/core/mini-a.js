@@ -3829,6 +3829,14 @@ MiniA.prototype._nativeToolFinalText = function(response) {
     var recovered = this._parseModelJsonResponse(candidate)
     if (isMap(recovered) && isDef(recovered.action)) return __
   }
+  // Streamed tool-loop turns can glue commentary directly onto a complete action envelope
+  var inlineIdx = candidate.search(/\{\s*"action"\s*:/)
+  if (inlineIdx > 0) {
+    try {
+      var inlineParsed = JSON.parse(candidate.substring(inlineIdx))
+      if (isMap(inlineParsed) && isString(inlineParsed.action)) return __
+    } catch(ignoreInline) {}
+  }
   return text
 }
 
@@ -13238,13 +13246,18 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
   }
 }
 
+// Name of the auto-registered shell MCP tool; prompts hiding it must use the same name
+MiniA.prototype._shellMcpToolName = function(args) {
+  return toBoolean(isMap(args) ? args.usestdutils : false) === true ? "bash" : "shell"
+}
+
 MiniA.prototype._createShellMcpConfig = function(args) {
   try {
     if (toBoolean(args.useshell) !== true) return __
 
     var parent = this
 
-    var toolName = toBoolean(args.usestdutils) === true ? "bash" : "shell"
+    var toolName = this._shellMcpToolName(args)
     var fns = {}
     fns[toolName] = function(params) {
         var p = isObject(params) ? params : {}
@@ -14833,9 +14846,33 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         }
 
         if (action === "call") {
+          // Repair a tool name nested inside arguments (e.g. arguments:{ tool:"x", params:{...} })
+          if ((!isString(params.tool) || params.tool.trim().length === 0) && isMap(params.arguments) && isString(params.arguments.tool) && params.arguments.tool.trim().length > 0) {
+            var _nestedCallArgs = params.arguments
+            params = clone(params)
+            params.tool = _nestedCallArgs.tool
+            if (isMap(_nestedCallArgs.arguments)) {
+              params.arguments = _nestedCallArgs.arguments
+            } else if (isMap(_nestedCallArgs.params)) {
+              params.arguments = _nestedCallArgs.params
+            } else {
+              params.arguments = clone(_nestedCallArgs)
+              delete params.arguments.tool
+            }
+            try { parent._trace("proxy_argument_repair", { action: "call", nestedTool: params.tool }) } catch(ignoreNestedTrace) {}
+          }
           var toolName = isString(params.tool) ? params.tool.trim() : ""
           if (toolName.length === 0) {
             return { error: "Call action requires a 'tool' name." }
+          }
+
+          // Spilled-result readers are local to the proxy, not downstream tools
+          var _resultAliasOps = { result_stat: "stat", result_read: "read", result_head: "head", result_tail: "tail", result_slice: "slice", result_grep: "grep" }
+          if (isString(_resultAliasOps[toolName]) && isUnDef((state.toolToConnections || {})[toolName])) {
+            var _aliasArgs = isMap(params.arguments) ? clone(params.arguments) : {}
+            if (isUnDef(_aliasArgs.resultFile) && isString(params.resultFile)) _aliasArgs.resultFile = params.resultFile
+            _aliasArgs.op = _resultAliasOps[toolName]
+            return _doReadResult(_aliasArgs)
           }
           if (!isProxyToolAllowed(toolName)) {
             return {
@@ -17264,7 +17301,7 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
     // controls needed to observe delegated work. Only retain configured tools.
     if (useDynamicSelection) {
       this.mcpTools.forEach(function(tool) {
-        if (/^(proxy-dispatch|subtask-status|execution-task|agent-comms|agent-state)$/.test(tool.name) && selectedToolNames.indexOf(tool.name) < 0) selectedToolNames.push(tool.name)
+        if (/^(proxy-dispatch|subtask-status|execution-task|agent-comms|agent-state|result_(stat|read|head|tail|slice|grep))$/.test(tool.name) && selectedToolNames.indexOf(tool.name) < 0) selectedToolNames.push(tool.name)
       })
     }
 
@@ -19528,6 +19565,7 @@ MiniA.prototype._buildRunPrompt = function(args) {
 
     var promptProfile = this._getPromptProfile(args)
     var shellViaActionPreferred = args.useshell === true && this._useTools === true
+    var shellMcpToolName = this._shellMcpToolName(args)
     var proxyToolsList = ""
     var proxyToolCount = this.mcpTools.length
     if (promptUseMcpProxy === true && isObject(this._getMcpProxyState())) {
@@ -19541,7 +19579,7 @@ MiniA.prototype._buildRunPrompt = function(args) {
           .filter(name => isString(name) && name.length > 0)
       }
       proxyNames = proxyNames.filter(name => name !== "proxy-dispatch")
-      if (shellViaActionPreferred) proxyNames = proxyNames.filter(name => name !== "shell")
+      if (shellViaActionPreferred) proxyNames = proxyNames.filter(name => name !== shellMcpToolName)
       if (isArray(args._mcpHandoffTools) && args._mcpHandoffTools.length > 0) {
         var handoffToolMap = {}
         args._mcpHandoffTools.forEach(function(name) {
@@ -19556,7 +19594,7 @@ MiniA.prototype._buildRunPrompt = function(args) {
         if (isArray(proxyState.catalog)) {
           proxyState.catalog.forEach(function(entry) {
             if (isMap(entry) && isMap(entry.tool) && isString(entry.tool.name) && entry.tool.name !== "proxy-dispatch") {
-              if ((!shellViaActionPreferred || entry.tool.name !== "shell") && proxyNames.indexOf(entry.tool.name) >= 0) {
+              if ((!shellViaActionPreferred || entry.tool.name !== shellMcpToolName) && proxyNames.indexOf(entry.tool.name) >= 0) {
                 proxyToolsWithDesc.push({ name: entry.tool.name, description: entry.tool.description || "", _builtin: entry.builtin === true })
               }
             }
@@ -19581,12 +19619,12 @@ MiniA.prototype._buildRunPrompt = function(args) {
     if (args.chatbotmode) {
       var chatActions = []
       if (args.useshell) chatActions.push("shell")
-      var chatbotVisibleToolNames = this.mcpToolNames.filter(name => !(shellViaActionPreferred && name === "shell"))
+      var chatbotVisibleToolNames = this.mcpToolNames.filter(name => !(shellViaActionPreferred && name === shellMcpToolName))
       var chatToolsList = chatbotVisibleToolNames.join(", ")
       var chatbotToolDetails = []
       var includeChatToolDetails = this._shouldIncludeToolDetails(promptProfile, chatbotVisibleToolNames.length)
       if (this.mcpTools.length > 0 && !this._useToolsActual && includeChatToolDetails) {
-        chatbotToolDetails = this.mcpTools.filter(tool => !(shellViaActionPreferred && tool.name === "shell")).map(tool => {
+        chatbotToolDetails = this.mcpTools.filter(tool => !(shellViaActionPreferred && tool.name === shellMcpToolName)).map(tool => {
           var summary = this._getToolSchemaSummary(tool, {
             profile  : promptProfile,
             toolCount: chatbotVisibleToolNames.length

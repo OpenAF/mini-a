@@ -2542,6 +2542,52 @@
     }
   }
 
+  // Spilled-result readers and nested tool names work through proxy-dispatch 'call'
+  exports.testProxyCallRoutesResultAliasesAndNestedTool = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    var utilsConfig = agent._createUtilsMcpConfig({ useutils: true, __interaction_source: "mini-a-con" })
+    var tempPath = String(java.nio.file.Files.createTempFile("mini-a-proxy-alias-", ".txt").toAbsolutePath())
+    try {
+      io.writeFileString(tempPath, "line 1\nline 2\nline 3")
+      ;[true, false].forEach(function(stdutils) {
+        var cfg = agent._createMcpProxyConfig([utilsConfig], { usestdutils: stdutils })
+        var dispatch = cfg.options.fns["proxy-dispatch"]
+        var stat = dispatch({ action: "call", tool: "result_stat", arguments: { resultFile: tempPath } })
+        ow.test.assert(isMap(stat) && stat.op === "stat" && isUnDef(stat.error), true, "result_stat via proxy call reads the spill (usestdutils=" + stdutils + ")")
+        ow.test.assert(stat.lineCount, 3, "result_stat via proxy call counts lines")
+        var head = dispatch({ action: "call", arguments: { tool: "result_head", params: { resultFile: tempPath, lines: 1 } } })
+        ow.test.assert(isMap(head) && head.op === "head", true, "A tool name nested inside arguments is repaired")
+        ow.test.assert(String(head.content[0].text).indexOf("line 2") < 0, true, "Nested params become the tool arguments")
+      })
+    } finally {
+      io.rm(tempPath)
+      agent._stopAgentResources()
+    }
+  }
+
+  // An action envelope appended to commentary with no newline is not a final answer
+  exports.testNativeToolFinalTextDetectsInlineActionEnvelope = function() {
+    var agent = createAgent()
+    var text = "I'll inspect it with shell instead since result_* tools aren't registered." + stringify({ action: "shell", command: "ls -la /tmp", thought: "inspect" }, __, "")
+    ow.test.assert(isUnDef(agent._nativeToolFinalText(text)), true, "Commentary immediately followed by an action envelope goes to action processing")
+    var parsed = agent._parseModelJsonResponse(text)
+    ow.test.assert(isMap(parsed) && parsed.action === "shell" && parsed.command === "ls -la /tmp", true, "The appended shell action is recoverable")
+    var prose = "Use the {\"action\": ...} envelope described in the docs to run commands."
+    ow.test.assert(agent._nativeToolFinalText(prose), prose, "Prose that only mentions an action envelope stays final text")
+  }
+
+  // The prompt hides the shell MCP tool under the same name it is registered with
+  exports.testShellMcpToolNameMatchesRegistration = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    ;[true, false].forEach(function(stdutils) {
+      var cfg = agent._createShellMcpConfig({ useshell: true, usestdutils: stdutils })
+      var registered = Object.keys(cfg.options.fns)
+      ow.test.assert(registered, [agent._shellMcpToolName({ usestdutils: stdutils })], "Shell MCP name helper matches registration (usestdutils=" + stdutils + ")")
+    })
+  }
+
   exports.testProxyDispatchSchemaOmitsReadresultParamsWhenStdutilsEnabled = function() {
     var agent = createAgent()
     agent.fnI = function() {}

@@ -65,7 +65,7 @@
     a._selectMcpToolsDynamically = function() { return [] }
     a._registerMcpToolsForGoal({ goal: "And the next five days?", mcpdynamic: true, mcpproxy: true, mcpproxynative: true })
     ;[a.llm, a.lc_llm].forEach(function(client) {
-      assert(client.tools.sort(), ["execution-task", "proxy-dispatch", "subtask-status"], "An empty follow-up selection preserves configured transport and coordination tools")
+      assert(client.tools.sort(), ["execution-task", "proxy-dispatch", "result_head", "subtask-status"], "An empty follow-up selection preserves configured transport, spill-reader and coordination tools")
       assert(client.__miniAProxyDispatchRegistered, true, "Proxy remains registered after an empty selection")
     })
   }) }
