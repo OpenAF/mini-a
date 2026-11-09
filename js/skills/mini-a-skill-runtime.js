@@ -332,6 +332,20 @@ function __miniAInstallSkillRuntime() {
       try { var meta = provider.open(item.ref, { cacheTtlMs: 0 }); return meta && !meta.error && !meta.disableModelInvocation }
       catch(e) { runtime.event("unavailable", { ref: item.ref, reason: __miniAErrMsg(e) }); return false }
     })
+    // Prefer eligible bundled guidance over exact-name wiki duplicates during automatic selection only.
+    if (!explicit.length && !runtime.blocked.length && args.skillsautosearch !== false) {
+      var bundledRoot = String(new java.io.File(__miniABundleRoot + "/skills").getCanonicalPath())
+      var bundledNames = Object.create(null)
+      candidates.forEach(function(item) {
+        if (item.rootPath === bundledRoot) bundledNames[item.name] = item
+      })
+      wikiCandidates = wikiCandidates.filter(function(item) {
+        var bundled = bundledNames[item.name]
+        if (!bundled) return true
+        runtime.event("collision", { name: item.name, winner: bundled.id, ignored: item.id, reason: "bundled-skill-preferred" })
+        return false
+      })
+    }
     var eligibleCount = candidates.length + wikiCandidates.length, wikiCount = wikiCandidates.length
     var limit = Math.max(1, Math.floor(args.skillsautolimit || 5)), combined = []
     while (combined.length < limit && (candidates.length || wikiCandidates.length)) {

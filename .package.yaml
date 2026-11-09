@@ -309,7 +309,7 @@ filesHash:
   docs/REPLY-JSON.md: 9dd6747356eb044924928dd08737a01e162e5f5c
   docs/SKILLS-YAML-FORMAT.md: 7457c1d133dea0e6ba860826339b2e8f7a23db94
   docs/SUPERVISED.md: 30d6a276f66d4319d3c66f7ad066a2df54c088a8
-  docs/VIRTUAL-SKILLS.md: d7020b52e3a9938b1b81fa30fa97def0f1c22120
+  docs/VIRTUAL-SKILLS.md: 3545e1376314ff2b2ed2e7c538c0f402fe722159
   docs/WHATS-NEW.md: 8eba947fc2f1f1d5b37319dabd90a4bdad459b41
   docs/WIKI-QUICKSTART.md: a7bdd10a557bc722a676ec62542a119fc01be63c
   docs/WIKI-RETRIEVAL-V2.md: 7595333c58e6de1b6b2468f70fdffcbc4951ac96
@@ -382,7 +382,7 @@ filesHash:
   js/session/mini-a-wikiman.js: a9f917d181383c0d339c73d47ab93e363d5122c7
   js/skills/mini-a-mcp-skills.js: 36b3790c0303922ae5742bacbf887295300ff285
   js/skills/mini-a-plugins.js: e9f5b70fa7d7c32bfe4ffbadf4967b7cd74bc3d5
-  js/skills/mini-a-skill-runtime.js: 7910740c77e0d8428e683617435e5d63ee2a2003
+  js/skills/mini-a-skill-runtime.js: f2bac1ae48f9a72cb78b1f0f8c1155152f7f075a
   js/skills/mini-a-skills.js: 11fc69463269641c4f69ad08d2dd955d9ef89259
   js/studio/wiki-studio-api.js: a9880237eb0f7d33dbbf39d4367b0e9f9452dcdd
   js/studio/wiki-studio-backups.js: 867786356358c8d5ddf91e1476f904a404c30c6e
@@ -457,7 +457,7 @@ filesHash:
   mini-a-modelman.js: 048b7bbed05207e058db130693e800c64ebaa486
   mini-a-modes.yaml: 754cc2598ee619e2f7d77845cc194a7bfa5cbda9
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: 3bd3adf87c5d80a837045cd694b38edca924023f
+  mini-a-web.yaml: c5621a9b9ca5f1871af5d1f4b0df06ac68c9366c
   mini-a-wiki-studio-worker.yaml: 54e763d3914cfff34e554fb958721d3153206d97
   mini-a-wiki-studio.yaml: fa487160468c8b5f440a99df6395a93762de39db
   mini-a-wikiman.js: 91add17fe98d8120835e3d1698790f97cd733923

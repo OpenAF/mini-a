@@ -354,6 +354,84 @@
     })
   }
 
+  // Exercise automatic bundle preference without changing explicit requests or source permissions.
+  exports.testBundledSkillsPreferVirtualDuplicates = function() {
+    fixture(function(root) {
+      var name = "mini-a-runtime-diagnostics"
+      var localRoot = root + "/local"
+      io.mkdir(localRoot)
+      io.mkdir(root + "/wiki")
+      io.writeFileString(root + "/wiki/duplicate.md", "---\ntype: skill\nname: " + name + "\ndescription: Generate test reports\n---\n# Steps\nSTALE_WIKI\n")
+      io.writeFileString(root + "/wiki/unique.md", "---\ntype: skill\nname: " + name + "-extra\ndescription: Generate test reports\n---\n# Steps\nUNIQUE_WIKI\n")
+      var manager = new MiniAWikiManager({ root: root + "/wiki", backend: "fs", access: "ro", wikiretrievalv2: false })
+      var agent = agentFor(localRoot)
+      agent._skillUtils = new MiniUtilsTool({ skillsroot: localRoot, bundledskillsroot: __miniABundleRoot + "/skills" })
+      var listSkills = agent._skillUtils._listSkills
+      agent._skillUtils._listSkills = function() {
+        return listSkills.call(this, {}).filter(function(item) { return item.name === name })
+      }
+      agent._skillWikiManager = manager
+      agent._skillWikiEnabled = true
+      agent._skillUtils._skillWikiManager = manager
+      agent._scoreSkillForPrompt = function() { return 2 }
+      var offered = [], activity = []
+      agent._selectSkillCandidates = function(candidates) {
+        offered = candidates
+        return candidates
+      }
+      agent.fnI = function(type, message) { if (type === "skill") activity.push(message) }
+      var args = { useskills: true, useskillswiki: true, skillsautosearch: true, goal: "Generate test reports", skillsautolimit: 5 }
+      try {
+        agent._resetSkillRuntime(args)
+        ow.test.assert(agent._consultSkillsForRun(args), [], "Automatic bundle/wiki consultation succeeds")
+        ow.test.assert(offered.map(function(item) { return item.id }).sort(), ["local:" + name, "wiki:unique.md"], "Only the exact-name virtual duplicate is suppressed")
+        ow.test.assert(agent._skillRuntime.records["local:" + name].state, "active", "Bundled guidance is loaded")
+        ow.test.assert(agent._skillGuidanceContext().indexOf("STALE_WIKI"), -1, "Suppressed virtual guidance does not enter context")
+        ow.test.assert(agent._skillGuidanceContext().indexOf("UNIQUE_WIKI") >= 0, true, "Differently named virtual guidance remains available")
+        ow.test.assert(activity.some(function(message) { return message.indexOf("collision " + name + ": using local:" + name + "; ignored wiki:duplicate.md") >= 0 }), true, "Activity identifies both sources")
+
+        // Explicit wiki, local and handoff requests retain their selected source.
+        args.goal = "$wiki:duplicate.md"
+        activity = []
+        agent._resetSkillRuntime(args)
+        ow.test.assert(agent._consultSkillsForRun(args), [], "Explicit wiki request bypasses bundle preference")
+        ow.test.assert(agent._skillRuntime.records["wiki:duplicate.md"].content.indexOf("STALE_WIKI") >= 0, true, "Explicit virtual body loads")
+        ow.test.assert(activity.some(function(message) { return message.indexOf("collision ") === 0 }), false, "Explicit wiki request is not reported as suppressed")
+        args.goal = "$local:" + name
+        agent._resetSkillRuntime(args)
+        ow.test.assert(agent._consultSkillsForRun(args), [], "Explicit bundled request still works")
+        ow.test.assert(agent._skillRuntime.records["local:" + name].state, "active", "Explicit bundle is active")
+        args.goal = "Generate test reports"
+        args._skillHandoff = [{ ref: "wiki:duplicate.md", required: true }]
+        agent._resetSkillRuntime(args)
+        ow.test.assert(agent._consultSkillsForRun(args), [], "Source-qualified wiki handoff is preserved")
+        ow.test.assert(agent._skillRuntime.records["wiki:duplicate.md"].state, "active", "Handoff loads the virtual source")
+        delete args._skillHandoff
+        args.goal = "$" + name
+        agent._resetSkillRuntime(args)
+        ow.test.assert(agent._consultSkillsForRun(args)[0].reason, "ambiguous-skill-use-source-qualified-id", "Unqualified explicit ambiguity is unchanged")
+
+        // Disabled, ineligible and custom local candidates cannot suppress virtual guidance.
+        args.goal = "Generate test reports"
+        args.useskills = false
+        agent._resetSkillRuntime(args)
+        ow.test.assert(agent._consultSkillsForRun(args), [], "Virtual-only consultation succeeds")
+        ow.test.assert(offered.some(function(item) { return item.id === "wiki:duplicate.md" }), true, "Disabled local source does not suppress virtual skills")
+        args.useskills = true
+        agent._skillDisablesModelInvocation = function(item) { return item.name === name }
+        agent._resetSkillRuntime(args)
+        ow.test.assert(agent._consultSkillsForRun(args), [], "Virtual fallback works when bundle is disabled for model invocation")
+        ow.test.assert(offered.some(function(item) { return item.id === "wiki:duplicate.md" }), true, "Ineligible bundle does not suppress the duplicate")
+        delete agent._skillDisablesModelInvocation
+        writeSkill(localRoot, name, "CUSTOM_LOCAL")
+        agent._resetSkillRuntime(args)
+        ow.test.assert(agent._consultSkillsForRun(args), [], "Custom local precedence remains unchanged")
+        ow.test.assert(offered.some(function(item) { return item.id === "wiki:duplicate.md" }), true, "A custom local same-name skill does not inherit bundle preference")
+        ow.test.assert(agent._skillRuntime.records["local:" + name].content.indexOf("CUSTOM_LOCAL") >= 0, true, "Local root precedence is preserved")
+      } finally { manager.close() }
+    })
+  }
+
   exports.testSkillWikiProgressiveResolution = function() {
     fixture(function(root) {
       io.writeFileString(root + "/long.md", "---\ntype: skill\nname: long\n---\n# When to use\nReports.\n# Safety\nRead only.\n# Steps\n" + "x".repeat(500) + "\n# Verify\nCheck result.\n")

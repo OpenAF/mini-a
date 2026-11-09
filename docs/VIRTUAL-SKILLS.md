@@ -379,6 +379,15 @@ tier and duration. A failure across all available tiers blocks selection.
 Explicit requests bypass selection entirely. Fallbacks may increase latency
 when a provider is unavailable.
 
+When both `useskills=true` and `useskillswiki=true` are enabled, automatic
+selection prefers an eligible bundled Mini-A skill over virtual candidates with
+the exact same skill name. Suppressed duplicates appear in activity as a
+collision identifying the local winner and ignored wiki reference. This rule
+applies to skills from Mini-A's bundled directory; custom local and plugin
+skills keep their existing behavior. Differently named virtual skills remain
+eligible. An explicit `$wiki:path.md` request or wiki handoff still loads that
+source, and an unqualified `$name` remains ambiguous when both sources match.
+
 Use `$local:report` to disambiguate a local skill or `$wiki:report.md` for an
 existing wiki reference. `$report` works when exactly one enabled source resolves
 the name. Unknown `$name` references are logged as ignored and the task continues.

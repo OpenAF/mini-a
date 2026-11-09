@@ -2921,9 +2921,10 @@ jobs:
   type : periodic
   typeArgs:
     timeInterval: 300000  # every 5 minutes
-  args :
-    historyretention: toNumber().isNumber().default(600)  # 10 minutes
-    ssequeuetimeout: toNumber().isNumber().default(120)   # SSE queue timeout in seconds (2 minutes)
+  check:
+    in:
+      historyretention: toNumber().isNumber().default(600)  # 10 minutes
+      ssequeuetimeout: toNumber().isNumber().default(120)   # SSE queue timeout in seconds (2 minutes)
   exec : | #js
     if (isDef(global.__advanced)) global.__advanced.pruneHistory()
     var toDelete = []
