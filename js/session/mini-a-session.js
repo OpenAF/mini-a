@@ -4736,6 +4736,8 @@ function MiniAInteractiveSession(args, adapter) {
       ansi: __conAnsi === true, kind: kind,
       useasciiviz: _consoleChartsEnabled(),
       renderChart: function(params) {
+        // Restored answers can render before any agent has loaded utility tools.
+        if (typeof MiniUtilsTool !== "function") loadLib(__miniAPath("js/core/mini-a-utils.js"))
         return new MiniUtilsTool({ useasciiviz: true }).renderChart(params)
       }
     })

@@ -343,7 +343,11 @@ function __miniAPreprocessConsoleCharts(text, opts) {
         while (String(text).indexOf(marker) >= 0) marker += "X"
         charts.push({ marker: marker, text: chart })
         output.push(marker)
-      } catch(e) { output.push(original) }
+      } catch(e) {
+        // Keep the chart source available and explain why it could not render.
+        var reason = __miniAErrMsg(e).replace(/\x1b\[[0-9;]*m/g, "").replace(/\s+/g, " ").slice(0, 240)
+        output.push("Console chart could not be rendered: " + reason + "\n\n" + original)
+      }
     } else output.push(original)
     block = []; fence = ""; language = ""
   }

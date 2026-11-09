@@ -877,6 +877,34 @@
     } finally { print = originalPrint }
   }
 
+  // Validate chart colors against Jansi even when the test runner has no terminal.
+  exports.testBarChartAnsiColors = function() {
+    var originalFlag = __ansiColorFlag
+    var originalConsole = __conConsole
+    var tool = new MiniUtilsTool({ useasciiviz: true })
+    try {
+      __ansiColorFlag = true
+      __conConsole = true
+      var aliases = { b: "BLUE", r: "RED", g: "GREEN", c: "CYAN", m: "MAGENTA", y: "YELLOW", k: "BLACK", w: "WHITE" }
+      Object.keys(aliases).forEach(function(alias) {
+        var render = function(color) {
+          return tool.renderChart({ type: "bars", data: [{ value: 54, label: "Sample", color: color }], options: { width: 40 } })
+        }
+        var expected = render(aliases[alias])
+        ow.test.assert(expected.indexOf("\x1b[") >= 0, true, "Test exercises ANSI escape generation")
+        ow.test.assert(render(alias), expected, "Shorthand matches the full ANSI color name")
+        ow.test.assert(render(" " + alias.toUpperCase() + " "), expected, "Shorthand ignores case and surrounding whitespace")
+      })
+      var styled = tool.renderChart({ type: "bars", data: [{ value: 54, color: "BOLD,BLUE" }], options: { width: 40 } })
+      ow.test.assert(styled.indexOf("[ERROR]"), -1, "Existing ANSI styles remain supported")
+      var invalid = tool.renderChart({ type: "bars", data: [{ value: 54, color: "invalid-color" }], options: { width: 40 } })
+      ow.test.assert(invalid.indexOf("[ERROR]"), 0, "Unknown colors retain an actionable renderer error")
+    } finally {
+      __ansiColorFlag = originalFlag
+      __conConsole = originalConsole
+    }
+  }
+
   exports.testPrintChartUsesArrayRenderer = function() {
     var received
     try {

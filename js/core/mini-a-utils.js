@@ -3860,6 +3860,8 @@ MiniUtilsTool.prototype._renderChart = function(params) {
         si   : function(x) { return ow.format.toAbbreviation(x) }
       }
       var barFmt = barFmts[barUnit] || barFmts.int
+      // Accept common chart color abbreviations before invoking the ANSI renderer.
+      var barColorAliases = { b: "BLUE", r: "RED", g: "GREEN", c: "CYAN", m: "MAGENTA", y: "YELLOW", k: "BLACK", w: "WHITE" }
       var barEntries = data.map(function(e, i) {
         return isMap(e)
           ? { value: Number(e.value), color: isString(e.color) ? e.color : __, label: isString(e.label) ? e.label : "" }
@@ -3879,7 +3881,12 @@ MiniUtilsTool.prototype._renderChart = function(params) {
       var barSize = Math.max(1, barHSize - (barLabelW > 0 ? barLabelW + 1 : 0) - barValueW - 3)
       out = barEntries.map(function(e, i) {
         var bar = ow.format.string.progress(e.value, barMax, barMin, barSize, barIndicator, barSpace)
-        if (isString(e.color) && e.color.length > 0) bar = ansiColor(e.color, bar)
+        if (isString(e.color) && e.color.trim().length > 0) {
+          var color = e.color.trim()
+          var alias = color.toLowerCase()
+          if (Object.prototype.hasOwnProperty.call(barColorAliases, alias)) color = barColorAliases[alias]
+          bar = ansiColor(color, bar)
+        }
         var lbl = barLabelW > 0 ? barPad(e.label, barLabelW) + " " : ""
         return lbl + bar + " :" + barPad(barValueStrs[i], barValueW)
       }).join("\n")

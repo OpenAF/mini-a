@@ -4470,8 +4470,9 @@ and optional axis labels. Supported types are `line`, `bars`, `printbars`,
 `sparkline`, `histogram`, `heatmap`, `bullet`, `scatter`, `boxplot`, `timeline`,
 `statusmatrix`, `pie`, `donut`, `stackedbar`, `stackedcolumns`, `divergingbars`,
 `treemap`, and `dashboard`. Omitted width uses available console width. The tool remains
-available for interim charts while Mini-A works. Invalid or incomplete blocks
-remain readable; `/last md` and saved Markdown retain the original JSON fences.
+available for interim charts while Mini-A works. Invalid blocks and rendering
+failures show a short diagnostic and retain the original JSON; incomplete blocks
+remain readable while streaming. `/last md` and saved Markdown retain the original JSON fences.
 This option defaults to false and inline chart rendering applies to the
 interactive console.
 
@@ -4480,6 +4481,10 @@ or maps such as `{"Used":70,"Free":30}`. Use `divergingbars` for signed values,
 `stackedcolumns` with `[{"label":"Host","values":{"CPU":50,"Memory":30}}]`
 for composition comparisons, and `treemap` for category areas. Camel-case names
 such as `stackedBar` are also accepted.
+
+For `bars`, colors accept ANSI names such as `BLUE` and `RED` or the shorthand
+`b`, `r`, `g`, `c`, `m`, `y`, `k`, and `w` (blue, red, green, cyan, magenta,
+yellow, black, and white). Existing ANSI styles such as `BOLD,BLUE` also work.
 
 ```oafPrintChart
 {"type":"donut","data":{"Used":70,"Free":30},"options":{"width":40,"height":12,"legend":"right","centerText":"70%"},"title":"Capacity"}

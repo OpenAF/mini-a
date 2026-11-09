@@ -5736,13 +5736,19 @@
       var block = "```oafPrintChart\n" + JSON.stringify(params) + "\n```"
       ow.test.assert(__miniAMarkdownRender(block, 40, { ansi: false, useasciiviz: true, renderChart: render }), chart, "Category/dashboard fences dispatch")
       ow.test.assert(calls[calls.length - 1].type, params.type, "Fence preserves chart type")
-      ow.test.assert(__miniAMarkdownRender(block, 40, { ansi: false, useasciiviz: true, renderChart: function() { return "[ERROR] unavailable" } }), block, "Unavailable chart preserves JSON")
+      var unavailable = __miniAMarkdownRender(block, 40, { ansi: false, useasciiviz: true, renderChart: function() { return "[ERROR] unavailable" } })
+      ow.test.assert(unavailable.indexOf(block) >= 0, true, "Unavailable chart preserves JSON")
+      ow.test.assert(unavailable.indexOf("Console chart could not be rendered: [ERROR] unavailable") >= 0, true, "Unavailable chart explains the failure")
     })
     var invalid = ['```oafPrintChart\n{broken}\n```', '```oafPrintChart\n[]\n```', fence.slice(0, -3)]
     invalid.forEach(function(value) {
-      ow.test.assert(__miniAMarkdownRender(value, 40, { ansi: false, useasciiviz: true, renderChart: render }), value, "Invalid and incomplete blocks remain readable")
+      var rendered = __miniAMarkdownRender(value, 40, { ansi: false, useasciiviz: true, renderChart: render })
+      ow.test.assert(rendered.indexOf(value) >= 0, true, "Invalid and incomplete blocks remain readable")
+      if (value === fence.slice(0, -3)) ow.test.assert(rendered, value, "Incomplete streaming fences do not report an error")
+      else ow.test.assert(rendered.indexOf("Console chart could not be rendered:") >= 0, true, "Invalid complete fences explain the failure")
     })
-    ow.test.assert(__miniAMarkdownRender(fence, 40, { ansi: false, useasciiviz: true, renderChart: function() { return "[ERROR] unsupported" } }), fence, "Renderer failures preserve original JSON")
+    ow.test.assert(__miniAMarkdownRender(fence, 40, { ansi: false, useasciiviz: true, renderChart: function() { return "[ERROR] unsupported" } }), "Console chart could not be rendered: [ERROR] unsupported\n\n" + fence, "Renderer failures explain the error and preserve original JSON")
+    ow.test.assert(__miniAMarkdownRender(fence, 40, { ansi: false, useasciiviz: true, renderChart: function() { throw new Error("Missing chart utility") } }), "Console chart could not be rendered: Missing chart utility\n\n" + fence, "Thrown failures explain the error and preserve original JSON")
     var nested = "````markdown example\n" + fence + "\n````"
     ow.test.assert(__miniACleanCodeBlocks(nested), nested, "Cleanup must not expose nested chart examples")
     var count = calls.length
