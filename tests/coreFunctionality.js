@@ -5727,6 +5727,17 @@
     ow.test.assert(ansi.indexOf(chart) >= 0, true, "Markdown must not interpret chart symbols or labels")
     ow.test.assert(__miniAMarkdownRender(fence, 40, { ansi: false, renderChart: render }), fence, "Disabled charts stay literal")
     ow.test.assert(__miniACleanCodeBlocks(fence), fence, "Chart-only answers keep their fence")
+    // New chart payloads use the same Markdown dispatch and error preservation.
+    var categoryFences = [
+      { type: "donut", data: { Used: 70, Free: 30 } },
+      { type: "dashboard", data: [{ type: "text", data: "Status" }] }
+    ]
+    categoryFences.forEach(function(params) {
+      var block = "```oafPrintChart\n" + JSON.stringify(params) + "\n```"
+      ow.test.assert(__miniAMarkdownRender(block, 40, { ansi: false, useasciiviz: true, renderChart: render }), chart, "Category/dashboard fences dispatch")
+      ow.test.assert(calls[calls.length - 1].type, params.type, "Fence preserves chart type")
+      ow.test.assert(__miniAMarkdownRender(block, 40, { ansi: false, useasciiviz: true, renderChart: function() { return "[ERROR] unavailable" } }), block, "Unavailable chart preserves JSON")
+    })
     var invalid = ['```oafPrintChart\n{broken}\n```', '```oafPrintChart\n[]\n```', fence.slice(0, -3)]
     invalid.forEach(function(value) {
       ow.test.assert(__miniAMarkdownRender(value, 40, { ansi: false, useasciiviz: true, renderChart: render }), value, "Invalid and incomplete blocks remain readable")

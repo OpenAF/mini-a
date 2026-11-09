@@ -3700,6 +3700,54 @@ MiniUtilsTool.prototype._visualizationsGuard = function() {
   return __
 }
 
+// Validate declarative dashboard widgets before OpenAF can dispatch executable types.
+MiniUtilsTool.prototype._chartDashboardData = function(data, options) {
+  var types = {
+    text: "text", table: "table", tree: "tree", md: "md", map: "map", progress: "progress",
+    sparkline: "sparkline", histogram: "histogram", heatmap: "heatmap", bullet: "bullet",
+    scatter: "scatter", boxplot: "boxplot", timeline: "timeline", statusmatrix: "statusMatrix",
+    "status-matrix": "statusMatrix", pie: "pie", donut: "donut", stackedbar: "stackedBar",
+    stackedcolumns: "stackedColumns", divergingbars: "divergingBars", treemap: "treemap"
+  }
+  // Keep widget data and options declarative throughout nested payloads.
+  function checkValues(value) {
+    if (isFunction(value)) throw new Error("Dashboard payloads must contain data only, not functions.")
+    if (isArray(value)) value.forEach(checkValues)
+    else if (isMap(value)) Object.keys(value).forEach(function(key) { checkValues(value[key]) })
+  }
+  checkValues(data)
+  checkValues(options)
+  var dimensions = ["width", "height", "columns"]
+  dimensions.forEach(function(key) {
+    var value = options[key]
+    if (isDef(value) && (typeof value !== "number" || !isFinite(value) || value <= 0 || Math.floor(value) !== value)) {
+      throw new Error("Dashboard options." + key + " must be a positive integer.")
+    }
+  })
+  if (!isArray(data) || data.length === 0) throw new Error("Dashboard data must be a non-empty widget array or array of rows.")
+  var grid = isArray(data[0])
+  // Normalize supported widget names without changing the caller payload.
+  function widget(value) {
+    if (!isMap(value) || !isString(value.type)) throw new Error("Dashboard widgets require a type and data.")
+    var type = value.type.toLowerCase().trim()
+    if (!Object.prototype.hasOwnProperty.call(types, type)) throw new Error("Unsupported dashboard widget type '" + type + "'.")
+    if (isUnDef(value.data)) throw new Error("Dashboard widgets require data.")
+    if (isDef(value.options) && !isMap(value.options)) throw new Error("Dashboard widget options must be an object.")
+    if (isDef(value.span) && (typeof value.span !== "number" || !isFinite(value.span) || value.span <= 0)) {
+      throw new Error("Dashboard widget span must be a positive finite number.")
+    }
+    var normalized = {}
+    Object.keys(value).forEach(function(key) { normalized[key] = value[key] })
+    normalized.type = types[type]
+    return normalized
+  }
+  return data.map(function(value) {
+    if (!grid) return widget(value)
+    if (!isArray(value) || value.length === 0) throw new Error("Dashboard rows must be non-empty arrays.")
+    return value.map(widget)
+  })
+}
+
 /**
  * <odoc>
  * <key>MiniUtilsTool.printChart(params) : Object</key>
@@ -3720,6 +3768,9 @@ MiniUtilsTool.prototype._visualizationsGuard = function() {
  * - boxplot   : array of numbers, or array of {values,label} series -- ow.format.printBoxplot
  * - timeline  : array of {label,start,end,color,status} events -- ow.format.printTimeline
  * - statusmatrix: a matrix or {values,xLabels,yLabels} of statuses -- ow.format.printStatusMatrix
+ * - pie/donut/stackedbar/treemap: non-negative numbers, {label,value,color} records, or value maps
+ * - stackedcolumns: [{label,values:{category:number}}]; divergingbars: signed category values
+ * - dashboard: widgets or rows of {type,data,title,span,options}; data-only widget types only
  * `options` is passed through to the underlying OpenAF renderer (width, height, min, max, colors, palette,
  * labels, unit, etc. -- see per-type docs); for type=line, options.unit selects int/dec1/dec2/dec3/dec4/dec/bytes/si,
  * while type=bars supports int/dec1/dec2/dec3/dec/bytes/si;
@@ -3843,6 +3894,19 @@ MiniUtilsTool.prototype._renderChart = function(params) {
       var pbSpace = isString(options.space) ? options.space : " "
       out = printBars(data, pbWidth, isNumber(options.max) ? options.max : __, isNumber(options.min) ? options.min : __, pbIndicator, pbSpace)
       break
+    case "pie":
+    case "donut":
+    case "stackedbar":
+    case "stackedcolumns":
+    case "divergingbars":
+    case "treemap":
+    case "dashboard":
+      var renderers = { pie: "printPie", donut: "printDonut", stackedbar: "printStackedBar", stackedcolumns: "printStackedColumns", divergingbars: "printDivergingBars", treemap: "printTreemap", dashboard: "printDashboard" }
+      var rendererName = renderers[type]
+      if (type === "dashboard") data = this._chartDashboardData(data, options)
+      if (!isFunction(ow.format[rendererName])) return "[ERROR] ow.format." + rendererName + " is unavailable. Update OpenAF to use type='" + type + "'."
+      out = ow.format[rendererName](data, options)
+      break
     case "sparkline":
       out = ow.format.printSparkline(data, options)
       break
@@ -3869,7 +3933,7 @@ MiniUtilsTool.prototype._renderChart = function(params) {
       out = ow.format.printStatusMatrix(data, options)
       break
     default:
-      return "[ERROR] Unknown type '" + type + "'. Expected one of: line, bars, printbars, sparkline, histogram, heatmap, bullet, scatter, boxplot, timeline, statusmatrix."
+      return "[ERROR] Unknown type '" + type + "'. Expected one of: line, bars, printbars, sparkline, histogram, heatmap, bullet, scatter, boxplot, timeline, statusmatrix, pie, donut, stackedbar, stackedcolumns, divergingbars, treemap, dashboard."
     }
 
     return { text: String(out), display: { kind: "chart", type: type, data: data, options: options, title: title } }
@@ -4799,22 +4863,22 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     printChart: {
       name       : "printChart",
-      description: "Render an ASCII/ANSI data visualization to the console DURING execution (not just in the final answer). Requires useasciiviz=true. One tool covers many chart kinds -- pick the kind with `type`; each maps 1:1 to an OpenAF renderer (line->printChartArray, sparkline->ow.format.printSparkline, histogram->ow.format.printHistogram, heatmap->ow.format.printHeatmap, bullet->ow.format.printBullet, scatter->ow.format.printScatter, boxplot->ow.format.printBoxplot, timeline->ow.format.printTimeline, statusmatrix->ow.format.printStatusMatrix), plus two bar renderers: bars (array-based, built in) and printbars (format-string based, wraps the global printBars helper). The shape of `data` depends on `type` -- see its property description. Use `options` for renderer settings (width, height, min, max, colors, palette, labels, unit, ...), also documented per-type below.",
+      description: "Render an ASCII/ANSI data visualization to the console DURING execution (not just in the final answer). Requires useasciiviz=true. One tool covers many chart kinds -- pick the kind with `type`; each maps 1:1 to an OpenAF renderer (line->printChartArray, sparkline->ow.format.printSparkline, histogram->ow.format.printHistogram, heatmap->ow.format.printHeatmap, bullet->ow.format.printBullet, scatter->ow.format.printScatter, boxplot->ow.format.printBoxplot, timeline->ow.format.printTimeline, statusmatrix->ow.format.printStatusMatrix, pie->printPie, donut->printDonut, stackedbar->printStackedBar, stackedcolumns->printStackedColumns, divergingbars->printDivergingBars, treemap->printTreemap, dashboard->printDashboard), plus two bar renderers: bars (array-based, built in) and printbars (format-string based, wraps the global printBars helper). The shape of `data` depends on `type` -- see its property description. Use `options` for renderer settings (width, height, min, max, colors, palette, labels, unit, ...), also documented per-type below.",
       inputSchema: {
         type      : "object",
         properties: {
           type   : {
             type       : "string",
-            description: "Visualization kind: line (default) draws a multi-series line chart; bars draws horizontal bars from an array; printbars draws horizontal bars from a compact printBars format string (lets one call chart many pre-labelled/colored values at once); sparkline draws a compact inline trend; histogram buckets a value distribution; heatmap renders a numeric matrix or time-bucketed map as a colored grid; bullet draws KPI-style value/target/range gauges; scatter plots [x,y] points; boxplot summarizes one or more numeric distributions; timeline draws labeled start/end bars (e.g. Gantt-style); statusmatrix renders a grid of discrete status values as colored cells.",
-            enum       : ["line", "chart", "bars", "bar", "printbars", "sparkline", "histogram", "heatmap", "bullet", "scatter", "boxplot", "timeline", "statusmatrix", "status-matrix"],
+            description: "Visualization kind: line (default) draws a multi-series line chart; bars draws horizontal bars from an array; printbars draws horizontal bars from a compact printBars format string (lets one call chart many pre-labelled/colored values at once); sparkline draws a compact inline trend; histogram buckets a value distribution; heatmap renders a numeric matrix or time-bucketed map as a colored grid; bullet draws KPI-style value/target/range gauges; scatter plots [x,y] points; boxplot summarizes one or more numeric distributions; timeline draws labeled start/end bars (e.g. Gantt-style); statusmatrix renders status cells; pie/donut/stackedbar show category proportions; stackedcolumns compares category composition; divergingbars compares signed values; treemap shows category areas; dashboard combines declarative widgets.",
+            enum       : ["line", "chart", "bars", "bar", "printbars", "sparkline", "histogram", "heatmap", "bullet", "scatter", "boxplot", "timeline", "statusmatrix", "status-matrix", "pie", "donut", "stackedbar", "stackedBar", "stackedcolumns", "stackedColumns", "divergingbars", "divergingBars", "treemap", "dashboard"],
             default    : "line"
           },
           data   : {
-            description: "Chart data, shape depends on `type`: line=array of numbers or array of arrays (multi-series); bars=array of numbers or {value,color,label}; printbars=a printBars-style format string \"<unit> <value[:color[:label]]> ...\" e.g. \"int 42:red:CPU 87:yellow:Mem\" (unit is one of int/dec1/dec2/dec3/dec/bytes/si; values must be numeric literals, not function names); sparkline=array of numbers or {data,name,color}; histogram=array of numbers; heatmap=matrix, {values,xLabels,yLabels}, or a date/time-keyed map; bullet={value,target,min,max,ranges,label} or array of such; scatter=array of [x,y] pairs or {x,y,symbol,color}; boxplot=array of numbers or {values,label} series; timeline=array of {label,start,end,color,status}; statusmatrix=matrix or {values,xLabels,yLabels}."
+            description: "Chart data, shape depends on `type`: line=array of numbers or array of arrays (multi-series); bars=array of numbers or {value,color,label}; printbars=a printBars-style format string \"<unit> <value[:color[:label]]> ...\" e.g. \"int 42:red:CPU 87:yellow:Mem\" (unit is one of int/dec1/dec2/dec3/dec/bytes/si; values must be numeric literals, not function names); sparkline=array of numbers or {data,name,color}; histogram=array of numbers; heatmap=matrix, {values,xLabels,yLabels}, or a date/time-keyed map; bullet={value,target,min,max,ranges,label} or array of such; scatter=array of [x,y] pairs or {x,y,symbol,color}; boxplot=array of numbers or {values,label} series; timeline=array of {label,start,end,color,status}; statusmatrix=matrix or {values,xLabels,yLabels}. Category charts (pie, donut, stackedbar, treemap) accept non-negative numbers, {label,value,color} records, or a value map. Divergingbars accepts the same shapes with signed values. Stackedcolumns accepts [{label,values:{category:number}}]. Dashboard accepts widgets or rows of widgets: {type,data,title,span,options}; allowed widget types: text, table, tree, md, map, progress, sparkline, histogram, heatmap, bullet, scatter, boxplot, timeline, statusmatrix, pie, donut, stackedbar, stackedcolumns, divergingbars, treemap. Executable/function widgets, chart/bar format strings, area, and nested dashboards are unsupported."
           },
           options: {
             type       : "object",
-            description: "Renderer options passed through to the OpenAF chart function for the chosen type: width, height, min, max, colors, palette, label/labels, showMinMax, buckets, vertical, showOutliers, showValue, valueFormat apply broadly where relevant; unit (line: int/dec1/dec2/dec3/dec4/dec/bytes/si, default dec; bars: int/dec1/dec2/dec3/dec/bytes/si); indicator/space (bars and printbars -- bar-fill character and gap character); max/min (printbars -- axis bounds, same as bars); xLabel/yLabel (scatter); xAxis/yAxis/aggregate/legend (heatmap time-bucketed); seriesLabels (line legend, paired with colors)."
+            description: "Renderer options passed through to the OpenAF chart function for the chosen type: width, height, min, max, colors, palette, label/labels, showMinMax, buckets, vertical, showOutliers, showValue, valueFormat apply broadly where relevant; unit (line: int/dec1/dec2/dec3/dec4/dec/bytes/si, default dec; bars: int/dec1/dec2/dec3/dec/bytes/si); indicator/space (bars and printbars -- bar-fill character and gap character); max/min (printbars -- axis bounds, same as bars); xLabel/yLabel (scatter); xAxis/yAxis/aggregate/legend (heatmap time-bucketed); seriesLabels (line legend, paired with colors). Category options: legend, maxCategories, normalize, showPercent, showValue, precision, unicode; pie/donut: size, mode, startAngle, clockwise, cellAspect, fallback; donut: innerRadius, centerText, centerTextOverflow; stackedcolumns: gap, labels; divergingbars: symmetric, min, max; treemap: labels, cellAspect. Dashboard: positive integer width/height/columns, border, borderColor, borderStyle; positive span controls widget proportions."
           },
           title  : { type: "string", description: "Optional bold header printed above the chart." },
           xlabel : { type: "string", description: "Optional X-axis label (mapped to options.xLabel)." },

@@ -4468,11 +4468,43 @@ an `oafPrintChart` Markdown fence:
 The parameters match the `printChart` tool: `type`, `data`, `options`, `title`,
 and optional axis labels. Supported types are `line`, `bars`, `printbars`,
 `sparkline`, `histogram`, `heatmap`, `bullet`, `scatter`, `boxplot`, `timeline`,
-and `statusmatrix`. Omitted width uses available console width. The tool remains
+`statusmatrix`, `pie`, `donut`, `stackedbar`, `stackedcolumns`, `divergingbars`,
+`treemap`, and `dashboard`. Omitted width uses available console width. The tool remains
 available for interim charts while Mini-A works. Invalid or incomplete blocks
 remain readable; `/last md` and saved Markdown retain the original JSON fences.
 This option defaults to false and inline chart rendering applies to the
 interactive console.
+
+Category charts accept non-negative numeric arrays, `{label,value,color}` records,
+or maps such as `{"Used":70,"Free":30}`. Use `divergingbars` for signed values,
+`stackedcolumns` with `[{"label":"Host","values":{"CPU":50,"Memory":30}}]`
+for composition comparisons, and `treemap` for category areas. Camel-case names
+such as `stackedBar` are also accepted.
+
+```oafPrintChart
+{"type":"donut","data":{"Used":70,"Free":30},"options":{"width":40,"height":12,"legend":"right","centerText":"70%"},"title":"Capacity"}
+```
+
+Category options include `legend`, `maxCategories`, `normalize`, `showPercent`,
+`showValue`, `precision`, and `palette`. Pie/donut additionally support `size`,
+`mode`, `cellAspect`, and `fallback`; donut supports `innerRadius` and
+`centerTextOverflow`. Diverging bars support `symmetric`, `min`, and `max`.
+Options follow the corresponding OpenAF renderer.
+
+Dashboards accept an array of widgets or an array of widget rows. Each widget
+has `type`, `data`, optional `title`, positive `span`, and `options`.
+Dashboard `width`, `height`, and `columns`, when supplied, must be positive integers;
+`border`, `borderColor`, and `borderStyle` control framing.
+
+```oafPrintChart
+{"type":"dashboard","data":[{"type":"donut","data":{"Used":70,"Free":30},"title":"Capacity"},{"type":"sparkline","data":[2,5,3,8],"title":"Trend"}],"options":{"width":80,"height":14,"columns":2}}
+```
+
+Allowed widgets are `text`, `table`, `tree`, `md`, `map`, `progress`, `sparkline`,
+`histogram`, `heatmap`, `bullet`, `scatter`, `boxplot`, `timeline`, `statusmatrix`,
+and the six new category chart types. Function payloads, `func`, format-string
+`chart`/`bar`, `area`, and nested dashboards are rejected. New renderers require
+an OpenAF version that provides them; missing functions produce an update hint.
 
 ### Local wiki absorption
 

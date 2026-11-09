@@ -826,6 +826,40 @@
     }
   }
 
+  // Cover new renderer forwarding and reject executable dashboard widgets before dispatch.
+  exports.testCategoryChartsAndDashboards = function() {
+    ow.loadFormat()
+    var names = { pie: "printPie", donut: "printDonut", stackedBar: "printStackedBar", stackedColumns: "printStackedColumns", divergingBars: "printDivergingBars", treemap: "printTreemap", dashboard: "printDashboard" }
+    var originals = {}, received, calls = 0
+    var tool = new MiniUtilsTool({ useasciiviz: true })
+    try {
+      Object.keys(names).forEach(function(type) {
+        var name = names[type]
+        originals[name] = ow.format[name]
+        ow.format[name] = function(data, options) { calls++; received = { data: data, options: options }; return "RENDERED" }
+        var data = type === "dashboard" ? [[{ type: "stackedBar", data: { A: 2 }, span: 2 }]] : { A: 2 }
+        ow.test.assert(tool.renderChart({ type: type, data: data, options: { width: 40 } }), "RENDERED", "New types render through shared path")
+        ow.test.assert(received.options.width, 40, "Options reach renderer")
+        if (type === "dashboard") ow.test.assert(received.data[0][0].type, "stackedBar", "Widget casing matches OpenAF")
+      })
+      var before = calls
+      var rejectedTypes = ["func", "chart", "bar", "area", "dashboard", "unknown"]
+      rejectedTypes.forEach(function(type) {
+        ow.test.assert(tool.renderChart({ type: "dashboard", data: [{ type: type, data: "danger()" }] }).indexOf("[ERROR]"), 0, "Unsafe widgets rejected")
+      })
+      var invalidData = [[], [[]], [{ type: "text", data: "x", span: 0 }], [{ type: "text", data: function() {} }], [[{ type: "text", data: "x" }], {}]]
+      invalidData.forEach(function(data) {
+        ow.test.assert(tool.renderChart({ type: "dashboard", data: data }).indexOf("[ERROR]"), 0, "Invalid dashboard rejected")
+      })
+      ow.test.assert(tool.renderChart({ type: "dashboard", data: [{ type: "text", data: "x" }], options: { columns: 0 } }).indexOf("[ERROR]"), 0, "Invalid dimensions rejected")
+      ow.test.assert(calls, before, "Rejected dashboards never reach OpenAF")
+      ow.format.printPie = __
+      ow.test.assert(tool.renderChart({ type: "pie", data: [1] }).indexOf("Update OpenAF") > 0, true, "Missing renderer has actionable error")
+    } finally {
+      Object.keys(originals).forEach(function(name) { ow.format[name] = originals[name] })
+    }
+  }
+
   exports.testRenderChartDoesNotDisplay = function() {
     var events = [], received, originalPrint = print, prints = []
     var tool = new MiniUtilsTool({ useasciiviz: true,

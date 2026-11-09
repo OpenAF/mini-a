@@ -1296,9 +1296,10 @@ MiniA.buildVisualKnowledge = function(options) {
       "  - Include charts in answers using fenced Markdown blocks tagged `oafPrintChart`. The console parses the JSON and renders the chart inline.\n" +
       "  - Each fence contains ONLY strict JSON using printChart parameters: {type, data, options, title}; no JavaScript, comments, or callbacks.\n" +
       "  - Example:\n```oafPrintChart\n{\"type\":\"line\",\"data\":[2,5,3,8],\"options\":{\"height\":8,\"unit\":\"int\"},\"title\":\"Trend\"}\n```\n" +
-      "  - Supported types: line, bars, printbars, sparkline, histogram, heatmap, bullet, scatter, boxplot, timeline, statusmatrix. Use the same data shapes and renderer options as printChart.\n" +
+      "  - Supported types: line, bars, printbars, sparkline, histogram, heatmap, bullet, scatter, boxplot, timeline, statusmatrix, pie, donut, stackedbar, stackedcolumns, divergingbars, treemap, dashboard. Use the same data shapes and renderer options as printChart.\n" +
       "  - When asked to plot or chart, include an oafPrintChart fence in the answer. Prefer these fences for numeric series, comparisons, distributions, progress, and status information worth visualizing.\n" +
       "  - Keep printChart tool calls for useful live/interim charts DURING execution. A tool call does not replace an explicitly requested answer chart.\n" +
+      "  - Use pie/donut/stackedbar for proportions, stackedcolumns for composition comparisons, divergingbars for signed comparisons, treemap for category areas, and dashboard for related data-only widgets. Dashboard widgets use {type,data,title,span,options}; never use func, chart/bar format strings, area, or nested dashboards.\n" +
       "  - Use clear titles and labels; keep each chart focused on one insight."
     )
   }
