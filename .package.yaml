@@ -335,8 +335,8 @@ filesHash:
   docs/WIKI-QUICKSTART.md: a7bdd10a557bc722a676ec62542a119fc01be63c
   docs/WIKI-RETRIEVAL-V2.md: 5de3673c7243f8cb8b7b9c4e1d33ac745a00269a
   docs/WIKI-STUDIO-IMPLEMENTATION.md: 763c1ce0e6268f1853823fb1e904b65be651bb5c
-  docs/WIKI-STUDIO.md: a37c8bda4b4f8ac247fc52f553959ebaeec27e2c
-  docs/WIKI.md: a914d5a8601bec0d2d21c0fc88c866255feaba43
+  docs/WIKI-STUDIO.md: 59c1d0a1a1582aa179fff1f791d56fa00ea93beb
+  docs/WIKI.md: c77c38ecc35dae4224ca3e2cd6abcfa3c8d82754
   docs/WORKIQ.md: 9d2a64d6e06e148775a77b8c4df40427ffb16524
   docs/examples/embed-parent.html: 424f23db52096d9c01155656e8c607a20878ed04
   evals/context-virtualization.yaml: 1e3b86cf0c77b92c39de42d53881b264ede0efe6
@@ -408,15 +408,15 @@ filesHash:
   js/skills/mini-a-plugins.js: e9f5b70fa7d7c32bfe4ffbadf4967b7cd74bc3d5
   js/skills/mini-a-skill-runtime.js: f2bac1ae48f9a72cb78b1f0f8c1155152f7f075a
   js/skills/mini-a-skills.js: 11fc69463269641c4f69ad08d2dd955d9ef89259
-  js/studio/wiki-studio-api.js: 15d364d6b72695678d36cf75a049b8ccc5c5b4d7
+  js/studio/wiki-studio-api.js: 9454cbec3a0a9574391073cbdf35b29f58e72049
   js/studio/wiki-studio-backups.js: a988e76e58702cedd9e460ccbc1d4541a55e6ffd
   js/studio/wiki-studio-bootstrap.js: b372b762e60f9fce16246ff44ac5b22dee3fa109
   js/studio/wiki-studio-common.js: 3c2093efc25dd4b449b86decb699265da4402513
   js/studio/wiki-studio-config.js: 9fea13ace56ab4996e0ab78dd9ab24eacf7cb7a4
   js/studio/wiki-studio-graph.js: 10955546c41707073e8a465b055c4690d4e32d77
-  js/studio/wiki-studio-ingestion.js: 61d87e23a7f4fa1e9ef15019349a548810798d66
+  js/studio/wiki-studio-ingestion.js: fefb6c38d7a702e4b9748d8e0e967f97f0f13f4b
   js/studio/wiki-studio-jobs.js: ad9352aa5a32309e145db2cf03cbc232e9e5944e
-  js/studio/wiki-studio-operations.js: 1530ecdb419ec957f6b21909287fcb22412b66af
+  js/studio/wiki-studio-operations.js: 156d17f6544ad5cb223f657ddb4800a0539899c7
   js/studio/wiki-studio-outbound.js: d86a20b91903266438a393b2a5d11f90fe07d191
   js/studio/wiki-studio-pages.js: 08b96b89ce3af0f8d9952ed121a0e2a66e4e9566
   js/studio/wiki-studio-registry.js: 8d96e3a5241d64522c15fc96a932619ae4204856
@@ -428,15 +428,15 @@ filesHash:
   js/web/mini-a-web-session.js: d1be5352a28708865a7a11bde9c68ce08e3f8aef
   js/wiki/mini-a-absorb.js: 6e5ec9a54eb3485c8787e693c7c8baba30cd9834
   js/wiki/mini-a-graph-options.js: 8b4acf8ad103ee7fa707b2a376782b5de968a21b
-  js/wiki/mini-a-graph.js: 50e4095b37c28881358778c155d98b76e5f21995
-  js/wiki/mini-a-ingest.js: 25f6e81f466d6969bfade1d25e7cc766d2c6ec00
+  js/wiki/mini-a-graph.js: 76f8a3779117b08cfbd411d70ba256d45ae327b9
+  js/wiki/mini-a-ingest.js: 85fdbe90afe5839dbe4ca555dac09170fdd036ce
   js/wiki/mini-a-mcp-wiki.js: e524c7b3fcd8f35a43187124864e6533ce1d470a
   js/wiki/mini-a-wiki-export.js: 2c43e40d61eba88146a28dd07829190bd088a0ca
   js/wiki/mini-a-wiki-folders.js: d22e361f8ef7f0e32f09c466e169283d4796b50a
   js/wiki/mini-a-wiki-knowledge.js: b0b4e771af92fcc4257926fac7d468adcf26e633
   js/wiki/mini-a-wiki-maintenance.js: be11599afcbb73630e188de62ac086f9f8b73919
   js/wiki/mini-a-wiki-retrieval.js: e2322e6ca9bb09c6b269f43e2db16b5f28881299
-  js/wiki/mini-a-wiki.js: 77a15639a86dd57bce1787e51747cf3989aa972c
+  js/wiki/mini-a-wiki.js: 0c5a1fb5fb65731220a78d38d086da78838fb5a0
   js/wiki/mini-a-wikiops.js: 3554824aca8b45c99dd0fe81574c01a589e611e7
   mcps/CREATING.md: 96bae262502f3fc47b4431a4234253f03cc3366a
   mcps/EXTERNAL-MCPS.md: 152d0db701bc3ee259d4184f08fdce3ca2b0d332
@@ -506,7 +506,7 @@ filesHash:
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   public/studio/index.html: 594c0185415165d621ecfb528f3bd914b940117b
   public/studio/studio.css: 5276901e63d10fa9320636a7ab7116c0898babdb
-  public/studio/studio.js: f06875eef44f068507e9f2710aaa57488d41fe26
+  public/studio/studio.js: a0fbb1307720ff97fbf693c0feb5d927fa8828c5
   skills/mini-a-contract-authoring/SKILL.md: 0d98a31839edfbe86463893816dfd258e5261de7
   skills/mini-a-contract-authoring/references/CONTRACT.md: 58d482c7a033e0c03e7b0fe40d037bcd99e663c9
   skills/mini-a-decisions/SKILL.md: 2f5f011baacbf1bf7d1d37c6268eb78113e62524
