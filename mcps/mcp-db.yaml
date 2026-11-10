@@ -194,9 +194,12 @@ jobs:
         // Return the java.sql.Connection info from the Connection object __connect
         var _metadata = _connect.getMetaData()
 
+        var _protocolVersion = null
+        // Protocol version is a driver extension, not part of java.sql.Connection.
+        try { _protocolVersion = _connect.getProtocolVersion() } catch(unsupportedProtocol) {}
         return {
-          version        : _connect.getDBVersionNumber(),
-          protocolVersion: _connect.getProtocolVersion(),
+          version        : _metadata.getDatabaseProductVersion(),
+          protocolVersion: _protocolVersion,
           autoCommit     : _connect.getAutoCommit(),
           catalog        : _connect.getCatalog(),
           clientInfo     : af.fromJavaMap(_connect.getClientInfo()),

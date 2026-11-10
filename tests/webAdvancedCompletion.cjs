@@ -17,13 +17,13 @@ function fixture(advanced = true) {
   const control = { disabled: true, classList: { remove() {} } };
   const context = vm.createContext({
     advancedUI: advanced ? {} : null, currentSessionUuid: 'session', isProcessing: true,
-    pollInFlight: false, pollQueued: false, pollingInterval: null,
+    pollInFlight: false, pollQueued: false, pollingInterval: null, transcriptPollUuid: null, transcriptRevision: null, transcriptContent: "",
     streamActive: true, streamBuffer: 'Partial preview', conversationFinished: false,
     promptInput: control, submitBtn: control, clearBtn: control, attachBtn: null, fileInput: null,
     planPanel: null, attachmentsEnabled: false, console,
     lastRawContent: 'Prompt', lastKnownHistory: [], lastSubmittedPrompt: 'Explain',
     lastFinishedPrompt: '', sawNonFinishedForActiveSubmission: false,
-    historyEnabled: true, activeHistoryId: null, activeSubmissionStartedAt: 1,
+    historyEnabled: true, activeHistoryId: null, activeSubmissionStartedAt: 1, activeSubmissionRunId: 'active-run',
     fetch(url, options) {
       let resolve;
       const pending = new Promise(done => { resolve = done; });
@@ -37,7 +37,7 @@ function fixture(advanced = true) {
     normalizePromptForComparison: value => value,
     ensurePromptVisibleUntilAcknowledged: value => value,
     renderRawContent: async value => { renders.push(value); },
-    addConversationToHistory: (uuid, prompt, data) => { saved.push({ uuid, content: data.content }); return { id: uuid }; },
+    addConversationToHistory: (uuid, prompt, data) => { saved.push({ uuid, content: data.content, history: data.history }); return { id: uuid }; },
     stopStream() { context.streamActive = false; context.streamBuffer = ''; },
     setTimeout(fn) { timers.push(fn); return timers.length; }, clearTimeout() {},
     setSubmitIcon() {}, setPlanningMode() {}, removePreview() {}, addPreview() {},
@@ -89,5 +89,39 @@ function fixture(advanced = true) {
   assert.equal(simple.context.currentSessionUuid, null, 'Simple mode retains its existing completion lifecycle');
   await simple.context.pollOnce();
   assert.equal(simple.requests.length, 0);
+  const stale = fixture();
+  stale.context.activeSubmissionRunId = 'new-run';
+  const stalePoll = stale.context.pollOnce();
+  stale.requests[0].resolve({ok:true,json:async()=>({status:'finished',runId:'old-run',transcriptRevision:'old',content:'Old answer',history:[{event:'user',message:'Explain'}]})});
+  await stalePoll;
+  assert.equal(stale.renders.length,0,'Reject a different run even when prompt text matches');
+  assert.equal(stale.context.transcriptRevision,null,'Stale runs cannot advance transcript revision');
+  const revisions = fixture();
+  revisions.context.streamActive = false;
+  let poll = revisions.context.pollOnce();
+  const history = [{event:'user',message:'Explain'}];
+  revisions.requests.at(-1).resolve({ok:true,json:async()=>({status:'processing',runId:'active-run',transcriptRevision:'r1',content:answer,history})});
+  await poll;
+  poll = revisions.context.pollOnce();
+  assert.equal(revisions.requests.at(-1).body.ifTranscriptRevision,'r1');
+  revisions.requests.at(-1).resolve({ok:true,json:async()=>({status:'finished',outcome:'success',runId:'active-run',transcriptRevision:'r1'})});
+  await poll;
+  assert.equal(revisions.saved.at(-1).content,answer);
+  assert.deepEqual(revisions.saved.at(-1).history,history,'Unchanged terminal polls retain full history for persistence');
+  const retry = fixture(false);
+  Object.assign(retry.context, {
+    isProcessing:false, lastKnownHistory:history, window:{}, streamEnabled:false,
+    captureEmbedContext:()=>null, getCurrentConversationEvents:()=>history,
+    removeLastAssistantFromEvents:events=>events, getOrCreateSessionUuid:()=> 'session',
+    sendHistoryToServer:async()=>{}, renderRawContent:async()=>{}, forceRenderChartBlocks:()=>{},
+    resetPlanPanel:()=>{}, resetSubagentPanel:()=>{}, hljs:{highlightAll(){}},
+    fetch:async()=>({ok:true,json:async()=>({uuid:'session',runId:'retry-run'})}),
+    startProcessing(){retry.context.startedRun=retry.context.activeSubmissionRunId;}, startPolling(){}
+  });
+  const retryStart = page.indexOf('    async function handleRetryLastAnswer()');
+  const retryEnd = page.indexOf('    function captureActivityDisclosures()',retryStart);
+  vm.runInContext(page.slice(retryStart,retryEnd),retry.context);
+  await retry.context.handleRetryLastAnswer();
+  assert.equal(retry.context.startedRun,'retry-run','Retry binds the newly accepted run before polling');
   console.log('Advanced completion ordering checks passed (final rendering, history, refresh, Stop and Simple mode).');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const crypto = require('node:crypto');
-const source = fs.readFileSync('mini-a.js', 'utf8');
+const source = fs.readFileSync('js/core/mini-a.js', 'utf8');
 let clock = 1000, pending = [], clients = [], events = [], stamps = {}, wikiCloses = 0;
 function MiniA() { this._mcpConnections = {}; }
 function File(path) { this.path = path; this.getCanonicalPath = () => path; this.lastModified = () => stamps[path] || 1; this.length = () => 1; }

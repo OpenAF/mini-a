@@ -1,0 +1,111 @@
+include:
+- oJobTest.yaml
+ojob:
+  logToConsole: false
+jobs:
+- name: Studio source migration and isolation
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testSourceIsolationAndMigration
+- name: Studio inventory and lock namespaces
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testInventoryAndNamespaces
+- name: Studio oversized outcomes
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testOversizedOutcomes
+- name: Studio recursive folders
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testFolders
+- name: Studio selections
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testSelections
+- name: Studio create folder
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testCreateFolder
+- name: Studio graph build settings
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testGraphBuildSettings
+- name: Studio cleanup
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testCleanup
+- name: Studio explorer
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testExplorer
+- name: Studio registry
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testRegistry
+- name: Studio root browse
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testRootBrowse
+- name: Studio change root
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testChangeRoot
+- name: Studio search modes
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testSearchModes
+- name: Studio authorization
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testAuth
+- name: Studio paths
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testPaths
+- name: Studio atomic persistence
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testAtomicAndLocks
+- name: Studio pages
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testPages
+- name: Studio graph
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testGraph
+- name: Studio durable jobs
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testJobs
+- name: Studio source boundaries
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testSources
+- name: Studio hydration
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testHydration
+- name: Studio backups and restore
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testBackups
+- name: Studio bulk backup deletion
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testBulkBackupDelete
+- name: Studio wiki exports
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testExports
+- name: Studio dream safety
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testDreamSafety
+- name: Studio planned absorption
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testAbsorption
+todo:
+- Studio source migration and isolation
+- Studio inventory and lock namespaces
+- Studio oversized outcomes
+- Studio recursive folders
+- Studio selections
+- Studio create folder
+- Studio graph build settings
+- Studio cleanup
+- Studio explorer
+- Studio planned absorption
+- Studio backups and restore
+- Studio bulk backup deletion
+- Studio wiki exports
+- Studio dream safety
+- Studio hydration
+- Studio source boundaries
+- Studio durable jobs
+- Studio graph
+- Studio pages
+- Studio registry
+- Studio root browse
+- Studio change root
+- Studio search modes
+- Studio authorization
+- Studio paths
+- Studio atomic persistence
+

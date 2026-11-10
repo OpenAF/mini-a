@@ -236,7 +236,7 @@ When auto-spill fires, the response includes `"autoSpilled": true` and the same 
 ### Key Components
 
 1. **`_createMcpProxyConfig(mcpConfigs, args)`**: Creates a dummy MCP configuration that wraps all downstream connections
-2. **Proxy State Management**: Uses `global.__mcpProxyState__` to track all connections, tools, and aliases
+2. **Proxy State Management**: Tracks connections, tools, and aliases in state owned by the root agent; delegated children inherit that state when sharing its proxy
 3. **Helper Functions**: Includes utilities for deep cloning, sanitizing sensitive data, resolving connection IDs, and rebuilding tool indexes
 
 ### Connection Tracking
@@ -336,12 +336,45 @@ For small payloads, inline `arguments` and inline `result` are simpler and usual
 
 ## Technical Notes
 
-1. **Global State**: The proxy maintains global state in `global.__mcpProxyState__` and `global.__mcpProxyHelpers__`
+1. **Session State**: Executable proxy closures use their owning agent's state and helpers. `global.__mcpProxyState__` and `global.__mcpProxyHelpers__` remain legacy diagnostic pointers, rather than shared dispatch state
 2. **Lazy Initialization**: Compatible with `mcplazy=true` for deferred connection setup
 3. **Error Handling**: Each connection tracks errors independently; failures don't break the entire proxy
-4. **Tool Caching**: Works with existing tool caching mechanisms (when `toolcachettl` is set)
+4. **Tool Caching**: Only downstream tools explicitly declaring `cacheable: true` or `deterministic: true` are eligible; `toolcachettl` controls their lifetime. The outer proxy is always uncached
 5. **Security**: Sensitive credentials in connection descriptors are sanitized before being returned
 
 ## Based On
 
 This implementation is based on the standalone `mcps/mcp-proxy.yaml` oJob file, which provides the same proxy functionality as a standalone MCP server. The integration into mini-a.js makes this capability available natively without requiring external processes.
+
+## Caching and dispatch safety
+
+Mini-A caches a tool result only when the tool declares boolean `cacheable: true`
+or `deterministic: true` in `annotations` or `metadata`. A false value for either
+field overrides a positive declaration. `readOnlyHint: false` also disables
+caching. Read-only and idempotent hints alone do not imply that a result stays
+fresh: time, random and live-data tools are called each time. Bundled `mcp-math`
+operations explicitly opt in. Existing TTL and `cacheKeyFields` controls still
+apply; declare every input that can affect a cached result.
+
+Caches belong to a root session and the current MCP client/catalog generation.
+Delegated children that share clients also share invalidation. Namespaces are
+opaque and contain no connection credentials. Potential mutations invalidate the
+family before and after execution, including shell commands and idempotent
+writes. Reads bypass the cache while a mutation runs, and a read that overlaps an
+invalidation cannot populate it. Explicit cacheable or deterministic declarations
+without a read-only hint are treated as a promise that the operation is safe to
+cache; writable declarations always override that promise.
+
+Transient initialization failures can retry before dispatch. After dispatch,
+Mini-A retries only operations explicitly marked read-only or idempotent. If an
+unsafe operation loses its response, the existing error envelope additionally
+contains `outcome: "unknown"` and `retryable: false`: the remote write may already
+have completed, so automatic replay is suppressed. Inspect the remote state
+before deciding to invoke the operation again. The same optional fields pass
+through programmatic tool-call error responses.
+
+The embedded proxy applies these rules to the resolved downstream tool, after
+reading any `argumentsFile`. The outer `proxy-dispatch` call is never cached and
+runs once. Serialization or result-file failures cannot repeat the downstream
+action; a result-file error returns `retryable: false` even if the action itself
+completed successfully.

@@ -1,8 +1,8 @@
 // Provider-free integration of /decide through the shared Advanced/console dispatcher.
 // Run: OAF_DECIDE_MODEL="(type: ollama, model: env-decision)" oaf -f tests/decideCommand.js
 if (getEnv("OAF_DECIDE_MODEL") !== "(type: ollama, model: env-decision)") throw new Error("Run with the documented fixture model configuration")
-load('mini-a-session.js')
-load('mini-a-advanced.js')
+load('js/session/mini-a-session.js')
+load('js/web/mini-a-advanced.js')
 var testRoot = String(io.createTempFile('mini-a-decide-', '.dir'))
 io.rm(testRoot); io.mkdir(testRoot)
 var originalHome = __gHDir

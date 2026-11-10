@@ -26,8 +26,13 @@ todo:
 jobs:
 - name: Compact wiki
   exec: |
-    load("mini-a-common.js")
-    load("mini-a-wiki.js")
+    var miniALibraryRoot = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParentFile().getParent())
+    if (!io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) miniALibraryRoot = getOPackPath("mini-a")
+    if (!isString(miniALibraryRoot) || !io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) throw new Error("Cannot locate the Mini-A package for " + ow.oJob.__file)
+    loadLib(miniALibraryRoot + "/js/mini-a-paths.js")
+    __miniAPackageRoot = __miniAResolvePackageRoot(miniALibraryRoot)
+    loadLib(__miniAPath("js/core/mini-a-common.js"), true)
+    loadLib(__miniAPath("js/wiki/mini-a-wiki.js"), true)
     if (!isString(args.dir) || !new java.io.File(args.dir).isDirectory()) throw "A local wiki directory is required"
     var wm = new MiniAWikiManager({ backend:"fs", root:args.dir, access:"rw", wikiretrievalv2:true, wikilexical:args.wikilexical, wikiretrievalconfig:args.wikiretrievalconfig })
     try {

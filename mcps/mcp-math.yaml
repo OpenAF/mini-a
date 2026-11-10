@@ -45,6 +45,7 @@ todo:
           title         : calculate
           readOnlyHint  : true
           idempotentHint: true
+          cacheable     : true
 
       statistics:
         name       : statistics
@@ -69,6 +70,7 @@ todo:
           title         : statistics
           readOnlyHint  : true
           idempotentHint: true
+          cacheable     : true
 
       convert-unit:
         name       : convert-unit
@@ -97,6 +99,7 @@ todo:
           title         : convert-unit
           readOnlyHint  : true
           idempotentHint: true
+          cacheable     : true
 
       number-info:
         name       : number-info
@@ -113,6 +116,7 @@ todo:
           title         : number-info
           readOnlyHint  : true
           idempotentHint: true
+          cacheable     : true
 
     ((fns    )): &MCPFNS
       calculate   : Calculate mathematical operations

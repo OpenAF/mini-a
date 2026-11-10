@@ -66,13 +66,13 @@
     }
   },
   "sourceSha1": {
-    "mini-a-wiki.js": "723d50264550090e153dd399b91e01e7b1113cfb",
-    "mini-a-wiki-retrieval.js": "f25c86ff78acdf851095e77581d135850d880180",
-    "mini-a-wiki-knowledge.js": "dc0b786982d834d6e66a9b2cb24a8f5760f89fd6",
-    "mini-a-ingest.js": "2843494bf25f81d26db4f9748f6faddf4f4e334a",
-    "mini-a-mcp-wiki.js": "2e5e759e7f1e0ee2f69f33f17704ad6b7735e369",
+    "js/wiki/mini-a-wiki.js": "723d50264550090e153dd399b91e01e7b1113cfb",
+    "js/wiki/mini-a-wiki-retrieval.js": "f25c86ff78acdf851095e77581d135850d880180",
+    "js/wiki/mini-a-wiki-knowledge.js": "dc0b786982d834d6e66a9b2cb24a8f5760f89fd6",
+    "js/wiki/mini-a-ingest.js": "2843494bf25f81d26db4f9748f6faddf4f4e334a",
+    "js/wiki/mini-a-mcp-wiki.js": "2e5e759e7f1e0ee2f69f33f17704ad6b7735e369",
     "tests/wikiRetrievalV2.js": "aab345246931b066fd6dcfbfb6d142e6378b8331",
-    "mini-a-utils.js": "4296b052b92a3ea3f5beb3233047abe6ab6c3d6b",
+    "js/core/mini-a-utils.js": "4296b052b92a3ea3f5beb3233047abe6ab6c3d6b",
     "mcps/mcp-wiki.yaml": "73f4ba47d6b902b7e8cbca1bd6eea25e065b6ca4",
     "tests/wikiRetrievalContracts.js": "25c8972d693d5da5aba536dd29d56980beaf8914",
     "tests/wiki.js": "da5e76705015b73bc96b363bfec1d36a0c41a105"

@@ -1,6 +1,7 @@
 (function() {
   exports.testWebPersistence = function() {
     load("mini-a.js")
+    loadLib(String(new java.io.File("js/memory/mini-a-history-vm.js").getCanonicalPath()))
     var root = String(java.nio.file.Files.createTempDirectory("mini-a-history-s3-").toAbsolutePath())
     var yaml = io.readFileString("mini-a-web.yaml")
     var start = yaml.indexOf("    global._mini_a_web_buildHistoryPayload =")
@@ -114,7 +115,12 @@
       ow.test.assert(io.fileExists(path) && io.fileExists(path + ".historyvm") && isDef(objects["sessions/c-test.json"]), true, "Automatic expiry retains history when historykeep is enabled")
       global._mini_a_web_checkToken = function() { return true }
       global._mini_a_web_isValidUuid = function() { return true }
-      var clear = yaml.split("# Clear a session")[1].split("# Submit a prompt")[0].split("((execURI      )): | #js\n")[1]
+      // Select the route structurally so adjacent routes/comments cannot enter JS.
+      var clearRoutes = af.fromYAML(yaml).todo.filter(function(entry) {
+        return isMap(entry) && entry["((uri          ))"] === "/clear"
+      })
+      ow.test.assert(clearRoutes.length, 1, "Exactly one clear route exists")
+      var clear = clearRoutes[0]["((execURI      ))"]
       new Function("request", clear)({ files: { postData: '{"uuid":"test","force":true}' } })
       ow.test.assert(io.fileExists(path) || io.fileExists(path + ".historyvm") || isDef(objects["sessions/c-test.json"]), false, "Explicit deletion overrides historykeep for local and remote state")
       objects["sessions/c-legacy.json"] = '{"c":[{"role":"user","content":"legacy"}]}'

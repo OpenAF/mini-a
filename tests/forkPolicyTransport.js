@@ -2,7 +2,7 @@
 var fixtureUrl = getEnv("MINI_A_FORK_FIXTURE_URL")
 if (!isString(fixtureUrl) || !/^http:\/\/127\.0\.0\.1:\d+$/.test(fixtureUrl)) throw new Error("Use tests/forkPolicyTransport.py")
 load("mini-a.js")
-load("mini-a-subtask.js")
+load("js/core/mini-a-subtask.js")
 ;["native", "structured", "timeout"].forEach(function(kind) {
   var agent = new MiniA()
   agent.fnI = function() {}; agent._trace = function() {}

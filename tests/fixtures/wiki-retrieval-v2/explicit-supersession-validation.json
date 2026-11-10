@@ -1,7 +1,7 @@
 {
   "sources": {
-    "mini-a-wiki-knowledge.js": "4ccb56f13414f6891740d700171910b9ee69d341",
-    "mini-a-wiki-retrieval.js": "cc204b7806e2f9f5354628c141ae87f357458b3b",
+    "js/wiki/mini-a-wiki-knowledge.js": "4ccb56f13414f6891740d700171910b9ee69d341",
+    "js/wiki/mini-a-wiki-retrieval.js": "cc204b7806e2f9f5354628c141ae87f357458b3b",
     "tests/wikiRetrievalV2.js": "3d17da1222556ff1b8fcf56d478e668dfcb9dd00",
     "tests/wikiRetrievalV2.yaml": "6e897d35dc71176ccc9f0e3af6f00b343553e2c8",
     "tests/wiki.yaml": "16ff6933c3e11d0587de24d2276821945b8acaec"

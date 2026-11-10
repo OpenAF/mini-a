@@ -1,0 +1,1608 @@
+// Author: Nuno Aguiar
+// License: Apache 2.0
+// Description: Shared utility functions used across mini-a components.
+
+// Per-instance policy: never install a process-global IO hook (web sessions share a JVM).
+function MiniAFileAccess(allowed) {
+  this.enabled = isDef(allowed)
+  if (!this.enabled) return
+  if (isString(allowed)) {
+    var text = allowed.trim()
+    // Structured inputs must parse successfully; never reinterpret them as path lists.
+    if (/^[\[({]/.test(text)) {
+      try {
+        try { allowed = JSON.parse(text) } catch(ignoreJSON) { allowed = af.fromJSSLON(text) }
+      } catch(parseError) {
+        throw new Error("fileallow contains an invalid JSON/SLON array")
+      }
+    } else {
+      allowed = text.split(",").map(function(path) { return path.trim() })
+    }
+  }
+  if (!isArray(allowed) || allowed.some(function(path) { return !isString(path) || !path.trim() })) {
+    throw new Error("fileallow must be a comma-delimited list or JSON/SLON array of file or directory paths")
+  }
+  this.roots = allowed.map(function(path) {
+    var file = new java.io.File(path).getCanonicalFile()
+    if (!file.exists()) throw new Error("fileallow entry does not exist: " + path)
+    return { path: file.toPath(), directory: file.isDirectory() }
+  })
+}
+
+// A remote generated task can opt into this strictly narrower execution profile.
+// Apply it again after child argument merging so worker defaults cannot widen it.
+function __miniARemoteComputeConfine(args) {
+  ;["useshell", "readwrite", "useutils", "usestdutils", "usetools", "usetoolslc", "usejsontool", "mcpproxy", "mcpprogcall",
+    "usedelegation", "autodelegation", "usewiki", "useskills", "useskillswiki", "usememory", "memorymd", "memoryreflect",
+    "usehistory", "historyvm", "historyvmshadow", "contextvirtualization", "contextvirtualizationshadow", "useplanning",
+    "planmode", "validateplan", "deepresearch", "outerloop"].forEach(function(k) { args[k] = false })
+  ;["agent", "agentfile", "plugins", "pluginsroot", "pluginsroots", "mcp", "mcpconfig", "workerreg", "workerregurl", "workerregtoken",
+    "outfile", "outfileall", "outputfile", "planfile", "plancontent", "contractfile", "contractargs", "libs", "agentcomms", "_skillHandoff"].forEach(function(k) { delete args[k] })
+  args.workers = []
+  args.fileallow = []
+  args.noagentsmd = true
+  args.modelstrategy = "default"
+  args._autoDecompose = false
+  args._autoDelegate = false
+  return args
+}
+
+// The worker admission path supplies a validated intersection of parent,
+// worker and task scopes. Reapply it after all inherited argument merges.
+function __miniARemoteScopedFileConfine(args, scope) {
+  if (!isMap(scope) || !isString(scope.root) || !isArray(scope.reads) || !isArray(scope.writes) || !isArray(scope.policies)) throw new Error("Invalid scoped file contract")
+  __miniARemoteComputeConfine(args)
+  args._remoteScopedFiles = clone(scope)
+  args._inheritedPolicies = clone(scope.policies)
+  args.policy = {}
+  delete args.policyfile
+  args.utilsroot = scope.root
+  args.fileallow = clone(scope.reads)
+  args._remoteWriteAllow = clone(scope.writes)
+  args.usetools = true
+  args.useutils = true
+  args.usestdutils = true
+  args.readwrite = scope.writes.length > 0
+  args.utilsallow = args.readwrite ? "read,apply_patch" : "read"
+  delete args.utilsdeny
+  return args
+}
+
+MiniAFileAccess.prototype.assert = function(path) {
+  if (!this.enabled) return path
+  var canonical = new java.io.File(String(path)).getCanonicalFile().toPath()
+  if (!this.roots.some(function(root) { return canonical.equals(root.path) || root.directory && canonical.startsWith(root.path) })) {
+    var error = new Error("File access denied by fileallow: " + path)
+    error.code = "MINI_A_FILE_DENIED"
+    throw error
+  }
+  return String(canonical)
+}
+MiniAFileAccess.prototype.allows = function(path) {
+  try { this.assert(path); return true } catch(e) { return false }
+}
+
+// Compute the narrower canonical roots shared by two independent policies.
+// An omitted policy is unrestricted; an empty list denies all access.
+MiniAFileAccess.intersection = function(first, second) {
+  var a = new MiniAFileAccess(first), b = new MiniAFileAccess(second)
+  if (!a.enabled && !b.enabled) return __
+  var roots = [], seen = Object.create(null)
+  var add = function(root) {
+    var path = String(root.path)
+    if (!seen[path]) { seen[path] = true; roots.push(path) }
+  }
+  if (!a.enabled) { b.roots.forEach(add); return roots }
+  if (!b.enabled) { a.roots.forEach(add); return roots }
+  a.roots.forEach(function(left) { b.roots.forEach(function(right) {
+    if (left.path.equals(right.path)) add(left)
+    else if (left.directory && right.path.startsWith(left.path)) add(right)
+    else if (right.directory && left.path.startsWith(right.path)) add(left)
+  }) })
+  return roots
+}
+MiniAFileAccess.prototype.url = function(url) {
+  if (!this.enabled) return url
+  var parsed = new java.net.URI(String(url)), scheme = String(parsed.getScheme()).toLowerCase()
+  if (scheme === "file") this.assert(String(new java.io.File(parsed)))
+  else if (scheme !== "http" && scheme !== "https") throw new Error("URL scheme denied by fileallow: " + scheme)
+  return url
+}
+
+/**
+ * Returns a formatted error message string from an error value.
+ * Replaces the repeated `(e.message || String(e))` / `(isDef(e) && isString(e.message)) ? e.message : e` pattern.
+ */
+function __miniAErrMsg(e) {
+  return (isDef(e) && isString(e.message)) ? e.message : String(e)
+}
+
+function __miniAIsContextOverflowError(error) {
+  var err = isObject(error) ? error : {}
+  if (isString(error)) err = { message: error }
+  if (!isObject(err)) return false
+
+  var samples = []
+  var add = value => {
+    if (!isString(value)) return
+    var text = value.trim()
+    if (text.length === 0) return
+    samples.push(text.toLowerCase())
+  }
+
+  add(err.message)
+  add(err.error)
+  add(err.code)
+  add(err.type)
+  if (isObject(err.error)) {
+    add(err.error.message)
+    add(err.error.code)
+    add(err.error.type)
+  }
+
+  if (isObject(err.response)) {
+    add(err.response.message)
+    add(err.response.error)
+    add(err.response.code)
+    add(err.response.type)
+    if (isObject(err.response.error)) {
+      add(err.response.error.message)
+      add(err.response.error.error)
+      add(err.response.error.code)
+      add(err.response.error.type)
+      add(err.response.error.status)
+    }
+  }
+
+  var normalized = samples.join(" | ")
+  if (normalized.length === 0) return false
+
+  var directSignals = [
+    "context_length_exceeded",
+    "model_context_window_exceeded",
+    "maximum context length",
+    "max context length",
+    "context window",
+    "prompt is too long",
+    "prompt too long",
+    "input token count",
+    "input too long",
+    "too many tokens",
+    "token limit exceeded",
+    "input length and max_tokens exceed context limit",
+    "input length and `max_tokens` exceed context limit",
+    "exceeds the maximum number of tokens"
+  ]
+
+  for (var i = 0; i < directSignals.length; i++) {
+    if (normalized.indexOf(directSignals[i]) >= 0) return true
+  }
+
+  var hasSizeTarget =
+    normalized.indexOf("context") >= 0 ||
+    normalized.indexOf("token") >= 0 ||
+    normalized.indexOf("prompt") >= 0 ||
+    normalized.indexOf("input") >= 0
+  var hasOverflowSignal =
+    normalized.indexOf("exceed") >= 0 ||
+    normalized.indexOf("too long") >= 0 ||
+    normalized.indexOf("limit") >= 0 ||
+    normalized.indexOf("maximum") >= 0
+
+  return hasSizeTarget && hasOverflowSignal
+}
+
+// Shared by evaluation and supervised acceptance. No executable expressions.
+function __miniACompareAssertion(actual, assertion) {
+  var label = assertion.name || assertion.path || "answer"
+  var out = { passed: false, assertion: label, actual: actual, expected: "recognized assertion" }
+  if (isDef(assertion.equals)) { out.expected = assertion.equals; out.passed = actual === assertion.equals }
+  else if (isDef(assertion.contains)) { out.expected = assertion.contains; out.passed = String(actual).indexOf(String(assertion.contains)) >= 0 }
+  else if (isDef(assertion.notContains)) { out.expected = assertion.notContains; out.passed = String(actual).indexOf(String(assertion.notContains)) < 0 }
+  else if (isDef(assertion.matches)) { out.expected = assertion.matches; out.passed = new RegExp(assertion.matches).test(String(actual)) }
+  else if (isDef(assertion.max)) { out.expected = "<= " + assertion.max; out.passed = isNumber(actual) && actual <= assertion.max }
+  else if (isDef(assertion.min)) { out.expected = ">= " + assertion.min; out.passed = isNumber(actual) && actual >= assertion.min }
+  return out
+}
+
+function __miniAParseSkillArgs(rawValue) {
+  var raw = isString(rawValue) ? rawValue.trim() : ""
+  var argv = [], current = "", quote = "", escaping = false
+  for (var i = 0; i < raw.length; i++) {
+    var ch = raw.charAt(i)
+    if (escaping) { current += ch; escaping = false; continue }
+    if (ch === "\\") { escaping = true; continue }
+    if (quote.length > 0) { if (ch === quote) quote = ""; else current += ch; continue }
+    if (ch === "'" || ch === '"') { quote = ch; continue }
+    if (/\s/.test(ch)) { if (current.length > 0) { argv.push(current); current = "" }; continue }
+    current += ch
+  }
+  if (escaping || quote.length > 0) return { ok: false, error: "Unbalanced quotes or trailing escape in arguments." }
+  if (current.length > 0) argv.push(current)
+  return { ok: true, raw: raw, argv: argv, argc: argv.length }
+}
+
+/**
+ * Normalizes console event text while preserving message line boundaries.
+ * Providers can supply either actual line feeds or escaped `\\n` sequences.
+ */
+function __miniANormalizeConsoleEventText(value) {
+  return (isString(value) ? value : String(value || ""))
+    .replace(/\r\n?/g, "\n")
+    .replace(/\\n/g, "\n")
+    .trim()
+}
+
+/**
+ * Buffers a Markdown stream until it has complete renderable units. Markdown
+ * renderers are line-oriented, so handing them provider-sized token fragments
+ * loses inline formatting such as emphasis and links.
+ */
+function __miniAMarkdownStream(opts) {
+  opts = isObject(opts) ? opts : {}
+  var pending = "", inCode = false, code = "", codeFence = "", codeFenceLength = 0, chartCode = false, inTable = false, table = "", header = ""
+  var separator = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/
+
+  function cellCount(line) {
+    var value = String(line || "").trim()
+    if (value.charAt(0) === "|") value = value.substring(1)
+    if (value.charAt(value.length - 1) === "|") value = value.substring(0, value.length - 1)
+    return value.length === 0 ? 0 : value.split("|").length
+  }
+  function isSeparator(line) { return separator.test(String(line || "").trim()) }
+  function isRow(line) {
+    var value = String(line || "").trim()
+    if (value.length === 0 || isSeparator(value)) return false
+    var pipes = (value.match(/\|/g) || []).length
+    return (value.charAt(0) === "|" || pipes >= 2) && cellCount(value) >= 2
+  }
+  function emit(text, kind) {
+    if (text.length > 0 && isFunction(opts.onUnit)) opts.onUnit(text, kind)
+  }
+  function preview() {
+    if (isFunction(opts.onPreview)) opts.onPreview(opts.useasciiviz === true && (chartCode || /^ {0,3}(?:`{1,}|~{1,})/.test(pending)) ? "" : pending)
+  }
+  function process(line) {
+    var withNl = line + "\n"
+    if (inCode) {
+      code += withNl
+      var closing = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/)
+      if (closing && closing[1].charAt(0) === codeFence && closing[1].length >= codeFenceLength) {
+        emit(code, "code"); code = ""; inCode = false; chartCode = false
+      }
+      return
+    }
+    var opening = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
+    if (opening) {
+      if (inTable) { emit(table, "table"); table = ""; inTable = false }
+      if (header.length > 0) { emit(header, "line"); header = "" }
+      inCode = true; code = withNl; codeFence = opening[1].charAt(0); codeFenceLength = opening[1].length; chartCode = opening[2].trim() === "oafPrintChart"; return
+    }
+    if (inTable) {
+      if (isRow(line) && cellCount(line) === cellCount(table.split("\n")[0])) { table += withNl; return }
+      emit(table, "table"); table = ""; inTable = false
+    }
+    if (header.length > 0) {
+      if (isSeparator(line) && cellCount(line) === cellCount(header)) {
+        inTable = true; table = header + withNl; header = ""; return
+      }
+      emit(header, "line"); header = ""
+    }
+    if (isRow(line)) header = withNl
+    else emit(withNl, "line")
+  }
+  return {
+    feed: function(text) {
+      pending += isDef(text) ? String(text) : ""
+      var idx
+      while ((idx = pending.indexOf("\n")) >= 0) {
+        var line = pending.substring(0, idx)
+        pending = pending.substring(idx + 1)
+        process(line)
+      }
+      preview()
+    },
+    end: function() {
+      if (pending.length > 0) {
+        if (inCode) code += pending
+        else if (inTable) table += pending
+        else if (header.length > 0) { emit(header, "line"); header = ""; emit(pending, "line") }
+        else emit(pending, "line")
+      }
+      pending = ""
+      if (code.length > 0) emit(code, "code")
+      if (table.length > 0) emit(table, "table")
+      if (header.length > 0) emit(header, "line")
+      inCode = false; code = ""; chartCode = false; inTable = false; table = ""; header = ""
+      preview()
+    },
+    reset: function() { pending = ""; inCode = false; code = ""; chartCode = false; inTable = false; table = ""; header = ""; preview() }
+  }
+}
+
+function __miniAHasConsoleChartFence(text) {
+  return isString(text) && /^ {0,3}(?:`{3,}|~{3,})oafPrintChart[ \t]*\r?$/m.test(text)
+}
+
+/** Extract only complete chart fences, keeping nested code examples literal. */
+function __miniAPreprocessConsoleCharts(text, opts) {
+  var lines = String(text).split(/\r?\n/), output = [], charts = []
+  var fence = "", fenceLength = 0, block = [], language = ""
+  function finish(complete) {
+    var original = block.join("\n")
+    if (complete && language === "oafPrintChart") {
+      try {
+        var params = JSON.parse(block.slice(1, -1).join("\n"))
+        if (!isMap(params)) throw "Chart parameters must be an object"
+        params.options = isMap(params.options) ? params.options : {}
+        if (isUnDef(params.options.width)) params.options.width = opts.width
+        var chart = opts.renderChart(params)
+        if (!isString(chart) || chart.indexOf("[ERROR]") === 0) throw chart
+        if (opts.ansi !== true) chart = chart.replace(/\x1b\[[0-9;]*m/g, "")
+        var marker = "MINIACHARTPLACEHOLDER" + charts.length + "END"
+        while (String(text).indexOf(marker) >= 0) marker += "X"
+        charts.push({ marker: marker, text: chart })
+        output.push(marker)
+      } catch(e) {
+        // Keep the chart source available and explain why it could not render.
+        var reason = __miniAErrMsg(e).replace(/\x1b\[[0-9;]*m/g, "").replace(/\s+/g, " ").slice(0, 240)
+        output.push("Console chart could not be rendered: " + reason + "\n\n" + original)
+      }
+    } else output.push(original)
+    block = []; fence = ""; language = ""
+  }
+  lines.forEach(function(line) {
+    if (fence.length > 0) {
+      block.push(line)
+      var close = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/)
+      if (close && close[1].charAt(0) === fence && close[1].length >= fenceLength) finish(true)
+    } else {
+      var open = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
+      if (open) {
+        fence = open[1].charAt(0); fenceLength = open[1].length
+        language = open[2].trim(); block = [line]
+      } else output.push(line)
+    }
+  })
+  if (block.length > 0) finish(false)
+  return { text: output.join("\n"), charts: charts }
+}
+
+/** Render a complete Markdown unit without losing literal tags or list wraps. */
+function __miniAMarkdownRender(text, width, opts) {
+  var value = isDef(text) ? String(text) : ""
+  opts = isObject(opts) ? opts : {}
+  var ansi = isDef(opts.ansi) ? opts.ansi === true : (typeof __conAnsi !== "undefined" && __conAnsi === true)
+  var prepared = { text: value, charts: [] }
+  if (opts.useasciiviz === true && isFunction(opts.renderChart)) {
+    prepared = __miniAPreprocessConsoleCharts(value, { width: width, ansi: ansi, renderChart: opts.renderChart })
+    value = prepared.text
+  }
+  function restore(rendered) {
+    prepared.charts.forEach(function(chart) { rendered = rendered.split(chart.marker).join(chart.text) })
+    return rendered
+  }
+  if (ansi !== true || value.length === 0) return restore(value)
+  if (opts.kind !== "code" && opts.kind !== "table") value = value.replace(/^( {0,3})[-+]\s+/gm, "$1* ")
+  if (/<\?xml\b/i.test(value) || /^\s*<\/?[A-Za-z_][A-Za-z0-9_.:-]*(?:\s+[^<>]*?)?>\s*$/m.test(value)) return restore(value)
+  // OpenAF's second withMD argument is an ANSI style, not a render width.
+  // Passing a number here throws "defaultAnsi is not a string" mid-stream.
+  if (!isObject(__flags) || !isObject(__flags.WITHMD)) return restore(ow.format.withMD(value, __, width))
+  var oldHtmlFilter = __flags.WITHMD.htmlFilter
+  try {
+    __flags.WITHMD.htmlFilter = false
+    return restore(ow.format.withMD(value, __, width))
+  } finally {
+    __flags.WITHMD.htmlFilter = oldHtmlFilter
+  }
+}
+
+function __miniAMarkdownPreviewRows(text, width) {
+  var wrapped = ow.format.string.wordWrap(String(text || ""), width)
+  return String(wrapped || "").replace(/\r/g, "").split("\n").length
+}
+
+/**
+ * Normalizes `askChoose` results into a safe zero-based index.
+ * Returns -1 for blank, invalid, negative, or out-of-range values.
+ *
+ * @param {number|string} value - Raw choice index to normalize.
+ * @param {number} [maxExclusive] - Optional exclusive upper bound.
+ */
+function __miniANormalizeChoiceIndex(value, maxExclusive) {
+  var idx = isNumber(value) ? value : Number(value)
+  if (isNaN(idx)) return -1
+  idx = Math.floor(idx)
+  if (idx < 0) return -1
+  if (isNumber(maxExclusive) && idx >= maxExclusive) return -1
+  return idx
+}
+
+/**
+ * Resolves the canonical path to a SKILL.md template within a folder.
+ * Returns the path string if found, or undefined if not found.
+ *
+ * @param {string} folderPath - The folder to look inside.
+ * @param {string[]} [candidates] - Filenames to try (default: ["SKILL.md", "skill.md"]).
+ */
+function __miniAResolveSkillTemplateFromFolder(folderPath, candidates) {
+  candidates = candidates || ["SKILL.yaml", "SKILL.yml", "SKILL.json", "SKILL.md", "skill.md"]
+  if (!isString(folderPath) || folderPath.trim().length === 0) return __
+  for (var i = 0; i < candidates.length; i++) {
+    try {
+      var candidatePath = String(new java.io.File(folderPath, candidates[i]).getCanonicalPath())
+      if (!io.fileExists(candidatePath)) continue
+      var info = io.fileInfo(candidatePath)
+      if (isDef(info) && info.isFile === true) return candidatePath
+    } catch (e) {}
+  }
+  return __
+}
+
+function __miniASkillTemplateFormatFromPath(templatePath) {
+  if (!isString(templatePath)) return "markdown"
+  var lower = templatePath.toLowerCase()
+  if (/\.ya?ml$/i.test(lower)) return "yaml"
+  if (/\.json$/i.test(lower)) return "json"
+  return "markdown"
+}
+
+function __miniAShouldIgnoreSkillEntryName(entryName, includeHidden) {
+  if (!isString(entryName) || entryName.length === 0) return true
+  if (String(entryName).toLowerCase().endsWith(".disabled")) return true
+  if (includeHidden !== true && entryName.indexOf(".") === 0) return true
+  return false
+}
+
+function __miniAExtractFrontMatterMeta(markdownText) {
+  var meta = __
+  var body = isString(markdownText) ? String(markdownText) : String(markdownText || "")
+  var normalized = body.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n")
+  var frontMatterMatch = normalized.match(/^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/)
+  if (frontMatterMatch && isString(frontMatterMatch[1])) {
+    try {
+      var parsed = af.fromYAML(frontMatterMatch[1])
+      if (isObject(parsed)) meta = parsed
+    } catch (ignoreMetaParseError) {}
+    body = normalized.substring(frontMatterMatch[0].length)
+  } else {
+    body = normalized
+  }
+  return {
+    meta: isObject(meta) ? meta : __,
+    body: body
+  }
+}
+
+function __miniASerializeFrontMatter(meta, body) {
+  var yaml = ""
+  try { yaml = af.toYAML(isObject(meta) ? meta : {}) } catch(ignoreSerializeErr) { yaml = "" }
+  return "---\n" + yaml + "---\n" + (isString(body) ? body : "")
+}
+
+function __miniASanitizeVirtualSkillPath(pathValue) {
+  if (!isString(pathValue)) return __
+  var normalized = pathValue.trim().replace(/\\/g, "/")
+  if (normalized.length === 0) return __
+  if (normalized.charAt(0) === "/") return __
+  if (/^[A-Za-z]:\//.test(normalized)) return __
+  if (/^[a-z][a-z0-9+.-]*:/i.test(normalized)) return __
+  if (normalized.indexOf("..") >= 0) return __
+  while (normalized.indexOf("//") >= 0) normalized = normalized.replace(/\/\//g, "/")
+  if (normalized.length === 0 || normalized === ".") return __
+  if (normalized.indexOf("./") === 0) normalized = normalized.substring(2)
+  return normalized.length > 0 ? normalized : __
+}
+
+function __miniANormalizeSkillVirtualFiles(skillDoc) {
+  var files = {}
+
+  function joinPath(basePath, childPath) {
+    if (!isString(childPath)) return __
+    var sanitizedChild = __miniASanitizeVirtualSkillPath(childPath)
+    if (!isString(sanitizedChild)) return __
+    if (!isString(basePath) || basePath.length === 0) return sanitizedChild
+    var merged = basePath + "/" + sanitizedChild
+    return __miniASanitizeVirtualSkillPath(merged)
+  }
+
+  function appendFile(pathKey, value) {
+    var normalizedPath = __miniASanitizeVirtualSkillPath(pathKey)
+    if (!isString(normalizedPath)) return
+    if (isUnDef(value) || value === null) {
+      files[normalizedPath] = ""
+      return
+    }
+    if (isString(value) || value instanceof java.lang.String) {
+      files[normalizedPath] = String(value)
+      return
+    }
+    if (isObject(value)) {
+      if (isString(value.body)) {
+        files[normalizedPath] = value.body
+        return
+      }
+      if (isString(value.content)) {
+        files[normalizedPath] = value.content
+        return
+      }
+      if (isString(value.text)) {
+        files[normalizedPath] = value.text
+        return
+      }
+      files[normalizedPath] = ""
+      return
+    }
+    files[normalizedPath] = String(value)
+  }
+
+  function visitRefs(refsMap, basePath) {
+    if (!isObject(refsMap)) return
+    Object.keys(refsMap).forEach(function(rawKey) {
+      var refValue = refsMap[rawKey]
+      var key = isString(rawKey) ? rawKey : String(rawKey)
+      var joined = joinPath(basePath, key)
+      if (!isString(joined)) return
+      if (isObject(refValue) && isObject(refValue.refs)) {
+        visitRefs(refValue.refs, joined)
+        if (isString(refValue.body) || isString(refValue.content) || isString(refValue.text)) appendFile(joined, refValue)
+        return
+      }
+      appendFile(joined, refValue)
+    })
+  }
+
+  function visitChildren(children, basePath) {
+    if (!isArray(children)) return
+    children.forEach(function(child) {
+      if (!isObject(child)) return
+      var childPath = isString(child.path) ? child.path : ""
+      var childBase = basePath
+      if (childPath.length > 0) {
+        childBase = joinPath(basePath, childPath)
+        if (!isString(childBase)) childBase = basePath
+      }
+      if (isObject(child.refs)) visitRefs(child.refs, childBase)
+      if (isArray(child.children)) visitChildren(child.children, childBase)
+    })
+  }
+
+  if (isObject(skillDoc)) {
+    if (isObject(skillDoc.refs)) visitRefs(skillDoc.refs, "")
+    if (isArray(skillDoc.children)) visitChildren(skillDoc.children, "")
+  }
+  return files
+}
+
+function __miniALoadSkillTemplateDocument(templatePath, fileAccess) {
+  if (!isString(templatePath) || templatePath.trim().length === 0) return __
+  if (!io.fileExists(templatePath) || io.fileInfo(templatePath).isFile !== true) return __
+  if (fileAccess) templatePath = fileAccess.assert(templatePath)
+  var raw = io.readFileString(templatePath)
+  if (!isString(raw)) raw = String(raw || "")
+  var format = __miniASkillTemplateFormatFromPath(templatePath)
+
+  if (format === "markdown") {
+    var md = __miniAExtractFrontMatterMeta(raw)
+    var mdMeta = isObject(md.meta) ? md.meta : {}
+    var mdDescription = isString(mdMeta.description) ? mdMeta.description.replace(/\s+/g, " ").trim() : ""
+    return {
+      format      : "markdown",
+      rawContent  : raw,
+      bodyTemplate: isString(md.body) ? md.body : "",
+      description : mdDescription.length > 0 ? mdDescription : __,
+      meta        : mdMeta,
+      virtualFiles: {}
+    }
+  }
+
+  var parsed
+  try {
+    parsed = format === "json" ? jsonParse(raw) : af.fromYAML(raw)
+  } catch (parseError) {
+    parsed = __
+  }
+  if (!isObject(parsed)) return __
+  var bodyTemplate = ""
+  if (isString(parsed.body)) bodyTemplate = parsed.body
+  if (bodyTemplate.length === 0 && isString(parsed.goal)) bodyTemplate = parsed.goal
+  var description = ""
+  if (isString(parsed.summary)) description = parsed.summary
+  if (description.length === 0 && isString(parsed.description)) description = parsed.description
+  if (description.length === 0 && isObject(parsed.meta) && isString(parsed.meta.description)) description = parsed.meta.description
+  description = isString(description) ? description.replace(/\s+/g, " ").trim() : ""
+
+  return {
+    format      : format,
+    rawContent  : raw,
+    bodyTemplate: bodyTemplate,
+    description : description.length > 0 ? description : __,
+    meta        : isObject(parsed.meta) ? parsed.meta : {},
+    skillData   : parsed,
+    virtualFiles: __miniANormalizeSkillVirtualFiles(parsed)
+  }
+}
+
+/**
+ * Reads a skill description from the YAML front-matter of a SKILL.md template.
+ * Returns the description string, or undefined if not present / on error.
+ *
+ * @param {string} templatePath - Absolute path to the template file.
+ */
+function __miniAReadSkillDescriptionFromTemplate(templatePath, fileAccess) {
+  if (!isString(templatePath) || templatePath.trim().length === 0) return __
+  try {
+    var loaded = __miniALoadSkillTemplateDocument(String(templatePath), fileAccess)
+    if (!isObject(loaded) || !isString(loaded.description)) return __
+    var description = loaded.description.replace(/\s+/g, " ").trim()
+    return description.length > 0 ? description : __
+  } catch (e) {
+    return __
+  }
+}
+
+function __miniAApplyMemoryUserDefaults(cfg) {
+  if (!isObject(cfg)) return cfg
+
+  cfg.memoryuser = toBoolean(cfg.memoryuser) === true
+  cfg.memoryusersession = toBoolean(cfg.memoryusersession) === true
+  if (cfg.memoryuser !== true && cfg.memoryusersession !== true) return cfg
+
+  var _memUserHome = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
+  var _memUserDir  = _memUserHome + "/.openaf-mini-a"
+  var _memUserMemDir = _memUserDir + "/memory"
+  io.mkdir(_memUserMemDir)
+
+  if (cfg.memoryuser === true && isUnDef(cfg.memorych)) {
+    cfg.memorych = stringify({ name: "mini_a_global_mem", type: "file", options: { file: _memUserMemDir + "/memory-global.json.gz", lock: _memUserMemDir + "/memory-global.lock", multifile: false, gzip: true, compact: true } }, __, "")
+  }
+  if (isUnDef(cfg.memorysessionch)) {
+    cfg.memorysessionch = stringify({ name: "mini_a_session_mem", type: "file", options: { file: _memUserMemDir + "/memory-session.json.gz", lock: _memUserMemDir + "/memory-session.lock", multifile: false, gzip: true, compact: true } }, __, "")
+  }
+  if (cfg.memoryusersession === true && isUnDef(cfg.memoryscope) && isUnDef(cfg.memoryScope)) cfg.memoryscope = "session"
+  cfg.usememory = true
+  if (cfg.memoryuser === true) {
+    if (isUnDef(cfg.memorypromote)) cfg.memorypromote = "facts,decisions,summaries"
+    if (isUnDef(cfg.memorystaledays)) cfg.memorystaledays = 30
+  }
+  return cfg
+}
+
+/**
+ * Removes leading YAML front-matter from markdown content when present.
+ * Intended for slash command / skill template processing, so metadata blocks
+ * used for listing do not leak into rendered prompts.
+ *
+ * @param {string} markdownText - Raw markdown text.
+ * @returns {string} markdown without the leading front-matter block.
+ */
+function __miniAStripMarkdownFrontMatter(markdownText) {
+  if (!isString(markdownText) || markdownText.length === 0) return ""
+  var normalized = String(markdownText).replace(/^\uFEFF/, "").replace(/\r\n/g, "\n")
+  var frontMatterMatch = normalized.match(/^---[ \t]*\n[\s\S]*?\n---[ \t]*(?:\n|$)/)
+  if (!frontMatterMatch) return normalized
+  return normalized.substring(frontMatterMatch[0].length)
+}
+
+/**
+ * Renders a skill template by substituting {{args}}, {{argv}}, {{argc}},
+ * and positional {{arg1}}…{{argN}} placeholders.
+ * If the template contains no placeholders but arguments were provided,
+ * arguments are auto-appended.
+ *
+ * @param {string}  template   - The raw template text.
+ * @param {object}  parsedArgs - Object with `raw` (string), `argv` (array), `argc` (number).
+ */
+function __miniARenderSkillTemplate(template, parsedArgs) {
+  var rendered = isString(template) ? template : String(template || "")
+  var replacedAny = false
+  var args = isObject(parsedArgs) ? parsedArgs : { raw: "", argv: [], argc: 0 }
+
+  function replaceAll(placeholder, value) {
+    if (rendered.indexOf(placeholder) >= 0) {
+      replacedAny = true
+      rendered = rendered.split(placeholder).join(value)
+    }
+  }
+
+  var argvString = "[]"
+  try {
+    argvString = stringify(args.argv || [], __, "")
+  } catch (e) {
+    argvString = "[]"
+  }
+
+  replaceAll("{{args}}", args.raw || "")
+  replaceAll("{{argv}}", argvString)
+  replaceAll("{{argc}}", String(isNumber(args.argc) ? args.argc : 0))
+
+  rendered = rendered.replace(/\{\{arg([1-9][0-9]*)\}\}/g, function(_, indexStr) {
+    replacedAny = true
+    var idx = Number(indexStr) - 1
+    if (!isNaN(idx) && idx >= 0 && isArray(args.argv) && idx < args.argv.length) return args.argv[idx]
+    return ""
+  })
+
+  if ((args.argc || 0) > 0 && replacedAny !== true) {
+    rendered += "\n\nArguments (auto-appended):\n"
+    rendered += "- raw: " + (args.raw || "") + "\n"
+    rendered += "- argv: " + argvString + "\n"
+    rendered += "- argc: " + (args.argc || 0) + "\n"
+  }
+
+  return rendered
+}
+
+/**
+ * Builds a compact tool manifest array for /list-tools responses.
+ * When proxyState is provided (mcpproxy=true), reads from the proxy connection catalog
+ * so the listing is proxy-aware (includes connection alias).
+ * Without proxyState, falls back to the plain tools array.
+ *
+ * @param {Array}   tools      - agent.mcpTools array (fallback when no proxy state)
+ * @param {Object}  [proxyState] - global.__mcpProxyState__ when mcpproxy=true
+ * @param {boolean} [withSchema] - if true, include inputSchema per tool
+ * @returns {Array} compact tool entries: { name, description[, connection][, inputSchema] }
+ */
+function __miniABuildCompactToolManifest(tools, proxyState, withSchema) {
+  withSchema = withSchema === true
+  var result = []
+
+  if (isObject(proxyState) && isObject(proxyState.connections)) {
+    Object.keys(proxyState.connections).forEach(function(connId) {
+      var conn = proxyState.connections[connId]
+      if (!isObject(conn) || !isArray(conn.tools)) return
+      var alias = isString(conn.alias) ? conn.alias : connId
+      conn.tools.forEach(function(tool) {
+        if (!isObject(tool) || !isString(tool.name)) return
+        if (tool.name === "proxy-dispatch") return
+        var desc = isString(tool.description) ? tool.description : ""
+        var entry = {
+          name       : tool.name,
+          description: desc.split("\n")[0].trim(),
+          connection : alias
+        }
+        if (withSchema && isObject(tool.inputSchema)) entry.inputSchema = tool.inputSchema
+        result.push(entry)
+      })
+    })
+  } else if (isArray(tools)) {
+    tools.forEach(function(tool) {
+      if (!isObject(tool) || !isString(tool.name)) return
+      var desc = isString(tool.description) ? tool.description : ""
+      var entry = {
+        name       : tool.name,
+        description: desc.split("\n")[0].trim()
+      }
+      if (withSchema && isObject(tool.inputSchema)) entry.inputSchema = tool.inputSchema
+      result.push(entry)
+    })
+  }
+
+  return result
+}
+
+/**
+ * Loads additional libraries from a comma-separated string.
+ * Supports both plain file paths and @oPack/library.js notation.
+ *
+ * @param {string}   libsString - Comma-separated list of library paths.
+ * @param {function} [logFn]    - Called with informational messages (default: log).
+ * @param {function} [errFn]    - Called with error messages (default: logErr).
+ */
+function __miniALoadLibraries(libsString, logFn, errFn) {
+  if (!isString(libsString) || libsString.trim().length === 0) return
+  logFn = isFunction(logFn) ? logFn : function(msg) { log(msg) }
+  errFn = isFunction(errFn) ? errFn : function(msg) { logErr(msg) }
+  libsString.split(",").map(function(r) { return r.trim() }).filter(function(r) { return r.length > 0 }).forEach(function(lib) {
+    logFn("Loading library: " + lib + "...")
+    try {
+      if (lib.startsWith("@")) {
+        if (/^\@([^\/]+)\/(.+)\.js$/.test(lib)) {
+          var _ar = lib.match(/^\@([^\/]+)\/(.+)\.js$/)
+          var _path = getOPackPath(_ar[1])
+          var _file = _path + "/" + _ar[2] + ".js"
+          if (io.fileExists(_file)) {
+            loadLib(_file)
+          } else {
+            errFn("Library '" + lib + "' not found.")
+          }
+        } else {
+          errFn("Library '" + lib + "' does not have the correct format (@oPack/library.js).")
+        }
+      } else {
+        loadLib(lib)
+      }
+    } catch(e) {
+      errFn("Failed to load library " + lib + ": " + __miniAErrMsg(e))
+    }
+  })
+}
+
+// Reuse registered providers, otherwise load their installed oPack entry point.
+// Type/package name exceptions belong here, not in individual model callers.
+function __miniAEnsureModelProvider(config) {
+  if (!isMap(config) || !isString(config.type)) return
+  ow.loadAI()
+  var type = config.type.toLowerCase()
+  if (isDef(ow.ai.__gpttypes[type])) return
+  var aliases = { bedrock: { pack: "AWS", lib: "aws.js" } }
+  var entry = Object.prototype.hasOwnProperty.call(aliases, type) ? aliases[type] : __, paths = getOPackPaths()
+  if (!entry && /^[a-z0-9_-]+$/.test(type)) {
+    var pack = Object.keys(paths).filter(function(name) { return name.toLowerCase() === type })[0]
+    if (isDef(pack)) entry = { pack: pack, lib: type + ".js" }
+    else if (type === "ghcopilot") entry = { pack: "ghcopilot", lib: "ghcopilot.js" }
+  }
+  if (!entry) throw new Error("Unregistered model provider '" + type + "'. Install its oPack or load its registration library with libs=@oPack/library.js.")
+  includeOPack(entry.pack)
+  loadLib(getOPackPath(entry.pack) + "/" + entry.lib)
+  if (isUnDef(ow.ai.__gpttypes[type])) throw new Error("Library '" + entry.lib + "' did not register model provider '" + type + "'. Use libs=@oPack/library.js for a custom entry point.")
+}
+
+function __miniACleanCodeBlocks(text) {
+  if (!isString(text)) return text
+  var trimmed = String(text).trim()
+  var isVisualBlock = trimmed.startsWith("```chart") || trimmed.startsWith("```mermaid") || trimmed.startsWith("```leaflet") || __miniAHasConsoleChartFence(trimmed)
+  if (trimmed.startsWith("```") && trimmed.endsWith("```") && !isVisualBlock) {
+    return trimmed.replace(/^```+[\w]*\n/, "").replace(/```+$/, "").trim()
+  }
+  return text
+}
+
+function __miniARepairJsonString(jsonString) {
+  if (!isString(jsonString)) return jsonString
+
+  // Repair punctuation only outside strings: answer text and tool arguments
+  // may themselves contain snippets such as ",}" or "{key:value}".
+  var parts = []
+  var inString = false
+  var escaped = false
+  for (var i = 0; i < jsonString.length; i++) {
+    var ch = jsonString.charAt(i)
+    if (inString) {
+      parts.push(ch)
+      if (escaped) escaped = false
+      else if (ch === "\\") escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') { inString = true; parts.push(ch); continue }
+    if (ch === "," && /^\s*[}\]]/.test(jsonString.substring(i + 1))) continue
+    parts.push(ch)
+    if (ch === "{" || ch === ",") {
+      var key = jsonString.substring(i + 1).match(/^(\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)(\s*:)/)
+      if (key) {
+        parts.push(key[1] + '"' + key[2] + '"' + key[3])
+        i += key[0].length
+      }
+    }
+  }
+  var repaired = parts.join("")
+
+  var parsed = jsonParse(repaired, __, __, true)
+  if (isMap(parsed) || isArray(parsed)) return repaired
+
+  var _fixed = (function(s) {
+    var out = []
+    var inStr = false
+    var esc = false
+    for (var _i = 0; _i < s.length; _i++) {
+      var ch = s[_i]
+      if (esc) { out.push(ch); esc = false; continue }
+      if (ch === "\\") { out.push(ch); esc = true; continue }
+      if (ch === '"') {
+        if (!inStr) {
+          inStr = true; out.push(ch)
+        } else {
+          var pk = _i + 1
+          while (pk < s.length && (s[pk] === " " || s[pk] === "\t")) pk++
+          var nc = pk < s.length ? s[pk] : ""
+          if (nc === "" || nc === "," || nc === "}" || nc === "]" || nc === ":" || nc === "\n" || nc === "\r") {
+            inStr = false; out.push(ch)
+          } else {
+            out.push("\\"); out.push('"')
+          }
+        }
+      } else {
+        out.push(ch)
+      }
+    }
+    return out.join("")
+  })(repaired)
+  if (_fixed !== repaired) {
+    var _fixedParsed = jsonParse(_fixed, __, __, true)
+    if (isMap(_fixedParsed) || isArray(_fixedParsed)) return _fixed
+  }
+
+  return jsonString
+}
+
+function __miniAExtractResponseTextCandidates(rawResponse) {
+  var texts = []
+  var addText = function(value) {
+    if (isUnDef(value)) return
+    if (isString(value)) {
+      var cleaned = String(value)
+      if (cleaned.trim().length > 0) texts.push(cleaned)
+    }
+  }
+  var addFromParts = function(parts) {
+    if (!isArray(parts)) return
+    parts.forEach(function(part) {
+      if (isString(part)) {
+        addText(part)
+      } else if (isMap(part)) {
+        addText(part.text)
+        addText(part.content)
+      }
+    })
+  }
+
+  if (isString(rawResponse)) addText(rawResponse)
+  if (isMap(rawResponse)) {
+    addText(rawResponse.response)
+    addText(rawResponse.content)
+    addText(rawResponse.completion)
+    addText(rawResponse.text)
+    addText(rawResponse.output)
+    addText(rawResponse.output_text)
+    addText(rawResponse.reasoning)
+    addText(rawResponse.thinking)
+
+    if (isMap(rawResponse.message)) {
+      addText(rawResponse.message.content)
+      addText(rawResponse.message.thinking)
+      addText(rawResponse.message.reasoning)
+      addFromParts(rawResponse.message.content)
+    }
+    addFromParts(rawResponse.content)
+
+    if (isArray(rawResponse.choices)) {
+      rawResponse.choices.forEach(function(choice) {
+        if (isUnDef(choice)) return
+        addText(choice.text)
+        addText(choice.thinking)
+        addText(choice.reasoning)
+        if (isMap(choice.message)) {
+          addText(choice.message.content)
+          addText(choice.message.thinking)
+          addText(choice.message.reasoning)
+          addFromParts(choice.message.content)
+        }
+        if (isMap(choice.delta)) {
+          addText(choice.delta.content)
+          addText(choice.delta.thinking)
+          addText(choice.delta.reasoning)
+        }
+        addFromParts(choice.content)
+      })
+    }
+
+    if (isArray(rawResponse.candidates)) {
+      rawResponse.candidates.forEach(function(candidate) {
+        if (isUnDef(candidate)) return
+        if (isMap(candidate.content)) {
+          addText(candidate.content.text)
+          addFromParts(candidate.content.parts)
+        }
+        addText(candidate.output)
+        addText(candidate.text)
+      })
+    }
+
+    if (isArray(rawResponse.messages)) {
+      rawResponse.messages.forEach(function(message) {
+        if (isUnDef(message)) return
+        addText(message.content)
+        addFromParts(message.content)
+      })
+    }
+  }
+
+  // Streaming adapters return { content, events }. Reasoning models (e.g. Ollama
+  // thinking models) can leave content empty and put everything in the events'
+  // thinking deltas; rebuild text from the events and never stringify the envelope,
+  // which would surface the raw chunk array as the model's answer.
+  var isStreamEnvelope = isMap(rawResponse) && isArray(rawResponse.events)
+  if (isStreamEnvelope && texts.length === 0) {
+    var evContent = "", evThinking = ""
+    rawResponse.events.forEach(function(ev) {
+      if (!isMap(ev)) return
+      if (isMap(ev.message)) {
+        if (isString(ev.message.content)) evContent += ev.message.content
+        if (isString(ev.message.thinking)) evThinking += ev.message.thinking
+        else if (isString(ev.message.reasoning)) evThinking += ev.message.reasoning
+      }
+      if (isArray(ev.choices)) {
+        ev.choices.forEach(function(choice) {
+          if (!isMap(choice) || !isMap(choice.delta)) return
+          if (isString(choice.delta.content)) evContent += choice.delta.content
+          if (isString(choice.delta.reasoning_content)) evThinking += choice.delta.reasoning_content
+          else if (isString(choice.delta.reasoning)) evThinking += choice.delta.reasoning
+          else if (isString(choice.delta.thinking)) evThinking += choice.delta.thinking
+        })
+      }
+    })
+    addText(evContent)
+    addText(evThinking)
+  }
+
+  if (texts.length === 0 && isMap(rawResponse) && !isStreamEnvelope) addText(stringify(rawResponse, __, ""))
+  return texts
+}
+
+function __miniAExtractStructuredThinkingTexts(rawResponse) {
+  var texts = []
+  var addText = function(value) {
+    if (isString(value) && value.trim().length > 0) texts.push(value)
+  }
+  var scanParts = function(parts) {
+    if (!isArray(parts)) return
+    parts.forEach(function(part) {
+      if (!isMap(part)) return
+      var t = String(part.type || "").toLowerCase()
+      if (t === "thinking" || t === "reasoning") {
+        addText(part.thinking)
+        addText(part.text)
+      }
+    })
+  }
+
+  if (!isMap(rawResponse)) return texts
+  addText(rawResponse.reasoning)
+  addText(rawResponse.thinking)
+
+  if (isMap(rawResponse.message)) {
+    addText(rawResponse.message.thinking)
+    addText(rawResponse.message.reasoning)
+    scanParts(rawResponse.message.content)
+  }
+
+  scanParts(rawResponse.content)
+  if (isArray(rawResponse.choices)) {
+    rawResponse.choices.forEach(function(choice) {
+      if (isUnDef(choice)) return
+      addText(choice.thinking)
+      addText(choice.reasoning)
+      if (isMap(choice.message)) {
+        addText(choice.message.thinking)
+        addText(choice.message.reasoning)
+        scanParts(choice.message.content)
+      }
+      if (isMap(choice.delta)) {
+        addText(choice.delta.thinking)
+        addText(choice.delta.reasoning)
+      }
+    })
+  }
+
+  return texts
+}
+
+function __miniAParseJsonCandidate(rawText, repairFn) {
+  if (!isString(rawText)) return __
+  var text = rawText.trim()
+  if (text.length === 0) return __
+
+  var parsed = jsonParse(text, __, __, true)
+  if (isMap(parsed) || isArray(parsed)) return parsed
+
+  var firstObj = text.indexOf("{")
+  var lastObj = text.lastIndexOf("}")
+  if (firstObj >= 0 && lastObj > firstObj) {
+    var objCandidate = text.substring(firstObj, lastObj + 1)
+    parsed = jsonParse(objCandidate, __, __, true)
+    if (isMap(parsed) || isArray(parsed)) return parsed
+  }
+
+  var firstArr = text.indexOf("[")
+  var lastArr = text.lastIndexOf("]")
+  if (firstArr >= 0 && lastArr > firstArr) {
+    var arrCandidate = text.substring(firstArr, lastArr + 1)
+    parsed = jsonParse(arrCandidate, __, __, true)
+    if (isMap(parsed) || isArray(parsed)) return parsed
+  }
+
+  var extractBalancedJson = function(source) {
+    if (!isString(source)) return ""
+    var trimmed = source.trim()
+    if (trimmed.length === 0) return ""
+    var start = -1
+    var openCh = ""
+    var closeCh = ""
+    for (var i = 0; i < trimmed.length; i++) {
+      var ch = trimmed.charAt(i)
+      if (ch === "{") { start = i; openCh = "{"; closeCh = "}"; break }
+      if (ch === "[") { start = i; openCh = "["; closeCh = "]"; break }
+    }
+    if (start < 0) return ""
+
+    var depth = 0
+    var inString = false
+    var escaped = false
+    for (var j = start; j < trimmed.length; j++) {
+      var cur = trimmed.charAt(j)
+      if (escaped) { escaped = false; continue }
+      if (cur === "\\") { escaped = true; continue }
+      if (cur === "\"") { inString = !inString; continue }
+      if (inString) continue
+      if (cur === openCh) depth++
+      if (cur === closeCh) depth--
+      if (depth === 0) return trimmed.substring(start, j + 1)
+    }
+    return ""
+  }
+
+  var balancedCandidate = extractBalancedJson(text)
+  if (balancedCandidate.length > 0) {
+    parsed = jsonParse(balancedCandidate, __, __, true)
+    if (!(isMap(parsed) || isArray(parsed)) && isFunction(repairFn)) {
+      var repairedBalanced = repairFn(balancedCandidate)
+      if (repairedBalanced !== balancedCandidate) parsed = jsonParse(repairedBalanced, __, __, true)
+    }
+    if (isMap(parsed) || isArray(parsed)) return parsed
+  }
+
+  return __
+}
+
+function __miniAStripThinkingTagsFromString(text, allowedTags, tagNormalizer) {
+  if (!isString(text)) return { cleaned: text, blocks: [] }
+  var tagPattern = /<\s*([a-zA-Z0-9_-]+)(?:\s[^>]*)?>([\s\S]*?)<\/\s*\1\s*>/g
+  var blocks = []
+  var seen = {}
+  var cleaned = text.replace(tagPattern, function(match, tag, content) {
+    var normalized = isFunction(tagNormalizer) ? tagNormalizer(tag) : String(tag || "")
+    if (!isMap(allowedTags) || allowedTags[normalized] !== true) return match
+    var trimmed = (content || "").toString().trim()
+    if (trimmed.length > 0 && !seen[trimmed]) { seen[trimmed] = true; blocks.push(trimmed) }
+    return ""
+  }).trim()
+  return { cleaned: cleaned, blocks: blocks }
+}
+
+function __miniAExtractEmbeddedFinalAction(answerPayload, cleanCodeBlocksFn) {
+  if (isUnDef(answerPayload)) return null
+  var embedded = answerPayload
+  if (isString(embedded)) {
+    var cleaner = isFunction(cleanCodeBlocksFn) ? cleanCodeBlocksFn : __miniACleanCodeBlocks
+    var cleaned = cleaner(embedded).trim()
+    if (cleaned.length === 0) return null
+    if (!cleaned.match(/^(\{|\[)/)) return null
+    try {
+      embedded = jsonParse(cleaned, __, __, true)
+    } catch (e) {
+      return null
+    }
+  }
+  if (!isMap(embedded)) return null
+  var embeddedActionRaw = ((embedded.action || embedded.type || embedded.name || embedded.tool || embedded.think || "") + "").trim()
+  if (embeddedActionRaw.toLowerCase() !== "final") return null
+  if (isUnDef(embedded.answer)) return null
+  var hasEmbeddedThought = isDef(embedded.thought) || isDef(embedded.think)
+  if (!hasEmbeddedThought) return null
+
+  var normalized = { action: "final", answer: embedded.answer }
+  if (isDef(embedded.thought)) normalized.thought = embedded.thought
+  else if (isDef(embedded.think)) normalized.thought = embedded.think
+  if (isDef(embedded.state)) normalized.state = embedded.state
+  if (isDef(embedded.params)) normalized.params = embedded.params
+  if (isDef(embedded.command)) normalized.command = embedded.command
+  return normalized
+}
+
+function __miniAParseListOption(value) {
+  if (isUnDef(value) || value === null) return []
+  if (isArray(value)) {
+    return value
+      .map(function(v) { return (isString(v) ? v : stringify(v, __, "")).toLowerCase().trim() })
+      .filter(function(v) { return v.length > 0 })
+  }
+  if (!isString(value)) value = stringify(value, __, "")
+  return value.split(",").map(function(v) { return v.trim().toLowerCase() }).filter(function(v) { return v.length > 0 })
+}
+
+// Return the candidates for the argument currently being completed after
+// `/skills `. Local skill names are always valid prefix filters; skill-library
+// operations are only valid when the optional library is configured.
+function __miniACompleteSkillsArgument(remainder, localSkillNames, skillLibraryEnabled) {
+  var raw = isString(remainder) ? remainder : ""
+  var leadingWhitespace = (raw.match(/^\s*/) || [""])[0].length
+  var argument = raw.substring(leadingWhitespace)
+  if (/\s/.test(argument)) return { candidates: [], offset: leadingWhitespace }
+
+  var prefix = argument.toLowerCase()
+  var names = isArray(localSkillNames) ? localSkillNames.slice() : []
+  if (skillLibraryEnabled === true) {
+    names = names.concat(["search", "remote", "recommend", "open", "read", "related", "context"])
+  }
+
+  var seen = {}
+  var candidates = []
+  names.forEach(function(name) {
+    if (!isString(name)) return
+    var candidate = name.trim()
+    var normalized = candidate.toLowerCase()
+    if (candidate.length === 0 || normalized.indexOf(prefix) !== 0 || seen[normalized] === true) return
+    seen[normalized] = true
+    candidates.push(candidate)
+  })
+  candidates.sort(function(a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()) })
+  return { candidates: candidates, offset: leadingWhitespace }
+}
+
+// Accept a channel definition or a native filesystem path. A path is converted
+// to the file-channel shape expected by OpenAF while structured SLON/JSON is
+// left untouched.
+function __miniANormalizeChannelDef(value) {
+  if (!isString(value)) return value
+  var text = value.trim()
+  if (text.length === 0) return value
+
+  var parsed = __
+  try { parsed = af.fromJSSLON(text) } catch(ignoreChannelDefParse) {}
+  if (isMap(parsed) || isArray(parsed)) return value
+
+  try {
+    java.nio.file.Paths.get(text)
+    if (io.fileExists(text) && io.fileInfo(text).isDirectory) return value
+    return stringify({ type: "file", options: { file: text } }, __, "")
+  } catch(ignoreInvalidChannelPath) {
+    return value
+  }
+}
+
+function __miniAConfigureDebugChannel(llmInstance, debugConfig, defaultName, label, logFn, debugChannelFiles) {
+  if (!isObject(llmInstance) || !isString(debugConfig) || debugConfig.length === 0) return
+
+  if (isUnDef(llmInstance.setDebugCh)) {
+    logFn("warn", `${label} debug channel specified but setDebugCh is not available.`)
+    return
+  }
+
+  try {
+    var debugMap = af.fromJSSLON(__miniANormalizeChannelDef(debugConfig))
+    if (!isMap(debugMap)) return
+    if (isUnDef(debugMap.name)) debugMap.name = defaultName
+    var channelType = isString(debugMap.type) ? debugMap.type : "simple"
+    var channelOptions = isMap(debugMap.options) ? debugMap.options : {}
+
+    if (channelType === "file" && isString(channelOptions.file) && channelOptions.file.length > 0 && !io.fileExists(channelOptions.file)) {
+      io.writeFileString(channelOptions.file, "{}")
+    }
+
+    var channelExists = false
+    try {
+      channelExists = $ch().list().indexOf(debugMap.name) >= 0
+    } catch(ignoreListDebugCh) {}
+    if (!channelExists) {
+      $ch(debugMap.name).create(channelType, channelOptions)
+    }
+    if (isMap(debugChannelFiles)) delete debugChannelFiles[debugMap.name]
+    llmInstance.setDebugCh(debugMap.name)
+    logFn("output", `${label} debug channel '${debugMap.name}' created and configured.`)
+  } catch (e) {
+    var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
+    logFn("warn", `Failed to configure ${label} debug channel: ${errMsg}`)
+  }
+}
+
+function __miniANormalizePromptProfile(profile, fallbackProfile) {
+  var normalized = isString(profile) ? profile.trim().toLowerCase() : ""
+  if (normalized === "minimal" || normalized === "balanced" || normalized === "verbose") return normalized
+  return isString(fallbackProfile) && fallbackProfile.length > 0 ? fallbackProfile : "balanced"
+}
+
+function __miniAStemWord(word) {
+  var suffixes = [
+    { pattern: /ness$/, replacement: "" },
+    { pattern: /ing$/, replacement: "" },
+    { pattern: /ed$/, replacement: "" },
+    { pattern: /es$/, replacement: "" },
+    { pattern: /s$/, replacement: "" },
+    { pattern: /ied$/, replacement: "y" },
+    { pattern: /ies$/, replacement: "y" },
+    { pattern: /ation$/, replacement: "ate" },
+    { pattern: /tion$/, replacement: "t" },
+    { pattern: /er$/, replacement: "" },
+    { pattern: /ly$/, replacement: "" },
+    { pattern: /able$/, replacement: "" },
+    { pattern: /ible$/, replacement: "" }
+  ]
+  for (var i = 0; i < suffixes.length; i++) {
+    if (suffixes[i].pattern.test(word) && word.length > 4) return word.replace(suffixes[i].pattern, suffixes[i].replacement)
+  }
+  return word
+}
+
+function __miniALevenshteinDistance(a, b) {
+  if (a.length === 0) return b.length
+  if (b.length === 0) return a.length
+  var matrix = []
+  for (var i = 0; i <= b.length; i++) matrix[i] = [i]
+  for (var j = 0; j <= a.length; j++) matrix[0][j] = j
+  for (i = 1; i <= b.length; i++) {
+    for (j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) matrix[i][j] = matrix[i - 1][j - 1]
+      else matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j] + 1)
+    }
+  }
+  return matrix[b.length][a.length]
+}
+
+
+// Entry points prepare a fresh goal before init/start; never prefix a reused
+// mutable runtime args object inside the core research/outer loops.
+function __miniAPrefixGoal(goal, prefix) {
+  return isString(prefix) && prefix.length > 0 ? prefix + goal : goal
+}
+
+// OpenAF formatters may return undefined after retaining the original answer.
+function __miniAFinalResult(result, original) {
+  return isDef(result) ? result : original
+}
+
+// Unwrap only one complete outer block. An earlier closing fence means this
+// is a Markdown document containing multiple blocks, not a single wrapper.
+function __miniAUnwrapAnswer(text, preserveVisuals) {
+  if (!isString(text)) return text
+  var normalized = text.replace(/\r\n/g, "\n")
+  var match = normalized.match(/^\s*(`{3,})([^\n]*)\n([\s\S]*?)\n\1[ \t]*\s*$/)
+  if (!match) return text
+  var lang = match[2].trim().toLowerCase()
+  if (preserveVisuals !== false && /^(chart|chartjs|chart\.js|mermaid|leaflet|oafprintchart)$/.test(lang)) return text
+  var closing = new RegExp("^ {0,3}`{" + match[1].length + ",}[ \t]*$", "m")
+  if (closing.test(match[3])) return text
+  return match[3]
+}
+
+function __miniAHookPath(path) {
+  try { return io.fileInfo(path).canonicalPath } catch(ignoreHookPath) { return path }
+}
+
+function __miniAHookBoolean(value) {
+  return /^(true|1|yes|y|on)$/.test(String(value).trim().toLowerCase())
+}
+
+function __miniALoadHooksFromDir(dirPath, hooks) {
+  var validEvents = ["before_goal", "after_goal", "before_tool", "after_tool", "before_shell", "after_shell"]
+  try {
+    if (!io.fileExists(dirPath)) return
+    var info = io.fileInfo(dirPath)
+    if (!isObject(info) || info.isDirectory !== true) return
+    var listing = io.listFiles(dirPath)
+    if (!isObject(listing) || !isArray(listing.files)) return
+
+    listing.files.forEach(function(file) {
+      if (!isObject(file) || file.isDirectory === true) return
+      if (!isString(file.filename) || file.filename.length === 0) return
+      if (!/\.(yaml|yml|json)$/i.test(file.filename)) return
+
+      var fullPath = __miniAHookPath(dirPath + "/" + file.filename)
+      try {
+        var hookDef
+        if (/\.json$/i.test(file.filename)) {
+          hookDef = io.readFileJSON(fullPath)
+        } else {
+          hookDef = io.readFileYAML(fullPath)
+        }
+        if (!isObject(hookDef)) return
+        var event = isString(hookDef.event) ? hookDef.event.trim().toLowerCase() : ""
+        if (validEvents.indexOf(event) < 0) {
+          logWarn("Hook '" + file.filename + "' has invalid or missing event type: '" + event + "'")
+          return
+        }
+        var cmd = isString(hookDef.command) ? hookDef.command.trim() : ""
+        if (cmd.length === 0) {
+          logWarn("Hook '" + file.filename + "' has no command defined.")
+          return
+        }
+        var toolFilter = []
+        if (isString(hookDef.toolFilter) && hookDef.toolFilter.trim().length > 0) {
+          toolFilter = hookDef.toolFilter.split(",").map(function(s) { return s.trim().toLowerCase() }).filter(function(s) { return s.length > 0 })
+        }
+        hooks[event].push({
+          name        : file.filename.replace(/\.(yaml|yml|json)$/i, ""),
+          file        : fullPath,
+          event       : event,
+          command     : cmd,
+          toolFilter  : toolFilter,
+          injectOutput: __miniAHookBoolean(hookDef.injectOutput) === true,
+          timeout     : (isNumber(hookDef.timeout) && hookDef.timeout > 0) ? hookDef.timeout : 5000,
+          failBlocks  : __miniAHookBoolean(hookDef.failBlocks) === true,
+          env         : isObject(hookDef.env) ? hookDef.env : {}
+        })
+      } catch (hookParseError) {
+        logWarn("Failed to parse hook file '" + file.filename + "': " + hookParseError)
+      }
+    })
+  } catch (hookLoadError) {
+    logWarn("Failed to load hooks from '" + dirPath + "': " + hookLoadError)
+  }
+}
+
+function __miniARunHooks(loadedHooks, event, contextVars) {
+  var hooksForEvent = isArray(loadedHooks[event]) ? loadedHooks[event] : []
+  if (hooksForEvent.length === 0) return { outputs: [], blocked: false }
+
+  var outputs = []
+  var blocked = false
+  var vars = isObject(contextVars) ? contextVars : {}
+
+  hooksForEvent.forEach(function(hook) {
+    if (hook.toolFilter.length > 0 && isString(vars.MINI_A_TOOL)) {
+      var toolLower = vars.MINI_A_TOOL.toLowerCase()
+      if (hook.toolFilter.indexOf(toolLower) < 0) return
+    }
+    try {
+      var env = {}
+      Object.keys(hook.env).forEach(function(k) { env[k] = String(hook.env[k]) })
+      Object.keys(vars).forEach(function(k) { env[k] = String(vars[k]) })
+      env.MINI_A_HOOK_NAME  = hook.name
+      env.MINI_A_HOOK_EVENT = event
+
+      var result = $sh(hook.command).timeout(hook.timeout).envs(env).get(0)
+      var stdout   = isString(result.stdout)   ? result.stdout.trim()   : ""
+      var stderr   = isString(result.stderr)   ? result.stderr.trim()   : ""
+      var exitCode = isNumber(result.exitcode) ? result.exitcode        : -1
+
+      if (exitCode !== 0) {
+        logWarn("Hook '" + hook.name + "' (" + event + ") exited with code " + exitCode + (stderr.length > 0 ? ": " + stderr.substring(0, 200) : ""))
+        if (hook.failBlocks) blocked = true
+      }
+      if (hook.injectOutput && stdout.length > 0) {
+        outputs.push({ hookName: hook.name, output: stdout.substring(0, 4096) })
+      }
+    } catch (hookExecError) {
+      logWarn("Hook '" + hook.name + "' (" + event + ") failed: " + hookExecError)
+      if (hook.failBlocks) blocked = true
+    }
+  })
+
+  return { outputs: outputs, blocked: blocked }
+}
+
+// Shared console/browser-console parsing; -- escapes goals starting with a modifier.
+function __miniAParseDelegate(text) {
+  var goal = String(text || "").trim(), options = {}
+  if (/^--(?:\s|$)/.test(goal)) return { goal: goal.substring(2).trim(), options: options }
+  var match = /^(fork|clean|auto)(?:\s+|$)/i.exec(goal)
+  if (match) {
+    goal = goal.substring(match[0].length).trim()
+    if (match[1].toLowerCase() === "fork") { options.fork = true; options.forkscope = ["memory", "context"] }
+    else options.forkpolicy = match[1].toLowerCase()
+  }
+  return { goal: goal, options: options }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Mode presets
+// ─────────────────────────────────────────────────────────────
+
+// __miniAResolveModePreset: resolve one or more comma-separated mode names into a merged
+// parameter map. Presets come from <basePath>/mini-a-modes.yaml, overridden by
+// ~/.openaf-mini-a_modes.yaml then ~/.openaf-mini-a/modes.yaml. Names match case-insensitively,
+// `include`/`_include` chains are merged first (cycles throw), and `params` may be a map, an
+// array of maps or inline keys. Returns { key, description, params, includes, warnings };
+// throws on an unknown/invalid mode. A preset file that fails to load is reported in warnings
+// (the bundled file failing also throws, as no presets can be resolved).
+// opts: { basePath: bundle root (required), homeDir: home directory override }
+var __miniAResolveModePreset = function(modeName, opts) {
+  opts = isMap(opts) ? opts : {}
+  var errText = function(e) { return (isDef(e) && isString(e.message)) ? e.message : String(e) }
+  var normalizeIncludeList = function(value) {
+    if (isArray(value)) return value
+    if (isString(value)) {
+      var trimmed = value.trim()
+      if (trimmed.length === 0) return []
+      if (trimmed.indexOf(",") >= 0) {
+        return trimmed.split(",").map(function(part) { return String(part || "").trim() }).filter(function(part) { return part.length > 0 })
+      }
+      return [ trimmed ]
+    }
+    return []
+  }
+  var unwrap = function(loaded) {
+    if (isMap(loaded) && isMap(loaded.modes)) return loaded.modes
+    if (isMap(loaded)) return loaded
+    return {}
+  }
+
+  var warnings = []
+  var basePath = isDef(opts.basePath) ? String(opts.basePath) : "."
+  var presets
+  try {
+    presets = unwrap(io.readFileYAML(basePath + "/mini-a-modes.yaml"))
+  } catch(e) {
+    throw "Failed to load mode presets: " + errText(e)
+  }
+
+  var homeDir = isDef(opts.homeDir) ? String(opts.homeDir)
+    : (typeof __gHDir === "function" ? __gHDir() : String(java.lang.System.getProperty("user.home")))
+  ;[".openaf-mini-a_modes.yaml", ".openaf-mini-a/modes.yaml"].forEach(function(fileName) {
+    var customPath = io.fileInfo((homeDir || ".") + "/" + fileName).canonicalPath
+    if (!io.fileExists(customPath)) return
+    try {
+      var customPresets = unwrap(io.readFileYAML(customPath))
+      // later custom files override earlier ones
+      if (Object.keys(customPresets).length > 0) presets = merge(presets, customPresets)
+    } catch(e) {
+      warnings.push("Failed to load custom mode presets from '" + customPath + "': " + errText(e))
+    }
+  })
+
+  if (!isMap(presets) || Object.keys(presets).length === 0) throw "Mode '" + modeName + "' requested but no presets are defined."
+
+  var resolveModeKey = function(name) {
+    if (!isString(name)) return __
+    var target = name.trim()
+    if (target.length === 0) return __
+    var presetKeys = Object.keys(presets)
+    for (var j = 0; j < presetKeys.length; j++) {
+      if (presetKeys[j] === target || presetKeys[j].toLowerCase() === target.toLowerCase()) return presetKeys[j]
+    }
+    return __
+  }
+  var getModeParams = function(modePreset) {
+    if (!isMap(modePreset)) return __
+    if (isDef(modePreset.params)) return modePreset.params
+    var inlineParams = {}
+    Object.keys(modePreset).forEach(function(paramKey) {
+      if (paramKey === "description" || paramKey === "include" || paramKey === "_include") return
+      inlineParams[paramKey] = modePreset[paramKey]
+    })
+    return Object.keys(inlineParams).length > 0 ? inlineParams : __
+  }
+  var resolveModeDefinition = function(modeKey, stack) {
+    if (!isString(modeKey) || modeKey.length === 0) throw "Invalid mode name."
+    var cycleStack = isArray(stack) ? stack.slice(0) : []
+    if (cycleStack.indexOf(modeKey) >= 0) {
+      cycleStack.push(modeKey)
+      throw "Circular mode include detected: " + cycleStack.join(" -> ")
+    }
+    cycleStack.push(modeKey)
+
+    var modePreset = presets[modeKey]
+    if (!isMap(modePreset)) throw "Mode '" + modeKey + "' preset is invalid."
+
+    var includeList = normalizeIncludeList(isDef(modePreset.include) ? modePreset.include : modePreset._include)
+    var mergedParams = {}
+    includeList.forEach(function(includeName) {
+      var includeKey = resolveModeKey(includeName)
+      if (isUnDef(includeKey)) throw "Mode '" + modeKey + "' includes unknown mode '" + includeName + "'."
+      mergedParams = merge(mergedParams, resolveModeDefinition(includeKey, cycleStack).params)
+    })
+
+    var ownParams = getModeParams(modePreset)
+    if (isArray(ownParams)) {
+      ownParams.forEach(function(entry) { if (isMap(entry)) mergedParams = merge(mergedParams, entry) })
+    } else if (isMap(ownParams)) {
+      mergedParams = merge(mergedParams, ownParams)
+    } else if (isDef(ownParams)) {
+      throw "Mode '" + modeKey + "' has unsupported params definition."
+    }
+    return {
+      key        : modeKey,
+      description: isString(modePreset.description) ? modePreset.description : "",
+      params     : mergedParams,
+      includes   : includeList
+    }
+  }
+
+  var modeNames = normalizeIncludeList(isString(modeName) ? modeName : "")
+  var resolvedKeys = []
+  var resolved = { params: {}, description: "", includes: [], warnings: warnings }
+  modeNames.forEach(function(name) {
+    var modeKey = resolveModeKey(name)
+    if (isUnDef(modeKey)) throw "Mode '" + name + "' not found. Available modes: " + Object.keys(presets).join(", ")
+    var preset = resolveModeDefinition(modeKey, [])
+    resolvedKeys.push(modeKey)
+    resolved.params = merge(resolved.params, preset.params)
+    if (modeNames.length === 1) {
+      resolved.description = preset.description
+      resolved.includes = preset.includes
+    }
+  })
+  resolved.key = resolvedKeys.join(",")
+  return resolved
+}

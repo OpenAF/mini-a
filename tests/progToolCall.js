@@ -1,6 +1,6 @@
 (function() {
-  load("mini-a-common.js")
-  load("mini-a-progcall.js")
+  load("js/core/mini-a-common.js")
+  load("js/core/mini-a-progcall.js")
 
   // ─── Mock agent ────────────────────────────────────────────────────────────
   // A minimal agent stub that satisfies MiniAProgCallServer's expectations.

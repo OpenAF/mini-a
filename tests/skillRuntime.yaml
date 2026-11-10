@@ -54,6 +54,10 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/skillRuntime.js").testSkillMixedCandidatesAndSourceCollision
 
+- name: MiniA Skill Runtime::testBundledSkillsPreferVirtualDuplicates
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testBundledSkillsPreferVirtualDuplicates
+
 - name: MiniA Skill Runtime::testSkillWikiProgressiveResolution
   to: oJob Test
   exec: args.func = require("tests/skillRuntime.js").testSkillWikiProgressiveResolution
@@ -102,7 +106,17 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/skillRuntime.js").testBundledToolSkillsGatedByEnabledTools
 
+- name: MiniA Skill Runtime::testVisualSkillAvailabilityAndReferences
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testVisualSkillAvailabilityAndReferences
+
+- name: MiniA Skill Runtime::testVisualKnowledgeRendererContracts
+  to: oJob Test
+  exec: args.func = require("tests/skillRuntime.js").testVisualKnowledgeRendererContracts
+
 todo:
+- MiniA Skill Runtime::testVisualSkillAvailabilityAndReferences
+- MiniA Skill Runtime::testVisualKnowledgeRendererContracts
 - MiniA Skill Runtime::testWikiSkillMcpRenderedBudget
 - MiniA Skill Runtime::testWikiSkillActivationRetainsArguments
 - MiniA Skill Runtime::testSkillDeferredSectionsSurvivePartialReads
@@ -118,6 +132,7 @@ todo:
 - MiniA Skill Runtime::testSkillContextContinuityRevisionAndCompletion
 - MiniA Skill Runtime::testSkillExtraRootsAddToDefaultsAndFileAllow
 - MiniA Skill Runtime::testSkillMixedCandidatesAndSourceCollision
+- MiniA Skill Runtime::testBundledSkillsPreferVirtualDuplicates
 - MiniA Skill Runtime::testSkillWikiProgressiveResolution
 - MiniA Skill Runtime::testSkillSelectorNoneAndFailure
 - MiniA Skill Runtime::testSkillStartLoadsBeforeExecutionAndBlocksMissing

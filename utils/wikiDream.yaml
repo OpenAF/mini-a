@@ -53,14 +53,19 @@ help:
 ojob:
   logToConsole: false
   catch: |
-    logErr("❌ " + (isMap(exception) && isDef(exception.stage) ? exception.stage + " failed: " + stringify(exception.result, __, "") : exception))
+    logErr("❌ " + (isMap(exception) && isDef(exception.stage) ? exception.stage + " failed: " + af.toSLON(exception.result) : exception))
     exit(1)
 todo:
 - Dream wiki
 jobs:
 - name: Dream wiki
   exec: | #js
-    load(String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent()) + "/wikiJobsLib.js")
+    var miniALibraryRoot = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParentFile().getParent())
+    if (!io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) miniALibraryRoot = getOPackPath("mini-a")
+    if (!isString(miniALibraryRoot) || !io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) throw new Error("Cannot locate the Mini-A package for " + ow.oJob.__file)
+    loadLib(miniALibraryRoot + "/js/mini-a-paths.js")
+    __miniAPackageRoot = __miniAResolvePackageRoot(miniALibraryRoot)
+    loadLib(__miniAPath("utils/wikiJobsLib.js"), true)
     var logFn = wikiJobsLog
     var prepared = wikiJobsPrepare(args, { kind: "dream", log: logFn, createRoot: false })
     var dreamArgs = wikiJobsDreamArgs(prepared, args)
@@ -72,7 +77,7 @@ jobs:
 
     try {
       var compact = wikiJobsCompactStage(prepared, logFn)
-      if (isDef(compact)) log("Compaction result: " + stringify(compact, __, ""))
+      if (isDef(compact)) log("Compaction result: " + af.toSLON(compact))
     } catch(e) {
       wikiJobsFail("Dream succeeded, but compaction (check the output before reopening the wiki)", isMap(e) && isDef(e.result) ? e.result : String(e), dream.backup)
     }

@@ -1,5 +1,5 @@
 (function() {
-  load("mini-a-common.js")
+  load("js/core/mini-a-common.js")
 
   var SERVER_YAML = "tests/mcpAuthServer.yaml"
 

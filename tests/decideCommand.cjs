@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const session = fs.readFileSync('mini-a-session.js', 'utf8');
+const session = fs.readFileSync('js/session/mini-a-session.js', 'utf8');
 const source = fs.readFileSync('public/advanced.js', 'utf8');
 const all = node => [node, ...node.children.flatMap(all)];
 function el(tag, text = '') {
@@ -53,7 +53,7 @@ const submit=()=>guided.onsubmit({preventDefault(){}});
   uuid='second'; await structured.onsubmit({preventDefault(){}}); assert.equal(submitted.length,count+1,'stale form cannot submit to another session');
   uuid='first'; await click('Cancel'); assert.ok(all(guided).some(n=>n.textContent==='Decision cancelled.'));
   // Exercise the real guided-console function with queued answers and validation.
-  const decision=fs.readFileSync('mini-a-decision.js','utf8');
+  const decision=fs.readFileSync('js/core/mini-a-decision.js','utf8');
   const queue=[], output=[];
   const fixture=vm.createContext({__:undefined, MiniADecision:{error:code=>Object.assign(new Error(code),{code})},
     isMap:x=>x!==null && typeof x==='object' && !Array.isArray(x), isArray:Array.isArray,

@@ -1,0 +1,74 @@
+help:
+  text: |
+    Standalone local Wiki Studio. No model is required for browsing/editing.
+    ojob mini-a-wiki-studio.yaml studiohome=/data/studio studioallowroots='["/data/wikis"]'
+    The browser opens automatically (disable with openbrowser=false).
+    Uses STUDIO_TOKEN, or prints a new process-scoped token once at startup.
+    STUDIO_TOKEN must contain at least 32 characters when set.
+    Configure OAF_MODEL for model-backed operations and wiki test servers;
+    OAF_LC_MODEL optionally configures the low-cost model.
+  expects:
+  - name     : studiohome
+    desc     : "Directory for Studio state, registry, jobs, backups and audit logs (default: ~/.openaf-mini-a/wiki-studio)"
+    example  : "/data/studio"
+    mandatory: false
+  - name     : studioallowroots
+    desc     : "JSON array of existing dedicated parent directories allowed to contain wiki roots (default: []). Use canonical paths outside Studio home; system and hidden directories are rejected."
+    example  : '["/data/wikis"]'
+    mandatory: false
+  - name     : studiosourcedirs
+    desc     : 'JSON array of allowlisted local source directories for directory/Git checkout intake, each with id and path (default: []; maximum 50). Use existing dedicated visible directories outside Studio home.'
+    example  : '[{"id":"docs","path":"/data/sources/docs"}]'
+    mandatory: false
+  - name     : onport
+    desc     : "Local HTTP listener port, from 1 to 65535 (default: 8890)"
+    example  : "8890"
+    mandatory: false
+  - name     : studiohost
+    desc     : "Listener address (default and only supported value: 127.0.0.1). Non-loopback binding is rejected."
+    example  : "127.0.0.1"
+    mandatory: false
+    options  : ["127.0.0.1"]
+  - name     : openbrowser
+    desc     : "Open the Studio browser automatically with the access token in the URL fragment (default: true)"
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+ojob:
+  daemon: true
+  logToConsole: false
+  catch: |
+    printErr("Wiki Studio startup failed: " + exception); exit(1)
+todo:
+- Shutdown Wiki Studio
+- Start Wiki Studio
+jobs:
+- name: Shutdown Wiki Studio
+  type: shutdown
+  exec: |
+    if(isDef(global.__wikiStudio)) global.__wikiStudio.stop()
+- name: Start Wiki Studio
+  exec: |
+    var base = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent())
+    if (!io.fileExists(base + "/js/studio/wiki-studio-bootstrap.js")) {
+      base = getOPackPath("mini-a")
+    }
+    if (!isString(base) || !io.fileExists(base + "/js/studio/wiki-studio-bootstrap.js")) {
+      throw new Error("Cannot locate the Mini-A Wiki Studio package for " + ow.oJob.__file)
+    }
+    base = String(new java.io.File(base).getCanonicalPath())
+    loadLib(base + "/js/studio/wiki-studio-bootstrap.js")
+    wikiStudioBootstrap(base)
+    loadLib(base + "/js/studio/wiki-studio-common.js")
+    loadLib(base + "/js/studio/wiki-studio-config.js")
+    loadLib(base + "/js/studio/wiki-studio-api.js")
+    loadLib(base + "/js/studio/wiki-studio-pages.js")
+    loadLib(base + "/js/studio/wiki-studio-graph.js")
+    loadLib(base + "/js/studio/wiki-studio-outbound.js")
+    loadLib(base + "/js/studio/wiki-studio-sources.js")
+    loadLib(base + "/js/studio/wiki-studio-jobs.js")
+    loadLib(base + "/js/studio/wiki-studio-operations.js")
+    loadLib(base + "/js/studio/wiki-studio-backups.js")
+    loadLib(base + "/js/studio/wiki-studio-ingestion.js")
+    global.__wikiStudio = new WikiStudioServer(wikiStudioConfig(args, base))
+    global.__wikiStudio.start()

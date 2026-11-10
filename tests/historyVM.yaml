@@ -2,6 +2,11 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA History VM Tests::AssemblyCostMemo
+  from: MiniA History VM Tests::Init
+  to: oJob Test
+  exec: args.func = require("tests/historyVM.js").testAssemblyCostsMemoizedPerInvocation
+
 - name: MiniA History VM Tests::LowCostExecutorHistoryLifecycle
   from: MiniA History VM Tests::Init
   to: oJob Test
@@ -261,6 +266,7 @@ jobs:
   exec: args.func = require("tests/historyVM.js").testRecoverBranchWithoutCheckpoint
 
 todo:
+- MiniA History VM Tests::AssemblyCostMemo
 - MiniA History VM Tests::LowCostExecutorHistoryLifecycle
 - MiniA History VM Tests::AutomaticContextTarget
 - MiniA History VM Tests::DisposableEvidenceAcrossProviderChanges

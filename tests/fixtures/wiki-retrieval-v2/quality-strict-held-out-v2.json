@@ -136,8 +136,8 @@
   "recordedSourceSha1": {
     "tests/wikiRetrievalQuality.js": "481fe082fa740ea40e24066ca61219256e8b0442",
     "tests/wikiRetrievalEvidence.js": "019bb1e7db6e85e03798806d657eb0a411a26f33",
-    "mini-a-wiki-retrieval.js": "c952d4544256a6692e41258bb4765f0ba25f1ce4",
-    "mini-a-wiki.js": "3b671f02a6fb0485207791156c4cefd692bb2e78",
+    "js/wiki/mini-a-wiki-retrieval.js": "c952d4544256a6692e41258bb4765f0ba25f1ce4",
+    "js/wiki/mini-a-wiki.js": "3b671f02a6fb0485207791156c4cefd692bb2e78",
     "tests/fixtures/wiki-retrieval-v2/held-out.json": "8928e58077bc8a55073778acb213b17a861909fc"
   }
 }

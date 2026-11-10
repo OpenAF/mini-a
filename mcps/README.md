@@ -809,7 +809,7 @@ Tools:
 - `web-search`: Search the web and return an array of results with `title`, `description`, and `link`.
   - Input: `query` (string, required), `limit` (number, default 12), `searchEngine` (string, default `duckduckgo`/`ddg`).
 - `get-url`: Fetch and process a single URL.
-  - Input: `url` (string, required), `style` (enum `html` | `basic` | `text` | `map`, default `basic`).
+  - Input: `url` (string, required), `style` (enum `html` | `basic` | `text` | `map`, default `html`). Omitting `style` returns the raw `$rest().get(url)` response; `html` also returns the raw response, while `basic`, `text`, and `map` process it with jsoup.
 - `http-request`: Execute a direct HTTP request and return the raw `$rest` response map.
   - Input: `url` (string, required), `method` (enum `GET` | `HEAD` | `POST` | `PUT` | `PATCH` | `DELETE`, default `GET`), `data` (object, optional for `POST`/`PUT`/`PATCH`), `headers` (object, optional), `throwExceptions` (boolean, default `false`).
   - `POST`/`PUT`/`PATCH`/`DELETE` require starting the MCP with `readwrite=true`.
@@ -1004,7 +1004,9 @@ command-line arguments (and therefore out of `ps` output and other jobs' args).
   mini-a goal="..." mcp="(type: remote, url: 'http://host:8080/mcp', auth: (type: bearer, token: 's3cr3t'))"
   ```
 
-For production deployments beyond a single shared token (mTLS, per-user OAuth, IP allowlisting), put
+The above bearer-token setting describes authentication on the bundled MCP **server**. For outbound connections, Mini-A also supports generic OAuth2 through OpenAF's `$mcp` client; see [remote MCP OAuth2 configuration](../USAGE.md#oauth2-authentication-for-remote-mcp-servers).
+
+For production deployments of these bundled servers beyond a single shared token (mTLS, per-user OAuth, IP allowlisting), put
 a reverse proxy (e.g. Caddy, nginx, oauth2-proxy) in front of the MCP port instead.
 
 **Agent Plugins**: a downloaded [Agent Plugins](https://agent-plugins.org) directory's `mcp.json`

@@ -1,7 +1,7 @@
 (function() {
-  load("mini-a-common.js")
-  load("mini-a-wiki.js")
-  load("mini-a-mcp-wiki.js")
+  load("js/core/mini-a-common.js")
+  load("js/wiki/mini-a-wiki.js")
+  load("js/wiki/mini-a-mcp-wiki.js")
 
   var createTestDir = function() {
     var testDir = java.io.File.createTempFile("miniwiki-test-", "").getCanonicalPath()
@@ -51,7 +51,7 @@
   // ── Parsefrontmatter ────────────────────────────────────────────────────────
 
   exports.testConsoleWikiOperations = function() {
-    var source = io.readFileString("mini-a-session.js"), output = [], calls = []
+    var source = io.readFileString("js/session/mini-a-session.js"), output = [], calls = []
     var hits = [{path:"guide.md",title:"Guide"}]
     hits.outcome = "partial"; hits.stopReasons = ["deadline"]; hits.sources = [{wiki:"docs",status:"partial"}]
     var manager = {
@@ -292,7 +292,7 @@
   // ── Knowledge state ────────────────────────────────────────────────────────────
 
   exports.testKnowledgeLoadStateMergesPartialManifestWithDefaults = function() {
-    load("mini-a-wiki-knowledge.js")
+    load("js/wiki/mini-a-wiki-knowledge.js")
     var dir = createTestDir()
     try {
       writePage(dir, "index.md", "# Index")
@@ -2437,7 +2437,7 @@
     }
 
     // Extract the template from each source
-    var wikiJs    = io.readFileString("mini-a-wiki.js")
+    var wikiJs    = io.readFileString("js/wiki/mini-a-wiki.js")
     var mcpWiki   = io.readFileString("mcps/mcp-wiki.yaml")
     var mcpOps    = io.readFileString("mcps/mcp-wiki-ops.yaml")
 
@@ -2456,12 +2456,12 @@
 
     // Standalone launchers delegate to one shared implementation instead of
     // duplicating managed templates and migration constants in YAML.
-    var shared = io.readFileString("mini-a-mcp-wiki.js")
-    ow.test.assert(shared.indexOf('loadLib("mini-a-wiki.js")') >= 0,true,"shared MCP module loads the authoritative wiki implementation")
+    var shared = io.readFileString("js/wiki/mini-a-mcp-wiki.js")
+    ow.test.assert(shared.indexOf('loadLib(__miniAPath("js/wiki/mini-a-wiki.js"))') >= 0,true,"shared MCP module loads the authoritative wiki implementation")
     var launchers = ["mcps/mcp-wiki.yaml","mcps/mcp-wiki-ops.yaml"]
     launchers.forEach(function(path){
       var init = io.readFileYAML(path).jobs.filter(function(job){return job.name === "Init"})[0]
-      ow.test.assert(init.exec.indexOf('loadLib("mini-a-mcp-wiki.js")') >= 0,true,"launcher loads shared MCP module")
+      ow.test.assert(init.exec.indexOf('loadLib(__miniAPath("js/wiki/mini-a-mcp-wiki.js"))') >= 0,true,"launcher loads shared MCP module")
       ow.test.assert(init.exec.indexOf("__miniAMcpWikiInit(args") >= 0,true,"launcher delegates manager construction to shared initializer")
     })
     ow.test.assert(wikiJs.indexOf("__miniAWikiLogTemplate") >= 0,true,"core supplies the shared log template")
@@ -2783,7 +2783,7 @@
   }
 
   exports.testFalkorReadGateAllowsReadOnlyGraphs = function() {
-    load("mini-a-graph.js")
+    load("js/wiki/mini-a-graph.js")
     var dir = createTestDir()
     try {
       var g = new MiniAWikiGraph({ graphDir: dir + "/g", readOnly: true, falkor: { host: "localhost", port: 6379 } }, function() {})

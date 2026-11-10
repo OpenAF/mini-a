@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Expand into Mini-A</title>
+<style>body { font: 16px system-ui; max-width: 1000px; margin: 2rem auto; } label { display: block; margin: 1rem 0; } input, textarea { width: 95%; } iframe { width: 100%; height: 70vh; border: 1px solid #aaa; } button { margin-right: .5rem; }</style>
+<h1>Expand into a conversation</h1>
+<form id="form">
+  <label>Mini-A URL <input id="url" value="/mini-a/?embed=1" required></label>
+  <label>Customer ID <input id="customer" value="C-123"></label>
+  <label>Goal <textarea id="goal" required>Explain the current customer's open cases.</textarea></label>
+  <label>Handoff <select id="mode"><option value="submit">Submit first goal</option><option value="draft">Editable draft</option></select></label>
+  <button>Expand</button><button type="button" id="update" disabled>Update context</button><button type="button" id="clear" disabled>Clear context</button>
+</form>
+<p id="status" role="status"></p><div id="chat"></div>
+<script>
+  let frame, targetOrigin, channelId, revision = 0, helloTimer;
+  const pending = new Map();
+  const field = id => document.getElementById(id);
+  const status = text => { field('status').textContent = text; };
+  function request(action, values = {}, handshake = false) {
+    const requestId = crypto.randomUUID();
+    const message = {type:'mini-a:embed', version:1, action, requestId, ...values};
+    if (!handshake) message.channelId = channelId;
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        pending.delete(requestId); clearInterval(helloTimer);
+        reject(new Error('No acknowledgement. Check the iframe and authentication before retrying.'));
+      }, 20000);
+      pending.set(requestId, {resolve, reject, timeout});
+      const send = () => frame.contentWindow.postMessage(message, targetOrigin);
+      if (handshake) helloTimer = setInterval(send, 250);
+      send();
+    });
+  }
+  window.addEventListener('message', event => {
+    if (!frame || event.source !== frame.contentWindow || event.origin !== targetOrigin) return;
+    const data = event.data;
+    if (!data || data.type !== 'mini-a:embed' || data.version !== 1) return;
+    const waiter = pending.get(data.requestId);
+    if (!waiter || !['ready','ack','error'].includes(data.action)) return;
+    if (data.action !== 'ready' && data.channelId !== channelId) return;
+    if (data.status === 'pending') return;
+    if (data.action === 'ready') { channelId = data.channelId; clearInterval(helloTimer); }
+    pending.delete(data.requestId); clearTimeout(waiter.timeout);
+    if (data.action === 'error') waiter.reject(new Error(data.message));
+    else waiter.resolve(data);
+  });
+  async function updateContext() {
+    const customerId = field('customer').value;
+    if (!customerId.trim()) throw new Error('Enter a customer ID, or clear context for a prompt-only deployment.');
+    await request('set-context', {revision:++revision, context:{customerId}});
+    status('Context updated for the next goal.');
+  }
+  field('form').addEventListener('submit', async event => {
+    event.preventDefault();
+    clearInterval(helloTimer);
+    pending.forEach(waiter => { clearTimeout(waiter.timeout); waiter.reject(new Error('A new iframe was opened.')); });
+    pending.clear(); channelId = null; revision = 0;
+    field('update').disabled = field('clear').disabled = true;
+    try {
+      const url = new URL(field('url').value, location.href);
+      url.searchParams.set('embed', '1'); targetOrigin = url.origin;
+      frame = document.createElement('iframe'); frame.title = 'Mini-A conversation'; frame.src = url.href;
+      field('chat').replaceChildren(frame); status('Connecting…');
+      const ready = await request('hello', {}, true);
+      field('update').disabled = field('clear').disabled = false;
+      if (field('customer').value.trim()) await updateContext();
+      else if (ready.contextRequired) throw new Error('This deployment requires context. Enter a customer ID.');
+      if (!ready.prompt) throw new Error('Context is connected. Initial handoff requires the same origin and webembedprompt=true.');
+      const result = await request('start', {text:field('goal').value, mode:field('mode').value, revision});
+      status(result.status === 'draft' ? 'Continue editing inside Mini-A.' : 'Continue the conversation inside Mini-A.');
+    } catch (error) { status(error.message); }
+  });
+  field('update').onclick = () => updateContext().catch(error => status(error.message));
+  field('clear').onclick = () => request('clear-context', {revision:++revision}).then(() => status('Context cleared.')).catch(error => status(error.message));
+</script>
+</html>

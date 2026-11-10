@@ -1,7 +1,7 @@
 // Run from the checkout under test: WIKI_BENCH_PAGES=100 WIKI_BENCH_SAMPLES=10 oaf -f tests/wikiRetrievalBenchmark.js
 // Local FS + real Lucene; zero-result contract microbenchmark, not passage quality evaluation.
-load("mini-a-common.js")
-load("mini-a-wiki.js")
+load("js/core/mini-a-common.js")
+load("js/wiki/mini-a-wiki.js")
 var pages = Math.max(1, Number(getEnv("WIKI_BENCH_PAGES")) || 100)
 var samples = Math.max(2, Number(getEnv("WIKI_BENCH_SAMPLES")) || 10)
 var dir = java.io.File.createTempFile("wiki-bench-", "").getCanonicalPath()

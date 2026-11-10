@@ -1,7 +1,7 @@
 (function() {
-  load("mini-a-utils.js")
-  load("mini-a-common.js")
-  load("mini-a-wiki.js")
+  load("js/core/mini-a-utils.js")
+  load("js/core/mini-a-common.js")
+  load("js/wiki/mini-a-wiki.js")
 
   // Helper to create a test directory
   var createTestDir = function() {
@@ -41,8 +41,8 @@
   }
 
   exports.testWikiSkillRenderedBudget = function() {
-    load("mini-a-skill-runtime.js")
-    load("mini-a-skills.js")
+    load("js/skills/mini-a-skill-runtime.js")
+    load("js/skills/mini-a-skills.js")
     var makeTool = function(template, pending) {
       var tool = new MiniUtilsTool({}), wm = {}
       tool._skillWikiManager = wm
@@ -826,6 +826,40 @@
     }
   }
 
+  // Cover new renderer forwarding and reject executable dashboard widgets before dispatch.
+  exports.testCategoryChartsAndDashboards = function() {
+    ow.loadFormat()
+    var names = { pie: "printPie", donut: "printDonut", stackedBar: "printStackedBar", stackedColumns: "printStackedColumns", divergingBars: "printDivergingBars", treemap: "printTreemap", dashboard: "printDashboard" }
+    var originals = {}, received, calls = 0
+    var tool = new MiniUtilsTool({ useasciiviz: true })
+    try {
+      Object.keys(names).forEach(function(type) {
+        var name = names[type]
+        originals[name] = ow.format[name]
+        ow.format[name] = function(data, options) { calls++; received = { data: data, options: options }; return "RENDERED" }
+        var data = type === "dashboard" ? [[{ type: "stackedBar", data: { A: 2 }, span: 2 }]] : { A: 2 }
+        ow.test.assert(tool.renderChart({ type: type, data: data, options: { width: 40 } }), "RENDERED", "New types render through shared path")
+        ow.test.assert(received.options.width, 40, "Options reach renderer")
+        if (type === "dashboard") ow.test.assert(received.data[0][0].type, "stackedBar", "Widget casing matches OpenAF")
+      })
+      var before = calls
+      var rejectedTypes = ["func", "chart", "bar", "area", "dashboard", "unknown"]
+      rejectedTypes.forEach(function(type) {
+        ow.test.assert(tool.renderChart({ type: "dashboard", data: [{ type: type, data: "danger()" }] }).indexOf("[ERROR]"), 0, "Unsafe widgets rejected")
+      })
+      var invalidData = [[], [[]], [{ type: "text", data: "x", span: 0 }], [{ type: "text", data: function() {} }], [[{ type: "text", data: "x" }], {}]]
+      invalidData.forEach(function(data) {
+        ow.test.assert(tool.renderChart({ type: "dashboard", data: data }).indexOf("[ERROR]"), 0, "Invalid dashboard rejected")
+      })
+      ow.test.assert(tool.renderChart({ type: "dashboard", data: [{ type: "text", data: "x" }], options: { columns: 0 } }).indexOf("[ERROR]"), 0, "Invalid dimensions rejected")
+      ow.test.assert(calls, before, "Rejected dashboards never reach OpenAF")
+      ow.format.printPie = __
+      ow.test.assert(tool.renderChart({ type: "pie", data: [1] }).indexOf("Update OpenAF") > 0, true, "Missing renderer has actionable error")
+    } finally {
+      Object.keys(originals).forEach(function(name) { ow.format[name] = originals[name] })
+    }
+  }
+
   exports.testRenderChartDoesNotDisplay = function() {
     var events = [], received, originalPrint = print, prints = []
     var tool = new MiniUtilsTool({ useasciiviz: true,
@@ -841,6 +875,34 @@
       ow.test.assert(tool.renderChart({ type: "unknown" }).indexOf("[ERROR]"), 0, "Unknown charts preserve validation errors")
       ow.test.assert(new MiniUtilsTool().renderChart({ data: [1] }).indexOf("[ERROR]"), 0, "Rendering retains opt-in guard")
     } finally { print = originalPrint }
+  }
+
+  // Validate chart colors against Jansi even when the test runner has no terminal.
+  exports.testBarChartAnsiColors = function() {
+    var originalFlag = __ansiColorFlag
+    var originalConsole = __conConsole
+    var tool = new MiniUtilsTool({ useasciiviz: true })
+    try {
+      __ansiColorFlag = true
+      __conConsole = true
+      var aliases = { b: "BLUE", r: "RED", g: "GREEN", c: "CYAN", m: "MAGENTA", y: "YELLOW", k: "BLACK", w: "WHITE" }
+      Object.keys(aliases).forEach(function(alias) {
+        var render = function(color) {
+          return tool.renderChart({ type: "bars", data: [{ value: 54, label: "Sample", color: color }], options: { width: 40 } })
+        }
+        var expected = render(aliases[alias])
+        ow.test.assert(expected.indexOf("\x1b[") >= 0, true, "Test exercises ANSI escape generation")
+        ow.test.assert(render(alias), expected, "Shorthand matches the full ANSI color name")
+        ow.test.assert(render(" " + alias.toUpperCase() + " "), expected, "Shorthand ignores case and surrounding whitespace")
+      })
+      var styled = tool.renderChart({ type: "bars", data: [{ value: 54, color: "BOLD,BLUE" }], options: { width: 40 } })
+      ow.test.assert(styled.indexOf("[ERROR]"), -1, "Existing ANSI styles remain supported")
+      var invalid = tool.renderChart({ type: "bars", data: [{ value: 54, color: "invalid-color" }], options: { width: 40 } })
+      ow.test.assert(invalid.indexOf("[ERROR]"), 0, "Unknown colors retain an actionable renderer error")
+    } finally {
+      __ansiColorFlag = originalFlag
+      __conConsole = originalConsole
+    }
   }
 
   exports.testPrintChartUsesArrayRenderer = function() {

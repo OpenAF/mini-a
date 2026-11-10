@@ -4,7 +4,7 @@ Mini-A now includes a small rule-based routing layer for tool/action execution.
 
 ## Architecture
 
-- `mini-a-router.js` contains the isolated router implementation (`MiniAToolRouter`).
+- `js/core/mini-a-router.js` contains the isolated router implementation (`MiniAToolRouter`).
 - `mini-a.js` builds an action intent before tool execution and asks the router to choose:
   - selected route
   - rationale

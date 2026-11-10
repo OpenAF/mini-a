@@ -7,7 +7,7 @@ const elements=[];
 function node(tag,text='') {
   return {tag,tagName:tag.toUpperCase(),textContent:text,children:[],attributes:[],
     append(...nodes){this.children.push(...nodes)},replaceChildren(...nodes){this.children=nodes},
-    setAttribute(name,value){this.attributes.push({name,value})},
+    setAttribute(name,value){const attribute=this.attributes.find(a=>a.name===name);if(attribute)attribute.value=value;else this.attributes.push({name,value})},
     removeAttribute(name){this.attributes=this.attributes.filter(a=>a.name!==name)},
     replaceWith(value){this.replacement=value},focus(){this.focused=true},
     querySelectorAll(){return []},querySelector(){return this.children.find(n=>n.tag==='textarea'||n.tag==='button')},
@@ -36,7 +36,7 @@ ctx.markdown('<script>attack()</script>');
 assert.equal(script.replacement.tag,'text');assert.equal(image.replacement.tag,'text');assert.equal(frame.replacement.tag,'text');assert.equal(svg.replacement.tag,'text');
 assert.deepEqual(badLink.attributes,[{name:'rel',value:'noopener noreferrer'}]);
 assert.deepEqual(goodLink.attributes,[{name:'href',value:'https://example.invalid/path'},{name:'rel',value:'noopener noreferrer'}]);
-assert.deepEqual(code.attributes,[{name:'class',value:'language-mermaid'}]);assert.equal(codeInjection.attributes.length,0);
+assert.deepEqual(code.attributes,[{name:'class',value:'language-mermaid'}]);assert.deepEqual(codeInjection.attributes,[{name:'class',value:'language-mermaid'}],'Keep only the recognized code language, dropping unrelated classes');
 vm.runInContext(source.slice(source.indexOf('  function showDialog('),source.indexOf('  function commandForm(')),ctx);
 // Question dialogs use the same passive renderer, including for untrusted HTML.
 ctx.showDialog({id:'unsafe-question',type:'input',label:'Input requested',choices:[{type:'text',label:'<script>attack()</script><a href="javascript:attack()">link</a>',choices:[]}]});

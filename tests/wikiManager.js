@@ -61,6 +61,47 @@
       assert(run(runner,"wiki.delete",{path:"renamed.md"},true).ok,true,"Delete")
     })
   }
+  exports.testGraphBuildControls = function() {
+    fixture(function(root, runner) {
+      run(runner,"wiki.init",{},true)
+      var saved = run(runner,"graph.defaults",{extraction:"semantic",modelHelp:"off",maxCalls:7,maxTokens:8000,maxMinutes:2},true)
+      assert(saved.ok,true,"Save graph defaults")
+      var reopened = new MiniAWikiOps(runner.args)
+      assert(run(reopened,"graph.settings").effective.maxCalls,7,"Defaults survive new manager")
+      var result = run(reopened,"graph.build",{maxCalls:3},true)
+      assert(result.effective.maxCalls,3,"Run override")
+      assert(result.calls,0,"Saved model off guarantees no calls")
+      assert(run(reopened,"graph.settings").effective.maxCalls,7,"Override not saved")
+      throws(function(){reopened.spec("graph.build",{extraction:"semantic",strategy:"resume",force:true})},"Resume")
+      var ro=new MiniAWikiOps(merge(runner.args,{wikiaccess:"ro"}))
+      assert(run(ro,"graph.defaults",{maxCalls:4},true).ok,false,"Read-only save rejected")
+      assert(run(ro,"graph.build",{},true).ok,false,"Read-only build rejected")
+      assert(run(ro,"graph.settings").effective.maxCalls,7,"Read-only settings visible")
+      var replay=runner.command(runner.spec("graph.build",{extraction:"semantic",modelHelp:"off",strategy:"resume",maxCalls:3}),{confirm:true})
+      assert(replay.command.indexOf("resume")>=0,true,"Replay preserves strategy")
+    })
+  }
+  exports.testGraphBuildNoMarkdownAndDreamTags = function() {
+    fixture(function(root,runner) {
+      assert(run(runner,"graph.defaults",{extraction:"semantic",modelHelp:"off"},true).ok,true,"Save defaults on empty wiki")
+      assert(run(runner,"graph.build",{},true).ok,true,"Build empty wiki")
+      assert(io.listFiles(root).files.some(function(file){return /\.md$/.test(file.filename)}),false,"Graph build/defaults never bootstrap Markdown")
+      var wm=__miniAWikiCreatePrimary(runner.config())
+      try {
+        var body="# Technical\nTLS HTTP TCP UDP DNS HTTPS JSON YAML XML"
+        wm.write("tags.md",{title:"Technical",tags:["existing"]},body)
+        wm.graph("build",{extraction:"semantic",modelHelp:"off"})
+        wm._config.graphTagPolicy=true
+        assert(wm.write("tags.md",{title:"Technical",tags:[]},body).ok,false,"Reorg cannot remove tags")
+        assert(wm.write("tags.md",{title:"Technical",tags:["existing","unsupported"]},body).ok,false,"Unsupported additions rejected")
+        assert(wm.write("tags.md",{title:"Technical",tags:["existing","TLS","HTTP","TCP","UDP","DNS","HTTPS"]},body).ok,false,"Six additions rejected")
+        var suggestions=wm.graph("tags",{path:"tags.md"}), additions=suggestions.additions.slice(0,2).map(function(item){return item.tag})
+        assert(additions.length,2,"Graph supplies evidenced additions")
+        assert(wm.write("tags.md",{title:"Technical",tags:["existing"].concat(additions)},body).ok,true,"Main model selected evidenced tags accepted")
+        assert(wm._dreamTagReasons.length,2,"Reasons recorded")
+      } finally {wm.close()}
+    })
+  }
   exports.testGraphAndIndexes = function() {
     fixture(function(root, runner) {
       run(runner,"wiki.init",{},true)
@@ -96,6 +137,24 @@
     var sanitized = MiniAWikiOps.sanitize({ok:true,secret:"SECRET_VALUE",message:"failed SECRET_VALUE MODEL_SECRET MOUNT_SECRET"},args)
     assert(sanitized.ok,true,"Sanitization preserves result structure")
     assert(/SECRET_VALUE|MODEL_SECRET|MOUNT_SECRET/.test(JSON.stringify(sanitized)),false,"Error and history redaction")
+  }
+  exports.testFolderConfirmations = function() {
+    var choices=[0], inputs=["folder"], calls=[], shown=[]
+    var man=new MiniAWikiMan({wikiroot:"/tmp/wiki",wikiaccess:"rw"},{choose:function(){return choices.shift()},ask:function(){return inputs.shift()},print:function(v){shown.push(v)}})
+    man.runner=function(){var runner=new MiniAWikiOps(man.args);runner.execute=function(spec,gates){calls.push({operation:spec.operation,params:clone(spec.params),gates:clone(gates||{})});return spec.operation==="wiki.folderPreview"?{ok:true,revision:"reviewed-revision",source:"folder",pages:2,files:3,folders:2,incomingLinks:[]}:{ok:true}};return runner}
+    man.runOperation("wiki.folderDelete")
+    assert(calls.length,1,"Declining folder operation only previews")
+    calls=[];choices=[1];inputs=["folder","wrong"]
+    man.runOperation("wiki.folderDelete")
+    assert(calls.length,1,"Wrong exact path never deletes")
+    calls=[];choices=[1];inputs=["folder","folder"]
+    man.runOperation("wiki.folderDelete")
+    assert(calls.length,2,"Preview then confirmed deletion")
+    assert(calls[1].params.expectedRevision,"reviewed-revision","Reviewed revision carried into execution")
+    assert(calls[1].params.confirmation,"folder","Exact path carried into execution")
+    assert(calls[1].gates.confirm,true,"Mutation gate retained")
+    var remote=new MiniAWikiOps({wikibackend:"s3",wikibucket:"test",wikiaccess:"rw"})
+    assert(remote.unavailable(remote.spec("wiki.folderMove",{from:"old",to:"new"})).indexOf("local filesystem")>=0,true,"Unsupported backend disabled")
   }
   exports.testReorgConfirmations = function() {
     var executed = [], printed = [], choices = [], prompts = []
@@ -149,9 +208,9 @@
     })
   }
   exports.testLaunchAndGuidance = function() {
-    var consoleSource=io.readFileString("mini-a-session.js"), dreamSource=io.readFileString("mini-a-dreams.js")
+    var consoleSource=io.readFileString("js/session/mini-a-session.js"), dreamSource=io.readFileString("js/memory/mini-a-dreams.js")
     assert(consoleSource.indexOf('wikiman=true conflicts with')>=0,true,"Conflicting modes rejected")
-    assert(io.readFileString("mini-a-subtask.js").indexOf('"wikiman"')>=0,true,"UI mode excluded from delegation")
+    assert(io.readFileString("js/core/mini-a-subtask.js").indexOf('"wikiman"')>=0,true,"UI mode excluded from delegation")
     assert(dreamSource.indexOf('dreamArgs.goal += "\\n\\nAdditional operator guidance')>=0,true,"Guidance appended to established goal")
     assert(dreamSource.indexOf('dreamArgs.useshell    = false')>=0,true,"Shell restriction remains")
   }
@@ -232,9 +291,9 @@
     assert(new MiniAWikiOps({wikiroot:"/tmp",dreammaxsteps:"17"}).args.dreammaxsteps,17,"CLI numeric tuning normalized")
   }
   exports.testGraphStatsConsoleParity = function() {
-    var source = io.readFileString("mini-a-session.js")
+    var source = io.readFileString("js/session/mini-a-session.js")
     var start = source.indexOf("  function printGraph("), end = source.indexOf("  function printIngestRecovery(", start)
-    var consoleStats = new Function("wm", "capture", 'var getConsoleWikiManager=function(){return wm}, print=function(){}, printTree=function(v){capture(v);return ""};\n' + source.substring(start,end) + '\nprintGraph("stats");')
+    var consoleStats = new Function("wm", "capture", 'var adapter=null, getConsoleWikiManager=function(){return wm}, print=function(){}, printTree=function(v){capture(v);return ""};\n' + source.substring(start,end) + '\nprintGraph("stats");')
     fixture(function(root, runner) {
       function compare(label) {
         var wm = __miniAWikiCreatePrimary(runner.config()), expected
@@ -256,7 +315,7 @@
     fixture(function(root) {
       function prompts(args) {
         var seen = []
-        var man = new MiniAWikiMan(args, {print:function(){},ask:function(){throw new Error("Unexpected text prompt")},choose:function(prompt){seen.push(prompt);return prompt === "Select wiki" ? 0 : 7}})
+        var man = new MiniAWikiMan(args, {print:function(){},ask:function(){throw new Error("Unexpected text prompt")},choose:function(prompt,labels){seen.push(prompt);return prompt === "Select wiki" ? 0 : labels.length - 1}})
         man.run()
         return seen
       }
@@ -264,6 +323,57 @@
       assert(prompts({wikiroot:root,wikimounts:[]}),["Wiki operations"],"Empty mount list needs no picker")
       assert(prompts({wikiroot:root,wikimounts:[{name:"docs",root:root}]}),["Select wiki","Wiki operations"],"Configured mounts retain selection")
       assert(prompts({wikiroot:root,wikimounts:[{name:"docs",root:root}],wikitarget:"docs"}),["Wiki operations"],"Explicit mounted target remains selected")
+    })
+  }
+  exports.testBrowseOrganize = function() {
+    fixture(function(root, runner) {
+      io.mkdir(root + "/a"); io.mkdir(root + "/dest")
+      io.writeFileString(root + "/dest/index.md", "# Dest\n") // folders are sections: browse lists them through their pages
+      io.writeFileString(root + "/a/one.md", "# One\n[Home](../home.md)\n")
+      io.writeFileString(root + "/a/two.md", "# Two\n")
+      io.writeFileString(root + "/a/three.md", "# Three\n")
+      io.writeFileString(root + "/home.md", "# Home\n[One](a/one.md)\n")
+      var plan, shown, man = function(args, steps) {
+        plan = steps.slice(); shown = []
+        return new MiniAWikiMan(args, {
+          print: function(v) { shown.push(v) },
+          ask: function() { return plan.shift() },
+          choose: function(prompt, labels) {
+            var want = plan.shift()
+            if (isString(want)) return labels.length - 1 // Back
+            var i = labels.findIndex(function(l) { return want.test(l) })
+            assert(i >= 0, true, "Expected a choice matching " + want + " in " + JSON.stringify(labels))
+            return i
+          }
+        })
+      }
+      var args = { wikiroot: root, wikiaccess: "rw", wikiretrievalv2: false, usewikigraph: false }
+      // Mark two pages in a/, walk to dest/, move them there (selection transaction), create a folder, then back out.
+      man(args, [/📁 a\//, /one\.md/, /two\.md/, /\.\.  \(wiki root\)/, /📁 dest\//, /Move 2 marked here/, /Yes/,
+        /New folder here/, "fresh", /Yes/, "back"]).organize()
+      assert(io.fileExists(root + "/dest/one.md") && io.fileExists(root + "/dest/two.md"), true, "Marked pages moved")
+      assert(io.fileExists(root + "/a/one.md") || io.fileExists(root + "/a/two.md"), false, "Sources removed")
+      assert(io.fileExists(root + "/a/three.md"), true, "Unmarked page kept")
+      assert(io.readFileString(root + "/home.md").indexOf("dest/one.md") >= 0, true, "Incoming link rewritten")
+      assert(io.fileExists(root + "/dest/fresh/index.md"), true, "New folder is a section with index.md")
+      // One page takes the plain page-move path.
+      var m1 = man(args, [/📁 a\//, /three\.md/, /\.\.  \(wiki root\)/, /📁 dest\//, /Move 1 marked here/, /Yes/, "back"])
+      m1.organize()
+      assert(io.fileExists(root + "/dest/three.md"), true, "Single page moved")
+      assert(m1.history.some(function(h) { return h.operation === "wiki.move" }), true, "Single page uses wiki.move")
+      // A folder in the selection requires typing the exact confirmation to delete.
+      io.mkdir(root + "/gone"); io.writeFileString(root + "/gone/x.md", "# X\n")
+      var m2 = man(args, [/Mark\/unmark a subfolder/, /gone/, /home\.md/, /Delete 2 marked/, /Yes/, "wrong", "back"])
+      m2.organize()
+      assert(io.fileExists(root + "/gone/x.md"), true, "Wrong confirmation changes nothing")
+      var m3 = man(args, [/📁 gone\//, /Mark this folder/, /\.\.  \(wiki root\)/, /📁 dest\//, /one\.md/, /Delete 2 marked/, /Yes/, "delete 2 items", "back"])
+      m3.organize()
+      assert(io.fileExists(root + "/gone") || io.fileExists(root + "/dest/one.md"), false, "Typed confirmation deletes the selection")
+      // Read-only wikis can browse but never offer mutations.
+      var seen = []
+      var ro = new MiniAWikiMan({ wikiroot: root, wikiaccess: "ro", wikiretrievalv2: false }, { print: function() {}, ask: function() { return "" }, choose: function(p, labels) { seen = seen.concat(labels); return labels.length - 1 } })
+      ro.organize()
+      assert(seen.some(function(l) { return /New folder|Move \d+ marked|Delete \d+ marked/.test(l) }), false, "Read-only browse offers no mutations")
     })
   }
   exports.testCategoryUX = function() {

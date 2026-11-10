@@ -1,0 +1,21 @@
+# Private per-instance worker. Never publish this port to users or the internet.
+include:
+- oJobHTTPd.yaml
+ojob:
+  daemon: true
+  opacks:
+  - oJob-common
+  loadLibs:
+  - js/artifacts/mini-a-artifact-policy.js
+  - js/artifacts/mini-a-artifact-worker.js
+todo:
+- Init
+- (httpdStart): "${onport:-8091}"
+- (httpdService): "${onport:-8091}"
+  ((uri)): /artifact-worker
+  ((execURI)): | #js
+    return MiniAArtifactWorker.request(request)
+jobs:
+- name: Init
+  exec: | #js
+    MiniAArtifactWorker.init(args)

@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync('mini-a-session.js', 'utf8');
+const source = fs.readFileSync('js/session/mini-a-session.js', 'utf8');
 const start = source.indexOf('  function printStats(');
 const end = source.indexOf('\n  function commandHelpRows(', start);
 let rows, exported;

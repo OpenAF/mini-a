@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync('mini-a.js', 'utf8');
+const source = fs.readFileSync('js/core/mini-a.js', 'utf8');
 const start = source.indexOf('MiniA.prototype._createRateLimiter =');
 const end = source.indexOf('\n/**', start);
 function fixture(limits) {

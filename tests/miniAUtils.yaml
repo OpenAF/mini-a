@@ -1,4 +1,14 @@
 jobs:
+- name: MiniA Utils Tests::BarChartAnsiColors
+  from: MiniA Utils Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testBarChartAnsiColors
+
+- name: MiniA Utils Tests::CategoryChartsAndDashboards
+  from: MiniA Utils Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testCategoryChartsAndDashboards
+
 - name: MiniA Utils Tests::WikiSkillRenderedBudget
   to: oJob Test
   exec: args.func = require("tests/miniAUtils.js").testWikiSkillRenderedBudget
@@ -285,6 +295,8 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Utils Tests::BarChartAnsiColors
+- MiniA Utils Tests::CategoryChartsAndDashboards
 - MiniA Utils Tests::WikiSkillRenderedBudget
 - MiniA Bundled Skills::testBundledSkillRootsAndOverrides
 - MiniA Utils Tests::FileAllowBoundary

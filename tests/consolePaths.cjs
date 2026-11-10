@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync('mini-a-session.js', 'utf8');
+const source = fs.readFileSync('js/session/mini-a-session.js', 'utf8');
 function extract(name) {
   const start = source.indexOf('  function ' + name + '(');
   assert.ok(start >= 0, name);
@@ -17,7 +17,7 @@ const wm = {
   attach: (name, cfg) => { calls.push(['attach', name, cfg.root]); return { ok: true }; },
   graph: (sub, p) => { calls.push(['graph', sub, p.from, p.to]); return {}; }
 };
-const ctx = vm.createContext({
+const ctx = vm.createContext({__miniAPath: p => p,
   isString: x => typeof x === 'string', isObject: x => x !== null && typeof x === 'object',
   isMap: x => x !== null && typeof x === 'object', isArray: Array.isArray,
   isUnDef: x => x === undefined, isFunction: x => typeof x === 'function', isDef: x => x !== undefined,

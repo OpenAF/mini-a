@@ -4,6 +4,22 @@
 
 Mini-A is a minimalist autonomous agent that uses LLMs, shell commands and/or MCP servers to achieve user-defined goals. Simple, flexible, and easy to use as a library, CLI tool, or embedded interface.
 
+JavaScript implementations are grouped by functionality under `js/` (`core`,
+`session`, `web`, `memory`, `skills`, `wiki`, and `studio`). The root keeps the public
+`mini-a.js` library and the console, model manager, memory manager, MCP tester,
+wiki manager, and dreams entry points. YAML jobs and shell launchers retain their
+existing paths. Direct users of other libraries should use their new paths, for
+example `loadLib((getOPackPath("mini-a") || ".") + "/js/wiki/mini-a-wiki.js")`.
+Internal dependencies resolve from the executing package so a checkout can coexist
+with another installed Mini-A version.
+
+
+[Wiki Studio](docs/WIKI-STUDIO.md) provides a separate authenticated local browser
+for filesystem wikis, Markdown editing, graph exports, staged imports, jobs and
+verified recovery. Start with `ojob mini-a-wiki-studio.yaml studiohome=/data/studio
+studioallowroots='["/data/wikis"]'`; browsing requires no model. See its documented
+capabilities and disabled outbound adapters before enabling workflows.
+
 ![/.github/mini-a-web-screenshot1.jpg](/.github/mini-a-web-screenshot1.jpg)
 
 ![/.github/mini-a-con-screenshot.png](/.github/mini-a-con-screenshot.png)
@@ -94,7 +110,7 @@ Shell access is disabled by default for safety; add `useshell=true` when you exp
 - Agent Plugins ([agent-plugins.org](https://agent-plugins.org)): `plugins=<dir1,dir2>` or `pluginsroot(s)=<dir>` — see [docs/AGENT-PLUGINS.md](docs/AGENT-PLUGINS.md)
 - Starter generators: `mini-a --command`, `mini-a --skill`, `mini-a --hook`, `mini-a --agent`
 
-With `useskills=true`, Mini-A also discovers three bundled skills:
+With `useskills=true`, Mini-A also discovers bundled skills including
 `mini-a-wiki-retrieval`, `mini-a-skill-authoring`, and
 `mini-a-runtime-diagnostics`. For example:
 
@@ -112,6 +128,19 @@ Bundling preserves `useskills=false` and the conditional `skillsautosearch`
 default. It adds no selection calls by itself. Instructions and supporting
 references ship locally; execution still requires the relevant tools and sources.
 Normal `fileallow`, tool filters, access modes, and skill budgets apply.
+
+For visual responses, the bundled `mini-a-visual-output` skill provides on-demand
+guides and examples for Chart.js, Mermaid, LaTeX math, and Leaflet. Enable the
+relevant renderer and request the skill explicitly, for example:
+
+```bash
+opack exec mini-a useskills=true skillsautosearch=false usemath=true goal='Use $local:mini-a-visual-output to explain the quadratic formula.'
+```
+
+Use `usecharts`, `usediagrams` (alias `usemermaid`), or `usemaps` for the other
+formats. Rich rendering happens in the web UI; console transcripts preserve
+their source. See [visual-output skill guidance](USAGE.md#visual-output-skill)
+for loading, validation, and browser asset requirements.
 
 - Override the base home directory: `homedir=<path>` (reads `.openaf-mini-a` from `<path>` instead of `~`)
 
@@ -143,6 +172,9 @@ settings/presets, detailed activity and debug traces, and subsystem operation sc
 Slash commands open dedicated panes with readable results, searchable Help,
 answer/wiki readers, and paginated previous results. Progress remains in Live activity.
 See [Advanced web console](USAGE.md#advanced-web-console).
+
+For application integration, see [iframe context and same-origin prompt handoff](docs/WEB-EMBED.md).
+The opt-in bridge accepts validated parameters and can expand a parent input box into a conversation.
 
 For history/attachments and S3-backed history examples, see [USAGE.md](USAGE.md#web-ui-quick-start).
 
@@ -343,6 +375,8 @@ For SSE-based MCP servers:
 mini-a mcptest=true mcp="(type: sse, url: 'http://localhost:9090/mcp')"
 ```
 
+Remote MCP connections also support OpenAF OAuth2 through `auth: (type: oauth2, ...)`, including client credentials and browser authorization-code login with optional protected token persistence. See [remote MCP OAuth2 configuration](USAGE.md#oauth2-authentication-for-remote-mcp-servers) for complete examples and runtime requirements.
+
 ### MCP Tester Features
 
 The interactive tester provides:
@@ -456,12 +490,12 @@ Mini-A ships with complementary components:
 - **`mini-a-memoryman.js`** - Interactive working-memory manager for inspecting and maintaining persisted global/session memories — launched via `mini-a memoryman=true`
 - **`mini-a-wikiman.js`** - Guided wiki, graph, Dream and ingestion maintenance menus with replayable CLI commands; run `mini-a wikiman=true wikiroot=/path/to/wiki wikiaccess=rw` (see [usage](USAGE.md#wiki-operations-manager))
 - **`mini-a-modelman.js`** - Interactive model/config manager, also reachable from the console via `/model` — launched via `mini-a modelman=true`
-- **`mini-a-wiki-maintenance.js`** - Shared local writer lock and durable maintenance journal persistence.
+- **`js/wiki/mini-a-wiki-maintenance.js`** - Shared local writer lock and durable maintenance journal persistence.
 - **`mini-a-dreams.js`** - Dream engine for memory/wiki consolidation with mode routing, reorg gates, and structured output/reporting — launched via `mini-a dream=true` or `/dream`
 - **`mini-a.sh`** - Shell wrapper script for running directly from a cloned repository
 - **`mini-a.js`** - Reusable library for embedding in other OpenAF jobs
-- **`mini-a-progcall.js`** - Per-session localhost HTTP bridge used by programmatic MCP tool calling (`mcpprogcall=true`)
-- **`mini-a-subtask.js`** - SubtaskManager for local child-agent delegation and remote worker delegation
+- **`js/core/mini-a-progcall.js`** - Per-session localhost HTTP bridge used by programmatic MCP tool calling (`mcpprogcall=true`)
+- **`js/core/mini-a-subtask.js`** - SubtaskManager for local child-agent delegation and remote worker delegation
 - **`mini-a-web.sh` / `mini-a-web.yaml`** - Lightweight HTTP server for browser UI — launched via `mini-a web=true` or `mini-a onport=<port>` (or directly with `./mini-a-web.sh onport=<port>`)
 - **`mini-a-worker.yaml`** - Headless HTTP API server for programmatic agent delegation (launch with `mini-a workermode=true`)
 - **`mini-a-modes.yaml`** - Built-in configuration presets for common use cases (can be extended with `~/.openaf-mini-a_modes.yaml` or `~/.openaf-mini-a/modes.yaml`)
@@ -852,3 +886,51 @@ with browser sign-in, SBucket credential persistence and read-only tools by defa
 Opt in with `modelstrategy=supervised` to prepare a protected contract with main and execute with LC. `savecontract=true` and `reusecontract=true` separately enable accepted-contract persistence and exact-goal reuse. See [supervised contracts](docs/SUPERVISED.md) for configuration, validation and evaluation.
 
 With `orchestration=auto`, Mini-A tracks progress independently of successful tool calls and checks task results before accepting them. Delegated work can declare dependencies, acceptance criteria, and resource scopes; optional `runmaxtokens` and `runmaxtimems` control aggregate admission across the agent tree. Durable runs reconcile prior remote work before resubmission. See [reliable automatic orchestration](USAGE.md#reliable-automatic-orchestration) for contracts, defaults, and verification commands.
+
+### Download SVG answers
+
+Simple and Advanced display supported SVG answer blocks as images. A compact
+“⋯” menu in the top-right corner of each graphic contains shrink/enlarge/reset
+controls, SVG and PNG download buttons, and a full-screen action. Each menu
+option has a small icon. In full screen, all controls remain available in a
+floating toolbar with tooltips. Resizing affects the preview only. SVG downloads preserve the
+sanitized preview dimensions and Unicode text. PNG downloads use a transparent
+background at 2× resolution, capped at 8192 pixels per side and approximately
+16 megapixels for large diagrams. Both exports run entirely in the browser. This does not
+require `usesandbox` and does not read files from the server. Invalid or unsupported
+SVG remains available as source. Active elements, external resources, embedded
+HTML, animation and stylesheet blocks are not supported; passive inline
+presentation styles are preserved.
+
+Mermaid diagrams provide the same SVG and PNG download options in their “⋯”
+menu, including in full-screen mode. Exports include the complete diagram with
+its current theme, regardless of preview zoom or pan. PNG uses the same 2×
+transparent-background default and size limits described above.
+
+Chart.js response charts also have a collapsed “⋯” menu with zoom in/out,
+reset, PNG download and full-screen controls. Zoom enlarges the chart within a
+scrollable viewport while preserving its data and axis limits. The live canvas
+keeps native tooltips, legend toggles and click interactions in both views.
+PNG downloads capture the complete current canvas. Unchanged charts keep their
+state during streamed response updates.
+
+### Optional document-generation libraries
+
+The container image is maintained in `openaf-dockers/mini-a`. Document-generation
+libraries are optional and are not installed by this feature:
+
+| Output | OpenAF support |
+| --- | --- |
+| PDF, DOCX | `mdconvert` oPack, using its Markdown conversion APIs |
+| XLSX | `plugin-XLS` oPack and the `XLS` plugin |
+| PPTX | Apache POI XSLF (`org.apache.poi.xslf.usermodel.XMLSlideShow`) bundled with `plugin-XLS`; use the Java API directly |
+| PNG, JPEG | Java ImageIO and Java2D; provide fonts and a headless-compatible JRE |
+| SVG | UTF-8 XML text; no additional oPack needed |
+
+Generation libraries are not security validators. Installing them does not provide
+an isolated worker or authorize publication of server files. Server-generated
+file publication uses the separate restricted worker and artifact broker. See
+[generated-file downloads](docs/GENERATED-FILES.md) for setup and limits; browser-only
+SVG export remains independent of that facility.
+
+Wiki graph extraction, model budgets, saved defaults and resume controls are documented in [Graph builds](docs/GRAPH-BUILDS.md).

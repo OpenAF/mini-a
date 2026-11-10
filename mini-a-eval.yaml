@@ -7,7 +7,7 @@ ojob:
   - oJob-common
   loadLibs:
   - mini-a.js
-  - mini-a-eval.js
+  - js/core/mini-a-eval.js
 
 jobs:
 - name: MiniA Eval

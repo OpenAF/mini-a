@@ -25,15 +25,9 @@ var wikiJobsStr = function(value) {
   return ""
 }
 
-// Load mini-a libraries from this copy and register them under the bare names other
-// libraries use with loadLib(), so those calls do not pick up another installed copy.
+// Use the same canonical library keys as the modules loaded by these jobs.
 var wikiJobsLoadLibs = function(names) {
-  names.forEach(function(name) {
-    var key = name.toLowerCase()
-    if (isDef(__loadedLibs[key]) && __loadedLibs[key] != 0) return
-    load(__wikiJobsRoot + "/" + name)
-    __loadedLibs[key] = true
-  })
+  names.forEach(function(name) { loadLib(__wikiJobsRoot + "/" + name) })
 }
 
 // Timestamped output through OpenAF's log functions. Ingest/dream progress arrives as strings;
@@ -89,7 +83,7 @@ var wikiJobsPrepare = function(args, opts) {
   var defaultMode = isQuery ? "wiki" : "poweruser"
   var modeName = isDef(args.mode) ? wikiJobsStr(args.mode) : defaultMode
   if (modeName.length > 0 && modeName.toLowerCase() !== "none") {
-    if (typeof __miniAResolveModePreset === "undefined") wikiJobsLoadLibs(["mini-a-common.js"])
+    if (typeof __miniAResolveModePreset === "undefined") wikiJobsLoadLibs(["js/core/mini-a-common.js"])
     var preset = __miniAResolveModePreset(modeName, { basePath: __wikiJobsRoot, homeDir: opts.homeDir })
     preset.warnings.forEach(function(w) { logFn("⚠️  " + w) })
     Object.keys(preset.params).forEach(function(k) {
@@ -225,20 +219,20 @@ var wikiJobsBackup = function(root, logFn) {
 var wikiJobsRunIngest = function(ingestArgs, logFn) {
   global.__mini_a_ingest_lib_mode = true
   global.__mini_a_dreams_lib_mode = true
-  wikiJobsLoadLibs(["mini-a-common.js", "mini-a-ingest.js"])
+  wikiJobsLoadLibs(["js/core/mini-a-common.js", "js/wiki/mini-a-ingest.js"])
   var res = new MiniAIngest(ingestArgs, logFn).run()
   return isMap(res) ? res : { ok: false, error: "ingestion returned no result" }
 }
 
 var wikiJobsRunDream = function(dreamArgs, logFn) {
   global.__mini_a_dreams_lib_mode = true
-  wikiJobsLoadLibs(["mini-a-common.js", "mini-a-dreams.js"])
+  wikiJobsLoadLibs(["js/core/mini-a-common.js", "mini-a-dreams.js"])
   var res = new MiniADreams(dreamArgs, logFn).run()
   return isMap(res) ? res : { ok: false, error: "dream returned no result" }
 }
 
 var wikiJobsCompact = function(root, a, logFn) {
-  wikiJobsLoadLibs(["mini-a-common.js", "mini-a-wiki.js"])
+  wikiJobsLoadLibs(["js/core/mini-a-common.js", "js/wiki/mini-a-wiki.js"])
   var wm = new MiniAWikiManager({ backend: "fs", root: root, access: "rw", wikiretrievalv2: true, wikilexical: a.wikilexical, wikiretrievalconfig: a.wikiretrievalconfig })
   try {
     return wm.compact({ dryRun: false, offline: true })
@@ -299,7 +293,7 @@ var wikiJobsQueryReadiness = function(root) {
 
 // Print a stage failure and exit 1.
 var wikiJobsFail = function(stage, detail, backup) {
-  logErr("❌ " + stage + " failed" + (isDef(detail) ? ": " + (isString(detail) ? detail : stringify(detail, __, "")) : ""))
+  logErr("❌ " + stage + " failed" + (isDef(detail) ? ": " + (isString(detail) ? detail : af.toSLON(detail)) : ""))
   if (isDef(backup)) logWarn("🗄️  Pre-dream backup: " + backup)
   exit(1)
 }

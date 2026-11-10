@@ -148,6 +148,12 @@ a posting cut short by the work budget cannot pass that filter. Depth defaults t
 one. `wikigraphcrossdepth=2` permits one additional local hop after an explicit
 cross link, preserving the original support chain and consuming the same caps.
 It never follows a further cross link or starts an unrestricted recursive walk.
+
+`wikigraphproximity=true` (default off) adds a proximity component to
+graph-discovered hits: a personalized PageRank walk from the query's lexical seeds
+over links, tags and grounded concepts (hub features are not traversed), charged to
+the same `maxGraphEdges` budget. The best-connected hit gains up to `0.25`, reported
+as `scoreComponents.proximity`.
 At disclosure, both source and destination permissions/revisions and explicit
 mount routing are checked again; changing or detaching a route invalidates its
 hint. Every citation retains the destination wiki and generation.
@@ -953,9 +959,9 @@ Operations MCP client examples (v2 enabled on the server):
 This adds no tools or structural enumeration to restricted wiki MCP or virtual
 skills. Feature-off operations return `v2-required` for this new action.
 
-- `mini-a-wiki-retrieval.js`: parser, local generation publication, managed readers, catalogue/cache, scoped ranking, evidence packing, applicability and maintenance report.
-- `mini-a-wiki.js` and `mini-a-wiki-knowledge.js`: shared hooks, contract repairs, scores, continuations, incremental publication and separate telemetry.
-- `mini-a-mcp-wiki.js`, `mini-a-mcp-skills.js`, `mini-a-utils.js`, `mini-a-skills.js`: trusted cursor adapters, restricted private grants and revision-aware wiki skill facade.
+- `js/wiki/mini-a-wiki-retrieval.js`: parser, local generation publication, managed readers, catalogue/cache, scoped ranking, evidence packing, applicability and maintenance report.
+- `js/wiki/mini-a-wiki.js` and `js/wiki/mini-a-wiki-knowledge.js`: shared hooks, contract repairs, scores, continuations, incremental publication and separate telemetry.
+- `js/wiki/mini-a-mcp-wiki.js`, `js/skills/mini-a-mcp-skills.js`, `js/core/mini-a-utils.js`, `js/skills/mini-a-skills.js`: trusted cursor adapters, restricted private grants and revision-aware wiki skill facade.
 - `mini-a.js`, `mini-a-con.js`, `mini-a-dreams.js`, launch YAML and `mcps/` schemas: consistent default and override propagation.
 - `tests/wikiRetrieval*.js`, suite registration and fixtures: runtime regression counts, repeat-run checks, deterministic quality and local performance harnesses.
 - Wiki/ingestion/virtual-skills documentation and `.package.yaml`: migration, measured limits and runtime packaging; pre-existing package edits retained.

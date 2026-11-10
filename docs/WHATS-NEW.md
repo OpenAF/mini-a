@@ -2,6 +2,22 @@
 
 ## Recent Updates
 
+### Delete sources from the Studio library
+
+Import → Source library now has a **Delete** action per source. It removes the source record and its staged revisions after confirmation; pages already imported remain. **Add source** also offers **Ad-hoc import**, which imports files, a webpage or captions once and then discards the source instead of keeping it in the library. See [Wiki Studio](WIKI-STUDIO.md#sources-uploads-and-incremental-hydration).
+
+### Choose where imported sources land in Studio
+
+The Studio import step now shows a **Wiki folder** box with a **Choose folder…** picker and a list of the page paths new files will get. YouTube captions accept an optional **Markdown file name** (default `youtube-<video id>.md`). See [Wiki Studio](WIKI-STUDIO.md#sources-uploads-and-incremental-hydration).
+
+### Create folders and move several pages at once
+
+Wiki Studio and `wikiman=true` can now create folders (sections with an `index.md`) and move or delete a mixed selection of pages and folders in one verified transaction (preview, recovery snapshot, links rewritten once). Studio adds multi-select, a folder picker, drag-and-drop, a context menu and move/rename/delete while reading; wikiman adds *Browse & organize*. See `docs/WIKI-STUDIO.md` and `USAGE.md`.
+
+### Export a wiki to a portable ZIP
+
+`wiki.export` (wikiman → Indexes & storage, Wiki Studio → Maintenance → Export, or `ojob utils/wikiOps.yaml operation=wiki.export`) packages pages plus the validated search index and graph for other Mini-A instances, such as an S3 bucket. By default the index is a nested `mini-a-wiki-index.zip`; `nobundle=true` stores the index folders loose. See [Exporting a wiki to a ZIP](WIKI.md#exporting-a-wiki-to-a-zip).
+
 ### Wiki lifecycle in three commands
 
 `mini-a wikihydrate=true wikiroot=... source=...`, `mini-a wikidream=true wikiroot=...` and the new `mini-a wikiquery=true wikiroot=... [onport=8888|goal=...]` (also `--wiki-hydrate`, `--wiki-dream`, `--wiki-query`, or `ojob utils/wikiQuery.yaml`) create, reorganize and query a local wiki. Querying is read-only and uses the new `wiki` mode preset. A new [wiki quickstart](WIKI-QUICKSTART.md) walks through the whole flow.
@@ -54,7 +70,7 @@ Recovery now accepts already-parsed object/array retries, sends the corrective p
 
 **Change**: Read-only `wikibackend=http` wikis fetch pages from a static server while consuming a published `mini-a-wiki-index.zip` for catalog, Lucene search, and graph state. S3 can opt into the same bundle with `s3artifactbundle=true`; set `wikiartifactrefreshsecs` to periodically recheck remote ETag/Last-Modified metadata in long-lived processes.
 
-### Wiki: automated knowledge ingestion (`mini-a-ingest.js`)
+### Wiki: automated knowledge ingestion (`js/wiki/mini-a-ingest.js`)
 
 **Change**: New ingestion pipeline that turns a documentation folder, a git repository (local checkout or clone URL) or a web page into distilled, linked, indexed wiki pages.
 
@@ -119,7 +135,7 @@ New arguments: `ingestsource`, `ingesttype`, `ingestsection`, `ingestinclude`, `
 
 ### Wiki: Open Knowledge Format (OKF) compatibility
 
-**Change**: The wiki (`mini-a-wiki.js`) is now format-level compatible with Google's [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog) (OKF), so mini-a wikis can be read by — and can read — OKF bundles.
+**Change**: The wiki (`js/wiki/mini-a-wiki.js`) is now format-level compatible with Google's [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog) (OKF), so mini-a wikis can be read by — and can read — OKF bundles.
 
 - **`type` front-matter field**: `write` now auto-fills `type: concept` when omitted (OKF's only required field). `lint` reports an info-level `missing_frontmatter` issue (field `type`) for legacy pages with no `type`, skipping `index.md` / `*/index.md`.
 - **Bundle-root-relative links**: `[label](/path/to/page.md)` links (leading `/`) now resolve from the wiki root instead of being rejected as external/absolute — they participate in link resolution, lint, and the backlinks graph like any other internal link. `move` continues to leave `/`-rooted links untouched (a pre-existing guard), so an absolute link pointing at a moved page is not auto-rewritten.
@@ -147,7 +163,7 @@ New arguments: `ingestsource`, `ingesttype`, `ingestsection`, `ingestinclude`, `
 ```bash
 # Standalone (memory + wiki)
 mini-a dream=true \
-  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/js/memory/mini-a-memory.json))' \
   usewiki=true wikiroot=/shared/wiki \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 
@@ -251,7 +267,7 @@ See [docs/DELEGATION.md](DELEGATION.md) for full documentation including example
 
 **What's New**:
 
-- **`MiniAWikiManager`** class (`mini-a-wiki.js`): pluggable FS, S3, S3+FS (`s3fs`), and Elasticsearch/OpenSearch (`es`) backends, `parseFrontmatter`, `extractLinks`, `tree`, `browse`, `backlinks`, `move`, `search`, `lint`, and `write` operations.
+- **`MiniAWikiManager`** class (`js/wiki/mini-a-wiki.js`): pluggable FS, S3, S3+FS (`s3fs`), and Elasticsearch/OpenSearch (`es`) backends, `parseFrontmatter`, `extractLinks`, `tree`, `browse`, `backlinks`, `move`, `search`, `lint`, and `write` operations.
 
 - **New `wiki` agent action**: the agent can call `list`, `tree`, `browse`, `read`, `search`, `grep`, `backlinks`, `lint`, `write` (when `wikiaccess=rw`), `move` (when `wikiaccess=rw`), `init` (when `wikiaccess=rw`), or `delete` (when `wikiaccess=rw`) at any step:
   ```json

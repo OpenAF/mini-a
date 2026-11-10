@@ -1,6 +1,6 @@
 // Read-only optional local replay, or a disposable 11-wiki benchmark by default.
 // WIKI_FEDERATION_MOUNTS is a JSON array of mount configurations; never printed.
-load('mini-a-common.js'); load('mini-a-wiki.js')
+load('js/core/mini-a-common.js'); load('js/wiki/mini-a-wiki.js')
 var supplied=getEnv('WIKI_FEDERATION_MOUNTS'), root, mounts=[], writer, manager
 try {
   if (isString(supplied) && supplied.trim()) mounts=af.fromJson(supplied)
@@ -25,5 +25,5 @@ try {
     var shown=isFunction(manager.presentSearch)?manager.presentSearch(result):result
     records.push({millis:elapsed,backendReadCalls:reads,backendReadBytes:bytes,validationBlockReads:validationReads()-validationBefore,paths:(result.results||[]).map(function(hit){return hit.path}),rawChars:stringify(result,__, '').length,modelChars:af.toTOON(shown).length,outcome:result.outcome,used:result.budget&&result.budget.used})
   }
-  print('FEDERATION_BENCHMARK='+stringify({runtime:getVersion(),sources:mounts.length,fixture:supplied?'existing-read-only-mounts':'disposable-11-wikis',samples:records,sourceSha1:{wiki:sha1(io.readFileString('mini-a-wiki.js')),retrieval:sha1(io.readFileString('mini-a-wiki-retrieval.js'))}},__,''))
+  print('FEDERATION_BENCHMARK='+stringify({runtime:getVersion(),sources:mounts.length,fixture:supplied?'existing-read-only-mounts':'disposable-11-wikis',samples:records,sourceSha1:{wiki:sha1(io.readFileString('js/wiki/mini-a-wiki.js')),retrieval:sha1(io.readFileString('js/wiki/mini-a-wiki-retrieval.js'))}},__,''))
 } finally {if(manager)manager.close();if(writer)writer.close();if(root)io.rm(root)}

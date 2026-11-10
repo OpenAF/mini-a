@@ -1,10 +1,10 @@
 (function() {
   load("mini-a.js")
-  load("mini-a-subtask.js")
+  load("js/core/mini-a-subtask.js")
   var check = function(value, expected, message) { ow.test.assert(value, expected, message) }
   var config = { type: "fixture", model: "risk" }
   exports.terminalApprovalReturnValue = function() {
-    var source = io.readFileString("mini-a-session.js")
+    var source = io.readFileString("js/session/mini-a-session.js")
     var start = source.indexOf("agent.setConfirmFn(function(label, choices) {")
     var end = source.indexOf("\n      })", start)
     check(start >= 0 && end > start, true, "Session approval callback exists")

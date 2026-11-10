@@ -1,5 +1,5 @@
 // Run with OAF_JARGS=-Xmx256m oaf -f tests/webAttachmentMemory.js.
-load('mini-a-web-attachments.js')
+load('js/web/mini-a-web-attachments.js')
 global.__useattach = true
 function check(value, message) { if (!value) throw new Error(message) }
 function rejects(value, name) {

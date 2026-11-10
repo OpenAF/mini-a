@@ -1,6 +1,6 @@
 // Real shared command dispatch, Advanced progress/results and cooperative Stop.
-load('mini-a-session.js')
-load('mini-a-advanced.js')
+load('js/session/mini-a-session.js')
+load('js/web/mini-a-advanced.js')
 var root = String(new java.io.File(io.createTempDir('web_dream_auto_')).getCanonicalPath())
 var oldHome = __gHDir
 __gHDir = function() { return root }

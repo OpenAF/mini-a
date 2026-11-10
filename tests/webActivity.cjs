@@ -6,7 +6,7 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const page = fs.readFileSync(path.join(root, 'public/index.md'), 'utf8');
 const yaml = require('./webSource.cjs');
-const agent = fs.readFileSync(path.join(root, 'mini-a.js'), 'utf8');
+const agent = fs.readFileSync(path.join(root, 'js/core/mini-a.js'), 'utf8');
 const showdown = require(path.join(root, 'public/showdown.min.js'));
 const converter = new showdown.Converter({ tables: true });
 assert.match(page, /\.answer-activity > summary\s*\{[\s\S]*?color: #737373;[\s\S]*?font-style: italic;/);
@@ -20,14 +20,18 @@ function result(events, showexecs = true) {
     request: { files: { postData: '{"uuid":"test"}' } },
     global: {
       _mini_a_web_checkToken: () => true, _mini_a_web_isValidUuid: () => true,
-      __res: { test: events }, __lastActivity: {}, __showexecs: showexecs
+      __res: { test: events }, __lastActivity: {}, __showexecs: showexecs, __busy: {},
+      __sessionLock: { lock() {}, unlock() {} }
     },
     ow: { server: { httpd: { reply: value => value } } },
     isDef: x => x !== undefined && x !== null, isUnDef: x => x === undefined || x === null,
     isString: x => typeof x === 'string', isArray: Array.isArray, isFunction: x => typeof x === 'function',
-    jsonParse: JSON.parse, printErr: error => { throw error; }, __: undefined
+    genUUID: () => "revision", jsonParse: JSON.parse, printErr: error => { throw error; }, __: undefined
   };
-  return vm.runInNewContext('(function() {' + route + '})()', context);
+  vm.createContext(context);
+  const helpers = yaml.slice(yaml.indexOf('    global._mini_a_web_reserve ='), yaml.indexOf('    global.__webtoken =')).replace(/^    /gm,'');
+  vm.runInContext(helpers, context);
+  return vm.runInContext('(function() {' + route + '})()', context);
 }
 const events = [
   { event: '👤', message: 'First <prompt>' },
@@ -68,10 +72,12 @@ assert.equal((twoAnswers.content.match(/data-complete="true"/g) || []).length, 2
 const proxyStart = yaml.indexOf('              var genericProxyPattern =');
 const proxyEnd = yaml.indexOf('              if (global.__usestream', proxyStart);
 const proxyContext = vm.createContext({
-  global: { __res: { test: [] } }, uuid: 'test', lma: {},
+  global: { __res: { test: [] }, __sessionLock: {lock() {}, unlock() {}} }, uuid: 'test', lma: {},
+  isArray: Array.isArray, genUUID: () => 'revision',
   isString: value => typeof value === 'string',
   isDef: value => value !== undefined && value !== null, __: undefined
 });
+vm.runInContext(yaml.slice(yaml.indexOf('    global._mini_a_web_transcript ='), yaml.indexOf('    global._mini_a_web_outcome =')).replace(/^    /gm,''), proxyContext);
 vm.runInContext('var pendingProxyThought, displayMessage;', proxyContext);
 const normalizeInteraction = vm.runInContext('(function(_e, m) {' +
   yaml.slice(proxyStart, proxyEnd) + '})', proxyContext);
@@ -127,10 +133,11 @@ for (const name of ['createMarkdownConverter', 'escapeHtml', 'preprocessChartBlo
 }
 let mathOptions;
 rendering.window = {
-  showdownKatex: options => {
-    mathOptions = options;
-    return () => [];
-  }
+  renderMathInElement() {}
+};
+rendering.createMathMarkdownExtension = options => {
+  mathOptions = options;
+  return () => [];
 };
 vm.runInContext('createMarkdownConverter(true);', rendering);
 assert.deepEqual(Array.from(mathOptions.delimiters, delimiter => ({

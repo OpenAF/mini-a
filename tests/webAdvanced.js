@@ -1,8 +1,8 @@
 // OpenAF integration checks for the real shared runtime, disk journal and async adapter.
 // Run: oaf -f tests/webAdvanced.js (no model requests).
-load('mini-a-session.js')
-load('mini-a-web-attachments.js')
-load('mini-a-advanced.js')
+load('js/session/mini-a-session.js')
+load('js/web/mini-a-web-attachments.js')
+load('js/web/mini-a-advanced.js')
 var testRoot = String(io.createTempFile('mini-a-advanced-tests-', '.dir'))
 io.rm(testRoot); io.mkdir(testRoot)
 testRoot = String(new java.io.File(testRoot).getCanonicalPath())
@@ -15,6 +15,9 @@ global._mini_a_web_isValidUuid = function(id) { return /^[a-z0-9-]+$/.test(id) }
 global._mini_a_web_reserve = function(id) { if (global.__busy[id]) return __; global.__busy[id] = true; return global.__runTokens[id] = genUUID() }
 global._mini_a_web_release = function(id, token) { if (global.__runTokens[id] === token) { delete global.__busy[id]; delete global.__runTokens[id] } }
 global._mini_a_web_dispose = function(id) { delete global.__conversations[id] }
+var webYaml = io.readFileString('mini-a-web.yaml')
+global.__sessionLock = new java.util.concurrent.locks.ReentrantLock()
+eval(webYaml.substring(webYaml.indexOf('    global._mini_a_web_transcript ='), webYaml.indexOf('    global._mini_a_web_outcome =')).replace(/^    /gm, ''))
 var submitted=[]
 var MiniAWebPrompt = function(req) { submitted.push(jsonParse(req.files.postData)) }
 try {
@@ -347,5 +350,20 @@ try {
   promptNames.forEach(function(key) { check(isUnDef(resetReload.runtime.options()[key]), key + ' remains unset on next resume') })
   resetReload.runtime.dispose()
 
+  loadLib(__miniAPath('js/web/mini-a-web-embed.js'))
+  MiniAWebEmbed.init({webembed:true,webembedorigins:'https://app.example',webembedfields:{customerId:{type:'string',required:true}}})
+  var embedData = {version:1,revision:1,context:{customerId:'EXPANSION_RECORD'}}
+  jobs = []
+  advanced.request({uuid:'embedded-expansion',action:'command',command:'/git-impact app',requestId:'embed-command',embed:embedData})
+  embedData.context.customerId = 'CHANGED_AFTER_ADMISSION'
+  jobs.shift()()
+  check(submitted[submitted.length-1].embed.context.customerId === 'EXPANSION_RECORD', 'expanded goal retains the admitted snapshot')
+  check(submitted[submitted.length-1].prompt.indexOf('Review the complete changes') >= 0, 'custom command still expands')
+  check(stringify(advanced.snapshot(advanced.get('embedded-expansion'),0).settings).indexOf('EXPANSION_RECORD') < 0, 'context is not a setting')
+  check(io.readFileString(advanced.get('embedded-expansion').file).indexOf('EXPANSION_RECORD') < 0, 'context is not persisted in options or receipts')
+  var invalidEmbed = false
+  try { advanced.request({uuid:'embedded-expansion',action:'command',command:'goal',requestId:'embed-invalid',embed:{version:1,revision:2,context:null}}) } catch(e) { invalidEmbed = true }
+  check(invalidEmbed && jobs.length === 0, 'invalid context rejected before command execution')
+  advanced.get('embedded-expansion').runtime.dispose()
   print('Advanced OpenAF integration checks passed')
 } catch(e) { printErr(e); exit(1) } finally { __gHDir = originalHome; io.rm(testRoot) }

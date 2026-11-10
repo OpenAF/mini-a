@@ -2,7 +2,7 @@
   global.__mini_a_dreams_lib_mode = true
   global.__mini_a_ingest_lib_mode = true
   load("mini-a-dreams.js")
-  load("mini-a-ingest.js")
+  load("js/wiki/mini-a-ingest.js")
   function fixture(fn) {
     var root = String(new java.io.File(io.createTempDir("dream_auto_test_")).getCanonicalPath()), wm
     try {
@@ -299,7 +299,7 @@
     ow.test.assert(isString(backup.files['.mini-a-wiki-move/journal.json']), true, 'move authority included in backup')
   }) }
   exports.testAutoAbsorptionRecovery = function() { fixture(function(root) {
-    load('mini-a-absorb.js')
+    load('js/wiki/mini-a-absorb.js')
     var src = String(new java.io.File(io.createTempDir('auto_absorb_source_')).getCanonicalPath())
     try {
       io.writeFileString(src + '/new.md', '# New\n\nAbsorbed recovery evidence.')
@@ -439,7 +439,7 @@
     ow.test.assert(r._createWikiDecision().isConfigured(), false, "explicit opt-out overrides configuration")
     var dec = new MiniADecision({ env: function() { return "" } })
     ow.test.assert(dec.isConfigured(), false, "no configuration remains disabled")
-    loadLib("mini-a-wikiops.js")
+    loadLib(String(new java.io.File("js/wiki/mini-a-wikiops.js").getCanonicalPath()))
     var settings = MiniAWikiOps.settings({ modeldec: cfg, usedecide: false })
     ow.test.assert(settings.modeldec.model, cfg.model, "Wiki Manager forwards decision configuration")
     ow.test.assert(settings.usedecide, false, "Wiki Manager forwards opt-out")

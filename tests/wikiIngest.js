@@ -1,10 +1,10 @@
 (function() {
   global.__mini_a_ingest_lib_mode = true
   global.__mini_a_dreams_lib_mode = true
-  load("mini-a-common.js")
-  load("mini-a-memory.js")
-  load("mini-a-wiki.js")
-  load("mini-a-ingest.js")
+  load("js/core/mini-a-common.js")
+  load("js/memory/mini-a-memory.js")
+  load("js/wiki/mini-a-wiki.js")
+  load("js/wiki/mini-a-ingest.js")
 
   // ─── helpers ────────────────────────────────────────────────
 
@@ -112,7 +112,7 @@
   }
 
   exports.testIngestReadsDocumentsAndImages = function() {
-    loadLib("mini-a-utils.js")
+    loadLib(String(new java.io.File("js/core/mini-a-utils.js").getCanonicalPath()))
     var src = String(io.createTempDir("miniingest_binary_")), wiki = String(io.createTempDir("miniingest_wiki_"))
     var originalExtractor = MiniUtilsTool.prototype._createDocumentExtractor
     try {
@@ -129,7 +129,7 @@
       ing._setLlm({ promptImage: function(prompt, path) {
         images++
         ow.test.assert(prompt.indexOf("untrusted source data") >= 0, true, "vision prompt distrusts image text")
-        ow.test.assert(String(path).indexOf("diagram.png") >= 0, true, "image path reaches vision model")
+        ow.test.assert(String(path).indexOf("iVBOR") === 0, true, "prepared immutable PNG bytes reach vision model")
         return "A diagram labeled Widget"
       } })
       var result = ing.run()
@@ -147,7 +147,7 @@
   }
 
   exports.testIngestRejectsIncompleteDocumentExtraction = function() {
-    loadLib("mini-a-utils.js")
+    loadLib(String(new java.io.File("js/core/mini-a-utils.js").getCanonicalPath()))
     var src = String(io.createTempDir("miniingest_binary_")), wiki = String(io.createTempDir("miniingest_wiki_"))
     var originalExtractor = MiniUtilsTool.prototype._createDocumentExtractor
     try {

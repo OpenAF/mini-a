@@ -1,6 +1,8 @@
 # Run from the checkout with OAF_MODEL configured. Synthetic read-only tasks.
 # The model-led comparison may fail markers; compare its results with automatic.
 # ojob mini-a.yaml eval=true evalfile=evals/skills.yaml evalout=/tmp/mini-a-skills-eval.json
+# The visual-* cases use supplied synthetic data. Inspect reference-read events
+# and parse/render the final artifacts; load counts alone do not prove adherence.
 scenarios:
 - name: local-semantic-selection
   goal: Prepare a synthetic account ledger report for Alder.
@@ -162,3 +164,67 @@ scenarios:
     equals: 0
   - path: result.skill_activity.selection_calls
     equals: 0
+
+- name: visual-chart
+  goal: 'Use $local:mini-a-visual-output and its relevant reference. Return one chart of these supplied illustrative order counts: North 12, South 18. Include a short caption, preserve the values, and do not claim browser verification.'
+  args: &visual
+    raw: true
+    format: md
+    useskills: true
+    skillsautosearch: false
+    useskillswiki: false
+    usewiki: false
+    useutils: false
+    useshell: false
+    readwrite: false
+    usedecide: false
+    useplanning: false
+    usememory: false
+    usetools: true
+    usejsontool: true
+    usecharts: true
+    usediagrams: false
+    usemath: false
+    usemaps: false
+    usesvg: false
+    useasciiviz: false
+    maxsteps: 6
+  expected:
+    matches: '```chart(?:js|\.js)?\s*\{'
+  assertions: &visual_assertions
+  - path: result.skill_activity.loads
+    min: 2
+  - path: result.skill_activity.selection_calls
+    equals: 0
+  - path: metrics.tool_calls
+    min: 1
+
+- name: visual-diagram
+  goal: 'Use $local:mini-a-visual-output and its relevant reference. Draw a flowchart: receive request, check whether valid, accept if yes, otherwise explain the error. Include a short caption; do not claim browser verification.'
+  args:
+    <<: *visual
+    usecharts: false
+    usediagrams: true
+  expected:
+    matches: '```mermaid\s*(flowchart|graph)'
+  assertions: *visual_assertions
+
+- name: visual-math
+  goal: 'Use $local:mini-a-visual-output and its relevant reference. Solve 2x + 4 = 10 with an aligned display equation and explain the steps. Do not put the equation in a code fence or claim browser verification.'
+  args:
+    <<: *visual
+    usecharts: false
+    usemath: true
+  expected:
+    matches: '\$\$[\s\S]+?\$\$'
+  assertions: *visual_assertions
+
+- name: visual-map
+  goal: 'Use $local:mini-a-visual-output and its relevant reference. Make a map using only these supplied illustrative locations: Sample A at latitude 51.5, longitude -0.09 and Sample B at latitude 51.51, longitude -0.1. Center at [51.505,-0.09], zoom 13, add a 500-meter circle around Sample A. Explain that the area is illustrative; do not claim browser verification.'
+  args:
+    <<: *visual
+    usecharts: false
+    usemaps: true
+  expected:
+    matches: '```leaflet\s*\{'
+  assertions: *visual_assertions

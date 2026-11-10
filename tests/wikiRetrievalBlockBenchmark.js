@@ -1,5 +1,5 @@
 // Native verified-reader microbenchmark; this is not end-to-end retrieval latency.
-load("mini-a-common.js"); load("mini-a-wiki.js")
+load("js/core/mini-a-common.js"); load("js/wiki/mini-a-wiki.js")
 var samples = Math.max(10, Number(getEnv("WIKI_BLOCK_SAMPLES")) || 1000)
 var dir = String(io.createTempDir("wiki-block-bench-")), manager
 var bean = java.lang.management.ManagementFactory.getThreadMXBean()
@@ -8,7 +8,7 @@ if (allocationSupported && !bean.isThreadAllocatedMemoryEnabled()) bean.setThrea
 var threadId = java.lang.Thread.currentThread().threadId()
 var allocation = function() { return allocationSupported ? Number(bean.getThreadAllocatedBytes(threadId)) : null }
 var clock = function() { return Number(java.lang.System.nanoTime()) / 1000000 }
-var report = { kind: "verified-block-microbenchmark", samples: samples, runtime: getVersion(), jvm: String(java.lang.System.getProperty("java.version")), sourceSha1: sha1(io.readFileString("mini-a-wiki-retrieval.js")), cases: [], allocationEstimator: allocationSupported ? "ThreadMXBean current-thread allocated Java heap bytes; includes harness, excludes native/non-heap and other threads; not peak memory" : "unavailable" }
+var report = { kind: "verified-block-microbenchmark", samples: samples, runtime: getVersion(), jvm: String(java.lang.System.getProperty("java.version")), sourceSha1: sha1(io.readFileString("js/wiki/mini-a-wiki-retrieval.js")), cases: [], allocationEstimator: allocationSupported ? "ThreadMXBean current-thread allocated Java heap bytes; includes harness, excludes native/non-heap and other threads; not peak memory" : "unavailable" }
 try {
   manager = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro", wikiretrievalv2: true }, function(){})
   var values = ["parameter is supported.\r\n", new Array(100).join("é😀\r\n"), new Array(40000).join("é😀\r\n")]

@@ -108,17 +108,18 @@ jobs:
       if (!ids[e.from] || !ids[e.to]) { skipped++; return false }
       return true
     }).map(function(e) { return { from: e.from, to: e.to, type: String(e.type || "related"), provenance: String(e.provenance || "AMBIGUOUS"), props: isMap(e.props) ? e.props : {} } })
-    var data = { title: args.title, source: source, generated: new Date().toISOString(), nodes: nodes, edges: edges, skipped: skipped }
+    var data = { title: args.title, source: source, generated: new Date().toISOString(), nodes: nodes, edges: edges, skipped: skipped, embed: toBoolean(args.embed) === true }
     // Escape HTML-sensitive characters before embedding JSON in a script element.
     var payload = JSON.stringify(data).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029")
     var html = `<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Wiki constellation</title>
     <style>
-    :root{color-scheme:dark;--bg:#070c19;--panel:#10192be8;--line:#ffffff16;--muted:#99abc5;--text:#ecf3ff;--accent:#8de5df}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,sans-serif;overflow:hidden}canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none}header{position:absolute;top:30px;left:32px;pointer-events:none}h1{font-size:27px;font-weight:500;letter-spacing:-1px;margin:7px 0}small,.muted{color:var(--muted)}.eyebrow{text-transform:uppercase;letter-spacing:3px;font-size:10px;color:var(--accent)}.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;backdrop-filter:blur(18px);box-shadow:0 16px 55px #0004}.left{position:absolute;top:140px;left:24px;width:260px;max-height:calc(100dvh - 230px);overflow:auto;padding:18px}.right{position:absolute;right:24px;top:30px;width:300px;max-height:calc(100dvh - 115px);overflow:auto;padding:22px}h2{font-size:19px;font-weight:500;margin:12px 0;overflow-wrap:anywhere}h3{font-size:11px;text-transform:uppercase;letter-spacing:2px;color:var(--muted);margin:24px 0 12px}input[type=search],select{width:100%;border:1px solid #ffffff22;border-radius:10px;background:#070d1d;color:var(--text);padding:11px;font:inherit}button{background:#ffffff08;color:var(--text);border:1px solid #ffffff1c;border-radius:9px;padding:9px 12px;cursor:pointer;font:inherit}button:hover{background:#ffffff18;border-color:#8de5df88}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}button:disabled{opacity:.4;cursor:default}.row{display:flex;align-items:center;gap:8px;margin:9px 0}.row span:last-child{margin-left:auto;color:var(--muted);font-size:12px}.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}.result{width:100%;text-align:left;margin-top:5px;overflow-wrap:anywhere}.result small{display:block;margin-top:4px}.controls{position:absolute;bottom:25px;left:50%;transform:translateX(-50%);display:flex;gap:6px;padding:8px;white-space:nowrap}.footer{position:absolute;bottom:31px;left:30px;font-size:11px;color:var(--muted);pointer-events:none}.badge{display:inline-block;padding:5px 8px;border-radius:6px;background:#ffffff0b;color:var(--accent);font-size:11px}#properties{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65;font-size:12px;color:#b6c6dc}#tip{position:absolute;pointer-events:none;padding:8px 12px;background:#17233a;border:1px solid #ffffff30;border-radius:8px;display:none;max-width:300px}.empty{line-height:1.8;color:var(--muted)}#notice{position:absolute;top:48%;left:35%;max-width:30%;text-align:center;color:var(--muted)}.help{line-height:1.9;font-size:12px;color:var(--muted)}input[type=checkbox]{accent-color:var(--accent)}details summary{cursor:pointer;color:var(--muted)}@media(max-width:1000px){.right{width:245px}.left{width:210px}.footer{display:none}}@media(max-width:700px){header{top:15px;left:18px}h1{font-size:21px}.left{top:102px;left:12px;width:180px;max-height:40dvh;padding:12px}.right{top:auto;bottom:85px;right:12px;width:210px;max-height:32dvh;padding:14px}.controls{bottom:15px;gap:3px}.controls button{padding:8px}.help{display:none}#notice{left:40%;max-width:50%}}
+    :root{color-scheme:dark;--bg:#070c19;--panel:#10192be8;--line:#ffffff16;--muted:#99abc5;--text:#ecf3ff;--accent:#8de5df}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,sans-serif;overflow:hidden}canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none}header{position:absolute;top:30px;left:32px;pointer-events:none}h1{font-size:27px;font-weight:500;letter-spacing:-1px;margin:7px 0}small,.muted{color:var(--muted)}.eyebrow{text-transform:uppercase;letter-spacing:3px;font-size:10px;color:var(--accent)}.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;backdrop-filter:blur(18px);box-shadow:0 16px 55px #0004}.left{position:absolute;top:140px;left:24px;width:260px;max-height:calc(100dvh - 230px);overflow:auto;padding:18px}.right{position:absolute;right:24px;top:30px;width:300px;max-height:calc(100dvh - 115px);overflow:auto;padding:22px}h2{font-size:19px;font-weight:500;margin:12px 0;overflow-wrap:anywhere}h3{font-size:11px;text-transform:uppercase;letter-spacing:2px;color:var(--muted);margin:24px 0 12px}input[type=search],select{width:100%;border:1px solid #ffffff22;border-radius:10px;background:#070d1d;color:var(--text);padding:11px;font:inherit}button{background:#ffffff08;color:var(--text);border:1px solid #ffffff1c;border-radius:9px;padding:9px 12px;cursor:pointer;font:inherit}button:hover{background:#ffffff18;border-color:#8de5df88}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}button:disabled{opacity:.4;cursor:default}.row{display:flex;align-items:center;gap:8px;margin:9px 0}.row span:last-child{margin-left:auto;color:var(--muted);font-size:12px}.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}.result{width:100%;text-align:left;margin-top:5px;overflow-wrap:anywhere}.result small{display:block;margin-top:4px}.controls{position:absolute;bottom:25px;left:50%;transform:translateX(-50%);display:flex;gap:6px;padding:8px;white-space:nowrap}.footer{position:absolute;bottom:31px;left:30px;font-size:11px;color:var(--muted);pointer-events:none}.badge{display:inline-block;padding:5px 8px;border-radius:6px;background:#ffffff0b;color:var(--accent);font-size:11px}#properties{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65;font-size:12px;color:#b6c6dc}#tip{position:absolute;pointer-events:none;padding:8px 12px;background:#17233a;border:1px solid #ffffff30;border-radius:8px;display:none;max-width:300px}.empty{line-height:1.8;color:var(--muted)}#notice{position:absolute;top:48%;left:35%;max-width:30%;text-align:center;color:var(--muted)}.help{line-height:1.9;font-size:12px;color:var(--muted)}input[type=checkbox]{accent-color:var(--accent)}.disclosure-toggle{cursor:pointer;color:var(--muted);min-height:44px;padding:12px 0;touch-action:manipulation}.disclosure-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:3px}@media(pointer:coarse){button,select,input[type=search]{min-height:44px}input[type=checkbox]{width:22px;height:22px}.row{min-height:44px}}@media(max-width:1000px){.right{width:245px}.left{width:210px}.footer{display:none}}@media(max-width:700px){header{top:15px;left:18px}h1{font-size:21px}.left{top:102px;left:12px;width:180px;max-height:40dvh;padding:12px}.right{top:auto;bottom:85px;right:12px;width:210px;max-height:32dvh;padding:14px}.controls{bottom:15px;gap:3px}.controls button{padding:8px}#notice{left:40%;max-width:50%}}
+    .disclosure-toggle{display:flex;width:100%;gap:8px;align-items:center;text-align:left;background:transparent;border:0;font:inherit}.disclosure-toggle::before{content:"▸"}.disclosure[data-open=true]>.disclosure-toggle::before{content:"▾"}.disclosure:not([data-open=true])>:not(.disclosure-toggle){display:none!important}
     </style></head><body>
     <canvas id="sky" aria-label="Interactive wiki graph. Use search and the connection list for keyboard navigation."></canvas>
     <header><div class="eyebrow">Mini-A / knowledge atlas</div><h1 id="title"></h1><small id="stats"></small></header>
-    <aside class="panel left" aria-label="Graph filters"><input id="search" type="search" placeholder="Find a star…" aria-label="Search nodes"><div id="results"></div><h3>Star types</h3><div id="types"></div><h3>Relationships</h3><select id="relation" aria-label="Relationship type"><option value="">All relationships</option></select><label class="row"><input id="focus" type="checkbox"> Neighborhood only</label><label class="row"><input id="labels" type="checkbox" checked> Show labels</label><details><summary>How to explore</summary><p class="help">Scroll or pinch to zoom. Drag the sky to pan; drag a star to move it. Select a star to follow its connections.<br><b>/</b> Search · <b>Esc</b> Clear<br><b>+</b> / <b>−</b> Zoom · <b>F</b> Fit</p></details></aside>
+    <aside class="panel left" aria-label="Graph filters"><input id="search" type="search" placeholder="Find a star…" aria-label="Search nodes"><div id="results"></div><h3>Star types</h3><div id="types"></div><h3>Relationships</h3><select id="relation" aria-label="Relationship type"><option value="">All relationships</option></select><label class="row"><input id="focus" type="checkbox"> Neighborhood only</label><label class="row"><input id="labels" type="checkbox" checked> Show labels</label><div class="disclosure"><button type="button" class="disclosure-toggle" id="explore-summary" aria-expanded="false">How to explore</button><p class="help">Scroll or pinch to zoom. Drag the sky to pan; drag a star to move it. Select a star to follow its connections.<br><b>/</b> Search · <b>Esc</b> Clear<br><b>+</b> / <b>−</b> Zoom · <b>F</b> Fit</p></div></aside>
     <aside class="panel right" aria-label="Selected node"><div class="eyebrow">Observatory</div><div id="detail"><h2>Every idea has an orbit.</h2><p class="empty">Select a star to discover its neighbors, inspect its properties, and follow the threads through your wiki.</p><h3>Brightest stars</h3><div id="hubs"></div></div></aside>
     <div id="notice"></div><div id="tip"></div><div class="footer" id="source"></div>
     <nav class="panel controls" aria-label="Graph controls"><button id="back" title="Previous node" disabled>← Back</button><button id="minus" aria-label="Zoom out">−</button><button id="plus" aria-label="Zoom in">+</button><button id="fit">Fit</button><button id="motion" aria-pressed="false">Pause</button><button id="random">Discover</button><button id="save" title="Save graph image">PNG ↓</button></nav>
@@ -127,7 +128,26 @@ jobs:
     (function() {
       'use strict';
       var data = JSON.parse(document.getElementById('graph-data').textContent);
+      if (data.embed && parent !== window) parent.postMessage({type:'mini-a-wiki-graph-ready',version:1}, '*');
       var $ = function(id) { return document.getElementById(id); };
+      // Match Studio disclosure activation inside the standalone/embedded renderer.
+      function bindDisclosure(toggle) {
+        var panel = toggle.parentElement;
+        toggle.type = 'button'; toggle.className = 'disclosure-toggle';
+        Object.defineProperty(panel, 'open', {
+          get: function() { return panel.getAttribute('data-open') === 'true'; },
+          set: function(value) {
+            panel.setAttribute('data-open', String(!!value));
+            toggle.setAttribute('aria-expanded', String(!!value));
+          }
+        });
+        panel.open = false;
+        toggle.onclick = function(event) {
+          event.preventDefault(); event.stopPropagation();
+          panel.open = !panel.open;
+        };
+      }
+      bindDisclosure($('explore-summary'));
       var canvas = $('sky'), ctx = canvas.getContext('2d'), nodes = data.nodes, edges = data.edges;
       var palette = ['#83dedb','#af9aff','#f4bf78','#ff8ca7','#83b8ff','#a9db87','#df9cdd','#e1d78d'];
       var types = Array.from(new Set(nodes.map(function(n) { return n.type; }))).sort(), enabled = new Set(types), colors = new Map();
@@ -173,6 +193,9 @@ jobs:
         var note = document.createElement('small'); note.textContent = matches.length > 30 ? 'Showing 30 of ' + matches.length + ' matches' : matches.length + ' matches'; $('results').appendChild(note);
       }
       function select(n, remember) {
+        if (data.embed && parent !== window && n.id === 'doc:' + n.props.path && typeof n.props.path === 'string' && n.props.path.length <= 512 && !/[\\\\%:\\x00-\\x1f?#]/.test(n.props.path) && /\\.md$/i.test(n.props.path) && n.props.path.split('/').every(function(p) { return p && p !== '.' && p !== '..' && p.charAt(0) !== '.' && !/^AGENTS\\.md$/i.test(p); })) {
+          parent.postMessage({type:'mini-a-wiki-graph-node', version:1, nodeId:n.id, path:n.props.path}, '*');
+        }
         if(selected && selected !== n && remember !== false) history.push(selected.id);
         selected = n; $('back').disabled = !history.length;
         // Connection jumps also restore the destination type if it was filtered out.
@@ -195,7 +218,7 @@ jobs:
           button(other.label, function() { select(other); }, panel, (outgoing ? '→ ' : '← ') + e.type + ' · ' + e.provenance);
         });
         if(!adjacent.get(selected.id).length) { var p = document.createElement('p'); p.className = 'empty'; p.textContent = 'An unconnected star. Discover another to continue exploring.'; panel.appendChild(p); }
-        var details = document.createElement('details'), summary = document.createElement('summary'); summary.textContent = 'Node properties'; details.append(summary,props); panel.appendChild(details);
+        var details = document.createElement('div'), summary = document.createElement('button'); details.className = 'disclosure'; summary.textContent = 'Node properties'; details.append(summary,props); bindDisclosure(summary); panel.appendChild(details);
       }
       function fit() {
         if(!visible.length) return;
@@ -278,6 +301,7 @@ jobs:
     if (!/\.html?$/i.test(output)) throw "Output must be an HTML file or an existing directory: " + output
     var outputFile = new java.io.File(output).getCanonicalFile()
     if (String(outputFile) === graphFile) throw "Output cannot replace the source graph"
+    if (data.embed) html = html.replace('<meta charset="utf-8">', '<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: blob:; connect-src \'none\'; base-uri \'none\'; form-action \'none\'">')
     io.writeFileString(String(outputFile), html.replace("__WIKI_GRAPH_DATA__", function() { return payload }))
     print("Exported " + nodes.length + " nodes and " + edges.length + " edges to " + outputFile)
     if (skipped) printErr("Skipped " + skipped + " dangling edges.")

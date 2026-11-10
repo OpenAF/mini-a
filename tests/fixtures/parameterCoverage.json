@@ -40,6 +40,18 @@
       "ingestsection",
       "ingestsource",
       "ingesttype"
+    ],
+    "Console wiki lifecycle shortcuts dispatch to standalone utility jobs": [
+      "wikihydrate",
+      "wikidream",
+      "wikiquery"
+    ],
+    "Web embedding startup options": [
+      "webembed",
+      "webembedorigins",
+      "webembedfields",
+      "webembedcontextrequired",
+      "webembedprompt"
     ]
   },
   "webHelpExclusions": {
@@ -118,6 +130,11 @@
       "wikiman",
       "wikitarget",
       "workermode"
+    ],
+    "Console wiki lifecycle shortcuts dispatch to standalone utility jobs": [
+      "wikihydrate",
+      "wikidream",
+      "wikiquery"
     ]
   },
   "consoleHelpExclusions": {
@@ -161,6 +178,11 @@
     ],
     "Reserved budget, not enforced by current dreams": [
       "wikidreambudget"
+    ],
+    "Web-only artifact isolation startup options": [
+      "webartifacts",
+      "artifactworkerurl",
+      "artifactdir"
     ]
   },
   "nonPublic": {

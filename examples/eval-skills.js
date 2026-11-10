@@ -1,7 +1,7 @@
 /* Controlled fixtures for the paired skills example. No provider calls here. */
 loadLib("mini-a.js")
-loadLib("mini-a-eval.js")
-loadLib("mini-a-utils.js")
+loadLib(__miniAPath("js/core/mini-a-eval.js"))
+loadLib(__miniAPath("js/core/mini-a-utils.js"))
 
 exports.assertIsolation = function(agent, args, targetPresent) {
   var policy = new MiniAFileAccess(args.fileallow)

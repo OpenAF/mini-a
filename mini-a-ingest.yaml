@@ -160,8 +160,13 @@ jobs:
       model            : isString.default(__)
   exec : | #js
     global.__mini_a_ingest_lib_mode = true
-    loadLib("mini-a-common.js")
-    loadLib("mini-a-ingest.js")
+    var miniALibraryRoot = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParent())
+    if (!io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) miniALibraryRoot = getOPackPath("mini-a")
+    if (!isString(miniALibraryRoot) || !io.fileExists(miniALibraryRoot + "/js/mini-a-paths.js")) throw new Error("Cannot locate the Mini-A package for " + ow.oJob.__file)
+    loadLib(miniALibraryRoot + "/js/mini-a-paths.js")
+    __miniAPackageRoot = __miniAResolvePackageRoot(miniALibraryRoot)
+    loadLib(__miniAPath("js/core/mini-a-common.js"))
+    loadLib(__miniAPath("js/wiki/mini-a-ingest.js"))
 
     var ingestArgs = merge({}, args)
     ingestArgs.usewiki    = "true"

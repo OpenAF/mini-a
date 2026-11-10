@@ -1,7 +1,9 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-Mini-A runs on OpenAF jobs. The core agent logic lives in `mini-a.js`, while `mini-a.yaml` orchestrates CLI sessions and `mini-a-web.yaml` powers the HTTP UI. The interactive console (`mini-a-con.js`) is exposed through `opack exec mini-a` (or the optional `mini-a` alias). Delegation and sub-goal management is handled by `mini-a-subtask.js` (the `SubtaskManager` class for local and remote delegation) and `mini-a-worker.yaml` (headless HTTP API for distributed agent workloads). Shell wrappers (`mini-a.sh`, `mini-a-web.sh`) invoke the same jobs when working from a cloned repository. Supporting assets sit in `public/` (Markdown UI template plus vendored `showdown.min.js`). Use `mcps/` for built-in Model Context Protocol job descriptors and reference docs; each `.yaml` under that folder can be invoked through the `mcp=` parameter. Additional guidance and examples are in `USAGE.md` and `README.md`.
+Mini-A runs on OpenAF jobs. The public library entry point is `mini-a.js`; core agent logic lives in `js/core/mini-a.js`, while `mini-a.yaml` orchestrates CLI sessions and `mini-a-web.yaml` powers the HTTP UI. The interactive console (`mini-a-con.js`) is exposed through `opack exec mini-a` (or the optional `mini-a` alias). Delegation and sub-goal management is handled by `js/core/mini-a-subtask.js` (the `SubtaskManager` class for local and remote delegation) and `mini-a-worker.yaml` (headless HTTP API for distributed agent workloads). Shell wrappers (`mini-a.sh`, `mini-a-web.sh`) invoke the same jobs when working from a cloned repository. Supporting assets sit in `public/` (Markdown UI template plus vendored `showdown.min.js`). Use `mcps/` for built-in Model Context Protocol job descriptors and reference docs; each `.yaml` under that folder can be invoked through the `mcp=` parameter. Additional guidance and examples are in `USAGE.md` and `README.md`.
+
+Internal JavaScript is grouped under `js/core`, `js/session`, `js/web`, `js/memory`, `js/skills`, `js/wiki`, and `js/studio`. Root JavaScript files are public entry-point facades. Use package-relative `loadLib` paths through `js/mini-a-paths.js` for internal dependencies, preserving explicit reloads for executable managers and core prototype mixins.
 
 ## Build, Test, and Development Commands
 - `mini-a goal="draft release notes" useshell=false`: start the agent from the installed console (alias shown after install). Use `opack exec mini-a ...` if you skipped the alias.
@@ -11,10 +13,17 @@ Mini-A runs on OpenAF jobs. The core agent logic lives in `mini-a.js`, while `mi
 Always export `OAF_MODEL="(type: ..., model: ..., key: ...)"` (and optionally `OAF_LC_MODEL`) before running.
 
 ## Coding Style & Naming Conventions
-JavaScript executes inside OpenAF; keep two-space indentation and prefer `var` with camelCase names to match the existing code. Class-like helpers use PascalCase (e.g., `MiniA`), internal state uses `_` prefixes, and metrics keys stay snake_case. YAML files follow two-space indents with lower-case keys. Avoid introducing external dependencies without coordination—runtime expects the OpenAF standard library.
+JavaScript executes inside OpenAF; keep two-space indentation and prefer `var` with camelCase names to match the existing code. Class-like helpers use PascalCase (e.g., `MiniA`), internal state uses `_` prefixes, and metrics keys stay snake_case. Follow the layout of OpenAF's own `js/openaf.js` (keeping two-space indentation instead of its tabs) for new and edited code, including browser code under `public/`:
+- One statement per line; no semicolons at line ends; spaces around operators, after commas and keywords (`if (x) {`), and inside object literals (`{ a: 1 }`). Do not pack several statements onto one line; reformat dense code you touch.
+- Use `var` and `function` declarations; keep arrow functions for short inline callbacks (`map`, `filter`, `forEach`).
+- Break long call chains one call per line, aligned under the first call, as in `_wikiPathFor` in `js/wiki/mini-a-ingest.js`.
+- Use `isDef`/`isUnDef`/`isString`-style checks (explicit `typeof`/`length` checks in browser code) rather than truthiness when a value can be `""` or `0`.
+- Put a short `//` comment above each function or logical block saying what it does or why (not how); separate blocks with a blank line. Public library functions may carry `<odoc>` blocks like `js/openaf.js`. YAML files follow two-space indents with lower-case keys. Avoid introducing external dependencies without coordination—runtime expects the OpenAF standard library.
 
 ## Testing Guidelines
-Automated tests exist for utility modules under `tests/`. Run the mini-a-utils test suite with `ojob tests/miniAUtils.yaml` to verify file operations, mathematical operations, and time operations. When adding new functionality to `mini-a-utils.js`, extend the corresponding test file (`tests/miniAUtils.js`) and update the job configuration (`tests/miniAUtils.yaml`) with new test cases.
+Automated tests exist for utility modules under `tests/`. Run the mini-a-utils test suite with `ojob tests/miniAUtils.yaml` to verify file operations, mathematical operations, and time operations. When adding new functionality to `js/core/mini-a-utils.js`, extend the corresponding test file (`tests/miniAUtils.js`) and update the job configuration (`tests/miniAUtils.yaml`) with new test cases.
+
+For module layout and loading changes, run `node tests/modulePaths.cjs` and `python3 tests/modulePaths.py`; these cover path precedence, unrelated working directories, copied packages, reloads, and repeated command entry points.
 
 For core agent behavior, validate by scripting representative goals (see `USAGE.md`) and capture the agent transcript with `debug=true`. When adding MCP integrations, run the corresponding `mcp-*.yaml` job standalone before wiring it into Mini-A. Document manual verification steps in the PR description, and note any scenarios not exercised.
 

@@ -1,5 +1,5 @@
 (function() {
-  load("mini-a-common.js"); load("mini-a-wiki.js")
+  load("js/core/mini-a-common.js"); load("js/wiki/mini-a-wiki.js")
   var temporary = function() { var p = java.io.File.createTempFile("wiki-v2-test-", "").getCanonicalPath(); io.rm(p); io.mkdir(p); return p }
   var make = function(root, extra) { return new MiniAWikiManager(merge({ backend: "fs", root: root, access: "rw", wikiretrievalv2: true, wikiretrievalconfig: { passageChars: 256 } }, extra || {}), function() {}) }
   exports.testAutomaticPublicationMaintenance = function() {
@@ -108,7 +108,7 @@
       io.writeFileString(path,JSON.stringify(reordered));pointer.checksum=MiniAWikiRetrievalV2.digest(path)
       io.writeFileString(root+"/current.json",JSON.stringify(pointer))
       var script=dir+"/restart.js", log=dir+"/restart.log"
-      io.writeFileString(script,'load("mini-a-common.js");load("mini-a-wiki.js");var m=new MiniAWikiManager('+JSON.stringify({backend:"fs",root:String(dir),access:"ro",wikiretrievalv2:true})+',function(){});try{var r=m.retrieve("rcarestartneedle");if(!r.ok||!r.evidence.length)throw new Error(stringify(r));}catch(e){printErr(e);java.lang.System.exit(1)}finally{m.close()}java.lang.System.exit(0)')
+      io.writeFileString(script,'load("js/core/mini-a-common.js");load("js/wiki/mini-a-wiki.js");var m=new MiniAWikiManager('+JSON.stringify({backend:"fs",root:String(dir),access:"ro",wikiretrievalv2:true})+',function(){});try{var r=m.retrieve("rcarestartneedle");if(!r.ok||!r.evidence.length)throw new Error(stringify(r));}catch(e){printErr(e);java.lang.System.exit(1)}finally{m.close()}java.lang.System.exit(0)')
       var command=new java.util.ArrayList();command.add(String(getOpenAFPath())+"/oaf");command.add("-f");command.add(script)
       var builder=new java.lang.ProcessBuilder(command)
       builder.directory(new java.io.File(String(java.lang.System.getProperty("user.dir"))))
@@ -378,7 +378,7 @@
         var script = dir+"/precedence.js", log = dir+"/precedence.log"
         var configs = [{backend:"fs",root:String(dir),access:"ro"},{backend:"fs",root:String(dir),access:"ro",wikiretrievalv2:false},{backend:"fs",root:String(dir),access:"ro",wikiretrievalv2:true}]
         var expected = [envValue!=="false",false,true]
-        io.writeFileString(script,'load("mini-a-common.js");load("mini-a-wiki.js");try{var configs='+stringify(configs,__,"")+',expected='+stringify(expected,__,"")+';configs.forEach(function(c,i){var m=new MiniAWikiManager(c,function(){});try{if(toBoolean(m._config.wikiretrievalv2)!==expected[i]||m.context().retrieval.mode!==(expected[i]?"v2":"legacy"))throw new Error("precedence mismatch "+i)}finally{m.close()}});java.lang.System.exit(0)}catch(e){printErr(e);java.lang.System.exit(1)}')
+        io.writeFileString(script,'load("js/core/mini-a-common.js");load("js/wiki/mini-a-wiki.js");try{var configs='+stringify(configs,__,"")+',expected='+stringify(expected,__,"")+';configs.forEach(function(c,i){var m=new MiniAWikiManager(c,function(){});try{if(toBoolean(m._config.wikiretrievalv2)!==expected[i]||m.context().retrieval.mode!==(expected[i]?"v2":"legacy"))throw new Error("precedence mismatch "+i)}finally{m.close()}});java.lang.System.exit(0)}catch(e){printErr(e);java.lang.System.exit(1)}')
         var command = new java.util.ArrayList()
         command.add(String(getOpenAFPath())+"/oaf");command.add("-f");command.add(script)
         var builder = new java.lang.ProcessBuilder(command)
@@ -463,7 +463,7 @@
       ow.test.assert(remote.results[0].path,"@indexed/v2.md","V2-only mount scope uses V2")
       ow.test.assert(legacy.agenticRead(remote.results[0].ref).body.indexOf("mixedautoneedle")>=0,true,"legacy primary reads V2 mount")
       ow.test.assert(legacy.agenticSearch("mixedautoneedle").results.length,2,"legacy primary includes both modes")
-      load("mini-a-mcp-wiki.js")
+      load("js/wiki/mini-a-mcp-wiki.js")
       ;[primary,legacy].forEach(function(manager) {
         global.__wikiManager = manager
         global.__miniAMcpWiki = {restriction:new MiniAMcpWikiRestriction({wikirestrict:true,wikirestrictpagecooldown:0},{backend:"fs",root:manager._backend.root})}
@@ -476,7 +476,7 @@
       })
       io.writeFileString(dir+"/v2/.mini-a-wiki-serving/current.json","{}")
       ow.test.assert(isArray(primary.search("mixedautoneedle")),false,"mixed adapter preserves published-source errors")
-      load("mini-a-skills.js")
+      load("js/skills/mini-a-skills.js")
       var skillFailure = ""
       try { __miniASkillSearch(legacy,{query:"mixedautoneedle",type:"*"}) } catch(e) { skillFailure=String(e) }
       ow.test.assert(skillFailure.indexOf("skill-search-unavailable")>=0,true,"legacy-primary skill facade preserves published mount errors")
@@ -627,8 +627,8 @@
     try {
       io.mkdir(dir+"/root");io.mkdir(dir+"/remote")
       root=make(dir+"/root",{usegraph:true,wikigraphcrossmaxdf:1});remote=make(dir+"/remote",{usegraph:true})
-      root.write("seed.md",{title:"Seed",tags:["joined"],aliases:["Shared alias"]},"# Seed\nsharedcrossneedle")
-      remote.write("target.md",{title:"Remote",tags:["joined"],aliases:["Shared alias"]},"# Remote\nSupporting evidence")
+      root.write("seed.md",{title:"Seed",tags:["joined"],aliases:["Shared alias"]},"# Seed\nsharedcrossneedle JoinedProtocol")
+      remote.write("target.md",{title:"Remote",tags:["joined"],aliases:["Shared alias"]},"# Remote\nSupporting evidence JoinedProtocol")
       root.reindex();remote.reindex();root.attach("other",{backend:"fs",root:dir+"/remote"})
       var options={wiki:"*",expandGraph:true}, has=function(out){return out.results.some(function(r){return r.path==="@other/target.md"})}
       ;["tag","alias"].forEach(function(kind){root._config.wikigraphcrossjoin=kind;ow.test.assert(has(root.agenticSearch("sharedcrossneedle",options)),true,"cross "+kind+" joins use bounded adjacency")})
@@ -639,13 +639,11 @@
       root._config.wikigraphcrossminkeylen=3;root._config.wikigraphcrossjoin=""
       ow.test.assert(has(root.agenticSearch("sharedcrossneedle",options)),false,"empty join kinds disable cross joins")
       root._config.wikigraphcrossjoin="concept"
-      var extract=function(){return {relationships:[{from:"Joined concept",to:"Other concept",provenance:"INFERRED"}]}}
-      root._graph._llmExtractFn=extract;remote._graph._llmExtractFn=extract
-      root._graph.buildSemantic(root._graphPages());remote._graph.buildSemantic(remote._graphPages())
+      root._graph.buildSemantic(root._graphPages(),{modelHelp:"off"});remote._graph.buildSemantic(remote._graphPages(),{modelHelp:"off"})
       root.attach("other",{backend:"fs",root:dir+"/remote"})
       var graph=root._mounts[0].manager._graph
       ow.test.assert(has(root.agenticSearch("sharedcrossneedle",options)),true,"semantic concepts join different pinned wikis")
-      graph._semanticByPage["target.md"][0].props.revision="stale"
+      graph._semanticByPage["target.md"].forEach(function(edge) {edge.props.revision="stale"})
       var stale=root.agenticSearch("sharedcrossneedle",options)
       ow.test.assert(has(stale),false,"stale target semantic support excluded")
       ow.test.assert(stale.stopReasons.indexOf("stale-graph-evidence")>=0,true,"stale cross support reported explicitly")
@@ -719,15 +717,21 @@
       wm.write("seed.md",{title:"Seed",tags:["shared"]},"# Seed\ngraphneedle")
       wm.write("target.md",{title:"Related",tags:["shared"]},"# Details\nShared metadata evidence")
       ow.test.assert(wm.agenticSearch("graphneedle",{expandGraph:true}).results.some(function(r){return r.path==="target.md"}),true,"shared tag discovery validates both source assertions")
-      wm.write("seed.md",{title:"Seed"},"# Seed\ngraphneedle")
-      wm.write("target.md",{title:"Related"},"# Details\nConceptual supporting evidence")
-      wm._graph._llmExtractFn=function(payload){return {relationships:payload.path === "seed.md" || payload.path === "target.md" ? [{from:"Shared concept",to:"Other concept",provenance:"INFERRED"}] : []}}
-      wm._graph.buildSemantic(wm._graphPages())
+      wm.write("seed.md",{title:"Seed"},"# Seed\ngraphneedle SharedProtocol")
+      wm.write("target.md",{title:"Related"},"# Details\nConceptual supporting evidence SharedProtocol")
+      wm._graph.buildSemantic(wm._graphPages(),{modelHelp:"off"})
       ow.test.assert(wm.agenticSearch("graphneedle",{expandGraph:true}).results.some(function(r){return r.path==="target.md"}),true,"source-bound shared concepts discover supporting pages")
-      var semantic=wm._graph._semanticByPage["seed.md"][0], revision=semantic.props.revision
-      semantic.props.revision="obsolete"
+      var graphHit=function(res){return res.results.filter(function(r){return r.path==="target.md"})[0]}
+      var noProximity=graphHit(wm.agenticSearch("graphneedle",{expandGraph:true}))
+      ow.test.assert(isUnDef(noProximity.scoreComponents.proximity),true,"proximity is off by default")
+      wm._config.wikigraphproximity=true
+      var withProximity=graphHit(wm.agenticSearch("graphneedle",{expandGraph:true}))
+      delete wm._config.wikigraphproximity
+      ow.test.assert(withProximity.scoreComponents.proximity>0 && withProximity.rankScore>noProximity.rankScore,true,"wikigraphproximity adds a bounded proximity component")
+      var semantic=wm._graph._semanticByPage["seed.md"], revisions=semantic.map(function(edge){return edge.props.revision})
+      semantic.forEach(function(edge){edge.props.revision="obsolete"})
       ow.test.assert(wm.agenticSearch("graphneedle",{expandGraph:true}).results.some(function(r){return r.path==="target.md"}),false,"semantic assertion revision must match, even when document node is current")
-      semantic.props.revision=revision
+      semantic.forEach(function(edge,index){edge.props.revision=revisions[index]})
       // Revoke supporting authority after collection but before public materialization.
       var active=wm._retrievalV2._graphActive
       wm._retrievalV2._graphActive=function(hit,deadline,used){return hit.graphSupports ? false : active.call(this,hit,deadline,used)}
@@ -1151,7 +1155,7 @@
       ow.test.assert(out.evidence[0].path,"@last/same.md","last mount wins common reranking despite earlier hits")
       ow.test.assert(out.evidence[0].passage.wiki,"last","passage reference binds selected logical wiki")
       ow.test.assert(root.retrieve("wikirestrictrefttl",{wiki:"primary"}).evidence.length,0,"explicit primary scope excludes other mounts")
-      var dispatchSource=io.readFileString("mini-a.js")
+      var dispatchSource=io.readFileString("js/core/mini-a.js")
       ;["wk","cbWk"].forEach(function(prefix) {
         var mapping=new RegExp("var "+prefix+"SearchOpts = (\\{[\\s\\S]*?\\n\\s*\\})").exec(dispatchSource)
         var options=new Function(prefix+"Params",prefix+"Path","return "+mapping[1])({wiki:"last",maxQueries:1,maxCandidates:4},"")
@@ -1231,7 +1235,7 @@
     } finally {if(wm)wm.close();io.rm(dir)}
   }
   exports.testRestrictedPassages = function() {
-    load("mini-a-mcp-wiki.js")
+    load("js/wiki/mini-a-mcp-wiki.js")
     ow.test.assert(__miniAMcpWikiSafeChars("😀😀x",3),"😀","restricted UTF-16 cap does not split or overallocate surrogate pairs")
     ow.test.assert(__miniAMcpWikiSafeChars("secret description",0),"","zero metadata allowance discloses no remaining text")
     ow.test.assert(__miniAMcpWikiSafeChars("😀😀x",4).length,4,"supplementary characters consume two restricted character units")
@@ -1428,7 +1432,7 @@
     } finally {if(reader)reader.close();if(wm)wm.close();io.rm(dir)}
   }
   exports.testLifecycleAndSuppression = function() {
-    load("mini-a-wiki-knowledge.js")
+    load("js/wiki/mini-a-wiki-knowledge.js")
     var dir = temporary(), wm, pin
     try {
       wm = make(dir,{wikitelemetry:true,wikiretrievalconfig:{passageChars:256,telemetryFlushQueries:2}})
@@ -1450,13 +1454,13 @@
       ow.test.assert(wm.open("evidence.md").error,"stale-evidence","pending journal suppresses cached outline")
       ow.test.assert(wm.agenticRead("evidence.md").body,__,"pending journal suppresses reads")
       io.rm(dir+"/.mini-a-wiki-ingest/journal.json")
-      load("mini-a-skills.js")
+      load("js/skills/mini-a-skills.js")
       wm.write("skill.md",{title:"Old skill",type:"skill"},"# Skill\nskillparameter operates the console")
       var provider=new MiniAWikiSkillProvider(wm), selected=provider.open("wiki:skill.md")
       ow.test.assert(selected.title,"Old skill","wiki skill uses serving metadata")
       wm.write("skill.md",{title:"New skill",type:"skill"},"# Skill\nskillparameter is revised")
       ow.test.assert(provider.open("wiki:skill.md").title,"New skill","v2 skill facade cannot serve stale TTL metadata")
-      load("mini-a-mcp-wiki.js");load("mini-a-mcp-skills.js")
+      load("js/wiki/mini-a-mcp-wiki.js");load("js/skills/mini-a-mcp-skills.js")
       global.__wikiManager=wm
       var restriction=new MiniAMcpWikiRestriction({wikirestrict:true},{backend:"fs",root:String(dir)})
       global.__miniAMcpWiki={restriction:restriction}
@@ -2213,7 +2217,7 @@
       ow.test.assert(wm.knowledgeReconcileDerivatives({ dryRun: false, approved: true }).error, "ingest-pending", "repair cannot change pending journal fingerprint")
       ow.test.assert(io.readFileString(wm._knowledgeStatePath()), before, "pending journal operations leave authority intact")
       io.rm(journal)
-      global.__mini_a_ingest_lib_mode = true; load("mini-a-ingest.js")
+      global.__mini_a_ingest_lib_mode = true; load("js/wiki/mini-a-ingest.js")
       var ingest = new MiniAIngest({}, function() {}), result = { planned_derivatives_invalidated: [] }
       ow.test.assert(wm.knowledgeRecordDerivative("page-summary", "supported", { text: "Supported summary." }, [ref]).ok, true, "ingest fixture has real summary postings")
       state = wm.knowledgeLoadState(); state.sources.origin = { page: "source.md", chunks: [] }
@@ -2306,7 +2310,7 @@
     } finally {releaseLock.countDown();releaseBackend.countDown();if(holder)holder.join(1000);if(reader)reader.join(1000);if(pin)wm._retrievalV2.release(pin);if(wm)wm.close();io.rm(dir)}
   }
   exports.testConcurrentRestrictedLedger = function() {
-    load("mini-a-mcp-wiki.js")
+    load("js/wiki/mini-a-mcp-wiki.js")
     var chName = "wiki_v2_quota_" + String(java.util.UUID.randomUUID()).replace(/-/g, ""), old = global.__wikiManager
     global.__wikiManager = __
     try {
@@ -2679,7 +2683,7 @@
     } finally {if(wm)wm.close();io.rm(dir)}
   }
   exports.testLegacyReadOnlyLexicalFeatures = function() {
-    loadLib("mini-a-wiki-knowledge.js")
+    loadLib(String(new java.io.File("js/wiki/mini-a-wiki-knowledge.js").getCanonicalPath()))
     var dir = temporary(), writer, reader, lockWriter, directory, analyzer
     try {
       var lexical = { language: "english", synonyms: [["time to live", "reference expiry"]], shingles: true, ngrams: true }
@@ -2760,7 +2764,7 @@
       var current=wm.retrieve("validitymarker",{})
       ow.test.assert(current.evidence.length,1,"current evaluation excludes expired and malformed records while missing validity remains unknown")
       ow.test.assert(current.evidence[0].path,"unknown.md","undated foundational content is not demoted for editorial age")
-      loadLib("mini-a-mcp-wiki.js")
+      loadLib(String(new java.io.File("js/wiki/mini-a-mcp-wiki.js").getCanonicalPath()))
       var trustedTool=__miniAMcpWikiCreateTool({root:dir,access:"ro",agenticRetrieval:true},wm)
       var trusted=trustedTool.wiki({operation:"search",query:"validitymarker",applicability:{validAt:"2024-02-29"}})
       ow.test.assert(trusted.results.length,1,"trusted utility adapter preserves validity applicability")
@@ -2774,7 +2778,7 @@
         ow.test.assert(standalone.results.length,1,"actual standalone MCP job forwards applicability")
         ow.test.assert(standalone.results[0].path,"bounded.md","standalone job retains the applicable page identity")
       } finally {global.__wikiTool=savedTool}
-      var coreSource=io.readFileString("mini-a.js")
+      var coreSource=io.readFileString("js/core/mini-a.js")
       ;["wk","cbWk"].forEach(function(prefix) {
         var paramsName=prefix+"Params", pathName=prefix+"Path", queryName=prefix+"Query", optsName=prefix+"SearchOpts"
         var mapping=new RegExp("var "+optsName+" = (\\{[\\s\\S]*?\\n\\s*\\})").exec(coreSource)
@@ -3095,7 +3099,7 @@
       var readerOpens = wm._retrievalV2.metrics.readerOpens
       ow.test.assert(wm._retrievalV2.exportBundle(dir + "/published.zip").ok, true, "completed journal permits validated bundle export")
       ow.test.assert(wm._retrievalV2.metrics.readerOpens, readerOpens, "validated publication searcher reused for export without another reader open")
-      global.__mini_a_ingest_lib_mode = true; load("mini-a-ingest.js")
+      global.__mini_a_ingest_lib_mode = true; load("js/wiki/mini-a-ingest.js")
       var ingester = new MiniAIngest({}, function() {}), previousBatch = wm._servingBatchChanges, rejected = false
       try { ingester._applyJournal(wm, {}, dir + "/bad-journal.json", {}) } catch(badJournal) { rejected = true }
       ow.test.assert(rejected, true, "malformed journal rejected before page application")
@@ -3143,7 +3147,7 @@
       ow.test.assert(isString(webInit.check.in.wikiretrievalconfig),true,"web accepts retrieval configuration strings")
       var safe = io.readFileString("mcps/mcp-skills-safe.yaml")
       ow.test.assert((safe.match(/__miniAMcpWikiObserveRestricted\(/g)||[]).length,4,"restricted skill tools record aggregate outcome events")
-      load("mini-a-mcp-skills.js")
+      load("js/skills/mini-a-mcp-skills.js")
       __miniAMcpSkillsInit({wikibackend:"fs",wikiroot:String(dir),wikiretrievalv2:true,wikiretrievalconfig:"(readPolicy: strict)",wikitelemetry:true,wikirestrict:true,wikirestrictprofile:"relaxed",label:"Skills"},{access:"ro",readonly:true,logPrefix:"area-six-test"})
       var observed = [], reader = global.__wikiManager
       ow.test.assert(reader._retrievalV2.config.readPolicy,"strict","MCP initialization accepts readPolicy")
@@ -3174,7 +3178,7 @@
         var recoveryQuery=activated?"newlypublishedparameter":"crashrecoveryparameter"
         if(activated)io.writeFileString(dir+"/newly-published.md","# Published\nnewlypublishedparameter appears only in the activated generation.")
         var cfg = stringify({backend:"fs",root:String(dir),access:"rw",wikiretrievalv2:true,wikiretrievalconfig:{passageChars:256}}, __, "")
-        io.writeFileString(script, 'load("mini-a-common.js");load("mini-a-wiki.js");var m=new MiniAWikiManager(' + cfg + ',function(){});m._retrievalV2._publicationFault=function(step){if(step===' + stringify(step) + ')java.lang.Runtime.getRuntime().halt(31)};m.reindex();java.lang.Runtime.getRuntime().halt(32)')
+        io.writeFileString(script, 'load("js/core/mini-a-common.js");load("js/wiki/mini-a-wiki.js");var m=new MiniAWikiManager(' + cfg + ',function(){});m._retrievalV2._publicationFault=function(step){if(step===' + stringify(step) + ')java.lang.Runtime.getRuntime().halt(31)};m.reindex();java.lang.Runtime.getRuntime().halt(32)')
         var command = new java.util.ArrayList()
         command.add(String(getOpenAFPath()) + "/oaf"); command.add("-f"); command.add(script)
         var builder = new java.lang.ProcessBuilder(command)
@@ -3187,7 +3191,7 @@
         if(activated)ow.test.assert(currentPointer!==pointer,true,"post-rename halt retains newly validated serving pointer: "+step)
         else ow.test.assert(currentPointer,pointer,"crash leaves active pointer intact at "+step)
         var recovery = dir + "/recover-" + step + ".js", recoveryLog = dir + "/recover-" + step + ".log"
-        io.writeFileString(recovery, 'load("mini-a-common.js");load("mini-a-wiki.js");var m=new MiniAWikiManager(' + stringify({backend:"fs",root:String(dir),access:"ro",wikiretrievalv2:true,wikiretrievalconfig:{passageChars:256}}, __, "") + ',function(){});try{var r=m.retrieve('+stringify(recoveryQuery)+');if(!r.ok||!r.evidence.length)java.lang.System.exit(33)}finally{m.close()}java.lang.System.exit(0)')
+        io.writeFileString(recovery, 'load("js/core/mini-a-common.js");load("js/wiki/mini-a-wiki.js");var m=new MiniAWikiManager(' + stringify({backend:"fs",root:String(dir),access:"ro",wikiretrievalv2:true,wikiretrievalconfig:{passageChars:256}}, __, "") + ',function(){});try{var r=m.retrieve('+stringify(recoveryQuery)+');if(!r.ok||!r.evidence.length)java.lang.System.exit(33)}finally{m.close()}java.lang.System.exit(0)')
         builder.command().set(2, recovery); builder.redirectOutput(new java.io.File(recoveryLog))
         var recovered = builder.start()
         if (!recovered.waitFor(20, java.util.concurrent.TimeUnit.SECONDS)) { recovered.destroyForcibly(); throw new Error("recovery subprocess deadline: " + step) }

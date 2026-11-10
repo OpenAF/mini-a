@@ -1,8 +1,8 @@
 (function() {
-  load("mini-a-common.js")
-  load("mini-a-wiki.js")
-  load("mini-a-skills.js")
-  load("mini-a-mcp-skills.js")
+  load("js/core/mini-a-common.js")
+  load("js/wiki/mini-a-wiki.js")
+  load("js/skills/mini-a-skills.js")
+  load("js/skills/mini-a-mcp-skills.js")
 
   var mkTmp = function() {
     var d = String(java.io.File.createTempFile("miniaskills-test-", "").getCanonicalPath())
@@ -381,7 +381,7 @@
 
   exports.testBundledRetrievalWorkflow = function() {
     load("mini-a.js")
-    load("mini-a-utils.js")
+    load("js/core/mini-a-utils.js")
     var dir = mkTmp(), wm
     try {
       wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikiretrievalv2: true }, function() {})

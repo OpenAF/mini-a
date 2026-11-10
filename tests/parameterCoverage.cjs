@@ -4,8 +4,8 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const inventory = require('./fixtures/parameterCoverage.json');
 const read = path => fs.readFileSync(path, 'utf8');
-const session = read('mini-a-session.js');
-const core = read('mini-a.js');
+const session = read('js/session/mini-a-session.js');
+const core = read('js/core/mini-a.js');
 const section = (source, start, end) => {
   const offset = source.indexOf(start);
   assert.ok(offset >= 0, start);
@@ -36,7 +36,7 @@ const jobExcluded = flatten(inventory.jobHelpExclusions);
 const webExcluded = flatten(inventory.webHelpExclusions);
 const consoleExcluded = flatten(inventory.consoleHelpExclusions);
 const publicNames = new Set([...Object.keys(definitions), ...primaryNames, ...Object.values(helps).flatMap(names => [...names])]);
-const knownSource = section(core, 'MiniA._KNOWN_ARGUMENT_NAMES =', '\nMiniA._IGNORED_INTERNAL_ARGUMENT_NAMES =');
+const knownSource = section(read('js/core/mini-a-launcher.js').replaceAll('MiniALauncher.', 'MiniA.'), 'MiniA._KNOWN_ARGUMENT_NAMES =', '\nMiniA._IGNORED_INTERNAL_ARGUMENT_NAMES =');
 const knownNames = new Set([...knownSource.matchAll(/"([a-z][\w-]*)"/g)].map(m => m[1]));
 for (const name of publicNames) {
   if (!consoleExcluded.has(name)) assert.ok(definitions[name] || primaryNames.has(name), name + ' missing interactive help (or an applicability exclusion)');
@@ -129,8 +129,8 @@ assert.equal(args.ingestmode, undefined, 'unset ingestion mode remains omitted')
 context.sessionOptions = {};
 assert.equal(context.buildArgs('test').wikimaxprompttokens, undefined, 'unset prompt cap remains omitted');
 // Execute the production budget helper to pin the documented precedence/sentinel behavior.
-const budgetSource = read('mini-a-wiki-knowledge.js').split('\nMiniAWikiManager.prototype.')[0];
-const Budget = vm.runInNewContext(budgetSource + ';MiniAWikiKnowledgeBudget', { isMap: x => x && typeof x === 'object' });
+const budgetSource = read('js/wiki/mini-a-wiki-knowledge.js').split('\nMiniAWikiManager.prototype.')[0];
+const Budget = vm.runInNewContext(budgetSource + ';MiniAWikiKnowledgeBudget', { isMap: x => x && typeof x === 'object', isNumber: x => typeof x === 'number' });
 assert.equal(new Budget({}, 'ingest').maxPrompt, 0);
 assert.equal(new Budget({ wikimaxprompttokens: 0 }, 'ingest').maxPrompt, 0);
 assert.equal(new Budget({ wikimaxprompttokens: 'invalid' }, 'ingest').maxPrompt, 0);

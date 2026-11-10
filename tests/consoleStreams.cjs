@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync('mini-a-session.js', 'utf8');
+const source = fs.readFileSync('js/session/mini-a-session.js', 'utf8');
 const helper = source.slice(source.indexOf('function __miniAConsoleStreams('), source.indexOf('function MiniAInteractiveSession('));
 const context = vm.createContext({});
 vm.runInContext(helper, context);
@@ -87,7 +87,7 @@ assert.equal(output.length, closedLength, 'Cleanup is idempotent across normal c
 console.log('Independent stream screens, round-trip restoration, resize, warnings, and terminal cleanup passed');
 
 // The Markdown helper forwards geometry to withMD's third argument, not style.
-const common = fs.readFileSync('mini-a-common.js', 'utf8');
+const common = fs.readFileSync('js/core/mini-a-common.js', 'utf8');
 const renderHelper = common.slice(common.indexOf('function __miniAMarkdownRender('), common.indexOf('function __miniAMarkdownPreviewRows('));
 const markdownCalls = [];
 const markdownContext = vm.createContext({

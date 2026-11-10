@@ -1,6 +1,6 @@
 // Optional integration: OAF_JARGS=-Djava.awt.headless=true oaf -f tests/documentReading.js
 // Set MINI_A_TEST_TIKA_PATH to an existing checkout to test without installation.
-load("mini-a-utils.js")
+load("js/core/mini-a-utils.js")
 ow.loadTest()
 try {
   var tikaPath = getEnv("MINI_A_TEST_TIKA_PATH")

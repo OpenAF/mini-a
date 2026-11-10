@@ -1,5 +1,5 @@
 // Run with: oaf -f tests/agentComms.js (no model credentials or network required).
-load("mini-a-subtask.js")
+load("js/core/mini-a-subtask.js")
 var passed = 0
 function check(value, message) { if (!value) throw new Error(message); passed++ }
 function throws(fn, message) { var caught = false; try { fn() } catch(e) { caught = true }; check(caught, message) }

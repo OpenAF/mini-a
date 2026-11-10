@@ -90,12 +90,12 @@ Markdown. These results establish repository references, not external usage.
 | --- | --- |
 | `truncateText`, `mini-a-con.js:3279` | Local helper with no caller; strong removal candidate |
 | `isTableRowLine`, `mini-a.js:3506` | Local helper with no caller; also leaves `isTableSeparatorLine` at line 3501 and `TABLE_SEPARATOR_REGEX` at line 3487 unused as a group |
-| `__miniAStripMarkdownFrontMatter`, `mini-a-common.js:462` | No repository caller or documentation reference; candidate after checking shared-helper compatibility |
+| `__miniAStripMarkdownFrontMatter`, `js/core/mini-a-common.js:462` | No repository caller or documentation reference; candidate after checking shared-helper compatibility |
 | `_getModelConfigForTools`, `mini-a.js:11646` | No repository caller; inspect API compatibility before removal |
-| `_levenshteinDistance`, `mini-a-tool-selection.js:9` | Unused wrapper; shared `__miniALevenshteinDistance` is a separate implementation and must not be removed with it |
+| `_levenshteinDistance`, `js/core/mini-a-tool-selection.js:9` | Unused wrapper; shared `__miniALevenshteinDistance` is a separate implementation and must not be removed with it |
 | `_backupMemoryToMarkdown`, `mini-a-dreams.js:271` | No caller; active memory dream path uses channel or namespace backup helpers |
-| `_saveLedger`, `mini-a-ingest.js:213` | Explicitly labeled compatibility export; removal requires compatibility decision, not merely a reference count |
-| `lookupMoveLinks`, `mini-a-wiki-retrieval.js:619` | No repository caller; public-shaped method, so retain pending API review |
+| `_saveLedger`, `js/wiki/mini-a-ingest.js:213` | Explicitly labeled compatibility export; removal requires compatibility decision, not merely a reference count |
+| `lookupMoveLinks`, `js/wiki/mini-a-wiki-retrieval.js:619` | No repository caller; public-shaped method, so retain pending API review |
 | `_recordRunTask`, `mini-a.js:1721` | Uncalled persistence helper; investigate whether this is missing integration before deleting |
 | `_flushMemoryPersist`, `mini-a.js:8780` | Uncalled last-resort persistence flush; investigate shutdown correctness before deleting |
 
@@ -160,7 +160,7 @@ packages releases; it does not run the aggregate tests.
 Performed manifest existence/size checks, exact-content duplicate checks, test
 registration comparisons, static reference searches, archive member inspection,
 and a ZIP size estimate. Ran `python3 tests/wikiRetrievalAcceptance.py`; it fails
-at the source SHA-1 check for `('v2', 'mini-a-wiki-retrieval.js')`. This proves the
+at the source SHA-1 check for `('v2', 'js/wiki/mini-a-wiki-retrieval.js')`. This proves the
 frozen report is stale for this checkout, not that live retrieval quality regressed.
 No full OpenAF suite, provider test, package install, or hosted workflow was run.
 

@@ -16,7 +16,7 @@ Create a `mini-a.contract/v1` Markdown contract for the requested goal. This ski
    - `semantic`: an explicit `rubric` and bounded `required_evidence`, never executable expressions.
    Sources may use `{input: name, format: json|yaml}`, `{path: permittedPath}`, `{answer: true}` or `{tool: name, params: {...}}`. Missing evidence and skipped checks cannot count as success.
 5. Write concrete execution and evidence-collection instructions, preserving constraints and bounding recovery. Set `escalation.local_repairs` to an integer from 0 to 2; identify when to stop and report a blocker. Keep structured collections within 64 entries and the document within 64 KiB. Do not add secrets, invented fingerprints, runtime `requirements_hash` or acceptance `provenance`; Mini-A establishes these during preparation and accepted execution.
-6. Check YAML parsing, required fields, unique IDs, heading links, input bindings and criterion coverage. If the checkout's OpenAF runtime is available, use `MiniASupervised.prototype.parse`/`validate` from `mini-a-supervised.js` for structural validation without starting execution or calling models. Report checks actually performed; structural validity does not prove acceptance or successful execution.
+6. Check YAML parsing, required fields, unique IDs, heading links, input bindings and criterion coverage. If the checkout's OpenAF runtime is available, use `MiniASupervised.prototype.parse`/`validate` from `js/core/mini-a-supervised.js` for structural validation without starting execution or calling models. Report checks actually performed; structural validity does not prove acceptance or successful execution.
 
 Deliver the contract path (or complete document), required positional inputs and a matching invocation, for example:
 

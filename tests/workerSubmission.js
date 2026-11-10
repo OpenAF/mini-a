@@ -1,6 +1,6 @@
 (function() {
   load("mini-a.js")
-  load("mini-a-subtask.js")
+  load("js/core/mini-a-subtask.js")
   ow.loadServer()
   var spec = io.readFileYAML("mini-a-worker.yaml")
   var init = spec.jobs.filter(function(job) { return job.name === "Init" })[0].exec

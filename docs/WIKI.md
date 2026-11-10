@@ -47,6 +47,13 @@ Use `/wiki init` to scaffold, `/wiki write <path> <content>` to edit, and
 `/wiki lint` to inspect consistency. Check `/wiki backlinks <path>` before moving
 or deleting a page. Mounts remain read-only; edits target the primary wiki.
 
+To reorganize, use **Browse & organize** in `wikiman=true` or the Pages explorer in
+Wiki Studio: create folders (a folder is a section with an `index.md`), mark several
+pages and folders, then move or delete them in one previewed, snapshotted
+transaction that rewrites links once (local filesystem wikis; one page uses the
+ordinary page move). Programmatic API: `createFolder`, `previewSelection`,
+`moveSelection`, `deleteSelection` on `MiniAWikiManager`.
+
 ### Ingest and synchronize
 
 Use [repeated ingestion](#safe-repeated-ingestion) for imported documents and source
@@ -416,6 +423,26 @@ At process startup Mini-A compares HTTP `ETag` or `Last-Modified` metadata with 
 
 S3 continues to support `wikis3artifactprefix` containing individual Lucene and graph objects. Set `s3artifactbundle=true` to instead consume one `<wikis3artifactprefix>/mini-a-wiki-index.zip`. Mini-A checks S3 object metadata before downloading it, making this useful for read-only consumers with many Lucene segment files. `wikiartifactrefreshsecs` also supports this bundle form; individual artifact trees remain startup-only to avoid mixing Lucene generations. S3 itself still uses native object listing for page catalogs.
 
+## Exporting a wiki to a ZIP
+
+`wiki.export` packages a local filesystem wiki as one ZIP: every page and attachment plus the validated Retrieval V2 serving generations (current and previous) and, when present, the graph (`.mini-a-wiki-graph/graph.json`). The wiki is never modified, and read-only sessions can export. It is available in `wikiman=true` (Indexes & storage → *Export wiki to ZIP*), in Wiki Studio (Maintenance → Export), and noninteractively:
+
+```
+ojob utils/wikiOps.yaml wikiroot=/path/to/wiki operation=wiki.export 'params={"output":"/path/export.zip"}'
+```
+
+| Layout | How to get it | Contents |
+| --- | --- | --- |
+| Bundle (default) | `params={"output":"…"}` | Pages plus a single `mini-a-wiki-index.zip` |
+| Loose (opt-in) | add `"nobundle":true` | Pages plus the index folders stored directly (`.mini-a-wiki-serving/…`, `.mini-a-wiki-graph/graph.json`); no `mini-a-wiki-index.zip` |
+
+Both layouts carry identical, checksum-verified index content (the same builder as `bundlePath` publication, which compacts delta generations); only the packaging differs. Engine-internal state (`-meta`, `-state`, `-ingest`, locks) is deliberately not exported because other instances reject it. Use the result as follows:
+- **S3**: unzip and upload everything to one prefix, then read with `wikibackend=s3 wikiprefix=<prefix> wikis3artifactprefix=<prefix> s3artifactbundle=true` (bundle layout).
+- **HTTP**: publish the unzipped files; the bundle is fetched from `<wikiurl>/mini-a-wiki-index.zip`.
+- **Directly**: either layout opens as an archive wiki, `wikiroot=export.zip wikiindexdir=<cache> wikiretrievalv2=true`.
+
+Export refuses, with a hint, when the wiki has no published Retrieval V2 index (`no-retrieval-publication`: run `/wiki reindex`), an ingestion is pending (`ingest-pending`: resume or discard it), the destination exists or lies inside the wiki, a page changes while exporting (`wiki-changed-during-export`), or a root page is named `mini-a-wiki-index.zip` in bundle layout. The same size/file-count budgets as bundle hydration apply.
+
 ## Search scan budget, read cache, and parallel scan
 
 The `wikisearch*` settings in this section configure direct `MiniAWikiManager` instances. They are currently not forwarded by the shared CLI configuration adapter.
@@ -567,8 +594,26 @@ through Tika, and describes PNG/JPEG through the configured vision model. Extrac
 failures and truncated documents leave their source pages untouched. The default
 `ingestmaxfilekb=512` input limit applies to these formats.
 Other passive structured formats advertised by oafp are converted to Markdown with
-a JSON code block before the normal wiki writer stores a `.md` page. Image inspection
-still calls the vision model in `normalize` and `raw` modes.
+a JSON code block before the normal wiki writer stores a `.md` page. Uncached image inspection
+uses the vision model even in `normalize` and `raw` modes. Images and later
+distillation share one operation budget and actual-call count. A zero budget defers
+uncached images; dry-run never calls a provider or writes extraction caches. Deferral
+preserves the last destination page.
+
+Successful image descriptions are cached privately under
+`.mini-a-wiki-ingest/extractions/<scope>/<sourceKey>.json`, using the raw image digest,
+effective non-secret visual-model settings and extraction version. Credential changes
+alone do not invalidate this cache. Image bytes are checked before and after extraction
+and again before publication or pruning; prune checks never invoke vision. The existing
+extracted-text hashes and page ownership signatures remain unchanged. `ingestforce=true`
+refreshes an image once per source per run and still obeys budgets and edit protection.
+
+Vision input estimates use the wiki token estimator over the prepared prompt, detail
+and transmitted image representation, plus a one-fifth output reserve. These are budget
+estimates, not provider-billed token usage. `wikimaxprompttokens` applies separately to
+the textual prompt, so an encoded image does not consume that text-only cap. Factory-created
+vision and distillation clients are closed after use; caller-injected clients retain their
+conversations and remain open.
 
 ```sh
 ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=/tmp/wiki ingestmode=auto
@@ -638,8 +683,8 @@ empty authorization applies only after complete discovery of an empty folder.
 Inventory revalidation detects changes before deletion; it does not make the source
 filesystem an atomic snapshot. Do not modify the source during reconciliation.
 
-All modes rebuild complete pages. `normalize`, `raw`, and structured `auto` use no
-model. Distillation receives every current source chunk, including after section
+All modes rebuild complete pages. For text sources, `normalize`, `raw`, and structured
+`auto` use no model. Distillation receives every current source chunk, including after section
 removals or `ingestforce=true`. Prompt overhead counts toward `wikimaxprompttokens`
 and `wikiingestbudget`/`wikillmbudget`. By default, a context-limit error
 triggers split-and-synthesize recovery; if recovery cannot finish, ingestion
@@ -781,15 +826,16 @@ change that freshness contract.
 ## Model prompt and operation limits
 
 These settings appear in console help and in `ojob mini-a-ingest.yaml -jobhelp`.
-They bound ingestion distillation estimates, including prompt overhead and estimated
-output. They do not cap vision extraction calls or all model activity in a session.
+Operation budgets cover vision extraction and distillation estimates, including
+prompt overhead and estimated output. The distillation call limit is per source;
+these settings do not cap all model activity across a session.
 
 | Parameter | Type | Default | Behavior |
 | --- | --- | --- | --- |
 | `wikimaxprompttokens` | number | `0` | Zero/unset tries the complete source then splits on provider context overflow. Positive values impose a hard estimated input cap and defer oversized sources. |
 | `wikiingestmaxcalls` | number | `32` | Maximum distillation model calls per source, including failed attempts and synthesis. `0` disables recovery after the initial call. |
 | `wikillmbudget` | number | `-1` | Fallback estimated input-plus-output token budget for one ingestion invocation; negative/unset means unlimited. |
-| `wikiingestbudget` | number | fallback | A nonnegative value overrides `wikillmbudget` for ingestion; `0` defers distillation work. Negative/unset values use the fallback. |
+| `wikiingestbudget` | number | fallback | A nonnegative value overrides `wikillmbudget` for ingestion; `0` defers uncached image extraction and distillation work. Negative/unset values use the fallback. |
 | `wikidreambudget` | number | not enforced | Reserved by the budget helper; the current dream runner does not use it. Use `dreammaxsteps` for the auto/reorg step budget. |
 | `dreamwikimaxaffected` | number | `100` | Bounds the affected-page set in dream plan/dry-run previews. |
 | `wikimetacache` | boolean | `true` | Cache parsed page metadata; `false` reads metadata afresh. |

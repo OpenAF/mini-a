@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const {el, all} = require('./webAdvancedFixture.cjs');
 const source = fs.readFileSync('public/advanced.js','utf8');
-const session = fs.readFileSync('mini-a-session.js','utf8');
+const session = fs.readFileSync('js/session/mini-a-session.js','utf8');
 const start = session.indexOf('  var parameterDefinitions = {');
 const definitions = vm.runInNewContext(session.slice(start,session.indexOf('\n  }',start)+4)+';parameterDefinitions',{__:undefined});
 const bindings = [], requests = [];

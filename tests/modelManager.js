@@ -1,11 +1,11 @@
 (function() {
-  load("mini-a-common.js")
+  load("js/core/mini-a-common.js")
 
   // Run the production menu with an isolated store and scripted answers. No
   // terminal initialization, credential access, or model request is performed.
   var runMenu = function(definitions, choices, answers) {
     var store = clone(definitions), writes = [], errors = []
-    var source = io.readFileString("mini-a-modelman.js")
+    var source = io.readFileString("js/session/mini-a-modelman.js")
     var body = source.substring(source.indexOf("function mainOAFModel("), source.indexOf("\nvar _result = mainOAFModel(args)"))
     var sec = {
       list: function() { return Object.keys(store) },

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "description": "Fixed synthetic technical-wiki benchmark. Graph queries ask for pages sharing an identifier absent from most page titles; lexical controls ask for exact titles. Distractors exercise corpus scale, not external validity.",
+  "distractors": 1000,
+  "topics": [
+    {"query":"ECONNREFUSED","titles":["ECONNREFUSED diagnosis","Shared socket recovery","Datagram retry policy","Receiver ownership","Remote endpoint rejection","Transient receive errors"],"evidence":"ECONNREFUSED indicates a refused network operation; inspect socket state before retrying."},
+    {"query":"conn.ReceiveFunc","titles":["conn.ReceiveFunc contract","Receive buffer slots","Packet compaction","Batch receive ownership","Tunnel read loop","Transport adapter invariants"],"evidence":"conn.ReceiveFunc requires callers to preserve buffer-slot ownership during packet compaction."},
+    {"query":"ProxyFromEnvironment","titles":["ProxyFromEnvironment resolution","Proxy exclusion rules","HTTP transport setup","Environment diagnostics","Credential replacement","Reconnect behavior"],"evidence":"ProxyFromEnvironment resolves the HTTP proxy from environment settings and exclusion rules."},
+    {"query":"getOPackPath","titles":["getOPackPath lookup","Installed package assets","Working directory independence","Library facade loading","Package extraction checks","Reloading prototype extensions"],"evidence":"getOPackPath locates the installed package independently of the caller working directory."},
+    {"query":"JdbcUrlPolicy","titles":["JdbcUrlPolicy validation","Connection string restrictions","Database adapter boundary","Driver configuration review","URL parsing checks","Allowed database options"],"evidence":"JdbcUrlPolicy validates the database URL before the connection is opened."}
+  ],
+  "lexicalQueries":["Shared socket recovery","Receive buffer slots","Proxy exclusion rules","Installed package assets","Connection string restrictions"],
+  "budgets":{"maxEdges":256,"cap":10,"maxCalls":3,"maxTokens":200000,"maxMinutes":10}
+}
