@@ -4,7 +4,7 @@ help:
     Run a wiki dream (reorganization by default) on a local Mini-A wiki, then compact it.
     Stop other readers and writers of the wiki first: reorg can move, merge and delete
     pages, and compaction rebuilds the serving index offline. Mutating modes (reorg,
-    apply, repair, auto) first zip the wiki to <wikiroot>.predream-<timestamp>.zip.
+    apply, repair, auto, rebuild) first zip the wiki to <wikiroot>.predream-<timestamp>.zip.
 
     ojob utils/wikiDream.yaml wikiroot=okts/docs
     ojob utils/wikiDream.yaml wikiroot=okts/docs semantic=true
@@ -26,7 +26,7 @@ help:
     desc: SLON/JSON model config (overrides the mode preset, then OAF_MODEL)
     mandatory: false
   - name: dreamwikimode
-    desc: "Wiki dream mode (default reorg): auto, plan, apply, reorg, repair, reindex, graph, indexes"
+    desc: "Wiki dream mode (default reorg): auto, plan, apply, reorg, repair, reindex, rebuild, graph, indexes"
     mandatory: false
   - name: semantic
     desc: "Opt-in LLM semantic graph extraction (default false)"
@@ -82,6 +82,6 @@ jobs:
       wikiJobsFail("Dream succeeded, but compaction (check the output before reopening the wiki)", isMap(e) && isDef(e.result) ? e.result : String(e), dream.backup)
     }
 
-    logFn("✅ Wiki dream (" + dreamArgs.dreamwikimode + ") complete: " + prepared.root)
+    logFn((dream.partial === true ? "⏸ Wiki dream incomplete; repeat to resume (" : "✅ Wiki dream complete (") + dreamArgs.dreamwikimode + "): " + prepared.root)
     if (isDef(dream.backup)) logFn("🗄️  Pre-dream backup: " + dream.backup)
     wikiJobsReaderHint(prepared, logFn)

@@ -44,7 +44,7 @@ help:
     desc: "Run a wiki dream after ingestion and before compaction (default false)"
     mandatory: false
   - name: dreamwikimode
-    desc: "Dream mode when dream=true (default reorg): auto, plan, apply, reorg, repair, reindex, graph, indexes"
+    desc: "Dream mode when dream=true (default reorg): auto, plan, apply, reorg, repair, reindex, rebuild, graph, indexes"
     mandatory: false
   - name: dreamsemantic
     desc: "Semantic graph extraction for the chained dream (default: same as semantic)"

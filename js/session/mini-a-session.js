@@ -979,7 +979,7 @@ function MiniAInteractiveSession(args, adapter) {
     dream          : { type: "boolean", default: false, description: "Run a dream (sleep) pass — LLM-powered memory and/or wiki consolidation — instead of the console." },
     dreammode      : { type: "string", description: "Dream mode selector for dream=true: memory, wiki, or both (default auto: memory when memory is configured, otherwise wiki)." },
     dreamwiki      : { type: "boolean", default: false, description: "Force wiki dream when dream=true and memory is also configured." },
-    dreamwikimode  : { type: "string", description: "Wiki dream mode: auto, plan, apply (default), reorg, repair, reindex, graph, or indexes." },
+    dreamwikimode  : { type: "string", description: "Wiki dream mode: auto, plan, apply (default), reorg, repair, reindex, rebuild, graph, or indexes." },
     dreammemorymode: { type: "string", description: "Memory dream mode: plan or apply." },
     dreamwikillm   : { type: "boolean", default: true, description: "Allow semantic wiki auto repairs, using configured decide for bounded link choices and the main model for remaining proposals." },
     dreammaxsteps  : { type: "number", default: 40, description: "Total model step budget for wiki auto/reorg." },
@@ -2693,8 +2693,8 @@ function MiniAInteractiveSession(args, adapter) {
 
           // Handle /dream command completions
           if (lookupName === "dream") {
-            var dreamSubcmds = ["memory", "wiki", "dryrun", "auto", "plan", "apply", "reorg", "repair", "reindex", "graph", "indexes"]
-            var dreamWikiModes = ["auto", "plan", "apply", "reorg", "repair", "reindex", "graph", "indexes", "dryrun"]
+            var dreamSubcmds = ["memory", "wiki", "dryrun", "auto", "plan", "apply", "reorg", "repair", "reindex", "rebuild", "graph", "indexes"]
+            var dreamWikiModes = ["auto", "plan", "apply", "reorg", "repair", "reindex", "rebuild", "graph", "indexes", "dryrun"]
             var remainder = uptoCursor.substring(firstSpace + 1)
             var trimmedRemainder = remainder.replace(/^\s*/, "")
             var insertionPoint = cursor - trimmedRemainder.length
@@ -6712,7 +6712,7 @@ function MiniAInteractiveSession(args, adapter) {
       { command: "/edit [last]", description: "Compose and submit one goal in the configured external editor (last pre-fills the previous goal; /editor also works)" },
       { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, compact, mounts, attach, detach" },
       { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, report, query, retrieve, answer (retrieval alias; no synthesis), neighbors, path, communities, surprise, export, stats, falkor, cross (requires usewikigraph=true)" },
-      { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: auto, plan, apply (default), reorg, repair, reindex, graph, indexes, dryrun" },
+      { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: auto, plan, apply (default), reorg, repair, reindex, rebuild, graph, indexes, dryrun" },
       { command: "/absorb plan|show|apply|status|resume|delete|cancel [spec|id]", description: "Plan, review and apply local wiki absorption (see ABSORB.md)." },
       { command: "/ingest <source> [section]", description: "Ingest docs into the wiki; flags: dryrun, force, independent. No source: recovery choices." }
     ]
@@ -6756,7 +6756,7 @@ function MiniAInteractiveSession(args, adapter) {
           wiki: ["context", "list", "tree", "browse", "read", "search", "backlinks", "lint", "write", "move", "mv", "delete", "remove", "rm", "init", "reindex", "compact", "mounts", "attach", "detach"],
           graph: ["query", "retrieve", "answer", "neighbors", "path", "cross", "communities", "surprise", "stats", "report", "build", "falkor", "export"],
           skills: ["search", "remote", "recommend", "open", "read", "related", "context"], absorb: ["plan", "show", "apply", "status", "resume", "delete", "cancel"], ingest: ["recovery", "dryrun", "force", "prune", "allowemptyprune", "sourceid=", "independent"],
-          dream: ["memory", "wiki", "plan", "apply", "reorg", "repair", "reindex", "graph", "indexes", "dryrun"], subtask: ["result", "cancel"] })[name] || [],
+          dream: ["memory", "wiki", "plan", "apply", "reorg", "repair", "reindex", "rebuild", "graph", "indexes", "dryrun"], subtask: ["result", "cancel"] })[name] || [],
         aliases: canonical === "edit" ? ["editor"] : canonical === "exit" ? ["quit"] : [],
         examples: ({ decide: ["/decide", "/decide interactive", '/decide {"state":"Evidence","questions":{"urgent":{"type":"boolean","instructions":"Is this urgent?"}}}'], set: ["/set debug true"], show: ["/show wiki"], model: ["/model lc"], last: ["/last", "/last md"], history: ["/history 10"], stats: ["/stats detailed tools", "/stats out=metrics.json"], wiki: ['/wiki read "Team Docs/index.md"', '/wiki write "notes.md"'], graph: ["/graph export mermaid", "/graph retrieve installation"], skills: ["/skills search testing", "/skills read reference"], ingest: ['/ingest "./docs" "Docs" dryrun prune sourceid=docs'], absorb: ["/absorb status", "/absorb show plan-id"], dream: ["/dream wiki plan dryrun"], subtask: ["/subtask result task-id", "/subtask cancel task-id"] })[name] || ["/" + name], prerequisite: name === "decide" ? "modeldec or OAF_DECIDE_MODEL configured; usedecide must not be false." : ["wiki", "graph", "ingest", "absorb"].indexOf(name) >= 0 ? "Wiki enabled; write operations require wikiaccess=rw." : name === "delegate" ? "usedelegation=true" : "" }
     })
@@ -7562,7 +7562,7 @@ function MiniAInteractiveSession(args, adapter) {
     var hasMemory = isString(dreamSessionOptions.memorych) && dreamSessionOptions.memorych.trim().length > 0
     var hasWiki   = toBoolean(dreamSessionOptions.usewiki) === true
 
-    var isWikiMode = ["wiki", "auto", "plan", "apply", "reorg", "repair", "reindex", "graph", "indexes"].indexOf(mode) >= 0
+    var isWikiMode = ["wiki", "auto", "plan", "apply", "reorg", "repair", "reindex", "rebuild", "graph", "indexes"].indexOf(mode) >= 0
     if (mode === "memory" && !hasMemory) {
       print(colorifyText("No memory channel configured. Start with memorych=...", errorColor)); return
     }
@@ -7592,11 +7592,12 @@ function MiniAInteractiveSession(args, adapter) {
 
     try {
       if (parts.indexOf("auto") >= 0 || parts.indexOf("plan") >= 0 || parts.indexOf("apply") >= 0 || parts.indexOf("reorg") >= 0 || parts.indexOf("repair") >= 0 ||
-          parts.indexOf("reindex") >= 0 || parts.indexOf("graph") >= 0 || parts.indexOf("indexes") >= 0) {
+          parts.indexOf("reindex") >= 0 || parts.indexOf("rebuild") >= 0 || parts.indexOf("graph") >= 0 || parts.indexOf("indexes") >= 0) {
         if (parts.indexOf("auto") >= 0) dreamArgs.dreamwikimode = "auto"
         if (parts.indexOf("plan") >= 0) dreamArgs.dreamwikimode = "plan"
         if (parts.indexOf("apply") >= 0) dreamArgs.dreamwikimode = "apply"
         if (parts.indexOf("repair") >= 0) dreamArgs.dreamwikimode = "repair"
+        if (parts.indexOf("rebuild") >= 0) dreamArgs.dreamwikimode = "rebuild"
         if (parts.indexOf("reindex") >= 0) dreamArgs.dreamwikimode = "reindex"
         if (parts.indexOf("graph") >= 0) dreamArgs.dreamwikimode = "graph"
         if (parts.indexOf("indexes") >= 0) dreamArgs.dreamwikimode = "indexes"
@@ -7659,7 +7660,7 @@ function MiniAInteractiveSession(args, adapter) {
 
       if ((mode === "" || mode === "memory") && hasMemory) reportDream("memory", runner.dreamMemory())
       if ((mode === "" || mode === "wiki" || mode === "auto" || mode === "plan" || mode === "apply" || mode === "reorg" || mode === "repair" ||
-           mode === "reindex" || mode === "graph" || mode === "indexes") && hasWiki) reportDream("wiki", runner.dreamWiki())
+           mode === "reindex" || mode === "rebuild" || mode === "graph" || mode === "indexes") && hasWiki) reportDream("wiki", runner.dreamWiki())
     } catch(dreamErr) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Dream error: " + dreamErr, errorColor))
     } finally { activeDream = __ }

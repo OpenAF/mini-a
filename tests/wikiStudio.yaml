@@ -3,6 +3,9 @@ include:
 ojob:
   logToConsole: false
 jobs:
+- name: Studio full rebuild
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testFullRebuild
 - name: Studio workflow settings
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testWorkflowSettings

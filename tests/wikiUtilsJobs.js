@@ -181,6 +181,10 @@
       ow.test.assert(r.exitcode, 0, "repair dream succeeds: " + r.stderr)
       ow.test.assert(io.listFiles(base).files.filter(function(f) { return /^wiki\.predream-.*\.zip$/.test(f.filename) }).length, 1, "mutating dreams write one backup")
 
+      r = runJob("wikiDream.yaml", { wikiroot: root, dreamwikimode: "rebuild", semantic: "false", compact: "false", mode: "none" })
+      ow.test.assert(r.exitcode, 0, "full rebuild batch option succeeds: " + r.stderr)
+      ow.test.assert(io.fileExists(root + "/.mini-a-wiki-full-rebuild.json"), true, "batch publishes the rebuild checkpoint")
+
       r = runJob("wikiDream.yaml", { wikiroot: base + "/missing", mode: "none" })
       ow.test.assert(r.exitcode, 1, "dreaming a missing wiki fails")
       ow.test.assert(io.fileExists(base + "/missing"), false, "a missing wiki is not created")

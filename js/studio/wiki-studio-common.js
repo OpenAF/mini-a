@@ -138,7 +138,7 @@ WikiStudio.scan = function(root, all, metadataOnly) {
 WikiStudio.fingerprint = function(files) { return WikiStudio.hash(JSON.stringify(Object.keys(files).sort().map(function(k) { return [k, files[k].hash] }))) }
 WikiStudio.redact = function(value) {
   var text = String(value).replace(/Bearer\s+[^\s"']+/gi, "Bearer [redacted]").replace(/(https?:\/\/)[^/\s@]+@/gi, "$1[redacted]@")
-  ;["OAF_MODEL", "OAF_LC_MODEL", "STUDIO_TOKEN"].forEach(function(k) {
+  ;["OAF_MODEL", "OAF_LC_MODEL", "OAF_DECIDE_MODEL", "STUDIO_TOKEN"].forEach(function(k) {
     var s = String(getEnv(k) || ""); if (s) text = text.split(s).join("[redacted]")
     try {
       var parsed=af.fromJSSLON(s)

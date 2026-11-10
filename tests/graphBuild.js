@@ -84,6 +84,10 @@ try {
   fail=true;var failure=f.build([modelPages[0]],{extraction:"semantic",modelHelp:"auto",force:true})
   assert(failure.failed===1&&f._state.edges.filter(function(e){return e.props.method==="model"}).length===1,"malformed refresh preserves unchanged-source result")
   var reloaded=graph("failure");assert(reloaded._state.edges.filter(function(e){return e.props.method==="model"}).length===1,"checkpoint persistence")
+  var throwing = graph("diagnostic", { modelExtractors: [{ role: "main", extract: function() { throw new Error("private provider error") } }] })
+  var diagnostic = throwing.build([modelPages[0]], { extraction: "semantic", modelHelp: "auto", formatModelError: function() { return "sanitized test error" } })
+  assert(diagnostic.modelErrors.main === "sanitized test error", "only caller-sanitized exception sample is retained")
+  assert(diagnostic.failureReasons["model-extraction-failed"] === 1, "exceptions retain their failure category")
   var fallback=graph("fallback",{modelExtractors:[{role:"lc",extract:function(){throw "failed"}},{role:"main",extract:function(){return{relationships:[]}}}]})
   assert(fallback.build([modelPages[0]],{extraction:"semantic",modelHelp:"auto"}).calls===2,"LC main escalation counted")
   var decision=graph("decision",{modelExtractors:models,decisionExtractor:{fingerprint:"decision",extract:function(){return {paths:[]}}}})
@@ -268,6 +272,7 @@ try {
   assert(junkCalls === 2 && junk._state.edges.some(function(e) { return e.props && e.props.method === "model" }), "wholly ungrounded response escalates to the next model")
   var allBad = graph("allbad", { modelExtractors: [{ role: "main", fingerprint: "bad", extract: function() { return { relationships: [{ from: "A1", to: "B1", evidence: { quote: "nowhere" } }] } } }] })
   var allBadReport = allBad.build([mixPage], { extraction: "semantic", modelHelp: "auto" })
+  assert(allBadReport.failureReasons["ungrounded-relationships"] === 1, "ungrounded section failure is categorized")
   assert(allBadReport.failed === 1 && allBad._state.enrichment["mix.md"].status !== "complete", "wholly ungrounded response fails the section")
 
   // Dangling link statistic: unresolved page links count, indexed pages and @mount links do not.

@@ -84,7 +84,9 @@ MiniAGraphBuild.modelAdapters = function(args) {
       if (!client) client = $llm(config)
       var instruction = entry.role === "decision" ? "Classify supplied candidate paths that share the technical concept. Return JSON {paths:[]}, at most 8, only supplied paths. Discovery is not evidence." : "Return JSON {relationships:[{from,to,type,provenance,confidence,evidence:{quote}}]}. Quote exact supplied section text supporting both endpoints. Use INFERRED for associations. Empty relationships is valid."
       var prompt = instruction + "\n" + stringify(payload, __, "")
-      var response = isFunction(client.promptJSONWithStats) ? client.promptJSONWithStats(prompt) : isFunction(client.promptWithStats) ? client.promptWithStats(prompt) : client.prompt(prompt)
+      // Respect the same provider JSON-mode opt-outs as the core agent.
+      var noJsonPrompt = toBoolean(getEnv(entry.role === "lc" ? "OAF_MINI_A_LCNOJSONPROMPT" : "OAF_MINI_A_NOJSONPROMPT")) === true
+      var response = !noJsonPrompt && isFunction(client.promptJSONWithStats) ? client.promptJSONWithStats(prompt) : isFunction(client.promptWithStats) ? client.promptWithStats(prompt) : client.prompt(prompt)
       var raw = isMap(response) && isDef(response.response) ? response.response : response
       if (isString(raw)) raw = jsonParse(raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim(), __, __, true)
       return isMap(raw) ? raw : { ok: false, error: "malformed-output" }

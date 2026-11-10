@@ -1053,7 +1053,7 @@ window.MiniAAdvancedUI = function(bridge) {
       actions([['Preview wiki maintenance','/dream wiki auto dryrun']]); resultPanel();
       workflowForm('dream', 'Plan or run maintenance', [
         {name:'target',label:'Target',options:[['wiki','Wiki'],['memory','Memory']]},
-        {name:'mode',label:'Wiki mode',options:[['plan','Plan'],['auto','Auto'],['apply','Apply'],['reorg','Reorganize'],['repair','Repair'],['reindex','Reindex'],['graph','Graph'],['indexes','Indexes']]},
+        {name:'mode',label:'Wiki mode',options:[['plan','Plan'],['auto','Auto'],['apply','Apply'],['reorg','Reorganize'],['repair','Repair'],['reindex','Reindex'],['rebuild','Full rebuild (expensive; resumable)'],['graph','Graph'],['indexes','Indexes']]},
         {name:'dryrun',label:'Dry run',check:true,default:true,help:'Memory uses its own maintenance behavior; Wiki mode only applies to the Wiki target.'}
       ], draft => '/dream ' + draft.target + (draft.target === 'wiki' ? ' ' + draft.mode : '') + (draft.dryrun ? ' dryrun' : ''), 'Run maintenance');
     }

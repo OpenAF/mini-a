@@ -1057,7 +1057,17 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, options) {
     var role = model.role || "decision"
     report.callsByRole[role] = (report.callsByRole[role] || 0) + 1
     report.estimatedTokens += tokens
-    try { return model.extract(payload, Math.max(1, opts.maxMinutes * 60000 - (Date.now() - started))) } catch(e) { return { ok: false, error: "model-extraction-failed" } }
+    try {
+      return model.extract(payload, Math.max(1, opts.maxMinutes * 60000 - (Date.now() - started)))
+    } catch(e) {
+      // Only caller-sanitized exception samples may enter persisted reports.
+      if (isFunction(opts.formatModelError)) {
+        if (!isMap(report.modelErrors)) report.modelErrors = {}
+        if (isUnDef(report.modelErrors[role])) report.modelErrors[role] = opts.formatModelError(e)
+      }
+      report.modelCallExceptions = (report.modelCallExceptions || 0) + 1
+      return { ok: false, error: "model-extraction-failed" }
+    }
   }
   if (!isMap(this._state.enrichment)) this._state.enrichment = {}
 
@@ -1152,13 +1162,23 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, options) {
         response = attemptResponse
         // A response is usable when it is empty or grounds at least one relationship; the rest are dropped.
         if (response && response.ok !== false && isArray(response.relationships) && response.needsContext !== true && response.relationships.length <= 32 && (response.relationships.length === 0 || response.relationships.some(function(rel) { return self._validateRelationship(rel, section) !== null }))) break
-        if (response) response = { ok: false, error: "invalid-extraction" }
+        // Preserve safe failure categories instead of collapsing every response into invalid-extraction.
+        var reason = "invalid-extraction"
+        if (response && response.ok === false) reason = response.error === "model-extraction-failed" ? "model-extraction-failed" : response.error === "malformed-output" ? "malformed-output" : "extractor-error"
+        else if (!response || !isArray(response.relationships)) reason = "missing-relationships"
+        else if (response.needsContext === true) reason = "needs-context"
+        else if (response.relationships.length > 32) reason = "too-many-relationships"
+        else reason = "ungrounded-relationships"
+        response = { ok: false, error: reason }
         if (stopped) break
       }
       if (stopped && !response) break
       if (!response || response.ok === false || !isArray(response.relationships) || response.needsContext === true) {
         failed = true
         report.failed++
+        if (!isMap(report.failureReasons)) report.failureReasons = {}
+        var failureReason = response && response.error || "missing-response"
+        report.failureReasons[failureReason] = (report.failureReasons[failureReason] || 0) + 1
         continue
       }
       var validated = []

@@ -1399,3 +1399,21 @@ its navigation summary remains capped at ten mounts and reports truncation;
 
 See [the compatibility assessment](../WIKI-FEDERATION-ASSESSMENT.md) for
 classification, test evidence, measured replay and outstanding limitations.
+
+## Embedding evaluation and persistent cache
+
+Embedding retrieval is not enabled in normal ingestion or search. The initial held-out comparison with Ollama `embeddinggemma-2` did not pass the quality gate: production lexical retrieval scored 1.0 and the candidate passage-fusion approach scored 0.667 across six cases (answerable support recall and correct abstention for the unanswerable case). The candidate missed a federated result and introduced a hit for an unanswerable query. This small fixture does not establish performance on larger or paraphrase-heavy corpora; ingestion guidance and concept suggestions remain unevaluated.
+
+`js/wiki/mini-a-wiki-embeddings.js` provides a reusable OpenAF H2 MVStore channel cache. Content/configuration hashes identify vectors without persisting input text or credentials. Compatible calls reuse vectors across runs and managers; failures are not cached. Input is sent one passage per call because some OpenAF adapters concatenate array inputs. Provider vectors are normalized and checked for finite values, nonzero magnitude, and consistent dimensions. The cache is a local writable file with one process owning its MVStore handle; concurrent processes should use separate files. Cache files still contain derived wiki information and should use the wiki's storage permissions.
+
+Run the optional, live small-corpus comparison with an independent `OAF_EMBED_MODEL` configuration:
+
+```bash
+WIKI_EMBED_CACHE=/private/tmp/wiki-embedding-eval.db oaf -f tests/wikiEmbeddingsQuality.js
+# While validating the sibling OpenAF source before upgrading the installed runtime:
+WIKI_EMBED_OPENAF_SOURCE=../openaf/js/owrap.ai.js WIKI_EMBED_CACHE=/private/tmp/wiki-embedding-eval.db oaf -f tests/wikiEmbeddingsQuality.js
+```
+
+`WIKI_EMBED_FIXTURE` accepts a fixture with `pages` and `queries` in the existing retrieval-quality format. The report includes production lexical quality, lexical passage-candidate quality, candidate hybrid quality, call/cache counts, and a conservative gate (at least 0.10 absolute improvement with no per-query regression). It uses exhaustive vector comparison solely as a small-corpus quality oracle, not a large-wiki serving implementation. A passing fixture alone does not enable embeddings. A representative quality win must precede production HNSW integration and the planned 100,000-passage benchmark.
+
+Offline checks: `oaf -f tests/wikiEmbeddings.js` and `oaf -f tests/wikiFullRebuild.js`.

@@ -110,6 +110,7 @@ MiniAWikiOps.catalog = (function() {
   add("wiki.delete", "Pages & structure", "Delete a page", true, [["path", "Page path"]])
   add("wiki.indexes", "Pages & structure", "Regenerate directory indexes", true)
   add("wiki.upgrade", "Pages & structure", "Upgrade wiki instructions", true)
+  add("dream.rebuild", "Indexes & storage", "Fully rebuild graph and index (expensive; resume pending run)", true, [["modelHelp", "Model help: auto or off", "auto"], ["maxCalls", "Maximum model calls per run", 100, "number"], ["maxMinutes", "Maximum minutes per run", 10, "number"]], {}, "Reconstructs derived data from existing wiki pages. Repeat to resume an interrupted or budget-limited run.")
   add("wiki.reindex", "Indexes & storage", "Rebuild search index", true)
   add("wiki.compact", "Indexes & storage", "Preview / apply compaction", true, [], { dryRun: true, offline: false }, "Apply requires all other readers and writers to be stopped.")
   add("wiki.export", "Indexes & storage", "Export wiki to ZIP", false, [["output", "Output ZIP file (new file, absolute path)"], ["nobundle", "Store index folders loose instead of a nested mini-a-wiki-index.zip", false, "boolean"]], { nobundle: false }, "Packages pages plus the validated search/graph index for other Mini-A instances (for example an S3 bucket). Requires a published Retrieval V2 index; the wiki is not modified.")
@@ -220,6 +221,7 @@ MiniAWikiOps.prototype.unavailable = function(spec) {
   if ((folderOp || id === "wiki.compact" || id === "wiki.indexstats" || id === "wiki.export" || id === "graph.filestats" || id === "graph.html" || id.indexOf("absorb.") === 0) && (backend !== "fs" || archive || cfg.__catalog)) return "Requires a local filesystem wiki"
   if (folderOp && this.args.wikitarget) return "Folder operations require a local primary wiki; mounted wikis are read-only"
   if (id === "dream.auto" && (backend !== "fs" || archive || cfg.__catalog || this.args.wikitarget)) return "Auto requires a local primary filesystem wiki"
+  if (id === "dream.rebuild" && (backend !== "fs" || archive || cfg.__catalog)) return "Full rebuild requires a local writable filesystem wiki"
   if (id === "wiki.compact" && toBoolean(cfg.wikiretrievalv2) === false) return "Compaction requires Retrieval V2"
   if (id.indexOf("graph.") === 0 && id !== "graph.html" && id !== "graph.filestats" && id !== "graph.settings" && id !== "graph.defaults" && toBoolean(cfg.usegraph) !== true) return "Enable usewikigraph=true in session settings"
   if (cfg.__catalog && (id.indexOf("dream.") === 0 || id.indexOf("ingest.") === 0 || id.indexOf("graph.") === 0 && id !== "graph.stats")) return "Select a concrete wiki target"
@@ -271,7 +273,7 @@ MiniAWikiOps.prototype._execute = function(spec, gates) {
     if (id === "wiki.compact" && MiniAWikiOps.mutates(spec) && toBoolean(p.offline) !== true) throw new Error("Compaction requires params.offline=true after stopping other readers and writers")
     var a = merge({}, this.args), cfg = this.targetConfig(), group = id.split(".")[0], action = id.split(".")[1]
 
-    if (id === "graph.build" || id === "graph.defaults") cfg.skipBootstrap = true
+    if (id === "graph.build" || id === "graph.defaults" || id === "dream.rebuild") cfg.skipBootstrap = true
     if (id.indexOf("wiki.folder") === 0) cfg.skipBootstrap = true
     if (id === "wiki.folderRestore") { cfg.folderRecovery = true; cfg.maintenanceSourceOnly = true }
     delete a.wikiman; delete a.wikitarget
@@ -319,7 +321,7 @@ MiniAWikiOps.prototype._execute = function(spec, gates) {
         dream._args.dreamwikiinstructions = String(p.instructions || a.dreamwikiinstructions || "")
         dream._args.dreamwikiorganize = String(p.organize || a.dreamwikiorganize || "none")
       }
-      return dream.dreamWiki()
+      return dream.dreamWiki(action === "rebuild" ? merge(p.rebuild || p, { onProgress: self.onGraphProgress, formatModelError: self.formatModelError, isCancelled: self.isCancelled }) : __)
     }
     if (group === "absorb") {
       loadLib(__miniAPath("js/wiki/mini-a-absorb.js"))
@@ -362,6 +364,7 @@ MiniAWikiOps.prototype._execute = function(spec, gates) {
           wm._graph._cfg.modelExtractors = graphDream._graphExtractors()
           wm._graph._cfg.decisionExtractor = graphDream._graphDecisionExtractor()
         }
+        p.formatModelError = this.formatModelError
         p.onProgress = this.onGraphProgress || function(progress) { self.log(af.toSLON(progress)) }
         p.isCancelled = this.isCancelled
       }

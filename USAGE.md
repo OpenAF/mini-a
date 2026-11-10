@@ -3550,6 +3550,16 @@ For a deletion preview, omit `to`. Recovery uses `operation=wiki.folderRestore p
 
 Page editing imports a content file or opens `editor=` / `$EDITOR` (default `vi`) without invoking a shell. The reviewed content is snapshotted in a temporary file. **Session → Run history / export** saves a sanitized JSON run record; page-write exports also preserve the content next to the record. Unexported editor snapshots are removed on exit. No connection profiles or history are saved automatically.
 
+For a complete reconstruction from existing Markdown, select **Fully rebuild graph and index** in the wiki manager's **Indexes & storage** menu, or run:
+
+```bash
+mini-a dream=true dreammode=wiki dreamwikimode=rebuild usewiki=true wikiroot=/path/to/wiki wikiaccess=rw
+# Batch wrapper: creates a pre-dream backup; keeps model enrichment off.
+ojob utils/wikiDream.yaml wikiroot=/path/to/wiki dreamwikimode=rebuild mode=none semantic=false compact=false
+```
+
+This is an expensive opt-in. Stop external readers and writers first. The full index is republished atomically, then the entire graph is reconstructed. Repeat the same command to resume an incomplete run: completed graph enrichment is reused, while an interrupted index phase restarts. Changes to wiki content invalidate a completed index checkpoint. Source pages are preserved. `dryrun=true` previews the request without starting it. Add `wikigraphsemantic=true` to the direct command (or `semantic=true` to the batch wrapper) to permit bounded model enrichment; model calls otherwise default off. Model work uses the existing graph budgets and checkpoints. The operation requires a writable filesystem wiki.
+
 Commands refer to sensitive argument values through `MINIA_WIKIOPS_<ARGUMENT>` environment variables, listing the required variables without printing their values. Existing `OAF_MODEL` configuration and saved model aliases remain usable. Launch modes such as `modelman`, `mcptest`, Dream, web, worker, and goal/exec cannot be combined with `wikiman=true`.
 
 ## Wiki Ingestion
@@ -3749,7 +3759,7 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 | `wikiroot` / `wikibucket` / `wikibackend` | string | - | Same wiki backend settings as the regular agent |
 | `model` | string | - | SLON/JSON model config used for the memory consolidation LLM call |
 | `dryrun` | boolean | `false` | Preview what would change without writing anything back |
-| `dreamwikimode` | string | `apply` | Wiki dream mode: `auto`, `plan`, `apply`, `reorg`, `repair`, `reindex`, `graph`, `indexes` |
+| `dreamwikimode` | string | `apply` | Wiki dream mode: `auto`, `plan`, `apply`, `reorg`, `repair`, `reindex`, `rebuild`, `graph`, `indexes` |
 | `dreammemorymode` | string | `apply` | Memory dream mode: `plan` or `apply` |
 | `dreamwikidryrun` | boolean | `false` | Propose wiki changes without writing (opt-out of `apply`) |
 | `dreamwikiapproval` | string | `ask` | Reorg approval mode: `auto`, `ask`, `never` |

@@ -99,6 +99,29 @@
       if(result.partial)assert(s.jobs.deletion(finished,w,s.jobs.list()).allowed,false,"Partial result is protected from cleanup")
     })}finally{wikiStudioExecute=original}
   }) }
+  // Full rebuild uses the shared worker, snapshots, and strict opt-in validation.
+  exports.testFullRebuild = function() { fixture(function(s, t) {
+    WikiStudio.privateDir(s.config.home + "/jobs")
+    s.jobs = new WikiStudioJobs(s.config)
+    var w = add(s, t)
+    io.writeFileString(w.root + "/page.md", "# Existing\nReconstruct derived artifacts from this page.")
+    rejects(function() {
+      s.jobWikiRoute({ method: "POST", headers: {}, body: { mode: "rebuild" } }, w, ["dreams"], "admin")
+    }, "offline_required")
+    var job = s.jobWikiRoute({ method: "POST", headers: { "idempotency-key": "full-rebuild" }, body: {
+      mode: "rebuild", options: { rebuild: { modelHelp: "off", maxCalls: 2 } }, confirmation: { externalProcessesStopped: true }
+    } }, w, ["dreams"], "admin")
+    assert(job.operation, "dream.rebuild", "Studio queues shared Dream mode")
+    assert(job.params.rebuild.maxCalls, 2, "Budget is retained")
+    s.jobs.update(job.id, { status: "acquiring-lock" })
+    wikiStudioRunWorker(s.config, job.id)
+    var finished = s.jobs.get(job.id)
+    assert(finished.status, "completed", "Full rebuild worker succeeds")
+    assert(!!finished.backupId, true, "Verified snapshot precedes full rebuild")
+    var result = WikiStudio.json(s.jobs.dir(job.id) + "/result.json")
+    assert(result.complete, true, "Worker reports complete reconstruction")
+    assert(io.readFileString(w.root + "/page.md").indexOf("Reconstruct derived") >= 0, true, "Markdown remains authoritative")
+  }) }
   exports.testRegistry = function() { fixture(function(s, t) {
     var w = add(s, t); assert(w.access, "rw", "Registered wiki")
     assert(new WikiStudioRegistry(s.config).get("alpha").root, w.root, "Registry survives reopen")

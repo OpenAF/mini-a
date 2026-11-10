@@ -707,7 +707,14 @@ function row(parent) { const node = el("div", undefined, parent); node.className
 function technical(value, parent, title = "Technical details") { const d = el("disclosure", undefined, parent); el("disclosure-toggle", title, d); jsonView(value, d); return d; }
 function human(value) { return String(value || "").replace(/[._-]+/g, " ").replace(/^./, c => c.toUpperCase()); }
 function bytes(value) { return new Intl.NumberFormat(undefined, {maximumFractionDigits: 1}).format(value / (value >= 1048576 ? 1048576 : 1024)) + (value >= 1048576 ? " MiB" : " KiB"); }
-function date(value) { return value ? new Date(value).toLocaleString() : "—"; }
+// Display Studio timestamps consistently in the browser's local timezone.
+function date(value) {
+  if (value === undefined || value === null || value === "") return "—"
+  var timestamp = new Date(value)
+  if (isNaN(timestamp.getTime())) return "—"
+  var pad = function(part) { return String(part).padStart(2, "0") }
+  return timestamp.getFullYear() + "-" + pad(timestamp.getMonth() + 1) + "-" + pad(timestamp.getDate()) + ", " + pad(timestamp.getHours()) + ":" + pad(timestamp.getMinutes()) + ":" + pad(timestamp.getSeconds())
+}
 function disable(control, reason) { control.disabled = !!reason; control.title = reason || ""; if (reason) { const note = el("small", reason, control.parentElement); note.className = "muted control-reason"; } return control; }
 function writeReason(model = false) { return currentWiki.access !== "rw" ? "This wiki is read-only" : model && !studioSession?.canTestWiki ? "Configure OAF_MODEL to use this action" : ""; }
 async function allItems(path) {
@@ -852,8 +859,9 @@ async function showView(name, content) {
         button(test, "Refresh test servers", refreshTestServers);
         await refreshTestServers();
         var launch = await workflowTuning(test, "test", { maxsteps: "Maximum consecutive non-success steps", maxcontext: "Context tokens" });
-        el("p", "Launch defaults come from wiki " + selectedId + ".", launch.box).className = "muted";
-  const advanced = check(launch.box, "Enable Advanced view (trusted console controls)");
+        // Identify the wiki supplying this overview's launch defaults.
+        el("p", "Launch defaults come from wiki " + currentWiki.id + ".", launch.box).className = "muted"
+        var advanced = check(launch.box, "Enable Advanced view (trusted console controls)")
         button(test, "Open wiki test in new tab", async () => {
           const tab = window.open("about:blank", "_blank");
           if (!tab) throw new Error("Allow pop-ups for Studio to open the wiki test.");
@@ -1846,6 +1854,14 @@ var DREAM_TASKS = {
     effect: "Preview, or edits pages",
     model: "Uses model if configured"
   },
+  rebuild: {
+    title: "Fully rebuild graph and index",
+    short: "Expensive reconstruction; repeat to resume.",
+    effect: "Reconstructs all derived data",
+    model: "Optional model calls",
+    summary: "Expensive opt-in: reconstruct the search index and entire graph from existing wiki content. Repeat this task to resume a pending rebuild. The index phase restarts after interruption; completed graph work is reused.",
+    when: "You need a complete reconstruction of derived data. Stop external writers first. A backup is created before the job."
+  },
   reindex: {
     title: "Rebuild search",
     short: "Refresh search after outside edits.",
@@ -1892,7 +1908,7 @@ var DREAM_TASKS = {
 var DREAM_TASK_GROUPS = [
   { title: "Find out what needs attention", hint: "Safe to run any time. Nothing is changed.", tasks: ["plan"] },
   { title: "Fix problems", hint: "Edit pages to resolve findings. A verified backup is taken first.", tasks: ["apply", "repair", "auto"] },
-  { title: "Refresh derived data", hint: "Rebuild what Mini-A derives from your pages. Page content stays the same.", tasks: ["reindex", "indexes", "graph"] },
+  { title: "Refresh derived data", hint: "Rebuild what Mini-A derives from your pages. Page content stays the same.", tasks: ["reindex", "indexes", "graph", "rebuild"] },
   { title: "Restructure with the model", hint: "Larger structural changes driven by the model. Review findings first.", tasks: ["reorg"] },
   { title: "Storage", hint: "Housekeeping for the files behind the wiki.", tasks: ["compact"] }
 ]
@@ -2078,6 +2094,34 @@ async function dreamsView(content, openTab) {
 
     if (mode === "graph") {
       await graphBuildControls(optionsPanel, true)
+      return
+    }
+
+    // Full reconstruction has an explicit cost acknowledgement and bounded model work.
+    if (mode === "rebuild") {
+      var modelHelp = field(optionsPanel, "Model enrichment", ["off", "auto"])
+      var maxCalls = field(optionsPanel, "Maximum model calls per run")
+      maxCalls.type = "number"
+      maxCalls.min = "1"
+      maxCalls.value = "100"
+      var maxTokens = field(optionsPanel, "Maximum estimated tokens per run")
+      maxTokens.type = "number"
+      maxTokens.min = "1"
+      maxTokens.step = "1"
+      maxTokens.value = "200000"
+      var maxMinutes = field(optionsPanel, "Maximum minutes per run")
+      maxMinutes.type = "number"
+      maxMinutes.min = "0.1"
+      maxMinutes.step = "0.1"
+      maxMinutes.value = "10"
+      var acknowledge = check(optionsPanel, "I understand this fully rebuilds derived data and can be expensive")
+      var stopped = check(optionsPanel, "External readers and writers are stopped")
+      disable(button(optionsPanel, "Start / resume full rebuild", async function() {
+        if (!acknowledge.checked || !stopped.checked) {
+          throw new Error("Acknowledge the rebuild cost and stop external processes first")
+        }
+        await queue("dreams", { mode: "rebuild", options: { rebuild: { modelHelp: modelHelp.value, maxCalls: Number(maxCalls.value), maxTokens: Number(maxTokens.value), maxMinutes: Number(maxMinutes.value) } }, confirmation: { externalProcessesStopped: true } })
+      }), writeReason())
       return
     }
 

@@ -5877,3 +5877,8 @@ loadLib(__miniAPath("js/wiki/mini-a-wiki-export.js"), true)
     } finally { lock.release() }
   }
 })
+
+// Explicit, resumable reconstruction of all derived wiki artifacts.
+MiniAWikiManager.prototype.fullRebuild = function(options) {
+  return __miniAWikiFullRebuild(this, options)
+}

@@ -69,8 +69,8 @@ WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
     operation = "graph.build"
   } else if (route === "dreams") {
     WikiStudio.fields(body, ["mode", "options", "confirmation"])
-    WikiStudio.assert(["plan", "apply", "repair", "reindex", "graph", "indexes", "reorg", "auto"].indexOf(body.mode) >= 0, 400, "invalid_mode", "Unsupported dream mode")
-    var o = body.options || {}; WikiStudio.fields(o, ["semantic", "organize", "instructions", "dreammaxsteps", "backup", "compact", "dryrun", "tuning"])
+    WikiStudio.assert(["plan", "apply", "repair", "reindex", "rebuild", "graph", "indexes", "reorg", "auto"].indexOf(body.mode) >= 0, 400, "invalid_mode", "Unsupported dream mode")
+    var o = body.options || {}; WikiStudio.fields(o, ["semantic", "organize", "instructions", "dreammaxsteps", "backup", "compact", "dryrun", "tuning", "rebuild"])
     WikiStudio.assert(body.mode!=="plan"||o.semantic!==true,400,"plan_model_free","Plan is model-free maintenance diagnostics; semantic extraction is unavailable in plan mode")
     ;["semantic", "backup", "compact", "dryrun"].forEach(function(k) { if (isDef(o[k])) WikiStudio.assert(isBoolean(o[k]), 400, "invalid_options", "Expected boolean: " + k) })
     WikiStudio.assert(!isDef(o.organize) || ["none", "topics"].indexOf(o.organize) >= 0, 400, "invalid_options", "Organization must be none or topics")
@@ -84,6 +84,12 @@ WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
     }
     if (body.mode === "reorg") WikiStudio.assert(body.confirmation && body.confirmation.acknowledgeStructuralChanges === true, 400, "confirmation_required", "Reorg is a live structural edit, not a frozen plan. Explicit structural-change confirmation is required")
     if (o.compact === true) WikiStudio.assert(body.confirmation && body.confirmation.externalProcessesStopped === true, 400, "offline_required", "Stop external readers/writers and confirm before offline compaction")
+    if (body.mode === "rebuild") {
+      WikiStudio.fields(o.rebuild || {}, ["modelHelp", "maxCalls", "maxTokens", "maxMinutes"])
+      try { params.rebuild = MiniAGraphBuild.resolve(merge(o.rebuild || {}, { extraction: "semantic" })) }
+      catch(e) { WikiStudio.fail(400, "invalid_options", String(e.message || e)) }
+    }
+    if (body.mode === "rebuild") WikiStudio.assert(body.confirmation && body.confirmation.externalProcessesStopped === true, 400, "offline_required", "Stop external writers before a full rebuild")
     operation = "dream." + body.mode
   } else if (this.sourceOperation && ["ingestions", "absorptions", "maintenance"].indexOf(route) >= 0) {
     var spec = this.sourceOperation(w, route, body); operation = spec.operation; params = spec.params
@@ -114,7 +120,7 @@ var wikiStudioRunWorker = function(config, id) {
       phase("preflight", "Checking root identity and file boundaries")
       var before = WikiStudio.scan(w.root, false), beforeState = WikiStudio.scan(w.root, true)
       WikiStudio.atomic(jobs.dir(id) + "/before.json", before)
-      var operation = j.operation, params = j.params, needsBackup = /^(dream\.(apply|repair|indexes|reorg)|ingest\.resume|absorb\.(apply|resume)|backup.restore)$/.test(operation) || operation === "dream.auto" && !params.dryrun || operation === "ingest.run" && !params.dryrun
+      var operation = j.operation, params = j.params, needsBackup = /^(dream\.(apply|repair|indexes|rebuild|reorg)|ingest\.resume|absorb\.(apply|resume)|backup.restore)$/.test(operation) || operation === "dream.auto" && !params.dryrun || operation === "ingest.run" && !params.dryrun
       if(!/^(ingest\.(recovery|resume|discard)|absorb\.(status|show|resume)|backup\.)/.test(operation)) WikiStudio.assert(WikiStudio.pending(w.root).length===0,423,"recovery_pending","Pending engine journal must be reviewed/resumed before a new operation")
       var backup
       if (needsBackup) {
@@ -125,7 +131,13 @@ var wikiStudioRunWorker = function(config, id) {
       // No mid-engine kill: cancellation after this checkpoint may finish with
       // writes. The final status always reflects the real result.
       if (jobs.get(id).cancelRequested) { jobs.update(id,{status:"cancelled",phase:"cancelled"}); return }
-      phase("running", "Executing the existing Mini-A engine; semantic extraction " + (params.extraction === "semantic" || params.semantic ? "enabled" : "disabled")); started = true
+      // Full rebuild keeps its effective graph options in the nested rebuild parameters.
+      var graphOptions = operation === "dream.rebuild" ? params.rebuild || {} : params
+      var semanticMessage = graphOptions.extraction === "semantic" || params.semantic === true ? "enabled" : "using engine defaults"
+      if (graphOptions.extraction === "structural" || isUnDef(graphOptions.extraction) && params.semantic === false) semanticMessage = "disabled"
+      if (graphOptions.extraction === "semantic" && graphOptions.modelHelp === "off") semanticMessage = "enabled; model enrichment disabled"
+      phase("running", "Executing the existing Mini-A engine; semantic extraction " + semanticMessage)
+      started = true
       var result = wikiStudioExecute(config, w, j, function(msg) { jobs.event(id, "running", msg) }, backup)
       if (/^wiki\.(folder|selection)/.test(operation)) { var updated = jobs.get(id); if (updated.backupId) backup = WikiStudio.json(WikiStudio.backupPath(config,w,updated.backupId) + "/manifest.json") }
       phase("refreshing", "Closing engine readers and comparing Markdown manifests")
@@ -151,7 +163,18 @@ var wikiStudioRunWorker = function(config, id) {
         result = summary
       }
       WikiStudio.atomic(jobs.dir(id) + "/result.json", result)
-      jobs.update(id, {status:status,phase:status,completedAt:WikiStudio.now(),changedPageCount:diff.changedPageCount}); jobs.event(id,status,"Finished with " + diff.changedPageCount + " changed Markdown paths")
+      // Report the engine outcome separately from changes to authoritative Markdown.
+      var finalMessage = "Operation " + status
+      var graphResult = result.graph || (isMap(result.result) ? result.result.graph : __)
+      if (isMap(graphResult)) {
+        if (isString(graphResult.status)) finalMessage += "; graph status: " + graphResult.status
+        if (isNumber(graphResult.pending)) finalMessage += "; " + graphResult.pending + " pages with unfinished enrichment"
+        if (isNumber(graphResult.failed)) finalMessage += "; " + graphResult.failed + " failed section extractions"
+        if (graphResult.resumable === true) finalMessage += "; enrichment can be resumed"
+      }
+      finalMessage += ". Changed Markdown paths: " + diff.changedPageCount
+      jobs.update(id, { status: status, phase: status, completedAt: WikiStudio.now(), changedPageCount: diff.changedPageCount })
+      jobs.event(id, status, finalMessage)
     })
   } catch(e) {
     jobs.update(id, {status: started ? "recovery-required" : "failed",phase:"failed",completedAt:WikiStudio.now(),error: e.code || "engine_error",warning: e.status ? WikiStudio.redact(e.message) : "Worker failed. Inspect engine recovery; partial writes may remain."})
@@ -168,6 +191,7 @@ var wikiStudioExecute = function(config, w, job, logFn, backup) {
   if (operation === "dream.reorg") { a.dreamwikireorg = true; a.dreamwikiapproval = "auto" }
   var params = operation === "graph.build" ? clone(p) : operation.indexOf("dream.") === 0 ? {dryrun:p.dryrun === true} : {}
   if (operation === "graph.build") delete params.compact
+  if (operation === "dream.rebuild") params.rebuild = p.rebuild
   if (operation === "dream.reorg") { params.instructions = p.instructions; params.organize = p.organize }
   if (operation === "wiki.folderMove" || operation === "wiki.folderDelete") {
     var wm = new MiniAWikiManager({root:w.root,backend:"fs",access:"rw",skipBootstrap:true,usegraph:w.graph.enabled,wikiretrievalv2:w.retrieval.v2 !== false})
@@ -192,12 +216,42 @@ var wikiStudioExecute = function(config, w, job, logFn, backup) {
     } finally { sm.close() }
   }
   if (isFunction(WikiStudio.executeSource) && /^(ingest|absorb|backup|wiki)\./.test(operation)) return WikiStudio.executeSource(config,w,job,logFn,backup)
-  WikiStudio.assert(operation === "graph.build" || /^dream\.(plan|apply|repair|reindex|graph|indexes|auto|reorg)$/.test(operation), 400, "invalid_operation", "Worker operation is not allowlisted")
+  WikiStudio.assert(operation === "graph.build" || /^dream\.(plan|apply|repair|reindex|rebuild|graph|indexes|auto|reorg)$/.test(operation), 400, "invalid_operation", "Worker operation is not allowlisted")
   var runner = new MiniAWikiOps(a,logFn)
-  if (operation === "graph.build") {
+  if (operation === "graph.build" || operation === "dream.rebuild") {
     var jobs = new WikiStudioJobs(config)
+    // Reuse Studio's credential redaction before retaining a bounded exception sample.
+    runner.formatModelError = function(error) {
+      return WikiStudio.redact(String(error)).replace(/https?:\/\/[^\s"']+/gi, "[url]").substring(0, 500)
+    }
+    var reportedModelErrors = {}
     runner.isCancelled = function() { return jobs.get(job.id).cancelRequested === true }
-    runner.onGraphProgress = function(progress) { jobs.update(job.id, { progress: progress }); logFn(af.toSLON(progress)) }
+    // Keep structured diagnostics while explaining page visits and section failures in the event log.
+    runner.onGraphProgress = function(progress) {
+      jobs.update(job.id, { progress: progress })
+      var errors = (isMap(progress.graph) ? progress.graph : progress).modelErrors || {}
+      Object.keys(errors).forEach(function(role) {
+        if (reportedModelErrors[role]) return
+        reportedModelErrors[role] = true
+        logFn("Graph model error (" + role + "): " + errors[role])
+      })
+      var graph = isMap(progress.graph) ? progress.graph : progress
+      if (isString(graph.stage)) {
+        var message = "Graph " + graph.stage
+        if (isNumber(graph.processed)) message += "; pages visited: " + graph.processed + (isNumber(progress.total) ? "/" + progress.total : "")
+        if (isNumber(graph.failed)) message += "; failed section extractions: " + graph.failed
+        if (isMap(graph.failureReasons)) message += "; failure reasons: " + af.toSLON(graph.failureReasons)
+        if (isNumber(graph.calls)) message += "; model calls: " + graph.calls
+        if (isNumber(graph.estimatedTokens)) message += "; estimated token budget used: " + graph.estimatedTokens + (isMap(graph.effective) ? "/" + graph.effective.maxTokens : "")
+        if (isString(progress.path)) message += "; page: " + progress.path
+        if (isString(graph.status)) message += "; status: " + graph.status
+        if (graph.stage === "complete" && isNumber(graph.pending)) message += "; pages with unfinished enrichment: " + graph.pending
+        if (graph.resumable === true) message += "; enrichment can be resumed"
+        logFn(message)
+      } else {
+        logFn(af.toSLON(progress))
+      }
+    }
   }
   var result = runner.execute(runner.spec(operation,params), {confirm:true,backupconfirmed:!!backup})
   if (result.ok !== false && p.compact && operation !== "dream.plan" && !p.dryrun) {

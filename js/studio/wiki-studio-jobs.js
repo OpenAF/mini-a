@@ -147,7 +147,7 @@ WikiStudioServer.prototype.extraRoute = function(req, parts, role) {
       WikiStudio.authorize(role, "admin"); WikiStudio.fields(body, [])
       if (j.status === "queued") { var cancelled=jobs.transition(j.id,["queued"],{status:"cancelled",phase:"cancelled",cancelRequested:true}); if(cancelled)return WikiStudioJobs.publicJob(cancelled);j=jobs.get(j.id) }
       WikiStudio.assert(WikiStudioJobs.terminal.indexOf(j.status) < 0, 409, "job_finished", "Job is already terminal")
-      return WikiStudioJobs.publicJob(jobs.update(j.id, { cancelRequested: true, warning: j.operation === "graph.build" ? "Cancellation requested. Completed graph work is checkpointed; no further model calls will be scheduled. In-flight calls use their request timeout." : "Cancellation requested. Active engines have no safe abort checkpoint; the job may finish with writes. No rollback is implied." }))
+      return WikiStudioJobs.publicJob(jobs.update(j.id, { cancelRequested: true, warning: (j.operation === "graph.build" || j.operation === "dream.rebuild") ? "Cancellation requested. Completed graph work is checkpointed; no further model calls will be scheduled. In-flight calls use their request timeout." : "Cancellation requested. Active engines have no safe abort checkpoint; the job may finish with writes. No rollback is implied." }))
     }
   }
   WikiStudio.fail(404, "not_found", "Route not found")

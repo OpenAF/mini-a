@@ -306,8 +306,11 @@ The job writes to `<studio home>/exports/<wiki>/<job>/` and the UI downloads it 
 | repair | Existing lint repair | Snapshot |
 | indexes | Regenerate directory index.md pages | Snapshot even though the utility default does not cover this mode |
 | reindex | Rebuild search artifacts | Exclusive Studio lock |
+| rebuild | Entire search index and graph from existing Markdown | Explicit cost acknowledgement; external processes stopped; verified snapshot; resumable graph checkpoints |
 | graph | Structural graph, optional semantics | Semantic off by default |
 | reorg | Live LLM structural changes | Admin confirmation; verified snapshot; all existing reorg gates |
+
+Choose **Maintenance → Dream tasks → Fully rebuild graph and index** for an expensive reconstruction from existing wiki pages. Model enrichment defaults off; select `auto` to permit model calls, with per-run call/time budgets. **Start / resume full rebuild** resumes pending graph work. Keep the same model-enrichment selection when resuming; choosing `off` completes only the deterministic graph. Interrupted index publication restarts atomically. Source edits invalidate the previous index checkpoint. Partial or cancelled runs remain visible in Activity; repeat the task to resume. Each Studio run first creates a verified snapshot. The same engine is available in `wikiman=true` and batch Dream with `dreamwikimode=rebuild`.
 
 Reorg is not an immutable plan/apply contract. Maintenance plan must never be
 described as its exact preview. Configure trusted `OAF_MODEL` in the server

@@ -10,8 +10,8 @@ var __wikiJobsRoot = String(new java.io.File(String(__loadedfrom)).getCanonicalF
 
 var WIKI_JOBS_DEFAULT_LEXICAL = "(language: english, ngrams: true, shingles: true, queryExpansion: true, pseudoRelevanceFeedback: true)"
 // Dream modes that can change pages and therefore get a pre-run backup.
-var WIKI_JOBS_MUTATING_DREAMS = { reorg: true, apply: true, repair: true, auto: true }
-var WIKI_JOBS_DREAM_MODES = ["auto", "plan", "apply", "reorg", "repair", "reindex", "graph", "indexes"]
+var WIKI_JOBS_MUTATING_DREAMS = { reorg: true, apply: true, repair: true, auto: true, rebuild: true }
+var WIKI_JOBS_DREAM_MODES = ["auto", "plan", "apply", "reorg", "repair", "reindex", "rebuild", "graph", "indexes"]
 // Job-level controls translated into Mini-A args; never forwarded verbatim.
 var WIKI_JOBS_CONTROL_KEYS = { source: true, semantic: true, dreamsemantic: true, prune: true, dryrun: true, compact: true,
   backup: true, dream: true, organize: true, instructions: true, mode: true, objid: true, execid: true, init: true }
@@ -252,6 +252,10 @@ var wikiJobsDreamStage = function(prepared, dreamArgs, logFn) {
   delete dreamArgs.__backup
   var res = wikiJobsRunDream(dreamArgs, logFn)
   if (isDef(backupPath)) res.backup = backupPath
+  if (mode === "rebuild" && res.partial === true) {
+    prepared.compact = false
+    logFn("Full rebuild is incomplete. Repeat dreamwikimode=rebuild to resume; compaction is skipped.")
+  }
   if (res.partial === true) logFn("⚠️  Dream finished partially; check the output above.")
   return res
 }

@@ -4,6 +4,12 @@ include:
 - tests/wikiExport.yaml
 
 jobs:
+- name: MiniA Wiki Tests::EmbeddingCache
+  to: oJob Test
+  exec: args.func = function() { load("tests/wikiEmbeddings.js") }
+- name: MiniA Wiki Tests::FullRebuild
+  to: oJob Test
+  exec: args.func = function() { load("tests/wikiFullRebuild.js") }
 - name: MiniA Wiki Tests::ConsoleWikiOperations
   to: oJob Test
   exec: args.func = require("tests/wiki.js").testConsoleWikiOperations

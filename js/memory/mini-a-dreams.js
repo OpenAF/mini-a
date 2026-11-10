@@ -1177,6 +1177,27 @@ MiniADreams.prototype.dreamWikiAuto = function() {
 }
 
 MiniADreams.prototype.dreamWiki = function(opts) {
+  // Selecting rebuild explicitly opts into expensive reconstruction from existing Markdown.
+  if (String(this._args.dreamwikimode || "").trim().toLowerCase() === "rebuild") {
+    if (toBoolean(this._args.dreamwikidryrun) === true || toBoolean(this._args.dryrun) === true) return { ok: true, dryrun: true, operation: "full-rebuild", expensive: true }
+    if (!toBoolean(this._args.usewiki)) return { ok: false, reason: "usewiki-not-set" }
+    var rebuildConfig = this._buildWikiConfig()
+    if (!isMap(rebuildConfig)) return { ok: false, reason: "no-wiki-config" }
+    rebuildConfig.usegraph = true
+    rebuildConfig.skipBootstrap = true
+    var rebuildManager = new MiniAWikiManager(rebuildConfig, function() {})
+    var rebuildSelf = this
+    var rebuildOptions = merge({ modelHelp: this._effectiveWikiGraphSemantic("graph") ? "auto" : "off" }, merge(opts || {}, { confirmExpensive: true }))
+    if (!isFunction(rebuildOptions.onProgress)) rebuildOptions.onProgress = function(progress) {
+      rebuildSelf._log("[dreams:wiki:rebuild] " + af.toSLON(progress))
+    }
+    try {
+      return rebuildManager.fullRebuild(rebuildOptions)
+    } finally {
+      rebuildManager.close()
+    }
+  }
+
   if (String(this._args.dreamwikimode || "").trim().toLowerCase() === "auto") return this.dreamWikiAuto()
   var self = this
   var organization = String(self._args.dreamwikiorganize || "none").toLowerCase()
