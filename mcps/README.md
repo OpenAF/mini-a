@@ -1004,7 +1004,9 @@ command-line arguments (and therefore out of `ps` output and other jobs' args).
   mini-a goal="..." mcp="(type: remote, url: 'http://host:8080/mcp', auth: (type: bearer, token: 's3cr3t'))"
   ```
 
-For production deployments beyond a single shared token (mTLS, per-user OAuth, IP allowlisting), put
+The above bearer-token setting describes authentication on the bundled MCP **server**. For outbound connections, Mini-A also supports generic OAuth2 through OpenAF's `$mcp` client; see [remote MCP OAuth2 configuration](../USAGE.md#oauth2-authentication-for-remote-mcp-servers).
+
+For production deployments of these bundled servers beyond a single shared token (mTLS, per-user OAuth, IP allowlisting), put
 a reverse proxy (e.g. Caddy, nginx, oauth2-proxy) in front of the MCP port instead.
 
 **Agent Plugins**: a downloaded [Agent Plugins](https://agent-plugins.org) directory's `mcp.json`

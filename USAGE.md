@@ -2301,6 +2301,34 @@ mini-a goal="check remote server" \
   mcp="(type: remote, url: 'http://localhost:8888/mcp')"
 ```
 
+#### OAuth2 authentication for remote MCP servers
+
+Mini-A passes the `auth` map in `mcp=` to OpenAF's `$mcp` client. Generic OAuth2 is supported directly; it is not limited to WorkIQ. These options require an OpenAF runtime containing the corresponding `$mcp` OAuth2 implementation (including callback and token-store support for the example below).
+
+For an interactive authorization-code login, register a client with your provider and use its exact registered loopback redirect URI:
+
+```bash
+mini-a goal="List the available remote tools" \
+  mcp="(type: remote, url: 'https://mcp.example.com/mcp', auth: (type: oauth2, grantType: authorization_code, clientId: 'YOUR_CLIENT_ID', authURL: 'https://identity.example.com/authorize', tokenURL: 'https://identity.example.com/token', redirectURI: 'http://127.0.0.1:12798/', scope: 'mcp:read offline_access', callback: true, interactive: true, tokenStore: (type: sec, profile: example-mcp)))"
+```
+
+Replace the endpoints, client ID, redirect URI and scopes with your provider's values. `callback: true` enables the local callback listener with state and PKCE validation; login opens a browser by default. Run this on the machine receiving the loopback callback. Add `clientSecret` only if your registered client requires it. `offline_access` is provider-specific and should only be requested where supported.
+
+`tokenStore` opts into protected SBucket persistence (default repository `mcp-oauth2`); `profile` separates stored credentials. Optional store settings include `repo`, `bucket`, `key`, `file`, `lockSecret` and `mainSecret`. Without a token store, tokens are held in the client for its lifetime. OpenAF automatically retrieves tokens and refreshes them when needed; refresh tokens depend on the provider's grant and consent settings. For subsequent unattended runs, retain the same configuration and store but set `interactive: false`: valid stored credentials can be used/refreshed, while a required new login fails instead of opening a browser or prompting. `loginTimeoutMs` defaults to 300000; `disableOpenBrowser: true` suppresses automatic browser opening.
+
+For service-to-service client credentials:
+
+```bash
+mini-a goal="List the available remote tools" \
+  mcp="(type: remote, url: 'https://mcp.example.com/mcp', auth: (type: oauth2, grantType: client_credentials, clientId: 'YOUR_CLIENT_ID', clientSecret: 'YOUR_CLIENT_SECRET', tokenURL: 'https://identity.example.com/token', scope: 'mcp:read'))"
+```
+
+`client_credentials` is the default grant when `grantType` is omitted. The examples use placeholders; avoid putting real secrets into shell history or committed configuration.
+
+For servers publishing OAuth Protected Resource Metadata and Authorization Server Metadata, OpenAF can discover omitted `authURL`/`tokenURL` values. A `clientId` is still required. Discovered endpoints require HTTPS except loopback addresses or explicit `allowHTTP: true`. Optional `audience`, `resource` and `extraParams` customize provider requests; `sendResource: false` omits the OAuth resource parameter for providers that do not accept it.
+
+You can inspect the connection with `mini-a mcptest=true mcp="..."` using the same configuration. Agent Plugin `mcp.json` import currently converts bearer headers only; configure OAuth2 through `mcp=` directly. For Microsoft WorkIQ's dedicated login/status/logout workflow, see [WorkIQ setup](docs/WORKIQ.md).
+
 ### Multiple MCP Orchestration
 
 Mini-A can coordinate multiple MCP servers simultaneously, enabling complex cross-system workflows.

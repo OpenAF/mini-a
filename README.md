@@ -375,6 +375,8 @@ For SSE-based MCP servers:
 mini-a mcptest=true mcp="(type: sse, url: 'http://localhost:9090/mcp')"
 ```
 
+Remote MCP connections also support OpenAF OAuth2 through `auth: (type: oauth2, ...)`, including client credentials and browser authorization-code login with optional protected token persistence. See [remote MCP OAuth2 configuration](USAGE.md#oauth2-authentication-for-remote-mcp-servers) for complete examples and runtime requirements.
+
 ### MCP Tester Features
 
 The interactive tester provides:
