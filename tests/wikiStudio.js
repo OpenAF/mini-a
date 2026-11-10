@@ -318,6 +318,22 @@
     rejects(function(){make("x","viewer")},"forbidden")
     rejects(function(){make("y","editor",merge(w,{access:"ro"}))},"read_only")
   }) }
+  // Saved settings remain isolated and queued overrides are independent snapshots.
+  exports.testWorkflowSettings = function() { fixture(function(s,t) {
+    var w = add(s,t)
+    function request(method, body) { return s.dispatch({method:method,path:"/api/v1/wikis/alpha/settings/ingestion",role:"admin",body:body,headers:{}}) }
+    assert(request("GET").effective.wikiingestmaxcalls,32,"Built-in call limit")
+    request("PUT",{wikiingestmaxcalls:0,wikiingestbudget:0})
+    var frozen = s.resolveTuning(w,"ingestion",{concurrency:2})
+    request("PUT",{wikiingestmaxcalls:7})
+    assert(frozen.wikiingestmaxcalls,0,"Existing submission retains explicit zero")
+    assert(frozen.concurrency,2,"Run override wins")
+    assert(s.resolveTuning(w,"absorption",{}).absorbmaxpages,100,"Workflow isolation")
+    assert(s.resolveTuning(merge(w,{identity:"different"}),"ingestion",{}).wikiingestmaxcalls,32,"Root identity isolation")
+    rejects(function(){request("PUT",{maxfiles:2001})},"invalid_options")
+    rejects(function(){request("PUT",{model:"secret"})},"unknown_field")
+    rejects(function(){request("PUT",{concurrency:1.5})},"invalid_options")
+  }) }
   exports.testGraphBuildSettings = function() { fixture(function(s,t) {
     WikiStudio.privateDir(s.config.home+"/jobs")
     var w=add(s,t), route=["graph","settings"]

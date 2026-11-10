@@ -21,5 +21,6 @@ include:
 - tests/workerSubmission.yaml
 - tests/wiki.yaml
 - tests/wikiCross.yaml
+- tests/graphLift.yaml
 - tests/wikiIngest.yaml
 - tests/wikiUtilsJobs.yaml

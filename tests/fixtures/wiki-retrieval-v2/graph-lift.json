@@ -1,0 +1,112 @@
+{
+  "split": "graph-lift",
+  "pages": [
+    {
+      "path": "deploy/overview.md",
+      "title": "Deployment Overview",
+      "body": "# Deployment\nReleases use the blue-green strategy. If a release misbehaves follow the [rollback steps](rollback.md)."
+    },
+    {
+      "path": "deploy/rollback.md",
+      "title": "Rollback Runbook",
+      "body": "# Rollback\nTo undo a release run the revertrelease command and confirm health checks."
+    },
+    {
+      "path": "ops/alerts.md",
+      "title": "Alert Routing",
+      "metadata": {
+        "tags": [
+          "pager"
+        ]
+      },
+      "body": "# Alerts\nCritical alerts page the engineer through the escalationpolicy settings."
+    },
+    {
+      "path": "ops/oncall.md",
+      "title": "Rotation Calendar",
+      "metadata": {
+        "tags": [
+          "pager"
+        ]
+      },
+      "body": "# Schedule\nThe duty roster rotates weekly using the rotationcalendar file."
+    },
+    {
+      "path": "perf/overview.md",
+      "title": "Performance Overview",
+      "body": "# Performance\nLatency budgets are tracked per service. See [[Cache Tuning]] for memory trade-offs."
+    },
+    {
+      "path": "perf/cache.md",
+      "title": "Cache Tuning",
+      "body": "# Cache\nSet evictionratio to 0.8 for write-heavy loads."
+    },
+    {
+      "path": "cluster/raft.md",
+      "title": "Consensus",
+      "body": "# Consensus\nThe **quorumsize** setting decides the election majority."
+    },
+    {
+      "path": "cluster/sizing.md",
+      "title": "Capacity Sizing",
+      "body": "# Sizing\nPick an odd **quorumsize**; three nodes tolerate one failure."
+    },
+    {
+      "path": "misc/style.md",
+      "title": "Style Guide",
+      "body": "# Style\nUse sentence case for headings."
+    },
+    {
+      "path": "misc/glossary.md",
+      "title": "Glossary",
+      "body": "# Glossary\nA term list for newcomers."
+    },
+    {
+      "path": "misc/faq.md",
+      "title": "FAQ",
+      "body": "# FAQ\nAsk questions in the team channel."
+    },
+    {
+      "path": "misc/direct.md",
+      "title": "Direct Answer",
+      "body": "# Direct\nThe retentionwindow option keeps audit logs for thirty days."
+    }
+  ],
+  "queries": [
+    {
+      "query": "blue-green release strategy",
+      "support": [
+        "run the revertrelease command"
+      ],
+      "k": 3
+    },
+    {
+      "query": "critical alerts escalationpolicy",
+      "support": [
+        "rotates weekly using the rotationcalendar"
+      ],
+      "k": 3
+    },
+    {
+      "query": "latency budgets per service",
+      "support": [
+        "Set evictionratio to 0.8"
+      ],
+      "k": 3
+    },
+    {
+      "query": "election majority setting",
+      "support": [
+        "three nodes tolerate one failure"
+      ],
+      "k": 3
+    },
+    {
+      "query": "retentionwindow audit logs",
+      "support": [
+        "keeps audit logs for thirty days"
+      ],
+      "k": 1
+    }
+  ]
+}

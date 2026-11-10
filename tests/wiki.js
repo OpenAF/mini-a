@@ -590,6 +590,28 @@
     }
   }
 
+  exports.testGraphResolvesLinkTargetsToPages = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", usegraph: true })
+      wm.write("docs/guide/setup.md", { title: "Setup Guide" }, "# Setup\nSee [config](../ref/config.md), [[Config Reference]] and [[ghost-page]].")
+      wm.write("docs/ref/config.md", { title: "Config Reference", aliases: ["Settings"] }, "# Config")
+      wm.write("docs/other.md", { title: "Other" }, "# Other\nSee [[docs/ref/config.md]] and [[Settings]].")
+      var rebuilt = wm.graph("build", { extraction: "structural" })
+      var edges = wm._graph._state.edges.filter(function(e) { return e.type === "LINKS_TO" && e._deleted !== true })
+      var targets = function(from) { return edges.filter(function(e) { return e.from === "doc:" + from }).map(function(e) { return e.to }).sort() }
+      ow.test.assert(stringify(targets("docs/guide/setup.md")), stringify(["doc:docs/ref/config.md", "doc:ghost-page.md"]), "relative md link and [[title]] link must resolve to the real page")
+      ow.test.assert(stringify(targets("docs/other.md")), stringify(["doc:docs/ref/config.md"]), "[[path]] and [[alias]] links must resolve and collapse to one target")
+      ow.test.assert(wm.graph("stats", {}).danglingLinks, 1, "only the unresolved link must remain dangling")
+      // Incremental writes resolve through the same catalog.
+      wm.write("docs/late.md", { title: "Late" }, "# Late\nSee [[Setup Guide]].")
+      var late = wm._graph._state.edges.filter(function(e) { return e.type === "LINKS_TO" && e.from === "doc:docs/late.md" })
+      ow.test.assert(late.length === 1 && late[0].to === "doc:docs/guide/setup.md", true, "incremental write must resolve [[title]] links")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
   exports.testDeleteIncrementallyUpdatesGraph = function() {
     var dir = createTestDir()
     try {

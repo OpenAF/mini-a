@@ -1030,13 +1030,85 @@ MiniAWikiManager.prototype._luceneUnset = function(path) {
 
 MiniAWikiManager.prototype._graphPayloadFromRecord = function(path, raw, parsed) {
   var built = this._buildPageRecord(path, raw, parsed)
+  var catalog = this._graphLinkCatalog()
+  catalog.add(path, built.meta)
   return {
     path: path,
     meta: built.meta,
     body: built.body,
-    links: built.links,
+    links: this._graphResolveLinks(path, built.body, catalog),
     revision: sha1(raw)
   }
+}
+
+// _graphLinkCatalog: lookup of existing page paths, basenames and titles used to resolve link
+// targets. Seeded lazily from the graph's own document nodes so single-page updates stay cheap,
+// and grown as pages are indexed. Pass `pages` ({path, meta}) to build a fresh one.
+MiniAWikiManager.prototype._graphLinkCatalog = function(pages) {
+  if (!isArray(pages) && isMap(this._linkCatalog)) return this._linkCatalog
+  var cat = { paths: {}, bySlug: {}, byTitle: {} }
+  var slugify = function(v) { return String(v || "").trim().toLowerCase().replace(/\s+/g, "-") }
+  // unique: remember a key only while a single path claims it
+  var unique = function(map, key, path) {
+    if (key.length === 0) return
+    if (!isDef(map[key])) map[key] = path
+    else if (map[key] !== path) map[key] = null
+  }
+  cat.add = function(path, meta) {
+    if (!isString(path) || path.length === 0) return
+    cat.paths[path] = true
+    unique(cat.bySlug, path.replace(/\.md$/i, "").split("/").pop().toLowerCase(), path)
+    if (isMap(meta)) {
+      if (isString(meta.title)) unique(cat.byTitle, slugify(meta.title), path)
+      if (isArray(meta.aliases)) meta.aliases.forEach(function(a) { unique(cat.byTitle, slugify(a), path) })
+    }
+  }
+  if (isArray(pages)) pages.forEach(function(pg) { cat.add(pg.path, pg.meta) })
+  else {
+    var state = isObject(this._graph) && isMap(this._graph._state) ? this._graph._state : __
+    if (isDef(state)) {
+      Object.keys(isMap(state.summaries && state.summaries.pages) ? state.summaries.pages : {}).forEach(function(path) {
+        var node = state.nodes["doc:" + path]
+        cat.add(path, isMap(node) && isMap(node.props) ? { title: node.props.title } : __)
+      })
+    }
+    this._linkCatalog = cat
+  }
+  return cat
+}
+
+// _graphResolveLinks: link targets of a page body as graph targets. Markdown links resolve
+// relative to the page, [[wiki]] links by path, basename, title or alias. Unresolved targets
+// keep their raw spelling so lint and dangling-link counts can still see them.
+MiniAWikiManager.prototype._graphResolveLinks = function(path, body, catalog) {
+  var self = this
+  var seen = {}
+  var out = []
+  this._extractLinkEntries(isString(body) ? body : "").forEach(function(entry) {
+    var raw = String(entry.raw)
+    var bits = raw.split("#")
+    var target = bits.shift()
+    var resolved = raw
+    if (target.length === 0 || target.charAt(0) === "@") resolved = raw
+    else if (entry.type === "md") {
+      var md = self.resolveLink(path, target)
+      if (isString(md) && !catalog.paths[md]) {
+        if (catalog.paths[md + ".md"]) md = md + ".md"
+        else if (catalog.paths[md.replace(/\/$/, "") + "/index.md"]) md = md.replace(/\/$/, "") + "/index.md"
+      }
+      if (isString(md)) resolved = md
+    } else if (!catalog.paths[target]) {
+      var slug = target.replace(/\.md$/i, "").toLowerCase()
+      var hit = catalog.bySlug[slug.split("/").pop()]
+      if (slug.indexOf("/") < 0 && isString(hit)) resolved = hit
+      else if (isString(catalog.byTitle[slug])) resolved = catalog.byTitle[slug]
+    }
+    if (!seen[resolved]) {
+      seen[resolved] = true
+      out.push(resolved)
+    }
+  })
+  return out
 }
 
 MiniAWikiManager.prototype._readArchiveGraph = function() {
@@ -1435,12 +1507,14 @@ MiniAWikiManager.prototype._hydrateArtifactBundle = function(remoteMetaFn, downl
 // Falls back to its own read pass when omitted, preserving behaviour for the
 // standalone `graph build`/`graph answer` callers.
 MiniAWikiManager.prototype._graphPages = function(pageDocs) {
+  var self = this
   if (isArray(pageDocs)) {
+    var docCatalog = this._graphLinkCatalog(pageDocs)
+    this._linkCatalog = docCatalog
     return pageDocs.map(function(r) {
-      return { path: r.path, meta: r.meta, body: r.body, links: r.links, revision: sha1(r.raw) }
+      return { path: r.path, meta: r.meta, body: r.body, links: self._graphResolveLinks(r.path, r.body, docCatalog), revision: sha1(r.raw) }
     })
   }
-  var self = this
   var pages = this._safeListPages("").filter(function(p) { return !self._isSearchExcludedPath(p) })
   var out = []
   for (var i = 0; i < pages.length; i++) {
@@ -1451,10 +1525,13 @@ MiniAWikiManager.prototype._graphPages = function(pageDocs) {
       path: pages[i],
       revision: sha1(raw),
       meta: isMap(parsed.meta) ? parsed.meta : {},
-      body: isString(parsed.body) ? parsed.body : "",
-      links: this.extractLinks(isString(parsed.body) ? parsed.body : "")
+      body: isString(parsed.body) ? parsed.body : ""
     })
   }
+  // Links resolve only once every page is known.
+  var catalog = this._graphLinkCatalog(out)
+  this._linkCatalog = catalog
+  out.forEach(function(page) { page.links = self._graphResolveLinks(page.path, page.body, catalog) })
   return out
 }
 
@@ -1738,6 +1815,7 @@ MiniAWikiManager.prototype._graphUpdatePage = function(path, raw, parsed) {
 // _graphRemovePage: drop one page from the graph; derived stats stay lazy.
 MiniAWikiManager.prototype._graphRemovePage = function(path) {
   if (!isObject(this._graph) || !isFunction(this._graph.removePage)) return
+  if (isMap(this._linkCatalog) && isMap(this._linkCatalog.paths)) delete this._linkCatalog.paths[path]
   try {
     if (isFunction(this._graph._removePage)) this._graph._removePage(path, true)
     else this._graph.removePage(path)

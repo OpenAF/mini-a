@@ -76,6 +76,23 @@ WikiStudioServer.prototype.dispatch = function(req) {
         WikiStudio.fail(405, "method_not_allowed", "Method not allowed")
       })
     }
+    if (p.length === 6 && p[4] === "settings") {
+      WikiStudio.authorize(role, "admin")
+      WikiStudio.assert(read || req.method === "PUT", 405, "method_not_allowed", "Use GET or PUT")
+      var workflow = p[5], defaults = WikiStudio.tuningDefaults[workflow]
+      WikiStudio.assert(isDef(defaults), 404, "not_found", "Unknown workflow")
+      return WikiStudio.lock(c.home, "settings-" + w.id, function() {
+        var file = c.home + "/settings/" + w.id + ".json"
+        var saved = WikiStudio.json(file, {})
+        if (saved.identity !== w.identity) saved = { identity: w.identity, workflows: {} }
+        if (!read) {
+          WikiStudio.authorize(role, "admin", w)
+          saved.workflows[workflow] = WikiStudio.validateTuning(workflow, body)
+          WikiStudio.atomic(file, saved)
+        }
+        return { defaults: defaults, effective: merge(clone(defaults), saved.workflows[workflow] || {}) }
+      })
+    }
     if (p.length === 5 && p[4] === "test" && req.method === "POST") return this.testWiki(w, body, role)
     if (p.length === 5 && p[4] === "test" && (read || req.method === "DELETE")) {
       WikiStudio.authorize(role, "admin")
@@ -191,17 +208,22 @@ WikiStudioServer.prototype.handle = function(ex) {
 // Test servers inherit model credentials through the environment, never the response.
 WikiStudioServer.prototype.testWiki = function(w, body, role) {
   WikiStudio.authorize(role, "admin")
-  WikiStudio.fields(body, ["advanced"])
+  WikiStudio.fields(body, ["advanced", "tuning"])
+  var tuning = this.resolveTuning(w, "test", body.tuning || {})
   WikiStudio.assert(isBoolean(body.advanced), 400, "invalid_options", "Advanced must be boolean")
   WikiStudio.assert(String(getEnv("OAF_MODEL") || "").trim().length > 0, 422, "model_required", "Configure OAF_MODEL before testing a wiki")
   var self = this
   return WikiStudio.lock(this.config.home, "test-" + w.id, function() {
     self.testServers = self.testServers || {}
     var key = w.id + ":" + body.advanced, existing = self.testServers[key]
-    if (existing && existing.process.isAlive()) return {url: existing.url}
+    if (existing && existing.process.isAlive()) {
+      WikiStudio.assert(JSON.stringify(existing.tuning || {}) === JSON.stringify(tuning), 409, "test_settings_changed", "Stop server to apply changed settings")
+      return {url: existing.url}
+    }
     var socket = new java.net.ServerSocket(0), port = socket.getLocalPort(); socket.close()
     var token = WikiStudio.id() + WikiStudio.id(), command = new java.util.ArrayList()
     ;[String(getOpenAFPath()) + "/ojob", self.config.base + "/mini-a-web.yaml", "onport=" + port, "usewiki=true", "wikiroot=" + w.root, "wikiaccess=ro", "wikiretrievalv2=true", "useshell=false", "webadvanced=" + body.advanced, "webtoken=" + token].forEach(function(arg) { command.add(String(arg)) })
+    Object.keys(tuning).sort().forEach(function(key) { command.add(key + "=" + tuning[key]) })
     var child = new java.lang.ProcessBuilder(command).directory(new java.io.File(self.config.base)).redirectOutput(java.lang.ProcessBuilder.Redirect.DISCARD).redirectError(java.lang.ProcessBuilder.Redirect.DISCARD).start()
     var url = "http://localhost:" + port + "/#token=" + encodeURIComponent(token), ready = false
     try {
@@ -212,8 +234,43 @@ WikiStudioServer.prototype.testWiki = function(w, body, role) {
       }
       WikiStudio.assert(ready, 503, "test_start_failed", "Test server did not start within 30 seconds")
       java.lang.Runtime.getRuntime().addShutdownHook(new java.lang.Thread(function() { child.destroy() }))
-      self.testServers[key] = {process:child,url:url}
+      self.testServers[key] = {process:child,url:url,tuning:tuning}
       return {url:url}
     } catch(e) { child.destroy(); throw e }
   })
+}
+
+// Workflow defaults contain only engine-supported tuning, never approvals or secrets.
+WikiStudio.tuningDefaults = {
+  ingestion: { maxfiles: 2000, maxfilesize: 8388608, wikiingestmaxcalls: 32, wikiingestbudget: -1, wikimaxprompttokens: 0, chunkchars: 24000, concurrency: 4 },
+  absorption: { absorbmaxpages: 100, absorbmaxtokens: 100000 },
+  reorg: { dreammaxsteps: 40, maxcontext: 24000, contextguard: true, toolresultmaxinline: 4096, readresultmaxmatches: 20 },
+  auto: { dreammaxsteps: 40 },
+  test: {},
+  search: { limit: 100 }
+}
+
+// Validate both saved preferences and run overrides through the same allowlist.
+WikiStudio.validateTuning = function(workflow, values) {
+  var defaults = WikiStudio.tuningDefaults[workflow]
+  var fields = workflow === "test" ? ["maxsteps", "maxcontext"] : Object.keys(defaults)
+  WikiStudio.fields(values, fields)
+  Object.keys(values).forEach(function(key) {
+    var value = values[key]
+    if (key === "contextguard") {
+      WikiStudio.assert(isBoolean(value), 400, "invalid_options", "Expected boolean: " + key)
+      return
+    }
+    var minimum = key === "wikiingestbudget" ? -1 : /^(wikiingestmaxcalls|wikimaxprompttokens)$/.test(key) ? 0 : 1
+    var maximum = key === "maxfiles" ? 2000 : key === "maxfilesize" ? 8388608 : key === "dreammaxsteps" ? 100 : key === "limit" ? 200 : 2147483647
+    WikiStudio.assert(isNumber(value) && isFinite(value) && Math.floor(value) === value && value >= minimum && value <= maximum, 400, "invalid_options", "Invalid tuning value: " + key)
+  })
+  return clone(values)
+}
+
+// Freeze effective tuning at submission rather than reading preferences in a worker.
+WikiStudioServer.prototype.resolveTuning = function(w, workflow, values) {
+  var saved = WikiStudio.json(this.config.home + "/settings/" + w.id + ".json", {})
+  var preferences = saved.identity === w.identity ? (saved.workflows || {})[workflow] || {} : {}
+  return merge(merge(clone(WikiStudio.tuningDefaults[workflow]), preferences), WikiStudio.validateTuning(workflow, values || {}))
 }

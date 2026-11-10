@@ -319,6 +319,20 @@ falls back to a deterministic regex/heuristic extractor (headings, `[[links]]`, 
 phrases) instead of erroring — the graph still gets semantic-style edges, just not LLM-derived ones. This is
 also what `graph`/`reorg` use if you opt them into `wikigraphsemantic=true` without a model configured.
 
+### Graph link resolution and grounding
+
+- **Links resolve to real pages.** When the graph is built or a page is written, markdown links resolve relative to the
+  page (with `.md` and `/index.md` fallbacks), and `[[wiki]]` links resolve by exact path, unique basename, or unique
+  title/alias. Unresolved targets keep their raw spelling; `graph stats` reports them as `danglingLinks`.
+  Ingest now offers the model the *destination* paths of the pages being written, so `[[path.md]]` links resolve.
+- **Partial section acceptance.** During semantic builds each model relationship is checked on its own: its quote must
+  appear in the section (any letter case) and contain both endpoints. Grounded relationships are kept and the rest
+  dropped (`relationshipsAccepted` / `relationshipsRejected` in the build report). A response with no grounded
+  relationship still falls through to the next model and fails the section.
+- **Measuring lift.** `WIKI_EVAL_GRAPH=off|structural|semantic WIKI_EVAL_SPLIT=graph-lift oaf -f tests/wikiRetrievalQuality.js`
+  prints recall and MRR per mode; `ojob tests/graphLift.yaml` asserts that the graph never lowers them. Note that under
+  Retrieval V2 `reindex` publishes passages only, so run `graph build` to populate the graph.
+
 ### Maintenance examples
 
 Renaming a page safely — check what points at it first, move it, then confirm nothing broke:

@@ -46,6 +46,7 @@ const click=async(root,title)=>{const b=find(root,'button',title);assert(b,'Miss
 const calls=[];
 context.api=async(path,method='GET',body)=>{
   calls.push({path,method,body});
+  if(path.includes('/settings/')) { const defaults = path.endsWith('/search') ? {limit:100} : {}; return {defaults,effective:defaults}; }
   if(path==='session')return {canTestWiki:false,adapters:{directory:[]}};
   if(path.includes('/children')) {const q=new URLSearchParams(path.split('?')[1]);return q.get('path')==='Guides'?{items:[{name:'intro.md',path:'Guides/intro.md',kind:'page'}]}:{items:[{name:'Guides',path:'Guides',kind:'folder'},{name:'index.md',path:'index.md',kind:'page'}]};}
   if(path.includes('/page?'))return {path:'Guides/intro.md',content:'# Introduction\nSafe text',revision:'revision-1'};
@@ -87,7 +88,7 @@ run('StudioApi.request=api;StudioApi.background=api;studioSession={canTestWiki:f
   assert.equal(scans(),gathered,'Overview reuses the background snapshot');
   assert(view.textContent.includes('Cached for this session'),'Cached data is labelled');
   await run('navigate("Maintenance")');
-  assert(find(view,'button','Dream · Check wiki'),'Maintenance defaults to Dream tasks');
+  assert(view.textContent.includes('Start Dream · check wiki'),'Maintenance defaults to Dream tasks');
   assert.equal(scans(),gathered,'Maintenance navigation does not rescan the wiki');
   await click(view,'Health');
   assert.equal(scans(),gathered,'Health shares the cached reports');
@@ -159,7 +160,7 @@ run('StudioApi.request=api;StudioApi.background=api;studioSession={canTestWiki:f
   video.value='sample-video';let resolvePreview;
   context.queueFixture=async()=>({id:'preview-job',finished:new Promise(resolve=>{resolvePreview=resolve;})});
   run('queue=queueFixture;');await click(view,'Download captions');
-  assert.equal(field(view,'Destination section').value,'team-notes','Destination defaults to the stable source ID');
+  assert.equal(field(view,'Import into folder').value,'team-notes','Destination defaults to the stable source ID');
   assert(find(view,'button','4. Import into wiki').disabled,'Import starts disabled');
   const preview=click(view,'Preview changes');await new Promise(resolve=>setImmediate(resolve));
   resolvePreview({status:'completed',result:{ok:true,changes:[]}});await preview;
@@ -265,12 +266,15 @@ run('StudioApi.request=api;StudioApi.background=api;studioSession={canTestWiki:f
   const force=descendants(graphHost).find(n=>n.tagName==='LABEL'&&n.textContent.includes('Force extraction')).querySelector('input');assert(force.disabled,'Resume disables force');
   await click(graphHost,'Save defaults');const saved=graphRequests.find(r=>r.method==='PUT').body;
   assert(!('strategy' in saved)&&!('force' in saved),'Save excludes per-run actions');
+  assert.equal(graphHost.querySelector('.studio-disclosure').open,false,'Graph technical tuning starts collapsed');
+  assert(field(graphHost,'Maximum calls').closest('.studio-disclosure'),'Call budget stays inside Advanced');
   const preset=field(graphHost,'Budget preset');preset.value='small';await preset.fire('change');assert.equal(Number(field(graphHost,'Maximum calls').value),20,'Preset changes budget');
   preset.value='reset';await preset.fire('change');assert.equal(field(graphHost,'Maximum calls').value,'100','Reset restores built-in budget');
   const readOnlyHost=new Element('div');context.readOnlyHost=readOnlyHost;run('currentWiki.access="ro"');await run('graphBuildControls(readOnlyHost)');assert(find(readOnlyHost,'button','Save defaults').disabled&&find(readOnlyHost,'button','Run graph build').disabled,'Read-only build controls disabled');
   const folderHost=new Element('div');document.body.append(folderHost);context.folderHost=folderHost;
   let folderName='Guides', folderAnswers=['Renamed'], folderJobs=[];
   context.folderApi=async(path,method,body)=>{
+    if(path==='settings/search')return {defaults:{limit:100},effective:{limit:100}};
     if(path.startsWith('children?')){const parent=new URLSearchParams(path.split('?')[1]).get('path');return {items:parent||!folderName?[]:[{kind:'folder',name:folderName,path:folderName}]};}
     if(path==='folders/preview')return {ok:true,source:body.source,destination:body.destination,pages:2,files:3,folders:2,incomingLinks:[{path:'index.md',targets:['Guides/index.md']}],revision:'reviewed'};
     throw Error('Unexpected folder request: '+path);

@@ -851,12 +851,14 @@ async function showView(name, content) {
         }
         button(test, "Refresh test servers", refreshTestServers);
         await refreshTestServers();
-        const advanced = check(test, "Enable Advanced view (trusted console controls)");
+        var launch = await workflowTuning(test, "test", { maxsteps: "Maximum consecutive non-success steps", maxcontext: "Context tokens" });
+        el("p", "Launch defaults come from wiki " + selectedId + ".", launch.box).className = "muted";
+  const advanced = check(launch.box, "Enable Advanced view (trusted console controls)");
         button(test, "Open wiki test in new tab", async () => {
           const tab = window.open("about:blank", "_blank");
           if (!tab) throw new Error("Allow pop-ups for Studio to open the wiki test.");
           tab.opener = null; tab.document.body.textContent = "Starting Mini-A Web…";
-          try { const result = await StudioApi.wiki("test", "POST", {advanced:advanced.checked}); tab.location.replace(result.url); await refreshTestServers(); }
+          try { const result = await StudioApi.wiki("test", "POST", {advanced:advanced.checked,tuning:launch.values()}); tab.location.replace(result.url); await refreshTestServers(); }
           catch(error) { tab.close(); throw error; }
         }, "open");
       }
@@ -1010,11 +1012,13 @@ async function pagesView(content) {
   // Index = full-text search index; Graph = pages grounded in the knowledge graph; Combined = both, rank-fused.
   const mode=field(toolbar,"Search with",["Index","Graph","Combined"]);
   mode.title="Index: full-text search index. Graph: pages linked to matching graph concepts and metadata. Combined: both, merged by rank.";
+  var searchTuning = await workflowTuning(content, "search", { limit: "Results per page (1–200)" });
+  el("p", "All-wiki search examines at most 100 hits per wiki.", searchTuning.box).className = "muted";
   const graphOff=currentWiki.graph?.enabled!==true;
   function syncModes(){
     const local=scope.value==="This wiki";
-    [...mode.options].forEach(option=>{option.disabled=local&&graphOff&&option.value!=="Index";});
-    if(mode.selectedOptions[0]?.disabled)mode.value="Index";
+    [...mode.children].forEach(option=>{option.disabled=local&&graphOff&&option.value!=="Index";});
+    if([...mode.children].find(option => option.value === mode.value)?.disabled)mode.value="Index";
     mode.title=local&&graphOff?"Graph is disabled for this wiki in Settings; only index search is available.":"Index: full-text search index. Graph: pages linked to matching graph concepts and metadata. Combined: both, merged by rank.";
   }
   scope.onchange=syncModes;syncModes();
@@ -1223,7 +1227,7 @@ async function pagesView(content) {
     const query=search.value.trim();results.replaceChildren();results.hidden=!query;if(!query)return;
     el("h4","Search results",results);
     const modeParam=mode.value==="Index"?"":"&mode="+mode.value.toLowerCase();
-    const response=await StudioApi.request((scope.value==="All registered wikis"?"search":wikiPath("search"))+"?q="+encodeURIComponent(query)+"&limit=100&offset="+offset+modeParam);
+    const response=await StudioApi.request((scope.value==="All registered wikis"?"search":wikiPath("search"))+"?q="+encodeURIComponent(query)+"&limit="+searchTuning.values().limit+"&offset="+offset+modeParam);
     if(response.warning)el("p",response.warning,results);if(response.coverage)technical(response.coverage,results,"Search coverage");
     const items=response.results||response.items||[];
     for(const hit of items){const r=row(results);r.classList.add("search-hit");
@@ -1231,7 +1235,7 @@ async function pagesView(content) {
       if(hit.matchedBy){const tag=el("span",hit.matchedBy.length>1?"index + graph":hit.matchedBy[0],r);tag.className="badge";if(hit.explanations?.length)tag.title=hit.explanations.join("; ");}
       button(r,(hit.wikiId?hit.wikiId+" / ":"")+hit.path,async()=>{if(!(await mayLeave()))return;dirty=false;if(hit.wikiId&&hit.wikiId!==currentWiki.id){await openWiki(await StudioApi.request("wikis/"+hit.wikiId));}await loadPage(hit.path);});button(r,"Reveal in tree",async()=>{if(hit.wikiId&&hit.wikiId!==currentWiki.id){await openWiki(await StudioApi.request("wikis/"+hit.wikiId));}await document.getElementById("page-list").reveal(hit.path);});}
     if(!items.length)el("p","No matching pages in the reported search coverage.",results);
-    if(offset)button(results,"Previous results",()=>searchPages(Math.max(0,offset-100)));if(response.truncated)button(results,"More results",()=>searchPages(offset+100));
+    if(offset)button(results,"Previous results",()=>searchPages(Math.max(0,offset-searchTuning.values().limit)));if(response.truncated)button(results,"More results",()=>searchPages(offset+searchTuning.values().limit));
   }
   button(toolbar,"Search",()=>searchPages());search.onkeydown=safely(async e=>{if(e.key==="Enter"){e.preventDefault();await searchPages();}});search.oninput=()=>{if(!search.value)results.hidden=true;};
   await refresh();aside.scrollTop=state.scroll;aside.onscroll=()=>{state.scroll=aside.scrollTop;};
@@ -1335,6 +1339,80 @@ function field(parent, name, choices, initial) {
   if (initial !== undefined) input.value = initial;
   return input;
 }
+// Keep technical tuning hidden until explicitly requested.
+function advancedOptions(parent) {
+  var box = el("disclosure", undefined, parent)
+  el("disclosure-toggle", "Advanced options", box)
+  return box
+}
+
+// Load explicit workflow defaults and keep all tuning actions inside the disclosure.
+async function workflowTuning(parent, workflow, labels, wikiId) {
+  var box = parent.classList.contains("studio-disclosure") ? parent : advancedOptions(parent)
+  var request = function(method, body) {
+    return wikiId ? StudioApi.request("wikis/" + encodeURIComponent(wikiId) + "/settings/" + workflow, method, body) : StudioApi.wiki("settings/" + workflow, method, body)
+  }
+  var settings = await request("GET")
+  var inputs = {}
+  Object.keys(labels).forEach(function(key) {
+    var value = settings.effective[key]
+    var input = key === "contextguard" ? check(box, labels[key]) : field(box, labels[key])
+    if (key === "contextguard") input.checked = value === true
+    else {
+      input.type = "number"
+      input.value = value === undefined ? "" : String(value)
+    }
+    if (input.type === "number") {
+      input.min = key === "wikiingestbudget" ? "-1" : ["wikiingestmaxcalls", "wikimaxprompttokens"].includes(key) ? "0" : "1"
+      input.step = "1"
+      if (key === "maxfiles") input.max = "2000"
+      if (key === "maxfilesize") input.max = "8388608"
+      if (key === "dreammaxsteps") input.max = "100"
+      if (key === "limit") input.max = "200"
+    }
+    inputs[key] = input
+  })
+  function values() {
+    var out = {}
+    Object.keys(inputs).forEach(function(key) {
+      var input = inputs[key]
+      if (key === "contextguard") out[key] = input.checked
+      else if (input.value.trim() !== "") {
+        if (!Number.isFinite(Number(input.value)) || !Number.isInteger(Number(input.value)) || Number(input.value) < Number(input.min) || input.max && Number(input.value) > Number(input.max)) {
+          box.open = true
+          input.focus()
+          throw new Error("Enter a finite number for " + labels[key])
+        }
+        out[key] = Number(input.value)
+      }
+    })
+    return out
+  }
+  var toggle = box.querySelector(".disclosure-toggle")
+  function customized() {
+    var changed = Object.keys(inputs).some(function(key) {
+      var input = inputs[key]
+      return key === "contextguard" ? input.checked !== settings.effective[key] : input.value !== String(settings.effective[key] === undefined ? "" : settings.effective[key])
+    })
+    toggle.textContent = "Advanced options" + (changed ? " · Customized" : "")
+  }
+  box.addEventListener("input", customized)
+  function apply(data) {
+    Object.keys(inputs).forEach(function(key) {
+      if (key === "contextguard") inputs[key].checked = data[key] === true
+      else inputs[key].value = data[key] === undefined ? "" : String(data[key])
+    })
+    customized()
+  }
+  button(box, "Reset to saved defaults", function() { apply(settings.effective) })
+  disable(button(box, "Save defaults for this wiki", async function() {
+    settings = await request("PUT", values())
+    message("Defaults saved")
+  }), writeReason())
+  button(box, "Restore built-in defaults", function() { apply(settings.defaults) })
+  return { box: box, values: values }
+}
+
 function check(parent, title) { const label = el("label", title, parent), input = el("input", undefined, label); label.className="check-field"; input.type = "checkbox"; label.prepend(input); return input; }
 const trackedJobs = new Map();
 function jobCancelButton(parent, id) {
@@ -1597,8 +1675,10 @@ async function sourcesView(content) {
     showDestination()
 
     const semantic=check(advanced,"Semantic extraction"),prune=check(advanced,"Remove source-owned pages missing from this revision");disable(semantic,writeReason(true));
+    var tuning = await workflowTuning(advanced, "ingestion", { maxfiles: "Maximum files", maxfilesize: "Maximum file size (bytes)", wikiingestmaxcalls: "Distillation calls per source (0 disables split recovery)", wikiingestbudget: "Estimated operation tokens (-1 unlimited; 0 defers model work)", wikimaxprompttokens: "Prompt tokens (0 automatic)", chunkchars: "Chunk characters", concurrency: "Concurrent distillations" })
+    var force = check(tuning.box, "Force reprocessing")
     const actions=row(body),result=el("div",undefined,body);let approved=null,working=false;
-    const options=()=>({mode:mode.value,layout:layout.value,section:folder(),include:include.value,exclude:exclude.value,semantic:semantic.checked,prune:prune.checked});
+    const options=()=>({mode:mode.value,layout:layout.value,section:folder(),include:include.value,exclude:exclude.value,semantic:semantic.checked,prune:prune.checked,tuning:tuning.values(),force:force.checked});
     const signature=()=>JSON.stringify(options());
     const preview=button(actions,"Preview changes",async()=>{
       working=true;preview.disabled=true;apply.disabled=true;const requested=signature();result.replaceChildren();el("p","Preparing preview…",result);
@@ -1635,9 +1715,11 @@ async function absorbView(content) {
   el("p", "Absorption uses Mini-A saved plans and recovery journals. Source wikis remain unchanged. A plan may require a model; apply reuses the saved plan.", content);
   const wikis = {items:await allItems("wikis")}, choices = el("div", undefined, content), selected = [];
   for (const wiki of wikis.items.filter(w => w.id !== currentWiki.id)) selected.push([wiki.id, check(choices, wiki.name)]);
-  const paths = field(content, "Paths (comma-separated; empty means all)"), tags = field(content, "Tags (comma-separated)"), topic = field(content, "Topic"), exclude = field(content, "Exclusions (comma-separated)");
+  const advanced = advancedOptions(content);
+  const paths = field(advanced, "Paths (comma-separated; empty means all)"), tags = field(advanced, "Tags (comma-separated)"), topic = field(advanced, "Topic"), exclude = field(advanced, "Exclusions (comma-separated)");
+  var budgets = await workflowTuning(advanced, "absorption", { absorbmaxpages: "Maximum pages", absorbmaxtokens: "Estimated aggregate model input tokens" });
   button(content, "Generate saved plan", async () => {
-    const body = { action: "plan", sourceWikiIds: selected.filter(([, box]) => box.checked).map(([id]) => id) };
+    const body = { action: "plan", tuning: budgets.values(), sourceWikiIds: selected.filter(([, box]) => box.checked).map(([id]) => id) };
     for (const [k, input] of [["paths", paths], ["tags", tags], ["exclude", exclude]]) if (input.value.trim()) body[k] = input.value.split(",").map(s => s.trim()).filter(Boolean);
     if (topic.value) body.topic = topic.value; await queue("absorptions", body);
   }).disabled = currentWiki.access !== "rw" || !studioSession?.canTestWiki;
@@ -1972,7 +2054,7 @@ async function dreamsView(content, openTab) {
   }
 
   // Render the selected task's explanation and options; the job payloads are unchanged
-  function select(mode, fromList) {
+  async function select(mode, fromList) {
     selectedMode = mode
     drawGroups()
     optionsPanel.replaceChildren()
@@ -1994,6 +2076,11 @@ async function dreamsView(content, openTab) {
     whyHost = el("div", undefined, optionsPanel)
     drawWhy()
 
+    if (mode === "graph") {
+      await graphBuildControls(optionsPanel, true)
+      return
+    }
+
     // Task options, shown only for tasks that have them
     var hasOptions = !["plan", "compact"].includes(mode)
     var optionsBlock = hasOptions ? el("div", undefined, optionsPanel) : null
@@ -2005,10 +2092,11 @@ async function dreamsView(content, openTab) {
     if (semantic) disable(semantic, writeReason(true))
     var organize = mode === "reorg" ? field(optionsBlock, "Organization", ["none", "topics"]) : null
     var instructions = mode === "reorg" ? field(optionsBlock, "Reorganization guidance") : null
-    var steps = mode === "reorg" ? field(optionsBlock, "Maximum model steps", null, "40") : null
-    if (steps) {
-      steps.type = "number"
-      steps.min = "1"
+    var tuning = null
+    if (["reorg", "auto"].includes(mode)) {
+      var labels = { dreammaxsteps: "Maximum model steps" }
+      if (mode === "reorg") Object.assign(labels, { maxcontext: "Context tokens", contextguard: "Enable context guard", toolresultmaxinline: "Inline tool-result size", readresultmaxmatches: "Read-result matches" })
+      tuning = await workflowTuning(optionsBlock, mode, labels)
     }
     var mutate = mode === "auto" ? check(optionsBlock, "Apply repairs (otherwise only preview)") : null
     var compact = !["plan", "compact"].includes(mode) ? check(optionsBlock, "Compact storage after success") : null
@@ -2033,7 +2121,7 @@ async function dreamsView(content, openTab) {
           semantic: semantic?.checked || false,
           organize: organize?.value || "none",
           instructions: instructions?.value || "",
-          dreammaxsteps: Number(steps?.value || 40),
+          tuning: tuning ? tuning.values() : {},
           compact: compact?.checked || false,
           dryrun: mode === "plan" || mode === "auto" && !mutate.checked
         },
@@ -2064,7 +2152,7 @@ async function dreamsView(content, openTab) {
 
   entry.listeners.add({ host: suggestionsHost, update })
   update()
-  select(selectedMode)
+  await select(selectedMode)
   SummaryCache.load(wikiId)
 }
 async function recoveryView(content){
@@ -2142,8 +2230,9 @@ async function backupsView(content) {
 
 // Quote complete argv values for macOS/Linux shells, including apostrophes.
 function studioShellQuote(value) { return "'" + String(value).replace(/'/g, "'\"'\"'") + "'"; }
-function studioWebCommand(job, wikis, mode, port, advanced) {
+function studioWebCommand(job, wikis, mode, port, advanced, tuning) {
   const args = [job, "mode=" + mode, "onport=" + port, "usewiki=true", "wikiaccess=ro", "wikiretrievalv2=true", "useshell=false", "webadvanced=" + advanced];
+  Object.keys(tuning || {}).forEach(function(key) { args.push(key + "=" + tuning[key]) });
   if (wikis.length === 1) args.push("wikiroot=" + wikis[0].root);
   else args.push("wikimounts=" + JSON.stringify(wikis.map(w => ({name:w.id, backend:"fs", root:w.root}))));
   return "ojob " + args.map(studioShellQuote).join(" ");
@@ -2159,7 +2248,8 @@ async function webCommandWizard(selectedId) {
   if (!wikis.length) el("p", "Register a wiki first to build a command.", dialog);
   el("p", "2. Choose launch options.", dialog);
   const mode = field(dialog, "Mode", ["webini", "web"]), port = field(dialog, "Port"); port.type = "number"; port.min = "1"; port.max = "65535"; port.value = "8888";
-  const advanced = check(dialog, "Enable Advanced view (trusted console controls)");
+  var launch = await workflowTuning(dialog, "test", { maxsteps: "Maximum consecutive non-success steps", maxcontext: "Context tokens" }, selectedId);
+  const advanced = check(launch.box, "Enable Advanced view (trusted console controls)");
   el("p", "3. Copy and run in a terminal with OAF_MODEL configured. Wiki access is read-only and shell access is disabled. This preview does not start a server.", dialog);
   const preview = el("textarea", undefined, dialog); preview.readOnly = true; preview.setAttribute("aria-label", "Command preview");
   const status = el("p", "", dialog); status.setAttribute("role", "status");
@@ -2167,7 +2257,7 @@ async function webCommandWizard(selectedId) {
   button(dialog, "Close", () => dialog.close(), "cross");
   function update() {
     const selected = choices.filter(c => c.input.checked).map(c => c.wiki), valid = selected.length > 0 && /^\d+$/.test(port.value) && Number(port.value) >= 1 && Number(port.value) <= 65535;
-    copy.disabled = !valid; preview.value = valid ? studioWebCommand(session.webJob, selected, mode.value, port.value, advanced.checked) : "";
+    copy.disabled = !valid; preview.value = valid ? studioWebCommand(session.webJob, selected, mode.value, port.value, advanced.checked, launch.values()) : "";
     status.textContent = valid ? "After startup, open http://localhost:" + port.value + (advanced.checked ? " using the generated access URL printed in your terminal." : ".") : "Select at least one wiki and a port between 1 and 65535.";
   }
   dialog.addEventListener("input", update); dialog.addEventListener("change", update);
@@ -2175,24 +2265,52 @@ async function webCommandWizard(selectedId) {
   update(); dialog.showModal();
 }
 
-async function graphBuildControls(content) {
+async function graphBuildControls(content, dream) {
   const settings=await StudioApi.wiki("graph/settings"), box=el("section",undefined,content);
   el("h2","Build graph",box);
   const extraction=field(box,"Extraction",["structural","semantic"]), modelHelp=field(box,"Model assistance",["off","auto"]), strategy=field(box,"Build strategy",["incremental","full","resume"]);
-  const preset=field(box,"Budget preset",["custom","small","moderate","large","reset"]), calls=field(box,"Maximum calls"), tokens=field(box,"Estimated total tokens"), minutes=field(box,"Elapsed minutes"), force=check(box,"Force extraction (ignore semantic caches)");
-  const review=el("pre",undefined,box), builtIn={extraction:"structural",modelHelp:"off",maxCalls:100,maxTokens:200000,maxMinutes:10};
+  const advanced = advancedOptions(box);
+  const preset=field(advanced,"Budget preset",["custom","small","moderate","large","reset"]), calls=field(advanced,"Maximum calls"), tokens=field(advanced,"Estimated total tokens"), minutes=field(advanced,"Elapsed minutes"), force=check(advanced,"Force extraction (ignore semantic caches)");
+  advanced.append(modelHelp.parentElement);
+  const review=el("pre",undefined,advanced), builtIn={extraction:"structural",modelHelp:"off",maxCalls:100,maxTokens:200000,maxMinutes:10};
   const apply=value=>{extraction.value=value.extraction;modelHelp.value=value.modelHelp;calls.value=String(value.maxCalls);tokens.value=String(value.maxTokens);minutes.value=String(value.maxMinutes);};
   apply(settings.effective);strategy.value="incremental";
-  const values=()=>({extraction:extraction.value,modelHelp:extraction.value==="structural"?"off":modelHelp.value,strategy:strategy.value,force:force.checked,maxCalls:Number(calls.value),maxTokens:Number(tokens.value),maxMinutes:Number(minutes.value)});
+  // Reveal invalid graph budgets before submitting a job.
+  const values=function() {
+    for (var input of [calls, tokens, minutes]) {
+      var value = Number(input.value)
+      if (!String(input.value).trim() || !Number.isFinite(value) || value <= 0 || input !== minutes && !Number.isInteger(value)) {
+        advanced.open = true
+        input.focus()
+        throw new Error("Graph budgets must be positive; calls and tokens must be integers")
+      }
+    }
+    return { extraction: extraction.value, modelHelp: extraction.value === "structural" ? "off" : modelHelp.value, strategy: strategy.value, force: force.checked, maxCalls: Number(calls.value), maxTokens: Number(tokens.value), maxMinutes: Number(minutes.value) }
+  }
   function refresh(){
     modelHelp.disabled=extraction.value==="structural"||currentWiki.access!=="rw";
     force.disabled=extraction.value!=="semantic"||strategy.value==="resume"||currentWiki.access!=="rw";if(force.disabled)force.checked=false;
     const v=values();review.textContent=JSON.stringify({effective:v,models:settings.models},null,2)+"\n"+settings.fallback;
   }
   preset.onchange=()=>{if(preset.value==="reset"){apply(builtIn);strategy.value="incremental";force.checked=false;}else if(settings.presets[preset.value]){const v=settings.presets[preset.value];calls.value=v.maxCalls;tokens.value=v.maxTokens;minutes.value=v.maxMinutes;}refresh();};
-  [extraction,modelHelp,strategy,calls,tokens,minutes,force].forEach(control=>{control.onchange=refresh;control.oninput=refresh;disable(control,writeReason(false));});
+  ;[calls, tokens, minutes].forEach(function(input) {
+    input.type = "number"
+    input.min = "0.000001"
+    input.step = input === minutes ? "any" : "1"
+  })
+  ;[extraction,modelHelp,strategy,calls,tokens,minutes,force].forEach(control=>{control.onchange=refresh;control.oninput=refresh;disable(control,writeReason(false));});
   disable(preset,writeReason(false));
-  disable(button(box,"Save defaults",async()=>{const v=values();delete v.force;delete v.strategy;await StudioApi.wiki("graph/settings","PUT",v);message("Graph defaults saved");}),writeReason(false));
-  disable(button(box,"Run graph build",()=>queue("graph/rebuild",values())),writeReason(false));
+  disable(button(advanced,"Save defaults",async()=>{const v=values();delete v.force;delete v.strategy;await StudioApi.wiki("graph/settings","PUT",v);message("Graph defaults saved");}),writeReason(false));
+  var compact = dream ? check(advanced, "Compact storage after success") : null
+  var external = dream ? check(box, "External CLI readers and writers are stopped") : null
+  button(advanced, "Reset to saved defaults", function() { apply(settings.effective); refresh() })
+  disable(button(box,"Run graph build",function() {
+    var options = values()
+    if (compact && compact.checked) {
+      options.compact = true
+      options.confirmation = { externalProcessesStopped: external.checked }
+    }
+    return queue("graph/rebuild", options)
+  }),writeReason(false));
   refresh();
 }

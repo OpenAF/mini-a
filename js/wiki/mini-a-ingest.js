@@ -360,10 +360,10 @@ MiniAIngest.prototype._distillPrompt = function(source, chunks, siblings) {
     "- `body`: markdown starting at heading level 1 (`# Title`). Distill — do not transcribe. Keep\n" +
     "  concrete facts, commands, names, numbers and constraints; drop boilerplate, badges, licence\n" +
     "  headers, tables of contents and navigation.\n" +
-    "- Link to related sources with `[[Wiki Style Links]]` using the titles listed below when relevant.\n" +
+    "- Link to related pages with `[[path.md]]`, copying a path exactly from the list below, only when it is clearly related.\n" +
     "- Never invent facts that are not in the source.\n\n" +
     "## Source\n" + String(source.rel || source.id) + "\n\n" +
-    (sibList.length > 0 ? "## Other sources being ingested (for [[links]])\n" + sibList + "\n\n" : "") +
+    (sibList.length > 0 ? "## Other pages being written (link targets)\n" + sibList + "\n\n" : "") +
     "## Content\n" + chunks.join("\n\n---\n\n")
 }
 
@@ -1203,7 +1203,8 @@ MiniAIngest.prototype.run = function() {
     })
     if (!found.complete) result.failed.push({ source: "discovery", error: "incomplete source inventory" })
     this._log("[ingest] Planned " + found.sources.length + " source(s): " + pending.length + " changed, " + result.skipped_unchanged + " unchanged, " + result.failed.length + " failed.")
-    var siblings = pending.map(function(p) { return p.src.rel }), llm
+    // Sibling destinations are what [[links]] must resolve to, not source filenames.
+    var siblings = pending.map(function(p) { return p.path }), llm
     pending.forEach(function(p) {
       if (p.needs) {
         var estimate = wm.knowledgeEstimateTokens(self._distillPrompt(p.src, p.chunks.map(function(c) { return c.text }), siblings))

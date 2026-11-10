@@ -32,6 +32,10 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/wiki.js").testWriteIncrementallyUpdatesGraph
 
+- name: MiniA Wiki Tests::GraphResolvesLinkTargetsToPages
+  to: oJob Test
+  exec: args.func = require("tests/wiki.js").testGraphResolvesLinkTargetsToPages
+
 - name: MiniA Wiki Tests::DeleteIncrementallyUpdatesGraph
   to: oJob Test
   exec: args.func = require("tests/wiki.js").testDeleteIncrementallyUpdatesGraph
@@ -782,6 +786,7 @@ todo:
 - MiniA Wiki Tests::WikiRunnerCoverage
 - MiniA Wiki Tests::ListSupportsOffsetAndLimitWithoutMeta
 - MiniA Wiki Tests::WriteIncrementallyUpdatesGraph
+- MiniA Wiki Tests::GraphResolvesLinkTargetsToPages
 - MiniA Wiki Tests::DeleteIncrementallyUpdatesGraph
 - MiniA Wiki Tests::FsBackendRejectsTraversalDelete
 - MiniA Wiki Tests::FsBackendRejectsAbsoluteWrite

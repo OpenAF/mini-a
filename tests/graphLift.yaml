@@ -1,0 +1,11 @@
+include:
+- oJobTest.yaml
+
+jobs:
+
+- name: MiniA GraphLift Tests::GraphLiftIsMonotonic
+  to  : oJob Test
+  exec: args.func = require("tests/graphLift.js").testGraphLiftIsMonotonic
+
+todo:
+- MiniA GraphLift Tests::GraphLiftIsMonotonic

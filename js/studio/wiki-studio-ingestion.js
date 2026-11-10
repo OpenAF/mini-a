@@ -10,7 +10,7 @@ WikiStudioServer.prototype.sourceOperation = function(w, route, body) {
     WikiStudio.fields(body,["sourceId","revision","preview","options","confirmation"])
     var source=this.sourceGet(w,body.sourceId); WikiStudio.assert(source,404,"source_not_found","Source not found")
     WikiStudio.assert(body.revision===source.revision,409,"stale_source","Select the current immutable source revision")
-    var o=body.options||{}; WikiStudio.fields(o,["mode","layout","section","include","exclude","prune","semantic","maxfiles","maxfilesize"])
+    var o=body.options||{}; WikiStudio.fields(o,["mode","layout","section","include","exclude","prune","semantic","maxfiles","maxfilesize","tuning","force"])
     WikiStudio.assert(!isDef(body.preview)||isBoolean(body.preview),400,"invalid_options","Preview must be boolean")
     WikiStudio.assert(!isDef(o.mode)||["auto","normalize","raw","distill"].indexOf(o.mode)>=0,400,"invalid_options","Unsupported ingestion mode")
     WikiStudio.assert(!isDef(o.layout)||["source","flat"].indexOf(o.layout)>=0,400,"invalid_options","Unsupported ingestion layout")
@@ -20,11 +20,14 @@ WikiStudioServer.prototype.sourceOperation = function(w, route, body) {
     ;["include","exclude"].forEach(function(k){ if(isDef(o[k])) WikiStudio.assert(isString(o[k])&&o[k].length<=1000&&!/[\x00-\x1f]/.test(o[k]),400,"invalid_options","Invalid include/exclude patterns") })
     ;["prune","semantic"].forEach(function(k){if(isDef(o[k]))WikiStudio.assert(isBoolean(o[k]),400,"invalid_options","Expected boolean")})
     ;["maxfiles","maxfilesize"].forEach(function(k){if(isDef(o[k]))WikiStudio.assert(isNumber(o[k])&&o[k]>=1&&Math.floor(o[k])===o[k]&&o[k]<=(k==="maxfiles"?2000:8388608),400,"invalid_options","Limit exceeds Studio quota")})
+    var tuning = this.resolveTuning(w, "ingestion", o.tuning || {})
+    ;["maxfiles", "maxfilesize"].forEach(function(key) { if (isDef(o[key])) tuning[key] = o[key] })
+    WikiStudio.assert(isUnDef(o.force) || isBoolean(o.force), 400, "invalid_options", "Force must be boolean")
     if(o.prune===true) WikiStudio.assert(body.confirmation&&body.confirmation.acknowledgePrune===true,400,"confirmation_required","Explicit prune confirmation required; empty-source authorization is not available")
-    return {operation:"ingest.run",params:{sourceId:source.id,revision:source.revision,staging:source.staging,inventoryChecksum:source.inventoryChecksum,dryrun:body.preview!==false,mode:o.mode||"auto",layout:o.layout||"source",section:section,include:o.include||"",exclude:o.exclude||"",prune:o.prune===true,semantic:o.semantic===true,maxfiles:o.maxfiles||2000,maxfilesize:o.maxfilesize||8388608}}
+    return {operation:"ingest.run",params:{sourceId:source.id,revision:source.revision,staging:source.staging,inventoryChecksum:source.inventoryChecksum,dryrun:body.preview!==false,mode:o.mode||"auto",layout:o.layout||"source",section:section,include:o.include||"",exclude:o.exclude||"",prune:o.prune===true,semantic:o.semantic===true,tuning:tuning,force:o.force===true,maxfiles:tuning.maxfiles,maxfilesize:tuning.maxfilesize}}
   }
   if(route==="absorptions") {
-    WikiStudio.fields(body,["action","sourceWikiIds","paths","tags","topic","exclude","planId","confirmation"])
+    WikiStudio.fields(body,["action","sourceWikiIds","paths","tags","topic","exclude","planId","confirmation","tuning"])
     WikiStudio.assert(["plan","show","apply","status","resume","delete","cancel"].indexOf(body.action)>=0,400,"invalid_action","Unsupported absorption action")
     if(["apply","resume"].indexOf(body.action)>=0)WikiStudio.assert(body.confirmation&&body.confirmation.applySavedPlan===true,400,"confirmation_required","Confirm applying the saved plan")
     var p={sourceIdentities:{}}
@@ -33,6 +36,7 @@ WikiStudioServer.prototype.sourceOperation = function(w, route, body) {
       ;["paths","tags","exclude"].forEach(function(k){if(isDef(body[k]))WikiStudio.assert(isArray(body[k])&&body[k].length<=100&&body[k].every(function(v){return isString(v)&&v.length<=512&&!/[\x00-\x1f]/.test(v)}),400,"invalid_selector","Invalid selectors")})
       WikiStudio.assert(!isDef(body.topic)||isString(body.topic)&&body.topic.length<=1000,400,"invalid_selector","Invalid topic")
       var self=this
+      p.tuning=this.resolveTuning(w,"absorption",body.tuning||{})
       p.spec={sources:body.sourceWikiIds.map(function(id){var source=self.registry.verify(self.registry.get(id));WikiStudio.assert(source.id!==w.id&&!WikiStudio.inside(source.root,w.root)&&!WikiStudio.inside(w.root,source.root),400,"source_overlap","Source and destination cannot overlap");p.sourceIdentities[source.id]={root:source.root,identity:source.identity};return {id:source.id,root:source.root,all:!body.paths&&!body.tags&&!body.topic,paths:body.paths||[],tags:body.tags||[],topic:body.topic||"",exclude:body.exclude||[]} })}
     } else if(body.action!=="status") { WikiStudio.assert(isString(body.planId)&&/^[a-zA-Z0-9_-]{1,160}$/.test(body.planId),400,"invalid_plan","Select a saved plan ID"); p.id=body.planId }
     if(["apply","resume"].indexOf(body.action)>=0) {
@@ -57,12 +61,13 @@ WikiStudio.executeSource = function(config,w,job,logFn,backup) {
   if(op==="backup.restore") return WikiStudio.restore(config,w,job,backup)
   if(op==="wiki.export") return WikiStudio.exportWiki(config,w,job,logFn)
   var a={wikiroot:w.root,wikiaccess:"rw",usewikigraph:w.graph.enabled,wikigraphsemantic:p.semantic===true,wikiretrievalv2:true},params={}
+  Object.keys(p.tuning || {}).forEach(function(key) { if (/^(wiki|absorb)/.test(key)) a[key] = p.tuning[key] })
   if(op==="ingest.run") {
     WikiStudio.assert(WikiStudio.inside(p.staging,config.home+"/sources/uploads"),400,"invalid_source","Source staging leaves trusted area")
     var inventory = WikiStudio.scan(p.staging,true)
     WikiStudio.assert(WikiStudio.fingerprint(inventory)===p.inventoryChecksum,409,"source_changed","Immutable staging revision changed; upload it again")
     WikiStudio.assert(Object.keys(inventory).length<=p.maxfiles,413,"source_limit","Source exceeds selected file-count limit")
-    params={source:p.staging,sourceid:w.id+"--"+p.sourceId,mode:p.mode,layout:p.layout,section:p.section,dryrun:p.dryrun,include:p.include,exclude:p.exclude,prune:p.prune,maxfilekb:p.maxfilesize/1024}
+    params={source:p.staging,sourceid:w.id+"--"+p.sourceId,mode:p.mode,layout:p.layout,section:p.section,dryrun:p.dryrun,include:p.include,exclude:p.exclude,prune:p.prune,maxfilekb:p.maxfilesize/1024,chunkchars:p.tuning?p.tuning.chunkchars:24000,concurrency:p.tuning?p.tuning.concurrency:4,force:p.force===true}
   } else if(/^ingest\.(recovery|resume|discard)$/.test(op))params=p.id?{id:p.id}:{}
   else if(op.indexOf("absorb.")===0) {
     params=p.spec?{spec:p.spec}:p.id?{id:p.id}:{}

@@ -248,5 +248,34 @@ try {
   px.proximity(["seed.md"], { budget: tiny })
   assert(tiny.used <= 2 && tiny.truncated === true, "proximity stays within its budget")
   assert(isArray(px.similarConcepts("concept:id:x")) && px.similarConcepts("concept:id:x").length === 0, "embedding seam is a no-op by default")
+  // Partial acceptance: grounded relationships are kept, ungrounded ones dropped, quotes match any case.
+  var mixPage = page("mix.md", "Redis uses RESP protocol. Nginx proxies Apache traffic.")
+  var mixed = graph("mixed", { modelExtractors: [{ role: "main", fingerprint: "mix", extract: function() { return { relationships: [
+    { from: "Redis", to: "RESP", type: "USES", provenance: "EXTRACTED", confidence: 0.9, evidence: { quote: "REDIS USES resp protocol" } },
+    { from: "Nginx", to: "Varnish", type: "PROXIES", provenance: "INFERRED", confidence: 0.5, evidence: { quote: "Nginx proxies Apache traffic" } }
+  ] } } }] })
+  var mixedReport = mixed.build([mixPage], { extraction: "semantic", modelHelp: "auto" })
+  var mixedEdges = mixed._state.edges.filter(function(e) { return e.props && e.props.method === "model" })
+  assert(mixedEdges.length === 1 && mixedReport.relationshipsAccepted === 1 && mixedReport.relationshipsRejected === 1, "partial section keeps grounded relationships")
+  assert(mixedEdges[0].props.evidence.quote === "Redis uses RESP protocol", "case-insensitive quote stores the exact section text")
+  assert(mixed._state.enrichment["mix.md"].status === "complete", "partial acceptance completes the section")
+  var junkCalls = 0
+  var junk = graph("junk", { modelExtractors: [
+    { role: "lc", fingerprint: "j1", extract: function() { junkCalls++; return { relationships: [{ from: "A1", to: "B1", evidence: { quote: "not in the page" } }] } } },
+    { role: "main", fingerprint: "j2", extract: function() { junkCalls++; return { relationships: [{ from: "Redis", to: "RESP", type: "USES", provenance: "EXTRACTED", evidence: { quote: "Redis uses RESP" } }] } } }
+  ] })
+  junk.build([mixPage], { extraction: "semantic", modelHelp: "auto" })
+  assert(junkCalls === 2 && junk._state.edges.some(function(e) { return e.props && e.props.method === "model" }), "wholly ungrounded response escalates to the next model")
+  var allBad = graph("allbad", { modelExtractors: [{ role: "main", fingerprint: "bad", extract: function() { return { relationships: [{ from: "A1", to: "B1", evidence: { quote: "nowhere" } }] } } }] })
+  var allBadReport = allBad.build([mixPage], { extraction: "semantic", modelHelp: "auto" })
+  assert(allBadReport.failed === 1 && allBad._state.enrichment["mix.md"].status !== "complete", "wholly ungrounded response fails the section")
+
+  // Dangling link statistic: unresolved page links count, indexed pages and @mount links do not.
+  var dl = graph("dangling")
+  dl.buildStructural([
+    { path: "a.md", body: "# A", revision: "1", meta: { title: "A" }, links: ["b.md", "ghost.md", "@m/x.md"] },
+    { path: "b.md", body: "# B", revision: "2", meta: { title: "B" }, links: [] }
+  ])
+  assert(dl.stats().danglingLinks === 1, "dangling links counted")
   print("PASS graph build acceptance: "+checked+" assertions")
 } finally { io.rm(root) }

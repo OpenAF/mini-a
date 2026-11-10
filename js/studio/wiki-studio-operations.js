@@ -60,20 +60,28 @@ WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
     params = {items:body.items,to:route === "selection/move" ? dest : null,expectedRevision:body.expectedRevision,confirmation:body.confirmation || ""}
     operation = route === "selection/move" ? "wiki.selectionMove" : "wiki.selectionDelete"
   } else if (route === "graph/rebuild") {
-    WikiStudio.fields(body, MiniAGraphBuild.fields)
+    WikiStudio.fields(body, MiniAGraphBuild.fields.concat(["compact", "confirmation"]))
+    WikiStudio.assert(isUnDef(body.compact) || isBoolean(body.compact), 400, "invalid_options", "Compact must be boolean")
+    if (body.compact) WikiStudio.assert(body.confirmation && body.confirmation.externalProcessesStopped === true, 400, "offline_required", "Confirm external processes are stopped")
     try { params = this.manager(w, false, function(wm) { return wm.graphBuildSettings(body).effective }) }
     catch(e) { WikiStudio.fail(400, "invalid_options", String(e.message || e)) }
+    params.compact = body.compact === true
     operation = "graph.build"
   } else if (route === "dreams") {
     WikiStudio.fields(body, ["mode", "options", "confirmation"])
     WikiStudio.assert(["plan", "apply", "repair", "reindex", "graph", "indexes", "reorg", "auto"].indexOf(body.mode) >= 0, 400, "invalid_mode", "Unsupported dream mode")
-    var o = body.options || {}; WikiStudio.fields(o, ["semantic", "organize", "instructions", "dreammaxsteps", "backup", "compact", "dryrun"])
+    var o = body.options || {}; WikiStudio.fields(o, ["semantic", "organize", "instructions", "dreammaxsteps", "backup", "compact", "dryrun", "tuning"])
     WikiStudio.assert(body.mode!=="plan"||o.semantic!==true,400,"plan_model_free","Plan is model-free maintenance diagnostics; semantic extraction is unavailable in plan mode")
     ;["semantic", "backup", "compact", "dryrun"].forEach(function(k) { if (isDef(o[k])) WikiStudio.assert(isBoolean(o[k]), 400, "invalid_options", "Expected boolean: " + k) })
     WikiStudio.assert(!isDef(o.organize) || ["none", "topics"].indexOf(o.organize) >= 0, 400, "invalid_options", "Organization must be none or topics")
     WikiStudio.assert(!isDef(o.instructions) || isString(o.instructions) && o.instructions.length <= 8000, 400, "invalid_options", "Instructions exceed limit")
     WikiStudio.assert(!isDef(o.dreammaxsteps) || isNumber(o.dreammaxsteps) && o.dreammaxsteps >= 1 && o.dreammaxsteps <= 100 && Math.floor(o.dreammaxsteps) === o.dreammaxsteps, 400, "invalid_options", "Step budget must be 1–100")
     params = { semantic: o.semantic === true, organize: o.organize || "none", instructions: o.instructions || "", dreammaxsteps: o.dreammaxsteps || 40, compact: o.compact === true, dryrun: body.mode === "plan" || body.mode === "auto" && o.dryrun !== false, backup: true }
+    if (["reorg", "auto"].indexOf(body.mode) >= 0) {
+      params.tuning = this.resolveTuning(w, body.mode, o.tuning || {})
+      if (isDef(o.dreammaxsteps)) params.tuning.dreammaxsteps = o.dreammaxsteps
+      params.dreammaxsteps = params.tuning.dreammaxsteps
+    }
     if (body.mode === "reorg") WikiStudio.assert(body.confirmation && body.confirmation.acknowledgeStructuralChanges === true, 400, "confirmation_required", "Reorg is a live structural edit, not a frozen plan. Explicit structural-change confirmation is required")
     if (o.compact === true) WikiStudio.assert(body.confirmation && body.confirmation.externalProcessesStopped === true, 400, "offline_required", "Stop external readers/writers and confirm before offline compaction")
     operation = "dream." + body.mode
@@ -153,11 +161,13 @@ var wikiStudioRunWorker = function(config, id) {
 var wikiStudioExecute = function(config, w, job, logFn, backup) {
   var p = job.params, operation = job.operation
   var a = { wikiroot: w.root, wikiaccess: "rw", wikiretrievalv2: true, usewikigraph: w.graph.enabled, wikigraphsemantic: isDef(p.semantic) ? p.semantic === true : __, dreammaxsteps: p.dreammaxsteps || 40 }
+  Object.keys(p.tuning || {}).forEach(function(key) { a[key] = p.tuning[key] })
   // A writable manager may bootstrap an empty registered directory even for a
   // preview. Plan must open a reader and must never bootstrap Markdown/state.
   if (operation === "dream.plan" || operation === "dream.auto" && p.dryrun) a.wikiaccess = "ro"
   if (operation === "dream.reorg") { a.dreamwikireorg = true; a.dreamwikiapproval = "auto" }
   var params = operation === "graph.build" ? clone(p) : operation.indexOf("dream.") === 0 ? {dryrun:p.dryrun === true} : {}
+  if (operation === "graph.build") delete params.compact
   if (operation === "dream.reorg") { params.instructions = p.instructions; params.organize = p.organize }
   if (operation === "wiki.folderMove" || operation === "wiki.folderDelete") {
     var wm = new MiniAWikiManager({root:w.root,backend:"fs",access:"rw",skipBootstrap:true,usegraph:w.graph.enabled,wikiretrievalv2:w.retrieval.v2 !== false})

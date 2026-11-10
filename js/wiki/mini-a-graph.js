@@ -985,6 +985,25 @@ MiniAWikiGraph.prototype.build = function(pages, options) {
   return report
 }
 
+// _validateRelationship: grounds one model relationship in a section. The quote is located
+// case-insensitively and both endpoints must appear in it. Returns the relationship with the
+// exact section substring as its quote and the quote offset, or null when it is not grounded.
+MiniAWikiGraph.prototype._validateRelationship = function(rel, section) {
+  var quote = rel && rel.evidence && rel.evidence.quote
+  var from = rel && rel.from
+  var to = rel && rel.to
+  if (!isString(quote) || quote.length === 0 || !isString(from) || !isString(to)) return null
+  if (!this._usefulConcept(from) || !this._usefulConcept(to)) return null
+  var text = section.text
+  var at = text.indexOf(quote)
+  if (at < 0 && text.toLowerCase().length === text.length) at = text.toLowerCase().indexOf(quote.toLowerCase())
+  if (at < 0) return null
+  var exact = text.substring(at, at + quote.length)
+  var lower = exact.toLowerCase()
+  if (lower.indexOf(from.toLowerCase()) < 0 || lower.indexOf(to.toLowerCase()) < 0) return null
+  return { rel: rel, quote: exact, at: at }
+}
+
 MiniAWikiGraph.prototype.buildSemantic = function(pages, options) {
   if (this._readOnly) return { ok: false, error: "graph is read-only" }
   options = options || {}
@@ -1131,10 +1150,8 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, options) {
         var attemptResponse = call(models[attempt], payload)
         if (!attemptResponse) break
         response = attemptResponse
-        if (response && response.ok !== false && isArray(response.relationships) && response.needsContext !== true && response.relationships.length <= 32 && response.relationships.every(function(rel) {
-          var quote = rel && rel.evidence && rel.evidence.quote
-          return isString(quote) && quote.length > 0 && section.text.indexOf(quote) >= 0 && isString(rel.from) && isString(rel.to) && self._usefulConcept(rel.from) && self._usefulConcept(rel.to) && quote.indexOf(rel.from) >= 0 && quote.indexOf(rel.to) >= 0
-        })) break
+        // A response is usable when it is empty or grounds at least one relationship; the rest are dropped.
+        if (response && response.ok !== false && isArray(response.relationships) && response.needsContext !== true && response.relationships.length <= 32 && (response.relationships.length === 0 || response.relationships.some(function(rel) { return self._validateRelationship(rel, section) !== null }))) break
         if (response) response = { ok: false, error: "invalid-extraction" }
         if (stopped) break
       }
@@ -1145,16 +1162,17 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, options) {
         continue
       }
       var validated = []
-      var invalid = false
       response.relationships.slice(0, 32).forEach(function(rel) {
-        var quote = rel && rel.evidence && rel.evidence.quote
-        var from = rel && rel.from
-        var to = rel && rel.to
-        var at = isString(quote) && quote.length > 0 ? section.text.indexOf(quote) : -1
-        if (!isString(from) || !isString(to) || at < 0 || quote.indexOf(from) < 0 || quote.indexOf(to) < 0 || !self._usefulConcept(from) || !self._usefulConcept(to)) {
-          invalid = true
+        var checked = self._validateRelationship(rel, section)
+        if (checked === null) {
+          report.relationshipsRejected = (report.relationshipsRejected || 0) + 1
           return
         }
+        var from = rel.from
+        var to = rel.to
+        var quote = checked.quote
+        var at = checked.at
+        report.relationshipsAccepted = (report.relationshipsAccepted || 0) + 1
         var resolve = function(name) {
           var known = vocabulary.names[name]
           if (known && known.length === 1) return known[0].id
@@ -1180,12 +1198,7 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, options) {
           }
         })
       })
-      if (invalid || response.relationships.length > 32) {
-        failed = true
-        report.failed++
-        continue
-      }
-      // Commit a window only after complete validation. Failed refreshes retain valid old assertions.
+      // Commit a window once its grounded relationships are known. Failed refreshes retain valid old assertions.
       ;(this._semanticByPage[page.path] || []).slice().forEach(function(e) {
         if (e.props.method === "model" && (e.props.windowKey === section.sid || isUnDef(e.props.windowKey) && e.props.window === section.start)) self._removeEdge(e)
       })
@@ -2025,11 +2038,17 @@ MiniAWikiGraph.prototype.stats = function() {
   var nodes = Object.keys(this._state.nodes).length
   var edges = this._state.edges.filter(function(e) { return e._deleted !== true }).length
   var byProv = { EXTRACTED: 0, INFERRED: 0, AMBIGUOUS: 0 }
+  var dangling = 0
   this._state.edges.forEach(function(e) {
     if (e._deleted === true) return
     byProv[this._normalizeProvenance(e.provenance)]++
+    // A page link whose target never became an indexed page (cross-wiki @links excluded).
+    if (e.type === "LINKS_TO" && String(e.to).indexOf("doc:@") !== 0) {
+      var target = this._state.nodes[e.to]
+      if (!isMap(target) || !isMap(target.props) || !isString(target.props.hash)) dangling++
+    }
   }.bind(this))
-  return { nodes: nodes, edges: edges, provenance: byProv, communities: isArray(this._state.communities) ? this._state.communities.length : 0 }
+  return { nodes: nodes, edges: edges, provenance: byProv, danglingLinks: dangling, communities: isArray(this._state.communities) ? this._state.communities.length : 0 }
 }
 
 MiniAWikiGraph.prototype.export = function(format) {

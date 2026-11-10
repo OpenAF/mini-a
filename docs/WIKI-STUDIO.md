@@ -610,3 +610,34 @@ beside the wiki and a pending journal inside `.mini-a-wiki-folders`; Wiki Manage
 **Restore pending folder snapshot** can roll it back using the exact recovery ID.
 Reopen readers after restoration. Do not delete pending recovery files; successful
 engine directory snapshots are retained until an operator removes them.
+
+
+### Advanced workflow options
+
+Studio keeps technical tuning in **Advanced options**, closed when a task opens.
+The ordinary workflow works with the existing defaults. Opening Advanced exposes
+numeric limits, explanations, and explicit **Save defaults for this wiki**,
+**Reset to saved defaults**, and **Restore built-in defaults** actions. Defaults
+are isolated by wiki and workflow; submitted jobs keep their effective settings.
+
+- Graph builds and Dream graph share call, estimated total-token and elapsed-time
+  budgets, presets, model assistance and force extraction. Graph defaults remain
+  managed by the existing graph settings.
+- Imports expose file count/size, chunk characters, concurrency, force reprocessing,
+  distillation calls per source, estimated operation tokens and prompt tokens.
+  Calls include retries/synthesis: zero permits the initial call but disables split
+  recovery. Operation tokens use -1 for unlimited and zero to defer model work.
+  Prompt tokens use zero for automatic context-overflow handling. These are estimates,
+  not provider billing guarantees. Force is a per-run choice.
+- Absorption planning exposes maximum pages and estimated aggregate model-input
+  tokens. Applying or resuming a saved plan retains that plan's original settings.
+- Dream Auto exposes model steps; Reorganization also exposes context tokens,
+  context guard, inline tool-result size and read-result match limits.
+- Search exposes results per page; all-wiki searches still inspect at most 100 hits
+  per wiki. Test launches and generated commands expose consecutive non-success
+  steps and context tokens. Blank test limits inherit runtime defaults. Stop an
+  existing test server before launching with changed limits.
+
+Saved defaults contain tuning only, never source selectors, approvals or model
+credentials. Restoring built-in values changes the form; use Save defaults to
+persist them. Required confirmations remain visible outside Advanced.
