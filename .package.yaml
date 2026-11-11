@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20261110'
+version: '20261111'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -151,6 +151,7 @@ files:
 - js/core/mini-a-utils.js
 - js/core/mini-a.js
 - js/memory/mini-a-dreams.js
+- js/memory/mini-a-embeddings.js
 - js/memory/mini-a-history-vm.js
 - js/memory/mini-a-memory.js
 - js/memory/mini-a-reflection-queue.js
@@ -312,7 +313,7 @@ filesHash:
   METRICS.md: 7dd872f40105f3c2156a64f15bdf0bfa8ac5661b
   README.md: bae76079fdecf46697c95f5ad8bbbc3e342bd6ff
   RELEASE_NOTES.md: fabd2aca0502fdae5b84d3180310daf74c27f2e6
-  USAGE.md: 3f650406fbe680da3ed434b9b888968ee7a5f5ee
+  USAGE.md: 0fdfd3b942d10d4da90aa329ea96aa70958fe989
   docs/ABSORB.md: 31bbe919b680e78b369772608d10dda78d1e015e
   docs/ADAPTIVE-ROUTER.md: c453ee985ce8c633a5af892393970d4b9c003bef
   docs/AGENT-PLUGINS.md: af8f692ac4bc690ac9df180e86bb1a1307a5aae5
@@ -393,9 +394,10 @@ filesHash:
   js/core/mini-a-supervised.js: f7aee934432fc16da7dcf9c9372afb0c5acbe11c
   js/core/mini-a-tool-selection.js: d0f59644dfd87d5228eaa36902873121b667c537
   js/core/mini-a-utils.js: 3b10b09b7ce1b274d0d443e7efe90940218e39c8
-  js/core/mini-a.js: 083dcc30de83bffa2f9146175930c29990e1a48a
+  js/core/mini-a.js: 94c7d8499daa16ea339b1ee376976ec40f3b9529
   js/memory/mini-a-dreams.js: 31f71978aeb47a8fc9f59d1015f4ab7807aa9a5b
-  js/memory/mini-a-history-vm.js: 0bfcb3657fbb2eb1b96d5a6350b92889797e05db
+  js/memory/mini-a-embeddings.js: de3248636769a8d0048945d00038dd050f7bac9f
+  js/memory/mini-a-history-vm.js: 62cc32c14658dc25b0387c7d40402551d8837e7d
   js/memory/mini-a-memory.js: 0d35042c9ac24a6f277bbaa4422374a168fd8116
   js/memory/mini-a-reflection-queue.js: 207c26239123305b482eb051b05f537dc420d437
   js/mini-a-paths.js: 6c5e5d6f2680d19df511e6260cf1a7b1a2e949a5
@@ -403,12 +405,12 @@ filesHash:
   js/session/mini-a-mcptest.js: 6e78cb74c5d9c723b038d2198102bdaa8ea4715d
   js/session/mini-a-memoryman.js: b897ad32e55fdc844cbe7f014729ec2ec62d67d9
   js/session/mini-a-modelman.js: 940c03c9d13d5fc0476117b2eb9cf822cf518bc6
-  js/session/mini-a-session.js: 894015809093961940f992b75fafa35beda8e4ec
+  js/session/mini-a-session.js: ba654e9e78166e92c7562cf4daa8b717425913df
   js/session/mini-a-wikiman.js: a5612a5c2d1c94031b644e05797f8353f2ed582d
   js/skills/mini-a-mcp-skills.js: 36b3790c0303922ae5742bacbf887295300ff285
   js/skills/mini-a-plugins.js: e9f5b70fa7d7c32bfe4ffbadf4967b7cd74bc3d5
-  js/skills/mini-a-skill-runtime.js: f2bac1ae48f9a72cb78b1f0f8c1155152f7f075a
-  js/skills/mini-a-skills.js: 11fc69463269641c4f69ad08d2dd955d9ef89259
+  js/skills/mini-a-skill-runtime.js: 83360a5b4362a0ad97103e438425f468dbe764f7
+  js/skills/mini-a-skills.js: 496abeceec1f68fd37888ee7b6f229b7a5c15046
   js/studio/wiki-studio-api.js: 9454cbec3a0a9574391073cbdf35b29f58e72049
   js/studio/wiki-studio-backups.js: a988e76e58702cedd9e460ccbc1d4541a55e6ffd
   js/studio/wiki-studio-bootstrap.js: b372b762e60f9fce16246ff44ac5b22dee3fa109
@@ -432,7 +434,7 @@ filesHash:
   js/wiki/mini-a-graph.js: cf2de0cfb2aacf4bb9776513f87481d803308f59
   js/wiki/mini-a-ingest.js: 85fdbe90afe5839dbe4ca555dac09170fdd036ce
   js/wiki/mini-a-mcp-wiki.js: e524c7b3fcd8f35a43187124864e6533ce1d470a
-  js/wiki/mini-a-wiki-embeddings.js: 7ac937ba23c426bdf5092b00e3cf8c9b3b3a82fc
+  js/wiki/mini-a-wiki-embeddings.js: 258805ed2e05b125c6d48081869036f09fc75070
   js/wiki/mini-a-wiki-export.js: 2c43e40d61eba88146a28dd07829190bd088a0ca
   js/wiki/mini-a-wiki-folders.js: d22e361f8ef7f0e32f09c466e169283d4796b50a
   js/wiki/mini-a-wiki-knowledge.js: b0b4e771af92fcc4257926fac7d468adcf26e633
@@ -489,16 +491,16 @@ filesHash:
   mini-a-modelman.js: 048b7bbed05207e058db130693e800c64ebaa486
   mini-a-modes.yaml: 754cc2598ee619e2f7d77845cc194a7bfa5cbda9
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: c5621a9b9ca5f1871af5d1f4b0df06ac68c9366c
+  mini-a-web.yaml: 8a8b57de80ab782f4fa5d93c8de3ca76646795fb
   mini-a-wiki-studio-worker.yaml: 8c6841c3aa4a0c2e3d4a13fa9b61c9dfde5e49e3
   mini-a-wiki-studio.yaml: 30c6b0f4d2055064a1939d5fcc60ceb68fc77b4b
   mini-a-wikiman.js: 91add17fe98d8120835e3d1698790f97cd733923
   mini-a-worker.yaml: 4d3062a08902da97f859c2e2967b272ae9969ace
   mini-a.js: 8553dc16398d24eeb2c6942075b7abb5c1ffc4a3
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
-  mini-a.yaml: 3c44f6f1118ab446572ee1c1bbe9d8c3ec7ae46a
+  mini-a.yaml: 964e2173b23ef122226feb2490f80c7cf3f191f9
   public/advanced.css: 531d5c0b6252367e4234069b50b7d8061a196431
-  public/advanced.js: 0cf93916241ea8d60b8b60607f321585ce890803
+  public/advanced.js: e1cb2d2254c119b716042043a96c6dd8e01a2c5f
   public/apple-touch-icon.png: 5e22ed6b303b377787779423b97c22f7b20b56ed
   public/data-editor.js: 1433293e0ed9f6486f14b6a91ed88684525a79b3
   public/embed-context.js: 5a0be6f139672eabbbd12f28efe2e749dfa43c44
