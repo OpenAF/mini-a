@@ -1130,9 +1130,11 @@ MiniAWikiManager.prototype._mountGraph = function(mount) {
     var graphDir = mount.manager._getGraphPath()
     var graphRaw = mount.manager._readArchiveGraph()
     if (!isString(graphRaw) && !io.fileExists(graphDir + "/graph.json")) {
+      if (isObject(mount.graph)) mount.graph.close()
       mount.graph = __
       return __
     }
+    if (isObject(mount.graph)) mount.graph.close()
     mount.graph = new MiniAWikiGraph({ graphDir: graphDir, graphRaw: graphRaw, readOnly: true }, this._logFn)
     return mount.graph
   } catch(e) {
@@ -3668,6 +3670,7 @@ MiniAWikiManager.prototype.close = function() {
   // channel in the process-global $cache registry
   if (isArray(this._mounts)) {
     this._mounts.forEach(function(m) {
+      try { if (isObject(m.graph)) m.graph.close() } catch(ignoreMountGraphClose) {}
       try { if (isObject(m.manager) && isFunction(m.manager.close)) m.manager.close() } catch(ignoreMountClose) {}
     })
   }
@@ -5681,6 +5684,7 @@ MiniAWikiManager.prototype.attach = function(name, config) {
     var count   = manager._safeListPages("").length
     this._mounts = this._mounts.filter(function(m) {
       if (m.name !== name) return true
+      try { if (isObject(m.graph)) m.graph.close() } catch(closeGraphError) {}
       try { m.manager.close() } catch(closeError) {}
       return false
     })
@@ -5699,6 +5703,7 @@ MiniAWikiManager.prototype.detach = function(name) {
   this._mounts = this._mounts.filter(function(m) {
     if (m.name !== name) return true
     found = true
+    try { if (isObject(m.graph)) m.graph.close() } catch(closeGraphError) {}
     try { if (isFunction(m.manager.close)) m.manager.close() } catch(e2) {}
     return false
   })

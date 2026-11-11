@@ -643,7 +643,9 @@
       root.attach("other",{backend:"fs",root:dir+"/remote"})
       var graph=root._mounts[0].manager._graph
       ow.test.assert(has(root.agenticSearch("sharedcrossneedle",options)),true,"semantic concepts join different pinned wikis")
-      graph._semanticByPage["target.md"].forEach(function(edge) {edge.props.revision="stale"})
+      remote._graph._semanticByPage["target.md"].forEach(function(edge) {edge.props.revision="stale"})
+      remote._graph.save()
+      root.attach("other",{backend:"fs",root:dir+"/remote"})
       var stale=root.agenticSearch("sharedcrossneedle",options)
       ow.test.assert(has(stale),false,"stale target semantic support excluded")
       ow.test.assert(stale.stopReasons.indexOf("stale-graph-evidence")>=0,true,"stale cross support reported explicitly")

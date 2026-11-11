@@ -1,0 +1,5 @@
+todo:
+- Verify wiki memory ownership
+jobs:
+- name: Verify wiki memory ownership
+  exec: load("tests/wikiMemory.js")

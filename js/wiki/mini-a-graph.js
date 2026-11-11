@@ -7,6 +7,7 @@ loadLib(__miniAPath("js/wiki/mini-a-graph-options.js"))
 // Description: Optional wiki knowledge-graph layer for Mini-A.
 
 var MiniAWikiGraph = function(config, loggerFn) {
+  if (isMap(config) && config.readOnly === true && !config.__privateReader && !isString(config.graphRaw) && !isMap(config.falkor) && !isFunction(config.similarConceptsFn)) return MiniAWikiGraph.sharedReader(config, loggerFn)
   this._cfg = isMap(config) ? config : {}
   this._log = isFunction(loggerFn) ? loggerFn : function() {}
   this._graphDir = isString(this._cfg.graphDir) && this._cfg.graphDir.trim().length > 0 ? String(this._cfg.graphDir).trim() : "./.mini-a-wiki-graph"
@@ -2364,4 +2365,65 @@ MiniAWikiGraph.prototype.load = function() {
 
 MiniAWikiGraph.prototype.close = function() {
   if (this._pendingSave === true) this._persist()
+}
+
+// Share only local read-only graphs; wrappers retain session policy and lifetime.
+if (isUnDef(global.__miniAGraphReaders)) {
+  global.__miniAGraphReaders = { entries: {}, lock: new java.util.concurrent.locks.ReentrantLock() }
+}
+MiniAWikiGraph.sharedReader = function(config, loggerFn) {
+  var store = global.__miniAGraphReaders
+  var facade = Object.create(MiniAWikiGraph.prototype)
+  var entry, closed = false
+  var file = new java.io.File(config.graphDir || "./.mini-a-wiki-graph", "graph.json")
+  // Release a manager's reference only after its current call has finished.
+  var release = function() {
+    if (!entry) return
+    entry.refs--
+    if (entry.refs === 0) delete store.entries[entry.key]
+    entry = __
+  }
+  // Serialize publication and derived-index mutation; never retain session callbacks.
+  var invoke = function(name, args) {
+    store.lock.lock()
+    try {
+      if (closed) throw new Error("graph-reader-closed")
+      var key = String(file.getCanonicalPath()) + ":" + (config.communityAlgo || "louvain")
+      if (file.isFile()) {
+        var attrs = java.nio.file.Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes)
+        key += ":" + String(attrs.fileKey()) + ":" + String(attrs.lastModifiedTime()) + ":" + Number(attrs.size())
+      } else key += ":missing"
+      if (!entry || entry.key !== key || name === "load") {
+        release()
+        entry = store.entries[key]
+        if (!entry) {
+          var graph = new MiniAWikiGraph({ graphDir: config.graphDir, communityAlgo: config.communityAlgo, readOnly: true, __privateReader: true })
+          // Never publish data read across an artifact replacement.
+          if (file.isFile()) {
+            var after = java.nio.file.Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes)
+            var afterKey = String(file.getCanonicalPath()) + ":" + (config.communityAlgo || "louvain") + ":" + String(after.fileKey()) + ":" + String(after.lastModifiedTime()) + ":" + Number(after.size())
+            if (afterKey !== key) throw new Error("graph-artifact-changed-during-load")
+          } else if (!key.endsWith(":missing")) throw new Error("graph-artifact-changed-during-load")
+          entry = { key: key, graph: graph, refs: 0 }
+          store.entries[key] = entry
+        }
+        entry.refs++
+      }
+      var result = name === "_state" ? entry.graph._state : entry.graph[name].apply(entry.graph, args)
+      return isMap(result) || isArray(result) ? clone(result) : result
+    } finally { store.lock.unlock() }
+  }
+  Object.keys(MiniAWikiGraph.prototype).forEach(function(name) {
+    if (!isFunction(MiniAWikiGraph.prototype[name]) || name === "close") return
+    facade[name] = function() { return invoke(name, arguments) }
+  })
+  facade._readOnly = true
+  facade._graphDir = config.graphDir
+  facade._hasFalkorRead = function() { return false }
+  Object.defineProperty(facade, "_state", { get: function() { return invoke("_state", []) } })
+  facade.close = function() {
+    store.lock.lock()
+    try { release(); closed = true } finally { store.lock.unlock() }
+  }
+  return facade
 }

@@ -841,6 +841,9 @@ MiniA.prototype._stopAgentResources = function() {
   if (isObject(this._skillWikiManager) && this._skillWikiManager !== this._wikiManager && isFunction(this._skillWikiManager.close)) {
     try { stopResource("skill_wiki_cleanup", function() { parent._skillWikiManager.close() }) } catch(ignoreSkillWikiClose) {}
   }
+  // Disposed agents must not retain closed graph and reader trees.
+  this._wikiManager = __
+  this._skillWikiManager = __
   if (isFunction(MiniA._untrackInstance)) MiniA._untrackInstance(this)
 }
 

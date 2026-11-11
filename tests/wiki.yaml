@@ -4,6 +4,9 @@ include:
 - tests/wikiExport.yaml
 
 jobs:
+- name: MiniA Wiki Tests::MemoryOwnership
+  to: oJob Test
+  exec: args.func = function() { load("tests/wikiMemory.js") }
 - name: MiniA Wiki Tests::EmbeddingCache
   to: oJob Test
   exec: args.func = function() { load("tests/wikiEmbeddings.js") }
@@ -784,6 +787,7 @@ jobs:
   exec: args.func = require("tests/wiki.js").testS3ArtifactsHydrateLocalSearchAndGraphCache
 
 todo:
+- MiniA Wiki Tests::MemoryOwnership
 - MiniA Wiki Tests::ConsoleSearchPreservesV2Status
 - MiniA Wiki Tests::ConsoleWikiOperations
 - MiniA Wiki Tests::WikiConfigSharedMapping

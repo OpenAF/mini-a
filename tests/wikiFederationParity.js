@@ -76,7 +76,8 @@
       ow.test.assert(has(wm.agenticSearch('needle configuration',{expandGraph:false})),false,'explicit disable wins')
       ow.test.assert(has(wm.agenticSearch('needle configuration',{wiki:'a'})),false,'derived joins respect selected scope')
       var graph=wm._mounts[1].manager._graph
-      graph._state.nodes['doc:target.md'].props.revision='stale'
+      b._graph._state.nodes['doc:target.md'].props.revision='stale'
+      b._graph.save()
       ow.test.assert(has(wm.agenticSearch('needle configuration')),false,'stale target support is rejected')
       b.write('target.md',{title:'Parquet Reader',source:'Parquet/reader.js'},'# Reader\nUpdated supporting instructions.')
       b.reindex()

@@ -1077,21 +1077,94 @@ MiniAWikiRetrievalV2.prototype.close = function() {
   var self = this
   this._guard(function() { self._flushTelemetry(); self.closed = true; self.cache = {}; self.cacheOrder = []; self.cacheSizes = {}; self.cacheBytes = 0 })
 }
+// Read only suppression metadata, skipping potentially large chunk payloads.
+MiniAWikiRetrievalV2.suppressionProjection = function(path, journal) {
+  var out = {}, selected = function(parts) {
+    return journal ? parts.length === 1 && parts[0] === "phase" || parts.length === 3 && parts[0] === "operations" && parts[2] === "path" : parts.length === 3 && parts[0] === "sources" && (parts[2] === "page" || parts[2] === "active")
+  }
+  // Assign literal keys so dots and brackets in source identifiers remain intact.
+  var put = function(parts, value) {
+    var target = out
+    for (var i = 0; i < parts.length; i++) {
+      var key = String(parts[i])
+      if (i === parts.length - 1) Object.defineProperty(target, key, { value: value, enumerable: true, configurable: true, writable: true })
+      else {
+        if (!Object.prototype.hasOwnProperty.call(target, key)) Object.defineProperty(target, key, { value: {}, enumerable: true, configurable: true, writable: true })
+        target = target[key]
+      }
+    }
+  }
+  if (isFunction(io.scanJSON) && isFunction(io.copyJSONRange)) {
+    io.scanJSON(path, function(event) {
+      var parts = event.path
+      if (event.phase === "value") {
+        if (parts.length === 0 && event.type !== "map") throw new Error("corrupt-suppression-root")
+        if (parts.length === 1 && parts[0] === (journal ? "operations" : "sources")) {
+          if (event.type !== (journal ? "array" : "map")) throw new Error("corrupt-suppression-container")
+          put(parts, {})
+        }
+        if (selected(parts)) {
+          if (event.type === "map" || event.type === "array") throw new Error("invalid-suppression-value")
+        } else if (parts.length > 0 && !(parts[0] === (journal ? "operations" : "sources") && parts.length <= 2)) return "skip"
+      } else if (selected(parts)) {
+        var bytes = new java.io.ByteArrayOutputStream()
+        try {
+          io.copyJSONRange(path, event.start, event.end, bytes)
+          put(parts, af.fromJson(String(bytes.toString("UTF-8"))))
+        } finally { bytes.close() }
+      }
+    })
+  } else {
+    var reader = new java.io.InputStreamReader(new java.io.FileInputStream(path), "UTF-8")
+    var json = new Packages.com.google.gson.stream.JsonReader(reader)
+    // Traverse selected containers only; Gson validates skipped values too.
+    var visit = function(parts) {
+      var token = String(json.peek())
+      if (selected(parts)) {
+        if (token === "STRING") put(parts, String(json.nextString()))
+        else if (token === "BOOLEAN") put(parts, Boolean(json.nextBoolean()))
+        else if (token === "NULL") { json.nextNull(); put(parts, null) }
+        else throw new Error("invalid-suppression-value")
+      } else if (parts.length === 0 || parts[0] === (journal ? "operations" : "sources") && parts.length <= 2) {
+        if (token === "BEGIN_OBJECT") {
+          put(parts, {})
+          json.beginObject()
+          while (json.hasNext()) visit(parts.concat([String(json.nextName())]))
+          json.endObject()
+        } else if (journal && parts.length === 1 && token === "BEGIN_ARRAY") {
+          put(parts, {})
+          json.beginArray()
+          var index = 0
+          while (json.hasNext()) visit(parts.concat([index++]))
+          json.endArray()
+        } else throw new Error("corrupt-suppression-container")
+      } else json.skipValue()
+    }
+    try {
+      visit([])
+      if (String(json.peek()) !== "END_DOCUMENT") throw new Error("trailing-suppression-data")
+    } finally { json.close() }
+  }
+  if (!isMap(out[journal ? "operations" : "sources"])) throw new Error("missing-suppression-container")
+  return out
+}
 MiniAWikiRetrievalV2.prototype._pending = function() {
   var m = this.manager, paths, state = m._getIndexRoot() + "/.mini-a-wiki-state/manifest.json", pending = {}, token = ""
   if (io.fileExists(m._getIndexRoot() + "/.mini-a-wiki-folders/pending.json")) return { _all: true }
-  var stamp = function(p) { var f = new java.io.File(p); return f.isFile() ? String(java.nio.file.Files.getLastModifiedTime(f.toPath())) + ":" + Number(f.length()) : "missing" }
+  var stamp = function(p) { var f = new java.io.File(p); return f.isFile() ? String(java.nio.file.Files.readAttributes(f.toPath(), java.nio.file.attribute.BasicFileAttributes).fileKey()) + ":" + String(java.nio.file.Files.getLastModifiedTime(f.toPath())) + ":" + Number(f.length()) : "missing" }
   try { paths = m._ingestJournalPaths() } catch(e) { return { _all: true } }
   token = paths.map(function(path) { return path + ":" + stamp(path) }).join("|") + "|" + stamp(state)
   if (this.suppression && this.suppression.token === token) return this.suppression.pending
   try {
-    paths.forEach(function(path) { var j = af.fromJson(io.readFileString(path)); if (!isMap(j) || !isArray(j.operations)) throw new Error("corrupt-journal"); if (j.phase !== "complete") j.operations.forEach(function(op) { pending[op.path] = true }) })
+    paths.forEach(function(path) { var j = MiniAWikiRetrievalV2.suppressionProjection(path, true); if (j.phase !== "complete") Object.keys(j.operations).forEach(function(key) { pending[j.operations[key].path] = true }) })
     if (io.fileExists(state)) {
-      var authority = af.fromJson(io.readFileString(state))
+      var authority = MiniAWikiRetrievalV2.suppressionProjection(state, false)
       if (!isMap(authority) || !isMap(authority.sources)) throw new Error("corrupt-state")
       Object.keys(authority.sources).forEach(function(k) { var source = authority.sources[k]; if (source.active === false) pending[source.page] = true })
     }
   } catch(e) { pending._all = true }
+  var after = paths.map(function(path) { return path + ":" + stamp(path) }).join("|") + "|" + stamp(state)
+  if (after !== token) return { _all: true }
   this.suppression = { token: token, pending: pending }
   return pending
 }
