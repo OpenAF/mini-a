@@ -52,3 +52,6 @@ assert.equal(decisionValues().Model, 'Not configured');
 vm.runInContext('delete statsMetrics.decisions; renderStats(container)', context);
 assert.equal(decisionCard(), undefined, 'older sessions need no decision metrics');
 console.log('Advanced statistics charts: data, palette, cleanup, tables and empty states passed.');
+vm.runInContext(`statsMode = 'summary'; statsMetrics = {embeddings: {calls: 2, hits: 3, failures: 1, input_tokens: 7, total_tokens: 7, usage_reports: 1}}; renderStats(container)`, context);
+assert.ok(context.container.children.some(card => card.children[0]?.text === 'Embeddings'));
+assert.ok(configs.some(config => config.data.labels.includes('Embeddings') && config.data.datasets[0].data.includes(7)));

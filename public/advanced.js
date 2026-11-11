@@ -1612,10 +1612,10 @@ window.MiniAAdvancedUI = function(bridge) {
       const p = metrics.performance || {};
       const decision = metrics.decisions;
       const hasDecisionUsage = decision?.usage_reports > 0;
-      chart('Token usage by model', [['Main', p.llm_normal_tokens], ['Low cost', p.llm_lc_tokens], ['Validation', p.llm_val_tokens], ['Decision', hasDecisionUsage ? decision.total_tokens : undefined]], 'Tokens');
+      chart('Token usage by model', [['Embeddings', metrics.embeddings?.usage_reports > 0 ? metrics.embeddings.total_tokens : undefined], ['Main', p.llm_normal_tokens], ['Low cost', p.llm_lc_tokens], ['Validation', p.llm_val_tokens], ['Decision', hasDecisionUsage ? decision.total_tokens : undefined]], 'Tokens');
       chart('Token accounting', [['Actual', p.llm_actual_tokens], ['Estimated', p.llm_estimated_tokens]], 'Tokens');
       group('Goals', metrics.goals);
-      chart('LLM calls', ['normal', 'low_cost', 'validation', 'decision'].map(key => [key, metrics.llm_calls?.[key]]).concat([['Advisor', metrics.advisor?.calls]]));
+      chart('LLM calls', ['normal', 'low_cost', 'validation', 'decision', 'embeddings'].map(key => [key, metrics.llm_calls?.[key]]).concat([['Advisor', metrics.advisor?.calls]]));
       if (decision && typeof decision === 'object') {
         const card = el('section', undefined, 'advanced-stat-card');
         card.append(el('h4', 'Decision model'), structuredMap({
@@ -1632,6 +1632,21 @@ window.MiniAAdvancedUI = function(bridge) {
           Fallbacks: decision.fallbacks || 0
         }));
         container.append(card);
+      }
+      // Show missing provider usage explicitly instead of implying zero tokens.
+      if (metrics.embeddings && Object.keys(metrics.embeddings).length) {
+        var embeddings = metrics.embeddings;
+        var embeddingCard = el('section', undefined, 'advanced-stat-card');
+        embeddingCard.append(el('h4', 'Embeddings'), structuredMap({
+          Calls: embeddings.calls || 0,
+          'Cache hits': embeddings.hits || 0,
+          Failures: embeddings.failures || 0,
+          'Input tokens': embeddings.usage_reports > 0 ? embeddings.input_tokens || 0 : 'Unavailable',
+          'Total tokens': embeddings.usage_reports > 0 ? embeddings.total_tokens || 0 : 'Unavailable',
+          'Usage reports': embeddings.usage_reports || 0,
+          'Elapsed (ms)': embeddings.duration_ms || 0
+        }));
+        container.append(embeddingCard);
       }
       group('Actions', metrics.actions);
       chart('Time spent', ['step_prompt_build_ms_total', 'step_llm_wait_ms_total', 'step_tool_exec_ms_total', 'step_context_maintenance_ms_total'].map(key => [key.replace('step_', '').replace('_ms_total', ''), p[key]]), 'Milliseconds');

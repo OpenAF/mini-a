@@ -5391,3 +5391,51 @@ Wiki graph extraction, model budgets, saved defaults and resume controls are doc
 `/prompt` returns a `runId` for each accepted request. `/result` retains `status: processing|finished` and adds `outcome: processing|success|failure|cancelled`, the owning `runId`, and an error for unsuccessful runs. A terminal failure or cancellation does not become a successful answer.
 
 Clients may send `ifTranscriptRevision` from the previous response. Matching revisions omit `content` and `history` while still returning status, plan and subagent metadata; retain the last full transcript and reset the revision when changing conversations. Requests without a revision always receive full snapshots, including copy/export/history consumers.
+
+### Embeddings for history and skill discovery
+
+Define `OAF_EMBED_MODEL` with an independent embedding provider configuration to
+use hybrid retrieval automatically within enabled history and skill features.
+For example, `OAF_EMBED_MODEL='(type: ollama, model: embeddinggemma-2)'`.
+This requires an OpenAF runtime supporting `$gpt(chatConfig, embeddingConfig)`.
+Older runtimes fall back to lexical search.
+
+Keep using `historyvm=true` with durable conversation storage for history recall,
+and `useskills=true` / `useskillswiki=true` for the desired skill sources.
+Embeddings do not enable these features themselves. History remains scoped to the
+active conversation branch; it is retrieved when requested, rather than injected
+before every turn. Explicit skill references retain their existing behavior.
+
+Use `historyembeddings=off` or `skillsembeddings=off` to disable either integration.
+`embeddingmaxcalls=9` limits provider calls per search (at most eight missing content
+vectors plus a query vector). Cache hits make no provider calls. Summaries are
+indexed before 2,000-character original-content chunks, with 200-character overlap.
+Cold searches have partial semantic coverage; subsequent searches progressively
+index the remaining eligible content. Skill discovery embeds names, descriptions
+and discovery metadata, then uses the existing model selection and permission checks.
+
+History search tools accept `mode=exact` to retain their prior search behavior.
+Empty queries retain browsing behavior without provider calls. History results
+include retrieval status; skill runtime events report coverage, calls and fallback.
+Provider failures preserve lexical results; three consecutive failures trigger a
+60-second cooldown. History vectors live in `<conversation>.historyvm/embeddings.db`;
+skill vectors live in `~/.mini-a/cache/skill-embeddings.db`. Cache files contain derived
+content vectors and can be removed while Mini-A is stopped to rebuild them on demand.
+Cache lock files prevent concurrent writers. Changing content or model configuration
+creates new cache entries. Embedding requests send eligible text to the configured provider.
+
+Run `oaf -f tests/semanticRetrieval.js` for deterministic retrieval tests. For live
+quality validation, set `MINIA_EMBED_QUALITY_CACHE` to a persistent writable cache path
+and run `oaf -f tests/semanticRetrievalQuality.js`. Source-checkout validation can set
+`MINIA_EMBED_OPENAF_SOURCE=../openaf/js/owrap.ai.js`; normal Mini-A does not load sibling sources.
+
+Embedding usage is included in `/stats`, its JSON export, the Mini-A metrics
+endpoints, and Advanced Statistics. The `embeddings` metrics report provider
+calls, cache hits, failures, elapsed milliseconds, input tokens, total tokens,
+and usage reports. `llm_calls.embeddings` contributes to `llm_calls.total`;
+cache hits do not count as provider calls. Embedding tokens remain separate from
+generative-model token counters. Token totals include only usage returned by the
+provider; missing usage displays as `Unavailable`, and `usage_reports` indicates
+how many requests supplied usage. These embedding counters accumulate across
+retrieval clients in the current process, including wiki, history, and skill
+retrieval; separate worker processes maintain their own counters.

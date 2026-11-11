@@ -454,6 +454,12 @@ help:
     desc     : Automatically select skills via decide, low-cost, then main; defaults off unless usedecide=true and a decision model (modeldec or OAF_DECIDE_MODEL) is set
     example  : "true"
     mandatory: false
+  - name     : historyembeddings
+    desc     : Use configured embeddings for enabled history retrieval (auto or off)
+  - name     : skillsembeddings
+    desc     : Use configured embeddings for enabled skill discovery (auto or off)
+  - name     : embeddingmaxcalls
+    desc     : Maximum embedding provider calls per search (default 9)
   - name     : skillsautolimit
     desc     : Combined compact candidate limit for automatic skill selection
     example  : "5"
@@ -1710,6 +1716,9 @@ jobs:
         useasciiviz    : useasciiviz
         skillsautosearch: skillsautosearch
         skillsautolimit: skillsautolimit
+        historyembeddings: historyembeddings
+        skillsembeddings: skillsembeddings
+        embeddingmaxcalls: embeddingmaxcalls
         skillsmaxloaded: skillsmaxloaded
         skillsmaxchars: skillsmaxchars
         skillmaxautoload: skillmaxautoload
@@ -2031,6 +2040,9 @@ jobs:
       useasciiviz    : toBoolean.isBoolean.default(false)
       skillsautosearch: toBoolean.isBoolean.default(__)
       skillsautolimit: toNumber.isNumber.default(5)
+      historyembeddings: isString.default("auto")
+      skillsembeddings: isString.default("auto")
+      embeddingmaxcalls: toNumber.isNumber.default(9)
       skillsmaxloaded: toNumber.isNumber.default(3)
       skillsmaxchars: toNumber.isNumber.default(12000)
       skillmaxautoload: toNumber.isNumber.default(1)

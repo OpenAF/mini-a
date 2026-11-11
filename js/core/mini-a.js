@@ -2764,10 +2764,12 @@ MiniA.prototype.getMetrics = function() {
     var advisorCalls = global.__mini_a_metrics.advisor_calls.get()
     var memorySnapshot = this._getMemoryMetricsSnapshot()
     var decisionMetrics = this._decisionMetrics || {}
+    var embeddingMetrics = typeof MiniAEmbeddings !== "undefined" ? MiniAEmbeddings.metrics() : {}
 
     return {
         execution: this._execution ? this._executionSync(function(execution) { return execution.snapshot() }) : __,
         decisions: clone(decisionMetrics),
+        embeddings: embeddingMetrics,
         fork_policy: this._subtaskManager ? MiniAForkPolicy.copy(this._subtaskManager.forkMetrics) : {},
         skills: this._skillRuntime ? this._skillRuntime.snapshot() : {},
         communication: this._comms ? MiniAComms.clone(this._comms.broker.metrics) : __,
@@ -2776,7 +2778,8 @@ MiniA.prototype.getMetrics = function() {
             low_cost: llmLcCalls,
             validation: llmValCalls,
             decision: decisionMetrics.calls || 0,
-            total: llmNormalCalls + llmLcCalls + llmValCalls + advisorCalls + (decisionMetrics.calls || 0),
+            embeddings: embeddingMetrics.calls || 0,
+            total: llmNormalCalls + llmLcCalls + llmValCalls + advisorCalls + (decisionMetrics.calls || 0) + (embeddingMetrics.calls || 0),
             fallback_to_main: global.__mini_a_metrics.fallback_to_main_llm.get(),
             lc_json_retries: global.__mini_a_metrics.lc_json_retries.get(),
             lc_reply_tool_attempts: global.__mini_a_metrics.lc_reply_tool_attempts.get(),
@@ -3245,11 +3248,13 @@ MiniA.prototype._initHistoryVm = function(args, existingPayload) {
     return __
   }
   var conversationPath = isString(args.conversation) ? args.conversation.trim() : ""
-  var initKey = conversationPath + "|" + enabled + "|" + shadow + "|" + contextVirtualization + "|" + contextVirtualizationShadow
+  var initKey = conversationPath + "|" + enabled + "|" + shadow + "|" + contextVirtualization + "|" + contextVirtualizationShadow + "|" + args.historyembeddings + "|" + args.embeddingmaxcalls
   if (isObject(this._historyVm) && this._historyVmInitKey === initKey) return this._historyVm
   __miniAEnsureOptionalLibrary("history")
   this._historyVm = new MiniAHistoryVM({
     enabled: enabled,
+    embeddingMode: args.historyembeddings,
+    embeddingMaxCalls: args.embeddingmaxcalls,
     shadow: shadow,
     contextVirtualization: contextVirtualization,
     contextVirtualizationShadow: contextVirtualizationShadow,
@@ -12780,6 +12785,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     if (isObject(this._wikiManager)) fileTool._wikiManager = this._wikiManager
     if (isObject(this._skillWikiManager)) {
       fileTool._skillWikiManager = this._skillWikiManager
+      this._skillWikiManager._skillEmbeddingOptions = { skillsembeddings: args.skillsembeddings, embeddingmaxcalls: args.embeddingmaxcalls }
       fileTool._skillsMaxLoaded = isNumber(args.skillsmaxloaded) ? args.skillsmaxloaded : 3
       fileTool._skillsMaxChars = isNumber(args.skillsmaxchars) ? args.skillsmaxchars : 12000
     }
@@ -13353,7 +13359,7 @@ MiniA.prototype._createHistoryVmMcpConfig = function(args) {
   var fns = {
     history_search: function(params) {
       var p = isMap(params) ? params : {}
-      return parent._historyVm.search(p.query, p.limit, p.cursor)
+      return parent._historyVm.search(p.query, p.limit, p.cursor, { mode: p.mode })
     },
     history_get: function(params) {
       var p = isMap(params) ? params : {}
@@ -13372,7 +13378,8 @@ MiniA.prototype._createHistoryVmMcpConfig = function(args) {
       inputSchema: {
         type: "object",
         properties: {
-          query: { type: "string", description: "Literal case-insensitive text to find; empty lists recent objects." },
+          mode: { type: "string", enum: ["auto", "exact"], description: "Use exact for literal matching." },
+          query: { type: "string", description: "Text to find; auto mode combines literal and semantic retrieval when configured. Empty lists recent objects." },
           limit: { type: "number", description: "Results per page, 1-50." },
           cursor: { type: "number", description: "Pagination cursor returned by the previous search." }
         }
@@ -13407,7 +13414,7 @@ MiniA.prototype._createHistoryVmMcpConfig = function(args) {
   if (parent._historyVm.contextVirtualization === true) {
     fns.context_search = function(params) {
       var p = isMap(params) ? params : {}
-      return parent._historyVm.contextSearch(p.query, p.limit, p.cursor, { maxDepth: p.maxDepth, includeObsolete: p.includeObsolete })
+      return parent._historyVm.contextSearch(p.query, p.limit, p.cursor, { maxDepth: p.maxDepth, includeObsolete: p.includeObsolete, mode: p.mode })
     }
     fns.context_get = function(params) {
       var p = isMap(params) ? params : {}
@@ -13433,6 +13440,7 @@ MiniA.prototype._createHistoryVmMcpConfig = function(args) {
       name: "context_search",
       description: "Search cheap context abstracts first and refine into matching hierarchy branches. Returns stable context handles, not filesystem paths.",
       inputSchema: { type: "object", properties: {
+        mode: { type: "string", enum: ["auto", "exact"] },
         query: { type: "string", description: "Text to search; empty lists hierarchy roots." },
         limit: { type: "number", description: "Results per page, 1-50." },
         cursor: { type: "number", description: "Pagination cursor." },

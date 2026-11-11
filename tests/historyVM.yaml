@@ -2,6 +2,9 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA History VM Tests::SemanticRetrieval
+  to: oJob Test
+  exec: args.func = function() { load("tests/semanticRetrieval.js") }
 - name: MiniA History VM Tests::AssemblyCostMemo
   from: MiniA History VM Tests::Init
   to: oJob Test

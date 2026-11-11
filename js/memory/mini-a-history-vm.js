@@ -4,6 +4,9 @@
 
 var MiniAHistoryVM = function(options) {
   var opts = isMap(options) ? options : {}
+  this.embeddingMode = opts.embeddingMode
+  this.embeddingMaxCalls = opts.embeddingMaxCalls
+  this._semanticPages = {}
   this.schemaVersion = 1
   this.normalizerVersion = 1
   this.policyVersion = 1
@@ -1233,6 +1236,11 @@ MiniAHistoryVM.prototype.contextSearch = function(query, limit, cursor, options)
     if (q.length === 0 || score > 0 || depths[object.handle] > 0) ranked.push({ object: object, score: score, exactMatch: exactMatch, depth: depths[object.handle] || 0, matchedLevel: indexed.matchedLevels[object.handle] || "branch" })
   }
   ranked.sort(function(a, b) { return b.score - a.score || a.depth - b.depth || b.object.event.seq - a.object.event.seq })
+  this.embeddingStatus = { mode: "lexical" }
+  if (opts.mode !== "exact") {
+    var semanticObjects = this._semanticCandidates(query, ranked.map(function(item) { return item.object }), start, true, opts.includeObsolete)
+    ranked = semanticObjects.map(function(object) { return { object: object, score: 0, depth: 0, matchedLevel: "hybrid", exactMatch: String(object.content).toLowerCase().indexOf(q) >= 0 } })
+  }
   var selected = ranked.slice(start, start + cap)
   this.metrics.context_objects_considered += ranked.length
   this.metrics.context_objects_selected += selected.length
@@ -1255,7 +1263,7 @@ MiniAHistoryVM.prototype.contextSearch = function(query, limit, cursor, options)
       estimatedTokens: item.object.estimatedOriginalTokens
     }
   }, this)
-  return { query: query || "", stage: stage, results: results, nextCursor: start + cap < ranked.length ? start + cap : __, totalMatches: ranked.length, objectsConsidered: ranked.length, candidateTokens: candidateTokens }
+  return { query: query || "", retrieval: this.embeddingStatus, stage: stage, results: results, nextCursor: start + cap < ranked.length ? start + cap : __, totalMatches: ranked.length, objectsConsidered: ranked.length, candidateTokens: candidateTokens }
 }
 
 MiniAHistoryVM.prototype._boundedTextResult = function(object, mode, text, metadata) {
@@ -2143,7 +2151,7 @@ MiniAHistoryVM.prototype._contentCodePoints = function(value, limit) {
   return chars
 }
 
-MiniAHistoryVM.prototype.search = function(query, limit, cursor) {
+MiniAHistoryVM.prototype.search = function(query, limit, cursor, options) {
   this.metrics.searches++
   var q = isString(query) ? query.toLowerCase().trim() : ""
   var cap = isNumber(limit) ? Math.max(1, Math.min(50, Math.floor(limit))) : 10
@@ -2155,10 +2163,12 @@ MiniAHistoryVM.prototype.search = function(query, limit, cursor) {
     var haystack = (object.summary + "\n" + (isString(object.content) ? object.content : stringify(object.content, __, ""))).toLowerCase()
     if (q.length === 0 || haystack.indexOf(q) >= 0) candidates.push(object)
   }
+  this.embeddingStatus = { mode: "lexical" }
+  if (!isMap(options) || options.mode !== "exact") candidates = this._semanticCandidates(query, candidates, start, false)
   var page = candidates.slice(start, start + cap).map(function(object) {
     return { id: object.id, handle: object.handle, kind: object.kind, type: object.type, summary: object.summary, originalBytes: object.originalBytes, estimatedTokens: object.estimatedOriginalTokens }
   })
-  return { query: query || "", results: page, nextCursor: start + cap < candidates.length ? start + cap : __, totalMatches: candidates.length }
+  return { query: query || "", retrieval: this.embeddingStatus, results: page, nextCursor: start + cap < candidates.length ? start + cap : __, totalMatches: candidates.length }
 }
 
 MiniAHistoryVM.prototype.get = function(id, offset, limit) {
@@ -2493,4 +2503,34 @@ MiniAHistoryVM.readLocalSnapshot = function(path) {
   if (!isArray(payload.c)) throw new Error("Invalid local history envelope")
   MiniAHistoryVM.validateSnapshot(snapshot, payload.history_vm)
   return snapshot
+}
+
+// Retrieve semantic evidence only from eligible objects in the active branch.
+MiniAHistoryVM.prototype._semanticCandidates = function(query, lexical, cursor, context, includeObsolete) {
+  if (this.embeddingMode === "off" || !String(query || "").trim().length || !isDef(getEnv("OAF_EMBED_MODEL"))) return lexical
+  try {
+    if (typeof MiniASemanticRetrieve === "undefined") loadLib(__miniAPath("js/memory/mini-a-embeddings.js"))
+    var eligible = this.objects.filter(function(object) { return object.branchId === this.branchId && (!context || includeObsolete === true || !object.obsolete) }, this)
+    var generation = sha256(eligible.map(function(object) { return object.id + ":" + sha256(stringify(object.content) + String(object.summary) + String(object.obsolete)) }).join("|"))
+    var key = sha256(String(query) + "|" + context + "|" + includeObsolete + "|" + this.branchId + "|" + generation + "|" + getEnv("OAF_EMBED_MODEL"))
+    var saved = this._semanticPages[key]
+    if (cursor > 0 && saved) return saved
+    var documents = []
+    eligible.forEach(function(object) { if (String(object.summary || "").trim().length) documents.push({ id: object.id, key: object.id + ":summary", text: String(object.summary) }) })
+    eligible.forEach(function(object) {
+      var chars = this._contentCodePoints(isString(object.content) ? object.content : stringify(object.content, __, ""))
+      for (var offset = 0; offset < chars.length; offset += 1800) documents.push({ id: object.id, key: object.id + ":" + offset, text: chars.slice(offset, offset + 2000).join("") })
+    }, this)
+    var result = MiniASemanticRetrieve(query, documents, lexical.map(function(object) { return object.id }), { mode: this.embeddingMode, maxCalls: this.embeddingMaxCalls, path: this.storePath + "/embeddings.db" })
+    this.embeddingStatus = result.status
+    var byId = {}
+    eligible.forEach(function(object) { byId[object.id] = object })
+    var ranked = result.ids.map(function(id) { return byId[id] }).filter(function(object) { return isDef(object) })
+    if (Object.keys(this._semanticPages).length >= 20) this._semanticPages = {}
+    this._semanticPages[key] = ranked
+    return ranked
+  } catch(e) {
+    this.embeddingStatus = { mode: "lexical", reason: "embedding-unavailable" }
+    return lexical
+  }
 }

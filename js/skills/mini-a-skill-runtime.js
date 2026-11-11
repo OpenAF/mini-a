@@ -298,7 +298,7 @@ function __miniAInstallSkillRuntime() {
     runtime.event("requests", { requests: mentions, origin: "goal-or-handoff" })
     var wikiCandidates = []
     if (provider && (args.skillsautosearch !== false && !mentions.length || mentions.some(function(name) { return name.indexOf(":") < 0 }))) {
-      try { wikiCandidates = provider.recommend({ task: mentions.length ? mentions.join(" ") : String(args.goal || ""), limit: Math.max(5, args.skillsautolimit || 5) }).map(function(item) { return merge(item, { id: item.ref, source: "wiki", description: item.summary || "" }) }) }
+      try { wikiCandidates = provider.recommend({ _skipSemantic: true, task: mentions.length ? mentions.join(" ") : String(args.goal || ""), limit: Math.max(5, args.skillsautolimit || 5) }).map(function(item) { return merge(item, { id: item.ref, source: "wiki", description: item.summary || "" }) }) }
       catch(e) { runtime.event("unavailable", { ref: "wiki", reason: __miniAErrMsg(e) }); if (mentions.some(function(value) { return value.indexOf("wiki:") === 0 })) runtime.block("wiki", __miniAErrMsg(e)) }
     }
     mentions.forEach(function(name) {
@@ -326,8 +326,34 @@ function __miniAInstallSkillRuntime() {
         explicit.push(item)
       }
     })
+    // Rank both enabled sources under one embedding budget before model selection.
+    var lexicalWikiCandidates = wikiCandidates.slice(0)
+    var semanticSkillIds = []
+    var semanticSkillOrder = []
+    if (!mentions.length && args.skillsautosearch !== false && args.skillsembeddings !== "off" && isDef(getEnv("OAF_EMBED_MODEL"))) {
+      try {
+        if (typeof MiniASemanticRetrieve === "undefined") loadLib(__miniAPath("js/memory/mini-a-embeddings.js"))
+        if (provider) {
+          var semanticWiki = __miniASkillSearch(provider._wm, { query: "", limit: 50, _semanticCatalog: true }, provider._logFn)
+          semanticWiki.forEach(function(item) {
+            if (!wikiCandidates.some(function(existing) { return existing.ref === item.ref })) wikiCandidates.push(merge(item, { id: item.ref, source: "wiki", description: item.summary || "" }))
+          })
+        }
+        var semanticSkills = local.concat(wikiCandidates).filter(function(item) { return !parent._skillDisablesModelInvocation(item) })
+        var docs = semanticSkills.map(function(item) { return { id: item.id, key: item.id, text: [item.name, item.description, item.summary, stringify(item.tags || []), stringify(item.intent || []), stringify(item.appliesTo || [])].filter(function(value) { return isDef(value) }).join("\n") } })
+        var lexical = semanticSkills.filter(function(item) { return (parent._scoreSkillForPrompt(item, args.goal, args.hookcontext) > 1 || semanticSkillIds.indexOf(item.id) >= 0) }).sort(function(a, b) { return parent._scoreSkillForPrompt(b, args.goal, args.hookcontext) - parent._scoreSkillForPrompt(a, args.goal, args.hookcontext) }).map(function(item) { return item.id })
+        var cacheRoot = String(java.lang.System.getProperty("user.home")) + "/.mini-a/cache"
+        var semanticResult = MiniASemanticRetrieve(String(args.goal || ""), docs, lexical, { mode: args.skillsembeddings, maxCalls: args.embeddingmaxcalls, path: cacheRoot + "/skill-embeddings.db" })
+        runtime.event("embeddings", semanticResult.status)
+        if (semanticResult.status.mode === "hybrid") {
+          semanticSkillOrder = semanticResult.ids
+          semanticSkillIds = semanticResult.ids.slice(0, Math.max(5, args.skillsautolimit || 5))
+        }
+      } catch(e) { runtime.event("embeddings", { mode: "lexical", reason: "embedding-unavailable" }) }
+    }
+    wikiCandidates = lexicalWikiCandidates.concat(wikiCandidates.filter(function(item) { return semanticSkillIds.indexOf(item.id) >= 0 && !lexicalWikiCandidates.some(function(existing) { return existing.id === item.id }) }))
     var disabledCount = local.filter(function(item) { return parent._skillDisablesModelInvocation(item) }).length
-    var candidates = local.filter(function(item) { return !parent._skillDisablesModelInvocation(item) && parent._scoreSkillForPrompt(item, args.goal, args.hookcontext) > 1 }).sort(function(a, b) { return parent._scoreSkillForPrompt(b, args.goal, args.hookcontext) - parent._scoreSkillForPrompt(a, args.goal, args.hookcontext) })
+    var candidates = local.filter(function(item) { return !parent._skillDisablesModelInvocation(item) && (parent._scoreSkillForPrompt(item, args.goal, args.hookcontext) > 1 || semanticSkillIds.indexOf(item.id) >= 0) }).sort(function(a, b) { return parent._scoreSkillForPrompt(b, args.goal, args.hookcontext) - parent._scoreSkillForPrompt(a, args.goal, args.hookcontext) })
     wikiCandidates = wikiCandidates.filter(function(item) {
       try { var meta = provider.open(item.ref, { cacheTtlMs: 0 }); return meta && !meta.error && !meta.disableModelInvocation }
       catch(e) { runtime.event("unavailable", { ref: item.ref, reason: __miniAErrMsg(e) }); return false }
@@ -346,6 +372,14 @@ function __miniAInstallSkillRuntime() {
         return false
       })
     }
+    if (semanticSkillOrder.length) {
+      var semanticSort = function(a, b) {
+        var ai = semanticSkillOrder.indexOf(a.id), bi = semanticSkillOrder.indexOf(b.id)
+        return (ai < 0 ? 1000000 : ai) - (bi < 0 ? 1000000 : bi)
+      }
+      candidates.sort(semanticSort)
+      wikiCandidates.sort(semanticSort)
+    }
     var eligibleCount = candidates.length + wikiCandidates.length, wikiCount = wikiCandidates.length
     var limit = Math.max(1, Math.floor(args.skillsautolimit || 5)), combined = []
     while (combined.length < limit && (candidates.length || wikiCandidates.length)) {
@@ -353,6 +387,10 @@ function __miniAInstallSkillRuntime() {
       if (combined.length < limit && wikiCandidates.length) combined.push(wikiCandidates.shift())
     }
     runtime.event("discovered", { localCount: local.length, wikiCount: wikiCount, eligibleCount: eligibleCount, disabledCount: disabledCount, candidates: combined.map(function(item) { return item.id }), candidateCount: combined.length })
+    if (semanticSkillOrder.length) combined.sort(function(a, b) {
+      var ai = semanticSkillOrder.indexOf(a.id), bi = semanticSkillOrder.indexOf(b.id)
+      return (ai < 0 ? 1000000 : ai) - (bi < 0 ? 1000000 : bi)
+    })
     var selected = explicit
     if (!selected.length && args.skillsautosearch !== false && combined.length && !runtime.blocked.length) {
       try { selected = this._selectSkillCandidates(combined, args, controls) }
@@ -363,6 +401,7 @@ function __miniAInstallSkillRuntime() {
     }
     else runtime.event("selection_skipped", { reason: selected.length ? "explicit-request-or-handoff" : runtime.blocked.length ? "required-skill-blocked" : args.skillsautosearch === false ? "automatic-search-disabled" : "no-eligible-candidates" })
     selected.forEach(function(item) {
+      if (semanticSkillIds.indexOf(item.id) >= 0) item.semanticGoal = String(args.goal || "")
       runtime.event("selected", { ref: item.id, explicit: explicit.indexOf(item) >= 0 })
       try {
         runtime.event("loading", { ref: item.id, source: item.source, path: item.templatePath || item.path || item.ref })
@@ -396,7 +435,7 @@ function __miniAInstallSkillRuntime() {
     var records = this._skillRuntime.records, parent = this
     return Object.keys(records).filter(function(key) {
       var record = records[key]
-      return record.state === "active" && record.candidate && parent._scoreSkillForPrompt(record.candidate, goal, "") > 1
+      return record.state === "active" && record.candidate && (parent._scoreSkillForPrompt(record.candidate, goal, "") > 1 || record.candidate.semanticGoal === String(goal))
     }).map(function(key) { return { ref: key, revision: records[key].revision, args: records[key].args && records[key].args.raw || "", required: true } })
   }
 

@@ -407,11 +407,11 @@ function __miniASkillRawHits(wm, query, opts, overFetch) {
 
 // ── skills-search (§8) ────────────────────────────────────────────────────────
 function __miniASkillSearch(wm, options, logFn) {
-  var opts = isObject(options) ? options : {}
+  var opts = merge(isMap(wm._skillEmbeddingOptions) ? wm._skillEmbeddingOptions : {}, isObject(options) ? options : {})
   var query = isString(opts.query) ? opts.query.trim() : ""
   var limit = isNumber(opts.limit) && opts.limit > 0 ? Math.min(Math.floor(opts.limit), 50) : 10
   var typeFilter = isDef(opts.type) ? String(opts.type).trim().toLowerCase() : "skill"
-  var overFetch = Math.min(Math.max(limit * 5, 40), 200)
+  var overFetch = opts._semanticCatalog === true ? Number.MAX_VALUE : Math.min(Math.max(limit * 5, 40), 200)
 
   var targetsByName = __miniASkillTargetsByName(wm, opts.wiki)
   var hits = query.length === 0 ? __miniASkillListAll(wm, opts.wiki, overFetch) : __miniASkillRawHits(wm, query, opts, overFetch)
@@ -436,7 +436,22 @@ function __miniASkillSearch(wm, options, logFn) {
     }))
   })
   results.sort(function(a, b) { return b.score - a.score })
-  results = results.slice(0, limit)
+  if (opts._semanticCatalog !== true && opts._skipSemantic !== true && opts.skillsembeddings !== "off" && query.length && isDef(getEnv("OAF_EMBED_MODEL"))) {
+    try {
+      if (typeof MiniASemanticRetrieve === "undefined") loadLib(__miniAPath("js/memory/mini-a-embeddings.js"))
+      var catalog = __miniASkillSearch(wm, merge(merge({}, opts), { query: "", _semanticCatalog: true, _skipSemantic: true }), logFn)
+      var records = {}
+      catalog.forEach(function(item) { records[item.ref] = item })
+      var documents = catalog.map(function(item) { return { id: item.ref, key: item.ref, text: [item.name, item.summary, stringify(item.tags || []), stringify(item.intent || [])].join("\n") } })
+      var retrieval = MiniASemanticRetrieve(query, documents, results.map(function(item) { return item.ref }), {
+        mode: opts.skillsembeddings, maxCalls: opts.embeddingmaxcalls,
+        path: String(java.lang.System.getProperty("user.home")) + "/.mini-a/cache/skill-embeddings.db"
+      })
+      wm._skillEmbeddingStatus = retrieval.status
+      if (retrieval.status.mode === "hybrid") results = retrieval.ids.map(function(id) { return records[id] }).filter(function(item) { return isDef(item) })
+    } catch(e) { wm._skillEmbeddingStatus = { mode: "lexical", reason: "embedding-unavailable" } }
+  }
+  if (opts._semanticCatalog !== true) results = results.slice(0, limit)
   __miniASkillMetricsIncr("searches")
   __miniASkillLog(logFn, "searched \"" + query + "\" -> " + results.length + " candidate(s)")
   return results

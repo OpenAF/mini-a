@@ -776,6 +776,9 @@ function MiniAInteractiveSession(args, adapter) {
     skillwikiroot  : { type: "string", description: "Root directory for a dedicated skill library (fs backend). Only needed when not reusing usewiki's wiki." },
     skillwikimounts: { type: "string", dataEditor: "array", description: "SLON/JSON array of read-only skill-library mounts, same shape as wikimounts. Only used with a dedicated skill wiki." },
     skillsautosearch: { type: "boolean", description: "Automatically select skills via decide, low-cost, then main. Defaults off unless usedecide=true and a decision model (modeldec or OAF_DECIDE_MODEL) is set; false keeps model-led or explicit loading." },
+    historyembeddings: { type: "string", default: "auto", description: "History embeddings: auto or off." },
+    skillsembeddings: { type: "string", default: "auto", description: "Skill discovery embeddings: auto or off." },
+    embeddingmaxcalls: { type: "number", default: 9, description: "Maximum embedding provider calls per search." },
     skillsautolimit: { type: "number", default: 5, description: "Maximum results per automatic skill search." },
     skillsmaxloaded: { type: "number", default: 3, description: "Maximum distinct local/wiki skills consulted per agent run." },
     skillsmaxchars : { type: "number", default: 12000, description: "Shared local/wiki skill guidance character budget per agent run." },
@@ -6072,6 +6075,7 @@ function MiniAInteractiveSession(args, adapter) {
           normal: metrics.llm_calls.normal || 0,
           low_cost: metrics.llm_calls.low_cost || 0,
           validation: metrics.llm_calls.validation || 0,
+          embeddings: metrics.llm_calls.embeddings || 0,
           decision: metrics.llm_calls.decision || 0
         }
         if ((metrics.llm_calls.fallback_to_main || 0) > 0) summaryExport.llm_calls.fallback_to_main = metrics.llm_calls.fallback_to_main || 0
@@ -6125,6 +6129,24 @@ function MiniAInteractiveSession(args, adapter) {
         ].forEach(function(row) {
           summaryRows.push({ category: "Decision", metric: row[0], value: row[1] })
         })
+      }
+
+      // Embedding tokens are provider-reported; cache hits do not consume tokens.
+      if (isMap(metrics.embeddings)) {
+        var embeddings = metrics.embeddings
+        summaryExport.embeddings = clone(embeddings)
+        ;[
+          ["Calls", embeddings.calls || 0],
+          ["Cache hits", embeddings.hits || 0],
+          ["Failures", embeddings.failures || 0],
+          ["Input tokens", embeddings.usage_reports > 0 ? embeddings.input_tokens || 0 : "Unavailable"],
+          ["Total tokens", embeddings.usage_reports > 0 ? embeddings.total_tokens || 0 : "Unavailable"],
+          ["Usage reports", embeddings.usage_reports || 0],
+          ["Elapsed (ms)", embeddings.duration_ms || 0]
+        ].forEach(function(row) {
+          summaryRows.push({ category: "Embeddings", metric: row[0], value: row[1] })
+        })
+        summaryRows.push({ category: "LLM Calls", metric: "Embeddings", value: embeddings.calls || 0 })
       }
 
       // Actions
