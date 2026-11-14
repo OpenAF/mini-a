@@ -337,50 +337,86 @@ function MiniAInteractiveSession(args, adapter) {
       })
     }
 
+  // Share guided plugin management across startup, console and TUI adapters.
+  function managePlugins(pluginManager) {
+    var rawAsk = adapter ? function(label) { return adapter.ask("text", label) } : host.ask
+    // Cancel text entry without sending an incomplete management request.
+    function read(label) {
+      var value = rawAsk(label)
+      if (isUnDef(value) || value === null || String(value).trim() === "/cancel") throw { cancelled: true }
+      return String(value)
+    }
+    // Normalize native and adapter choices and provide a consistent way back.
+    function choose(label, values) {
+      var choices = values.concat(["Back"])
+      var value = askChoose(label, choices, choices.length)
+      var index = isNumber(value) ? value : choices.indexOf(String(value))
+      if (index < 0 || index >= values.length) throw { cancelled: true }
+      return values[index]
+    }
+    var ask = read
+    print("Plugins — installations start disabled; activation applies to new sessions. Type /cancel to go back.")
+    var operations = ["list", "inventory", "create", "inspect", "convert", "export", "install", "enable", "disable", "remove", "exit"]
+    while (true) {
+      try {
+      var choice = askChoose("Plugins — choose an operation", operations, operations.length)
+      var operation = isNumber(choice) ? operations[choice] : String(choice)
+      if (operation === "exit" || operations.indexOf(operation) < 0) break
+      var request = { op: operation }
+      if (["inspect", "convert", "export", "install"].indexOf(operation) >= 0) request.source = ask("Plugin folder: ")
+      if (["create", "convert", "export"].indexOf(operation) >= 0) {
+        request.out = ask("Output folder (create/convert) or ZIP (export): ")
+        request.target = choose("Target format", ["minia", "claude", "chatgpt", "opencode", "copilot", "universal", "all"])
+        request.exclude = ask("Explicit excluded component IDs (comma separated): ")
+      }
+      if (operation === "create") {
+        request.spec = {
+          metadata: { name: ask("Plugin name: "), version: ask("Version [0.1.0]: ") || "0.1.0", description: ask("Description: ") },
+          components: []
+        }
+        var componentKinds = ["skills", "commands", "hooks", "scripts", "assets", "done"]
+        while (true) {
+          var componentChoice = askChoose("Add component", componentKinds, componentKinds.length)
+          var componentKind = isNumber(componentChoice) ? componentKinds[componentChoice] : String(componentChoice)
+          if (componentKind === "done" || componentKinds.indexOf(componentKind) < 0) break
+          request.spec.components.push({ kind: componentKind, source: ask("Component path: "), name: ask("Packaged name (include extension for files): ") })
+        }
+        if (ask("Add a synchronous command hook? [y/N]: ").toLowerCase() === "y") {
+          var hookEvents = ["UserPromptSubmit", "PreToolUse", "PostToolUse"]
+          var eventChoice = askChoose("Hook event", hookEvents, hookEvents.length)
+          var eventName = isNumber(eventChoice) ? hookEvents[eventChoice] : String(eventChoice)
+          if (hookEvents.indexOf(eventName) >= 0) {
+            request.spec.hooks = {}
+            request.spec.hooks[eventName] = [{ matcher: ask("Tool matcher [.*]: ") || ".*", hooks: [{ type: "command", command: ask("Hook command: "), timeout: Number(ask("Timeout seconds [5]: ") || "5") }] }]
+          }
+        }
+        var mcpSpec = ask("MCP servers JSON file (blank to skip): ")
+        if (mcpSpec.length) request.spec.mcp = pluginManager.readConfig(mcpSpec)
+      }
+      if (["enable", "disable", "remove"].indexOf(operation) >= 0) {
+        var items = pluginManager.list()
+        if (!items.length) {
+          print("No plugins installed.")
+          continue
+        }
+        var selected = choose("Installed plugin", items.map(function(item) { return item.id + " — " + (item.enabled ? "Enabled" : "Disabled") }))
+        request.id = items.filter(function(item) { return selected.indexOf(item.id + " — ") === 0 })[0].id
+        if (operation === "remove" && choose("Remove " + request.id + "?", ["Keep plugin", "Remove plugin"]) !== "Remove plugin") continue
+      }
+      try { print(printTree(pluginManager.request(request))) } catch (error) { logErr(String(error)) }
+      } catch (error) {
+        if (error.cancelled !== true) logErr(String(error))
+        else print("Plugin operation cancelled.")
+      }
+    }
+  }
+
     // Run plugin management without initializing a model or MCP connections.
     if (isDef(args.pluginop) || toBoolean(args.pluginman) === true) {
       loadLib(__miniAPath("js/skills/mini-a-plugins.js"))
       var pluginManager = new MiniAPluginManager(args)
       if (toBoolean(args.pluginman) === true) {
-        var operations = ["list", "inventory", "create", "inspect", "convert", "export", "install", "enable", "disable", "remove", "exit"]
-        while (true) {
-          var choice = askChoose("Plugin operation", operations, operations.length)
-          var operation = isNumber(choice) ? operations[choice] : String(choice)
-          if (operation === "exit" || operations.indexOf(operation) < 0) break
-          var request = { op: operation }
-          if (["inspect", "convert", "export", "install"].indexOf(operation) >= 0) request.source = ask("Plugin folder: ")
-          if (["create", "convert", "export"].indexOf(operation) >= 0) {
-            request.out = ask("Output folder (create/convert) or ZIP (export): ")
-            request.target = ask("Target: minia, claude, chatgpt, opencode, copilot, universal, all: ") || "minia"
-            request.exclude = ask("Explicit excluded component IDs (comma separated): ")
-          }
-          if (operation === "create") {
-            request.spec = {
-              metadata: { name: ask("Plugin name: "), version: ask("Version [0.1.0]: ") || "0.1.0", description: ask("Description: ") },
-              components: []
-            }
-            var componentKinds = ["skills", "commands", "hooks", "scripts", "assets", "done"]
-            while (true) {
-              var componentChoice = askChoose("Add component", componentKinds, componentKinds.length)
-              var componentKind = isNumber(componentChoice) ? componentKinds[componentChoice] : String(componentChoice)
-              if (componentKind === "done" || componentKinds.indexOf(componentKind) < 0) break
-              request.spec.components.push({ kind: componentKind, source: ask("Component path: "), name: ask("Packaged name (include extension for files): ") })
-            }
-            if (ask("Add a synchronous command hook? [y/N]: ").toLowerCase() === "y") {
-              var hookEvents = ["UserPromptSubmit", "PreToolUse", "PostToolUse"]
-              var eventChoice = askChoose("Hook event", hookEvents, hookEvents.length)
-              var eventName = isNumber(eventChoice) ? hookEvents[eventChoice] : String(eventChoice)
-              if (hookEvents.indexOf(eventName) >= 0) {
-                request.spec.hooks = {}
-                request.spec.hooks[eventName] = [{ matcher: ask("Tool matcher [.*]: ") || ".*", hooks: [{ type: "command", command: ask("Hook command: "), timeout: Number(ask("Timeout seconds [5]: ") || "5") }] }]
-              }
-            }
-            var mcpSpec = ask("MCP servers JSON file (blank to skip): ")
-            if (mcpSpec.length) request.spec.mcp = pluginManager.readConfig(mcpSpec)
-          }
-          if (["enable", "disable", "remove"].indexOf(operation) >= 0) request.id = ask("Plugin id: ")
-          try { print(printTree(pluginManager.request(request))) } catch (error) { logErr(String(error)) }
-        }
+        managePlugins(pluginManager)
       } else {
         try {
           print(printTree(pluginManager.request({ op: args.pluginop, source: args.pluginsource, out: args.pluginout, id: args.pluginid, target: args.plugintarget, format: args.pluginformat, spec: args.pluginspec, exclude: args.pluginexclude, dryRun: toBoolean(args.plugindryrun) })))
@@ -6805,6 +6841,7 @@ function MiniAInteractiveSession(args, adapter) {
       { command: "/models", description: "List current main, low, validation and decision models" },
       { command: "/stats [mode] [out=file.json]", description: "Show session statistics (modes: detailed, tools, memory, wiki)" },
       { command: "/debug [filter]", description: "Inspect previous-goal events; filters: all, calls, answers, memory, system, prompts, responses, thinking, problems" },
+      { command: "/plugins [help|JSON/SLON]", description: "Manage plugins with guided input or an explicit request" },
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
       { command: "/edit [last]", description: "Compose and submit one goal in the configured external editor (last pre-fills the previous goal; /editor also works)" },
       { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, compact, mounts, attach, detach" },
@@ -7826,7 +7863,15 @@ function MiniAInteractiveSession(args, adapter) {
       if (parsedSlashCommand.name === "plugins") {
         try {
           if (typeof MiniAPluginManager !== "function") loadLib(__miniAPath("js/skills/mini-a-plugins.js"))
-          var pluginRequest = parsedSlashCommand.argsRaw.length ? af.fromJSSLON(parsedSlashCommand.argsRaw) : { op: "list" }
+          if (!parsedSlashCommand.argsRaw.length) {
+            managePlugins(new MiniAPluginManager(args))
+            continue
+          }
+          if (parsedSlashCommand.argsRaw.trim() === "help") {
+            print("Usage: /plugins [help|JSON/SLON request] — no arguments opens guided management. Example: /plugins {op: list}")
+            continue
+          }
+          var pluginRequest = af.fromJSSLON(parsedSlashCommand.argsRaw)
           print(printTree(new MiniAPluginManager(args).request(pluginRequest)))
         } catch (error) { logErr(String(error)) }
         continue

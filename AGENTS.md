@@ -40,3 +40,11 @@ The Git history shows short imperative subjects (`Add usetools option`, `Update 
 
 ## Security & Configuration Notes
 Shell access is disabled by default—require contributors to opt in with `useshell=true` and justify commands touching the filesystem. Never commit secrets; rely on `OAF_MODEL` and related environment variables. When shipping MCP definitions, review default timeouts and permissions (`readwrite`, `shellallow`) to keep the agent constrained by default.
+
+## Consistent Web and Console/TUI UX
+- Treat web advanced view, console, and TUI as presentations of the same workflows. Reuse management services and adapter-aware `ask`/`askChoose` prompts; keep explicit CLI/request forms available for automation.
+- Match neighboring screens: include a currentColor SVG for every advanced navigation entry, shared themed cards/action rows, persistent field labels, responsive spacing, and keyboard-visible focus. Use existing components and theme variables.
+- Start with the common task and reveal operation-specific fields as needed. Keep advanced JSON and uncommon options collapsed. Distinguish browser uploads/downloads from server paths.
+- Provide loading, empty, success, and actionable error states; prevent duplicate submissions and stale results after navigation/session changes. Preserve entered values after errors.
+- Console/TUI menus must support Back/Cancel, normalize choice results, identify selected resources clearly, and avoid submitting partial requests. Explain activation scope and confirm destructive selections consistently across surfaces.
+- Verify changed workflows with focused behavioral tests, a running browser in light/dark and narrow layouts, and an interactive terminal where available. Report any visual or runtime checks not exercised; static tests alone do not establish visual correctness.

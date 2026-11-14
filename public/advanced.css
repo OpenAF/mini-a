@@ -454,3 +454,13 @@ body.mini-a-advanced.advanced-pane-focused .chat-container { display:none; }
 .advanced-help-entry[open]>summary {margin-bottom:.6rem}
 .advanced-shell dl.advanced-context-summary :is(dt,dd) {margin:0;padding:0;align-self:center;font-style:normal}
 .advanced-shell dl.advanced-context-summary dt {font-weight:400}
+
+/* Keep plugin workflows aligned with the shared advanced forms and themes. */
+.advanced-plugins { min-width:0; }
+.advanced-plugin-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr)); gap:.85rem; min-width:0; }
+.advanced-plugin-field { display:flex; flex-direction:column; gap:.35rem; min-width:0; font-size:.9rem; }
+.advanced-plugin-field :is(input,select,textarea) { box-sizing:border-box; width:100%; min-width:0; }
+.advanced-plugin-fields>details,.advanced-plugin-fields>div { grid-column:1/-1; }
+.advanced-plugin-fields textarea { box-sizing:border-box; width:100%; min-height:12rem; margin-top:.5rem; }
+.advanced-plugins [hidden] { display:none!important; }
+.advanced-plugin-list { overflow-wrap:anywhere; }

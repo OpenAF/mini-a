@@ -3,20 +3,20 @@ const fs = require('node:fs')
 const vm = require('node:vm')
 
 // Exercise the guided form's actual request construction without a browser dependency.
+const { el, all } = require('./webAdvancedFixture.cjs')
 const elements = []
-function element(tag, text) {
-  const value = { tag, textContent: text || '', value: '', children: [], files: [], checked: false,
-    append(...children) { this.children.push(...children) },
-    prepend(child) { this.children.unshift(child) },
-    replaceChildren(...children) { this.children = children },
-    setAttribute(key, value) { this[key] = value }
-  }
+function element(tag, text, className) {
+  const value = el(tag, text, className)
+  value.files = []
+  value.checked = false
+  value.click = function() { return this.callback?.() }
   elements.push(value)
   return value
 }
 const requests = []
 const context = vm.createContext({
   el: element,
+  window: { confirm: () => true },
   input(label) { const value = element('input'); value.label = label; return value },
   button(label, callback) { const value = element('button', label); value.callback = callback; return value },
   structuredMap(value) { const view = element('div'); view.payload = value; return view },
@@ -31,6 +31,8 @@ vm.runInContext(source.slice(start, end) + '\npluginScreen()', context)
 const field = label => elements.find(value => value.label === label || value['aria-label'] === label)
 const click = label => elements.find(value => value.tag === 'button' && value.textContent === label).callback()
 ;(async () => {
+  await new Promise(resolve => setImmediate(resolve))
+  requests.length = 0
   field('Plugin name').value = 'guided-fixture'
   field('Component kind').value = 'skills'
   field('Component server path').value = '/tmp/example-skill'
@@ -41,7 +43,7 @@ const click = label => elements.find(value => value.tag === 'button' && value.te
   field('Hook event').value = 'PreToolUse'
   field('Hook command').value = 'python3 guard.py'
   field('Plugin destination').value = 'minia'
-  await click('create')
+  await click('Create')
   const request = requests.at(-1)
   assert.ok(elements.some(value => value.payload?.ok === true), 'results use structured map rendering')
   assert.equal(request.spec.metadata.name, 'guided-fixture')
@@ -52,7 +54,7 @@ const click = label => elements.find(value => value.tag === 'button' && value.te
   assert.equal(advanced.open, undefined, 'advanced is collapsed by default')
   field('Use JSON specification instead of guided fields').checked = true
   field('Creation specification JSON').value = '{invalid'
-  await click('create')
+  await click('Create')
   assert.equal(requests.length, 1, 'invalid advanced JSON must not submit')
   console.log('Guided plugin creation tests passed')
 })().catch(error => { console.error(error); process.exitCode = 1 })

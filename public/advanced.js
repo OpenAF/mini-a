@@ -227,7 +227,6 @@ window.MiniAAdvancedUI = function(bridge) {
   const dialog = el('dialog', undefined, 'advanced-dialog'); dialog.setAttribute('aria-label', 'Console interaction'); document.body.append(dialog);
   dialog.addEventListener('cancel', e => { e.preventDefault(); api({action:'stop'}).catch(showError); dialog.close(); });
   const screens = [
-    ['plugins', 'Plugins', 'Inspect local plugins and manage activation for new sessions.'],
     ['help', 'Help', 'Search command syntax, prerequisites, aliases and custom commands. Insert a command to edit it before running.'],
     ['answer', 'Answer', 'Read the previous answer, copy it or download it to your browser.'],
     ['activity', 'Live activity', 'Follow agent actions, tool calls, progress, and results in real time.'],
@@ -244,11 +243,13 @@ window.MiniAAdvancedUI = function(bridge) {
     ['ingest', 'Ingest', 'Import sources into the wiki and manage ingestion recovery.'],
     ['absorb', 'Absorb', 'Create, review, and apply knowledge absorption plans.'],
     ['dream', 'Dream', 'Run memory consolidation and wiki maintenance operations.'],
+    ['plugins', 'Plugins', 'Inspect local plugins and manage activation for new sessions.'],
     ['skills', 'Skills', 'Discover skills and invoke custom commands.'],
     ['subtasks', 'Subtasks', 'Delegate goals and inspect or cancel child tasks.']
   ];
   // Match Simple view's small, rounded, currentColor SVG line icons.
   const tabIcons = {
+    plugins: 'M9 3h6v5h5v6h-5v7H9v-7H4V8h5Z',
     help: 'M9 8a3 3 0 1 1 5 2c-2 1-2 2-2 4M12 18v1M3 3h18v18H3Z',
     answer: 'M5 3h14v18H5ZM8 7h8m-8 4h8m-8 4h6',
     editor: 'm4 16 12-12 4 4-12 12H4ZM13 7l4 4',
@@ -1813,6 +1814,12 @@ window.MiniAAdvancedUI = function(bridge) {
   }).observe(document.body, {attributes: true, attributeFilter: ['class']});
   // Manage packages through the authenticated shared management service.
   function pluginScreen() {
+    var workspace = el('div', undefined, 'advanced-plugins')
+    var workflows = el('div', undefined, 'advanced-actions')
+    var installed = el('div', undefined, 'advanced-plugin-list')
+    var importPanel = el('div', undefined, 'advanced-form advanced-plugin-fields')
+    var pending = false
+    var sessionId = bridge.uuid ? bridge.uuid() : ''
     var source = input('Server plugin folder')
     var upload = el('input')
     upload.type = 'file'
@@ -1826,7 +1833,7 @@ window.MiniAAdvancedUI = function(bridge) {
     })
     target.setAttribute('aria-label', 'Plugin destination')
     var exclusions = input('Explicit excluded component IDs, comma separated')
-    var creation = el('fieldset')
+    var creation = el('fieldset', undefined, 'advanced-form advanced-plugin-fields')
     creation.append(el('legend', 'Create a plugin'))
     var pluginName = input('Plugin name')
     pluginName.value = 'my-plugin'
@@ -1914,12 +1921,22 @@ window.MiniAAdvancedUI = function(bridge) {
     var output = input('Output folder or export ZIP')
     var id = input('Installed plugin ID')
     var result = el('div')
-    var controls = el('div')
+    var controls = el('div', undefined, 'advanced-actions')
+    var operationButtons = []
     ;['list', 'inventory', 'create', 'inspect', 'convert', 'export', 'download', 'install', 'enable', 'disable', 'remove'].forEach(function(op) {
-      controls.append(button(op, async function() {
+      var control = button(op[0].toUpperCase() + op.slice(1), async function() {
+        if (pending) return
+        if (op === 'remove' && !window.confirm('Remove plugin ' + id.value + '?')) return
+        pending = true
+        operationButtons.forEach(function(item) { item.disabled = true })
+        result.setAttribute('role', 'status')
+        result.textContent = 'Working…'
         try {
         var request = { op: op, source: source.value, out: output.value, id: id.value, target: target.value, exclude: exclusions.value }
-        if (op === 'create') request.spec = creationSpec()
+        if (op === 'create') {
+          request.spec = creationSpec()
+          request.out = createOutput.value
+        }
         if (upload.files.length && ['inspect', 'convert', 'export', 'download', 'install'].includes(op)) {
           if (upload.files[0].size > 25 * 1024 * 1024) throw new Error('ZIP limit is 25 MiB')
           request.upload = await new Promise(function(resolve, reject) {
@@ -1935,6 +1952,9 @@ window.MiniAAdvancedUI = function(bridge) {
           body: JSON.stringify(request)
         })
         var data = await response.json()
+        if (bridge.uuid && sessionId !== bridge.uuid() || workspace.isConnected === false) return
+        if (response.ok === false || data.error) throw new Error(data.error || 'Plugin request failed')
+        if (op === 'list' && Array.isArray(data)) drawInstalled(data)
         if (data.base64) {
           var bytes = Uint8Array.from(atob(data.base64), function(character) { return character.charCodeAt(0); })
           var url = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' }))
@@ -1946,11 +1966,113 @@ window.MiniAAdvancedUI = function(bridge) {
           result.textContent = 'Converted plugin downloaded.'
         } else result.replaceChildren(structuredMap(data))
         } catch (error) {
-          result.textContent = error.message || String(error)
+          if (workspace.isConnected !== false) result.textContent = error.message || String(error)
+        } finally {
+          pending = false
+          operationButtons.forEach(function(item) { item.disabled = false })
         }
-      }))
+      })
+      control.dataset.pluginOperation = op
+      operationButtons.push(control)
+      controls.append(control)
     })
-    screen.append(el('p', 'Installations start disabled. Activation changes apply to new sessions.'), source, upload, target, exclusions, creation, output, id, controls, result)
+    // Give every field a persistent label instead of relying on placeholders.
+    function field(label, control, parent) {
+      var wrapper = el('label', label, 'advanced-plugin-field')
+      wrapper.append(control)
+      parent.append(wrapper)
+      return wrapper
+    }
+    field('Server plugin folder or ZIP', source, importPanel)
+    field('Upload ZIP from this browser (up to 25 MiB)', upload, importPanel)
+    var targetField = field('Target format', target, importPanel)
+    var outputField = field('Output server folder or ZIP path', output, importPanel)
+    var options = el('details')
+    options.append(el('summary', 'Advanced conversion options'))
+    field('Excluded component IDs (comma separated)', exclusions, options)
+    importPanel.append(options)
+    Array.from(creation.children).forEach(function(control) {
+      if (['input', 'select'].indexOf(control.tagName ? control.tagName.toLowerCase() : control.tag) >= 0) {
+        var label = control.getAttribute ? control.getAttribute('aria-label') || control.placeholder : control['aria-label'] || control.label
+        var wrapper = el('label', label || 'Value', 'advanced-plugin-field')
+        creation.insertBefore(wrapper, control)
+        wrapper.append(control)
+      }
+    })
+    // Keep optional integrations out of the initial creation workflow.
+    function optionalGroup(title, fields) {
+      var section = el('details')
+      section.append(el('summary', title))
+      fields.forEach(function(control) { section.append(control.parentElement) })
+      creation.append(section)
+    }
+    optionalGroup('Optional MCP server', [mcpName, mcpUrl])
+    optionalGroup('Optional command hook', [hookEvent, hookCommand, hookMatcher, hookTimeout])
+    var createOutput = input('Create output folder')
+    field('Output server folder', createOutput, creation)
+    // Keep installed selections and activation actions together.
+    function drawInstalled(items) {
+      installed.replaceChildren()
+      if (!items.length) installed.append(el('p', 'No plugins installed. Choose Inspect/import/export to install a local package.'))
+      items.forEach(function(item) {
+        var card = el('div', undefined, 'advanced-form')
+        card.append(el('h4', item.name || item.id), el('p', item.id + ' · ' + (item.enabled ? 'Enabled' : 'Disabled')))
+        var actions = el('div', undefined, 'advanced-actions')
+        ;[item.enabled ? 'disable' : 'enable', 'remove'].forEach(function(op) {
+          actions.append(button(op === 'remove' ? 'Remove' : item.enabled ? 'Disable' : 'Enable', function() {
+            id.value = item.id
+            operationButtons.filter(function(control) { return control.dataset.pluginOperation === op })[0].click()
+          }))
+        })
+        card.append(actions)
+        installed.append(card)
+      })
+    }
+    var importOperation = el('select')
+    ;['inspect', 'convert', 'export', 'download', 'install'].forEach(function(op) {
+      var option = el('option', op[0].toUpperCase() + op.slice(1))
+      option.value = op
+      importOperation.append(option)
+    })
+    var operationField = field('Operation', importOperation, importPanel)
+    importPanel.prepend(operationField)
+    // Show only inputs and actions used by the selected import operation.
+    function updateImport() {
+      var op = importOperation.value
+      targetField.hidden = ['convert', 'export', 'download'].indexOf(op) < 0
+      outputField.hidden = ['convert', 'export'].indexOf(op) < 0
+      options.hidden = ['convert', 'export', 'download'].indexOf(op) < 0
+      operationButtons.forEach(function(control) {
+        if (['inspect', 'convert', 'export', 'download', 'install'].indexOf(control.dataset.pluginOperation) >= 0) control.hidden = control.dataset.pluginOperation !== op
+      })
+    }
+    importOperation.onchange = updateImport
+    var modeButtons = []
+    function chooseMode(mode) {
+      installed.hidden = mode !== 'installed'
+      id.parentElement.hidden = mode !== 'installed'
+      importPanel.hidden = mode !== 'import'
+      creation.hidden = mode !== 'create'
+      operationButtons.forEach(function(control) {
+        var op = control.dataset.pluginOperation
+        control.hidden = (mode === 'installed' ? ['list', 'inventory', 'enable', 'disable', 'remove'] : mode === 'create' ? ['create'] : ['inspect', 'convert', 'export', 'download', 'install']).indexOf(op) < 0
+      })
+      if (mode === 'import') updateImport()
+      modeButtons.forEach(function(control) { control.setAttribute('aria-pressed', String(control.dataset.mode === mode)) })
+    }
+    ;[['installed', 'Installed plugins'], ['import', 'Inspect/import/export'], ['create', 'Create']].forEach(function(item) {
+      var control = button(item[1], function() { chooseMode(item[0]) })
+      control.dataset.mode = item[0]
+      modeButtons.push(control)
+      workflows.append(control)
+    })
+    workspace.append(workflows, el('p', 'Installations start disabled. Activation changes apply to new sessions.'), installed, importPanel, creation)
+    field('Selected installed plugin ID', id, workspace)
+    workspace.append(controls, result)
+    screen.append(workspace)
+    chooseMode('installed')
+    operationButtons[0].click()
+
   }
 
   function renderScreen(focusRequest = '') {
