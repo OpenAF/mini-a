@@ -69,6 +69,7 @@ files:
 - README.md
 - RELEASE_NOTES.md
 - USAGE.md
+- clean.yaml
 - docs/ABSORB.md
 - docs/ADAPTIVE-ROUTER.md
 - docs/AGENT-PLUGINS.md
@@ -307,7 +308,7 @@ filesHash:
   .gitignore: 84212e41a206d7fe17afca1f63b841add75d0a47
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENT-CHEATSHEET.md: 38a09d995d38b824a4c68397162040b15c425996
-  AGENTS.md: 916af62d23f3c0582fe87ece82c663eb7cd51dcd
+  AGENTS.md: 8f064d7bbb2c8cafaae3e89446e55be467b708c1
   CHEATSHEET.md: 30f03a98c99d33afd248cedef855ec9d11df85f0
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: 3c2b6d37d6c672b17795f0e9ddc9cea117d522c1
@@ -316,6 +317,7 @@ filesHash:
   README.md: bae76079fdecf46697c95f5ad8bbbc3e342bd6ff
   RELEASE_NOTES.md: fabd2aca0502fdae5b84d3180310daf74c27f2e6
   USAGE.md: 0fdfd3b942d10d4da90aa329ea96aa70958fe989
+  clean.yaml: c19639b07dfe6ae22032aff24c8997ab9860ad33
   docs/ABSORB.md: 31bbe919b680e78b369772608d10dda78d1e015e
   docs/ADAPTIVE-ROUTER.md: c453ee985ce8c633a5af892393970d4b9c003bef
   docs/AGENT-PLUGINS.md: ae5f51ff3a26f4286ad535a1c245a1528a5899c6
@@ -408,7 +410,7 @@ filesHash:
   js/session/mini-a-mcptest.js: 6e78cb74c5d9c723b038d2198102bdaa8ea4715d
   js/session/mini-a-memoryman.js: b897ad32e55fdc844cbe7f014729ec2ec62d67d9
   js/session/mini-a-modelman.js: 940c03c9d13d5fc0476117b2eb9cf822cf518bc6
-  js/session/mini-a-session.js: f8a9da153a15c8944e6bc81968efd4047325882f
+  js/session/mini-a-session.js: 846eb44fdfec22a239b0e5d8461526daacee1a7b
   js/session/mini-a-wikiman.js: a5612a5c2d1c94031b644e05797f8353f2ed582d
   js/skills/mini-a-mcp-skills.js: 36b3790c0303922ae5742bacbf887295300ff285
   js/skills/mini-a-plugin-manager.js: deaebd59cd86450ba96c35adbcf5c994da39f3ff
@@ -503,8 +505,8 @@ filesHash:
   mini-a.js: 8553dc16398d24eeb2c6942075b7abb5c1ffc4a3
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 964e2173b23ef122226feb2490f80c7cf3f191f9
-  public/advanced.css: 531d5c0b6252367e4234069b50b7d8061a196431
-  public/advanced.js: eb90129e915141247dd01df8c9d64bb51a4c111f
+  public/advanced.css: 571c702d4516468bc309126d28ba5859031c5be0
+  public/advanced.js: c1e1e5d3b89300dcf52a122e54444a144827cb0c
   public/apple-touch-icon.png: 5e22ed6b303b377787779423b97c22f7b20b56ed
   public/data-editor.js: 1433293e0ed9f6486f14b6a91ed88684525a79b3
   public/embed-context.js: 5a0be6f139672eabbbd12f28efe2e749dfa43c44
