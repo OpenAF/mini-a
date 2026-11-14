@@ -42,6 +42,7 @@ The Git history shows short imperative subjects (`Add usetools option`, `Update 
 Shell access is disabled by default—require contributors to opt in with `useshell=true` and justify commands touching the filesystem. Never commit secrets; rely on `OAF_MODEL` and related environment variables. When shipping MCP definitions, review default timeouts and permissions (`readwrite`, `shellallow`) to keep the agent constrained by default.
 
 ## Consistent Web and Console/TUI UX
+- Keep standalone console managers (`modelman=true`, `wikiman=true`, `pluginman=true`, and future managers) visually consistent: reuse the Mini-A banner and accent palette, emoji action labels, terminal-width separators, compact CSLON results, and framed current-resource summaries where appropriate. Keep operation IDs separate from display labels and preserve adapter-aware structured output, Back/Cancel, and activation-scope explanations.
 - Treat web advanced view, console, and TUI as presentations of the same workflows. Reuse management services and adapter-aware `ask`/`askChoose` prompts; keep explicit CLI/request forms available for automation.
 - Match neighboring screens: include a currentColor SVG for every advanced navigation entry, shared themed cards/action rows, persistent field labels, responsive spacing, and keyboard-visible focus. Use existing components and theme variables.
 - Start with the common task and reveal operation-specific fields as needed. Keep advanced JSON and uncommon options collapsed. Distinguish browser uploads/downloads from server paths.

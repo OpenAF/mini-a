@@ -346,67 +346,124 @@ function MiniAInteractiveSession(args, adapter) {
       if (isUnDef(value) || value === null || String(value).trim() === "/cancel") throw { cancelled: true }
       return String(value)
     }
+    // Keep operation IDs separate from the labels shown in every console adapter.
+    var operations = ["sources", "search", "acquire", "export-original", "list", "inventory", "create", "inspect", "convert", "export", "install", "enable", "disable", "remove", "exit"]
+    var labels = ["🌐 Public sources", "🔎 Search marketplaces", "📥 Acquire public package", "📤 Export original artifact", "📋 List installed plugins", "📦 Component inventory", "✨ Create a plugin", "🔎 Inspect a plugin", "🔄 Convert a plugin", "📤 Export a plugin", "📥 Install a plugin", "✅ Enable a plugin", "⏸️ Disable a plugin", "🗑️ Remove a plugin", "👋 Exit"]
+
     // Normalize native and adapter choices and provide a consistent way back.
     function choose(label, values) {
-      var choices = values.concat(["Back"])
-      var value = askChoose(label, choices, choices.length)
-      var index = isNumber(value) ? value : choices.indexOf(String(value))
+      var choices = values.concat(["🔙 Go back"])
+      var value = askChoose(label, choices, Math.min(12, choices.length))
+      var index = choices.indexOf(String(value))
+      if (index < 0) index = __miniANormalizeChoiceIndex(value, choices.length)
       if (index < 0 || index >= values.length) throw { cancelled: true }
       return values[index]
     }
+
+    // Size terminal decorations safely, including non-terminal adapters.
+    function width() {
+      if (!adapter) {
+        try {
+          var columns = Number((new Console()).getConsoleReader().getTerminal().getWidth())
+          if (isFinite(columns) && columns > 0) return Math.floor(columns)
+        } catch (ignore) {}
+      }
+      return 80
+    }
+
+    // Frame the current registry with the same palette and borders as the wiki manager.
+    function showRegistry() {
+      var items = pluginManager.list()
+      var summary = {
+        root: pluginManager.root,
+        installed: items.length,
+        enabled: items.filter(function(item) { return item.enabled === true }).length,
+        activation: "new sessions"
+      }
+      if (adapter) print(printTree(summary))
+      else {
+        ow.loadFormat()
+        print(ansiColor("FG(240)", repeat(width(), "╌")))
+        print(ow.format.withSideLine(af.toCSLON(summary), width(), "FG(220)", "RESET", ow.format.withSideLineThemes().doubleLineBothSides))
+      }
+    }
+
     var ask = read
-    print("Plugins — installations start disabled; activation applies to new sessions. Type /cancel to go back.")
-    var operations = ["list", "inventory", "create", "inspect", "convert", "export", "install", "enable", "disable", "remove", "exit"]
+    print(ansiColor("BOLD", " ._ _ " + ansiColor("FG(41)", "o") + "._ " + ansiColor("FG(41)", "o") + "   _\n | | ||| ||~~(_|") + ansiColor("FG(218)", " Plugin management"))
+    print(ansiColor("FAINT", "Installations start disabled; activation applies to new sessions. Type /cancel to go back."))
     while (true) {
       try {
-      var choice = askChoose("Plugins — choose an operation", operations, operations.length)
-      var operation = isNumber(choice) ? operations[choice] : String(choice)
-      if (operation === "exit" || operations.indexOf(operation) < 0) break
-      var request = { op: operation }
-      if (["inspect", "convert", "export", "install"].indexOf(operation) >= 0) request.source = ask("Plugin folder: ")
-      if (["create", "convert", "export"].indexOf(operation) >= 0) {
-        request.out = ask("Output folder (create/convert) or ZIP (export): ")
-        request.target = choose("Target format", ["minia", "claude", "chatgpt", "opencode", "copilot", "universal", "all"])
-        request.exclude = ask("Explicit excluded component IDs (comma separated): ")
-      }
-      if (operation === "create") {
-        request.spec = {
-          metadata: { name: ask("Plugin name: "), version: ask("Version [0.1.0]: ") || "0.1.0", description: ask("Description: ") },
-          components: []
+        showRegistry()
+        var selectedOperation = askChoose("Choose a plugin operation: ", labels, Math.min(12, labels.length))
+        var choice = labels.indexOf(String(selectedOperation))
+        if (choice < 0) choice = __miniANormalizeChoiceIndex(selectedOperation, labels.length)
+        if (choice < 0 || choice >= operations.length || operations[choice] === "exit") break
+        var operation = operations[choice]
+        var request = { op: operation }
+        if (operation === "search") {
+          request.source = ask("Source ID (blank for all): ")
+          request.query = ask("Search: ")
         }
-        var componentKinds = ["skills", "commands", "hooks", "scripts", "assets", "done"]
-        while (true) {
-          var componentChoice = askChoose("Add component", componentKinds, componentKinds.length)
-          var componentKind = isNumber(componentChoice) ? componentKinds[componentChoice] : String(componentChoice)
-          if (componentKind === "done" || componentKinds.indexOf(componentKind) < 0) break
-          request.spec.components.push({ kind: componentKind, source: ask("Component path: "), name: ask("Packaged name (include extension for files): ") })
+        if (operation === "acquire") {
+          var packageSource = ask("Public archive, github:owner/repo, npm:package@version or source JSON: ")
+          request.source = packageSource.trim().charAt(0) === "{" ? jsonParse(packageSource) : packageSource
         }
-        if (ask("Add a synchronous command hook? [y/N]: ").toLowerCase() === "y") {
-          var hookEvents = ["UserPromptSubmit", "PreToolUse", "PostToolUse"]
-          var eventChoice = askChoose("Hook event", hookEvents, hookEvents.length)
-          var eventName = isNumber(eventChoice) ? hookEvents[eventChoice] : String(eventChoice)
-          if (hookEvents.indexOf(eventName) >= 0) {
-            request.spec.hooks = {}
-            request.spec.hooks[eventName] = [{ matcher: ask("Tool matcher [.*]: ") || ".*", hooks: [{ type: "command", command: ask("Hook command: "), timeout: Number(ask("Timeout seconds [5]: ") || "5") }] }]
+        if (operation === "export-original") {
+          request.acquisition = ask("Acquisition ID: ")
+          request.out = ask("Output artifact path: ")
+        }
+        if (["inspect", "convert", "export", "install"].indexOf(operation) >= 0) request.source = ask("Plugin folder, ZIP or public HTTPS ZIP URL: ")
+        if (["create", "convert", "export"].indexOf(operation) >= 0) {
+          request.out = ask("Output folder (create/convert) or ZIP (export): ")
+          request.target = choose("Target format", ["mini-a", "claude", "chatgpt", "opencode", "copilot", "universal", "all"])
+          if (request.target === "mini-a") request.target = "minia"
+          request.exclude = ask("Explicit excluded component IDs (comma separated): ")
+        }
+        if (operation === "create") {
+          request.spec = {
+            metadata: { name: ask("Plugin name: "), version: ask("Version [0.1.0]: ") || "0.1.0", description: ask("Description: ") },
+            components: []
           }
+          var componentKinds = ["skills", "commands", "hooks", "scripts", "assets", "done"]
+          while (true) {
+            var componentChoice = askChoose("Add component", componentKinds, componentKinds.length)
+            var componentKind = isNumber(componentChoice) ? componentKinds[componentChoice] : String(componentChoice)
+            if (componentKind === "done" || componentKinds.indexOf(componentKind) < 0) break
+            request.spec.components.push({ kind: componentKind, source: ask("Component path: "), name: ask("Packaged name (include extension for files): ") })
+          }
+          if (ask("Add a synchronous command hook? [y/N]: ").toLowerCase() === "y") {
+            var hookEvents = ["UserPromptSubmit", "PreToolUse", "PostToolUse"]
+            var eventChoice = askChoose("Hook event", hookEvents, hookEvents.length)
+            var eventName = isNumber(eventChoice) ? hookEvents[eventChoice] : String(eventChoice)
+            if (hookEvents.indexOf(eventName) >= 0) {
+              request.spec.hooks = {}
+              request.spec.hooks[eventName] = [{ matcher: ask("Tool matcher [.*]: ") || ".*", hooks: [{ type: "command", command: ask("Hook command: "), timeout: Number(ask("Timeout seconds [5]: ") || "5") }] }]
+            }
+          }
+          var mcpSpec = ask("MCP servers JSON file (blank to skip): ")
+          if (mcpSpec.length) request.spec.mcp = pluginManager.readConfig(mcpSpec)
         }
-        var mcpSpec = ask("MCP servers JSON file (blank to skip): ")
-        if (mcpSpec.length) request.spec.mcp = pluginManager.readConfig(mcpSpec)
-      }
-      if (["enable", "disable", "remove"].indexOf(operation) >= 0) {
-        var items = pluginManager.list()
-        if (!items.length) {
-          print("No plugins installed.")
-          continue
+        if (["enable", "disable", "remove"].indexOf(operation) >= 0) {
+          var items = pluginManager.list()
+          if (!items.length) {
+            print("No plugins installed.")
+            continue
+          }
+          var selected = choose("Installed plugin", items.map(function(item) { return item.id + " — " + (item.enabled ? "Enabled" : "Disabled") }))
+          request.id = items.filter(function(item) { return selected.indexOf(item.id + " — ") === 0 })[0].id
+          if (operation === "remove" && choose("Remove " + request.id + "?", ["Keep plugin", "Remove plugin"]) !== "Remove plugin") continue
         }
-        var selected = choose("Installed plugin", items.map(function(item) { return item.id + " — " + (item.enabled ? "Enabled" : "Disabled") }))
-        request.id = items.filter(function(item) { return selected.indexOf(item.id + " — ") === 0 })[0].id
-        if (operation === "remove" && choose("Remove " + request.id + "?", ["Keep plugin", "Remove plugin"]) !== "Remove plugin") continue
-      }
-      try { print(printTree(pluginManager.request(request))) } catch (error) { logErr(String(error)) }
+        // Keep structured results compact and identify operation failures consistently.
+        print(ansiColor("FG(41),BOLD", "▶ Running: " + operation))
+        var started = now()
+        var result = pluginManager.request(request)
+        print(ansiColor("FG(41),BOLD", "✅ Completed: " + operation))
+        print(ansiColor("FG(249),ITALIC", "⏱ " + (now() - started) + " ms"))
+        if (adapter) print(printTree(result))
+        else print(af.toCSLON(result))
       } catch (error) {
-        if (error.cancelled !== true) logErr(String(error))
-        else print("Plugin operation cancelled.")
+        if (error.cancelled !== true) printErr(ansiColor("FG(196)", "❌ Plugin operation failed: " + String(error.message || error)))
+        else print(ansiColor("FAINT", "🔙 Plugin operation cancelled."))
       }
     }
   }
@@ -419,7 +476,7 @@ function MiniAInteractiveSession(args, adapter) {
         managePlugins(pluginManager)
       } else {
         try {
-          print(printTree(pluginManager.request({ op: args.pluginop, source: args.pluginsource, out: args.pluginout, id: args.pluginid, target: args.plugintarget, format: args.pluginformat, spec: args.pluginspec, exclude: args.pluginexclude, dryRun: toBoolean(args.plugindryrun) })))
+          print(printTree(pluginManager.request({ op: args.pluginop, source: args.pluginsource, query: args.pluginquery, acquisition: args.pluginacquisition, out: args.pluginout, id: args.pluginid, target: args.plugintarget, format: args.pluginformat, spec: args.pluginspec, exclude: args.pluginexclude, dryRun: toBoolean(args.plugindryrun) })))
         } catch (error) {
           logErr(String(error))
           exit(1, true)
@@ -1111,9 +1168,11 @@ function MiniAInteractiveSession(args, adapter) {
     extracommands  : { type: "string", description: "Comma-separated extra directories for custom slash commands" },
     extraskills    : { type: "string", description: "Comma-separated extra directories for custom skills" },
     extrahooks     : { type: "string", description: "Comma-separated extra directories for custom hooks" },
+    pluginquery    : { type: "string", description: "Public marketplace search text" },
+    pluginacquisition: { type: "string", description: "Acquired artifact ID for inspect/install/export" },
     pluginop       : { type: "string", description: "Plugin operation: list, create, inspect, convert, export, install, enable, disable, remove" },
     pluginman      : { type: "boolean", description: "Open guided plugin manager" },
-    pluginsource   : { type: "string", description: "Local plugin folder or ZIP" },
+    pluginsource   : { type: "string", description: "Local folder/ZIP, public HTTPS archive, github:owner/repo or npm:package@version" },
     pluginout      : { type: "string", description: "Converted plugin destination" },
     plugintarget   : { type: "string", description: "Plugin destination: minia, claude, chatgpt, opencode, copilot, universal, all" },
     pluginformat   : { type: "string", description: "Source format override (default auto)" },

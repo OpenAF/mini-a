@@ -120,7 +120,7 @@ MiniAPluginManager.prototype.request = function(request) {
 }
 
 // Extract bounded local ZIP packages into a disposable staging directory.
-MiniAPluginManager.prototype.extract = function(source) {
+MiniAPluginManager.prototype.extract = function(source, preserveRoot) {
   var archive = new org.apache.commons.compress.archivers.zip.ZipFile(new java.io.File(this.access.assert(source)))
   var root = String(new java.io.File(io.createTempDir()).getCanonicalPath())
   var total = 0
@@ -152,7 +152,7 @@ MiniAPluginManager.prototype.extract = function(source) {
       if ((entry.getUnixMode() & 73) !== 0) new java.io.File(resolved.path).setExecutable(true, false)
     }
     var packageRoot = root
-    if (!io.fileExists(root + "/plugin.json") && !io.fileExists(root + "/.claude-plugin/plugin.json") && !io.fileExists(root + "/.codex-plugin/plugin.json") && !io.fileExists(root + "/opencode.json") && !io.fileExists(root + "/opencode.jsonc")) {
+    if (preserveRoot !== true && !io.fileExists(root + "/plugin.json") && !io.fileExists(root + "/.claude-plugin/plugin.json") && !io.fileExists(root + "/.codex-plugin/plugin.json") && !io.fileExists(root + "/opencode.json") && !io.fileExists(root + "/opencode.jsonc")) {
       var children = io.listFiles(root).files
       if (children.length !== 1 || children[0].isDirectory !== true) throw new Error("ZIP must contain one plugin root")
       packageRoot = root + "/" + children[0].filename
@@ -257,7 +257,7 @@ MiniAPluginManager.prototype.exportZip = function(source, options) {
 MiniAPluginManager.prototype.webRequest = function(request) {
   var temporary = null
   try {
-    var source = request.source
+    var source = request.acquisition ? this.acquisition(request.acquisition).packagePath : request.source
     if (isDef(request.upload)) {
       if (!isString(request.upload) || request.upload.length > 34952536 || !/^[A-Za-z0-9+/]*={0,2}$/.test(request.upload)) throw new Error("Invalid ZIP upload")
       temporary = String(new java.io.File(io.createTempDir()).getCanonicalPath())
@@ -753,3 +753,6 @@ MiniAPluginManager.prototype.validateOpenCodeHooks = function(config) {
   })
   return config
 }
+
+// Extend package operations with public artifact acquisition.
+loadLib(__miniAPath("js/skills/mini-a-plugin-acquisition.js"))

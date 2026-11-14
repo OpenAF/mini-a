@@ -1819,15 +1819,22 @@ window.MiniAAdvancedUI = function(bridge) {
     var installed = el('div', undefined, 'advanced-plugin-list')
     var importPanel = el('div', undefined, 'advanced-form advanced-plugin-fields')
     var pending = false
+    var acquisitionJob = null
+    var cancelDownload = button('Cancel acquisition', async function() {
+      if (acquisitionJob) await fetch(bridge.url('plugins'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'cancel', job: acquisitionJob }) })
+    })
     var sessionId = bridge.uuid ? bridge.uuid() : ''
-    var source = input('Server plugin folder')
+    var source = input('Local path, HTTPS archive, github:owner/repo or npm:package@version')
+    var acquisitionId = input('Acquisition ID')
+    var catalogId = input('Source ID (blank for all)')
+    var catalogQuery = input('Search marketplaces')
     var upload = el('input')
     upload.type = 'file'
     upload.accept = '.zip,application/zip'
     upload.setAttribute('aria-label', 'Plugin ZIP upload')
     var target = el('select')
     ;['minia', 'claude', 'chatgpt', 'opencode', 'copilot', 'universal', 'all'].forEach(function(name) {
-      var option = el('option', name)
+      var option = el('option', name === 'minia' ? 'mini-a' : name)
       option.value = name
       target.append(option)
     })
@@ -1923,7 +1930,7 @@ window.MiniAAdvancedUI = function(bridge) {
     var result = el('div')
     var controls = el('div', undefined, 'advanced-actions')
     var operationButtons = []
-    ;['list', 'inventory', 'create', 'inspect', 'convert', 'export', 'download', 'install', 'enable', 'disable', 'remove'].forEach(function(op) {
+    ;['sources', 'search', 'acquire', 'export-original', 'list', 'inventory', 'create', 'inspect', 'convert', 'export', 'download', 'install', 'enable', 'disable', 'remove'].forEach(function(op) {
       var control = button(op[0].toUpperCase() + op.slice(1), async function() {
         if (pending) return
         if (op === 'remove' && !window.confirm('Remove plugin ' + id.value + '?')) return
@@ -1933,6 +1940,19 @@ window.MiniAAdvancedUI = function(bridge) {
         result.textContent = 'Working…'
         try {
         var request = { op: op, source: source.value, out: output.value, id: id.value, target: target.value, exclude: exclusions.value }
+        if (op === 'acquire') {
+          request.background = true
+          if (source.value.trim().charAt(0) === '{') request.source = JSON.parse(source.value)
+        }
+        if (op === 'search') {
+          request.source = catalogId.value
+          request.query = catalogQuery.value
+        }
+        if (acquisitionId.value.trim() && ['inspect', 'install', 'convert', 'export', 'export-original'].indexOf(op) >= 0) {
+          request.acquisition = acquisitionId.value.trim()
+          delete request.source
+        }
+        if (op === 'export-original') delete request.out
         if (op === 'create') {
           request.spec = creationSpec()
           request.out = createOutput.value
@@ -1952,19 +1972,43 @@ window.MiniAAdvancedUI = function(bridge) {
           body: JSON.stringify(request)
         })
         var data = await response.json()
+        if (op === 'acquire' && data.job) {
+          acquisitionJob = data.job
+          while (data.state === 'queued' || data.state === 'running') {
+            if (workspace.isConnected === false || bridge.uuid && sessionId !== bridge.uuid()) return
+            result.textContent = 'Acquisition ' + data.state + '…'
+            await new Promise(function(resolve) { setTimeout(resolve, 500) })
+            var progress = await fetch(bridge.url('plugins'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'status', job: acquisitionJob }) })
+            data = await progress.json()
+          }
+          acquisitionJob = null
+          if (data.state !== 'complete') throw new Error(data.error || 'Acquisition did not complete')
+          data = data.result
+        }
         if (bridge.uuid && sessionId !== bridge.uuid() || workspace.isConnected === false) return
         if (response.ok === false || data.error) throw new Error(data.error || 'Plugin request failed')
+        if (op === 'acquire' && data.id) acquisitionId.value = data.id
         if (op === 'list' && Array.isArray(data)) drawInstalled(data)
         if (data.base64) {
           var bytes = Uint8Array.from(atob(data.base64), function(character) { return character.charCodeAt(0); })
           var url = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' }))
-          var link = el('a', 'Download converted plugin')
+          var link = el('a', 'Download plugin artifact')
           link.href = url
           link.download = data.filename
           link.click()
           setTimeout(function() { URL.revokeObjectURL(url); }, 1000)
-          result.textContent = 'Converted plugin downloaded.'
-        } else result.replaceChildren(structuredMap(data))
+          result.textContent = 'Plugin artifact downloaded.'
+        } else {
+          result.replaceChildren(structuredMap(data))
+          if (op === 'search' && Array.isArray(data.items)) data.items.forEach(function(item) {
+            var select = button('Select ' + item.id, function() {
+              source.value = JSON.stringify(item.source)
+              acquisitionId.value = ''
+              result.textContent = 'Selected ' + item.id + '. Choose Acquire to download and inspect.'
+            })
+            result.append(select)
+          })
+        }
         } catch (error) {
           if (workspace.isConnected !== false) result.textContent = error.message || String(error)
         } finally {
@@ -1983,7 +2027,11 @@ window.MiniAAdvancedUI = function(bridge) {
       parent.append(wrapper)
       return wrapper
     }
-    field('Server plugin folder or ZIP', source, importPanel)
+    field('Local path or public package source', source, importPanel)
+    field('Acquisition ID (reuse inspected download)', acquisitionId, importPanel)
+    field('Marketplace source ID', catalogId, importPanel)
+    field('Marketplace search text', catalogQuery, importPanel)
+    importPanel.append(cancelDownload)
     field('Upload ZIP from this browser (up to 25 MiB)', upload, importPanel)
     var targetField = field('Target format', target, importPanel)
     var outputField = field('Output server folder or ZIP path', output, importPanel)
@@ -2051,16 +2099,16 @@ window.MiniAAdvancedUI = function(bridge) {
     function chooseMode(mode) {
       installed.hidden = mode !== 'installed'
       id.parentElement.hidden = mode !== 'installed'
-      importPanel.hidden = mode !== 'import'
+      importPanel.hidden = mode !== 'import' && mode !== 'browse'
       creation.hidden = mode !== 'create'
       operationButtons.forEach(function(control) {
         var op = control.dataset.pluginOperation
-        control.hidden = (mode === 'installed' ? ['list', 'inventory', 'enable', 'disable', 'remove'] : mode === 'create' ? ['create'] : ['inspect', 'convert', 'export', 'download', 'install']).indexOf(op) < 0
+        control.hidden = (mode === 'installed' ? ['list', 'inventory', 'enable', 'disable', 'remove'] : mode === 'create' ? ['create'] : mode === 'browse' ? ['sources', 'search', 'acquire', 'export-original'] : ['inspect', 'convert', 'export', 'download', 'install']).indexOf(op) < 0
       })
       if (mode === 'import') updateImport()
       modeButtons.forEach(function(control) { control.setAttribute('aria-pressed', String(control.dataset.mode === mode)) })
     }
-    ;[['installed', 'Installed plugins'], ['import', 'Inspect/import/export'], ['create', 'Create']].forEach(function(item) {
+    ;[['installed', 'Installed plugins'], ['browse', 'Public marketplaces'], ['import', 'Inspect/import/export'], ['create', 'Create']].forEach(function(item) {
       var control = button(item[1], function() { chooseMode(item[0]) })
       control.dataset.mode = item[0]
       modeButtons.push(control)
@@ -2071,7 +2119,7 @@ window.MiniAAdvancedUI = function(bridge) {
     workspace.append(controls, result)
     screen.append(workspace)
     chooseMode('installed')
-    operationButtons[0].click()
+    operationButtons.filter(function(control) { return control.dataset.pluginOperation === 'list' })[0].click()
 
   }
 

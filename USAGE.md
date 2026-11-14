@@ -5439,3 +5439,43 @@ provider; missing usage displays as `Unavailable`, and `usage_reports` indicates
 how many requests supplied usage. These embedding counters accumulate across
 retrieval clients in the current process, including wiki, history, and skill
 retrieval; separate worker processes maintain their own counters.
+
+### Acquiring public plugins
+
+The plugin manager accepts public HTTPS ZIPs, VSIX URLs, npm tarballs,
+`github:owner/repo` and `npm:package@version`. Downloads never run package
+scripts, hooks or MCP servers. GitHub repositories resolve to a fixed commit.
+Private sources and credentials are unsupported.
+
+Use `pluginop=sources` to list the Claude, Codex and Copilot repository catalogs.
+Search a catalog with `pluginop=search pluginsource=claude pluginquery=review`.
+For public npm/OpenCode discovery, use `pluginsource=opencode` with `search`.
+Search results contain source descriptors; `acquire` accepts these as structured
+requests through `/plugin` or the web manager. In the guided console, paste the
+source descriptor JSON when acquiring a catalog package.
+
+For example:
+
+```sh
+mini-a pluginop=acquire pluginsource=github:owner/repository
+mini-a pluginop=inspect pluginacquisition=ACQUISITION_ID
+mini-a pluginop=install pluginacquisition=ACQUISITION_ID
+mini-a pluginop=export-original pluginacquisition=ACQUISITION_ID pluginout=original.zip
+mini-a pluginop=acquisitions
+mini-a pluginop=acquisition-remove pluginacquisition=ACQUISITION_ID
+```
+
+Reuse the returned acquisition ID to install or export the inspected bytes.
+Installations start disabled. Unsupported packages remain available for file
+inspection and original export; conversion requires compatible components and
+explicit exclusions for blockers. Ordinary VSIX extensions cannot execute in
+Mini-A. Web acquisition runs in the background and supports cancellation.
+
+Downloads are capped at 25 MiB, extraction at 100 MiB and 10,000 entries. The
+cache holds up to 20 artifacts; remove unused acquisitions to free space.
+Original exports preserve artifact bytes. Repository exports are pinned source
+snapshots. Removing an acquisition does not remove installed copies.
+
+VS Code Extension Marketplace browsing is not integrated: use its public page
+and provide a public VSIX artifact URL, or download and inspect outside Mini-A.
+Generic Git hosts without a public ZIP endpoint are not fetched by invoking Git.
