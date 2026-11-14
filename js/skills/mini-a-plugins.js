@@ -113,9 +113,9 @@ function __miniAPluginResolveRoots(options) {
 
 function __miniAPluginDataDir(pluginName, options) {
   var dataRoot = __miniAPluginBaseHomeDir(options) + java.io.File.separator + ".openaf-mini-a" + java.io.File.separator + "plugin-data"
-  if (!io.fileExists(dataRoot)) io.mkdir(dataRoot)
+  if (options.inspect !== true && !io.fileExists(dataRoot)) io.mkdir(dataRoot)
   var pluginDataDir = dataRoot + java.io.File.separator + pluginName
-  if (!io.fileExists(pluginDataDir)) io.mkdir(pluginDataDir)
+  if (options.inspect !== true && !io.fileExists(pluginDataDir)) io.mkdir(pluginDataDir)
   return String(new java.io.File(pluginDataDir).getCanonicalPath())
 }
 
@@ -324,6 +324,14 @@ function __miniAPluginLoadOne(pluginDir, options) {
   }
 
   var manifestPath = String(new java.io.File(pluginDir, "plugin.json").getCanonicalPath())
+  var sourceFormat = "agent"
+  if (!io.fileExists(manifestPath)) {
+    var codexPath = pluginDir + "/.codex-plugin/plugin.json"
+    var claudePath = pluginDir + "/.claude-plugin/plugin.json"
+    if (io.fileExists(codexPath) && io.fileExists(claudePath)) return { ok: false, warning: "Ambiguous vendor manifests: " + pluginDir }
+    if (io.fileExists(codexPath)) { manifestPath = codexPath; sourceFormat = "codex" }
+    else if (io.fileExists(claudePath)) { manifestPath = claudePath; sourceFormat = "claude" }
+  }
   if (!io.fileExists(manifestPath)) {
     return { ok: false, warning: "plugin at '" + pluginDir + "' has no plugin.json; skipped" }
   }
@@ -335,6 +343,7 @@ function __miniAPluginLoadOne(pluginDir, options) {
     return { ok: false, warning: "plugin at '" + pluginDir + "': plugin.json is not valid JSON (" + __miniAErrMsg(parseErr) + ")" }
   }
 
+  if (sourceFormat !== "agent") parsed.$schema = __MINI_A_PLUGIN_SCHEMA_ID
   var manifestCheck = __miniAPluginValidateManifest(parsed)
   if (!manifestCheck.ok) {
     return { ok: false, warning: "plugin at '" + pluginDir + "': " + manifestCheck.error }
@@ -342,16 +351,61 @@ function __miniAPluginLoadOne(pluginDir, options) {
 
   var pluginName = parsed.name
   var warnings = []
+  var commandDefinitions = []
+  var commandsRelative = isString(parsed.commands) ? parsed.commands : "commands"
+  var commandsResolved = __miniAPluginResolveContained(pluginDir, commandsRelative)
+  if (commandsResolved.ok && io.fileExists(commandsResolved.path)) {
+    io.listFiles(fileAccess.assert(commandsResolved.path)).files.forEach(function(entry) {
+      if (entry.isDirectory || !/^[a-z0-9][a-z0-9_-]*\.md$/i.test(entry.filename)) return
+      var path = fileAccess.assert(commandsResolved.path + "/" + entry.filename)
+      var text = io.readFileString(path)
+      if (/\$[0-9]|!`|^(?:allowed-tools|model|context|agent):/m.test(text)) {
+        warnings.push("Unsupported command semantics: " + entry.filename)
+        return
+      }
+      commandDefinitions.push({ name: pluginName + ":" + entry.filename.replace(/\.md$/i, ""), file: path })
+    })
+  }
+
+  var hooks = []
+  var hooksRelative = isString(parsed.hooks) ? parsed.hooks : "hooks/hooks.json"
+  var hooksPath = __miniAPluginResolveContained(pluginDir, hooksRelative)
+  if (hooksPath.ok && io.fileExists(hooksPath.path)) {
+    try {
+      var hookConfig = io.readFileJSON(fileAccess.assert(hooksPath.path))
+      var events = { UserPromptSubmit: "before_goal", PreToolUse: "before_tool", PostToolUse: "after_tool" }
+      Object.keys(hookConfig.hooks || {}).forEach(function(event) {
+        if (!events[event]) { warnings.push("Unsupported hook event: " + event); return }
+        hookConfig.hooks[event].forEach(function(group) {
+          ;(group.hooks || []).forEach(function(hook) {
+            if (hook.type !== "command" || hook.async === true || !isString(hook.command)) {
+              warnings.push("Unsupported hook handler: " + event)
+              return
+            }
+            try {
+              hooks.push({ event: events[event], sourceEvent: event, protocol: hook.miniAProtocol, command: hook.command, matcher: new RegExp(group.matcher === "*" ? ".*" : (group.matcher || ".*")), timeout: isNumber(hook.timeout) ? hook.timeout * 1000 : 5000, root: pluginDir, format: sourceFormat, name: pluginName })
+            } catch (error) { warnings.push("Invalid hook matcher: " + event) }
+          })
+        })
+      })
+    } catch (error) { warnings.push("Invalid hooks configuration") }
+  }
 
   var skillsDir = __
-  var skillsCandidate = String(new java.io.File(pluginDir, "skills").getCanonicalPath())
+  var skillsRelative = sourceFormat !== "agent" && isString(parsed.skills) ? parsed.skills : "skills"
+  var skillsResolved = __miniAPluginResolveContained(pluginDir, skillsRelative)
+  if (!skillsResolved.ok) return { ok: false, warning: skillsResolved.error }
+  var skillsCandidate = skillsResolved.path
   if (io.fileExists(skillsCandidate)) {
     var skillsInfo = io.fileInfo(skillsCandidate)
     if (isDef(skillsInfo) && skillsInfo.isDirectory === true) skillsDir = skillsCandidate
   }
 
   var mcpConfigs = []
-  var mcpJsonPath = String(new java.io.File(pluginDir, "mcp.json").getCanonicalPath())
+  var mcpRelative = sourceFormat === "agent" ? "mcp.json" : (isString(parsed.mcpServers) ? parsed.mcpServers : ".mcp.json")
+  var mcpResolved = __miniAPluginResolveContained(pluginDir, mcpRelative)
+  if (!mcpResolved.ok) return { ok: false, warning: mcpResolved.error }
+  var mcpJsonPath = mcpResolved.path
   if (io.fileExists(mcpJsonPath)) {
     var mcpParsed
     try {
@@ -361,6 +415,18 @@ function __miniAPluginLoadOne(pluginDir, options) {
       mcpParsed = __
     }
     if (isMap(mcpParsed)) {
+      if (sourceFormat !== "agent") {
+        mcpParsed.$schema = __MINI_A_PLUGIN_MCP_SCHEMA_ID
+        Object.keys(mcpParsed.mcpServers || {}).forEach(function(key) {
+          var entry = mcpParsed.mcpServers[key]
+          if (isMap(entry) && isUnDef(entry.type) && isString(entry.command)) entry.type = "stdio"
+          if (isMap(entry) && entry.type === "http") entry.type = "streamable-http"
+          if (isMap(entry)) {
+            var text = stringify(entry, __, "").replace(/CLAUDE_PLUGIN_ROOT|CODEX_PLUGIN_ROOT/g, "PLUGIN_ROOT").replace(/CLAUDE_PLUGIN_DATA|CODEX_PLUGIN_DATA/g, "PLUGIN_DATA")
+            mcpParsed.mcpServers[key] = jsonParse(text)
+          }
+        })
+      }
       if (mcpParsed.$schema !== __MINI_A_PLUGIN_MCP_SCHEMA_ID) {
         warnings.push("plugin '" + pluginName + "': mcp.json '$schema' does not match the supported version; MCP servers skipped")
       } else if (!isMap(mcpParsed.mcpServers)) {
@@ -368,7 +434,12 @@ function __miniAPluginLoadOne(pluginDir, options) {
       } else {
         Object.keys(mcpParsed.mcpServers).forEach(function(serverName) {
           try {
-            var converted = __miniAPluginConvertMcpServerEntry(pluginDir, pluginName, serverName, mcpParsed.mcpServers[serverName], options)
+            var serverEntry = mcpParsed.mcpServers[serverName]
+            if (sourceFormat !== "agent" && isMap(serverEntry.headers) && Object.keys(serverEntry.headers).some(function(key) { return key.toLowerCase() !== "authorization" || !/^Bearer\s+/i.test(serverEntry.headers[key]) })) {
+              warnings.push("MCP server requires unsupported headers: " + serverName)
+              return
+            }
+            var converted = __miniAPluginConvertMcpServerEntry(pluginDir, pluginName, serverName, serverEntry, options)
             if (!converted.ok) {
               warnings.push(converted.warning)
               return
@@ -383,7 +454,7 @@ function __miniAPluginLoadOne(pluginDir, options) {
     }
   }
 
-  return { ok: true, name: pluginName, skillsDir: skillsDir, mcpConfigs: mcpConfigs, warnings: warnings }
+  return { ok: true, name: pluginName, format: sourceFormat, manifest: parsed, root: pluginDir, commands: commandDefinitions, hooks: hooks, skillsDir: skillsDir, mcpConfigs: mcpConfigs, warnings: warnings }
 }
 
 function __miniAPluginDiscover(options) {
@@ -391,6 +462,8 @@ function __miniAPluginDiscover(options) {
   var fileAccess = new MiniAFileAccess(options.fileallow)
   var warnings = []
   var skillsRoots = []
+  var commands = []
+  var hooks = []
   var mcpConfigs = []
   var candidateDirs = []
   var seenCandidates = {}
@@ -429,7 +502,20 @@ function __miniAPluginDiscover(options) {
     })
   })
 
+  if (typeof MiniAPluginManager === "function") {
+    new MiniAPluginManager(options).list().forEach(function(item) {
+      if (item.enabled === true) pushCandidate(item.path)
+    })
+  }
+
+  var managedStates = typeof MiniAPluginManager === "function" ? new MiniAPluginManager(options).list() : []
   candidateDirs.forEach(function(pluginDir) {
+    var managedStateFile = String(new java.io.File(pluginDir).getParent()) + "/state.json"
+    if (pluginDir.indexOf(new MiniAPluginManager(options).root + "/") === 0 && io.fileExists(managedStateFile)) {
+      var managedState = io.readFileJSON(managedStateFile)
+      if (managedState.enabled !== true || managedState.removed === true) return
+    }
+    if (managedStates.some(function(item) { return item.path === pluginDir && item.enabled !== true })) return
     try {
       var result = __miniAPluginLoadOne(pluginDir, options)
       if (!result.ok) {
@@ -437,6 +523,8 @@ function __miniAPluginDiscover(options) {
         return
       }
       if (isString(result.skillsDir)) skillsRoots.push(result.skillsDir)
+      commands = commands.concat(result.commands || [])
+      hooks = hooks.concat(result.hooks || [])
       if (isArray(result.mcpConfigs)) mcpConfigs = mcpConfigs.concat(result.mcpConfigs)
       if (isArray(result.warnings)) warnings = warnings.concat(result.warnings)
     } catch (loadErr) {
@@ -444,5 +532,78 @@ function __miniAPluginDiscover(options) {
     }
   })
 
-  return { skillsRoots: skillsRoots, mcpConfigs: mcpConfigs, warnings: warnings }
+  return { skillsRoots: skillsRoots, commands: commands, hooks: hooks, mcpConfigs: mcpConfigs, warnings: warnings }
+}
+
+// Load management without creating directories during discovery.
+loadLib(__miniAPath("js/skills/mini-a-plugin-manager.js"))
+
+// Execute the supported vendor command-hook protocol without widening permissions.
+function __miniARunPluginHooks(hooks, event, vars, options) {
+  var outcome = { outputs: [], blocked: false }
+  hooks.forEach(function(hook) {
+    var shellEvent = event === "before_shell" || event === "after_shell"
+    var mappedEvent = event === "before_shell" ? "before_tool" : (event === "after_shell" ? "after_tool" : event)
+    if (hook.event !== mappedEvent || mappedEvent === "after_tool" && vars.MINI_A_TOOL_ERROR === "true") return
+    if (!shellEvent && String(vars.MINI_A_TOOL || "").toLowerCase() === "shell") return
+    if (toBoolean(options.useshell) !== true) {
+      logWarn("Plugin hook requires useshell=true: " + hook.name)
+      return
+    }
+    var tool = shellEvent ? "Bash" : (vars.MINI_A_TOOL || "")
+    if (hook.protocol === "copilot") tool = shellEvent ? "bash" : tool
+    if (mappedEvent !== "before_goal" && !hook.matcher.test(tool)) return
+    if (!isString(options._pluginHookSession)) options._pluginHookSession = String(java.util.UUID.randomUUID())
+    var input = { session_id: options._pluginHookSession, hook_event_name: hook.sourceEvent, cwd: String(java.lang.System.getProperty("user.dir")), prompt: vars.MINI_A_GOAL, tool_name: tool }
+    try {
+      if (isString(vars.MINI_A_TOOL_PARAMS)) input.tool_input = jsonParse(vars.MINI_A_TOOL_PARAMS)
+      if (shellEvent) input.tool_input = { command: vars.MINI_A_SHELL_COMMAND }
+      if (isString(vars.MINI_A_TOOL_RESULT)) {
+        try { input.tool_response = jsonParse(vars.MINI_A_TOOL_RESULT) } catch (ignore) { input.tool_response = vars.MINI_A_TOOL_RESULT }
+      }
+      if (event === "after_shell") input.tool_response = { stdout: vars.MINI_A_SHELL_OUTPUT, exit_code: Number(vars.MINI_A_SHELL_EXITCODE) }
+      if (hook.protocol === "copilot") {
+        input = { sessionId: input.session_id, timestamp: now(), cwd: input.cwd, prompt: input.prompt, toolName: tool, toolArgs: input.tool_input, toolResult: { resultType: "success", textResultForLlm: stringify(input.tool_response || "", __, "") } }
+      }
+      var env = merge(getEnvs(), { PLUGIN_ROOT: hook.root, CLAUDE_PLUGIN_ROOT: hook.root, CODEX_PLUGIN_ROOT: hook.root })
+      var data = __miniAPluginDataDir(hook.name, options)
+      env.PLUGIN_DATA = data
+      env.CLAUDE_PLUGIN_DATA = data
+      env.CODEX_PLUGIN_DATA = data
+      env.COPILOT_PLUGIN_ROOT = hook.root
+      env.COPILOT_PLUGIN_DATA = data
+      var result = $sh(hook.command, stringify(input, __, "")).pwd(hook.root).envs(env).timeout(hook.timeout).get(0)
+      if (hook.protocol === "copilot" && result.exitcode !== 0 && mappedEvent !== "after_tool") outcome.blocked = true
+      if (result.exitcode === 2 && mappedEvent !== "after_tool") outcome.blocked = true
+      var stdout = String(result.stdout || "").trim()
+      if (result.exitcode !== 0 && result.exitcode !== 2) logWarn("Plugin hook failed: " + hook.name)
+      if (stdout.charAt(0) === "{") {
+        var output = jsonParse(stdout)
+        if (hook.protocol === "copilot") {
+          if (mappedEvent !== "before_tool") return
+          if (Object.keys(output).some(function(key) { return ["permissionDecision", "permissionDecisionReason", "additionalContext"].indexOf(key) < 0 })) {
+            outcome.blocked = true
+            logWarn("Unsupported Copilot hook output: " + hook.name)
+            return
+          }
+          output = { hookSpecificOutput: output }
+        }
+        var specific = output.hookSpecificOutput || {}
+        if (isDef(specific.updatedInput) || specific.permissionDecision === "ask" || Object.keys(output).some(function(key) { return ["decision", "reason", "continue", "stopReason", "systemMessage", "suppressOutput", "hookSpecificOutput"].indexOf(key) < 0 }) || Object.keys(specific).some(function(key) { return ["hookEventName", "permissionDecision", "permissionDecisionReason", "additionalContext"].indexOf(key) < 0 })) {
+          logWarn("Unsupported plugin hook control output: " + hook.name)
+          if (mappedEvent !== "after_tool") outcome.blocked = true
+          return
+        }
+        if (output.decision === "block" || output.continue === false || specific.permissionDecision === "deny") {
+          if (mappedEvent !== "after_tool") outcome.blocked = true
+        }
+        stdout = specific.additionalContext || output.systemMessage || ""
+      }
+      if (stdout.length) outcome.outputs.push({ hookName: hook.name, output: stdout.substring(0, 4096) })
+    } catch (error) {
+      logWarn("Plugin hook failed: " + hook.name)
+      if (mappedEvent !== "after_tool") outcome.blocked = true
+    }
+  })
+  return outcome
 }

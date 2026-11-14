@@ -337,6 +337,61 @@ function MiniAInteractiveSession(args, adapter) {
       })
     }
 
+    // Run plugin management without initializing a model or MCP connections.
+    if (isDef(args.pluginop) || toBoolean(args.pluginman) === true) {
+      loadLib(__miniAPath("js/skills/mini-a-plugins.js"))
+      var pluginManager = new MiniAPluginManager(args)
+      if (toBoolean(args.pluginman) === true) {
+        var operations = ["list", "inventory", "create", "inspect", "convert", "export", "install", "enable", "disable", "remove", "exit"]
+        while (true) {
+          var choice = askChoose("Plugin operation", operations, operations.length)
+          var operation = isNumber(choice) ? operations[choice] : String(choice)
+          if (operation === "exit" || operations.indexOf(operation) < 0) break
+          var request = { op: operation }
+          if (["inspect", "convert", "export", "install"].indexOf(operation) >= 0) request.source = ask("Plugin folder: ")
+          if (["create", "convert", "export"].indexOf(operation) >= 0) {
+            request.out = ask("Output folder (create/convert) or ZIP (export): ")
+            request.target = ask("Target: minia, claude, chatgpt, opencode, copilot, universal, all: ") || "minia"
+            request.exclude = ask("Explicit excluded component IDs (comma separated): ")
+          }
+          if (operation === "create") {
+            request.spec = {
+              metadata: { name: ask("Plugin name: "), version: ask("Version [0.1.0]: ") || "0.1.0", description: ask("Description: ") },
+              components: []
+            }
+            var componentKinds = ["skills", "commands", "hooks", "scripts", "assets", "done"]
+            while (true) {
+              var componentChoice = askChoose("Add component", componentKinds, componentKinds.length)
+              var componentKind = isNumber(componentChoice) ? componentKinds[componentChoice] : String(componentChoice)
+              if (componentKind === "done" || componentKinds.indexOf(componentKind) < 0) break
+              request.spec.components.push({ kind: componentKind, source: ask("Component path: "), name: ask("Packaged name (include extension for files): ") })
+            }
+            if (ask("Add a synchronous command hook? [y/N]: ").toLowerCase() === "y") {
+              var hookEvents = ["UserPromptSubmit", "PreToolUse", "PostToolUse"]
+              var eventChoice = askChoose("Hook event", hookEvents, hookEvents.length)
+              var eventName = isNumber(eventChoice) ? hookEvents[eventChoice] : String(eventChoice)
+              if (hookEvents.indexOf(eventName) >= 0) {
+                request.spec.hooks = {}
+                request.spec.hooks[eventName] = [{ matcher: ask("Tool matcher [.*]: ") || ".*", hooks: [{ type: "command", command: ask("Hook command: "), timeout: Number(ask("Timeout seconds [5]: ") || "5") }] }]
+              }
+            }
+            var mcpSpec = ask("MCP servers JSON file (blank to skip): ")
+            if (mcpSpec.length) request.spec.mcp = pluginManager.readConfig(mcpSpec)
+          }
+          if (["enable", "disable", "remove"].indexOf(operation) >= 0) request.id = ask("Plugin id: ")
+          try { print(printTree(pluginManager.request(request))) } catch (error) { logErr(String(error)) }
+        }
+      } else {
+        try {
+          print(printTree(pluginManager.request({ op: args.pluginop, source: args.pluginsource, out: args.pluginout, id: args.pluginid, target: args.plugintarget, format: args.pluginformat, spec: args.pluginspec, exclude: args.pluginexclude, dryRun: toBoolean(args.plugindryrun) })))
+        } catch (error) {
+          logErr(String(error))
+          exit(1, true)
+        }
+      }
+      exit(0, true)
+    }
+
     // A manager must not silently win over another requested standalone mode.
     if (toBoolean(args.wikiman) === true) {
       var wikiManConflicts = ["modelman", "mcptest", "memoryman", "dream", "workermode", "web"].filter(function(key) { return toBoolean(args[key]) === true })
@@ -1020,6 +1075,16 @@ function MiniAInteractiveSession(args, adapter) {
     extracommands  : { type: "string", description: "Comma-separated extra directories for custom slash commands" },
     extraskills    : { type: "string", description: "Comma-separated extra directories for custom skills" },
     extrahooks     : { type: "string", description: "Comma-separated extra directories for custom hooks" },
+    pluginop       : { type: "string", description: "Plugin operation: list, create, inspect, convert, export, install, enable, disable, remove" },
+    pluginman      : { type: "boolean", description: "Open guided plugin manager" },
+    pluginsource   : { type: "string", description: "Local plugin folder or ZIP" },
+    pluginout      : { type: "string", description: "Converted plugin destination" },
+    plugintarget   : { type: "string", description: "Plugin destination: minia, claude, chatgpt, opencode, copilot, universal, all" },
+    pluginformat   : { type: "string", description: "Source format override (default auto)" },
+    pluginspec     : { type: "string", description: "Creation specification JSON file" },
+    pluginexclude  : { type: "string", description: "Explicit excluded component IDs" },
+    plugindryrun   : { type: "boolean", description: "Analyze plugin compatibility without writing output" },
+    pluginid       : { type: "string", description: "Installed plugin identity" },
     plugins        : { type: "string", description: "Comma-separated Agent Plugins (agent-plugins.org) directories, each containing a plugin.json" },
     pluginsroot    : { type: "string", description: "Directory containing multiple Agent Plugins subfolders (default: .openaf-mini-a/plugins)" },
     pluginsroots   : { type: "string", description: "Comma-separated directories, each containing multiple Agent Plugins subfolders" },
@@ -1917,7 +1982,13 @@ function MiniAInteractiveSession(args, adapter) {
 
   function runHooks(event, contextVars) {
     if (typeof MiniAWebArtifacts !== "undefined" && MiniAWebArtifacts.enabled()) return { blocked: false, outputs: [] }
-    return __miniARunHooks(loadedHooks, event, contextVars)
+    var result = __miniARunHooks(loadedHooks, event, contextVars)
+    if (typeof __miniARunPluginHooks === "function" && typeof pluginsDiscoveryForConsole !== "undefined" && pluginsDiscoveryForConsole) {
+      var pluginResult = __miniARunPluginHooks(pluginsDiscoveryForConsole.hooks || [], event, contextVars, args)
+      result.blocked = result.blocked || pluginResult.blocked
+      result.outputs = result.outputs.concat(pluginResult.outputs)
+    }
+    return result
   }
 
   function getCustomSlashCommandNames() {
@@ -2406,6 +2477,9 @@ function MiniAInteractiveSession(args, adapter) {
         homedir     : findArgumentValue(args, "homedir")
       })
       if (isArray(pluginsDiscoveryForConsole.skillsRoots)) pluginSkillsDirs = pluginsDiscoveryForConsole.skillsRoots
+      ;(pluginsDiscoveryForConsole.commands || []).forEach(function(command) {
+        customSlashCommands[command.name] = { name: command.name, file: command.file, sourceType: "file", sourceCategory: "command", pluginCommand: true }
+      })
     }
   } catch (pluginDiscoverErr) {}
   pluginSkillsDirs.forEach(function(dir) {
@@ -5803,6 +5877,7 @@ function MiniAInteractiveSession(args, adapter) {
       var loadedTemplateDoc = loadCustomTemplateDocument(matchedDef)
       if (!isObject(loadedTemplateDoc)) throw new Error("Failed to parse template")
       var template = isString(loadedTemplateDoc.bodyTemplate) ? loadedTemplateDoc.bodyTemplate : ""
+      if (matchedDef.pluginCommand === true) template = template.replace(/\$ARGUMENTS/g, function() { return parsedArgs.raw })
       var goalFromTemplate = renderCustomSlashTemplate(template, parsedArgs)
       goalFromTemplate = preprocessSkillTemplateReferences(goalFromTemplate, matchedDef)
       return runGoal(goalFromTemplate, buildSkillUsage(matchedDef, getLastSkillReferenceFiles(), parsedArgs)) === true
@@ -7748,6 +7823,14 @@ function MiniAInteractiveSession(args, adapter) {
         runDecision(parsedSlashCommand.argsRaw)
         continue
       }
+      if (parsedSlashCommand.name === "plugins") {
+        try {
+          if (typeof MiniAPluginManager !== "function") loadLib(__miniAPath("js/skills/mini-a-plugins.js"))
+          var pluginRequest = parsedSlashCommand.argsRaw.length ? af.fromJSSLON(parsedSlashCommand.argsRaw) : { op: "list" }
+          print(printTree(new MiniAPluginManager(args).request(pluginRequest)))
+        } catch (error) { logErr(String(error)) }
+        continue
+      }
       if (parsedSlashCommand.name === "help") {
         var helpTopic = parsedSlashCommand.argsRaw.toLowerCase().trim()
         if (helpTopic.length > 0 && helpTopic !== "custom") {
@@ -8282,6 +8365,7 @@ function MiniAInteractiveSession(args, adapter) {
           var _loadedTemplateDoc = loadCustomTemplateDocument(_matchedDef)
           if (!isObject(_loadedTemplateDoc)) throw new Error("Failed to parse template")
           var template = isString(_loadedTemplateDoc.bodyTemplate) ? _loadedTemplateDoc.bodyTemplate : ""
+          if (_matchedDef.pluginCommand === true) template = template.replace(/\$ARGUMENTS/g, function() { return parsedArgs.raw })
           var goalFromTemplate = renderCustomSlashTemplate(template, parsedArgs)
           goalFromTemplate = preprocessSkillTemplateReferences(goalFromTemplate, _matchedDef)
           runGoal(goalFromTemplate, buildSkillUsage(_matchedDef, getLastSkillReferenceFiles(), parsedArgs), "/" + parsedSlashCommand.name)

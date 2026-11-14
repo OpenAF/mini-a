@@ -381,6 +381,10 @@ MiniAAdvanced.prototype.snapshot = function(state, after) {
 
 MiniAAdvanced.prototype.request = function(data) {
   if (typeof MiniAWebArtifacts !== "undefined") MiniAWebArtifacts.guardAdvanced(data)
+  if (data.action === "plugins") {
+    if (typeof MiniAPluginManager !== "function") loadLib(__miniAPath("js/skills/mini-a-plugins.js"))
+    return this.safe(new MiniAPluginManager(this.args).request(data.plugin || { op: "list" }))
+  }
   var self = this, state = this.get(data.uuid)
   var after = Math.max(0, Math.floor(Number(data.after) || 0))
   if (!isFinite(after)) throw new Error("Invalid cursor")

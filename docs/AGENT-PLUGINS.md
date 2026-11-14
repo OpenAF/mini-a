@@ -118,3 +118,135 @@ mini-a goal="..." plugins=~/plugins/hello
 ```
 
 The `hello` skill is now listable/invokable exactly like any other skill.
+
+## Local plugin management (development)
+
+The local manager supports Agent Plugins and vendor manifests in
+`.codex-plugin/plugin.json` and `.claude-plugin/plugin.json`.
+
+```sh
+mini-a pluginop=inspect pluginsource=/path/to/plugin
+mini-a pluginop=convert pluginsource=/path/to/plugin pluginout=/path/to/output
+mini-a pluginop=install pluginsource=/path/to/plugin.zip
+mini-a pluginop=list
+mini-a pluginop=enable pluginid=my-plugin
+mini-a pluginop=disable pluginid=my-plugin
+mini-a pluginop=remove pluginid=my-plugin
+mini-a pluginman=true
+```
+
+Installations start disabled under `<home>/.openaf-mini-a/managed-plugins`.
+Activation changes apply to new sessions. Removal retains package files for active
+sessions and retains plugin data. Reinstalling a retained identity currently requires
+manual cleanup after all sessions have ended.
+
+`/plugins` lists installations; `/plugins {op: "enable", id: "my-plugin"}`
+accepts the same management operations. The advanced web console has a Plugins
+screen for server-side folders and ZIP paths. The screen also accepts browser ZIP uploads and downloads converted ZIP packages.
+All web management operations require the trusted Advanced API authentication.
+
+Compatible Markdown commands appear as `/plugin-name:command`; `$ARGUMENTS`
+represents the raw arguments. Commands requiring positional substitutions,
+embedded execution, or host-specific permission/model overrides are skipped.
+The initial command-hook adapter handles prompt submission and tool events,
+including stdin JSON and basic blocking/context output, and requires `useshell=true`.
+The supported subset supplies a stable session identifier, prompt/tool JSON,
+plugin root/data variables and shell events matched as `Bash`. Unsupported control
+output blocks pre-action execution and is reported for post-action hooks.
+Async, HTTP, prompt and agent handlers, session lifecycle events and tool-input
+rewriting are outside this subset. Post-action hooks cannot undo completed actions.
+Broader vendor-protocol coverage remains outstanding.
+Visual verification in Chrome covered the Plugins layout, inventory listing,
+server-folder inspection, browser ZIP inspection and completed conversion download.
+Activation controls were covered by automated lifecycle tests, not this visual check.
+Agent profiles and host-specific app integrations remain unsupported.
+
+ZIP imports reject links, path traversal and duplicate paths. Limits are 25 MiB
+compressed, 100 MiB expanded and 10,000 entries. Only a single plugin root is accepted.
+
+Development checks:
+
+```sh
+openaf -f tests/pluginManager.js
+ojob tests/agentPlugins.yaml
+node tests/modulePaths.cjs
+python3 tests/modulePaths.py
+```
+
+Registry lifecycle writes use a cross-process file lock and atomic state replacement.
+The automated manager suite exercises ZIP transfer round trips, traversal rejection,
+activation snapshots and command-hook stdin/blocking behavior.
+
+## Creation and destination exports
+
+The manager now accepts `create`, `inventory`, and `export`, through `pluginop`,
+`pluginman`, `/plugins`, and the Advanced Plugins screen. Existing `convert`
+continues to produce a Mini-A directory; `export` writes a ZIP.
+
+```sh
+mini-a pluginop=create pluginspec=plugin-spec.json pluginout=/tmp/my-plugin
+mini-a pluginop=inspect pluginsource=/path/to/opencode-project
+mini-a pluginop=convert pluginsource=/path/to/copilot-plugin pluginout=/tmp/converted
+mini-a pluginop=export pluginsource=/tmp/my-plugin plugintarget=all pluginout=/tmp/targets.zip
+mini-a pluginop=convert pluginsource=/path/to/source pluginout=/tmp/converted plugindryrun=true
+```
+
+Targets are `minia`, `claude`, `chatgpt`, `opencode`, `copilot`, `universal`, and
+`all`. `all` produces a distribution ZIP containing five destination ZIPs.
+`universal` includes a portable root and an OpenCode configuration fragment.
+Extract the archive before installation and merge OpenCode `mcp.servers` into
+existing configuration. Exports do not modify destination configuration.
+
+Creation specifications use this shape:
+
+```json
+{
+  "metadata": { "name": "my-plugin", "version": "0.1.0", "description": "My workflow" },
+  "template": "combined",
+  "components": [
+    { "kind": "skills", "name": "review", "source": "/path/to/review" },
+    { "kind": "scripts", "name": "helper.py", "source": "/path/to/helper.py" }
+  ],
+  "mcp": {},
+  "hooks": {}
+}
+```
+
+Component kinds are `skills`, `commands`, `hooks`, `scripts`, `assets`,
+`references`, and `templates`. Templates are `skills`, `mcp`, and `combined`.
+The console prompts for metadata and component paths; the web screen provides metadata, template, component, remote MCP and hook fields,
+with an editable JSON specification under collapsed Advanced controls. `/plugins` accepts the same specification as
+an object in `spec` and uses `target`, `format`, `exclude`, and `dryRun` fields.
+`inventory` reports managed installations and configured skill/command roots.
+
+OpenCode V2 project bundles with `opencode.json` or `opencode.jsonc` support
+skills, Markdown commands, and declarative `mcp.servers` conversion. JSONC is
+parsed without evaluating code. Copilot Agent Plugins support portable skills,
+MCP definitions, and namespaced Markdown commands. `install` converts these
+sources automatically and leaves installations disabled. `pluginformat` can
+supply an explicit source-format override. `pluginid` selects an installed
+package instead of `pluginsource`.
+
+Inspection returns stable component IDs and blockers. Use `pluginexclude` with
+a comma-separated list of IDs (or `exclude` array in API requests) to explicitly
+omit unsupported components. Executable OpenCode plugins, agent profiles and
+unverified hook protocol mappings are blocked. General VS Code `.vsix`
+extensions cannot be converted. Copilot version 1 synchronous command hooks for `userPromptSubmitted`,
+`preToolUse` and `postToolUse` can be imported into Mini-A. Cross-platform `command`
+handlers support matchers and timeouts. Platform-specific commands, cwd/environment
+overrides and input rewriting remain unsupported. Copilot prompt/post-hook JSON
+control output is ignored, and Mini-A fails closed on pre-action execution errors,
+including timeouts. The compatibility report identifies this stricter behavior.
+
+OpenCode exports can include a generated V2 `PreToolUse` adapter. It supports
+synchronous command hooks and fail-closed denial, without context injection,
+input rewriting or persistent plugin-data placeholders. Mini-A imports this adapter
+only when its code matches the generator exactly and its descriptor validates;
+arbitrary executable OpenCode code still requires explicit exclusion. Local tests
+execute the adapter with the OpenCode registration API stubbed. Actual OpenCode,
+Copilot and other vendor runtime verification remains outstanding. Supporting resources outside conventional directories
+must be included explicitly during assembly.
+
+Additional validation: `openaf -f tests/pluginTargets.js`.
+
+Guided web form validation: `node tests/webPluginCreation.cjs`. Chrome verification on 2026-11-14 covered the guided creation layout, collapsed Advanced settings, successful plugin creation, OpenCode conversion, completed all-target download, and explicit hook exclusion blocking/recovery. The downloaded archive was checked for all five destination ZIPs, and the excluded hook was confirmed absent from output. Vendor runtime execution remains unverified.

@@ -227,6 +227,7 @@ window.MiniAAdvancedUI = function(bridge) {
   const dialog = el('dialog', undefined, 'advanced-dialog'); dialog.setAttribute('aria-label', 'Console interaction'); document.body.append(dialog);
   dialog.addEventListener('cancel', e => { e.preventDefault(); api({action:'stop'}).catch(showError); dialog.close(); });
   const screens = [
+    ['plugins', 'Plugins', 'Inspect local plugins and manage activation for new sessions.'],
     ['help', 'Help', 'Search command syntax, prerequisites, aliases and custom commands. Insert a command to edit it before running.'],
     ['answer', 'Answer', 'Read the previous answer, copy it or download it to your browser.'],
     ['activity', 'Live activity', 'Follow agent actions, tool calls, progress, and results in real time.'],
@@ -1138,7 +1139,7 @@ window.MiniAAdvancedUI = function(bridge) {
         }
         reviewed = JSON.stringify(request);
         if (new TextEncoder().encode(reviewed).length > 48 * 1024) throw new Error('Request exceeds 48 KiB.');
-        review.textContent = JSON.stringify(request, null, 2); review.hidden = false; submit.hidden = false; feedback.textContent = '';
+        review.replaceChildren(structuredMap(request)); review.hidden = false; submit.hidden = false; feedback.textContent = '';
       } catch (error) { invalidate(); feedback.textContent = error.message || String(error); }
     };
     const wizard = button('Ask inputs step by step', () => { if (!locked()) return command('/decide interactive'); });
@@ -1810,6 +1811,148 @@ window.MiniAAdvancedUI = function(bridge) {
       if (content) renderStats(content);
     }
   }).observe(document.body, {attributes: true, attributeFilter: ['class']});
+  // Manage packages through the authenticated shared management service.
+  function pluginScreen() {
+    var source = input('Server plugin folder')
+    var upload = el('input')
+    upload.type = 'file'
+    upload.accept = '.zip,application/zip'
+    upload.setAttribute('aria-label', 'Plugin ZIP upload')
+    var target = el('select')
+    ;['minia', 'claude', 'chatgpt', 'opencode', 'copilot', 'universal', 'all'].forEach(function(name) {
+      var option = el('option', name)
+      option.value = name
+      target.append(option)
+    })
+    target.setAttribute('aria-label', 'Plugin destination')
+    var exclusions = input('Explicit excluded component IDs, comma separated')
+    var creation = el('fieldset')
+    creation.append(el('legend', 'Create a plugin'))
+    var pluginName = input('Plugin name')
+    pluginName.value = 'my-plugin'
+    var version = input('Version')
+    version.value = '0.1.0'
+    var description = input('Description')
+    var template = el('select')
+    template.setAttribute('aria-label', 'Starter template')
+    ;['skills', 'mcp', 'combined'].forEach(function(name) {
+      var option = el('option', name)
+      option.value = name
+      template.append(option)
+    })
+    var componentList = el('div')
+    var components = []
+    var componentKind = el('select')
+    componentKind.setAttribute('aria-label', 'Component kind')
+    ;['skills', 'commands', 'scripts', 'assets', 'references', 'templates'].forEach(function(kind) {
+      var option = el('option', kind)
+      option.value = kind
+      componentKind.append(option)
+    })
+    var componentSource = input('Component server path')
+    var componentName = input('Packaged component name')
+    // Keep selected resources reviewable before submitting the specification.
+    function drawComponents() {
+      componentList.replaceChildren()
+      components.forEach(function(component, index) {
+        var row = el('div', component.kind + ': ' + component.name + ' ← ' + component.source)
+        row.append(button('Remove ' + component.name, function() {
+          components.splice(index, 1)
+          drawComponents()
+        }))
+        componentList.append(row)
+      })
+    }
+    var addComponent = button('Add component', function() {
+      if (!componentSource.value.trim() || !componentName.value.trim()) {
+        result.textContent = 'Enter a component path and packaged name.'
+        return
+      }
+      components.push({ kind: componentKind.value, source: componentSource.value.trim(), name: componentName.value.trim() })
+      drawComponents()
+    })
+    var mcpName = input('MCP server name (optional)')
+    var mcpUrl = input('Remote MCP URL')
+    var hookEvent = el('select')
+    hookEvent.setAttribute('aria-label', 'Hook event')
+    ;['No hook', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse'].forEach(function(event) {
+      var option = el('option', event)
+      option.value = event
+      hookEvent.append(option)
+    })
+    var hookCommand = input('Hook command')
+    var hookMatcher = input('Tool matcher')
+    hookMatcher.value = '.*'
+    var hookTimeout = input('Hook timeout in seconds')
+    hookTimeout.value = '5'
+    var advanced = el('details')
+    advanced.append(el('summary', 'Advanced creation specification'))
+    var useSpec = el('input')
+    useSpec.type = 'checkbox'
+    useSpec.setAttribute('aria-label', 'Use JSON specification instead of guided fields')
+    var useSpecLabel = el('label', 'Use JSON specification instead of guided fields')
+    useSpecLabel.prepend(useSpec)
+    var spec = el('textarea')
+    spec.setAttribute('aria-label', 'Creation specification JSON')
+    spec.value = JSON.stringify({ metadata: { name: 'my-plugin', version: '0.1.0', description: 'My workflow' }, template: 'skills', components: [] }, null, 2)
+    advanced.append(useSpecLabel, spec)
+    creation.append(pluginName, version, description, template, componentKind, componentSource, componentName, addComponent, componentList, mcpName, mcpUrl, hookEvent, hookCommand, hookMatcher, hookTimeout, advanced)
+    // Build the same declarative specification used by CLI and console creation.
+    function creationSpec() {
+      if (useSpec.checked) return JSON.parse(spec.value)
+      var value = { metadata: { name: pluginName.value.trim(), version: version.value.trim(), description: description.value }, template: template.value, components: components.slice() }
+      if (mcpName.value.trim()) {
+        value.mcp = {}
+        value.mcp[mcpName.value.trim()] = { type: 'streamable-http', url: mcpUrl.value.trim() }
+      }
+      if (hookEvent.value !== 'No hook') {
+        value.hooks = {}
+        value.hooks[hookEvent.value] = [{ matcher: hookMatcher.value, hooks: [{ type: 'command', command: hookCommand.value, timeout: Number(hookTimeout.value) }] }]
+      }
+      return value
+    }
+    var output = input('Output folder or export ZIP')
+    var id = input('Installed plugin ID')
+    var result = el('div')
+    var controls = el('div')
+    ;['list', 'inventory', 'create', 'inspect', 'convert', 'export', 'download', 'install', 'enable', 'disable', 'remove'].forEach(function(op) {
+      controls.append(button(op, async function() {
+        try {
+        var request = { op: op, source: source.value, out: output.value, id: id.value, target: target.value, exclude: exclusions.value }
+        if (op === 'create') request.spec = creationSpec()
+        if (upload.files.length && ['inspect', 'convert', 'export', 'download', 'install'].includes(op)) {
+          if (upload.files[0].size > 25 * 1024 * 1024) throw new Error('ZIP limit is 25 MiB')
+          request.upload = await new Promise(function(resolve, reject) {
+            var reader = new FileReader()
+            reader.onload = function() { resolve(String(reader.result).split(',')[1]); }
+            reader.onerror = reject
+            reader.readAsDataURL(upload.files[0])
+          })
+        }
+        var response = await fetch(bridge.url('plugins'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify(request)
+        })
+        var data = await response.json()
+        if (data.base64) {
+          var bytes = Uint8Array.from(atob(data.base64), function(character) { return character.charCodeAt(0); })
+          var url = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' }))
+          var link = el('a', 'Download converted plugin')
+          link.href = url
+          link.download = data.filename
+          link.click()
+          setTimeout(function() { URL.revokeObjectURL(url); }, 1000)
+          result.textContent = 'Converted plugin downloaded.'
+        } else result.replaceChildren(structuredMap(data))
+        } catch (error) {
+          result.textContent = error.message || String(error)
+        }
+      }))
+    })
+    screen.append(el('p', 'Installations start disabled. Activation changes apply to new sessions.'), source, upload, target, exclusions, creation, output, id, controls, result)
+  }
+
   function renderScreen(focusRequest = '') {
     screen.dataset.focusResult = focusRequest;
     promptRefresh = null;
@@ -1826,6 +1969,7 @@ window.MiniAAdvancedUI = function(bridge) {
     activity.hidden = activeScreen !== 'activity'; screen.hidden = !activity.hidden;
     if (activeScreen === 'activity') { followActivity(); return; }
     screen.replaceChildren(el('h3', selected[1]), el('p', selected[2], 'advanced-screen-description'));
+    if (activeScreen === 'plugins') { pluginScreen(); return; }
     if (!snapshot) return;
     if (!['subtasks','prompts','settings','models','history','wiki','graph','ingest','absorb','dream','context','debug','help','skills','decide'].includes(activeScreen)) resultPanel();
     if (activeScreen === 'help') { helpScreen(); secondarySection('Previous command results', () => resultPanel()); }

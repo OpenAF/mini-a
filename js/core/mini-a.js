@@ -16474,7 +16474,9 @@ MiniA.prototype._executeParallelToolBatch = function(batch, options) {
 
     parent._runHook("after_tool", {
       MINI_A_TOOL        : toolName,
-      MINI_A_TOOL_RESULT : resultDisplay.substring(0, 2000)
+      MINI_A_TOOL_PARAMS : stringify(params, __, ""),
+      MINI_A_TOOL_RESULT : resultDisplay,
+      MINI_A_TOOL_ERROR  : String(toolCallError === true)
     })
 
     if (parent._useToolsActual === true && parent.state !== "stop") {
@@ -17013,7 +17015,9 @@ MiniA.prototype._runCommand = function(args) {
         global.__mini_a_metrics.shell_commands_executed.inc()
         var afterShellResult = this._runHook("after_shell", {
           MINI_A_SHELL_COMMAND: finalCommand,
-          MINI_A_SHELL_OUTPUT : (args.output || "").substring(0, 2000)
+          MINI_A_SHELL_OUTPUT : args.output || "",
+          MINI_A_SHELL_EXITCODE: String(_r.exitcode),
+          MINI_A_TOOL_ERROR: String(_r.exitcode !== 0)
         })
         if (isArray(afterShellResult.outputs) && afterShellResult.outputs.length > 0 && isObject(this._runtime)) {
           afterShellResult.outputs.forEach(function(o) {

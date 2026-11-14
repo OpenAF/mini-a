@@ -1438,6 +1438,20 @@ todo:
       return ow.server.httpd.reply({ error: e.toString() })
     }
 
+# Plugin package transfers use the same trusted management boundary as Advanced.
+- (httpdService   ): "${onport:-8888}"
+  ((uri          )): /plugins
+  ((execURI      )): | #js
+    try {
+      if (isUnDef(global.__advanced) || !global._mini_a_web_checkToken(request)) throw "unauthorized"
+      if (typeof MiniAWebArtifacts !== "undefined" && MiniAWebArtifacts.enabled()) throw "Plugin management unavailable in artifact isolation"
+      if (String(request.method).toUpperCase() !== "POST") throw "POST required"
+      var raw = request.files.postData
+      if (!isString(raw) || raw.length > 35000000) throw "Invalid plugin request"
+      if (typeof MiniAPluginManager !== "function") loadLib(__miniAPath("js/skills/mini-a-plugins.js"))
+      return ow.server.httpd.reply(global.__advanced.safe(new MiniAPluginManager(args).webRequest(jsonParse(raw))))
+    } catch(e) { return ow.server.httpd.reply({ error: String(e) }) }
+
 # Trusted advanced console. All operations, including inspection, require authentication.
 - (httpdService   ): "${onport:-8888}"
   ((uri          )): /advanced
