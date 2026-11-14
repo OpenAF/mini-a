@@ -1,0 +1,44 @@
+# Run from the repository root: ojob clean.yaml
+# Preview: ojob clean.yaml dryrun=true
+help:
+  text: Recursively remove .openaf_precompiled cache folders.
+  expects:
+  - name: path
+    desc: Root directory to clean (defaults to the current directory).
+    example: .
+  - name: dryrun
+    desc: List cache folders without deleting them (defaults to false).
+    example: true
+
+ojob:
+  sequential: true
+  logToConsole: false
+  catch: throw exception
+
+todo:
+- Clean precompiled caches
+
+jobs:
+- name: Clean precompiled caches
+  exec: | #js
+    var root = _$(args.path, "path").isString().default(".")
+    var dryrun = _$(args.dryrun, "dryrun").toBoolean().isBoolean().default(false)
+    if (!io.fileInfo(root).isDirectory) throw "Not a directory: " + root
+
+    // Find cache directories without traversing symbolic links.
+    function cleanCaches(directory) {
+      io.listFiles(directory).files.forEach(function(file) {
+        var target = directory + "/" + file.filename
+        if (java.nio.file.Files.isSymbolicLink(new java.io.File(target).toPath())) return
+        if (!file.isDirectory) return
+        if (file.filename === ".openaf_precompiled") {
+          print((dryrun ? "Would remove " : "Removing ") + target)
+          if (!dryrun && !io.rm(target)) throw "Could not remove " + target
+        } else {
+          cleanCaches(target)
+        }
+      })
+    }
+
+    // Include caches immediately under the root and in every nested folder.
+    cleanCaches(root)

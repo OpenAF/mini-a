@@ -32,6 +32,7 @@ jobs:
       with:
         script: | #js
           ow.loadFormat()
+          oJob("clean.yaml")
           oPack("genpack . --exclude .github,tests,development,private,.mini-a")
           var pack = io.readFileYAML(".package.yaml")
           pack.version = ow.format.fromDate(new Date(), "yyyyMMdd")
