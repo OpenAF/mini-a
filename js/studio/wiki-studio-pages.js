@@ -114,7 +114,7 @@ WikiStudioServer.prototype.modeSearch = function(w, q) {
 
 WikiStudioServer.prototype.wikiRoute = function(req, w, parts, role) {
   var self = this, q = req.query || {}, body = req.body || {}, route = parts.join("/"), read = req.method === "GET"
-  if (this.jobWikiRoute && ["dreams", "ingestions", "absorptions", "graph/rebuild", "graph/settings", "backups", "changes", "maintenance", "sources", "folders/preview", "folders/move", "folders/delete", "selection/preview", "selection/move", "selection/delete", "exports"].indexOf(route) >= 0 || this.jobWikiRoute && /^(backups|exports|sources)\//.test(route)) return this.jobWikiRoute(req, w, parts, role)
+  if (this.jobWikiRoute && ["dreams", "ingestions", "absorptions", "graph/rebuild", "graph/settings", "graph/preview", "graph/upgrade", "graph/resume", "graph/embeddings", "graph/reconcile", "backups", "changes", "maintenance", "sources", "folders/preview", "folders/move", "folders/delete", "selection/preview", "selection/move", "selection/delete", "exports"].indexOf(route) >= 0 || this.jobWikiRoute && /^(backups|exports|sources)\//.test(route)) return this.jobWikiRoute(req, w, parts, role)
   return WikiStudio.wikiLock(this.config.home, w.id, function() {
     self.registry.verify(w)
     if (self.assertIdle) self.assertIdle(w.id)
@@ -175,6 +175,7 @@ WikiStudioServer.prototype.wikiRoute = function(req, w, parts, role) {
       var params = {}, paging = WikiStudioServer.paginate([], q)
       if (q.path) WikiStudio.pagePath(q.path, route === "backlinks")
       if (["tree", "pages"].indexOf(route) >= 0) params = { path: q.path || "", limit: paging.limit, offset: paging.offset }
+      if (route === "graph/stats" && String(q.detailed) === "true") params.detailed = true
       if (route === "tree") params = { path: q.path || "", maxDepth: 12 }
       if (route === "search") { WikiStudio.assert(isString(q.q) && q.q.length <= 1000, 400, "invalid_query", "Search query required (max 1000 characters)"); params = { query: q.q, limit: paging.limit, offset: paging.offset } }
       if (route === "backlinks") params = { path: WikiStudio.pagePath(q.path) }

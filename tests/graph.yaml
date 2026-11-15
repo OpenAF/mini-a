@@ -115,7 +115,12 @@ jobs:
   to: oJob Test
   exec: args.func = args.tests.testGraphSemanticBuildFallsBackWithoutLlm
 
+- name: MiniA Graph Tests::ReconciliationV2
+  to: oJob Test
+  exec: args.func = function() { load("tests/graphReconcile.js") }
+
 todo:
+- MiniA Graph Tests::ReconciliationV2
 - MiniA Graph Tests::StructuralBuild
 - MiniA Graph Tests::QueryNeighbors
 - MiniA Graph Tests::RelatedAndExport

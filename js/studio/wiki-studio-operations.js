@@ -15,10 +15,16 @@ WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
   }
   if (this.exportRoute && (route === "exports" || /^exports\//.test(route))) return this.exportRoute(req, w, parts, role)
   if (this.backupRoute && (route === "backups" || /^backups\//.test(route) || route === "changes")) return this.backupRoute(req, w, parts, role)
+  if (route === "graph/preview") {
+    WikiStudio.authorize(role, "viewer", w)
+    WikiStudio.assert(req.method === "POST", 405, "method_not_allowed", "Use POST for a graph upgrade preview")
+    WikiStudio.fields(body, MiniAGraphBuild.fields)
+    return this.manager(w, false, function(wm) { return wm.graph("upgrade", merge(body, { preview: true })) }, { skipBootstrap: true })
+  }
   if (route === "graph/settings") {
     if (req.method !== "GET") WikiStudio.authorize(role, "admin", w)
     WikiStudio.assert(req.method === "GET" || req.method === "PUT", 405, "method_not_allowed", "Use GET or PUT for graph settings")
-    WikiStudio.fields(body, ["extraction", "modelHelp", "maxCalls", "maxTokens", "maxMinutes", "preset"])
+    WikiStudio.fields(body, MiniAGraphBuild.preferenceFields.concat(["preset"]))
     return WikiStudio.wikiLock(this.config.home, w.id, function() {
       if (req.method === "PUT" && self.assertIdle) self.assertIdle(w.id)
       return self.manager(w, req.method === "PUT", function(wm) { return wm.graphBuildSettings(body, req.method === "PUT") }, {skipBootstrap:true})
@@ -59,6 +65,16 @@ WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
     else WikiStudio.assert(dest !== null, 400, "destination_required", "Choose a destination folder (empty for the wiki root)")
     params = {items:body.items,to:route === "selection/move" ? dest : null,expectedRevision:body.expectedRevision,confirmation:body.confirmation || ""}
     operation = route === "selection/move" ? "wiki.selectionMove" : "wiki.selectionDelete"
+  } else if (["graph/upgrade", "graph/resume", "graph/embeddings", "graph/reconcile"].indexOf(route) >= 0) {
+    WikiStudio.fields(body, MiniAGraphBuild.fields.concat(["confirmExpensive"]))
+    try { params = this.manager(w, false, function(wm) { return wm.graphBuildSettings(body).effective }) }
+    catch(e) { WikiStudio.fail(400, "invalid_options", String(e.message || e)) }
+    operation = route.replace("/", ".")
+    if (operation === "graph.reconcile" && isUnDef(body.reconcile) && params.reconcile === "off") params.reconcile = "lexical"
+    if (operation === "graph.upgrade" || operation === "graph.resume") {
+      WikiStudio.assert(body.confirmExpensive === true, 400, "confirmation_required", "Select the explicit expensive graph upgrade")
+      params.confirmExpensive = true
+    }
   } else if (route === "graph/rebuild") {
     WikiStudio.fields(body, MiniAGraphBuild.fields.concat(["compact", "confirmation"]))
     WikiStudio.assert(isUnDef(body.compact) || isBoolean(body.compact), 400, "invalid_options", "Compact must be boolean")
@@ -85,7 +101,7 @@ WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
     if (body.mode === "reorg") WikiStudio.assert(body.confirmation && body.confirmation.acknowledgeStructuralChanges === true, 400, "confirmation_required", "Reorg is a live structural edit, not a frozen plan. Explicit structural-change confirmation is required")
     if (o.compact === true) WikiStudio.assert(body.confirmation && body.confirmation.externalProcessesStopped === true, 400, "offline_required", "Stop external readers/writers and confirm before offline compaction")
     if (body.mode === "rebuild") {
-      WikiStudio.fields(o.rebuild || {}, ["modelHelp", "retryFailed", "maxCalls", "maxTokens", "maxMinutes"])
+      WikiStudio.fields(o.rebuild || {}, MiniAGraphBuild.fields)
       try { params.rebuild = MiniAGraphBuild.resolve(merge(o.rebuild || {}, { extraction: "semantic" })) }
       catch(e) { WikiStudio.fail(400, "invalid_options", String(e.message || e)) }
     }
@@ -170,7 +186,7 @@ var wikiStudioRunWorker = function(config, id) {
         if (isString(graphResult.status)) finalMessage += "; graph status: " + graphResult.status
         if (isNumber(graphResult.pending)) finalMessage += "; " + graphResult.pending + " pages with unfinished enrichment"
         if (isNumber(graphResult.failed)) finalMessage += "; " + graphResult.failed + " failed section extractions"
-        if (graphResult.retryRequired === true) finalMessage += "; deferred sections require Retry failed sections"
+        if (graphResult.retryRequired === true) finalMessage += graphResult.reconciliation && graphResult.reconciliation.retryRequired ? "; deferred pairs require Retry failed relationship validation" : "; deferred sections require Retry failed sections"
         if (graphResult.resumable === true) finalMessage += "; enrichment can be resumed"
       }
       finalMessage += ". Changed Markdown paths: " + diff.changedPageCount
@@ -190,7 +206,7 @@ var wikiStudioExecute = function(config, w, job, logFn, backup) {
   // preview. Plan must open a reader and must never bootstrap Markdown/state.
   if (operation === "dream.plan" || operation === "dream.auto" && p.dryrun) a.wikiaccess = "ro"
   if (operation === "dream.reorg") { a.dreamwikireorg = true; a.dreamwikiapproval = "auto" }
-  var params = operation === "graph.build" ? clone(p) : operation.indexOf("dream.") === 0 ? {dryrun:p.dryrun === true} : {}
+  var params = operation.indexOf("graph.") === 0 ? clone(p) : operation.indexOf("dream.") === 0 ? {dryrun:p.dryrun === true} : {}
   if (operation === "graph.build") delete params.compact
   if (operation === "dream.rebuild") params.rebuild = p.rebuild
   if (operation === "dream.reorg") { params.instructions = p.instructions; params.organize = p.organize }
@@ -217,9 +233,9 @@ var wikiStudioExecute = function(config, w, job, logFn, backup) {
     } finally { sm.close() }
   }
   if (isFunction(WikiStudio.executeSource) && /^(ingest|absorb|backup|wiki)\./.test(operation)) return WikiStudio.executeSource(config,w,job,logFn,backup)
-  WikiStudio.assert(operation === "graph.build" || /^dream\.(plan|apply|repair|reindex|rebuild|graph|indexes|auto|reorg)$/.test(operation), 400, "invalid_operation", "Worker operation is not allowlisted")
+  WikiStudio.assert(/^graph\.(build|reconcile|upgrade|resume|embeddings)$/.test(operation) || /^dream\.(plan|apply|repair|reindex|rebuild|graph|indexes|auto|reorg)$/.test(operation), 400, "invalid_operation", "Worker operation is not allowlisted")
   var runner = new MiniAWikiOps(a,logFn)
-  if (operation === "graph.build" || operation === "dream.rebuild" || operation === "dream.graph") {
+  if (operation.indexOf("graph.") === 0 || operation === "dream.rebuild" || operation === "dream.graph") {
     var jobs = new WikiStudioJobs(config)
     // Reuse Studio's credential redaction before retaining a bounded exception sample.
     runner.formatModelError = function(error) {

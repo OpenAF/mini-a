@@ -1513,6 +1513,39 @@ help:
     desc     : "Enable file attachments in the web UI."
     mandatory: false
     options  : ["true", "false"]
+  - name     : wikigraphreconcile
+    desc     : "off|lexical|hybrid; relationship reconciliation, default off"
+    mandatory: false
+  - name     : wikigraphreconcilellm
+    desc     : "off|auto; optional grounded pair validation, default off"
+    mandatory: false
+  - name     : wikigraphreconcilemaxcandidates
+    desc     : "Maximum discovery candidates per page (default 16)"
+    mandatory: false
+  - name     : wikigraphreconcilemaxedges
+    desc     : "Maximum added concept memberships per page (default 16)"
+    mandatory: false
+  - name     : wikigraphreconcilemaxcalls
+    desc     : "Maximum relationship validation calls per invocation (default 8; 0 disables calls)"
+    mandatory: false
+  - name     : wikigraphreconcilemaxtokens
+    desc     : "Maximum estimated relationship validation tokens (default 16000)"
+    mandatory: false
+  - name     : wikigraphreconcilemaxminutes
+    desc     : "Maximum reconciliation minutes per invocation (default 1)"
+    mandatory: false
+  - name     : wikigraphreconcilemaxpages
+    desc     : "Maximum indexing or reconciliation pages per invocation (default 100)"
+    mandatory: false
+  - name     : wikigraphreconcilemaxdf
+    desc     : "Maximum shared-feature document frequency fraction (default 0.2)"
+    mandatory: false
+  - name     : wikigraphembeddingmaxcalls
+    desc     : "Maximum graph embedding cache misses per invocation (default 8)"
+    mandatory: false
+  - name     : wikigraphembeddingmaxcomparisons
+    desc     : "Maximum vector comparisons per invocation (default 10000)"
+    mandatory: false
   - name     : usewikigraph
     desc     : "Enable the wiki knowledge graph for structural and semantic page relationships."
     mandatory: false
@@ -1584,7 +1617,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : wikigraphsemantic
-    desc     : "Build semantic (embedding-based) edges in addition to structural links when running /graph build."
+    desc     : "Build deterministic and optional model-extracted semantic relationships; separate reconciliation settings control embeddings."
     mandatory: false
     options  : ["true", "false"]
   - name     : wikilintresultlimit

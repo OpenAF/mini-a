@@ -1323,6 +1323,12 @@ function drawEditor() {
 window.addEventListener("beforeunload", event => { if (dirty) { event.preventDefault(); event.returnValue = ""; } });
 async function graphView(content) {
   const stats = await StudioApi.wiki("graph/stats"); el("p", stats.source + " · " + stats.freshness, content);
+  var diagnostic = el("div", undefined, content)
+  button(content, "Inspect meaningful connectivity", async function() {
+    diagnostic.replaceChildren()
+    var detailed = await StudioApi.wiki("graph/stats?detailed=true")
+    jsonView(detailed.stats.connectivity || detailed, diagnostic)
+  })
   button(content, "Open graph", async () => {
     const html = await StudioApi.graphHtml(currentWiki.id);
     if (graphBlob) URL.revokeObjectURL(graphBlob);
@@ -1682,11 +1688,20 @@ async function sourcesView(content) {
     }
     showDestination()
 
-    const semantic=check(advanced,"Semantic extraction"),prune=check(advanced,"Remove source-owned pages missing from this revision");disable(semantic,writeReason(true));
+    var semantic = check(advanced, "Semantic extraction")
+    var prune = check(advanced, "Remove source-owned pages missing from this revision")
+    disable(semantic, writeReason(true))
+    var importReconcile = field(advanced, "Relationship reconciliation", ["saved", "off", "lexical", "hybrid"])
+    var importValidation = field(advanced, "Relationship validation model", ["saved", "off", "auto"])
     var tuning = await workflowTuning(advanced, "ingestion", { maxfiles: "Maximum files", maxfilesize: "Maximum file size (bytes)", wikiingestmaxcalls: "Distillation calls per source (0 disables split recovery)", wikiingestbudget: "Estimated operation tokens (-1 unlimited; 0 defers model work)", wikimaxprompttokens: "Prompt tokens (0 automatic)", chunkchars: "Chunk characters", concurrency: "Concurrent distillations" })
     var force = check(tuning.box, "Force reprocessing")
     const actions=row(body),result=el("div",undefined,body);let approved=null,working=false;
-    const options=()=>({mode:mode.value,layout:layout.value,section:folder(),include:include.value,exclude:exclude.value,semantic:semantic.checked,prune:prune.checked,tuning:tuning.values(),force:force.checked});
+    var options = function() {
+      var selected = { mode: mode.value, layout: layout.value, section: folder(), include: include.value, exclude: exclude.value, semantic: semantic.checked, prune: prune.checked, tuning: tuning.values(), force: force.checked }
+      if (importReconcile.value !== "saved") selected.reconcile = importReconcile.value
+      if (importValidation.value !== "saved") selected.reconcileLlm = importValidation.value
+      return selected
+    }
     const signature=()=>JSON.stringify(options());
     const preview=button(actions,"Preview changes",async()=>{
       working=true;preview.disabled=true;apply.disabled=true;const requested=signature();result.replaceChildren();el("p","Preparing preview…",result);
@@ -2320,6 +2335,7 @@ async function webCommandWizard(selectedId) {
 
 // Describe section progress and distinguish automatic continuation from explicit retries.
 function graphBuildProgressText(p) {
+  if (typeof p.indexed === "number" && typeof p.candidates === "number") return human(p.status) + " · " + p.indexed + " discovery pages indexed · " + p.processed + " pages reconciled · " + p.pending + " pending · " + p.added + " memberships added · " + p.calls + " validation calls · " + p.embeddingCalls + " embedding calls · " + p.embeddingHits + " vector cache hits"
   var roles = p.callsByRole || {}
   return human(p.stage) + " · " + (p.processed || 0) + " pages visited · " + (p.sectionsCompleted || 0) + "/" + (p.sectionsTotal || 0) + " sections complete · " + (p.failedAttempts || 0) + " failed attempts · " + (p.deferredSections || 0) + " deferred sections · " + (p.relationshipsAccepted || 0) + " relationships accepted · " + (p.calls || 0) + "/" + (p.effective?.maxCalls || "?") + " calls (LC " + (roles.lc || 0) + ", main " + (roles.main || 0) + ", decision " + (roles.decision || 0) + ") · " + (p.estimatedTokens || 0) + "/" + (p.effective?.maxTokens || "?") + " estimated tokens · " + ((p.elapsedMs || 0) / 60000).toFixed(2) + "/" + (p.effective?.maxMinutes || "?") + " minutes" + (p.resumable ? " · Runnable work remains; run again to continue." : "") + (p.retryRequired ? " · Use Retry failed sections to reset failure limits; successful work is preserved." : "")
 }
@@ -2339,6 +2355,19 @@ async function graphBuildControls(content, dream) {
   var minutes = field(advanced, "Elapsed minutes")
   var force = check(advanced, "Force extraction (ignore semantic caches)")
   var retryFailed = check(advanced, "Retry failed sections")
+  var reconcile = field(advanced, "Relationship reconciliation", ["off", "lexical", "hybrid"])
+  var reconcileLlm = field(advanced, "Relationship validation model", ["off", "auto"])
+  var reconcileRetry = check(advanced, "Retry failed relationship validation")
+  el("p", "Lexical discovery grounds shared concepts across existing pages. Hybrid ranks candidates with cached embeddings. Model validation has a separate opt-in and budget.", advanced)
+  var reconcileInputs = {}
+  ;[["reconcileMaxCandidates", "Candidates per page", 16], ["reconcileMaxEdges", "New memberships per page", 16], ["reconcileMaxPages", "Pages per invocation", 100], ["reconcileMaxCalls", "Validation calls", 8], ["reconcileMaxTokens", "Estimated validation tokens", 16000], ["reconcileMaxMinutes", "Reconciliation minutes", 1], ["embeddingMaxCalls", "Embedding cache misses", 8]].forEach(function(entry) {
+    var control = field(advanced, entry[1])
+    control.type = "number"
+    control.min = "0"
+    control.step = entry[0] === "reconcileMaxMinutes" ? "any" : "1"
+    control.value = String(entry[2])
+    reconcileInputs[entry[0]] = control
+  })
   el("p", "Preserves successful work and resets the two-cycle failure limits for this run.", advanced)
   advanced.append(modelHelp.parentElement)
   var review = el("div", undefined, advanced)
@@ -2353,6 +2382,12 @@ async function graphBuildControls(content, dream) {
     tokens.value = String(value.maxTokens)
     minutes.value = String(value.maxMinutes)
     retryFailed.checked = false
+    reconcile.value = value.reconcile || "off"
+    reconcileLlm.value = value.reconcileLlm || "off"
+    reconcileRetry.checked = false
+    Object.keys(reconcileInputs).forEach(function(key) {
+      if (typeof value[key] === "number") reconcileInputs[key].value = String(value[key])
+    })
   }
   apply(settings.effective)
   strategy.value = "incremental"
@@ -2367,7 +2402,13 @@ async function graphBuildControls(content, dream) {
         throw new Error("Graph budgets must be positive; calls and tokens must be integers")
       }
     }
-    return { extraction: extraction.value, modelHelp: extraction.value === "structural" ? "off" : modelHelp.value, strategy: strategy.value, force: force.checked, retryFailed: retryFailed.checked, maxCalls: Number(calls.value), maxTokens: Number(tokens.value), maxMinutes: Number(minutes.value) }
+    var result = { extraction: extraction.value, modelHelp: extraction.value === "structural" ? "off" : modelHelp.value, strategy: strategy.value, force: force.checked, retryFailed: retryFailed.checked, maxCalls: Number(calls.value), maxTokens: Number(tokens.value), maxMinutes: Number(minutes.value), reconcile: reconcile.value, reconcileLlm: reconcile.value === "off" ? "off" : reconcileLlm.value, reconcileRetryFailed: reconcileRetry.checked }
+    Object.keys(reconcileInputs).forEach(function(key) {
+      var number = Number(reconcileInputs[key].value)
+      if (!reconcileInputs[key].value.trim() || !Number.isFinite(number) || number < 0 || key !== "reconcileMaxMinutes" && !Number.isInteger(number)) throw new Error("Invalid relationship budget: " + key)
+      result[key] = number
+    })
+    return result
   }
 
   // Keep incompatible actions unavailable as the extraction mode changes.
@@ -2377,6 +2418,8 @@ async function graphBuildControls(content, dream) {
     if (force.disabled) force.checked = false
     retryFailed.disabled = extraction.value !== "semantic" || modelHelp.value !== "auto" || currentWiki.access !== "rw"
     if (retryFailed.disabled) retryFailed.checked = false
+    reconcileRetry.disabled = reconcile.value === "off" || reconcileLlm.value !== "auto" || currentWiki.access !== "rw"
+    if (reconcileRetry.disabled) reconcileRetry.checked = false
     var parameters = { effective: values(), models: settings.models }
     review.replaceChildren()
     jsonView(parameters, review)
@@ -2399,7 +2442,7 @@ async function graphBuildControls(content, dream) {
     input.min = "0.000001"
     input.step = input === minutes ? "any" : "1"
   })
-  ;[extraction, modelHelp, strategy, calls, tokens, minutes, force, retryFailed].forEach(function(control) {
+  ;[extraction, modelHelp, strategy, calls, tokens, minutes, force, retryFailed, reconcile, reconcileLlm, reconcileRetry].concat(Object.values(reconcileInputs)).forEach(function(control) {
     control.onchange = refresh
     control.oninput = refresh
     disable(control, writeReason(false))
@@ -2410,21 +2453,60 @@ async function graphBuildControls(content, dream) {
     delete v.force
     delete v.strategy
     delete v.retryFailed
+    delete v.reconcileRetryFailed
     await StudioApi.wiki("graph/settings", "PUT", v)
     message("Graph defaults saved")
   }), writeReason(false))
   var compact = dream ? check(advanced, "Compact storage after success") : null
   var external = dream ? check(box, "External CLI readers and writers are stopped") : null
   button(advanced, "Reset to saved defaults", function() { apply(settings.effective); refresh() })
-  disable(button(box, "Run graph build", async function() {
+  var submitButtons = []
+  var submitting = false
+
+  // Keep a queued workflow single-submission until its background result arrives.
+  async function submitGraph(route, options) {
+    if (submitting) return
+    submitting = true
+    submitButtons.forEach(function(control) { control.disabled = true })
+    try {
+      var queued = await queue(route, options)
+      if (queued && queued.finished) await queued.finished
+    } finally {
+      submitting = false
+      submitButtons.forEach(function(control) { control.disabled = currentWiki.access !== "rw" })
+    }
+  }
+  var runButton = button(box, "Run graph build", async function() {
     var options = values()
     if (compact && compact.checked) {
       options.compact = true
       options.confirmation = { externalProcessesStopped: external.checked }
     }
-    await queue("graph/rebuild", options)
+    await submitGraph("graph/rebuild", options)
     retryFailed.checked = false
-    refresh()
-  }), writeReason(false))
+    if (box.isConnected) refresh()
+  })
+  submitButtons.push(runButton)
+  var upgradeResult = el("div", undefined, advanced)
+  var previewButton = button(advanced, "Preview graph upgrade", async function() {
+    if (previewButton.disabled) return
+    previewButton.disabled = true
+    upgradeResult.replaceChildren()
+    try {
+      var preview = await StudioApi.wiki("graph/preview", "POST", values())
+      if (upgradeResult.isConnected) jsonView(preview, upgradeResult)
+    } finally { previewButton.disabled = false }
+  })
+  var expensive = check(advanced, "Run an expensive staged graph upgrade from current pages")
+  ;[["Upgrade complete graph", "graph/upgrade"], ["Resume graph upgrade", "graph/resume"]].forEach(function(entry) {
+    submitButtons.push(button(advanced, entry[0], async function() {
+      if (!expensive.checked) throw new Error("Select the expensive staged graph upgrade first")
+      await submitGraph(entry[1], Object.assign(values(), { confirmExpensive: true }))
+    }))
+  })
+  submitButtons.push(button(advanced, "Refresh embedding cache only", async function() {
+    await submitGraph("graph/embeddings", values())
+  }))
+  submitButtons.forEach(function(control) { disable(control, writeReason(false)) })
   refresh()
 }

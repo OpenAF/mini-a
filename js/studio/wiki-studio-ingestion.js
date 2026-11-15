@@ -10,7 +10,7 @@ WikiStudioServer.prototype.sourceOperation = function(w, route, body) {
     WikiStudio.fields(body,["sourceId","revision","preview","options","confirmation"])
     var source=this.sourceGet(w,body.sourceId); WikiStudio.assert(source,404,"source_not_found","Source not found")
     WikiStudio.assert(body.revision===source.revision,409,"stale_source","Select the current immutable source revision")
-    var o=body.options||{}; WikiStudio.fields(o,["mode","layout","section","include","exclude","prune","semantic","maxfiles","maxfilesize","tuning","force"])
+    var o=body.options||{}; WikiStudio.fields(o,["mode","layout","section","include","exclude","prune","semantic","maxfiles","maxfilesize","tuning","force"].concat(Object.keys(MiniAGraphBuild.reconcileDefaults)))
     WikiStudio.assert(!isDef(body.preview)||isBoolean(body.preview),400,"invalid_options","Preview must be boolean")
     WikiStudio.assert(!isDef(o.mode)||["auto","normalize","raw","distill"].indexOf(o.mode)>=0,400,"invalid_options","Unsupported ingestion mode")
     WikiStudio.assert(!isDef(o.layout)||["source","flat"].indexOf(o.layout)>=0,400,"invalid_options","Unsupported ingestion layout")
@@ -20,11 +20,17 @@ WikiStudioServer.prototype.sourceOperation = function(w, route, body) {
     ;["include","exclude"].forEach(function(k){ if(isDef(o[k])) WikiStudio.assert(isString(o[k])&&o[k].length<=1000&&!/[\x00-\x1f]/.test(o[k]),400,"invalid_options","Invalid include/exclude patterns") })
     ;["prune","semantic"].forEach(function(k){if(isDef(o[k]))WikiStudio.assert(isBoolean(o[k]),400,"invalid_options","Expected boolean")})
     ;["maxfiles","maxfilesize"].forEach(function(k){if(isDef(o[k]))WikiStudio.assert(isNumber(o[k])&&o[k]>=1&&Math.floor(o[k])===o[k]&&o[k]<=(k==="maxfiles"?2000:8388608),400,"invalid_options","Limit exceeds Studio quota")})
+    var graphOverrides = {}
+    Object.keys(MiniAGraphBuild.reconcileDefaults).forEach(function(key) {
+      if (isDef(o[key])) graphOverrides[key] = o[key]
+    })
+    try { this.manager(w, false, function(wm) { return wm.graphBuildSettings(graphOverrides) }) }
+    catch(error) { WikiStudio.fail(400, "invalid_options", String(error.message || error)) }
     var tuning = this.resolveTuning(w, "ingestion", o.tuning || {})
     ;["maxfiles", "maxfilesize"].forEach(function(key) { if (isDef(o[key])) tuning[key] = o[key] })
     WikiStudio.assert(isUnDef(o.force) || isBoolean(o.force), 400, "invalid_options", "Force must be boolean")
     if(o.prune===true) WikiStudio.assert(body.confirmation&&body.confirmation.acknowledgePrune===true,400,"confirmation_required","Explicit prune confirmation required; empty-source authorization is not available")
-    return {operation:"ingest.run",params:{sourceId:source.id,revision:source.revision,staging:source.staging,inventoryChecksum:source.inventoryChecksum,dryrun:body.preview!==false,mode:o.mode||"auto",layout:o.layout||"source",section:section,include:o.include||"",exclude:o.exclude||"",prune:o.prune===true,semantic:o.semantic===true,tuning:tuning,force:o.force===true,maxfiles:tuning.maxfiles,maxfilesize:tuning.maxfilesize}}
+    return {operation:"ingest.run",params:{graphOverrides:graphOverrides,sourceId:source.id,revision:source.revision,staging:source.staging,inventoryChecksum:source.inventoryChecksum,dryrun:body.preview!==false,mode:o.mode||"auto",layout:o.layout||"source",section:section,include:o.include||"",exclude:o.exclude||"",prune:o.prune===true,semantic:o.semantic===true,tuning:tuning,force:o.force===true,maxfiles:tuning.maxfiles,maxfilesize:tuning.maxfilesize}}
   }
   if(route==="absorptions") {
     WikiStudio.fields(body,["action","sourceWikiIds","paths","tags","topic","exclude","planId","confirmation","tuning"])
@@ -61,6 +67,9 @@ WikiStudio.executeSource = function(config,w,job,logFn,backup) {
   if(op==="backup.restore") return WikiStudio.restore(config,w,job,backup)
   if(op==="wiki.export") return WikiStudio.exportWiki(config,w,job,logFn)
   var a={wikiroot:w.root,wikiaccess:"rw",usewikigraph:w.graph.enabled,wikigraphsemantic:p.semantic===true,wikiretrievalv2:true},params={}
+  Object.keys(p.graphOverrides || {}).forEach(function(key) {
+    if (Object.prototype.hasOwnProperty.call(MiniAGraphBuild.reconcileDefaults, key)) a["wikigraph" + key.toLowerCase()] = p.graphOverrides[key]
+  })
   Object.keys(p.tuning || {}).forEach(function(key) { if (/^(wiki|absorb)/.test(key)) a[key] = p.tuning[key] })
   if(op==="ingest.run") {
     WikiStudio.assert(WikiStudio.inside(p.staging,config.home+"/sources/uploads"),400,"invalid_source","Source staging leaves trusted area")

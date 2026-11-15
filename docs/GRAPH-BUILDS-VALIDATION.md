@@ -76,3 +76,79 @@ The test container was removed afterward; existing services were not restarted.
 Studio UI verification uses the DOM harness and server operation fixtures, rather
 than a visual session against a deployed Studio. No production wiki was reorganized
 and no installed Mini-A service was deployed or restarted.
+
+## Wiki Graph v2 validation — 2026-11-15
+
+The opt-in reconciliation and staged upgrade implementation is described in
+[Wiki Graph v2](WIKI-GRAPH-V2.md). These are local checkout results on installed
+OpenAF `20261114`; they do not establish production-corpus quality or hosted CI.
+
+| Check | Result |
+| --- | --- |
+| `ojob tests/graph.yaml` | 23 jobs passed, including the new reconciliation harness |
+| `oaf -f tests/graphReconcile.js` | 63 assertions: cross-batch grounding, no-op writes/calls, edit/delete invalidation, sparse diagnostics, bounded restart, pair validation, cache reuse, provider failures, retries, ingestion transaction boundaries and remote publication |
+| `python3 tests/graphUpgradeRecovery.py` | Six abrupt JVM exits recovered at structure, graph, ready, atomic replacement, post-publication and durable validation-receipt boundaries; completed pair validation was not called again |
+| `oaf -f tests/graphBuild.js` | 151 existing build-contract assertions passed |
+| `ojob tests/wiki.yaml` | Existing wiki, retrieval, embedding-cache and full-rebuild suite passed |
+| `ojob tests/wikiIngest.yaml` | 107 jobs passed |
+| `ojob tests/wikiManager.yaml` | 33 jobs passed |
+| `ojob tests/wikiStudio.yaml` | 27 jobs passed |
+| `ojob tests/wikiUtilsJobs.yaml` | Nine jobs passed |
+| `python3 tests/wikiStudioHttp.py` | 271 HTTP assertions, including new preview/upgrade/reconcile/detailed-stat routes and real isolated workers |
+| `node tests/wikiStudioUI.cjs`, `node tests/wikiStudioRequests.cjs` | Passed |
+| `node tests/embeddingStats.cjs` | Passed |
+| `node tests/modulePaths.cjs`, `python3 tests/modulePaths.py` | Passed, including copied packages and unrelated working directories |
+| `python3 tests/wikiStudioPackage.py` | Explicit 254-file manifest, generated oPack, extracted layout and real-worker workflow passed |
+| `oaf -f tests/graphParity.js` | 14 assertions and existing OpenAF graph channel tests passed |
+| `ojob tests/graphLift.yaml`, `python3 tests/wikiGraph.py` | Passed |
+| `MINIA_GRAPH_TEST_PORT=... oaf -f tests/graphFalkorLive.js` | 15 assertions passed against a disposable loopback-only FalkorDB container, including staged publication and metadata/evidence round trips |
+
+The real Ollama smoke test used the user's configured `embeddinggemma-2`: two
+cold embedding calls, then zero provider calls on the unchanged warm run. One
+explicit pair-validation call through the configured Ollama LC model produced two
+independently grounded memberships. No model configuration or installed runtime
+was changed. Network sandbox failures were retried with permission; failures
+continued to leave deterministic operation available.
+
+The production V2 held-out fixture (six queries, including one abstention) scored
+Recall@K **1.0**, MRR **1.0**, and one correct abstention both with graph disabled
+and with lexical reconciliation. This is a small compatibility check, not broad
+quality evidence. Query-time retrieval still performs no provider calls.
+
+`oaf -f tests/graphReconcileBenchmark.js` exercised six configurations at 100, 1000
+and 10000 pages: lexical document matching, structural graph, existing semantic
+graph, reconciled lexical, simulated hybrid, and simulated pair validation. The
+frozen synthetic graph-dependent queries scored Recall@10 **0.167** for lexical/
+structural and **1.0** for existing semantic and all reconciled variants, with MRR
+**1.0** throughout. Reconciled variants created 42 supported memberships and zero
+false-positive memberships on this fixture. Simulated hybrid/validation provided
+no additional quality gain; this does not measure real embedding/LLM quality.
+
+| Pages | Reconciled lexical build | Unchanged repeat | Processing rounds | Graph JSON bytes | Total derived bytes | Query p50 / p95 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 100 | 214 ms | 33 ms | 1 | 174672 | 238613 | 0.50 / 7.60 ms |
+| 1000 | 789 ms | 121 ms | 1 | 1397136 | 1757342 | 0.91 / 55.25 ms |
+| 10000 | 49184 ms | 1043 ms | 19 | 15608410 | 33447167 | 7.98 / 638.17 ms |
+
+Runs used 1000 pages per invocation and two-minute CPU limits. Times are single
+local measurements, not service-level promises. A common-title-prefix case exposed
+an excessive vocabulary dependency expansion; lookups are now bounded like the
+existing mention scanner. Hybrid performed 162 total dot products and 30 mock
+provider calls at 10000 pages, with zero warm provider calls. The recorded JVM
+used-heap samples varied substantially across sequential modes (including a
+1.36 GB sample for the 10000-page lexical reconciliation run); they are neither
+peak heap nor isolated per-mode overhead. Query timings include the first lazy
+index load and have only five samples per configuration. The separate 10000-page
+identical-title fixture completed in 3055 ms with 10000 components and zero
+meaningful neighbors. Simulated validation used six calls and 6837 estimated
+tokens at 10000 pages; mock embeddings do not report token usage. Whole-JSON saves and whole-wiki inventory
+remain scaling costs. The optional 100000-passage/ANN benchmark was not run; ANN
+is deferred rather than introduced as a dependency.
+
+Browser checks used a disposable served wiki: Advanced controls started collapsed,
+saved lexical defaults, ran deterministic reconciliation (two memberships, zero
+provider calls), and produced a provider-free upgrade preview with connectivity
+and publication estimates. The dark layout and 390-pixel viewport were inspected,
+including keyboard-visible focus. Light-theme emulation and an interactive terminal
+were not exercised; console workflows have manager/adapter tests. The temporary
+Studio server and FalkorDB container were stopped after validation.

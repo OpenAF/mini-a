@@ -19,6 +19,9 @@ help:
     desc     : The key where the graph data is stored (if not provided defaults to file or __pm)
     example  : graph
     mandatory: false
+  - name     : detailed
+    desc     : "Add meaningful document connectivity diagnostics (default false)"
+    mandatory: false
   - name     : top
     desc     : "Number of top entries to include in each ranked list (default: 10)"
     example  : "5"
@@ -42,6 +45,7 @@ jobs:
       key : isString.default(__)
       file: isString.default(__)
       top : toNumber.isNumber.default(10)
+      detailed: toBoolean.isBoolean.default(false)
   exec : |
     var graph
     if (isUnDef(args.key)) {
@@ -151,4 +155,13 @@ jobs:
       }
     }
 
+    if (args.detailed) {
+      var statsBase = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParentFile().getParent())
+      if (!io.fileExists(statsBase + "/js/mini-a-paths.js")) statsBase = getOPackPath("mini-a")
+      if (!isString(statsBase) || !io.fileExists(statsBase + "/js/mini-a-paths.js")) throw new Error("Cannot locate Mini-A connectivity diagnostics")
+      loadLib(statsBase + "/js/mini-a-paths.js")
+      __miniAPackageRoot = __miniAResolvePackageRoot(statsBase)
+      loadLib(__miniAPath("js/wiki/mini-a-graph-connectivity.js"))
+      result.connectivity = MiniAGraphConnectivity(graph, {})
+    }
     ow.oJob.output(result, args)

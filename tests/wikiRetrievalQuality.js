@@ -1,7 +1,7 @@
 // Deterministic passage evidence evaluation; no model judging or runtime dependencies.
 load("js/core/mini-a-common.js"); load("js/wiki/mini-a-wiki.js"); load("js/wiki/mini-a-wiki-knowledge.js")
 var mode = String(getEnv("WIKI_EVAL_MODE") || "v2"), graphMode = String(getEnv("WIKI_EVAL_GRAPH") || "off"), split = String(getEnv("WIKI_EVAL_SPLIT") || "held-out")
-if (["development", "held-out", "acceptance", "graph-lift"].indexOf(split) < 0 || ["v2", "legacy"].indexOf(mode) < 0 || ["off", "structural", "semantic"].indexOf(graphMode) < 0) throw new Error("invalid evaluation mode/split")
+if (["development", "held-out", "acceptance", "graph-lift"].indexOf(split) < 0 || ["v2", "legacy"].indexOf(mode) < 0 || ["off", "structural", "semantic", "lexical"].indexOf(graphMode) < 0) throw new Error("invalid evaluation mode/split")
 var fixturePath = "tests/fixtures/wiki-retrieval-v2/" + split + ".json", fixtureRaw = io.readFileString(fixturePath), fixture = af.fromJson(fixtureRaw), dir = String(io.createTempDir("wiki-quality-")), managers = {}, results = []
 var evidenceValidator=require("tests/wikiRetrievalEvidence.js")
 try {
@@ -14,7 +14,7 @@ try {
     managers[wiki] = new MiniAWikiManager({backend:"fs",root:dir+"/"+wiki,access:"rw",wikiretrievalv2:mode==="v2",usegraph:graphMode!=="off",wikigraphsearchhints:graphMode!=="off",wikigraphproximity:graphMode!=="off",llmExtractFn:function(){return{relationships:[]}}},function(){})
     var built=managers[wiki].reindex(); if(!built.ok)throw new Error(stringify(built))
     // Graph modes: V2 reindex publishes passages only, so the graph is built explicitly; semantic adds deterministic mentions (stub model, no network).
-    if(graphMode!=="off"){var g=managers[wiki].graph("build",{extraction:graphMode,modelHelp:graphMode==="semantic"?"auto":"off"});if(g&&g.ok===false)throw new Error(stringify(g))}
+    if(graphMode!=="off"){var g=managers[wiki].graph("build",{extraction:graphMode==="lexical"?"structural":graphMode,modelHelp:graphMode==="semantic"?"auto":"off",reconcile:graphMode==="lexical"?"lexical":"off"});if(g&&g.ok===false)throw new Error(stringify(g))}
   })
   var root = managers.primary
   Object.keys(managers).forEach(function(wiki){if(wiki!=="primary")root.attach(wiki,{backend:"fs",root:dir+"/"+wiki})})
