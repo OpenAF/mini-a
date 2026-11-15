@@ -392,7 +392,7 @@ SubtaskManager._PARENT_ONLY_CHILD_ARG_NAMES = [
   "mcpproxytoon", "mcpproxyallow", "mcpproxydeny", "mcplazy", "nosetmcpwd", "noagentsmd", "usejsonschema", "usejsontool",
   "useutils", "useskills", "utilsroot", "utilsallow", "utilsdeny", "miniadocs", "mini-a-docs",
   "debugfile", "goalprefix",
-  "workerreg", "workerregtoken", "workerregurl", "workerreginterval",
+  "workerreg", "workerregtoken", "workerregurl", "workerreginterval", "workerurl",
   "mcpprogcall", "mcpprogcallport", "mcpprogcallmaxbytes", "mcpprogcallresultttl",
   "mcpprogcalltools", "mcpprogcallbatchmax",
   "onport", "web", "modelman", "mcptest", "memoryman", "wikiman", "wikitarget", "workermode", "path"

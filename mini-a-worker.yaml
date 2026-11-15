@@ -81,6 +81,10 @@ help:
     desc     : Heartbeat interval in milliseconds
     example  : "30000"
     mandatory: false
+  - name     : workerurl
+    desc     : Public base URL advertised to main instances and in the agent card (defaults to http://<host address>:<onport>)
+    example  : "http://mini-a-worker-1:8080"
+    mandatory: false
 
   - name     : delegationmaxdepth
     desc     : "Maximum delegation nesting depth"
@@ -540,6 +544,14 @@ jobs:
     args.workerregurl = _$(args.workerregurl, "args.workerregurl").isString().default(__)
     args.workerregtoken = _$(args.workerregtoken, "args.workerregtoken").isString().default(__)
     args.workerreginterval = _$(args.workerreginterval, "args.workerreginterval").toNumber().isNumber().default(30000)
+    args.workerurl = _$(args.workerurl, "args.workerurl").default(__)
+
+    // Normalize the advertised URL (may arrive as a java.lang.String)
+    if (isDef(args.workerurl)) args.workerurl = String(args.workerurl).trim().replace(/\/+$/, "")
+    if (isDef(args.workerurl) && args.workerurl.length === 0) args.workerurl = __
+    if (isDef(args.workerurl) && !/^https?:\/\/[^\s\/?#]+(\/[^\s?#]*)?$/.test(args.workerurl)) {
+      throw new Error("Invalid workerurl '" + args.workerurl + "': expected http(s)://host[:port][/path]")
+    }
 
     // Validate
     if (isUnDef(args.apitoken)) {
@@ -846,10 +858,18 @@ jobs:
       return global.__worker_skillCache
     }
 
-    global.__worker_getAgentCard = function(includeExtendedData) {
+    // Resolve the base URL other instances should use to reach this worker
+    global.__worker_getPublicUrl = function(wargs) {
+      if (isString(wargs.workerurl) && wargs.workerurl.length > 0) return wargs.workerurl
       ow.loadNet()
+      var host = ow.net.getHostAddress()
+      if (!isString(host) || host.trim().length === 0) host = ow.net.getHostName()
+      return "http://" + host + ":" + wargs.onport
+    }
+
+    global.__worker_getAgentCard = function(includeExtendedData) {
       var wargs = global.__worker_args
-      var baseUrl = "http://" + ow.net.getHostAddress() + ":" + wargs.onport
+      var baseUrl = global.__worker_getPublicUrl(wargs)
       var card = {
         protocolVersion: "0.4.0",
         name: isString(wargs.workername) ? wargs.workername : "mini-a-worker",
@@ -1207,10 +1227,8 @@ jobs:
     var targets = regUrls.split(",").map(function(u) { return String(u || "").trim() }).filter(function(u) { return u.length > 0 })
     if (targets.length === 0) return
 
-    ow.loadNet()
-    var myHost = ow.net.getHostAddress()
-    if (!isString(myHost) || myHost.trim().length === 0) myHost = ow.net.getHostName()
-    var myUrl = "http://" + myHost + ":" + args.onport
+    // Advertise workerurl when set (containers, NAT, Kubernetes Services); otherwise the local address
+    var myUrl = global.__worker_getPublicUrl(isMap(global.__worker_args) ? global.__worker_args : args)
 
     global.__worker_selfUrl = myUrl
     global.__worker_regTargets = targets

@@ -237,6 +237,7 @@ ojob mini-a-worker.yaml onport=8080 apitoken=your-secret-token
 | `workerregurl` | string | (none) | Comma-separated parent registration URL(s) to self-register with |
 | `workerregtoken` | string | (none) | Bearer token used for registration endpoint authentication |
 | `workerreginterval` | number | `30000` | Heartbeat interval (ms) used to refresh registration |
+| `workerurl` | string | `http://<host address>:<onport>` | Public base URL advertised on registration and in the agent card `url`. Set it when the main instance cannot reach the worker's own IP (Docker published ports, NAT, Kubernetes Services) |
 
 Plus all standard Mini-A parameters: `model`, `mcp`, `rules`, `knowledge`, `useshell`, `readwrite`, `maxsteps`, etc.
 
@@ -552,6 +553,9 @@ Dynamic registration allows worker pods to self-register to a parent Mini-A inst
 - `workerregurl="<url1,url2>"` enables self-registration against one or more parents.
 - `workerregtoken=<token>` sends `Authorization: Bearer <token>`.
 - `workerreginterval=<ms>` controls heartbeat frequency.
+- `workerurl=<url>` sets the address the worker advertises. By default it is `http://<host address>:<onport>`, which inside a container is the container's internal IP.
+
+For a step-by-step setup with processes, Docker Compose, and Kubernetes, see [WORKERS-QUICKSTART.md](WORKERS-QUICKSTART.md).
 
 ### Registration Endpoints (Parent `workerreg` Port)
 

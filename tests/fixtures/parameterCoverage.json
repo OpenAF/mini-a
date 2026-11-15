@@ -253,7 +253,8 @@
     "maxcontext",
     "maxsteps",
     "delegationmaxdepth",
-    "delegationmaxretries"
+    "delegationmaxretries",
+    "workerurl"
   ],
   "ingestBudgets": [
     "wikillmbudget",

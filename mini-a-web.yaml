@@ -1073,6 +1073,10 @@ help:
     desc     : Worker heartbeat interval in milliseconds for self-registration
     example  : "30000"
     mandatory: false
+  - name     : workerurl
+    desc     : Public base URL a workermode worker advertises when registering (defaults to http://<host address>:<onport>)
+    example  : "http://mini-a-worker-1:8080"
+    mandatory: false
   - name     : workerskills
     desc     : JSON/SLON array of worker skills exposed by workermode
     example  : "[(name: 'research')]"
@@ -2314,6 +2318,7 @@ jobs:
       workerevictionttl: toNumber().isNumber().default(60000)
       workerregurl   : isString().default(__)
       workerreginterval: toNumber().isNumber().default(__)
+      workerurl      : isString().default(__)
       workerskills   : isString().default(__)
       workertags     : isString().default(__)
       showdelegate   : toBoolean().isBoolean().default(false)

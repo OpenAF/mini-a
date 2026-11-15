@@ -296,7 +296,8 @@ returns skill text, and only the bounded section/range asked for.
 A generic MCP client (Claude Code, Codex, OpenCode, agy, or any other
 MCP-capable agent) needs nothing beyond a normal MCP connection to this server --
 `toolPrefix=skills-` can namespace the tools (for example, `skills-search`) if the client also has an unrelated
-`search`/`context`/etc. tool from another server.
+`search`/`context`/etc. tool from another server. For a container deployment next to a multi-wiki `mcp-wiki` server, see
+[WIKI-CONTAINERS.md](WIKI-CONTAINERS.md).
 
 ### Safe / public mode
 

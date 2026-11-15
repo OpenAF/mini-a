@@ -2899,6 +2899,7 @@
       workerregtoken: "secret",
       workerregurl: "http://registry",
       workerreginterval: 1000,
+      workerurl: "http://worker-public:8080",
       mcpprogcall: true,
       mcpprogcallport: 12345,
       onport: 9999,
@@ -2931,7 +2932,7 @@
       "mcp", "mcpconfig", "mcpdynamic", "mcpproxy", "mcpproxynative", "mcpproxythreshold",
       "mcpproxytoon", "mcpproxyallow", "mcpproxydeny", "mcplazy", "nosetmcpwd", "usejsontool",
       "useutils", "useskills", "utilsroot", "utilsallow", "utilsdeny", "miniadocs", "mini-a-docs",
-      "debugfile", "goalprefix", "workerreg", "workerregtoken", "workerregurl", "workerreginterval",
+      "debugfile", "goalprefix", "workerreg", "workerregtoken", "workerregurl", "workerreginterval", "workerurl",
       "mcpprogcall", "mcpprogcallport", "onport", "web"
     ].forEach(function(key) {
       ow.test.assert(isUnDef(childArgs[key]), true, "Should strip inherited parent-only arg: " + key)

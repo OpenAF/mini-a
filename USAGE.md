@@ -1783,6 +1783,7 @@ Mini-A supports **delegation** — the ability to spawn child Mini-A agents to h
 | `workerevictionttl` | number | `60000` | Heartbeat TTL (ms) before dynamic worker eviction |
 | `workerregurl` | string | (none) | Comma-separated parent registration URLs for worker self-registration |
 | `workerreginterval` | number | `30000` | Worker heartbeat interval (ms) |
+| `workerurl` | string | `http://<host address>:<onport>` | Public base URL a worker advertises when registering and in its agent card; set it when the main instance reaches the worker through a container name, published port, NAT, or Kubernetes Service |
 | `maxconcurrent` | number | `4` | Maximum concurrent child agents |
 | `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
 | `delegationtimeout` | number | `300000` | Default foreground wait budget and initial subtask stall timeout (ms); activity extends execution |
@@ -1937,6 +1938,8 @@ For comprehensive delegation documentation, see **[docs/DELEGATION.md](docs/DELE
 ### Dynamic Worker Registration
 
 Dynamic worker registration lets workers announce themselves at startup and refresh registration with heartbeats, instead of relying only on a static `workers=` list.
+
+For a step-by-step setup (processes, Docker, Compose, Kubernetes), see **[docs/WORKERS-QUICKSTART.md](docs/WORKERS-QUICKSTART.md)**.
 
 ```bash
 # Parent instance: start registration server

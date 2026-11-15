@@ -86,6 +86,8 @@ mini-a goal="..." \
 
 Read and discovery tools include: `context` (compact overview), `search` (full-text search), `read` (page content and frontmatter), `open` (read with link validation), `navigate` (link-relative traversal), `grep` (regex search), `related` (related pages), `browse` (section structure), `tree` (full folder hierarchy), `backlinks` (incoming page links), and `list` (enumerate pages).
 
+To serve several wikis (and a skill library via `mcp-skills`) from containers, see [Serving wikis and skills from containers](../docs/WIKI-CONTAINERS.md).
+
 `audit=true` (or `OJOB_MCP_AUDIT=true`) logs every MCP tool call (tool name plus its call arguments — page paths, search queries, and so on) via OpenAF's `log()` function. It is off by default. See [Auditing MCP tool calls](#auditing-mcp-tool-calls) below — this works the same way for every MCP in this catalog, not just `mcp-wiki`/`mcp-wiki-safe`.
 
 #### mcp-wiki-safe

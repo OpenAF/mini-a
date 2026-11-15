@@ -1445,6 +1445,7 @@ mini-a mode=mypreset goal="your goal here"
 | `workerevictionttl` | number | `60000` | TTL (ms) before evicting unresponsive dynamic workers |
 | `workerregurl` | string | - | Registration URL(s) for worker self-registration (comma-separated) |
 | `workerreginterval` | number | `30000` | Heartbeat interval (ms) for re-registration |
+| `workerurl` | string | `http://<host address>:<onport>` | Public URL the worker advertises (container name, published port, Service DNS) |
 | `maxconcurrent` | number | `4` | Maximum concurrent child agents |
 | `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
 | `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |

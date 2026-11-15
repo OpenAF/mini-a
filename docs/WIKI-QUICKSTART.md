@@ -66,6 +66,7 @@ In the console, try:
 - Source changed: re-run hydrate (add `prune=true` to drop removed files).
 - Wiki drifting or messy: dream with `dreamwikimode=plan`, review, then run it for real.
 - Several wikis: use `wikimounts` (see [WIKI.md](WIKI.md#mcp-multi-wiki-selection)); `wikiquery` passes it through.
+- Serve wikis and skills from containers: see [WIKI-CONTAINERS.md](WIKI-CONTAINERS.md).
 - Publish for others: see [static HTTP wiki](WIKI.md#publishing-a-static-http-wiki).
 
 ## Troubleshooting

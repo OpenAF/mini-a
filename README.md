@@ -707,6 +707,7 @@ Wiki folders become browsable sub-wikis when they contain `index.md`. Agents can
 | `workerskills` | JSON/SLON array of A2A-style worker skills exposed by `workermode=true` | - |
 | `workertags` | Comma-separated tags appended to the default worker skill in `workermode=true` | - |
 | `workerreginterval` | Worker registration heartbeat interval in milliseconds | `30000` |
+| `workerurl` | Public base URL a worker advertises when self-registering (`workermode=true`) | `http://<host address>:<onport>` |
 | `maxsteps` | Maximum *consecutive* steps without a successful action before forcing a final answer (default is `15` via `mini-a.sh`/ojob, `50` when using the `MiniA` class programmatically) | `15` |
 | `maxtotalsteps` | Hard ceiling on *total* steps regardless of progress; forces a final answer the same way `maxsteps` does. `0` disables it | `0` |
 | `rpm` | Rate limit (requests per minute) | - |
