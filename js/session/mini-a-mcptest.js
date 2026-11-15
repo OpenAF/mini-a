@@ -100,6 +100,121 @@ function normalizeMCPConfigInput(rawConfig) {
     return config
 }
 
+// Include the provider's safe OAuth error identifier without exposing token responses.
+function mcpConnectionError(error) {
+  var message = String(error.message)
+  if (isString(error.oauthError) && /^[a-zA-Z0-9_]+$/.test(error.oauthError)) {
+    message += " (OAuth: " + error.oauthError + ")"
+  }
+  return message
+}
+
+// Read advertised scopes without starting login or requesting protected tools.
+function discoverMCPScopes(url) {
+  var uri = new java.net.URI(url)
+  if (String(uri.getScheme()) != "https") throw new Error("Scope discovery requires an HTTPS server URL.")
+  var origin = String(new java.net.URI(uri.getScheme(), null, uri.getHost(), uri.getPort(), null, null, null))
+  var path = String(uri.getPath() || "").replace(/\/$/, "")
+  var urls = [origin + "/.well-known/oauth-protected-resource" + path]
+  if (path != "") urls.push(origin + "/.well-known/oauth-protected-resource")
+  for (var i = 0; i < urls.length; i++) {
+    var metadata = $rest({ timeout: 10000 }).get(urls[i])
+    if (!isMap(metadata) || !isArray(metadata.scopes_supported)) continue
+    var scopes = metadata.scopes_supported.filter(function(scope) {
+      return isString(scope) && scope.length > 0 && !/\s/.test(scope)
+    })
+    return scopes.filter(function(scope, index) { return scopes.indexOf(scope) == index }).sort()
+  }
+  return []
+}
+
+// Let users select multiple advertised scopes, enter scopes manually, or retain defaults.
+function chooseMCPScopes(config, auth) {
+  var mode = normalizeChoiceIndex(askChoose("OAuth scopes: ", [
+    "🔍 Discover and select scopes", "📝 Enter scopes manually", "Use OpenAF defaults", "🔙 Cancel"
+  ]), 4)
+  if (mode < 0 || mode == 3) return false
+  if (mode == 2) return true
+  if (mode == 0) {
+    var scopes = []
+    try {
+      print("Discovering advertised OAuth scopes...")
+      scopes = discoverMCPScopes(config.url)
+    } catch(e) {
+      print("Scope discovery failed. Enter scopes manually or cancel with a blank value.")
+    }
+    if (scopes.length > 0) {
+      var selected = askChooseMultiple("Select OAuth scopes (blank selection cancels): ", scopes, 12)
+      if (!isArray(selected) || selected.length == 0) return false
+      auth.scope = selected.join(" ")
+      return true
+    }
+    print("No selectable scopes discovered. Enter the provider's scope names separated by spaces.")
+  }
+  var value = ask("Scopes separated by spaces (blank to cancel): ")
+  if (isUnDef(value) || value.trim() == "") return false
+  auth.scope = value.trim()
+  return true
+}
+
+// Configure remote authentication using OpenAF's native OAuth discovery and refresh.
+function configureMCPAuth(config) {
+  var choice = normalizeChoiceIndex(askChoose("Authentication: ", [
+    "Keep current / none", "OAuth2 automatic browser login", "OAuth2 authorization code", "OAuth2 client credentials", "Bearer token", "🔙 Cancel"
+  ]), 6)
+  if (choice < 0 || choice == 5) return false
+  if (choice == 0) return true
+
+  var auth = { type: choice == 4 ? "bearer" : "oauth2" }
+  if (choice == 4) {
+    auth.token = ask("Bearer token: ", "*")
+    if (isUnDef(auth.token) || auth.token.trim() == "") return false
+  } else {
+    if (choice != 1) {
+      auth.grantType = choice == 2 ? "authorization_code" : "client_credentials"
+      auth.clientId = ask("Client ID: ")
+      if (isUnDef(auth.clientId) || auth.clientId.trim() == "") return false
+      var secret = ask("Client secret (blank for public client): ", "*")
+      if (isDef(secret) && secret != "") auth.clientSecret = secret
+      if (choice == 2) auth.callback = true
+    }
+
+    if (!chooseMCPScopes(config, auth)) return false
+
+    var fields = choice == 1 ? [] : ["tokenURL"]
+    if (choice == 2) fields = fields.concat(["authURL", "redirectURI"])
+    fields.forEach(function(key) {
+      var value = ask(key + " (blank for OpenAF default/discovery): ")
+      if (isDef(value) && value.trim() != "") auth[key] = value.trim()
+    })
+    var profile = ask("Encrypted token store profile (blank for no persistence): ")
+    if (isDef(profile) && profile.trim() != "") auth.tokenStore = { type: "sec", profile: profile.trim() }
+    var extra = ask("Advanced auth options as JSSLON/JSON (blank to skip): ")
+    if (isDef(extra) && extra.trim() != "") auth = merge(auth, parseOptionalJSSLON("Authentication options", extra, "map"))
+  }
+  config.auth = auth
+  return true
+}
+
+// Show a shell-quoted parameter only when explicitly requested by the user.
+function showMCPParameter(config) {
+  var value = buildMcpParamString(config).replace(/'/g, "'\\''")
+  print("mcp='" + value + "'")
+}
+
+// Offer the completed configuration before starting a potentially failing connection.
+function reviewMCPConfig(config) {
+  while (true) {
+    var choice = normalizeChoiceIndex(askChoose("Connection configuration ready: ", [
+      "🔌 Connect", "🔤 Show mcp= parameter (includes configured secrets)", "🔙 Cancel"
+    ]), 3)
+    if (choice == 0) return config
+    if (choice != 1) return null
+    showMCPParameter(config)
+  }
+}
+
+// Collect optional connection settings.
 function enrichMCPConfig(config) {
     var _config = clone(config)
 
@@ -113,6 +228,8 @@ function enrichMCPConfig(config) {
         var _extraParsed = parseOptionalJSSLON("Extra $mcp options", _extra, "map")
         _config = merge(_config, _extraParsed)
     }
+
+    if (isDef(_config.url) && !configureMCPAuth(_config)) return null
 
     return _config
 }
@@ -205,7 +322,8 @@ function buildMCPConfig(args) {
         _config = normalizeMCPConfigInput(_raw)
     }
 
-    return enrichMCPConfig(_config)
+    var enriched = enrichMCPConfig(_config)
+    return isDef(enriched) ? reviewMCPConfig(enriched) : null
 }
 
 // Helper function to print elapsed time
@@ -573,7 +691,7 @@ function mainMCPTest(args) {
                 }
                 print("✅ Connected successfully!\n")
             } catch(e) {
-                print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Connection failed: " + e.message, errorColor) + "\n")
+                print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Connection failed: " + mcpConnectionError(e), errorColor) + "\n")
                 _mcpClient = __
                 _currentConfig = __
                 _currentConfigRaw = __
@@ -622,7 +740,7 @@ function mainMCPTest(args) {
                 }
                 print("✅ Connected successfully!\n")
             } catch(e) {
-                print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Connection failed: " + e.message, errorColor) + "\n")
+                print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Connection failed: " + mcpConnectionError(e), errorColor) + "\n")
                 _mcpClient = __
                 _currentConfig = __
                 _currentConfigRaw = __
@@ -700,7 +818,7 @@ function mainMCPTest(args) {
                 print("✅ Connected successfully!\n")
             }
         } catch(e) {
-            print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Connection failed: " + e.message, errorColor) + "\n")
+            print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Connection failed: " + mcpConnectionError(e), errorColor) + "\n")
             _mcpClient = __
             _currentConfig = __
             _currentConfigRaw = __
@@ -774,7 +892,7 @@ function mainMCPTest(args) {
                         _currentConfigRaw = _rawSnapshot
                         print("✅ Connected successfully!\n")
                     } catch(e) {
-                        print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Connection failed: " + e.message, errorColor) + "\n")
+                        print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Connection failed: " + mcpConnectionError(e), errorColor) + "\n")
                         _mcpClient = __
                         _currentConfig = __
                         _currentConfigRaw = __
@@ -845,7 +963,7 @@ function mainMCPTest(args) {
                     print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" No MCP configuration available yet. Please create a new connection first.", errorColor) + "\n")
                 } else {
                     print("\n" + ansiColor("FAINT", "-----\nUse the following command-line parameter to reconnect to this MCP server:") + "\n")
-                    print(ansiColor("FAINT,ITALIC", `mcp="${buildMcpParamString(_currentConfigRaw)}"`))
+                    showMCPParameter(_currentConfigRaw)
                     print(ansiColor("FAINT", "-----") + "\n")
                 }
             } else if (optionText.indexOf("Disconnect") >= 0) {
