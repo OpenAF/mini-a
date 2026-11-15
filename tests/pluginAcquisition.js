@@ -73,6 +73,17 @@ try {
     state = manager.request({ op: 'status', job: job.job })
   } while (['queued', 'running'].indexOf(state.state) >= 0 && now() < deadline)
   check(state.state === 'failed' && state.error.indexOf('HTTPS') >= 0, 'Background failure state')
+  // Failed job setup must release its worker slot; otherwise later calls report busy workers.
+  var failing = new MiniAPluginManager({ homedir: root })
+  failing.publicJobPath = function() { throw new Error('Job path denied') }
+  for (var attempt = 0; attempt < 4; attempt++) {
+    try {
+      failing.startAcquisition('https://example.invalid/fixture.zip')
+      check(false, 'Setup failure surfaced')
+    } catch (setupError) {
+      if (String(setupError).indexOf('Job path denied') < 0) throw setupError
+    }
+  }
   var record2 = manager.request({ op: 'acquire', source: { repo: 'example/demo', path: '../escape' } })
   throw new Error('Escaping subdirectory accepted')
 } catch (error) {

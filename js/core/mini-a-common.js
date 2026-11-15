@@ -1421,6 +1421,9 @@ function __miniALoadHooksFromDir(dirPath, hooks) {
   }
 }
 
+// Per-variable hook environment cap; Linux rejects any single env string over 128 KiB.
+var __miniAHookEnvMaxChars = 8192
+
 function __miniARunHooks(loadedHooks, event, contextVars) {
   var hooksForEvent = isArray(loadedHooks[event]) ? loadedHooks[event] : []
   if (hooksForEvent.length === 0) return { outputs: [], blocked: false }
@@ -1434,10 +1437,28 @@ function __miniARunHooks(loadedHooks, event, contextVars) {
       var toolLower = vars.MINI_A_TOOL.toLowerCase()
       if (hook.toolFilter.indexOf(toolLower) < 0) return
     }
+    var inputFile = __
     try {
       var env = {}
+      var truncated = false
       Object.keys(hook.env).forEach(function(k) { env[k] = String(hook.env[k]) })
-      Object.keys(vars).forEach(function(k) { env[k] = String(vars[k]) })
+      // Bound each value below OS environment limits; the full context is offered as a file.
+      Object.keys(vars).forEach(function(k) {
+        var value = String(vars[k])
+        if (value.length > __miniAHookEnvMaxChars) {
+          value = value.substring(0, __miniAHookEnvMaxChars) + "\n[truncated: " + String(vars[k]).length + " chars; see MINI_A_HOOK_INPUT_FILE]"
+          truncated = true
+        }
+        env[k] = value
+      })
+      if (truncated) {
+        inputFile = String(java.io.File.createTempFile("mini-a-hook-", ".json").getCanonicalPath())
+        var fullVars = {}
+        Object.keys(vars).forEach(function(k) { fullVars[k] = String(vars[k]) })
+        io.writeFileJSON(inputFile, fullVars, "")
+        env.MINI_A_HOOK_INPUT_FILE = inputFile
+        env.MINI_A_HOOK_TRUNCATED = "true"
+      }
       env.MINI_A_HOOK_NAME  = hook.name
       env.MINI_A_HOOK_EVENT = event
 
@@ -1456,6 +1477,10 @@ function __miniARunHooks(loadedHooks, event, contextVars) {
     } catch (hookExecError) {
       logWarn("Hook '" + hook.name + "' (" + event + ") failed: " + hookExecError)
       if (hook.failBlocks) blocked = true
+    } finally {
+      if (isDef(inputFile)) {
+        try { io.rm(inputFile) } catch(ignoreHookInputCleanup) {}
+      }
     }
   })
 

@@ -323,11 +323,19 @@ MiniAPluginManager.prototype.publicJobPath = function(id) {
 MiniAPluginManager.prototype.startAcquisition = function(source) {
   if (!__miniAPluginAcquisitionSlots.tryAcquire()) throw new Error('Acquisition workers are busy; retry shortly')
   var id = String(java.util.UUID.randomUUID())
-  var path = this.publicJobPath(id)
-  io.mkdir(path)
-  this.writeState(path + '/state.json', { job: id, state: 'queued' })
-  var worker = new MiniAPluginManager(this.options)
-  worker._publicJob = path
+  var path
+  var worker
+  // Release the slot when the job cannot be prepared, so failures do not exhaust workers.
+  try {
+    path = this.publicJobPath(id)
+    io.mkdir(path)
+    this.writeState(path + '/state.json', { job: id, state: 'queued' })
+    worker = new MiniAPluginManager(this.options)
+    worker._publicJob = path
+  } catch (setupError) {
+    __miniAPluginAcquisitionSlots.release()
+    throw setupError
+  }
   $doV(function() {
     try {
       worker.writeState(path + '/state.json', { job: id, state: 'running' })

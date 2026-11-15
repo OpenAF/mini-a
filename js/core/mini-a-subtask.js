@@ -157,7 +157,7 @@ SubtaskManager.prototype._restoreExecutionTasks = function() {
     try {
       var spec = { id: task.id, objective: task.objective, mode: task.mode, deliverable: task.deliverable, idempotent: task.idempotent, dependencies: clone(task.dependencies), resources: clone(task.resources), criteria: clone(task.criteria), required: true }
       var metadata = { automaticDecomposition: true }
-      if (task.repairs > 0) metadata.repairFeedback = { criteria: task.criteria, findings: task.checks || [], previousAnswer: task.answer }
+      if (task.repairs > 0) metadata.repairFeedback = { criteria: task.criteria, findings: task.checks || [], previousAnswer: MiniA._executionExcerpt(task.answer, 12000) }
 
       if (isMap(task.auto_remote_scope)) metadata.remoteScope = clone(task.auto_remote_scope)
       if (isArray(task.auto_allowed_workers)) metadata.allowedWorkers = clone(task.auto_allowed_workers)
@@ -1335,7 +1335,7 @@ SubtaskManager.prototype._repairDeliverable = function(subtask) {
   if (task.resources.writes.length && task.idempotent !== true) return false
   if ((task.repairs || 0) >= limit || this._execution().available(false) <= 0) return false
   var feedback = (task.checks || []).filter(function(check) { return check.outcome !== "met" })
-  if (!feedback.length || feedback.every(function(check) { return /invalid review|reviewer recovery/i.test(String(check.reason || "")) })) return false
+  if (!feedback.length || feedback.every(function(check) { return /invalid review|reviewer recovery|exceeds review context budget/i.test(String(check.reason || "")) })) return false
   // Unknown child usage keeps its reservation and must not be lost on repair.
   if (subtask.allocation && !subtask.usageSettled) return false
   // Decisions may avoid an unproductive repair but cannot relax the task contract.
@@ -1355,7 +1355,7 @@ SubtaskManager.prototype._repairDeliverable = function(subtask) {
       task.reason = "Repair " + task.repairs + "/" + limit + ": " + feedback.map(function(check) { return check.reason || check.id }).join("; ")
       task.revision++
       e.state.revision++
-      subtask.metadata.repairFeedback = { criteria: task.criteria, findings: feedback, previousAnswer: task.answer }
+      subtask.metadata.repairFeedback = { criteria: task.criteria, findings: feedback, previousAnswer: MiniA._executionExcerpt(task.answer, 12000) }
       subtask.status = "pending"
       subtask.error = __
       subtask.completedAt = __

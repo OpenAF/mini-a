@@ -1649,4 +1649,69 @@
     assert(source.indexOf('working context only ~')>=0,true,"Working context estimate labeled")
     assert(source.indexOf('[cost: cumulative session usage]')>=0,true,"Cumulative usage labeled")
   }
+
+  // A rejected synthesis with every delegated task accepted stays repairable by the parent.
+  exports.testRootRejectionDoesNotEndRun = function() { fixture(function(a, m) {
+    var id = m.submitAndRun("Return ready", {}, { task: task("accepted-guide") })
+    m._completeSubtask(m.subtasks[id], "fixture", "ready", {}, { execution: { outcome: "succeeded" } })
+    assert(a._execution.state.tasks["accepted-guide"].acceptance, "accepted", "Delegated task is accepted")
+    a._partialSynthesisReady = true
+    a._executionFinal = function() { a._autoFinalCheck = { reason: "Root synthesis misses a requirement", checks: [] }; return false }
+    assert(a._considerFinalCandidate("incomplete synthesis", { goal: "Return ready", format: "md" }, a._runtime), false, "Root rejection is reported")
+    assert(a._partialSynthesisReady, false, "Parent may repair its synthesis")
+  }) }
+  // Long deliverables are reviewed from an excerpt instead of failing the budget check.
+  exports.testLongAnswerReviewedFromExcerpt = function() { fixture(function(a) {
+    var prompts = []
+    a._supervisedClientFactory = function() { return { promptJSONWithStats: function(prompt) {
+      prompts.push(prompt)
+      return { response: { checks: [{ id: "guide", outcome: "met", reason: "present" }] }, stats: {} }
+    } } }
+    var spec = { objective: "Return a guide", criteria: [{ id: "guide", method: "semantic", requirement: "Actual guide" }] }
+    var answer = "head-marker " + "x".repeat(200000) + " tail-marker"
+    var checks = a._executionCheck(spec, answer, [], "succeeded", false)
+    assert(checks[0].outcome, "met", "Long answer is reviewed")
+    assert(prompts.length, 1, "Reviewer is called once")
+    assert(prompts[0].length <= MiniASupervised.maxChars, true, "Prompt fits the review limit")
+    assert(prompts[0].indexOf("head-marker") >= 0 && prompts[0].indexOf("tail-marker") >= 0, true, "Excerpt keeps head and tail")
+    assert(MiniA._executionExcerpt("abcdef", 10), "abcdef", "Short text is unchanged")
+    assert(MiniA._executionExcerpt("y".repeat(5000), 1000).length <= 1000, true, "Excerpt respects its bound")
+  }) }
+  // Growing parent evidence cannot re-review an unaccepted task without bound.
+  exports.testReconcileReviewsAreBounded = function() { fixture(function(a) {
+    a._lastStartArgs.delegationmaxrepairs = 1
+    a._execution.put(task("stuck"))
+    a._execution.state.tasks.stuck.answer = "not ready"
+    a._execution.finish("stuck", "partial", [])
+    var step = 0, calls = 0
+    a._executionEvidence = function() { return ["evidence " + step] }
+    a._executionCheck = function() { calls++; return [{ id: "ready", outcome: "unmet" }] }
+    for (step = 0; step < 6; step++) a._executionReconcileFinished()
+    assert(calls, 2, "Reviews stop at 1 + delegationmaxrepairs")
+  }) }
+  // Successful content quoting failure phrases does not disable a tool.
+  exports.testCapabilityPhraseInSuccessfulResult = function() { fixture(function(a) {
+    var calls = 0
+    a._computeToolCacheSettings = function() { return { enabled: false } }
+    a._registerToolCacheClient = function() { return 1 }
+    a._isCircuitOpen = function() { return false }
+    a._recordCircuitSuccess = function() {}
+    a._logToolUsage = function() {}
+    a._withExponentialBackoff = function(fn) { return fn() }
+    var client = { callTool: function() { calls++; return { content: [{ type: "text", text: "docs: capability unavailable means..." }] } } }
+    var info = { name: "source-read", metadata: { readOnlyHint: true } }
+    for (var i = 0; i < 3; i++) a._invokeMcpTool("fixture", client, info, {}, {}, {})
+    assert(calls, 3, "Successful reads are never blocked")
+  }) }
+  // Large hook values are capped in the environment and offered in full as a file.
+  exports.testHookEnvironmentIsBounded = function() {
+    var out = io.createTempDir() + "/hook-out.txt"
+    var hooks = { after_tool: [{ name: "probe", command: "printf '%s' \"${#MINI_A_TOOL_RESULT}:$MINI_A_HOOK_TRUNCATED:$(wc -c < \"$MINI_A_HOOK_INPUT_FILE\")\" > '" + out + "'", timeout: 10000, env: {}, toolFilter: [], failBlocks: false, injectOutput: false }] }
+    var result = __miniARunHooks(hooks, "after_tool", { MINI_A_TOOL: "x", MINI_A_TOOL_RESULT: "r".repeat(300000) })
+    assert(result.blocked, false, "Hook is not blocked")
+    var parts = io.readFileString(out).trim().split(":")
+    assert(Number(parts[0]) < 9000, true, "Environment value is capped")
+    assert(parts[1], "true", "Truncation is signalled")
+    assert(Number(parts[2].trim()) > 300000, true, "Full payload file is available")
+  }
 })()
