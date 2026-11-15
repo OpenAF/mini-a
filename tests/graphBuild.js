@@ -275,6 +275,149 @@ try {
   assert(allBadReport.failureReasons["ungrounded-relationships"] === 1, "ungrounded section failure is categorized")
   assert(allBadReport.failed === 1 && allBad._state.enrichment["mix.md"].status !== "complete", "wholly ungrounded response fails the section")
 
+  // Validation reasons share the prompt contract without deterministic stopword filtering.
+  var evidenceSection = { text: "İ prefixed 😀 API uses Redis.\nTLS uses HTTP.", start: 40, line: 3 }
+  var cases = [
+    [{ from: " ", to: "Redis" }, "invalid-endpoint"],
+    [{ from: "API", to: "Redis" }, "missing-quote"],
+    [{ from: "API", to: "Redis", evidence: { quote: "API  uses Redis" } }, "quote-absent-from-section"],
+    [{ from: "Other", to: "Redis", evidence: { quote: "API uses Redis" } }, "source-absent-from-quote"],
+    [{ from: "API", to: "Other", evidence: { quote: "API uses Redis" } }, "target-absent-from-quote"]
+  ]
+  cases.forEach(function(test) {
+    assert(keys._validateRelationshipDetailed(test[0], evidenceSection).reason === test[1], "detailed reason: " + test[1])
+    assert(keys._validateRelationship(test[0], evidenceSection) === null, "null compatibility: " + test[1])
+  })
+  var unicode = keys._validateRelationship({ from: "api", to: "REDIS", evidence: { quote: "api USES redis" } }, evidenceSection)
+  assert(unicode && unicode.quote === "API uses Redis" && unicode.at === evidenceSection.text.indexOf("API"), "grounded API and Unicode case-insensitive offsets")
+  assert(keys._validateRelationship({ from: "C++", to: "Node.js", evidence: { quote: "C++ uses Node.js" } }, { text: "C++ uses Node.js" }) !== null, "literal punctuation matching")
+
+  // Corrective feedback is bounded and transient; persistent samples contain no model text.
+  var feedback
+  var feedbackGraph = graph("feedback", { modelExtractors: [
+    { role: "lc", extract: function() { return { relationships: new Array(10).fill({ from: new Array(401).join("x"), to: "Redis", evidence: { quote: new Array(401).join("y") } }) } } },
+    { role: "main", extract: function(payload) { feedback = payload.correctiveFeedback; return { relationships: [] } } }
+  ] })
+  var feedbackReport = feedbackGraph.build([mixPage], { extraction: "semantic", modelHelp: "auto" })
+  assert(feedback.examples.length === 3 && feedback.examples[0].from.length === 300 && feedback.examples[0].quote.length === 300, "fallback examples bounded")
+  assert(feedback.counts["invalid-endpoint"] === 10 && feedback.instruction.indexOf("Empty relationships is valid") >= 0, "fallback reasons and empty output guidance")
+  assert(feedbackReport.failed === 0 && feedbackReport.failedAttempts === 1 && feedbackReport.recoveredFallbackAttempts === 1 && feedbackReport.relationshipsRejected === 10, "recovered attempts separate from failures")
+  assert(Object.keys(feedbackReport.diagnosticSamples[0]).sort().join(",") === "page,reason,relationshipIndex,role,sectionId", "diagnostic allowlist")
+  assert(stringify(feedbackGraph._state.build_status).indexOf("correctiveFeedback") < 0, "feedback not persisted")
+
+  // Two full failure cycles defer unchanged sections; explicit retries preserve successes.
+  var failedModels = [{ role: "lc", fingerprint: "failure-v1", extract: function(payload) {
+    return payload.path === "good.md" ? { relationships: [] } : { relationships: [{ from: "API", to: "Redis", evidence: { quote: "invented" } }] }
+  } }, { role: "main", fingerprint: "failure-main", extract: function() { return { ok: false } } }]
+  var failurePages = [page("bad.md", "API uses Redis."), page("good.md", "Good prose.")]
+  var limited = graph("failure-limits", { modelExtractors: failedModels })
+  assert(limited.build(failurePages, { semantic: true }).failed === 1, "first failure cycle")
+  limited = graph("failure-limits", { modelExtractors: failedModels })
+  var cycleTwo = limited.build(failurePages, { semantic: true })
+  assert(cycleTwo.deferredSections === 1 && cycleTwo.retryRequired && !cycleTwo.resumable, "two cycles require retry")
+  limited = graph("failure-limits", { modelExtractors: failedModels })
+  var deferred = limited.build(failurePages, { semantic: true, strategy: "full" })
+  assert(deferred.calls === 0 && deferred.partial && deferred.status === "retry-required" && deferred.sectionsCompleted === 1, "persisted deferral with full structural build")
+  var explicitRetry = limited.build(failurePages, { semantic: true, retryFailed: true })
+  assert(explicitRetry.calls === 2 && explicitRetry.sectionsCompleted === 1 && explicitRetry.deferredSections === 0, "retry resets failures and preserves successful work")
+  limited.build(failurePages, { semantic: true })
+  failurePages[0] = page("bad.md", "API now uses Redis.")
+  assert(limited.build(failurePages, { semantic: true }).calls === 2, "changed input resets failure history")
+  failedModels[0].fingerprint = "failure-v2"
+  assert(limited.build(failurePages, { semantic: true }).calls === 3, "model change resets inputs including previous success")
+  assert(limited.build(failurePages, { semantic: true, force: true }).calls === 3, "force refreshes completed and failed work")
+
+  // Cancellation and interrupted fallback do not record a full failure cycle.
+  var interrupted = graph("interrupted", { modelExtractors: failedModels })
+  var interruptedPage = [failurePages[0]]
+  var noCycle = interrupted.build(interruptedPage, { semantic: true, maxCalls: 1 })
+  assert(noCycle.failed === 0 && Object.keys(interrupted._state.enrichment["bad.md"].failures).length === 0, "budget during fallback is not a cycle")
+  interrupted.build(interruptedPage, { semantic: true, isCancelled: function() { return true } })
+  interrupted.build(interruptedPage, { semantic: true, maxTokens: 1 })
+  interrupted.build(interruptedPage, { extraction: "semantic", modelHelp: "off" })
+  assert(Object.keys(interrupted._state.enrichment["bad.md"].failures).length === 0, "cancel, token budget and disabled help add no cycles")
+  var cancelNow = false
+  var midCancel = graph("mid-cancel", { modelExtractors: [{ extract: function() { cancelNow = true; return { ok: false } } }, { extract: function() { throw new Error("must not run") } }] })
+  midCancel.build(interruptedPage, { semantic: true, isCancelled: function() { return cancelNow } })
+  assert(Object.keys(midCancel._state.enrichment["bad.md"].failures).length === 0, "cancel between extractors adds no cycle")
+  assert(Object.keys(graph("no-models").build(interruptedPage, { semantic: true }).rejectionReasons).length === 0, "absent models produce no rejection")
+
+  // Failure carry is section-scoped, and diagnostics remain bounded across a build.
+  var capped = graph("diagnostic-cap", { modelExtractors: [{ extract: function() {
+    var relationships = []
+    for (var i = 0; i < 32; i++) relationships.push({ from: "API", to: "Redis", evidence: { quote: "invented" } })
+    return { relationships: relationships }
+  } }] })
+  var cappedReport = capped.build(interruptedPage, { semantic: true })
+  assert(cappedReport.diagnosticSamples.length === 20 && cappedReport.relationshipsRejected === 32 && cappedReport.rejectionReasons["quote-absent-from-section"] === 32, "diagnostic samples capped without losing aggregate counts")
+  var carryFailures = graph("failure-carry", { modelExtractors: [{ extract: function() { return { ok: false } } }] })
+  var carryPage = page("carry.md", "# One\nFirst text.\n# Two\nSecond text.")
+  carryFailures.build([carryPage], { semantic: true })
+  carryFailures.build([carryPage], { semantic: true })
+  carryPage = page("carry.md", "# One\nChanged first text.\n# Two\nSecond text.")
+  var carryReport = carryFailures.build([carryPage], { semantic: true })
+  assert(carryReport.calls === 1 && carryReport.deferredSections === 1, "editing one section preserves other failure limits")
+  var singleCancelled = false
+  var lastCancel = graph("last-cancel", { modelExtractors: [{ extract: function() { singleCancelled = true; return { ok: false } } }] })
+  lastCancel.build(interruptedPage, { semantic: true, isCancelled: function() { return singleCancelled } })
+  assert(Object.keys(lastCancel._state.enrichment["bad.md"].failures).length === 0, "cancellation during final extractor adds no cycle")
+  var elapsed = 0
+  var originalNow = Date.now
+  var timed = graph("timed-failure", { modelExtractors: [{ extract: function() { elapsed = 1000; return { ok: false } } }] })
+  try {
+    Date.now = function() { return originalNow() + elapsed }
+    timed.build(interruptedPage, { semantic: true, maxMinutes: 0.01 })
+  } finally { Date.now = originalNow }
+  assert(Object.keys(timed._state.enrichment["bad.md"].failures).length === 0, "elapsed budget during extraction adds no failure cycle")
+  var allRoles = graph("all-roles", { modelExtractors: [
+    { role: "lc", extract: function() { return { ok: false } } },
+    { role: "main", extract: function() { return { relationships: [] } } }
+  ], decisionExtractor: { role: "decision", extract: function() { return { paths: [] } } } })
+  var roleReport = allRoles.build(modelPages, { semantic: true, maxCalls: 3 })
+  assert(roleReport.calls === 3 && roleReport.callsByRole.decision === 1 && roleReport.callsByRole.lc === 1 && roleReport.callsByRole.main === 1 && roleReport.estimatedTokens <= roleReport.effective.maxTokens, "classification and both extractors share call and token budgets")
+
+  // Round robin spreads work across long and short pages and persists its cursor.
+  var order = []
+  var fairModels = [{ role: "main", fingerprint: "fair", extract: function(payload) { order.push(payload.path); return { relationships: [] } } }]
+  var fairPages = [page("long.md", "# One\nFirst section.\n# Two\nSecond section.\n# Three\nThird section."), page("short.md", "Short prose."), page("last.md", "Last prose.")]
+  var fair = graph("fair", { modelExtractors: fairModels })
+  fair.build(fairPages, { semantic: true, maxCalls: 2 })
+  assert(order.join(",") === "long.md,short.md", "one section per page per round")
+  fair = graph("fair", { modelExtractors: fairModels })
+  order = []
+  fair.build(fairPages, { semantic: true, maxCalls: 1, strategy: "full" })
+  assert(order.join(",") === "last.md", "cursor survives reload and full build")
+  var retryOrder = []
+  var freshFirst = graph("fresh-first", { modelExtractors: [{ extract: function(payload) { retryOrder.push(payload.section); return { ok: false } } }] })
+  freshFirst.build([fairPages[0]], { semantic: true, maxCalls: 1 })
+  retryOrder = []
+  freshFirst.build([fairPages[0]], { semantic: true, maxCalls: 1 })
+  assert(retryOrder.length === 1 && retryOrder[0].indexOf("Two") === 0, "fresh sections precede failed sections")
+
+  // Old successful hashes migrate only when the complete previous input still matches.
+  var migration = graph("contract-migration", { modelExtractors: fairModels })
+  migration.build(fairPages, { semantic: true })
+  var migrationFingerprint = sha1(stringify([["main", "fair"]], __, ""))
+  fairPages.forEach(function(pg) {
+    var st = migration._state.enrichment[pg.path]
+    delete st.contractVersion
+    delete st.failureVersion
+    migration._semanticWork(pg).sections.forEach(function(section) {
+      st.completed[section.sid] = migration._sectionPlan(pg, section, migrationFingerprint).previousInputHash
+    })
+  })
+  migration.save()
+  migration = graph("contract-migration", { modelExtractors: fairModels })
+  assert(migration.build(fairPages, { semantic: true }).calls === 0, "old successful hashes survive contract migration and reload")
+  fairPages[1] = page("short.md", "Changed short prose.")
+  assert(migration.build(fairPages, { semantic: true }).calls === 1, "migration does not hide changed input")
+  assert(!isDef(MiniAGraphBuild.preferences({ semantic: true, retryFailed: true }).retryFailed), "retry action never saved")
+  ;[{ retryFailed: true }, { semantic: true, modelHelp: "off", retryFailed: true }, { semantic: true, retryFailed: "yes" }, { semantic: true, retryFailed: 1 }].forEach(function(options) {
+    var rejected = false
+    try { MiniAGraphBuild.resolve(options) } catch(e) { rejected = true }
+    assert(rejected, "strict incompatible retry rejected")
+  })
+
   // Dangling link statistic: unresolved page links count, indexed pages and @mount links do not.
   var dl = graph("dangling")
   dl.buildStructural([

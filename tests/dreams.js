@@ -903,6 +903,19 @@
       ow.test.assert(res.ok, true, "graph mode should succeed when usewikigraph is enabled")
       ow.test.assert(res.mode, "graph", "mode should be graph")
       ow.test.assert(res.graph, "rebuilt", "graph mode should report the graph as rebuilt")
+      var graphMethod = MiniAWikiManager.prototype.graph
+      var received
+      try {
+        MiniAWikiManager.prototype.graph = function(action, options) {
+          if (action !== "build") return graphMethod.apply(this, arguments)
+          received = options
+          return { ok: true, status: "retry-required", partial: true, resumable: false, retryRequired: true }
+        }
+        var partial = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "graph", usewikigraph: "true" }, function() {}).dreamWiki({ semantic: true, retryFailed: true })
+        ow.test.assert(received.retryFailed, true, "Dream graph forwards explicit retry")
+        ow.test.assert(partial.retryRequired && partial.partial && !partial.resumable, true, "Dream graph retains deferred-only status")
+        ow.test.assert(partial.graph_build.status, "retry-required", "Dream graph preserves detailed report")
+      } finally { MiniAWikiManager.prototype.graph = graphMethod }
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 

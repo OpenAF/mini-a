@@ -5227,6 +5227,7 @@ MiniUtilsTool._metadataByFn = (function() {
           semantic : { type: "boolean", description: "Legacy semantic=true maps to semantic extraction and automatic model assistance." },
           extraction: { type: "string", enum: ["structural", "semantic"] },
           modelHelp: { type: "string", enum: ["off", "auto"] },
+          retryFailed: { type: "boolean", description: "Reset section failure limits for this semantic run with automatic model help; preserve completed work." },
           strategy: { type: "string", enum: ["incremental", "full", "resume"] },
           force: { type: "boolean" },
           maxCalls: { type: "integer", minimum: 1 },

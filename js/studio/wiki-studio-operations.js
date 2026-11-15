@@ -85,7 +85,7 @@ WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
     if (body.mode === "reorg") WikiStudio.assert(body.confirmation && body.confirmation.acknowledgeStructuralChanges === true, 400, "confirmation_required", "Reorg is a live structural edit, not a frozen plan. Explicit structural-change confirmation is required")
     if (o.compact === true) WikiStudio.assert(body.confirmation && body.confirmation.externalProcessesStopped === true, 400, "offline_required", "Stop external readers/writers and confirm before offline compaction")
     if (body.mode === "rebuild") {
-      WikiStudio.fields(o.rebuild || {}, ["modelHelp", "maxCalls", "maxTokens", "maxMinutes"])
+      WikiStudio.fields(o.rebuild || {}, ["modelHelp", "retryFailed", "maxCalls", "maxTokens", "maxMinutes"])
       try { params.rebuild = MiniAGraphBuild.resolve(merge(o.rebuild || {}, { extraction: "semantic" })) }
       catch(e) { WikiStudio.fail(400, "invalid_options", String(e.message || e)) }
     }
@@ -165,11 +165,12 @@ var wikiStudioRunWorker = function(config, id) {
       WikiStudio.atomic(jobs.dir(id) + "/result.json", result)
       // Report the engine outcome separately from changes to authoritative Markdown.
       var finalMessage = "Operation " + status
-      var graphResult = result.graph || (isMap(result.result) ? result.result.graph : __)
+      var graphResult = isNumber(result.sectionsTotal) ? result : result.graph_build || result.graph || (isMap(result.result) ? result.result.graph_build || result.result.graph : __)
       if (isMap(graphResult)) {
         if (isString(graphResult.status)) finalMessage += "; graph status: " + graphResult.status
         if (isNumber(graphResult.pending)) finalMessage += "; " + graphResult.pending + " pages with unfinished enrichment"
         if (isNumber(graphResult.failed)) finalMessage += "; " + graphResult.failed + " failed section extractions"
+        if (graphResult.retryRequired === true) finalMessage += "; deferred sections require Retry failed sections"
         if (graphResult.resumable === true) finalMessage += "; enrichment can be resumed"
       }
       finalMessage += ". Changed Markdown paths: " + diff.changedPageCount
@@ -218,7 +219,7 @@ var wikiStudioExecute = function(config, w, job, logFn, backup) {
   if (isFunction(WikiStudio.executeSource) && /^(ingest|absorb|backup|wiki)\./.test(operation)) return WikiStudio.executeSource(config,w,job,logFn,backup)
   WikiStudio.assert(operation === "graph.build" || /^dream\.(plan|apply|repair|reindex|rebuild|graph|indexes|auto|reorg)$/.test(operation), 400, "invalid_operation", "Worker operation is not allowlisted")
   var runner = new MiniAWikiOps(a,logFn)
-  if (operation === "graph.build" || operation === "dream.rebuild") {
+  if (operation === "graph.build" || operation === "dream.rebuild" || operation === "dream.graph") {
     var jobs = new WikiStudioJobs(config)
     // Reuse Studio's credential redaction before retaining a bounded exception sample.
     runner.formatModelError = function(error) {
@@ -239,6 +240,11 @@ var wikiStudioExecute = function(config, w, job, logFn, backup) {
       if (isString(graph.stage)) {
         var message = "Graph " + graph.stage
         if (isNumber(graph.processed)) message += "; pages visited: " + graph.processed + (isNumber(progress.total) ? "/" + progress.total : "")
+        if (isNumber(graph.sectionsTotal)) message += "; completed sections: " + graph.sectionsCompleted + "/" + graph.sectionsTotal
+        if (isNumber(graph.failedAttempts)) message += "; failed attempts: " + graph.failedAttempts
+        if (isNumber(graph.deferredSections)) message += "; deferred sections: " + graph.deferredSections
+        if (isNumber(graph.relationshipsAccepted)) message += "; accepted relationships: " + graph.relationshipsAccepted
+        if (isMap(graph.callsByRole)) message += "; calls by role: " + af.toSLON(graph.callsByRole)
         if (isNumber(graph.failed)) message += "; failed section extractions: " + graph.failed
         if (isMap(graph.failureReasons)) message += "; failure reasons: " + af.toSLON(graph.failureReasons)
         if (isNumber(graph.calls)) message += "; model calls: " + graph.calls
@@ -246,6 +252,7 @@ var wikiStudioExecute = function(config, w, job, logFn, backup) {
         if (isString(progress.path)) message += "; page: " + progress.path
         if (isString(graph.status)) message += "; status: " + graph.status
         if (graph.stage === "complete" && isNumber(graph.pending)) message += "; pages with unfinished enrichment: " + graph.pending
+        if (graph.retryRequired === true) message += "; deferred sections require Retry failed sections"
         if (graph.resumable === true) message += "; enrichment can be resumed"
         logFn(message)
       } else {

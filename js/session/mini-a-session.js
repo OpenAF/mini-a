@@ -2952,7 +2952,7 @@ function MiniAInteractiveSession(args, adapter) {
               var buildToken = String(graphParts[1] || "").toLowerCase()
               var buildInsert = hasTrailingSpace ? cursor : (cursor - buildToken.length)
               var buildPartial = hasTrailingSpace ? "" : buildToken
-              ["extraction=structural","extraction=semantic","modelHelp=off","modelHelp=auto","strategy=incremental","strategy=full","strategy=resume","force=true","maxCalls=100","maxTokens=200000","maxMinutes=10","preset=small","preset=moderate","preset=large","preset=reset"].forEach(function(value) { if (value.toLowerCase().indexOf(buildPartial) === 0) candidates.add(value) })
+              ["extraction=structural","extraction=semantic","modelHelp=off","modelHelp=auto","strategy=incremental","strategy=full","strategy=resume","force=true","retryFailed=true","retryFailed=false","maxCalls=100","maxTokens=200000","maxMinutes=10","preset=small","preset=moderate","preset=large","preset=reset"].forEach(function(value) { if (value.toLowerCase().indexOf(buildPartial) === 0) candidates.add(value) })
               return candidates.isEmpty() ? -1 : Number(buildInsert)
             }
 
@@ -7570,7 +7570,7 @@ function MiniAInteractiveSession(args, adapter) {
       if (sub === "build") {
         parseConsolePathArgs(rest).argv.forEach(function(token) {
           var at=token.indexOf("="), key=token.substring(0,at)
-          if (at<1 || MiniAGraphBuild.fields.indexOf(key)<0) throw new Error("Graph build options: extraction=structural|semantic modelHelp=off|auto strategy=incremental|full|resume force=true maxCalls=100 maxTokens=200000 maxMinutes=10 preset=small|moderate|large|reset")
+          if (at<1 || MiniAGraphBuild.fields.indexOf(key)<0) throw new Error("Graph build options: extraction=structural|semantic modelHelp=off|auto strategy=incremental|full|resume force=true retryFailed=false maxCalls=100 maxTokens=200000 maxMinutes=10 preset=small|moderate|large|reset")
           params[key]=token.substring(at+1)
         })
       }

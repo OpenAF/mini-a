@@ -1,9 +1,16 @@
 // Shared build contract. No model creation or graph mutation occurs while resolving options.
 var MiniAGraphBuild = {
   version: 1,
-  defaults: { extraction: "structural", modelHelp: "off", strategy: "incremental", maxCalls: 100, maxTokens: 200000, maxMinutes: 10 },
+  extractionContract: {
+    version: 3,
+    maxRelationships: 32,
+    minEndpoint: 2,
+    maxEndpoint: 100,
+    instruction: "Return JSON {relationships:[{from,to,type,provenance,confidence,evidence:{quote}}]}. Return at most 32 relationships. Endpoints must be nonblank strings of 2-100 characters. Copy a quote from the current section containing both endpoint names literally, ignoring case. Synonyms, expanded names and cross-page candidates cannot substitute for section evidence. Preserve whitespace and punctuation. Use INFERRED for associations, EXTRACTED only for explicit assertions. Empty relationships is valid. Do not merge identities."
+  },
+  defaults: { extraction: "structural", modelHelp: "off", strategy: "incremental", maxCalls: 100, maxTokens: 200000, maxMinutes: 10, retryFailed: false },
   presets: { small: { maxCalls: 20, maxTokens: 40000, maxMinutes: 2 }, moderate: { maxCalls: 100, maxTokens: 200000, maxMinutes: 10 }, large: { maxCalls: 500, maxTokens: 1000000, maxMinutes: 30 } },
-  fields: ["extraction", "modelHelp", "strategy", "force", "maxCalls", "maxTokens", "maxMinutes", "preset", "semantic", "resume"],
+  fields: ["extraction", "modelHelp", "strategy", "force", "retryFailed", "maxCalls", "maxTokens", "maxMinutes", "preset", "semantic", "resume"],
   resolve: function(run, saved) {
     run = isMap(run) ? run : {}; saved = isMap(saved) ? saved : {}
     var explicit = merge({}, run), out = clone(this.defaults)
@@ -17,7 +24,7 @@ var MiniAGraphBuild = {
       if (isUnDef(run.modelHelp)) explicit.modelHelp = toBoolean(run.semantic) ? "auto" : "off"
     }
     this.fields.forEach(function(k) { if (isDef(explicit[k])) out[k] = explicit[k] })
-    ;["force", "resume"].forEach(function(k) {
+    ;["force", "resume", "retryFailed"].forEach(function(k) {
       if (isDef(out[k]) && [true, false, "true", "false"].indexOf(out[k]) < 0) throw new Error(k + " must be boolean")
       out[k] = toBoolean(out[k]) === true
     })
@@ -27,6 +34,7 @@ var MiniAGraphBuild = {
     if (["incremental", "full", "resume"].indexOf(out.strategy) < 0) throw new Error("strategy must be incremental, full or resume")
     if (out.strategy === "resume" && (out.force || out.extraction !== "semantic")) throw new Error("Resume requires semantic extraction without force")
     if (out.force && out.extraction !== "semantic") throw new Error("Force requires semantic extraction")
+    if (out.retryFailed && (out.extraction !== "semantic" || out.modelHelp !== "auto")) throw new Error("retryFailed requires semantic extraction with automatic model help")
     if (out.extraction === "structural") out.modelHelp = "off"
     ;["maxCalls", "maxTokens", "maxMinutes"].forEach(function(k) {
       var n = Number(out[k])
@@ -82,7 +90,7 @@ MiniAGraphBuild.modelAdapters = function(args) {
         return { paths: paths.slice(0, 8) }
       }
       if (!client) client = $llm(config)
-      var instruction = entry.role === "decision" ? "Classify supplied candidate paths that share the technical concept. Return JSON {paths:[]}, at most 8, only supplied paths. Discovery is not evidence." : "Return JSON {relationships:[{from,to,type,provenance,confidence,evidence:{quote}}]}. Quote exact supplied section text supporting both endpoints. Use INFERRED for associations. Empty relationships is valid."
+      var instruction = self.extractionContract.instruction
       var prompt = instruction + "\n" + stringify(payload, __, "")
       // Respect the same provider JSON-mode opt-outs as the core agent.
       var noJsonPrompt = toBoolean(getEnv(entry.role === "lc" ? "OAF_MINI_A_LCNOJSONPROMPT" : "OAF_MINI_A_NOJSONPROMPT")) === true

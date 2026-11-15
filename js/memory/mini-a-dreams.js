@@ -1463,7 +1463,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
       var wmGraph = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[dreams:wiki:graph] " + msg) })
       var tGraph = Date.now()
       var graphSemanticOn = self._effectiveWikiGraphSemantic("graph")
-      var graphResult = wmGraph.graph("build", { semantic: graphSemanticOn, onProgress: graphSemanticOn ? self._wikiGraphProgressFn() : __ })
+      var graphResult = wmGraph.graph("build", merge({ semantic: graphSemanticOn, onProgress: graphSemanticOn ? self._wikiGraphProgressFn() : __ }, opts || {}))
       wmGraph.close()
       if (!isMap(graphResult) || graphResult.ok !== true) {
         var graphErr = isMap(graphResult) && isString(graphResult.error) ? graphResult.error : "graph build failed"
@@ -1472,6 +1472,11 @@ MiniADreams.prototype.dreamWiki = function(opts) {
       }
       self._log("💤 [dreams] Wiki dream graph rebuild complete in " + ((Date.now() - tGraph) / 1000).toFixed(1) + "s.")
       defaultResult.graph = "rebuilt"
+      defaultResult.graph_build = graphResult
+      defaultResult.partial = graphResult.partial === true
+      defaultResult.resumable = graphResult.resumable === true
+      defaultResult.retryRequired = graphResult.retryRequired === true
+      defaultResult.status = graphResult.status
       return defaultResult
     } catch(graphErr2) {
       self._log("[dreams:wiki] Graph error: " + __miniAErrMsg(graphErr2))
@@ -2066,8 +2071,9 @@ MiniADreams.prototype._finalizeWiki = function(wm, result, options) {
       var gr = wm.graph("build", { semantic: semanticOn, onProgress: semanticOn ? self._wikiGraphProgressFn() : __ })
       report.graph = isMap(gr) && gr.ok === false ? ("failed: " + gr.error) : "rebuilt"
       // Budget-stopped semantic builds resume from their completed sections on the next run.
-      if (isMap(gr) && gr.ok !== false) report.graph_build = { status: gr.status, pending: gr.pending, resumable: gr.resumable === true, calls: gr.calls, cached: gr.cached }
+      if (isMap(gr) && gr.ok !== false) report.graph_build = { status: gr.status, pending: gr.pending, resumable: gr.resumable === true, retryRequired: gr.retryRequired === true, sectionsTotal: gr.sectionsTotal, sectionsCompleted: gr.sectionsCompleted, deferredSections: gr.deferredSections, failedAttempts: gr.failedAttempts, relationshipsAccepted: gr.relationshipsAccepted, callsByRole: gr.callsByRole, calls: gr.calls, cached: gr.cached }
       if (report.graph === "rebuilt") self._log("[dreams:wiki] Knowledge graph rebuilt in " + ((Date.now() - tG) / 1000).toFixed(1) + "s.")
+      if (isMap(gr) && gr.retryRequired === true) self._log("[dreams:wiki] Deferred sections require retryFailed=true; successful sections remain complete.")
       if (isMap(gr) && gr.resumable === true) self._log("[dreams:wiki] Knowledge graph enrichment is partial (" + gr.pending + " page(s) pending, status=" + gr.status + "); the next build resumes from completed sections.")
     } catch(eG) {
       report.graph = "failed"

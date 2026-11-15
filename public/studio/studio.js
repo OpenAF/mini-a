@@ -1523,7 +1523,7 @@ async function jobDetail(id) {
       progress.hidden=finished;phase.hidden=finished;
       updateText(phase,human(job.phase)+". Updates automatically.");
       const gp=job.progress;graphProgress.hidden=!gp;
-      if(gp) updateText(graphProgress,human(gp.stage)+" · "+(gp.processed||0)+" processed · "+(gp.cached||0)+" cached · "+(gp.pending||0)+" pending · "+(gp.failed||0)+" failed · "+(gp.calls||0)+" / "+(gp.effective?.maxCalls||"?")+" calls · "+(gp.estimatedTokens||0)+" / "+(gp.effective?.maxTokens||"?")+" estimated tokens · "+((gp.elapsedMs||0)/60000).toFixed(2)+" / "+(gp.effective?.maxMinutes||"?")+" minutes"+(gp.resumable?" · Pending work can be resumed explicitly":""));
+      if (gp) updateText(graphProgress, graphBuildProgressText(gp))
       const nextDetails=JSON.stringify(job);
       if(nextDetails!==detailValue){detailValue=nextDetails;detailBody.replaceChildren();jsonView(job,detailBody);}
       let received;
@@ -2100,6 +2100,14 @@ async function dreamsView(content, openTab) {
     // Full reconstruction has an explicit cost acknowledgement and bounded model work.
     if (mode === "rebuild") {
       var modelHelp = field(optionsPanel, "Model enrichment", ["off", "auto"])
+      var rebuildAdvanced = advancedOptions(optionsPanel)
+      var retryFailed = check(rebuildAdvanced, "Retry failed sections")
+      el("p", "Preserves successful work and resets the two-cycle failure limits.", rebuildAdvanced)
+      retryFailed.disabled = modelHelp.value !== "auto"
+      modelHelp.onchange = function() {
+        retryFailed.disabled = modelHelp.value !== "auto"
+        if (retryFailed.disabled) retryFailed.checked = false
+      }
       var maxCalls = field(optionsPanel, "Maximum model calls per run")
       maxCalls.type = "number"
       maxCalls.min = "1"
@@ -2120,7 +2128,8 @@ async function dreamsView(content, openTab) {
         if (!acknowledge.checked || !stopped.checked) {
           throw new Error("Acknowledge the rebuild cost and stop external processes first")
         }
-        await queue("dreams", { mode: "rebuild", options: { rebuild: { modelHelp: modelHelp.value, maxCalls: Number(maxCalls.value), maxTokens: Number(maxTokens.value), maxMinutes: Number(maxMinutes.value) } }, confirmation: { externalProcessesStopped: true } })
+        await queue("dreams", { mode: "rebuild", options: { rebuild: { modelHelp: modelHelp.value, retryFailed: retryFailed.checked, maxCalls: Number(maxCalls.value), maxTokens: Number(maxTokens.value), maxMinutes: Number(maxMinutes.value) } }, confirmation: { externalProcessesStopped: true } })
+        retryFailed.checked = false
       }), writeReason())
       return
     }
@@ -2309,18 +2318,46 @@ async function webCommandWizard(selectedId) {
   update(); dialog.showModal();
 }
 
+// Describe section progress and distinguish automatic continuation from explicit retries.
+function graphBuildProgressText(p) {
+  var roles = p.callsByRole || {}
+  return human(p.stage) + " · " + (p.processed || 0) + " pages visited · " + (p.sectionsCompleted || 0) + "/" + (p.sectionsTotal || 0) + " sections complete · " + (p.failedAttempts || 0) + " failed attempts · " + (p.deferredSections || 0) + " deferred sections · " + (p.relationshipsAccepted || 0) + " relationships accepted · " + (p.calls || 0) + "/" + (p.effective?.maxCalls || "?") + " calls (LC " + (roles.lc || 0) + ", main " + (roles.main || 0) + ", decision " + (roles.decision || 0) + ") · " + (p.estimatedTokens || 0) + "/" + (p.effective?.maxTokens || "?") + " estimated tokens · " + ((p.elapsedMs || 0) / 60000).toFixed(2) + "/" + (p.effective?.maxMinutes || "?") + " minutes" + (p.resumable ? " · Runnable work remains; run again to continue." : "") + (p.retryRequired ? " · Use Retry failed sections to reset failure limits; successful work is preserved." : "")
+}
+
+// Present the shared graph contract without saving one-run retry actions.
 async function graphBuildControls(content, dream) {
-  const settings=await StudioApi.wiki("graph/settings"), box=el("section",undefined,content);
-  el("h2","Build graph",box);
-  const extraction=field(box,"Extraction",["structural","semantic"]), modelHelp=field(box,"Model assistance",["off","auto"]), strategy=field(box,"Build strategy",["incremental","full","resume"]);
-  const advanced = advancedOptions(box);
-  const preset=field(advanced,"Budget preset",["custom","small","moderate","large","reset"]), calls=field(advanced,"Maximum calls"), tokens=field(advanced,"Estimated total tokens"), minutes=field(advanced,"Elapsed minutes"), force=check(advanced,"Force extraction (ignore semantic caches)");
-  advanced.append(modelHelp.parentElement);
-  const review=el("pre",undefined,advanced), builtIn={extraction:"structural",modelHelp:"off",maxCalls:100,maxTokens:200000,maxMinutes:10};
-  const apply=value=>{extraction.value=value.extraction;modelHelp.value=value.modelHelp;calls.value=String(value.maxCalls);tokens.value=String(value.maxTokens);minutes.value=String(value.maxMinutes);};
-  apply(settings.effective);strategy.value="incremental";
-  // Reveal invalid graph budgets before submitting a job.
-  const values=function() {
+  var settings = await StudioApi.wiki("graph/settings")
+  var box = el("section", undefined, content)
+  el("h2", "Build graph", box)
+  var extraction = field(box, "Extraction", ["structural", "semantic"])
+  var modelHelp = field(box, "Model assistance", ["off", "auto"])
+  var strategy = field(box, "Build strategy", ["incremental", "full", "resume"])
+  var advanced = advancedOptions(box)
+  var preset = field(advanced, "Budget preset", ["custom", "small", "moderate", "large", "reset"])
+  var calls = field(advanced, "Maximum calls")
+  var tokens = field(advanced, "Estimated total tokens")
+  var minutes = field(advanced, "Elapsed minutes")
+  var force = check(advanced, "Force extraction (ignore semantic caches)")
+  var retryFailed = check(advanced, "Retry failed sections")
+  el("p", "Preserves successful work and resets the two-cycle failure limits for this run.", advanced)
+  advanced.append(modelHelp.parentElement)
+  var review = el("pre", undefined, advanced)
+  var builtIn = { extraction: "structural", modelHelp: "off", maxCalls: 100, maxTokens: 200000, maxMinutes: 10 }
+
+  // Restore reusable extraction and budget preferences.
+  function apply(value) {
+    extraction.value = value.extraction
+    modelHelp.value = value.modelHelp
+    calls.value = String(value.maxCalls)
+    tokens.value = String(value.maxTokens)
+    minutes.value = String(value.maxMinutes)
+    retryFailed.checked = false
+  }
+  apply(settings.effective)
+  strategy.value = "incremental"
+
+  // Reveal invalid budgets before submitting a job.
+  function values() {
     for (var input of [calls, tokens, minutes]) {
       var value = Number(input.value)
       if (!String(input.value).trim() || !Number.isFinite(value) || value <= 0 || input !== minutes && !Number.isInteger(value)) {
@@ -2329,32 +2366,62 @@ async function graphBuildControls(content, dream) {
         throw new Error("Graph budgets must be positive; calls and tokens must be integers")
       }
     }
-    return { extraction: extraction.value, modelHelp: extraction.value === "structural" ? "off" : modelHelp.value, strategy: strategy.value, force: force.checked, maxCalls: Number(calls.value), maxTokens: Number(tokens.value), maxMinutes: Number(minutes.value) }
+    return { extraction: extraction.value, modelHelp: extraction.value === "structural" ? "off" : modelHelp.value, strategy: strategy.value, force: force.checked, retryFailed: retryFailed.checked, maxCalls: Number(calls.value), maxTokens: Number(tokens.value), maxMinutes: Number(minutes.value) }
   }
-  function refresh(){
-    modelHelp.disabled=extraction.value==="structural"||currentWiki.access!=="rw";
-    force.disabled=extraction.value!=="semantic"||strategy.value==="resume"||currentWiki.access!=="rw";if(force.disabled)force.checked=false;
-    const v=values();review.textContent=JSON.stringify({effective:v,models:settings.models},null,2)+"\n"+settings.fallback;
+
+  // Keep incompatible actions unavailable as the extraction mode changes.
+  function refresh() {
+    modelHelp.disabled = extraction.value === "structural" || currentWiki.access !== "rw"
+    force.disabled = extraction.value !== "semantic" || strategy.value === "resume" || currentWiki.access !== "rw"
+    if (force.disabled) force.checked = false
+    retryFailed.disabled = extraction.value !== "semantic" || modelHelp.value !== "auto" || currentWiki.access !== "rw"
+    if (retryFailed.disabled) retryFailed.checked = false
+    review.textContent = JSON.stringify({ effective: values(), models: settings.models }, null, 2) + "\n" + settings.fallback
   }
-  preset.onchange=()=>{if(preset.value==="reset"){apply(builtIn);strategy.value="incremental";force.checked=false;}else if(settings.presets[preset.value]){const v=settings.presets[preset.value];calls.value=v.maxCalls;tokens.value=v.maxTokens;minutes.value=v.maxMinutes;}refresh();};
+  preset.onchange = function() {
+    if (preset.value === "reset") {
+      apply(builtIn)
+      strategy.value = "incremental"
+      force.checked = false
+    } else if (settings.presets[preset.value]) {
+      var v = settings.presets[preset.value]
+      calls.value = v.maxCalls
+      tokens.value = v.maxTokens
+      minutes.value = v.maxMinutes
+    }
+    refresh()
+  }
   ;[calls, tokens, minutes].forEach(function(input) {
     input.type = "number"
     input.min = "0.000001"
     input.step = input === minutes ? "any" : "1"
   })
-  ;[extraction,modelHelp,strategy,calls,tokens,minutes,force].forEach(control=>{control.onchange=refresh;control.oninput=refresh;disable(control,writeReason(false));});
-  disable(preset,writeReason(false));
-  disable(button(advanced,"Save defaults",async()=>{const v=values();delete v.force;delete v.strategy;await StudioApi.wiki("graph/settings","PUT",v);message("Graph defaults saved");}),writeReason(false));
+  ;[extraction, modelHelp, strategy, calls, tokens, minutes, force, retryFailed].forEach(function(control) {
+    control.onchange = refresh
+    control.oninput = refresh
+    disable(control, writeReason(false))
+  })
+  disable(preset, writeReason(false))
+  disable(button(advanced, "Save defaults", async function() {
+    var v = values()
+    delete v.force
+    delete v.strategy
+    delete v.retryFailed
+    await StudioApi.wiki("graph/settings", "PUT", v)
+    message("Graph defaults saved")
+  }), writeReason(false))
   var compact = dream ? check(advanced, "Compact storage after success") : null
   var external = dream ? check(box, "External CLI readers and writers are stopped") : null
   button(advanced, "Reset to saved defaults", function() { apply(settings.effective); refresh() })
-  disable(button(box,"Run graph build",function() {
+  disable(button(box, "Run graph build", async function() {
     var options = values()
     if (compact && compact.checked) {
       options.compact = true
       options.confirmation = { externalProcessesStopped: external.checked }
     }
-    return queue("graph/rebuild", options)
-  }),writeReason(false));
-  refresh();
+    await queue("graph/rebuild", options)
+    retryFailed.checked = false
+    refresh()
+  }), writeReason(false))
+  refresh()
 }

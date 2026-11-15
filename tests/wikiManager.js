@@ -77,6 +77,16 @@
       assert(run(ro,"graph.defaults",{maxCalls:4},true).ok,false,"Read-only save rejected")
       assert(run(ro,"graph.build",{},true).ok,false,"Read-only build rejected")
       assert(run(ro,"graph.settings").effective.maxCalls,7,"Read-only settings visible")
+      var prompted = []
+      var menu = { choose: function(prompt) { return prompt === "Budgets" ? 0 : prompt === "Build strategy" ? 0 : 1 }, yes: function(prompt) { prompted.push(prompt); return prompt.indexOf("Retry failed sections") === 0 }, show: function() {} }
+      var controls = MiniAWikiMan.prototype.graphBuildControls.call(menu, reopened, false)
+      assert(controls.retryFailed,true,"Guided console forwards retry action")
+      assert(prompted.some(function(prompt) { return prompt.indexOf("preserving successes") >= 0 }),true,"Guided retry explains preserved work")
+      var preferences = MiniAWikiMan.prototype.graphBuildControls.call(menu, reopened, true)
+      assert(isUnDef(preferences.retryFailed),true,"Guided defaults exclude retry action")
+      throws(function(){reopened.spec("graph.build",{semantic:true,modelHelp:"off",retryFailed:true})},"retryFailed")
+      var retryReplay = runner.command(runner.spec("graph.build",{extraction:"semantic",modelHelp:"auto",retryFailed:true}),{confirm:true})
+      assert(retryReplay.command.indexOf("retryFailed") >= 0,true,"Replay preserves explicit retry")
       var replay=runner.command(runner.spec("graph.build",{extraction:"semantic",modelHelp:"off",strategy:"resume",maxCalls:3}),{confirm:true})
       assert(replay.command.indexOf("resume")>=0,true,"Replay preserves strategy")
     })

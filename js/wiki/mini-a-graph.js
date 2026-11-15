@@ -408,7 +408,7 @@ MiniAWikiGraph.prototype._removePageState = function(path) {
   var self = this
   candidates[docId] = true
   // Model work of an edited page is carried to the next semantic build (see _rebaseCarry).
-  this._stashCarry(path, this._semanticByPage[path], isMap(this._state.enrichment) && isMap(this._state.enrichment[path]) ? this._state.enrichment[path].completed : __, this._state.nodes)
+  this._stashCarry(path, this._semanticByPage[path], isMap(this._state.enrichment) && isMap(this._state.enrichment[path]) ? this._state.enrichment[path].completed : __, this._state.nodes, (this._state.enrichment || {})[path])
 
   // Owned edges are always adjacent to the page's document node or carry props.page,
   // so the two postings cover them without scanning the whole edge list.
@@ -525,11 +525,13 @@ MiniAWikiGraph.prototype._buildStructural = function(pages, opts, deferStats) {
       semanticNodeIds[e.to] = true
     }
   })
+  var nextPage = this._state.enrichment_next_page
   var oldNodes = this._state.nodes
   var oldCarry = isMap(this._state.semantic_carry) ? this._state.semantic_carry : {}
 
   this._state = this._emptyState()
   this._state.semantic_carry = oldCarry
+  this._state.enrichment_next_page = nextPage
   this._reindexEdges()
   for (var i = 0; i < list.length; i++) { this._indexPageStructural(list[i]); if (isFunction(options.onStructuralProgress) && (i + 1) % 25 === 0) options.onStructuralProgress(i + 1) }
   var unchanged = {}
@@ -558,7 +560,7 @@ MiniAWikiGraph.prototype._buildStructural = function(pages, opts, deferStats) {
   })
   list.forEach(function(page) {
     if (unchanged[page.path]) return
-    this._stashCarry(page.path, changedModel[page.path], isMap(oldEnrichment[page.path]) ? oldEnrichment[page.path].completed : __, oldNodes)
+    this._stashCarry(page.path, changedModel[page.path], isMap(oldEnrichment[page.path]) ? oldEnrichment[page.path].completed : __, oldNodes, oldEnrichment[page.path])
   }, this)
   for (var j = 0; j < oldSemanticEdges.length; j++) {
     var se = oldSemanticEdges[j]
@@ -658,9 +660,10 @@ MiniAWikiGraph.prototype._semanticSections = function(page) {
 }
 
 // Extraction contract versions. Bumping EXTRACTOR_VERSION re-derives deterministic mentions
-// (CPU only); bumping PROMPT_VERSION invalidates completed model work.
+// (CPU only). The input version stays stable when only grounding instructions improve.
 MiniAWikiGraph.EXTRACTOR_VERSION = 3
 MiniAWikiGraph.PROMPT_VERSION = 2
+MiniAWikiGraph.FAILURE_VERSION = 1
 
 // _isCodeLike: acronyms and identifiers (UPPER_CASE, camelCase, dotted, symbols, digits).
 // They are only case-folded, never plural/possessive-folded.
@@ -836,11 +839,12 @@ MiniAWikiGraph.prototype._semanticWork = function(page) {
 
 // _stashCarry: keep a changed page's model assertions and section completions until the next
 // semantic build, which re-attaches those whose section text is unchanged.
-MiniAWikiGraph.prototype._stashCarry = function(path, edges, completed, nodes) {
+MiniAWikiGraph.prototype._stashCarry = function(path, edges, completed, nodes, enrichment) {
   var models = (edges || []).filter(function(e) { return e._deleted !== true && isMap(e.props) && e.props.method === "model" && isString(e.props.windowKey) })
   var done = {}
   Object.keys(isMap(completed) ? completed : {}).forEach(function(k) { if (isString(completed[k]) && completed[k] !== "legacy") done[k] = completed[k] })
-  if (models.length === 0 && Object.keys(done).length === 0) return
+  var failures = isMap(enrichment) && enrichment.failureVersion === MiniAWikiGraph.FAILURE_VERSION ? enrichment.failures || {} : {}
+  if (models.length === 0 && Object.keys(done).length === 0 && Object.keys(failures).length === 0) return
   if (!isMap(this._state.semantic_carry)) this._state.semantic_carry = {}
   var carry = isMap(this._state.semantic_carry[path]) ? this._state.semantic_carry[path] : { completed: {}, edges: [] }
   var nodeCopy = function(id) {
@@ -848,6 +852,8 @@ MiniAWikiGraph.prototype._stashCarry = function(path, edges, completed, nodes) {
     return isMap(node) ? { type: node.type, props: clone(node.props || {}) } : { type: "concept", props: {} }
   }
   carry.completed = merge(carry.completed, done)
+  carry.failures = merge(carry.failures || {}, failures)
+  carry.failureVersion = MiniAWikiGraph.FAILURE_VERSION
   models.forEach(function(e) {
     if (carry.edges.length >= 512) return
     carry.edges.push({ from: e.from, to: e.to, type: e.type, provenance: e.provenance, props: clone(e.props), fromNode: nodeCopy(e.from), toNode: nodeCopy(e.to) })
@@ -874,6 +880,8 @@ MiniAWikiGraph.prototype._dropCarry = function(present) {
 MiniAWikiGraph.prototype._rebaseCarry = function(page, work, carry, state) {
   var self = this
   var bySid = {}
+  state.failures = merge(state.failures || {}, carry.failures || {})
+  state.failureVersion = carry.failureVersion
   work.sections.forEach(function(section) { bySid[section.sid] = section })
   ;(isArray(carry.edges) ? carry.edges : []).forEach(function(e) {
     var section = bySid[e.props.windowKey]
@@ -953,10 +961,11 @@ MiniAWikiGraph.prototype._sectionPlan = function(page, section, fingerprint) {
     body: section.text,
     concepts: concepts,
     candidates: cross,
-    instruction: "Return {relationships:[{from,to,type,provenance,confidence,evidence:{quote}}]}. Quote exact text from this section supporting both endpoints. Use INFERRED for associations, EXTRACTED only for explicit assertions. Empty relationships is valid. Do not merge identities."
+    instruction: MiniAGraphBuild.extractionContract.instruction
   }
   var inputs = [MiniAWikiGraph.PROMPT_VERSION, fingerprint, page.path, title, section.name, section.text, concepts.slice().sort(), cross.map(function(c) { return c.path + "|" + c.concept }).sort()]
-  return { section: section, payload: payload, cross: cross, inputHash: sha1(stringify(inputs, __, "")) }
+  var previousInputHash = sha1(stringify(inputs, __, ""))
+  return { section: section, payload: payload, cross: cross, previousInputHash: previousInputHash, inputHash: sha1(previousInputHash + ":contract-" + MiniAGraphBuild.extractionContract.version) }
 }
 
 MiniAWikiGraph.prototype.build = function(pages, options) {
@@ -986,23 +995,38 @@ MiniAWikiGraph.prototype.build = function(pages, options) {
   return report
 }
 
-// _validateRelationship: grounds one model relationship in a section. The quote is located
-// case-insensitively and both endpoints must appear in it. Returns the relationship with the
-// exact section substring as its quote and the quote offset, or null when it is not grounded.
-MiniAWikiGraph.prototype._validateRelationship = function(rel, section) {
-  var quote = rel && rel.evidence && rel.evidence.quote
+// _validateRelationshipDetailed: explain grounding failures without retaining model output.
+MiniAWikiGraph.prototype._validateRelationshipDetailed = function(rel, section) {
+  var contract = MiniAGraphBuild.extractionContract
   var from = rel && rel.from
   var to = rel && rel.to
-  if (!isString(quote) || quote.length === 0 || !isString(from) || !isString(to)) return null
-  if (!this._usefulConcept(from) || !this._usefulConcept(to)) return null
+  // Model terms use the evidence contract rather than the discovery stoplist.
+  var validEndpoint = function(name) {
+    return isString(name) && name.trim().length > 0 && name.length >= contract.minEndpoint && name.length <= contract.maxEndpoint
+  }
+  if (!validEndpoint(from) || !validEndpoint(to)) return { reason: "invalid-endpoint" }
+  var quote = rel && rel.evidence && rel.evidence.quote
+  if (!isString(quote) || quote.trim().length === 0) return { reason: "missing-quote" }
   var text = section.text
   var at = text.indexOf(quote)
-  if (at < 0 && text.toLowerCase().length === text.length) at = text.toLowerCase().indexOf(quote.toLowerCase())
-  if (at < 0) return null
+  // Match case without using offsets from a length-changing Unicode lowercase conversion.
+  if (at < 0) {
+    var escaped = quote.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    var match = new RegExp(escaped, "i").exec(text)
+    if (match) at = match.index
+  }
+  if (at < 0) return { reason: "quote-absent-from-section" }
   var exact = text.substring(at, at + quote.length)
   var lower = exact.toLowerCase()
-  if (lower.indexOf(from.toLowerCase()) < 0 || lower.indexOf(to.toLowerCase()) < 0) return null
+  if (lower.indexOf(from.toLowerCase()) < 0) return { reason: "source-absent-from-quote" }
+  if (lower.indexOf(to.toLowerCase()) < 0) return { reason: "target-absent-from-quote" }
   return { rel: rel, quote: exact, at: at }
+}
+
+// _validateRelationship: retain the original relationship-or-null caller contract.
+MiniAWikiGraph.prototype._validateRelationship = function(rel, section) {
+  var result = this._validateRelationshipDetailed(rel, section)
+  return result.reason ? null : result
 }
 
 MiniAWikiGraph.prototype.buildSemantic = function(pages, options) {
@@ -1022,6 +1046,16 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, options) {
   }
   var models = this._cfg.modelExtractors || (isFunction(this._llmExtractFn) ? [{ role: "main", fingerprint: this._cfg.modelFingerprint || "custom-v1", extract: this._llmExtractFn }] : [])
   var fingerprint = sha1(stringify(models.map(function(m) { return [m.role, m.fingerprint || "custom-v1"] }).concat(this._cfg.decisionExtractor ? [["decision", this._cfg.decisionExtractor.fingerprint]] : []), __, ""))
+  report.sectionsTotal = 0
+  report.sectionsCompleted = 0
+  report.deferredSections = 0
+  report.rejectionReasons = {}
+  report.diagnosticSamples = []
+  report.relationshipsRejected = 0
+  report.relationshipsAccepted = 0
+  report.recoveredFallbackAttempts = 0
+  report.failedAttempts = 0
+  report.callsByRole = { lc: 0, main: 0, decision: 0 }
   var stopped = ""
   var works = {}
   var plans = {}
@@ -1036,6 +1070,13 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, options) {
     unsaved = 0
     lastSaveAt = Date.now()
     report.pending = list.filter(function(page) { var state = self._state.enrichment[page.path]; return state && state.status !== "complete" }).length
+    report.deferredSections = 0
+    Object.keys(plans).forEach(function(path) {
+      report.deferredSections += plans[path].filter(function(plan) { return !plan.done && plan.deferred }).length
+    })
+    report.runnableSections = report.sectionsTotal - report.sectionsCompleted - report.deferredSections
+    report.retryRequired = report.deferredSections > 0
+    report.resumable = report.runnableSections > 0
     report.elapsedMs = Date.now() - started
     self._state.build_status = clone(report)
     self._compactEdges(force === true)
@@ -1107,6 +1148,9 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, options) {
     }
     if (isMap(carry)) self._rebaseCarry(page, work, carry, state)
     if (opts.force) state.completed = {}
+    if (state.failureVersion !== MiniAWikiGraph.FAILURE_VERSION || opts.force || opts.retryFailed) state.failures = {}
+    state.failureVersion = MiniAWikiGraph.FAILURE_VERSION
+    if (!isMap(state.failures)) state.failures = {}
     state.modelFingerprint = fingerprint
     self._state.enrichment[page.path] = state
     self._state.summaries.pages[page.path].summary = self._semanticSummaryFor({ body: page.body, title: (page.meta || {}).title })
@@ -1123,124 +1167,191 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, options) {
       var plan = self._sectionPlan(page, section, fingerprint)
       var recorded = state.completed[section.sid]
       if (recorded === "legacy") recorded = plan.inputHash
+      // Adopt only old checkpoints whose complete extraction input still matches.
+      if (isUnDef(state.contractVersion) && recorded === plan.previousInputHash) recorded = plan.inputHash
       plan.done = recorded === plan.inputHash
+      var failure = state.failures[section.sid]
+      if (plan.done || !isMap(failure) || failure.inputHash !== plan.inputHash) delete state.failures[section.sid]
+      plan.cycles = state.failures[section.sid] ? state.failures[section.sid].cycles : 0
+      plan.deferred = !plan.done && plan.cycles >= 2
+      report.sectionsTotal++
+      if (plan.done) report.sectionsCompleted++
       if (plan.done) completed[section.sid] = plan.inputHash
       else done = false
       return plan
     })
+    var activeSections = {}
+    plans[page.path].forEach(function(plan) { activeSections[plan.section.sid] = true })
+    Object.keys(state.failures).forEach(function(sid) { if (!activeSections[sid]) delete state.failures[sid] })
     state.completed = completed
+    state.contractVersion = MiniAGraphBuild.extractionContract.version
     state.status = done ? "complete" : "pending"
   })
   this._markDerivedDirty()
   checkpoint(true)
   report.stage = "enrichment"
 
-  // Pass 3: model enrichment of pending sections, within the call/token/time budgets.
-  for (var p = 0; p < list.length; p++) {
-    var page = list[p]
+  // Pass 3: serial rounds take one section per page, fresh work before failed work.
+  var visited = {}
+  var cursor = list.map(function(page) { return page.path }).indexOf(this._state.enrichment_next_page)
+  if (cursor < 0) cursor = 0
+  var schedule = []
+  ;[false, true].forEach(function(retrying) {
+    var queues = list.map(function(page) {
+      return plans[page.path].filter(function(plan) { return !plan.done && !plan.deferred && (plan.cycles > 0) === retrying })
+    })
+    var remaining = true
+    while (remaining) {
+      remaining = false
+      for (var offset = 0; offset < list.length; offset++) {
+        var index = (cursor + offset) % list.length
+        if (!queues[index].length) continue
+        remaining = true
+        schedule.push({ page: list[index], plan: queues[index].shift(), index: index })
+      }
+    }
+  })
+  report.cached = report.sectionsCompleted
+  for (var scheduled = 0; scheduled < schedule.length; scheduled++) {
+    var item = schedule[scheduled]
+    var page = item.page
+    var plan = item.plan
+    var section = plan.section
     var state = this._state.enrichment[page.path]
     var sectionPlans = plans[page.path]
-    var failed = false
     if (isFunction(opts.isCancelled) && opts.isCancelled()) stopped = "cancelled"
-    for (var s = 0; s < sectionPlans.length; s++) {
-      var plan = sectionPlans[s]
-      var section = plan.section
-      if (plan.done) {
-        report.cached++
-        continue
+    if (opts.modelHelp === "off" || !models.length || stopped) break
+    if (!visited[page.path]) {
+      visited[page.path] = true
+      report.processed++
+    }
+    var callsBefore = report.calls
+    var payload = plan.payload
+    if (plan.cross.length && this._cfg.decisionExtractor) {
+      var classified = call(this._cfg.decisionExtractor, { section: section.text, candidates: plan.cross })
+      if (classified && isArray(classified.paths)) payload = merge(payload, { candidates: plan.cross.filter(function(candidate) { return classified.paths.slice(0, 8).indexOf(candidate.path) >= 0 }) })
+      if (stopped) {
+        if (report.calls > callsBefore) this._state.enrichment_next_page = list[(item.index + 1) % list.length].path
+        break
       }
-      if (opts.modelHelp === "off" || !models.length || stopped) continue
-      var payload = plan.payload
-      if (plan.cross.length && this._cfg.decisionExtractor) {
-        var classified = call(this._cfg.decisionExtractor, { section: section.text, candidates: plan.cross })
-        if (classified && isArray(classified.paths)) payload = merge(payload, { candidates: plan.cross.filter(function(candidate) { return classified.paths.slice(0, 8).indexOf(candidate.path) >= 0 }) })
-        if (stopped) break
-      }
-      var response = null
-      for (var attempt = 0; attempt < models.length; attempt++) {
-        var attemptResponse = call(models[attempt], payload)
-        if (!attemptResponse) break
-        response = attemptResponse
-        // A response is usable when it is empty or grounds at least one relationship; the rest are dropped.
-        if (response && response.ok !== false && isArray(response.relationships) && response.needsContext !== true && response.relationships.length <= 32 && (response.relationships.length === 0 || response.relationships.some(function(rel) { return self._validateRelationship(rel, section) !== null }))) break
-        // Preserve safe failure categories instead of collapsing every response into invalid-extraction.
-        var reason = "invalid-extraction"
-        if (response && response.ok === false) reason = response.error === "model-extraction-failed" ? "model-extraction-failed" : response.error === "malformed-output" ? "malformed-output" : "extractor-error"
-        else if (!response || !isArray(response.relationships)) reason = "missing-relationships"
-        else if (response.needsContext === true) reason = "needs-context"
-        else if (response.relationships.length > 32) reason = "too-many-relationships"
-        else reason = "ungrounded-relationships"
-        response = { ok: false, error: reason }
-        if (stopped) break
-      }
-      if (stopped && !response) break
-      if (!response || response.ok === false || !isArray(response.relationships) || response.needsContext === true) {
-        failed = true
-        report.failed++
-        if (!isMap(report.failureReasons)) report.failureReasons = {}
-        var failureReason = response && response.error || "missing-response"
-        report.failureReasons[failureReason] = (report.failureReasons[failureReason] || 0) + 1
-        continue
-      }
-      var validated = []
-      response.relationships.slice(0, 32).forEach(function(rel) {
-        var checked = self._validateRelationship(rel, section)
-        if (checked === null) {
-          report.relationshipsRejected = (report.relationshipsRejected || 0) + 1
+    }
+    var response = null
+    var accepted = []
+    var attemptFailures = 0
+    for (var attempt = 0; attempt < models.length; attempt++) {
+      var attemptResponse = call(merge({ role: "main" }, models[attempt]), payload)
+      if (!attemptResponse) break
+      response = attemptResponse
+      accepted = []
+      var reasons = {}
+      var examples = []
+      var usable = response && response.ok !== false && isArray(response.relationships) && response.needsContext !== true && response.relationships.length <= MiniAGraphBuild.extractionContract.maxRelationships
+      if (usable) response.relationships.forEach(function(rel, index) {
+        var checked = self._validateRelationshipDetailed(rel, section)
+        if (!checked.reason) {
+          accepted.push(checked)
           return
         }
-        var from = rel.from
-        var to = rel.to
-        var quote = checked.quote
-        var at = checked.at
-        report.relationshipsAccepted = (report.relationshipsAccepted || 0) + 1
-        var resolve = function(name) {
-          var known = vocabulary.names[name]
-          if (known && known.length === 1) return known[0].id
-          return known && known.length > 1 ? "concept:ambiguous:" + page.path + ":" + name : self._conceptId(name)
-        }
-        validated.push({
-          from: resolve(from),
-          to: resolve(to),
-          type: /^[A-Z][A-Z0-9_]{0,40}$/.test(rel.type || "") ? rel.type : "RELATED_TO",
-          provenance: rel.provenance === "EXTRACTED" ? "EXTRACTED" : "INFERRED",
-          names: [from, to],
-          props: {
-            page: page.path,
-            revision: page.revision || state.hash,
-            sourceHash: state.hash,
-            section: section.section,
-            window: section.start,
-            windowKey: section.sid,
-            method: "model",
-            evidenceLayer: rel.provenance === "EXTRACTED" ? "grounded" : "inferred",
-            confidence: isNumber(rel.confidence) && isFinite(rel.confidence) ? Math.max(0, Math.min(1, rel.confidence)) : 0.5,
-            evidence: { quote: quote, start: section.start + at, end: section.start + at + quote.length, line: section.line + section.text.substring(0, at).split("\n").length - 1 }
-          }
-        })
+        var reason = checked.reason
+        reasons[reason] = (reasons[reason] || 0) + 1
+        report.relationshipsRejected++
+        report.rejectionReasons[reason] = (report.rejectionReasons[reason] || 0) + 1
+        if (report.diagnosticSamples.length < 20) report.diagnosticSamples.push({ page: page.path, sectionId: section.sid, role: models[attempt].role || "main", relationshipIndex: index, reason: reason })
+        if (examples.length < 3) examples.push({ from: isString(rel && rel.from) ? rel.from.substring(0, 300) : "", to: isString(rel && rel.to) ? rel.to.substring(0, 300) : "", quote: isString(rel && rel.evidence && rel.evidence.quote) ? rel.evidence.quote.substring(0, 300) : "" })
       })
-      // Commit a window once its grounded relationships are known. Failed refreshes retain valid old assertions.
-      ;(this._semanticByPage[page.path] || []).slice().forEach(function(e) {
-        if (e.props.method === "model" && (e.props.windowKey === section.sid || isUnDef(e.props.windowKey) && e.props.window === section.start)) self._removeEdge(e)
-      })
-      validated.forEach(function(e) {
-        self._upsertNode(e.from, "concept", { name: e.names[0], joinable: e.from.indexOf("concept:id:") === 0 })
-        self._upsertNode(e.to, "concept", { name: e.names[1], joinable: e.to.indexOf("concept:id:") === 0 })
-        self._addEdge(e.from, e.to, e.type, e.provenance, e.props)
-      })
-      plan.done = true
-      state.completed[section.sid] = plan.inputHash
-      if (sectionPlans.every(function(x) { return x.done })) state.status = "complete"
-      checkpoint()
+      if (usable && (response.relationships.length === 0 || accepted.length > 0)) {
+        report.recoveredFallbackAttempts += attemptFailures
+        break
+      }
+      var reason = "invalid-extraction"
+      if (response && response.ok === false) reason = response.error === "model-extraction-failed" ? "model-extraction-failed" : response.error === "malformed-output" ? "malformed-output" : "extractor-error"
+      else if (!response || !isArray(response.relationships)) reason = "missing-relationships"
+      else if (response.needsContext === true) reason = "needs-context"
+      else if (response.relationships.length > MiniAGraphBuild.extractionContract.maxRelationships) reason = "too-many-relationships"
+      else reason = "ungrounded-relationships"
+      attemptFailures++
+      report.failedAttempts++
+      payload = merge(payload, { correctiveFeedback: { reason: reason, counts: reasons, examples: examples, instruction: MiniAGraphBuild.extractionContract.instruction } })
+      response = { ok: false, error: reason }
     }
-    state.status = sectionPlans.every(function(x) { return x.done }) ? "complete" : failed ? "failed" : "pending"
-    report.processed++
-    if (isFunction(opts.onProgress)) opts.onProgress(merge(clone(report), { path: page.path, index: report.processed, total: list.length, status: state.status }))
+    if (report.calls > callsBefore) this._state.enrichment_next_page = list[(item.index + 1) % list.length].path
+    if (isFunction(opts.isCancelled) && opts.isCancelled()) stopped = "cancelled"
+    if (Date.now() - started >= opts.maxMinutes * 60000) stopped = stopped || "time-budget"
+    if (stopped && (!response || response.ok === false)) break
+    if (!response || response.ok === false) {
+      report.failed++
+      if (!isMap(report.failureReasons)) report.failureReasons = {}
+      var failureReason = response && response.error || "missing-response"
+      report.failureReasons[failureReason] = (report.failureReasons[failureReason] || 0) + 1
+      state.failures[section.sid] = { inputHash: plan.inputHash, cycles: plan.cycles + 1 }
+      plan.cycles++
+      plan.deferred = plan.cycles >= 2
+      checkpoint()
+      continue
+    }
+    var validated = []
+    accepted.forEach(function(checked) {
+      var rel = checked.rel
+      var from = rel.from
+      var to = rel.to
+      var quote = checked.quote
+      var at = checked.at
+      report.relationshipsAccepted = (report.relationshipsAccepted || 0) + 1
+      var resolve = function(name) {
+        var known = vocabulary.names[name]
+        if (known && known.length === 1) return known[0].id
+        return known && known.length > 1 ? "concept:ambiguous:" + page.path + ":" + name : self._conceptId(name)
+      }
+      validated.push({
+        from: resolve(from),
+        to: resolve(to),
+        type: /^[A-Z][A-Z0-9_]{0,40}$/.test(rel.type || "") ? rel.type : "RELATED_TO",
+        provenance: rel.provenance === "EXTRACTED" ? "EXTRACTED" : "INFERRED",
+        names: [from, to],
+        props: {
+          page: page.path,
+          revision: page.revision || state.hash,
+          sourceHash: state.hash,
+          section: section.section,
+          window: section.start,
+          windowKey: section.sid,
+          method: "model",
+          evidenceLayer: rel.provenance === "EXTRACTED" ? "grounded" : "inferred",
+          confidence: isNumber(rel.confidence) && isFinite(rel.confidence) ? Math.max(0, Math.min(1, rel.confidence)) : 0.5,
+          evidence: { quote: quote, start: section.start + at, end: section.start + at + quote.length, line: section.line + section.text.substring(0, at).split("\n").length - 1 }
+        }
+      })
+    })
+    // Commit a window once its grounded relationships are known. Failed refreshes retain valid old assertions.
+    ;(this._semanticByPage[page.path] || []).slice().forEach(function(e) {
+      if (e.props.method === "model" && (e.props.windowKey === section.sid || isUnDef(e.props.windowKey) && e.props.window === section.start)) self._removeEdge(e)
+    })
+    validated.forEach(function(e) {
+      self._upsertNode(e.from, "concept", { name: e.names[0], joinable: e.from.indexOf("concept:id:") === 0 })
+      self._upsertNode(e.to, "concept", { name: e.names[1], joinable: e.to.indexOf("concept:id:") === 0 })
+      self._addEdge(e.from, e.to, e.type, e.provenance, e.props)
+    })
+    plan.done = true
+    delete state.failures[section.sid]
+    report.sectionsCompleted++
+    state.completed[section.sid] = plan.inputHash
+    if (sectionPlans.every(function(x) { return x.done })) state.status = "complete"
+    checkpoint()
   }
+  report.deferredSections = 0
+  list.forEach(function(page) {
+    var state = self._state.enrichment[page.path]
+    var pending = plans[page.path].filter(function(plan) { return !plan.done })
+    report.deferredSections += pending.filter(function(plan) { return plan.deferred }).length
+    state.status = !pending.length ? "complete" : pending.some(function(plan) { return plan.cycles > 0 }) ? "failed" : "pending"
+  })
+  report.runnableSections = report.sectionsTotal - report.sectionsCompleted - report.deferredSections
+  report.retryRequired = report.deferredSections > 0
   report.pending = list.filter(function(page) { return self._state.enrichment[page.path].status !== "complete" }).length
-  report.partial = opts.modelHelp === "auto" && report.pending > 0
-  report.resumable = report.pending > 0
-  report.status = stopped || (report.partial ? "partial" : "complete")
+  report.partial = opts.modelHelp === "auto" && report.pending > 0 || report.deferredSections > 0
+  report.resumable = report.runnableSections > 0
+  report.status = stopped || (report.retryRequired && !report.resumable ? "retry-required" : "")
+  report.status = report.status || (report.partial ? "partial" : "complete")
   report.stage = "complete"
   this._pruneUnreferencedNodes("")
   checkpoint(true)

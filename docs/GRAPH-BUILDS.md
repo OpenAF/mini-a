@@ -9,7 +9,8 @@ Wiki Manager (`wikiman=true`) and Wiki Studio → Graph use the same build contr
 | `extraction` | `structural` (default), `semantic` |
 | `modelHelp` | `off` (default), `auto`; always off for structural extraction |
 | `strategy` | `incremental` (default), `full`, `resume` |
-| `force` | `false`; ignore semantic caches for this semantic run |
+| `force` | `false`; ignore completed semantic work and reset failure histories |
+| `retryFailed` | `false`; reset failure limits for this semantic run with `modelHelp=auto`, preserving completed work |
 | `maxCalls` | 100; positive integer |
 | `maxTokens` | 200000 estimated input plus output tokens; positive integer |
 | `maxMinutes` | 10; positive finite number |
@@ -48,18 +49,52 @@ section only when that section's candidate set changes. Pre-v3 enrichment of unc
 pages is migrated without model calls (offset completions become section ids; model
 assertions move to normalized concept ids).
 
-Every incremental semantic build continues unfinished sections, so `strategy=resume` is
+Incremental semantic builds continue runnable unfinished sections, so `strategy=resume` is
 an explicit equivalent that also rejects stale options. Dream/ingest finalization reports
 `graph_build` (status, pending, resumable, calls, cached) and logs when enrichment stays
 partial. Resume plus force, and structural resume/force, are rejected. Model failures
-remain pending; an empty validated relationship array is successful work. Failed
+remain unfinished; an empty validated relationship array is successful work. Failed
 refreshes preserve valid assertions for unchanged sources.
+
+A section is deferred after two failed cycles across builds with unchanged inputs and
+contract/model identity. A cycle means every available extractor failed in one build;
+LC plus main fallback is one cycle. Budget stops, cancellation, absent models and
+model help off do not add cycles. Success clears history; changed inputs reset it.
+Historical failures start with zero recorded cycles. `retryFailed=true` resets histories
+once at build start and preserves successful checkpoints. `force=true` resets both
+successful checkpoints and failures. Neither action raises budgets or saves preferences.
+Deferred sections keep a build partial. `retryRequired` identifies deferred work;
+`resumable` identifies remaining runnable sections. A deferred-only build reports
+`retry-required` and needs an explicit retry rather than an ordinary resume.
+
+Model work is scheduled serially, one section per page per round. Never-attempted
+sections precede failed sections, and a persisted next-page cursor rotates small-budget
+runs. Improved instructions migrate previous successful section hashes only when the
+previous input hash still matches. Failure metadata and extraction contracts have
+separate versions.
+
+Relationships require endpoint strings of 2–100 characters and a literal quote from the
+current section containing both names, ignoring case. Synonyms, expanded names and
+cross-page candidate evidence cannot replace that evidence. Quotes retain source
+whitespace, punctuation and UTF-16 offsets. The generic stoplist applies to deterministic
+discovery only; grounded model endpoints such as `API` are allowed. At most 32
+relationships are accepted per response. Valid relationships survive partial rejection;
+an empty list is successful. A wholly invalid response gives the next configured
+extractor reason counts and up to three endpoint/quote examples (300 characters per
+string); no additional repair calls are made and raw responses are never persisted.
+
+Reports preserve page counters (`processed` means pages visited), with `sectionsTotal`,
+`sectionsCompleted`, `deferredSections`, `runnableSections`, `retryRequired`,
+`failedAttempts`, `recoveredFallbackAttempts`, `relationshipsAccepted`,
+`relationshipsRejected`, `rejectionReasons` and `callsByRole`. Up to 20 diagnostic
+samples contain only page, section ID, role, relationship index and reason. Section
+failures are counted separately from rejected relationships and recovered fallbacks.
 
 Both interactive interfaces show effective settings and configured model availability
 before a build. They expose presets, custom budgets, per-run overrides, and **Save
 defaults**. Defaults are shared in `.mini-a-wiki-state/config.json` under the wiki's
-index root. They contain extraction, assistance and budgets only. Strategy, force and
-resume are per-run actions. Read-only wikis and mounts cannot save or build. Other
+index root. They contain extraction, assistance and budgets only. Strategy, force,
+`retryFailed` and resume are per-run actions. Read-only wikis and mounts cannot save or build. Other
 configuration fields in this file are preserved. Connection settings remain session-only.
 
 ```sh
@@ -72,6 +107,9 @@ ojob utils/wikiOps.yaml operation=graph.build wikiroot=/path/wiki \
 ojob utils/wikiOps.yaml operation=graph.defaults wikiroot=/path/wiki \
   usewikigraph=true wikiaccess=rw confirm=true \
   params='{"extraction":"semantic","modelHelp":"auto","preset":"small"}'
+
+# Retry deferred sections while preserving successful work:
+# /graph build extraction=semantic modelHelp=auto retryFailed=true
 
 # Resume previously unfinished enrichment with a one-run budget override:
 ojob utils/wikiOps.yaml operation=graph.build wikiroot=/path/wiki \

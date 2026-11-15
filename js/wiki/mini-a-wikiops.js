@@ -110,7 +110,7 @@ MiniAWikiOps.catalog = (function() {
   add("wiki.delete", "Pages & structure", "Delete a page", true, [["path", "Page path"]])
   add("wiki.indexes", "Pages & structure", "Regenerate directory indexes", true)
   add("wiki.upgrade", "Pages & structure", "Upgrade wiki instructions", true)
-  add("dream.rebuild", "Indexes & storage", "Fully rebuild graph and index (expensive; resume pending run)", true, [["modelHelp", "Model help: auto or off", "auto"], ["maxCalls", "Maximum model calls per run", 100, "number"], ["maxMinutes", "Maximum minutes per run", 10, "number"]], {}, "Reconstructs derived data from existing wiki pages. Repeat to resume an interrupted or budget-limited run.")
+  add("dream.rebuild", "Indexes & storage", "Fully rebuild graph and index (expensive; resume pending run)", true, [["modelHelp", "Model help: auto or off", "auto"], ["retryFailed", "Retry failed sections, preserving successes and resetting failure limits", false, "boolean"], ["maxCalls", "Maximum model calls per run", 100, "number"], ["maxMinutes", "Maximum minutes per run", 10, "number"]], {}, "Reconstructs derived data from existing wiki pages. Repeat to resume an interrupted or budget-limited run.")
   add("wiki.reindex", "Indexes & storage", "Rebuild search index", true)
   add("wiki.compact", "Indexes & storage", "Preview / apply compaction", true, [], { dryRun: true, offline: false }, "Apply requires all other readers and writers to be stopped.")
   add("wiki.export", "Indexes & storage", "Export wiki to ZIP", false, [["output", "Output ZIP file (new file, absolute path)"], ["nobundle", "Store index folders loose instead of a nested mini-a-wiki-index.zip", false, "boolean"]], { nobundle: false }, "Packages pages plus the validated search/graph index for other Mini-A instances (for example an S3 bucket). Requires a published Retrieval V2 index; the wiki is not modified.")
@@ -158,7 +158,7 @@ MiniAWikiOps.operation = function(id) {
 MiniAWikiOps.prototype.spec = function(id, params) {
   var op = MiniAWikiOps.operation(id), p = merge(clone(op.defaults), MiniAWikiOps.parse(params))
   if (id === "graph.build" || id === "graph.defaults") MiniAGraphBuild.resolve(p)
-  if (id === "graph.defaults" && ["force","resume","strategy"].some(function(k){return isDef(p[k])})) throw new Error("Force, resume and strategy are per-run actions, not saved defaults")
+  if (id === "graph.defaults" && ["force","resume","strategy","retryFailed"].some(function(k){return isDef(p[k])})) throw new Error("Force, resume, strategy and retryFailed are per-run actions, not saved defaults")
   op.fields.forEach(function(f) {
     if (isUnDef(p[f[0]]) && isDef(f[2])) p[f[0]] = f[2]
     if (isUnDef(p[f[0]]) || (isUnDef(f[2]) && String(p[f[0]]).trim() === "")) throw new Error("Required parameter: " + f[0])
@@ -167,7 +167,7 @@ MiniAWikiOps.prototype.spec = function(id, params) {
   Object.keys(p).forEach(function(k) {
     if (/^(wiki|dream|ingest|absorb|__)/.test(k) || ["confirm", "backupconfirmed", "model", "modeldec", "usedecide", "libs", "usewiki", "usewikigraph"].indexOf(k) >= 0) throw new Error("Use configuration arguments, not params, for " + k)
   })
-  ;["dryRun", "dryrun", "offline", "semantic", "withMeta", "force", "prune", "allowemptyprune", "independent", "nobundle"].forEach(function(k) {
+  ;["dryRun", "dryrun", "offline", "semantic", "withMeta", "force", "retryFailed", "prune", "allowemptyprune", "independent", "nobundle"].forEach(function(k) {
     if (isDef(p[k])) {
       if ([true, false, "true", "false"].indexOf(p[k]) < 0) throw new Error("Expected boolean parameter: " + k)
       p[k] = toBoolean(p[k]) === true
@@ -321,7 +321,7 @@ MiniAWikiOps.prototype._execute = function(spec, gates) {
         dream._args.dreamwikiinstructions = String(p.instructions || a.dreamwikiinstructions || "")
         dream._args.dreamwikiorganize = String(p.organize || a.dreamwikiorganize || "none")
       }
-      return dream.dreamWiki(action === "rebuild" ? merge(p.rebuild || p, { onProgress: self.onGraphProgress, formatModelError: self.formatModelError, isCancelled: self.isCancelled }) : __)
+      return dream.dreamWiki(["rebuild", "graph"].indexOf(action) >= 0 ? merge(p.rebuild || p, { onProgress: self.onGraphProgress, formatModelError: self.formatModelError, isCancelled: self.isCancelled }) : __)
     }
     if (group === "absorb") {
       loadLib(__miniAPath("js/wiki/mini-a-absorb.js"))

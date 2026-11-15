@@ -123,7 +123,7 @@ var __miniAWikiFullRebuild = function(wm, options) {
     __miniAWikiMaintenanceJson(path, state)
     progress({ graph: graph })
     var cancelled = isFunction(opts.isCancelled) && opts.isCancelled()
-    return { ok: graph.ok !== false, complete: state.phase === "complete", partial: state.phase !== "complete", status: cancelled ? "cancelled" : state.phase === "complete" ? "complete" : "partial", phase: state.phase, id: state.id, graph: graph, resumable: state.phase !== "complete" }
+    return { ok: graph.ok !== false, complete: state.phase === "complete", partial: state.phase !== "complete", status: cancelled ? "cancelled" : state.phase === "complete" ? "complete" : graph.retryRequired && !graph.resumable ? "retry-required" : "partial", phase: state.phase, id: state.id, graph: graph, resumable: state.phase !== "complete" && graph.resumable === true, retryRequired: graph.retryRequired === true }
   } finally {
     lock.release()
   }

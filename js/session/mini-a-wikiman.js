@@ -69,7 +69,10 @@ MiniAWikiMan.prototype.runner = function() {
   var self = this
   this.args.fileallow = this._fileallow
   var runner = new MiniAWikiOps(this.args, function(msg) { self.show(msg) })
-  runner.onGraphProgress = function(p) { self.ui.print(ansiColor("FG(249)", p.stage + " · " + p.processed + " processed · " + p.cached + " cached · " + p.pending + " pending · " + p.failed + " failed · " + p.calls + "/" + p.effective.maxCalls + " calls · " + p.estimatedTokens + "/" + p.effective.maxTokens + " estimated tokens · " + ((p.elapsedMs || 0) / 60000).toFixed(2) + "/" + p.effective.maxMinutes + " minutes" + (p.resumable ? " · resume pending work explicitly" : ""))) }
+  runner.onGraphProgress = function(p) {
+    var roles = p.callsByRole || {}
+    self.ui.print(ansiColor("FG(249)", p.stage + " · " + p.processed + " pages visited · " + (p.sectionsCompleted || 0) + "/" + (p.sectionsTotal || 0) + " sections complete · " + (p.failedAttempts || 0) + " failed attempts · " + (p.deferredSections || 0) + " deferred sections · " + (p.relationshipsAccepted || 0) + " relationships accepted · " + p.calls + "/" + p.effective.maxCalls + " calls (LC " + (roles.lc || 0) + ", main " + (roles.main || 0) + ", decision " + (roles.decision || 0) + ") · " + p.estimatedTokens + "/" + p.effective.maxTokens + " estimated tokens · " + ((p.elapsedMs || 0) / 60000).toFixed(2) + "/" + p.effective.maxMinutes + " minutes" + (p.resumable ? " · runnable work remains; run again to continue" : "") + (p.retryRequired ? " · Retry failed sections resets failure limits and preserves successes" : "")))
+  }
   runner._reviewedContent = this._reviewedContent
   return runner
 }
@@ -245,7 +248,7 @@ MiniAWikiMan.prototype.runOperation = function(id, advanced) {
     if (id === "absorb.plan" && field[0] === "spec") { params.spec = self.absorbSpec(); return }
     params[field[0]] = field[3] === "boolean" ? self.yes(field[1] + "?") : self.input(field[1], field[2])
   })
-  if (id === "graph.build" || id === "graph.defaults") params = this.graphBuildControls(runner, id === "graph.defaults")
+  if (id === "graph.build" || id === "graph.defaults" || id === "dream.graph") params = this.graphBuildControls(runner, id === "graph.defaults")
   if (id === "wiki.write") this.editPage(params)
   if (id === "dream.auto") params.dryrun = !this.yes("Run automatic repairs instead of previewing?")
   if (id === "ingest.run") params.dryrun = !this.yes("Apply ingestion instead of previewing?")
@@ -503,6 +506,7 @@ MiniAWikiMan.prototype.graphBuildControls = function(runner, saveOnly) {
   else if (MiniAGraphBuild.presets[preset]) options = merge(options, MiniAGraphBuild.presets[preset])
   else ["maxCalls", "maxTokens", "maxMinutes"].forEach(function(k) { options[k] = Number(self.input(k, options[k])) })
   options.force = !saveOnly && options.extraction === "semantic" && options.strategy !== "resume" && this.yes("Force extraction, ignoring semantic caches?")
+  options.retryFailed = !saveOnly && options.extraction === "semantic" && options.modelHelp === "auto" && this.yes("Retry failed sections, preserving successes and resetting failure limits?")
   options = MiniAGraphBuild.resolve(options)
   this.show({ effective: options, models: current.models || MiniAGraphBuild.availability(), fallback: current.fallback })
   if (!saveOnly && this.yes("Save extraction, model assistance and budgets as defaults for this wiki?")) {

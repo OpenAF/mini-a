@@ -372,6 +372,12 @@
     assert(s.jobWikiRoute({method:"GET"},w,route,"viewer").effective.maxCalls,9,"Studio override not saved")
     assert(s.jobWikiRoute(request,w,["graph","rebuild"],"admin").id,job.id,"Graph job replay idempotent")
     rejects(function(){s.jobWikiRoute({method:"POST",headers:{"idempotency-key":"invalid-options"},body:{extraction:"semantic",strategy:"resume",force:true}},w,["graph","rebuild"],"admin")},"invalid_options")
+    rejects(function(){s.jobWikiRoute({method:"POST",headers:{},body:{extraction:"semantic",modelHelp:"off",retryFailed:true}},w,["graph","rebuild"],"admin")},"invalid_options")
+    rejects(function(){s.jobWikiRoute({method:"POST",headers:{},body:{extraction:"semantic",modelHelp:"auto",retryFailed:"yes"}},w,["graph","rebuild"],"admin")},"invalid_options")
+    request.headers["idempotency-key"] = "retry-failed-options"
+    request.body = { extraction: "semantic", modelHelp: "auto", retryFailed: true }
+    assert(s.jobWikiRoute(request,w,["graph","rebuild"],"admin").params.retryFailed,true,"Studio forwards retry action")
+    assert(s.jobWikiRoute({method:"GET"},w,route,"viewer").effective.retryFailed,false,"Retry action not saved")
     rejects(function(){s.jobWikiRoute({method:"PUT",body:{maxCalls:3}},merge(w,{access:"ro"}),route,"admin")},"read_only")
   }) }
   exports.testGraph = function() { fixture(function(s, t) {
