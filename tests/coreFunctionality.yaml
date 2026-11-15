@@ -1037,6 +1037,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testWikiToolVisibleWhenEnabled
 
+- name: MiniA Core Tests::WikiMountsHintOptInPrompt
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWikiMountsHintOptInPrompt
+
 - name: MiniA Core Tests::ContextGuardBudgetHelpers
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -1458,6 +1463,7 @@ todo:
 - MiniA Core Tests::WarnUnknownArgsSuggestsClosestMatch
 - MiniA Core Tests::WikiToolNotVisibleWhenDisabled
 - MiniA Core Tests::WikiToolVisibleWhenEnabled
+- MiniA Core Tests::WikiMountsHintOptInPrompt
 - MiniA Core Tests::ContextGuardBudgetHelpers
 - MiniA Core Tests::ProxyDispatchReadresultHonorsContextGuardLimits
 - MiniA Core Tests::ResultExcerptRecovery

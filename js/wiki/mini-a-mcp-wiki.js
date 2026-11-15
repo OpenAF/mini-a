@@ -704,6 +704,16 @@ function __miniAMcpWikiInit(args, options) {
   // MiniAWikiManager.configure() itself resolves, invisible to args either way).
   ow.template.addHelper("$wikiHasSourceUrl", function() { return isObject(global.__wikiManager) && isDef(global.__wikiManager._sourceUrlTpl) })
   ow.template.addHelper("$wikiSourceField", function() { return isObject(global.__wikiManager) && isString(global.__wikiManager._sourceField) ? global.__wikiManager._sourceField : "sourceUrl" })
+
+  // Opt-in mount catalog hint for tool descriptions; never in restricted mode, which hides wiki structure.
+  var mountsHintEnabled = !restricted && toBoolean(args.wikimountshint) === true
+  var mountsHintMax = isDef(args.wikimountshintmax) ? Number(args.wikimountshintmax) : 12
+  ow.template.addHelper("$wikiMountsHint", function() {
+    if (!mountsHintEnabled || !isObject(global.__wikiManager) || !isFunction(global.__wikiManager.mountHintText)) return ""
+    var text = ""
+    try { text = global.__wikiManager.mountHintText(mountsHintMax) } catch(e) {}
+    return text.length > 0 ? " " + text : ""
+  })
   var restriction = restricted ? new MiniAMcpWikiRestriction(args, cfg) : { enabled: false }
   var logPrefix = isString(options.logPrefix) ? options.logPrefix : "mcp-wiki"
   var auditEnabled = __miniAMcpWikiAuditEnabled(args)

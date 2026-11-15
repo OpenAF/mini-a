@@ -110,6 +110,12 @@ Use `tree` and `browse` for hierarchy, `backlinks` before moving a page, and `li
 
 When nonempty `wikimounts` are supplied without a nonblank `wikiroot`, the default filesystem primary becomes a generated, read-only in-memory catalog. Its `index.md` links to each successfully attached mount's index (or its browsable root when no index exists), using the mount label and description. Attach, replace, and detach operations keep the catalog current; failed or removed mounts never cause a fallback to the current directory. Navigation and federated search continue to work, including mounts using Retrieval V2. The catalog has no persistent index or graph and rejects writes and maintenance even with `wikiaccess=rw`; configure `wikiroot` to enable persistent primary storage.
 
+To tell the model up front which topics the mounts cover, opt in with `wikimountshint=true`. A single line such as `Mounted wikis (wiki selector or @name/ prefix): @k8s "Kubernetes" — Cluster runbooks` is then added to the agent-mode wiki prompt section (not chatbot mode) and to the `context`/`search` descriptions of `mcp-wiki.yaml` (and `context` in `mcp-wiki-ops.yaml`). Descriptions come from the mount's `description`, falling back to its `index.md` front matter. `wikimountshintmax` (default 12) caps the list. The hint is off by default because it adds prompt tokens; restricted/safe MCP never emits it.
+
+```bash
+mini-a usewiki=true wikimounts="[{name:'k8s', label:'Kubernetes', description:'Cluster runbooks', backend:'fs', root:'/shared/k8s-wiki'}]" wikimountshint=true goal="..."
+```
+
 Set **`wikiroot=.` explicitly** to retain a current-directory primary alongside mounts. Empty mount configurations and non-filesystem primary backends retain their existing defaults. Invalid mount configuration is reported before primary initialization. This behavior applies to agent, console, web, and MCP sessions, and to dedicated `skillwikimounts` libraries without `skillwikiroot`. Attaching a mount interactively to an ordinary primary does not replace it. Restricted MCP keeps its opaque-reference rules and does not expose the generated navigation page.
 
 

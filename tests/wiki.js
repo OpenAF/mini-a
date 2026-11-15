@@ -3126,5 +3126,46 @@
     } finally { cleanupTestDir(primary); cleanupTestDir(a); cleanupTestDir(b) }
   }
 
+  exports.testMountHintTextListsMountsWithFallback = function() {
+    var primary = createTestDir(), a = createTestDir(), b = createTestDir(), c = createTestDir()
+    try {
+      writePage(a, "a.md", "---\ntitle: A\n---\n# A\nbody")
+      writePage(b, "index.md", "---\ntitle: B Home\ndescription: Kubernetes runbooks\n---\n# B\nbody")
+      writePage(c, "c.md", "---\ntitle: C\n---\n# C\nbody")
+      var wm = new MiniAWikiManager({ backend: "fs", root: primary, access: "ro" })
+      ow.test.assert(wm.mountHintText(), "", "no mounts yields an empty hint")
+      wm.attach("team", { backend: "fs", root: a, label: "Team docs", description: "Curated\nteam \"knowledge\"" })
+      wm.attach("k8s", { backend: "fs", root: b })
+      wm.attach("misc", { backend: "fs", root: c })
+      var text = wm.mountHintText()
+      ow.test.assert(text.indexOf("@team \"Team docs\" — Curated team 'knowledge'") >= 0, true, "label and sanitized description are listed: " + text)
+      ow.test.assert(text.indexOf("@k8s — Kubernetes runbooks") >= 0, true, "description falls back to the mount index.md front matter: " + text)
+      ow.test.assert(text.indexOf("@misc") >= 0 && text.indexOf("@misc —") < 0, true, "a mount without a description is still named")
+      ow.test.assert(text.indexOf("\n") < 0, true, "hint is a single line")
+      var capped = wm.mountHintText(1)
+      ow.test.assert(capped.indexOf("@team") >= 0 && capped.indexOf("@k8s") < 0, true, "cap limits listed mounts")
+      ow.test.assert(capped.indexOf("(+2 more; call context())") >= 0, true, "overflow is summarized: " + capped)
+    } finally { cleanupTestDir(primary); cleanupTestDir(a); cleanupTestDir(b); cleanupTestDir(c) }
+  }
+
+  exports.testMcpWikiMountsHintIsOptIn = function() {
+    var primary = createTestDir(), team = createTestDir()
+    try {
+      writePage(team, "index.md", "---\ntitle: Team\ndescription: Team runbooks\n---\n# Team\nbody")
+      var mounts = stringify([{ name: "team", label: "Team docs", backend: "fs", root: String(team) }], __, "")
+      var base = { wikiroot: String(primary), wikimounts: mounts }
+      __miniAMcpWikiInit(merge(base, {}), { access: "ro", readonly: true })
+      ow.test.assert($t("{{{$wikiMountsHint}}}", {}), "", "hint is off by default")
+      __miniAMcpWikiInit(merge(base, { wikimountshint: "true" }), { access: "ro", readonly: true })
+      var hint = $t("{{{$wikiMountsHint}}}", {})
+      ow.test.assert(hint.indexOf("@team \"Team docs\" — Team runbooks") >= 0, true, "opt-in hint lists mounts: " + hint)
+      __miniAMcpWikiInit(merge(base, { wikimountshint: true, wikirestrict: true }), { access: "ro", readonly: true })
+      ow.test.assert($t("{{{$wikiMountsHint}}}", {}), "", "restricted mode never exposes mount names")
+      var yaml = io.readFileString("mcps/mcp-wiki.yaml")
+      ow.test.assert((yaml.match(/\{\{\{\$wikiMountsHint\}\}\}/g) || []).length, 2, "mcp-wiki.yaml renders the hint on context and search")
+      ow.test.assert(io.readFileString("mcps/mcp-wiki-safe.yaml").indexOf("wikiMountsHint") < 0, true, "mcp-wiki-safe.yaml must not render the hint")
+    } finally { cleanupTestDir(primary); cleanupTestDir(team) }
+  }
+
   return exports
 })()

@@ -5719,6 +5719,47 @@ MiniAWikiManager.prototype.mounts = function() {
   })
 }
 
+// Compact mount entries for opt-in prompt/tool-description hints: the configured description,
+// else the mount index.md front-matter description (same fallback as context()). Never lists pages.
+MiniAWikiManager.prototype.mountHints = function(maxCount) {
+  var mounts = isArray(this._mounts) ? this._mounts : []
+  var max = isNumber(maxCount) && maxCount > 0 ? Math.floor(maxCount) : 12
+  var clean = function(value, limit) {
+    var text = String(isDef(value) && value !== null ? value : "")
+               .replace(/\s+/g, " ")
+               .replace(/"/g, "'")
+               .trim()
+    return text.length > limit ? text.substring(0, limit - 1).trim() + "…" : text
+  }
+
+  var items = mounts.slice(0, max).map(function(m) {
+    var desc = isString(m.description) ? m.description : ""
+    if (desc.trim().length === 0) {
+      try {
+        var idx = m.manager._metaFor("index.md")
+        if (isObject(idx) && isString(idx.description)) desc = idx.description
+      } catch(e) {}
+    }
+    var label = isString(m.label) && m.label !== m.name ? m.label : ""
+    return { name: m.name, label: clean(label, 60), description: clean(desc, 120) }
+  })
+  return { items: items, more: Math.max(0, mounts.length - items.length) }
+}
+
+// Single-line mount catalog hint; empty when nothing is mounted.
+MiniAWikiManager.prototype.mountHintText = function(maxCount) {
+  var hints = this.mountHints(maxCount)
+  if (hints.items.length === 0) return ""
+  var parts = hints.items.map(function(item) {
+    var text = "@" + item.name
+    if (item.label.length > 0) text += " \"" + item.label + "\""
+    if (item.description.length > 0) text += " — " + item.description
+    return text
+  })
+  var more = hints.more > 0 ? " (+" + hints.more + " more; call context())" : ""
+  return "Mounted wikis (wiki selector or @name/ prefix): " + parts.join("; ") + more + ". Prefer the wiki for questions on these topics."
+}
+
 // ── context ───────────────────────────────────────────────────────────────────
 
 MiniAWikiManager.prototype.context = function(options) {

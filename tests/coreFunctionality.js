@@ -5513,6 +5513,26 @@
     ow.test.assert(result.prompt.indexOf('"wiki"') === -1, true, "Wiki tool should not appear in system prompt when useWiki=false")
   }
 
+  exports.testWikiMountsHintOptInPrompt = function() {
+    var agent = createAgent()
+    var hint = "Mounted wikis (wiki selector or @name/ prefix): @k8s — Cluster runbooks. Prefer the wiki for questions on these topics."
+    var off = renderAgentPrompt(agent, { useWiki: true, wikiMountsHint: "" })
+    ow.test.assert(off.prompt.indexOf("Mounted wikis") < 0, true, "Mount hint must be absent by default")
+    var on = renderAgentPrompt(agent, { useWiki: true, wikiMountsHint: hint })
+    ow.test.assert(on.prompt.indexOf(hint) >= 0, true, "Mount hint should be rendered unescaped when provided")
+    var noWiki = renderAgentPrompt(agent, { useWiki: false, wikiMountsHint: hint })
+    ow.test.assert(noWiki.prompt.indexOf("Mounted wikis") < 0, true, "Mount hint must stay inside the useWiki block")
+
+    // The payload helper only emits text when both usewiki and wikimountshint are on
+    var calls = 0
+    agent._wikiManager = { mountHintText: function(max) { calls++; return "hint-" + max } }
+    ow.test.assert(agent._wikiMountsHintText({ usewiki: true }), "", "wikimountshint defaults off")
+    ow.test.assert(agent._wikiMountsHintText({ usewiki: false, wikimountshint: true }), "", "usewiki=false disables the hint")
+    ow.test.assert(agent._wikiMountsHintText({ usewiki: true, wikimountshint: "true", wikimountshintmax: 3 }), "hint-3", "string true enables the hint and passes the cap")
+    ow.test.assert(calls, 1, "manager is only consulted when the hint is enabled")
+    agent._wikiManager = __
+  }
+
   exports.testWikiToolVisibleWhenEnabled = function() {
     var agent = createAgent()
     var payload = {

@@ -975,6 +975,14 @@ help:
     desc     : SLON/JSON array of read-only wiki mounts [{name, backend, root|bucket|prefix|url|...}]
     example  : "[{name: 'team', backend: 'fs', root: '/shared/team-wiki'}]"
     mandatory: false
+  - name     : wikimountshint
+    desc     : "Opt-in: list mounted wikis (name, label, description) in the system prompt so the model knows which topics the wikis cover"
+    example  : "true"
+    mandatory: false
+  - name     : wikimountshintmax
+    desc     : Maximum mounts listed by wikimountshint (default 12)
+    example  : "12"
+    mandatory: false
   - name     : useskillswiki
     desc     : Enable the virtual skill library, reusing usewiki unless a dedicated skillwiki* source is given
     mandatory: false
@@ -2293,6 +2301,8 @@ jobs:
       wikisourceinline: toBoolean().isBoolean().default(false)
       wikilintstaleddays: toNumber().isNumber().default(__)
       wikimounts     : isString().default(__)
+      wikimountshint : toBoolean().isBoolean().default(false)
+      wikimountshintmax: toNumber().isNumber().default(12)
       useskillswiki   : toBoolean().isBoolean().default(false)
       skillwikibackend: isString().default(__)
       skillwikiroot  : isString().default(__)

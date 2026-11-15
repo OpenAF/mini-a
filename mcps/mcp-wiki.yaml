@@ -102,6 +102,14 @@ help:
     desc     : "SLON/JSON array of read-only wiki mounts: [{name, label?, description?, backend, root|bucket|prefix|url|...}]. name is the stable MCP wiki selector."
     example  : "[{name: 'team', label: 'Team docs', description: 'Curated team knowledge', backend: 'fs', root: './team-wiki'}]"
     mandatory: false
+  - name     : wikimountshint
+    desc     : "Opt-in: list mounted wikis (name, label, description; falls back to each mount's index.md description) in the context/search tool descriptions so the model knows which topics the wikis cover. Snapshot at tools/list time; costs prompt tokens."
+    example  : "true"
+    mandatory: false
+  - name     : wikimountshintmax
+    desc     : Maximum mounts listed by wikimountshint (default 12); the rest are summarized as "+N more"
+    example  : "12"
+    mandatory: false
   - name     : usewikigraph
     desc     : "Enable the wiki knowledge graph. Also enabled automatically when `wikigraphfalkorhost` is provided. Search transparently appends related-page hints."
     example  : "false"
@@ -182,7 +190,7 @@ todo:
     ((fnsMeta)): &MCPFNSMETA
       context:
         name       : context
-        description: "[ORIENTATION] Get a compact overview of {{label}}, including available wiki names for the wiki selector. Call once before searching when the relevant knowledge source is unknown."
+        description: "[ORIENTATION] Get a compact overview of {{label}}, including available wiki names for the wiki selector. Call once before searching when the relevant knowledge source is unknown.{{{$wikiMountsHint}}}"
         inputSchema:
           type      : object
           properties:
@@ -195,7 +203,7 @@ todo:
 
       search:
         name       : search
-        description: "[START HERE] Search {{label}} pages. context() lists wiki names. Omit wiki or use '*' for all wikis; use 'primary', a mount name, or an array for selected sources. Mounted paths remain @name/path.md. Returns compact matches through lexical keyword retrieval, not semantic question answering. Configured graph hints can add bounded related evidence; incomplete coverage cannot establish absence. Then read the best path."
+        description: "[START HERE] Search {{label}} pages. context() lists wiki names. Omit wiki or use '*' for all wikis; use 'primary', a mount name, or an array for selected sources. Mounted paths remain @name/path.md. Returns compact matches through lexical keyword retrieval, not semantic question answering. Configured graph hints can add bounded related evidence; incomplete coverage cannot establish absence. Then read the best path.{{{$wikiMountsHint}}}"
         inputSchema:
           type      : object
           properties:
@@ -531,6 +539,8 @@ jobs:
       wikigraphproximity  : toBoolean.isBoolean.default(__)
       label               : isString.default("wiki")
       wikimounts          : isString.default(__)
+      wikimountshint      : toBoolean.isBoolean.default(false)
+      wikimountshintmax   : toNumber.isNumber.default(12)
       audit               : default(__)
   exec : | #js
     var miniALibraryRoot = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParentFile().getParent())

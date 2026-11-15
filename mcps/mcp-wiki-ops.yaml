@@ -114,6 +114,14 @@ help:
     desc     : "SLON/JSON array of read-only wiki mounts: [{name, backend, root|bucket|prefix|url|...}]"
     example  : "[{name: 'team', backend: 'fs', root: './team-wiki'}]"
     mandatory: false
+  - name     : wikimountshint
+    desc     : "Opt-in: list mounted wikis (name, label, description; falls back to each mount's index.md description) in the context tool description so the model knows which topics the wikis cover. Snapshot at tools/list time; costs prompt tokens."
+    example  : "true"
+    mandatory: false
+  - name     : wikimountshintmax
+    desc     : Maximum mounts listed by wikimountshint (default 12); the rest are summarized as "+N more"
+    example  : "12"
+    mandatory: false
   - name     : audit
     desc     : "If true (or env OJOB_MCP_AUDIT), logs every MCP tool call (tool name and arguments, handled generically by oJobMCP.yaml) plus every page actually fetched from a remote wikibackend (s3, es) -- backend, resolved location (s3://bucket/key or es:index/path), and byte count -- via OpenAF's log() function. The latter also covers pages fetched internally while serving lint/reindex/graph_build, not just the top-level edit/maintain tool calls."
     example  : "false"
@@ -137,7 +145,7 @@ todo:
     ((fnsMeta)): &MCPFNSMETA
       context:
         name       : context
-        description: "[ORIENTATION] Get a compact overview of {{label}}, including available wiki names for the wiki selector."
+        description: "[ORIENTATION] Get a compact overview of {{label}}, including available wiki names for the wiki selector.{{{$wikiMountsHint}}}"
         inputSchema:
           type      : object
           properties:
@@ -366,6 +374,8 @@ jobs:
       wikisourcefield     : isString.default(__)
       wikisourceinline    : toBoolean.isBoolean.default(false)
       wikimounts          : isString.default(__)
+      wikimountshint      : toBoolean.isBoolean.default(false)
+      wikimountshintmax   : toNumber.isNumber.default(12)
       audit               : default(__)
   exec : | #js
     var miniALibraryRoot = String(new java.io.File(String(ow.oJob.__file)).getCanonicalFile().getParentFile().getParent())

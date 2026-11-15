@@ -424,6 +424,14 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiSafeOffProfileDisablesRestriction
 
+- name: MiniA Wiki Tests::MountHintTextListsMountsWithFallback
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMountHintTextListsMountsWithFallback
+
+- name: MiniA Wiki Tests::McpWikiMountsHintIsOptIn
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiMountsHintIsOptIn
+
 - name: MiniA Wiki Tests::McpWikiRestrictedRetrieval
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedRetrieval
@@ -885,6 +893,8 @@ todo:
 - MiniA Wiki Tests::McpWikiSearchSchemasDescribeLexicalRetrieval
 - MiniA Wiki Tests::McpWikiSafeIsRestrictedByDefaultWithExplicitOffEscape
 - MiniA Wiki Tests::McpWikiSafeOffProfileDisablesRestriction
+- MiniA Wiki Tests::MountHintTextListsMountsWithFallback
+- MiniA Wiki Tests::McpWikiMountsHintIsOptIn
 - MiniA Wiki Tests::McpWikiRestrictedRetrieval
 - MiniA Wiki Tests::McpWikiRestrictedSearchBudgetExhaustionDoesNotConsumeCooldowns
 - MiniA Wiki Tests::McpWikiRestrictedReadAcceptsReferenceAlias

@@ -417,7 +417,7 @@ Choose one action: {{{actionFieldValues}}}. Include only fields needed for that 
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if useMemorySearch}}
 • "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if useMemoryWrite}}
 • "memory_write" - Record durable knowledge that should survive across runs (params: {"kind":"preference|environment|procedure|pitfall|reference","value":"...","key":"optional stable key","tags":["optional"],"ttlDays":N}); use "preference" for what the user/team wants, "environment" for how this machine/repo/service is set up, "procedure" for a validated how-to, "pitfall" for something that failed and why, "reference" for a pointer to a doc/URL. Only write things worth remembering next time, not step-by-step narration.{{/if}}{{#if useWiki}}
-• "wiki" - Interact with the wiki knowledge base (params: {"op":"retrieve|search|open|navigate|read|grep|related|context|list|tree|browse|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md or wiki:ref","query":"...","pattern":"...","section":"Heading Name","startLine":N,"endLine":N,"maxChars":N,"limit":N,"contextLines":N}); Search without a wiki selector searches all mounted wikis automatically. Use path="@name/" for navigation or wiki="name" only to narrow scope. Partial coverage cannot establish absence; retain specific query terms when retrying. Read bounded evidence before making detailed factual claims. Retrieval strategy: SEARCH compact candidates, OPEN promising pages, NAVIGATE headings, then READ one section/range. Use GREP for exact identifiers/errors in a known page. Do not read every search result or whole long pages; use RELATED only when lexical evidence is insufficient.{{#if wikiRw}} Before write/move/delete read AGENTS.md for rules.{{/if}}{{#if wikiSourceUrl}} Results also carry a {{wikiSourceField}} URL, that page's canonical citation source; cite it when you use the page's content.{{/if}}{{/if}}{{#if useWikiGraph}}
+• "wiki" - Interact with the wiki knowledge base (params: {"op":"retrieve|search|open|navigate|read|grep|related|context|list|tree|browse|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md or wiki:ref","query":"...","pattern":"...","section":"Heading Name","startLine":N,"endLine":N,"maxChars":N,"limit":N,"contextLines":N}); Search without a wiki selector searches all mounted wikis automatically. Use path="@name/" for navigation or wiki="name" only to narrow scope. Partial coverage cannot establish absence; retain specific query terms when retrying. Read bounded evidence before making detailed factual claims. Retrieval strategy: SEARCH compact candidates, OPEN promising pages, NAVIGATE headings, then READ one section/range. Use GREP for exact identifiers/errors in a known page. Do not read every search result or whole long pages; use RELATED only when lexical evidence is insufficient.{{#if wikiRw}} Before write/move/delete read AGENTS.md for rules.{{/if}}{{#if wikiSourceUrl}} Results also carry a {{wikiSourceField}} URL, that page's canonical citation source; cite it when you use the page's content.{{/if}}{{#if wikiMountsHint}} {{{wikiMountsHint}}}{{/if}}{{/if}}{{#if useWikiGraph}}
 • "graph" - Query the wiki knowledge graph (params: {"op":"stats|query|neighbors|path|communities|surprise|retrieve|answer|export|build|cross|tags", ...}); use for relationship/graph-shaped questions, not as a substitute for wiki search. "answer" is a compatibility alias for retrieval and performs no LLM synthesis. "cross" (params: {"path":"page.md"} or {"query":"..."}) joins into mounted wikis' graphs via explicit @-links and shared tags/aliases/concepts.{{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 {{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
@@ -877,6 +877,17 @@ MiniA.prototype._normalizePromptDataText = function(inputText) {
   var text = isString(inputText) ? inputText : stringify(inputText, __, "")
   text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
   return text
+}
+
+// Opt-in (wikimountshint=true) one-line catalog of mounted wikis for the system prompt.
+MiniA.prototype._wikiMountsHintText = function(args) {
+  if (!isMap(args) || toBoolean(args.usewiki) !== true || toBoolean(args.wikimountshint) !== true) return ""
+  if (!isObject(this._wikiManager) || !isFunction(this._wikiManager.mountHintText)) return ""
+  try {
+    return this._wikiManager.mountHintText(args.wikimountshintmax)
+  } catch(e) {
+    return ""
+  }
 }
 
 MiniA.prototype._buildUntrustedPromptBlock = function(label, inputText) {
@@ -10009,6 +10020,10 @@ MiniA.prototype._normalizeWikiArgs = function(args) {
   args.wikigraphfalkorpass = _$(args.wikigraphfalkorpass, "args.wikigraphfalkorpass").isString().default(__)
   // wikimounts: SLON/JSON array of {name, backend, root|bucket|...} — left as-is (parsed at wiki init)
   if (isUnDef(args.wikimounts)) args.wikimounts = __
+  // wikimountshint: opt-in mount catalog line in the system prompt
+  args.wikimountshint = _$(toBoolean(args.wikimountshint), "args.wikimountshint").isBoolean().default(false)
+  var _wikiMountsHintMax = Number(args.wikimountshintmax)
+  args.wikimountshintmax = isNaN(_wikiMountsHintMax) || _wikiMountsHintMax <= 0 ? 12 : _wikiMountsHintMax
   return args
 }
 
@@ -20039,7 +20054,8 @@ MiniA.prototype._buildRunPrompt = function(args) {
         useWikiGraph       : promptUseWikiGraph,
         wikiRw             : args.usewiki && args.wikiaccess === "rw" && isObject(this._wikiManager),
         wikiSourceUrl      : args.usewiki && isObject(this._wikiManager) && isDef(this._wikiManager._sourceUrlTpl),
-        wikiSourceField    : isObject(this._wikiManager) ? this._wikiManager._sourceField : "sourceUrl"
+        wikiSourceField    : isObject(this._wikiManager) ? this._wikiManager._sourceField : "sourceUrl",
+        wikiMountsHint     : this._wikiMountsHintText(args)
       }
       this._systemInst = this._buildSystemPromptWithBudget("agent", agentPayload, this._SYSTEM_PROMPT, {
         args: args,
