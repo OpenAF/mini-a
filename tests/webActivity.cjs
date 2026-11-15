@@ -193,7 +193,7 @@ for (const laterEvents of [[],
 let panels = [];
 const context = vm.createContext({
   resultsDiv: { querySelectorAll: () => panels }, currentSessionUuid: 'test',
-  activityDisclosureState: new Map(), resetActivityDisclosure: false,
+  activityDisclosureState: new Map(), resetActivityDisclosure: false, answerAttemptLabel: '',
   streamCompletedActivities: new Set(), showExecsEnabled: true,
   buildOptimisticUserPromptBlock: message => '<div>' + message + '</div>'
 });

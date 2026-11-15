@@ -1046,6 +1046,9 @@ help:
     desc     : Optional absolute delegated subtask timeout in milliseconds regardless of activity
     example  : "900000"
     mandatory: false
+  - name     : delegationmaxrepairs
+    desc     : Maximum targeted deliverable repairs per delegated task (default 2)
+    example  : 2
   - name     : delegationmaxretries
     desc     : Default retry count for failed subtasks
     example  : "2"
@@ -1740,7 +1743,10 @@ todo:
             checkpoints: { reached: 0, total: 0 }
           }
         }
-        if (isDef(global.__subagentState) && isDef(global.__subagentState[postData.uuid])) {
+        var progressAgent = isDef(global.__conversations) ? global.__conversations[postData.uuid] : __
+        if (progressAgent && progressAgent._subtaskManager && isFunction(progressAgent._subtaskManager.progress)) {
+          _res.subagents = { items: progressAgent._subtaskManager.progress() }
+        } else if (isDef(global.__subagentState) && isDef(global.__subagentState[postData.uuid])) {
           _res.subagents = global.__subagentState[postData.uuid]
         } else {
           _res.subagents = {
@@ -2301,6 +2307,7 @@ jobs:
       delegationtimeout: toNumber().isNumber().default(300000)
       delegationstalltimeout: toNumber().isNumber().default(__)
       delegationhardtimeout: toNumber().isNumber().default(__)
+      delegationmaxrepairs: toNumber().isNumber().default(2)
       delegationmaxretries: toNumber().isNumber().default(2)
       workerreg      : toNumber().isNumber().default(__)
       workerregtoken : isString().default(__)

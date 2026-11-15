@@ -730,6 +730,9 @@ help:
     desc     : Optional absolute delegated subtask timeout in milliseconds regardless of activity
     example  : "900000"
     mandatory: false
+  - name     : delegationmaxrepairs
+    desc     : Maximum targeted deliverable repairs per delegated task (default 2)
+    example  : 2
   - name     : delegationmaxretries
     desc     : Maximum retries per delegated subtask
     example  : "2"
@@ -1785,6 +1788,7 @@ jobs:
         delegationtimeout: delegationtimeout
         delegationstalltimeout: delegationstalltimeout
         delegationhardtimeout: delegationhardtimeout
+        delegationmaxrepairs: delegationmaxrepairs
         delegationmaxretries: delegationmaxretries
         usea2a         : usea2a
         showdelegate   : showdelegate
@@ -2109,6 +2113,7 @@ jobs:
       delegationtimeout: toNumber.isNumber.default(__)
       delegationstalltimeout: toNumber.isNumber.default(__)
       delegationhardtimeout: toNumber.isNumber.default(__)
+      delegationmaxrepairs: toNumber.isNumber.default(__)
       delegationmaxretries: toNumber.isNumber.default(__)
       usea2a         : toBoolean.isBoolean.default(false)
       showdelegate   : toBoolean.isBoolean.default(false)

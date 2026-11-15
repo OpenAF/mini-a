@@ -213,6 +213,7 @@ MiniAExecution.prototype.put = function(spec) {
   if (!this.state.tasks[spec.id] && Object.keys(this.state.tasks).length >= 256) throw new Error("Execution task limit reached")
   var old = this.state.tasks[spec.id], next = this.copy({ id: spec.id, objective: spec.objective, dependencies: spec.dependencies || [],
     criteria: spec.criteria || [], resources: spec.resources || { reads: [], writes: ["*"] }, parent: spec.parent,
+    mode: spec.mode === "research" ? "research" : "action", deliverable: String(spec.deliverable || spec.objective),
     approach: spec.approach || "", idempotent: spec.idempotent === true, required: spec.required !== false })
   next.dependencies = next.dependencies || []; next.criteria = next.criteria || []
   if (!Array.isArray(next.dependencies) || !Array.isArray(next.criteria) || next.criteria.length > 64) throw new Error("Invalid task contract")
@@ -234,6 +235,11 @@ MiniAExecution.prototype.put = function(spec) {
   if (old && old.required !== false && next.required === false) throw new Error("Cannot drop a required task")
   if (old && old.criteria.some(function(c) { return !next.criteria.some(function(n) { return JSON.stringify(n) === JSON.stringify(c) }) })) throw new Error("Cannot weaken existing task criteria")
   next.status = old ? old.status : "pending"; next.acceptance = old ? old.acceptance : "pending"
+  // Approach revisions retain per-task recovery limits across checkpoints.
+  if (old) {
+    next.repairs = old.repairs || 0
+    next.takeoverAttempted = old.takeoverAttempted === true
+  }
   next.revision = old ? old.revision + 1 : 1
   this.state.tasks[next.id] = next
   try { this.validate() } catch(e) { if (old) this.state.tasks[next.id] = old; else delete this.state.tasks[next.id]; throw e }

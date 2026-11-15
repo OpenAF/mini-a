@@ -108,6 +108,13 @@ MiniAAdvanced.prototype._get = function(uuid) {
   var self = this, file = this.root + "/" + uuid + ".json"
   var saved = io.fileExists(file) ? io.readFileJSON(file) : {}
   var state = { uuid: uuid, file: file, journal: this.root + "/" + uuid + ".ndjson", sequence: 0, offsets: [], nativeResults: {}, pending: null, operation: null, receipts: isMap(saved.receipts) ? saved.receipts : {}, closed: saved.closed === true }
+  state.subagentProgress = isArray(saved.subagentProgress) ? saved.subagentProgress : []
+  if (saved.running) state.subagentProgress.forEach(function(item) {
+    if (["queued", "pending", "running", "reviewing", "repairing"].indexOf(item.status) >= 0) {
+      item.status = item.label = "unknown"
+      item.lastEvent = "Server restarted; prior worker outcome requires reconciliation."
+    }
+  })
   state.lock = new java.util.concurrent.locks.ReentrantLock()
   state.askLock = new java.util.concurrent.locks.ReentrantLock()
   // Recover the journal index, never materialize all diagnostic payloads in memory.
@@ -225,9 +232,13 @@ MiniAAdvanced.prototype._get = function(uuid) {
 }
 
 MiniAAdvanced.prototype.emit = function(state, type, value) {
+  if (type === "user" && isString(value) && !/^\[subtask:/.test(value)) state.subagentProgress = []
   state.lock.lock()
   try {
     var record = { sequence: state.sequence + 1, timestamp: new Date().toISOString(), runId: state.operation, type: type, value: this.safe(value, __, type === "command-result" || type === "result-part") }
+    // Keep worker identity separate from presentation and truncated event payloads.
+    var childMatch = isString(value) ? value.match(/^\[subtask:([^\]]+)\]/) : __
+    if (childMatch) record.subagentId = childMatch[1]
     var offset = io.fileExists(state.journal) ? Number(new java.io.File(state.journal).length()) : 0
     io.writeFileString(state.journal, stringify(record, __, "") + "\n", __, true)
     state.offsets.push(offset)
@@ -329,7 +340,10 @@ MiniAAdvanced.prototype.persist = function(state, full) {
     clean[key] = options[key]
   })
   if (full) return clean
-  io.writeFileJSON(state.file, { options: clean, running: !!state.operation, closed: state.closed, receipts: state.receipts }, "")
+  var agent = state.runtime.agent()
+  var progress = agent && agent._subtaskManager && isFunction(agent._subtaskManager.progress) ? agent._subtaskManager.progress() : []
+  if (progress.length) state.subagentProgress = this.safe(progress)
+  io.writeFileJSON(state.file, { options: clean, running: !!state.operation, closed: state.closed, receipts: state.receipts, subagentProgress: state.subagentProgress || [] }, "")
   return clean
 }
 
@@ -367,6 +381,7 @@ MiniAAdvanced.prototype.snapshot = function(state, after) {
   return {
     uuid: state.uuid, runId: global.__runTokens[state.uuid] || null, sequence: state.sequence, busy: !!global.__busy[state.uuid], closed: state.closed,
     operation: state.operation, operationView: state.operationView, kind: state.kind, pending: state.pending ? this.safe(state.pending) : null,
+    subagents: state.runtime.agent() && state.runtime.agent()._subtaskManager && state.runtime.agent()._subtaskManager.progress().length ? this.safe(state.runtime.agent()._subtaskManager.progress()) : state.subagentProgress || [],
     commandMetadata: state.runtime.commandMetadata(), commands: state.runtime.commands(), completions: state.runtime.completions(), events: this.events(state, after, 100),
     settings: Object.keys(definitions).sort().map(function(key) {
       var def = definitions[key]

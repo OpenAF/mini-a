@@ -365,5 +365,22 @@ try {
   try { advanced.request({uuid:'embedded-expansion',action:'command',command:'goal',requestId:'embed-invalid',embed:{version:1,revision:2,context:null}}) } catch(e) { invalidEmbed = true }
   check(invalidEmbed && jobs.length === 0, 'invalid context rejected before command execution')
   advanced.get('embedded-expansion').runtime.dispose()
+  // Restart preserves final summaries while marking unfinished workers uncertain.
+  var progressState = advanced.get('progress-restart')
+  progressState.subagentProgress = [{ id: 'worker', taskId: 'research', title: 'Research', status: 'running', label: 'running' }]
+  progressState.operation = 'interrupted-run'
+  advanced.persist(progressState)
+  progressState.runtime.dispose()
+  delete advanced.sessions['progress-restart']
+  var restoredProgress = advanced.get('progress-restart')
+  check(advanced.snapshot(restoredProgress, 0).subagents[0].status === 'unknown', 'restart never pretends an interrupted worker is still running')
+  restoredProgress.subagentProgress[0].status = restoredProgress.subagentProgress[0].label = 'accepted'
+  restoredProgress.operation = null
+  advanced.persist(restoredProgress)
+  restoredProgress.runtime.dispose()
+  delete advanced.sessions['progress-restart']
+  restoredProgress = advanced.get('progress-restart')
+  check(advanced.snapshot(restoredProgress, 0).subagents[0].status === 'accepted', 'accepted progress survives server restart')
+  restoredProgress.runtime.dispose()
   print('Advanced OpenAF integration checks passed')
 } catch(e) { printErr(e); exit(1) } finally { __gHDir = originalHome; io.rm(testRoot) }

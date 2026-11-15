@@ -1087,6 +1087,7 @@ function MiniAInteractiveSession(args, adapter) {
     delegationtimeout: { type: "number", default: 300000, description: "Default subtask deadline in milliseconds" },
     delegationstalltimeout: { type: "number", description: "Idle time in milliseconds before a delegated subtask is considered stalled" },
     delegationhardtimeout: { type: "number", description: "Optional absolute delegated subtask timeout in milliseconds regardless of activity" },
+    delegationmaxrepairs: { type: "number", default: 2, description: "Maximum targeted deliverable repairs per automatic sub-agent task" },
     delegationmaxretries: { type: "number", default: 2, description: "Default retry count for failed subtasks" },
     autodelegation : { type: "boolean", default: false, description: "Enable automatic delegation based on context size and complexity." },
     autodelegationthreshold: { type: "number", default: 8192, description: "Tool-result text length threshold that triggers automatic summary delegation when enabled." },
@@ -1249,7 +1250,7 @@ function MiniAInteractiveSession(args, adapter) {
     { category: "Memory and knowledge", subcategory: "Wiki storage and access", names: "wikiindexdir s3artifactbundle usewiki wikiaccess wikiaccesskey wikiartifactrefreshsecs wikibackend wikibucket wikihttpindexurl wikihttptimeout wikiignorecertcheck wikidream wikihydrate wikiman wikimounts wikiprefix wikiquery wikiregion wikiroot wikis3artifactprefix wikisecret wikiurl wikiuseversion1".split(" ") },
     { category: "Memory and knowledge", subcategory: "Ingestion and absorption", names: "ingestmode absorbmaxpages absorbmaxtokens absorboutput ingestallowemptyprune ingestchunkchars ingestconcurrency ingestdryrun ingestexclude ingestforce ingestinclude ingestindependent ingestlayout ingestledger ingestmaxfilekb ingestprune ingestsection ingestsource ingestsourceid ingesttype".split(" ") },
     { category: "Memory and knowledge", subcategory: "Dream consolidation", names: "dreamwikimaxaffected dryrun maxauditrecords dream dreammaxsteps dreammemorymode dreammode dreamreport dreamwiki dreamwikiapproval dreamwikidryrun dreamwikiinstructions dreamwikilintresultlimit dreamwikillm dreamwikimaxdepth dreamwikiminpages dreamwikimode dreamwikiorganize dreamwikireorg".split(" ") },
-    { category: "Delegation and servers", subcategory: "Delegation and subtasks", names: "autodelegation autodelegationmaxperstep autodelegationthreshold delegationhardtimeout delegationmaxdepth delegationmaxretries delegationstalltimeout delegationtimeout forkstatemaxbytes forkpolicy forkdecide maxconcurrent noisytools showdelegate subtasks subtasksfile subtaskssequential usea2a usedelegation".split(" ") },
+    { category: "Delegation and servers", subcategory: "Delegation and subtasks", names: "autodelegation autodelegationmaxperstep autodelegationthreshold delegationhardtimeout delegationmaxdepth delegationmaxrepairs delegationmaxretries delegationstalltimeout delegationtimeout forkstatemaxbytes forkpolicy forkdecide maxconcurrent noisytools showdelegate subtasks subtasksfile subtaskssequential usea2a usedelegation".split(" ") },
     { category: "Delegation and servers", subcategory: "Worker registry", names: "workerevictionttl workermode workerreg workerreginterval workerregtoken workerregurl workers workerskills workertags".split(" ") },
     { category: "Delegation and servers", subcategory: "Web interface", names: "browsercontext onport path ssequeuetimeout web webadvanced webadvancedpath webembed webembedorigins webembedfields webembedcontextrequired webembedprompt".split(" ") },
     { category: "Output and diagnostics", subcategory: "Display and visualizations", names: "format raw showexecs showthinking useascii useasciiviz usecharts usediagrams usemaps usemath usemermaid usestream usesvg usevectors".split(" ") },
@@ -6911,7 +6912,7 @@ function MiniAInteractiveSession(args, adapter) {
     ]
     helpCommands.push(
       { command: "/delegate <goal>", description: "Delegate using forkpolicy; modifiers: fork, clean, auto; -- preserves literal goals (requires usedelegation=true)" },
-      { command: "/subtasks", description: "List all subtasks and their status" },
+      { command: "/subtasks", description: "List sub-agents, assigned tasks and acceptance status" },
       { command: "/subtask <id>", description: "Show details for a subtask" },
       { command: "/exit", description: "Leave the console" }
     )
@@ -8347,7 +8348,7 @@ function MiniAInteractiveSession(args, adapter) {
             subtasks.forEach(function(st) {
               var idShort = st.id.substring(0, 8)
               var statusColor = st.status === "completed" ? successColor : (st.status === "failed" ? errorColor : hintColor)
-              print("  " + colorifyText(idShort, statusColor) + " " + colorifyText(st.status.padEnd(10), statusColor) + (st.acceptance ? " [" + st.acceptance + "]" : "") + " " + colorifyText(st.goal.substring(0, 60), hintColor))
+              print("  " + colorifyText(idShort, statusColor) + " " + colorifyText(String(st.phase || st.status).padEnd(10), statusColor) + (st.acceptance ? " [" + st.acceptance + "]" : "") + " " + colorifyText(st.goal.substring(0, 60), hintColor))
             })
           }
         } catch (listErr) {

@@ -4498,6 +4498,7 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     filesystemQuery: {
       name       : "filesystemQuery",
+      annotations: { readOnlyHint: true, destructiveHint: false },
       description: "Unified read-only filesystem tool: read files, list directories, search content, glob match paths, or get file info. Use this to explore codebases, locate files, or inspect metadata while keeping output compact.",
       inputSchema: {
         type      : "object",
@@ -4898,6 +4899,7 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     markdownFiles: {
       name       : "markdownFiles",
+      annotations: { readOnlyHint: true, destructiveHint: false },
       description: "Read-only markdown helper limited to *.md files inside the configured root. " +
         "Call with operation='list' (no path) to discover all available documentation files and their relative paths. " +
         "Use operation='read' with a relative path returned by 'list' to read a specific file. " +
@@ -5166,6 +5168,7 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     skillwiki: {
       name       : "skillwiki",
+      annotations: { readOnlyHint: true, destructiveHint: false, cacheable: false },
       description: "Virtual skill library enabled whenever this tool is present; verify counts with operation='context', not local skills; search(query)/recommend(task) return metadata only; use open(ref), then bounded read(ref,section). 'compose' returns declared prerequisite metadata only, never executes it. Bounded by skillsmaxloaded/skillsmaxchars per run.",
       inputSchema: {
         type      : "object",

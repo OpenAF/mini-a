@@ -14,6 +14,268 @@
     m._startWatchdog = function() {}; m._startLocalSubtask = function() {}
     try { fn(a, m) } finally { m.destroy() }
   }
+  // New evidence must release dependency-blocked queues without accepting descendants.
+  exports.testRepairFinishedDependency = function() { fixture(function(a, m) {
+    a._execution.put(task("upstream"))
+    a._execution.put(task("downstream", ["upstream"]))
+    var upstream = a._execution.state.tasks.upstream
+    upstream.answer = "ready"
+    a._execution.finish("upstream", "partial", [])
+    var evidence = ["first"], calls = 0, queued = 0
+    a._executionEvidence = function() { return evidence }
+    a._executionCheck = function() {
+      calls++
+      return [{ id: "ready", outcome: evidence[0] === "new evidence" ? "met" : "insufficient_evidence" }]
+    }
+    m._processQueue = function() { queued++ }
+    a._executionReconcileFinished()
+    a._executionReconcileFinished()
+    assert(calls, 1, "Unchanged evidence does not repeat review")
+    evidence = ["new evidence"]
+    a._executionReconcileFinished()
+    assert(upstream.acceptance, "accepted", "New evidence repairs upstream acceptance")
+    assert(a._execution.ready("downstream"), true, "Queued descendant becomes eligible")
+    assert(a._execution.state.tasks.downstream.acceptance, "pending", "Descendant still requires its own work")
+    assert(queued > 0, true, "Queue is advanced")
+  }) }
+  // Review results cannot certify a task revised while the reviewer was running.
+  exports.testDependencyRepairRejectsStaleReview = function() { fixture(function(a) {
+    a._execution.put(task("repair"))
+    a._execution.state.tasks.repair.answer = "ready"
+    a._execution.finish("repair", "partial", [])
+    a._executionCheck = function() {
+      var revised = task("repair")
+      revised.objective = "Revised requirement"
+      a._execution.put(revised)
+      return [{ id: "ready", outcome: "met" }]
+    }
+    a._executionReconcileFinished()
+    assert(a._execution.state.tasks.repair.acceptance, "pending", "Stale repair cannot accept revised task")
+  }) }
+  // A retained draft is explicitly unverified and keeps the precise blocker.
+  exports.testPartialDraftRetention = function() { fixture(function(a) {
+    a._latestAnswerCandidate = "Useful complete answer"
+    a._autoFinalCheck = { reason: "Required tasks: t5" }
+    var answer = a._executionPartialAnswer("No verified progress", { format: "md" })
+    assert(answer.indexOf("Useful complete answer") >= 0, true, "Draft survives stop")
+    assert(answer.indexOf("t5") >= 0, true, "Task blocker survives stop")
+    assert(answer.indexOf("Unverified") >= 0, true, "Draft is not presented as accepted")
+    assert(a._executionPartialAnswer("Stopped", { format: "json" }), "Useful complete answer", "Structured answer is not wrapped in prose")
+  }) }
+  // Completion candidates never publish acceptance before authoritative finalization.
+  exports.testCompletionCandidateAcceptance = function() { fixture(function(a) {
+    var events = []
+    a._answerAttemptStatus = function(status) { events.push(status) }
+    a._execution.put(task("required"))
+    a._execution.state.tasks.required.status = "running"
+    a._execution.state.tasks.required.owner = "worker"
+    assert(a._considerFinalCandidate("Useful deliverable", { goal: "Return ready" }, a._runtime), false, "Unsettled work rejects final")
+    assert(a._latestAnswerCandidate, "Useful deliverable", "Rejected deliverable retained")
+    assert(events.indexOf("accepted"), -1, "No premature accepted event")
+    assert(a._considerFinalCandidate("", {}, a._runtime), false, "Empty response cannot replace draft")
+    assert(a._latestAnswerCandidate, "Useful deliverable", "Empty response preserves draft")
+  }) }
+  // Automatic read-only work gets bounded, targeted repair with unchanged criteria.
+  exports.testAutomaticDeliverableRepairBounded = function() { fixture(function(a, m) {
+    var id = m.submitAndRun("Return ready", {}, { task: task("repair-worker") })
+    var t = a._execution.state.tasks["repair-worker"]
+    t.auto_generated = true
+    for (var attempt = 0; attempt < 3; attempt++) {
+      m._completeSubtask(m.subtasks[id], "fixture", "wrong", {}, { execution: { outcome: "succeeded" } })
+      if (attempt < 2) {
+        assert(m.subtasks[id].status, "pending", "Repair returns to existing queue")
+        assert(t.repairs, attempt + 1, "Repair counter persists on task")
+        assert(m.subtasks[id].args.modellock, "main", "Repair escalates to main model")
+        m.start(id)
+      }
+    }
+    assert(m.subtasks[id].status, "completed", "Repair limit terminates")
+    assert(t.acceptance, "rejected", "Repair never weakens criteria")
+    assert(t.repairs, 2, "Exactly two repairs")
+  }) }
+  // Research capability restrictions are enforced before any provider tool dispatch.
+  exports.testResearchWorkerCannotInvokeUnknownTools = function() { fixture(function(a) {
+    a._researchOnly = true
+    var result = a._invokeMcpTool("fixture", {}, { name: "unknown-action" }, {}, {}, {})
+    assert(result.blocked, true, "Unknown tool is blocked before dispatch")
+    assert(result.error.indexOf("read-only") >= 0, true, "Capability blocker is actionable")
+  }) }
+  // Parent takeover is one bounded, tool-free completion checked against the original contract.
+  exports.testResearchParentTakeover = function() { fixture(function(a, m) {
+    a._execution.put(task("takeover"))
+    var t = a._execution.state.tasks.takeover
+    t.mode = "research"
+    t.auto_generated = true
+    t.answer = "wrong"
+    a._execution.finish(t.id, "partial", [])
+    var calls = 0
+    a._orchestrationPlannerFactory = function() { return { promptJSONWithStats: function() {
+      calls++
+      return { response: { answer: "ready" }, stats: { tokens: { total: 10 } } }
+    } } }
+    a._executionTakeover()
+    a._executionTakeover()
+    assert(calls, 1, "Parent takeover runs once")
+    assert(t.acceptance, "accepted", "Original assertion accepts corrected deliverable")
+    assert(t.completedBy, "parent", "Ownership history records parent completion")
+    assert(t.takeoverAttempted, true, "Checkpoint state retains takeover limit")
+  }) }
+  // Native callbacks count consecutive failures rather than all failures in the run.
+  exports.testSuccessfulNativeToolBreaksErrorStreak = function() { fixture(function(a) {
+    var runtime = { context: [], errorHistory: [], earlyStopThreshold: 3 }
+    a._registerRuntimeError(runtime, { category: "validation", message: "invalid parameters" })
+    a._registerRuntimeError(runtime, { category: "validation", message: "invalid parameters" })
+    a._registerRuntimeSuccess(runtime)
+    a._registerRuntimeError(runtime, { category: "validation", message: "invalid parameters" })
+    assert(runtime.consecutiveErrors, 1, "Success resets native callback error streak")
+    assert(runtime.errorHistory.length, 3, "Diagnostic trail is preserved")
+    assert(runtime.earlyStopTriggered === true, false, "Separated errors cannot trigger the consecutive guard")
+  }) }
+  // Built-in read tools retain their capability contracts through prompt shaping.
+  exports.testResearchBuiltInReadContracts = function() { fixture(function(a) {
+    loadLib("js/core/mini-a-utils.js")
+    var metadata = MiniUtilsTool.getMetadataByFn()
+    var readTools = ["skillwiki", "filesystemQuery", "markdownFiles"]
+    readTools.forEach(function(name) {
+      assert(a._toolExecutionHints(a._slimToolMetaForProfile(metadata[name], "minimal")).readOnly, true, name + " is available to research workers")
+    })
+    assert(a._toolExecutionHints(metadata.filesystemModify).readOnly, false, "Write tool remains restricted")
+    var cfg = a._createUtilsMcpConfig({ useutils: true })
+    assert(a._toolExecutionHints(cfg.options.fnsMeta.markdownFiles).readOnly, true, "Documentation description override retains read-only contract")
+  }) }
+  // Early termination retains collected evidence even before a synthesis draft exists.
+  exports.testPartialWithoutDraftRetainsEvidence = function() { fixture(function(a) {
+    a._runtime.partialEvidence = ["web-search:\nVerified source excerpt"]
+    assert(a._executionPartialAnswer("tool errors", { format: "md" }).indexOf("Verified source excerpt") >= 0, true, "Source excerpts survive early stop")
+    a._execution.put(task("retained"))
+    a._execution.state.tasks.retained.answer = "Returned worker deliverable"
+    var answer = a._executionPartialAnswer("tool errors", { format: "md" })
+    assert(answer.indexOf("Returned worker deliverable") >= 0, true, "Returned deliverables survive early stop")
+    assert(answer.indexOf("Unverified partial result") >= 0, true, "Evidence is not presented as accepted synthesis")
+  }) }
+  // Persistent summaries describe acceptance and blockers independently of log retention.
+  exports.testPersistentSubagentProgress = function() { fixture(function(a, m) {
+    var id = m.submit("Return ready", {}, { task: task("progress") })
+    var progress = m.progress()
+    assert(progress[0].status, "queued", "Unstarted workers are visible")
+    m.start(id)
+    m._completeSubtask(m.subtasks[id], "fixture", "ready", {}, { execution: { outcome: "succeeded" } })
+    assert(m.progress()[0].status, "accepted", "Completion reflects acceptance")
+    assert(m.progress()[0].taskId, "progress", "Assigned task remains identifiable")
+  }) }
+  // Legacy explicit read-only goals receive enforced research scopes and can overlap.
+  exports.testLegacyReadOnlyDelegationParallel = function() { fixture(function(a, m) {
+    var one = m.submitAndRun("Read-only: explain stack", {})
+    var two = m.submitAndRun("Read-only: explain queue", {})
+    assert(m.runningCount, 2, "Independent research workers overlap")
+    assert(m._executionTask(m.subtasks[one]).mode, "research", "Read-only intent is enforced")
+    assert(m._buildChildArgs(m.subtasks[two]).useshell, false, "Research scope disables shell")
+  }) }
+  // Child cleanup must not destroy MCP clients borrowed from its parent.
+  exports.testBorrowedMcpCleanup = function() { fixture(function(a) {
+    var sharedDestroyed = 0, ownedDestroyed = 0
+    var shared = { destroy: function() { sharedDestroyed++ } }
+    a._mcpConnections = { shared: shared, owned: { destroy: function() { ownedDestroyed++ } } }
+    a._borrowedMcpConnections = { shared: shared }
+    a._stopAgentResources()
+    assert(sharedDestroyed, 0, "Borrowed parent client survives child cleanup")
+    assert(ownedDestroyed, 1, "Owned client still closes")
+  }) }
+  // Reproduce independent research, inadequate deliverables, bounded repairs, takeover and synthesis together.
+  exports.testDelegationIncidentRecovery = function() { fixture(function(a, m) {
+    var ids = ["codex", "claude", "opencode"].map(function(name) {
+      var spec = task(name)
+      spec.mode = "research"
+      var id = m.submitAndRun("Read-only: " + name, {}, { task: spec })
+      a._execution.state.tasks[name].auto_generated = true
+      return id
+    })
+    assert(m.runningCount, 3, "All independent platform workers overlap")
+    m._completeSubtask(m.subtasks[ids[1]], "fixture", "ready", {}, { execution: { outcome: "succeeded" } })
+    ;[ids[0], ids[2]].forEach(function(id) {
+      for (var attempt = 0; attempt < 3; attempt++) {
+        m._completeSubtask(m.subtasks[id], "fixture", attempt === 0 ? "I will write the guide" : "Wrong platform guide", {}, { execution: { outcome: "succeeded" } })
+        if (attempt < 2) m.start(id)
+      }
+    })
+    a._orchestrationPlannerFactory = function() { return { promptJSONWithStats: function() { return { response: { answer: "ready" }, stats: {} } } } }
+    a._executionTakeover()
+    assert(Object.keys(a._execution.state.tasks).every(function(id) { return a._execution.state.tasks[id].acceptance === "accepted" }), true, "Only checked repairs release synthesis")
+    assert(a._considerFinalCandidate("ready", { goal: "Return ready", format: "md" }, a._runtime), true, "One final synthesis accepted")
+    var saved = a._execution.snapshot()
+    assert(saved.tasks.codex.repairs, 2, "Durable state retains repair count")
+    assert(saved.tasks.opencode.takeoverAttempted, true, "Durable state retains takeover limit")
+    assert(new MiniAExecution({}, saved).state.tasks.codex.completedBy, "parent", "Resume retains ownership history")
+  }) }
+  // Malformed review retries once, then stays blocked for identical inputs.
+  exports.testInvalidReviewRetryBounded = function() { fixture(function(a) {
+    var calls = 0
+    a._supervisedClientFactory = function() { return { promptJSONWithStats: function() { calls++; return { response: {}, stats: {} } } } }
+    var spec = { objective: "Return a guide", criteria: [{ id: "guide", method: "semantic", requirement: "Actual guide" }] }
+    a._executionCheck(spec, "guide", [], "succeeded", false)
+    a._executionCheck(spec, "guide", [], "succeeded", false)
+    assert(calls, 2, "Invalid reviewer output is retried exactly once")
+    var restored = a._execution.snapshot()
+    a._execution = new MiniAExecution({}, restored)
+    a._executionCheck(spec, "guide", [], "succeeded", false)
+    assert(calls, 2, "Restart does not reset invalid review allowance")
+  }) }
+  // Repeated unavailable capabilities stop dispatch while leaving alternative tools available.
+  exports.testCapabilityFailureStopsEquivalentCalls = function() { fixture(function(a) {
+    var calls = 0
+    a._computeToolCacheSettings = function() { return { enabled: false } }
+    a._registerToolCacheClient = function() { return 1 }
+    a._isCircuitOpen = function() { return false }
+    a._recordCircuitSuccess = function() {}
+    a._logToolUsage = function() {}
+    a._withExponentialBackoff = function(fn) { return fn() }
+    var client = { callTool: function() { calls++; return { error: "[ERROR] skill-search-unavailable: incompatible-generation, source-unavailable", retryable: false } } }
+    var info = { name: "source-read", metadata: { readOnlyHint: true } }
+    a._invokeMcpTool("fixture", client, info, {}, {}, {})
+    a._invokeMcpTool("fixture", client, info, {}, {}, {})
+    assert(a._invokeMcpTool("fixture", client, info, {}, {}, {}).blocked, true, "Third equivalent call is blocked")
+    assert(calls, 2, "Unavailable capability is not invoked repeatedly")
+  }) }
+  // A resumed repair keeps its count, feedback, model escalation and enforced mode.
+  exports.testRepairResumePreservesContract = function() { fixture(function(a, m) {
+    var spec = task("resume-repair")
+    spec.mode = "research"
+    a._execution.put(spec)
+    var taskState = a._execution.state.tasks[spec.id]
+    taskState.auto_generated = true
+    taskState.repairs = 2
+    taskState.answer = "Incomplete prior answer"
+    taskState.checks = [{ id: "ready", outcome: "unmet", reason: "Missing deliverable" }]
+    m._restoreExecutionTasks()
+    var restored = m.subtasks[a._execution.state.tasks[spec.id].owner]
+    assert(a._execution.state.tasks[spec.id].repairs, 2, "Resume does not reset repair allowance")
+    assert(a._execution.state.tasks[spec.id].mode, "research", "Mode survives restore")
+    assert(restored.args.modellock, "main", "Repair escalation survives restore")
+    assert(restored.metadata.repairFeedback.previousAnswer, "Incomplete prior answer", "Repair has original findings")
+  }) }
+  // Exhausted delegation publishes useful partial synthesis once rather than generating repeated equivalent finals.
+  exports.testExhaustedDelegationKeepsPartialSynthesis = function() { fixture(function(a, m) {
+    var id = m.submitAndRun("Return ready", {}, { task: task("blocked-guide") })
+    m._completeSubtask(m.subtasks[id], "fixture", "wrong", {}, { execution: { outcome: "succeeded" } })
+    assert(a._considerFinalCandidate("Useful verified findings; one guide is missing.", { goal: "Return ready", format: "md" }, a._runtime), false, "Missing guide is not accepted")
+    assert(a._partialSynthesisReady, true, "Settled blocked work allows one partial publication")
+    var result = a._executionPartialAnswer(a._autoFinalCheck.reason, { format: "md" })
+    assert(result.indexOf("Useful verified findings") >= 0, true, "Partial preserves actual answer")
+    assert(result.indexOf("blocked-guide") >= 0, true, "Partial identifies unresolved deliverable")
+  }) }
+  // Long deliverables remain retrievable after context previews and checkpoint reload.
+  exports.testDelegationResultPagination = function() { fixture(function(a) {
+    a._execution.put(task("long-guide"))
+    a._execution.state.tasks["long-guide"].answer = "x".repeat(9000) + "retained-tail"
+    var config = a._createDelegationMcpConfig({ orchestration: "auto", usedelegation: true })
+    var result = config.options.fns["execution-task"]({ action: "result", taskId: "long-guide", offset: 9000, maxChars: 100 })
+    var page = jsonParse(result.content[0].text)
+    assert(page.answer, "retained-tail", "Tail is not silently truncated")
+    assert(page.hasMore, false, "Last page is marked complete")
+    a._execution = new MiniAExecution({}, a._execution.snapshot())
+    result = config.options.fns["execution-task"]({ action: "result", taskId: "long-guide", offset: 9000 })
+    assert(jsonParse(result.content[0].text).answer, "retained-tail", "Checkpoint retains full deliverable")
+  }) }
   exports.testParentWaitsWithoutModelTurnsAndResumesAfterChild = function() { fixture(function(a, m) {
     var id = m.submitAndRun("Return ready", {}, { task: task("wait-child") })
     a._runtime.successfulActionDetected = true
@@ -514,10 +776,10 @@
     assert(calls, 0, "No unnecessary semantic call")
     a._execution.put(task("parent-work"))
     assert(a._executionFinal("ready", { goal: "Return ready", useplanning: true }), true, "Parent work can satisfy plan criteria")
-    assert(calls, 1, "Batch root review once; deterministic criteria do not require review")
+    assert(calls, 0, "Root review is opt-in; deterministic criteria do not require review")
     assert(a._execution.state.tasks["parent-work"].acceptance, "accepted", "Plan step acceptance verified")
     assert(a._executionFinal("ready", { goal: "Return ready", useplanning: true }), true, "Same final result reuses acceptance")
-    assert(calls, 1, "Unchanged final result is not reviewed twice")
+    assert(calls, 0, "Unchanged final result is not reviewed twice")
   }) }
   exports.testFailedEnqueueRetainsOriginalSnapshot = function() { fixture(function(a) {
     var root = io.createTempFile("mini-a-enqueue-retry-", ".home")
@@ -957,7 +1219,7 @@
       var input = af.fromJson(prompt.substring(prompt.indexOf("\n") + 1))
       return { response: { checks: input.criteria.map(function(c) { return { id: c.id, outcome: "met" } }) } }
     } } }
-    var args = { goal: "Return ready", useplanning: true }
+    var args = { goal: "Return ready", useplanning: true, acceptancereview: true }
     assert(a._executionFinal("ready", args), true, "Initial evidence reviewed")
     assert(a._executionFinal("ready", args), true, "Unchanged evidence reuses verdict")
     assert(calls, 1, "No repeated review for identical evidence")
@@ -974,7 +1236,7 @@
       var input = af.fromJson(prompt.substring(prompt.indexOf("\n") + 1))
       return { response: { checks: input.criteria.map(function(c) { return { id: c.id, outcome: "met" } }) } }
     } } }
-    assert(a._executionFinal("ready", { goal: "Return ready", useplanning: true }), false, "Review for old revision cannot certify new revision")
+    assert(a._executionFinal("ready", { goal: "Return ready", useplanning: true, acceptancereview: true }), false, "Review for old revision cannot certify new revision")
     assert(a._execution.state.tasks.changing.acceptance, "pending", "Revised task remains pending")
     assert(a._autoFinalCheck, __, "Stale verdict is not cached")
   }) }

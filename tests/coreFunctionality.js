@@ -607,7 +607,7 @@
   exports.testSummaryMaintenanceUsesSafeBoundary = function() {
     var source = io.readFileString("js/core/mini-a.js")
     var begin = source.indexOf("    var finalizeToolExecution =")
-    var end = source.indexOf("    this._finalizeToolExecution = finalizeToolExecution", begin)
+    var end = source.indexOf("    this._finalizeToolExecution =", begin)
     ow.test.assert(begin >= 0 && end > begin, true, "Locate tool finalizer")
     ow.test.assert(source.substring(begin, end).indexOf("checkAndSummarizeContext()"), -1, "Concurrent callbacks must not invoke an LLM")
     ow.test.assert(source.indexOf("markContextDirty()\n      checkAndSummarizeContext()\n      var stepStartTime") >= 0, true, "Execution boundary handles pending context")
@@ -2698,7 +2698,8 @@
         var llm = $llm(config)
         llm.getGPT().model.rawPrompt = function(messages) {
           var url = messages[0].content[1].image_url.url
-          ow.test.assert(url.indexOf("data:image/jpeg;base64,/9j/"), 0, "OpenAF sends actual JPEG bytes with JPEG MIME")
+          var expectedPrefix = llm.getGPT().model.supportsImageMimeTypes === true ? "data:image/png;base64,iVBOR" : "data:image/jpeg;base64,/9j/"
+          ow.test.assert(url.indexOf(expectedPrefix), 0, "OpenAF sends bytes matching its declared image MIME capability")
           return { choices: [{ message: { content: "Adapter image answer" } }] }
         }
         return llm
@@ -4267,6 +4268,7 @@
   }
 
   exports.testMemoryReloadPreservesKeyedObservations = function() {
+    loadLib("js/memory/mini-a-memory.js")
     var mgr = new MiniAMemoryManager({ enabled: true, compactEvery: 100 })
     mgr.upsert("artifacts", "service:a", { value: "Service is healthy", taskScope: "a" })
     mgr.upsert("artifacts", "service:b", { value: "Service is healthy", taskScope: "b" })
@@ -4280,6 +4282,7 @@
   }
 
   exports.testMemoryExpiredDuplicateDoesNotHideFreshObservation = function() {
+    loadLib("js/memory/mini-a-memory.js")
     var mgr = new MiniAMemoryManager({ enabled: true, compactEvery: 100 })
     mgr.append("facts", { value: "The service is healthy", expiresAt: new Date(Date.now() - 1000).toISOString() })
     ow.test.assert(isUnDef(mgr.findNearDuplicate("facts", "The service is healthy")), true, "Expired entries are not confirmation candidates")

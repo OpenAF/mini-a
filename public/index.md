@@ -2180,6 +2180,9 @@
     let streamActive = false;
     let streamSource = null;
     let streamBuffer = '';
+    var answerEventSequence = 0
+    var answerAttemptId = null;
+    var answerAttemptLabel = '';
     let streamRenderTimer = null;
     let plannerStreamBuffer = '';
     let plannerRenderTimer = null;
@@ -6044,7 +6047,7 @@
                     planPanel.setAttribute('hidden', 'hidden');
                     planPanel.removeAttribute('open');
                 }
-                resetSubagentPanel(false);
+                updateSubagentPanel(data.subagents);
             }
             const htmlContent = renderConversationMarkdown(data.content || '');
             await updateResultsContent(htmlContent);
@@ -6376,10 +6379,6 @@
 
     function updateSubagentPanel(payload) {
         if (!subagentPanel) return;
-        if (conversationFinished) {
-            resetSubagentPanel(false);
-            return;
-        }
         const digest = JSON.stringify(payload || {});
         if (digest === lastSubagentDigest) return;
         lastSubagentDigest = digest;
@@ -6392,15 +6391,17 @@
 
         const summary = payload && payload.summary ? payload.summary : {};
         const total = Number(summary.total) || items.length;
-        const running = Number(summary.running) || 0;
-        const done = Number(summary.completed) || 0;
-        const failed = (Number(summary.failed) || 0) + (Number(summary.timeout) || 0);
+        const running = items.filter(item => ['running', 'reviewing', 'repairing'].includes(item.status)).length;
+        const accepted = items.filter(item => item.acceptance === 'accepted' || item.status === 'accepted').length;
+        const awaiting = items.filter(item => ['completed', 'finished', 'done', 'blocked'].includes(item.status) && item.acceptance !== 'accepted').length;
+        const failed = items.filter(item => ['failed', 'timeout', 'cancelled', 'unknown'].includes(item.status)).length;
 
         subagentPanel.removeAttribute('hidden');
         if (subagentSummaryText) {
             const parts = [`${total} sub-agents`];
             if (running > 0) parts.push(`${running} running`);
-            if (done > 0) parts.push(`${done} done`);
+            if (accepted > 0) parts.push(`${accepted} accepted`);
+            if (awaiting > 0) parts.push(`${awaiting} acceptance incomplete`);
             if (failed > 0) parts.push(`${failed} issues`);
             subagentSummaryText.textContent = parts.join(' · ');
         }
@@ -6425,9 +6426,10 @@
                 top.appendChild(duration);
 
                 const badge = document.createElement('span');
-                const statusLabel = item && item.label ? String(item.label) : (item && item.status ? String(item.status) : 'running');
+                const workerStatus = item && item.label ? String(item.label) : (item && item.status ? String(item.status) : 'running');
+                const statusLabel = item.acceptance === 'accepted' ? 'accepted' : ['done', 'completed', 'finished', 'blocked'].includes(workerStatus) ? 'acceptance ' + (item.acceptance || 'pending') : workerStatus;
                 badge.className = 'subagent-status';
-                if (statusLabel === 'done') badge.classList.add('done');
+                if (statusLabel === 'accepted') badge.classList.add('done');
                 if (statusLabel === 'failed') badge.classList.add('failed');
                 if (statusLabel === 'timeout') badge.classList.add('timeout');
                 badge.textContent = statusLabel;
@@ -6618,7 +6620,7 @@
             planPanel.setAttribute('hidden', 'hidden');
             planPanel.removeAttribute('open');
         }
-        resetSubagentPanel(false);
+        // Keep final worker acceptance visible after processing stops.
 
         updateCopyActionsVisibility();
     }
@@ -6834,6 +6836,7 @@
 
                 setPlanningMode(data && data.status !== 'finished' && data.phase === 'planning');
 
+                updateSubagentPanel(data.subagents);
                 // Only update plan panel if conversation is not finished and hasn't been marked as finished
                 if (data && data.status !== 'finished' && !conversationFinished) {
                     updatePlanPanel(data.plan);
@@ -6898,7 +6901,7 @@
                         planPanel.setAttribute('hidden', 'hidden');
                         planPanel.removeAttribute('open');
                     }
-                    resetSubagentPanel(false);
+                    updateSubagentPanel(data.subagents);
                     stopProcessing(false);
                 } else {
                     addPreview();
@@ -6952,7 +6955,7 @@
 
     function mergeFinalContentWithStream(rawContent, streamedChunk) {
         const base = rawContent || '';
-        const stream = streamedChunk || '';
+        const stream = (answerAttemptLabel && streamedChunk ? '**' + answerAttemptLabel + '**\n\n' : '') + (streamedChunk || '');
         if (!hasVisibleStreamText(stream)) return base;
         const extractedAnswer = extractAssistantAnswerText(base);
         if (typeof extractedAnswer === 'string' && extractedAnswer.length > 0) {
@@ -7057,6 +7060,9 @@
         stopStream();
         streamActive = true;
         streamBuffer = '';
+        answerAttemptId = null;
+        answerEventSequence = 0
+        answerAttemptLabel = '';
         plannerStreamBuffer = '';
         streamErrorCount = 0;
         syncPreviewText();
@@ -7065,10 +7071,37 @@
         const streamUrl = resolveAppUrl('stream') + '?uuid=' + encodeURIComponent(uuid) +
             (streamToken ? '&token=' + encodeURIComponent(streamToken) : '');
         streamSource = new EventSource(streamUrl);
+        // Keep only the current draft and expose its acceptance state.
+        streamSource.addEventListener('answer_attempt', function(event) {
+            var payload;
+            try { payload = JSON.parse(event.data); } catch (e) { return; }
+            if (payload.runId && activeSubmissionRunId && payload.runId !== activeSubmissionRunId) return;
+            if (typeof payload.sequence === "number") {
+                if (payload.sequence <= answerEventSequence) return
+                answerEventSequence = payload.sequence
+            }
+            if (payload.status === 'started') {
+                if (payload.attemptId === answerAttemptId) return;
+                answerAttemptId = payload.attemptId;
+                streamBuffer = '';
+                answerAttemptLabel = 'Draft';
+            } else {
+                if (payload.attemptId !== answerAttemptId) return;
+                answerAttemptLabel = payload.status === 'checking' ? 'Checking answer' :
+                    (payload.status === 'rejected' ? 'Retrying: ' + String(payload.reason || 'Acceptance incomplete').replace(/[\r\n*<>]/g, ' ') : '');
+            }
+            scheduleStreamRender();
+        });
         streamSource.addEventListener('stream', (event) => {
             if (!event || !event.data) return;
             let payload = {};
             try { payload = JSON.parse(event.data); } catch (e) { payload = {}; }
+            if (payload.runId && activeSubmissionRunId && payload.runId !== activeSubmissionRunId) return;
+            if (typeof payload.sequence === "number") {
+                if (payload.sequence <= answerEventSequence) return
+                answerEventSequence = payload.sequence
+            }
+            if (payload.attemptId && answerAttemptId && payload.attemptId !== answerAttemptId) return;
             const chunk = payload.message || '';
             if (!chunk) return;
             setPlanningMode(false);

@@ -170,7 +170,17 @@ function MiniAWebPrompt(request) {
               if (isDef(attachmentDisplay) && global._mini_a_web_owns(uuid, attachmentDisplay.token)) displayMessage = attachmentDisplay.text
               else if (isDef(advancedLive) && isString(advancedLive.displayPrompt) && advancedLive.displayPrompt.length > 0) m = advancedLive.displayPrompt
             }
-            if (isDef(advancedLive) && e !== "stream" && e !== "planner_stream") global.__advanced.emit(advancedLive, e, isString(displayMessage) ? displayMessage : m)
+            if (isDef(advancedLive) && e !== "stream" && e !== "planner_stream" && e !== "answer_attempt") global.__advanced.emit(advancedLive, e, isString(displayMessage) ? displayMessage : m)
+            if (e === "answer_attempt") {
+              if (isString(global._mini_a_web_extractSubtaskId(m))) return
+              if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
+                var attempt = jsonParse(m)
+                if (isDef(advancedLive)) global.__advanced.emit(advancedLive, "answer_attempt", attempt)
+                attempt.runId = lma._webAnswerRunToken
+                global._mini_a_web_ssePush(uuid, "answer_attempt", attempt)
+              }
+              return
+            }
             if (e == "stream") {
               // Local child agents inherit this callback and prefix every
               // interaction message with [subtask:id]. Do not mix their answer
@@ -179,7 +189,8 @@ function MiniAWebPrompt(request) {
               // often the parent answer again) to the main transcript.
               if (isString(global._mini_a_web_extractSubtaskId(m))) return
               if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
-                global._mini_a_web_ssePush(uuid, "stream", { message: m })
+                lma._answerEventSequence = (lma._answerEventSequence || 0) + 1
+                global._mini_a_web_ssePush(uuid, "stream", { sequence: lma._answerEventSequence, message: m, runId: lma._webAnswerRunToken, attemptId: lma._answerAttemptId })
               }
               return
             }
@@ -421,6 +432,7 @@ function MiniAWebPrompt(request) {
         startArgs.goal = __miniAPrefixGoal(postData.prompt, effectiveArgs.goalprefix)
       }
       if (global.__attachmentStops[uuid] === runToken || (advancedState && advancedState.cancelled) || !global._mini_a_web_owns(uuid, runToken)) return
+      lma._webAnswerRunToken = runToken
       if (isString(attachmentDisplayPrompt)) lma._webAttachmentDisplayPrompt = { token: runToken, text: attachmentDisplayPrompt }
       lma._webGoalPrefix = isString(effectiveArgs.goalprefix) ? effectiveArgs.goalprefix : ""
       var _rma

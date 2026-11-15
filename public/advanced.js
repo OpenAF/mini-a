@@ -192,6 +192,11 @@ window.MiniAAdvancedUI = function(bridge) {
   const follow = el('input'); follow.type = 'checkbox'; follow.checked = true;
   follow.setAttribute('aria-label', 'Auto-follow live activity'); followLabel.append(follow);
   activityHeader.append(el('h3', 'Live activity'), followLabel);
+  // Inspect worker results without clearing or replacing the live activity trail.
+  activityHeader.append(button('View sub-agents', function() {
+    activeScreen = 'subtasks'
+    renderScreen()
+  }))
   const eventTypeFilter = el('select'); eventTypeFilter.setAttribute('aria-label', 'Activity event type');
   const allEvents = el('option', 'All event types'); allEvents.value = ''; eventTypeFilter.append(allEvents);
   const activityFilters = el('div', undefined, 'advanced-activity-filters'); activityFilters.append(filter, eventTypeFilter);
@@ -199,7 +204,36 @@ window.MiniAAdvancedUI = function(bridge) {
   const newEvents = button('', () => { follow.checked = true; followActivity(); follow.focus(); }); newEvents.hidden = true;
   newEvents.className = 'advanced-new-events';
   newEvents.title = 'Events received while auto-follow was paused, including events hidden by filters. Resume at the latest matching event.';
-  activity.append(activityHeader, activityFilters, newEvents, events);
+  // Switch the usual log between the parent and workers without replacing its rows.
+  var activityAgent = el('select')
+  activityAgent.setAttribute('aria-label', 'Activity agent')
+  var allAgents = el('option', 'All activity')
+  allAgents.value = ''
+  var mainAgent = el('option', 'Main agent')
+  mainAgent.value = 'main'
+  activityAgent.append(allAgents, mainAgent)
+  activityFilters.prepend(activityAgent)
+  activity.append(activityHeader, activityFilters, newEvents, events)
+
+  // Worker snapshots enrich selector labels; journal events also discover older workers.
+  function ensureActivityAgent(id, title) {
+    if (!id) return
+    var key = String(id).substring(0, 8)
+    var option = [...activityAgent.children].find(function(item) { return item.value === key })
+    if (!option) {
+      option = el('option')
+      option.value = key
+      option.textContent = 'Sub-agent ' + key
+      activityAgent.append(option)
+    }
+    if (title) option.textContent = 'Sub-agent ' + key + ' · ' + String(title).substring(0, 80)
+  }
+  function renderSubagentProgress(items) {
+    var workers = Array.isArray(items) ? items : []
+    workers.forEach(function(item) {
+      ensureActivityAgent(item.id, item.title)
+    })
+  }
   function updateNewEvents() {
     newEvents.textContent = unseenEvents + ' new event' + (unseenEvents === 1 ? '' : 's') + ' · Resume';
     newEvents.hidden = !unseenEvents || follow.checked;
@@ -207,10 +241,12 @@ window.MiniAAdvancedUI = function(bridge) {
   function resetActivity() {
     events.replaceChildren(); unseenEvents = 0;
     eventTypeFilter.replaceChildren(allEvents); eventTypeFilter.value = '';
+    activityAgent.replaceChildren(allAgents, mainAgent)
+    activityAgent.value = ''
     updateNewEvents();
   }
   function eventMatches(node) {
-    return (!eventTypeFilter.value || node.dataset.type === eventTypeFilter.value) && node.textContent.toLowerCase().includes(filter.value.toLowerCase());
+    return (!activityAgent.value || node.dataset.agent === activityAgent.value) && (!eventTypeFilter.value || node.dataset.type === eventTypeFilter.value) && node.textContent.toLowerCase().includes(filter.value.toLowerCase());
   }
   function followActivity() {
     if (follow.checked) {
@@ -220,7 +256,7 @@ window.MiniAAdvancedUI = function(bridge) {
   }
   follow.onchange = followActivity;
   applySplit();
-  filter.oninput = eventTypeFilter.onchange = () => { [...events.children].forEach(n => n.hidden = !eventMatches(n)); followActivity(); };
+  filter.oninput = eventTypeFilter.onchange = activityAgent.onchange = () => { [...events.children].forEach(n => n.hidden = !eventMatches(n)); followActivity(); };
   shell.append(paneHeader, nav, screen, activity); document.body.append(shell);
   const suggestions = el('div', undefined, 'advanced-completions'); suggestions.hidden = true;
   suggestions.setAttribute('role', 'listbox'); toolbar.after(suggestions);
@@ -245,7 +281,7 @@ window.MiniAAdvancedUI = function(bridge) {
     ['dream', 'Dream', 'Run memory consolidation and wiki maintenance operations.'],
     ['plugins', 'Plugins', 'Inspect local plugins and manage activation for new sessions.'],
     ['skills', 'Skills', 'Discover skills and invoke custom commands.'],
-    ['subtasks', 'Subtasks', 'Delegate goals and inspect or cancel child tasks.']
+    ['subtasks', 'Sub-agents', 'Inspect assigned tasks, progress, and acceptance.']
   ];
   // Match Simple view's small, rounded, currentColor SVG line icons.
   const tabIcons = {
@@ -443,7 +479,15 @@ window.MiniAAdvancedUI = function(bridge) {
       return;
     }
     if (record.sequence <= liveFloor || (liveClearRun && record.runId === liveClearRun)) return;
+    if (record.type === 'answer_attempt' && record.value && typeof record.value === 'object') {
+      var attempt = record.value
+      record = Object.assign({}, record, { value: (attempt.status === 'started' ? 'Draft' : attempt.status === 'checking' ? 'Checking answer' : attempt.status === 'accepted' ? 'Answer accepted' : attempt.status === 'partial' ? 'Partial answer' : 'Retrying') + (attempt.reason ? ': ' + attempt.reason : '') })
+    }
     const details = el('details'); details.dataset.sequence = record.sequence; details.dataset.runId = record.runId || '';
+    var childMatch = typeof record.value === 'string' ? record.value.match(/^\[subtask:([^\]]+)\]/) : null
+    var childId = record.subagentId || (childMatch ? childMatch[1] : '')
+    details.dataset.agent = childId ? String(childId).substring(0, 8) : 'main'
+    if (childId) ensureActivityAgent(childId)
     const summary = el('summary');
     const eventType = el('span', undefined, 'advanced-event-type');
     if (Object.prototype.hasOwnProperty.call(activityEventEmojis, record.type)) {
@@ -470,7 +514,9 @@ window.MiniAAdvancedUI = function(bridge) {
     }
     details.hidden = !eventMatches(details);
     if (!follow.checked && navigate) { unseenEvents++; updateNewEvents(); }
-    while (events.childElementCount > 1000) events.firstChild.remove();
+    // A busy worker cannot evict the parent's retained log trail.
+    var agentRows = [...events.children].filter(function(node) { return node.dataset.agent === details.dataset.agent })
+    while (agentRows.length > 1000) agentRows.shift().remove()
   }
   async function poll() {
     // Input requests belong to the conversation, including before Advanced is opened.
@@ -483,6 +529,7 @@ window.MiniAAdvancedUI = function(bridge) {
       if (current !== bridge.uuid()) return;
       const first = !snapshot; usePresetLibrary(data); snapshot = data; busy = data.busy; bridge.trackRun(data);
       syncPromptDrafts(data);
+      renderSubagentProgress(data.subagents)
       if (data.busy && data.operationView) submittedView = {requestId:data.operation,name:data.operationView.name};
       paneStatus.dataset.state = data.closed ? 'closed' : busy ? 'working' : 'ready';
       status.textContent = paneStatus.textContent = data.closed ? 'Session ended' : data.pending ? 'Waiting for your input' : busy ? 'Working' : 'Ready';
@@ -1491,10 +1538,10 @@ window.MiniAAdvancedUI = function(bridge) {
   function subtaskScreen() {
     const generation = resultGeneration, uuid = bridge.uuid(), cards = new Map();
     const current = () => generation === resultGeneration && uuid === bridge.uuid();
-    const summary = el('p', 'Loading subtasks…', 'advanced-subtask-summary');
+    const summary = el('p', 'Loading sub-agents…', 'advanced-subtask-summary');
     summary.setAttribute('role', 'status');
     const notice = el('p', '', 'advanced-screen-description');
-    const filter = el('select'); filter.setAttribute('aria-label', 'Filter subtasks');
+    const filter = el('select'); filter.setAttribute('aria-label', 'Filter sub-agents');
     for (const [value, label] of [['all','All tasks'],['active','Running / queued'],['completed','Completed'],['issues','Failed / cancelled']]) {
       const option = el('option', label); option.value = value; filter.append(option);
     }
@@ -1553,7 +1600,7 @@ window.MiniAAdvancedUI = function(bridge) {
         }
       }
       empty.hidden = visible > 0;
-      empty.textContent = tasks.length ? 'No tasks match this filter.' : 'No subtasks in this conversation. Enable usedelegation=true and submit a child goal below.';
+      empty.textContent = tasks.length ? 'No tasks match this filter.' : 'No sub-agents in this conversation. Enable usedelegation=true and submit a child goal below.';
     }
     filter.onchange = draw;
     subtaskRefresh = async () => {
