@@ -2341,7 +2341,8 @@ async function graphBuildControls(content, dream) {
   var retryFailed = check(advanced, "Retry failed sections")
   el("p", "Preserves successful work and resets the two-cycle failure limits for this run.", advanced)
   advanced.append(modelHelp.parentElement)
-  var review = el("pre", undefined, advanced)
+  var review = el("div", undefined, advanced)
+  el("p", settings.fallback, advanced)
   var builtIn = { extraction: "structural", modelHelp: "off", maxCalls: 100, maxTokens: 200000, maxMinutes: 10 }
 
   // Restore reusable extraction and budget preferences.
@@ -2376,7 +2377,9 @@ async function graphBuildControls(content, dream) {
     if (force.disabled) force.checked = false
     retryFailed.disabled = extraction.value !== "semantic" || modelHelp.value !== "auto" || currentWiki.access !== "rw"
     if (retryFailed.disabled) retryFailed.checked = false
-    review.textContent = JSON.stringify({ effective: values(), models: settings.models }, null, 2) + "\n" + settings.fallback
+    var parameters = { effective: values(), models: settings.models }
+    review.replaceChildren()
+    jsonView(parameters, review)
   }
   preset.onchange = function() {
     if (preset.value === "reset") {
