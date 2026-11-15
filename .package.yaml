@@ -408,7 +408,7 @@ filesHash:
   js/memory/mini-a-reflection-queue.js: 207c26239123305b482eb051b05f537dc420d437
   js/mini-a-paths.js: 6c5e5d6f2680d19df511e6260cf1a7b1a2e949a5
   js/session/mini-a-con.js: 4da47ef436bd75196c0d9039de691cbbe70f05f3
-  js/session/mini-a-mcptest.js: 6e78cb74c5d9c723b038d2198102bdaa8ea4715d
+  js/session/mini-a-mcptest.js: bd2e471261bdfb63e75e6a6dc5e1463969db9107
   js/session/mini-a-memoryman.js: b897ad32e55fdc844cbe7f014729ec2ec62d67d9
   js/session/mini-a-modelman.js: 940c03c9d13d5fc0476117b2eb9cf822cf518bc6
   js/session/mini-a-session.js: 09054c3337e016baf787081cd079bcfeaaa25e9b
