@@ -1514,7 +1514,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : wikigraphreconcile
-    desc     : "off|lexical|hybrid; relationship reconciliation, default off"
+    desc     : "off|lexical|hybrid; relationship reconciliation, default lexical (deterministic, no provider calls)"
     mandatory: false
   - name     : wikigraphreconcilellm
     desc     : "off|auto; optional grounded pair validation, default off"

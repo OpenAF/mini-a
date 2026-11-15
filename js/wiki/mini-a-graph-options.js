@@ -62,7 +62,7 @@ var MiniAGraphBuild = {
 
 // Reconciliation is opt-in and has independent provider and CPU budgets.
 MiniAGraphBuild.reconcileDefaults = {
-  reconcile: "off", reconcileLlm: "off", reconcileMaxCandidates: 16,
+  reconcile: "lexical", reconcileLlm: "off", reconcileMaxCandidates: 16,
   reconcileMaxEdges: 16, reconcileMaxCalls: 8, reconcileMaxTokens: 16000,
   reconcileMaxMinutes: 1, embeddingMaxCalls: 8, reconcileMaxPages: 100,
   reconcileMaxDf: 0.2, embeddingMaxComparisons: 10000

@@ -1,7 +1,7 @@
 # Incremental wiki graph reconciliation
 
 Graph reconciliation is optional derived-data maintenance. Existing settings keep
-their behavior: `wikigraphreconcile=off` is the default, and
+their behavior except that `wikigraphreconcile=lexical` (deterministic, no provider calls) is now the default; set `off` to disable it. Also
 `wikigraphsemantic` still controls semantic extraction, not embeddings.
 Reconciliation never edits source Markdown, frontmatter or ingestion ownership.
 
@@ -63,7 +63,7 @@ use camel case. Saved preferences live in `.mini-a-wiki-state/config.json`.
 
 | CLI setting | Build option | Default |
 | --- | --- | --- |
-| `wikigraphreconcile` | `reconcile` | `off`: `off`, `lexical`, `hybrid` |
+| `wikigraphreconcile` | `reconcile` | `lexical`: `off`, `lexical`, `hybrid` |
 | `wikigraphreconcilellm` | `reconcileLlm` | `off`: `off`, `auto` |
 | `wikigraphreconcilemaxcandidates` | `reconcileMaxCandidates` | 16 per page, maximum 128 |
 | `wikigraphreconcilemaxedges` | `reconcileMaxEdges` | 16 added memberships per page, maximum 128 |

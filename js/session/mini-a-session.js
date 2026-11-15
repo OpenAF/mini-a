@@ -903,7 +903,7 @@ function MiniAInteractiveSession(args, adapter) {
     wikitelemetry: { type: "boolean", description: "Record local aggregate wiki retrieval telemetry (off by default); writable managers persist it, read-only managers keep it in memory." },
     wikilexical    : { type: "string", dataEditor: "map", description: "SLON/JSON Lucene lexical configuration; defaults to {language:'english'} and supports optional synonymsFile." },
     usewikigraph   : { type: "boolean", default: false, description: "Enable the wiki knowledge graph for structural and semantic page relationships." },
-    wikigraphreconcile: { type: "string", description: "off|lexical|hybrid; relationship reconciliation, default off" },
+    wikigraphreconcile: { type: "string", description: "off|lexical|hybrid; relationship reconciliation, default lexical (deterministic, no provider calls)" },
     wikigraphreconcilellm: { type: "string", description: "off|auto; optional grounded pair validation, default off" },
     wikigraphreconcilemaxcandidates: { type: "number", description: "Maximum discovery candidates per page (default 16)" },
     wikigraphreconcilemaxedges: { type: "number", description: "Maximum added concept memberships per page (default 16)" },
