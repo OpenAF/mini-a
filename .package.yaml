@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20261115'
+version: '20261116'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -91,6 +91,7 @@ files:
 - docs/WEB-EMBED.md
 - docs/WHATS-NEW.md
 - docs/WIKI-CONTAINERS.md
+- docs/WIKI-GRAPH-V2.md
 - docs/WIKI-MEMORY.md
 - docs/WIKI-QUICKSTART.md
 - docs/WIKI-RETRIEVAL-V2.md
@@ -191,7 +192,10 @@ files:
 - js/web/mini-a-web-embed.js
 - js/web/mini-a-web-session.js
 - js/wiki/mini-a-absorb.js
+- js/wiki/mini-a-graph-connectivity.js
 - js/wiki/mini-a-graph-options.js
+- js/wiki/mini-a-graph-reconcile.js
+- js/wiki/mini-a-graph-upgrade.js
 - js/wiki/mini-a-graph.js
 - js/wiki/mini-a-ingest.js
 - js/wiki/mini-a-mcp-wiki.js
@@ -329,8 +333,8 @@ filesHash:
   docs/DELEGATION.md: 660e5eaf1566ecddf4d936b2c65c362b6568a8dc
   docs/ENTRY-POINT-PARITY.md: a6423b9ad87bc1d46f670cce0105482143a5e092
   docs/GENERATED-FILES.md: f1ede373782f95e36a1a2552d742df1ff9f62e91
-  docs/GRAPH-BUILDS-VALIDATION.md: 94dfcd7c801b2449b196fdf0f6c7e2860676664b
-  docs/GRAPH-BUILDS.md: 85f46a2e35f936914db9c54d7cf0fac800890d90
+  docs/GRAPH-BUILDS-VALIDATION.md: 79d26a62a13105e128b82589b6131b08ef9736f1
+  docs/GRAPH-BUILDS.md: ca0d3cca10e161f55e4a1c47b96a6b725cff2b8e
   docs/LEARN.md: d61c674318b0655a2cdade7a2102339ac5fa4d75
   docs/MCPPROXY-FEATURE.md: 3f936439870f9d6ad42531e18fb108624427c956
   docs/OPTIMIZATIONS.md: d8e28a77194c868c6cef46dcb427f889c67430a9
@@ -342,12 +346,13 @@ filesHash:
   docs/WEB-EMBED.md: ef3b15688235fae45a32a80431d19db588f3f65a
   docs/WHATS-NEW.md: 6e21b008dd72cfead25f6676782e4b39d5b0509b
   docs/WIKI-CONTAINERS.md: fd4e4f0adc6360f44d40c4a457a8ac721633810b
+  docs/WIKI-GRAPH-V2.md: 84d90c76c1960d2f42671ea45247fb82752bd907
   docs/WIKI-MEMORY.md: 5cc15f27a9c6571f5dd4af797909b62b66d466aa
-  docs/WIKI-QUICKSTART.md: 173104790e43b2d109e9928a8969e2e401b0bc47
-  docs/WIKI-RETRIEVAL-V2.md: f391e687a69d845503920284849158b32c88158a
+  docs/WIKI-QUICKSTART.md: e44a15892c3032da3bec349ff4ea7e63fbd2510f
+  docs/WIKI-RETRIEVAL-V2.md: 460b2bcd3b42d43fa68dc5ce2ec105da500cf86c
   docs/WIKI-STUDIO-IMPLEMENTATION.md: 763c1ce0e6268f1853823fb1e904b65be651bb5c
-  docs/WIKI-STUDIO.md: a984302f05ce0d5815ca604bb9571b3fea089c14
-  docs/WIKI.md: a17c0d7bf8a49a0970f16c5f18a6cbefa84c05d5
+  docs/WIKI-STUDIO.md: 56a0fb765eefefada0b9a60ca591b63c5f70d1db
+  docs/WIKI.md: 4a51df6f3d4837a10a0192c3f748d16c9eca25cd
   docs/WORKERS-QUICKSTART.md: 8090219ee3eb7d281bd1029c8f1dfb91ee52159a
   docs/WORKIQ.md: 9d2a64d6e06e148775a77b8c4df40427ffb16524
   docs/examples/embed-parent.html: 424f23db52096d9c01155656e8c607a20878ed04
@@ -403,10 +408,10 @@ filesHash:
   js/core/mini-a-subtask.js: 27f69fb3e17aab40bee24d1c98e9ecb8a31e64ba
   js/core/mini-a-supervised.js: f7aee934432fc16da7dcf9c9372afb0c5acbe11c
   js/core/mini-a-tool-selection.js: d0f59644dfd87d5228eaa36902873121b667c537
-  js/core/mini-a-utils.js: 80d93a292bf3c316870bb43d7fce3cd1c6a34d2e
-  js/core/mini-a.js: 5e261838278b0f9205e2f6f9263bdd69ce75c54a
-  js/memory/mini-a-dreams.js: 557e6d0bdf4a91afbbaeff7e6118c54c0c59e7e7
-  js/memory/mini-a-embeddings.js: de3248636769a8d0048945d00038dd050f7bac9f
+  js/core/mini-a-utils.js: c62230f4e3a4d5edb84529bd2ab75d350e237e9a
+  js/core/mini-a.js: 0aba166bcc76ab616c061a6c1bf353a54b961931
+  js/memory/mini-a-dreams.js: 577ea92da3d1003c6634e06222d3de14700cb660
+  js/memory/mini-a-embeddings.js: b2ae391628a2afd4305ccea473cd35158cdaae7e
   js/memory/mini-a-history-vm.js: 62cc32c14658dc25b0387c7d40402551d8837e7d
   js/memory/mini-a-memory.js: 0d35042c9ac24a6f277bbaa4422374a168fd8116
   js/memory/mini-a-reflection-queue.js: 207c26239123305b482eb051b05f537dc420d437
@@ -415,8 +420,8 @@ filesHash:
   js/session/mini-a-mcptest.js: bd2e471261bdfb63e75e6a6dc5e1463969db9107
   js/session/mini-a-memoryman.js: b897ad32e55fdc844cbe7f014729ec2ec62d67d9
   js/session/mini-a-modelman.js: 940c03c9d13d5fc0476117b2eb9cf822cf518bc6
-  js/session/mini-a-session.js: 7daa68a10e5c2629eb169cb3595979043b62aefe
-  js/session/mini-a-wikiman.js: b8d80df648f4cc94c2b9b4b5ca25c5c41abc1c6d
+  js/session/mini-a-session.js: 9c82556c4e6824888225e15b5fd746a6d2216bd8
+  js/session/mini-a-wikiman.js: 207f9ae2252dc807553d9d10fbed69275ede2ee5
   js/skills/mini-a-mcp-skills.js: 36b3790c0303922ae5742bacbf887295300ff285
   js/skills/mini-a-plugin-acquisition.js: fe01bd9962e8e04764ffd8031cf061720a91f693
   js/skills/mini-a-plugin-manager.js: 75f8731758fe933e424665622b5356bf07005cda
@@ -426,14 +431,14 @@ filesHash:
   js/studio/wiki-studio-api.js: 9454cbec3a0a9574391073cbdf35b29f58e72049
   js/studio/wiki-studio-backups.js: a988e76e58702cedd9e460ccbc1d4541a55e6ffd
   js/studio/wiki-studio-bootstrap.js: b372b762e60f9fce16246ff44ac5b22dee3fa109
-  js/studio/wiki-studio-common.js: d115e48f102b4411b5ce65a352fa1be03c54d470
+  js/studio/wiki-studio-common.js: ab82e2f57a5fd6be87a8de4fb592dca27933c6e5
   js/studio/wiki-studio-config.js: 9fea13ace56ab4996e0ab78dd9ab24eacf7cb7a4
   js/studio/wiki-studio-graph.js: 10955546c41707073e8a465b055c4690d4e32d77
-  js/studio/wiki-studio-ingestion.js: fefb6c38d7a702e4b9748d8e0e967f97f0f13f4b
-  js/studio/wiki-studio-jobs.js: 1fbd53a7cf6ee8c89e01164082be7e771eb88cbb
-  js/studio/wiki-studio-operations.js: df1c3ecf2fe1feb2ff42dd229c84d6e212e171cd
+  js/studio/wiki-studio-ingestion.js: 4a636b272a9826a519d74acea473503ff4e2c4ad
+  js/studio/wiki-studio-jobs.js: 155dcc7e78ce604abcbaa13495f303a6b7792322
+  js/studio/wiki-studio-operations.js: af22cf16af4f3d56b15745e5a8b86b3f48c6bf0e
   js/studio/wiki-studio-outbound.js: d86a20b91903266438a393b2a5d11f90fe07d191
-  js/studio/wiki-studio-pages.js: 08b96b89ce3af0f8d9952ed121a0e2a66e4e9566
+  js/studio/wiki-studio-pages.js: 070f75de760711101bb61b3704b58920250fa525
   js/studio/wiki-studio-registry.js: 8d96e3a5241d64522c15fc96a932619ae4204856
   js/studio/wiki-studio-sources.js: cfededa8d71060b4aff502f4de7745df6cc83f5b
   js/web/mini-a-advanced.js: 179432f70c11becfeeb0da3a47b032d8f9dcaeb4
@@ -442,18 +447,21 @@ filesHash:
   js/web/mini-a-web-embed.js: f65398c2ff830977b39b69368fdac50a3c924e55
   js/web/mini-a-web-session.js: b594b811d5c077402e6bfb2a6b748416a7b157fa
   js/wiki/mini-a-absorb.js: 6e5ec9a54eb3485c8787e693c7c8baba30cd9834
-  js/wiki/mini-a-graph-options.js: 574bfafe6fae92e6ad6cd525d1d04bfbf93ea785
-  js/wiki/mini-a-graph.js: ad61637d2f78b36a2e66449028da004bc2084126
-  js/wiki/mini-a-ingest.js: 85fdbe90afe5839dbe4ca555dac09170fdd036ce
-  js/wiki/mini-a-mcp-wiki.js: 5747e15f78cf16c29dcf28840aee578cf7affc70
+  js/wiki/mini-a-graph-connectivity.js: 7a261dbc8fc46325a307967a5d94527a45ce2a04
+  js/wiki/mini-a-graph-options.js: 8be4c49be1ad33a97ab3a31f4631b0e8e2932451
+  js/wiki/mini-a-graph-reconcile.js: 4e852d1c36e4c57b53e4de7cb2ee6b5fbb2d7967
+  js/wiki/mini-a-graph-upgrade.js: 6b7ded339a08ab57d30f7fb54464513e736c0f4d
+  js/wiki/mini-a-graph.js: 76634b96dab9fc8d71ea2fccf4c27c9c9a98ef31
+  js/wiki/mini-a-ingest.js: ace44bdf3a69808c2d5d08d25d0ce44e175f1c3b
+  js/wiki/mini-a-mcp-wiki.js: cbfd4c0b530b3face88d16b3c4071975d4844fd1
   js/wiki/mini-a-wiki-embeddings.js: 258805ed2e05b125c6d48081869036f09fc75070
   js/wiki/mini-a-wiki-export.js: 2c43e40d61eba88146a28dd07829190bd088a0ca
   js/wiki/mini-a-wiki-folders.js: d22e361f8ef7f0e32f09c466e169283d4796b50a
   js/wiki/mini-a-wiki-knowledge.js: b0b4e771af92fcc4257926fac7d468adcf26e633
-  js/wiki/mini-a-wiki-maintenance.js: c0709cf8cb09a17244c24e7cc9cf8acd7db4540f
+  js/wiki/mini-a-wiki-maintenance.js: 91eac65b125a9e7ad910606bdab77e73af028357
   js/wiki/mini-a-wiki-retrieval.js: d2a8757dba00ae62cfc42e583a18a198ebd6b61a
-  js/wiki/mini-a-wiki.js: 68ab828ce86e4339f0efcef1b04a2d5709c26cbd
-  js/wiki/mini-a-wikiops.js: 1f81fc584f5cd4f968fea63b767dcb16ed737994
+  js/wiki/mini-a-wiki.js: eb08e69ab6ae0f2fa1cfd75c125586175a613e07
+  js/wiki/mini-a-wikiops.js: afd738a7e82b7c3359f3173b5c1900d268a0fc57
   mcps/CREATING.md: 96bae262502f3fc47b4431a4234253f03cc3366a
   mcps/EXTERNAL-MCPS.md: 152d0db701bc3ee259d4184f08fdce3ca2b0d332
   mcps/README.md: b9a8d802d10e775c7c8667bf50b75d9940ae1ee5
@@ -490,7 +498,7 @@ filesHash:
   mcps/mcp-web.yaml: e28dfa9ffdb60853dc941c18f6a82d763e25b3c2
   mcps/mcp-wiki-ops.yaml: cffaf7d2f609f82a732e5eaef57000683da0d587
   mcps/mcp-wiki-safe.yaml: de83dfb563e062b2aab5aee7be8c6c3ca71cc3b5
-  mcps/mcp-wiki.yaml: ce10d4988b6df1fc576dacd877857da303e37bbb
+  mcps/mcp-wiki.yaml: e35f208fab475b86526e5e702a4cd5ea6eccf063
   mcps/mcp-workiq.yaml: 10709d2dccf1032ac4826e8cb512cfb88bf4d14a
   mini-a-absorb.yaml: ea97adb587d515113bfd2b021c2e928e042fe49e
   mini-a-artifact-worker.yaml: 771cdffc2e30d885f145eb47e39c9d485d30a752
@@ -503,14 +511,14 @@ filesHash:
   mini-a-modelman.js: 048b7bbed05207e058db130693e800c64ebaa486
   mini-a-modes.yaml: 754cc2598ee619e2f7d77845cc194a7bfa5cbda9
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: 3f796ff46dd742b009be04309dcf717fc34804de
+  mini-a-web.yaml: 47d8268cf58c023da287264bbb275a4602b6f4f4
   mini-a-wiki-studio-worker.yaml: 8c6841c3aa4a0c2e3d4a13fa9b61c9dfde5e49e3
   mini-a-wiki-studio.yaml: 30c6b0f4d2055064a1939d5fcc60ceb68fc77b4b
   mini-a-wikiman.js: 91add17fe98d8120835e3d1698790f97cd733923
   mini-a-worker.yaml: be28143ec6cb67c9a2c08a6134238560372bb6c2
   mini-a.js: 8553dc16398d24eeb2c6942075b7abb5c1ffc4a3
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
-  mini-a.yaml: 7f821c9e937d1748199e189e9ad77885c5a33416
+  mini-a.yaml: 6ec4ac07dd2570361b624cc14f65661f43c75ed7
   public/advanced.css: 571c702d4516468bc309126d28ba5859031c5be0
   public/advanced.js: 8f8a93f207c388c894dd64f8ffae6bf0bec7f7a0
   public/apple-touch-icon.png: 5e22ed6b303b377787779423b97c22f7b20b56ed
@@ -522,7 +530,7 @@ filesHash:
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   public/studio/index.html: 594c0185415165d621ecfb528f3bd914b940117b
   public/studio/studio.css: 5276901e63d10fa9320636a7ab7116c0898babdb
-  public/studio/studio.js: 0c781b1bc89e860139f95d996f3e19a3ca3ff151
+  public/studio/studio.js: 4332c58c22c4463d4481ffd4a24bd62dfe918eb5
   skills/mini-a-contract-authoring/SKILL.md: 0d98a31839edfbe86463893816dfd258e5261de7
   skills/mini-a-contract-authoring/references/CONTRACT.md: 58d482c7a033e0c03e7b0fe40d037bcd99e663c9
   skills/mini-a-decisions/SKILL.md: 2f5f011baacbf1bf7d1d37c6268eb78113e62524
@@ -549,7 +557,7 @@ filesHash:
   skills/mini-a-visual-output/references/mermaid.md: e9591dfc9cc1d1d2e9bca66af424da958e3ec653
   skills/mini-a-wiki-retrieval/SKILL.md: b3492e2955cb4cd2aa45189be57e9ed940e697c9
   skills/mini-a-wiki-retrieval/references/retrieval.md: 5a89fd51b99ceaa598ac9116479f7f9d0a86c2b3
-  utils/graphStats.yaml: ce32169c30db09d0e74dfffdbba7d70c27db24bc
+  utils/graphStats.yaml: 2aa4f5c29889857033d4eb634bce68b8e62e3635
   utils/indexStats.yaml: 7fc4b114655146b3b3f94813949867485917bacd
   utils/wikiCompact.yaml: bec7795ef9992245afbe11510857d23a5a08fbe4
   utils/wikiDream.yaml: 1e40aef42ef47fe5fd16b28e9d3cfe0e7e144550
