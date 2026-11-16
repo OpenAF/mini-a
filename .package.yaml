@@ -347,7 +347,7 @@ filesHash:
   docs/WHATS-NEW.md: 6e21b008dd72cfead25f6676782e4b39d5b0509b
   docs/WIKI-CONTAINERS.md: fd4e4f0adc6360f44d40c4a457a8ac721633810b
   docs/WIKI-GRAPH-V2.md: 2fb7574c609509d83a7e0b5358a93c59c16f21db
-  docs/WIKI-MEMORY.md: 5cc15f27a9c6571f5dd4af797909b62b66d466aa
+  docs/WIKI-MEMORY.md: 4aebd1e266ab3c1b1a740b1080d56140c3d547df
   docs/WIKI-QUICKSTART.md: e44a15892c3032da3bec349ff4ea7e63fbd2510f
   docs/WIKI-RETRIEVAL-V2.md: 460b2bcd3b42d43fa68dc5ce2ec105da500cf86c
   docs/WIKI-STUDIO-IMPLEMENTATION.md: 763c1ce0e6268f1853823fb1e904b65be651bb5c
@@ -409,7 +409,7 @@ filesHash:
   js/core/mini-a-supervised.js: f7aee934432fc16da7dcf9c9372afb0c5acbe11c
   js/core/mini-a-tool-selection.js: d0f59644dfd87d5228eaa36902873121b667c537
   js/core/mini-a-utils.js: c62230f4e3a4d5edb84529bd2ab75d350e237e9a
-  js/core/mini-a.js: 0aba166bcc76ab616c061a6c1bf353a54b961931
+  js/core/mini-a.js: 0d742a00da6127ad806c7c9e2dec237465d7a9a5
   js/memory/mini-a-dreams.js: 577ea92da3d1003c6634e06222d3de14700cb660
   js/memory/mini-a-embeddings.js: b2ae391628a2afd4305ccea473cd35158cdaae7e
   js/memory/mini-a-history-vm.js: 62cc32c14658dc25b0387c7d40402551d8837e7d
@@ -451,7 +451,7 @@ filesHash:
   js/wiki/mini-a-graph-options.js: 8be4c49be1ad33a97ab3a31f4631b0e8e2932451
   js/wiki/mini-a-graph-reconcile.js: 4e852d1c36e4c57b53e4de7cb2ee6b5fbb2d7967
   js/wiki/mini-a-graph-upgrade.js: b9818939ddeaf5b40e570d23238a35d10077c2ae
-  js/wiki/mini-a-graph.js: 2c2068033b572e1628c096704b22758850e1b82c
+  js/wiki/mini-a-graph.js: a7545287d05bffde19f097f3d7f0f5ab30ebb25f
   js/wiki/mini-a-ingest.js: ace44bdf3a69808c2d5d08d25d0ce44e175f1c3b
   js/wiki/mini-a-mcp-wiki.js: cbfd4c0b530b3face88d16b3c4071975d4844fd1
   js/wiki/mini-a-wiki-embeddings.js: 258805ed2e05b125c6d48081869036f09fc75070
