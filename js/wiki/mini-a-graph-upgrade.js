@@ -5,7 +5,7 @@ var __miniAGraphUpgrade = function(wm, options) {
   if (wm._backendType !== "fs" || wm._catalog || !wm._graph) return { ok: false, error: "Graph upgrade requires a filesystem wiki with graph enabled" }
   if (!preview && wm._access !== "rw") return { ok: false, error: "wiki is read-only" }
   if (!preview && opts.confirmExpensive !== true) return { ok: false, error: "Confirm the expensive full rebuild explicitly" }
-  var effective = wm.graphBuildSettings(opts).effective
+  var effective = preview ? wm.graphBuildSettings(opts).effective : null
   if (!preview && wm.knowledgeMovePending()) return { ok: false, error: "structural-move-recovery-required" }
   var pages = wm._graphPages()
   var inventory = sha256(stringify(pages.map(function(page) { return [page.path, page.revision] }).sort(function(a, b) { return a[0].localeCompare(b[0]) }), __, ""))
@@ -31,6 +31,16 @@ var __miniAGraphUpgrade = function(wm, options) {
     return sha256(stringify(wm._graphPages().map(function(page) { return [page.path, page.revision] }).sort(function(a, b) { return a[0].localeCompare(b[0]) }), __, ""))
   }
 
+  // A paused run must not overwrite independently committed graph evidence.
+  function graphChecksum() {
+    return io.fileExists(graphFile) ? sha256(io.readFileString(graphFile)) : "missing"
+  }
+
+  // Keep the live graph and staged work available for inspection after a conflict.
+  function conflict() {
+    return { ok: false, complete: false, partial: true, resumable: false, status: "graph-conflict", error: "Live graph changed during upgrade; start a new graph upgrade to include the current evidence", phase: state.phase, id: state.id }
+  }
+
   try {
     state = io.fileExists(journalPath) ? io.readFileJSON(journalPath) : null
     if (state && state.version !== 1 && state.version !== 2) throw new Error("unsupported-rebuild-journal")
@@ -41,17 +51,25 @@ var __miniAGraphUpgrade = function(wm, options) {
       state = { version: 2, id: state.id, phase: "inventory", migratedFrom: 1, legacyPhase: state.phase }
     }
     if (opts.resumeOnly === true && (!state || state.phase === "complete")) return { ok: false, error: "no-pending-graph-upgrade" }
+    if (state && state.baseGraphChecksum && ["inventory", "index", "structure", "graph", "ready"].indexOf(state.phase) >= 0) {
+      var currentGraph = graphChecksum()
+      if (currentGraph !== state.baseGraphChecksum && currentGraph !== state.checksum) {
+        if (opts.resumeOnly === true) return conflict()
+        // An explicit new upgrade starts from the newer live graph; the old stage is retained.
+        state = null
+      }
+    }
     if (!state || state.phase === "complete" || state.source && state.source !== inventory) state = { version: 2, id: String(java.util.UUID.randomUUID()), phase: "inventory" }
     if (!/^[a-f0-9-]{36}$/.test(state.id || "") || ["inventory", "index", "structure", "graph", "ready", "published", "remote-sync"].indexOf(state.phase) < 0) throw new Error("unsupported-rebuild-journal")
     state.destination = String(new java.io.File(wm._backend.root).getCanonicalPath())
-    if (!state.baseGraphChecksum) state.baseGraphChecksum = io.fileExists(graphFile) ? sha256(io.readFileString(graphFile)) : "missing"
+    if (!state.baseGraphChecksum) state.baseGraphChecksum = graphChecksum()
     if (opts.runId && opts.runId !== state.id) throw new Error("rebuild-run-id-mismatch")
     state.source = inventory
     if (state.settings) {
       var resumed = MiniAGraphBuild.resolve(merge(state.settings, opts))
       if (["ready"].indexOf(state.phase) >= 0 && ["extraction", "modelHelp", "reconcile", "reconcileLlm", "reconcileMaxEdges", "reconcileMaxDf"].some(function(key) { return resumed[key] !== state.settings[key] })) state.phase = "graph"
       effective = resumed
-    }
+    } else effective = wm.graphBuildSettings(opts).effective
     state.settings = clone(effective)
     state.settings.retryFailed = false
     state.settings.reconcileRetryFailed = false
@@ -72,7 +90,7 @@ var __miniAGraphUpgrade = function(wm, options) {
     }
     if (["structure", "graph"].indexOf(state.phase) >= 0) {
       if (!io.fileExists(stageFile)) {
-        var seed = live._state
+        var seed = io.fileExists(graphFile) ? io.readFileJSON(graphFile) : live._state
         var legacySnapshot = graphFile + ".before-full-rebuild-" + state.id
         if (state.migratedFrom && io.fileExists(legacySnapshot)) {
           // Retain both the predecessor and proven work completed after a v1 reset.
@@ -150,10 +168,12 @@ var __miniAGraphUpgrade = function(wm, options) {
       if (currentInventory() !== state.source) throw new Error("stale-stage: wiki changed before publication")
       var published = io.fileExists(graphFile) && sha256(io.readFileString(graphFile)) === state.checksum
       if (!published) {
+        if (graphChecksum() !== state.baseGraphChecksum) return conflict()
         state.previous = graphFile + ".before-full-rebuild-" + state.id
         if (!io.fileExists(state.previous)) __miniAWikiMaintenanceJson(state.previous, io.fileExists(graphFile) ? io.readFileJSON(graphFile) : live._state)
         state.previousChecksum = sha256(io.readFileString(state.previous))
         checkpoint()
+        if (graphChecksum() !== state.baseGraphChecksum) return conflict()
         if (live._hasFalkor()) __miniAWikiMaintenanceJson(remoteMarker, { version: 1, id: state.id, checksum: state.checksum })
         __miniAWikiMaintenanceJson(graphFile, io.readFileJSON(stageFile))
         if (sha256(io.readFileString(graphFile)) !== state.checksum) throw new Error("published-graph-checksum-mismatch")

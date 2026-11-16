@@ -149,6 +149,16 @@ trip and an authoritative inventory revision check. Publication atomically repla
 Never delete these artifacts while a run is pending. Legacy journal v1 is preserved
 and migrated without discarding its compatible recovery snapshot.
 
+Resume keeps the settings recorded in the pending journal, including extraction
+and model assistance. Explicit request parameters override only their named fields.
+Studio uses the saved run settings unless **Override saved upgrade settings with
+these controls when resuming** is selected.
+
+Publication also checks that the live graph has not changed since staging began.
+A conflicting resume returns `graph-conflict` and preserves the live graph, journal
+and staged snapshot. Run `graph upgrade` again to start a new run from the current
+graph, including its newer evidence. The earlier stage is retained for inspection.
+
 Search and graph publication are separate operations. Existing V2 revision checks
 protect retrieval during mixed generations. An interrupted or budget-limited full
 upgrade stays staged and reports `partial`/`resumable`; the old graph continues to

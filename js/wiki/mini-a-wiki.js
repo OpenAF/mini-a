@@ -2063,6 +2063,14 @@ MiniAWikiManager.prototype._withGraphHints = function(hits, options) {
   return isNumber(lim) ? combined.slice(0, lim) : combined
 }
 
+// Validate resume overrides against the pending run rather than current defaults.
+MiniAWikiManager.prototype._graphResumeSettings = function(overrides) {
+  var file = this._getIndexRoot() + "/.mini-a-wiki-full-rebuild.json"
+  var state = io.fileExists(file) ? io.readFileJSON(file) : null
+  if (state && state.phase !== "complete" && isMap(state.settings)) return MiniAGraphBuild.resolve(merge(state.settings, overrides || {}))
+  return this.graphBuildSettings(overrides).effective
+}
+
 // Shared by Studio, wikiman, CLI, MCP and library callers. Stored alongside wiki state.
 MiniAWikiManager.prototype.graphBuildSettings = function(overrides, save) {
   var file = this._getIndexRoot() + "/.mini-a-wiki-state/config.json", config = {}

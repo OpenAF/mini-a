@@ -5,7 +5,13 @@ var checked = 0
 function assert(value, message) { if (!value) throw new Error(message); checked++ }
 function page(path, body, meta) { return { path: path, body: body, revision: sha1(body), meta: meta || {title:path}, links:[] } }
 var root = String(java.nio.file.Files.createTempDirectory("graph-build-").toFile().getCanonicalPath())
-function graph(name, config) { return new MiniAWikiGraph(merge({ graphDir:root+"/"+name, modelExtractors:[] }, config || {})) }
+  // Keep legacy build contracts independent of the separately tested reconciliation default.
+  function graph(name, config) {
+    var instance = new MiniAWikiGraph(merge({ graphDir: root + "/" + name, modelExtractors: [] }, config || {}))
+    var build = instance.build
+    instance.build = function(pages, options) { return build.call(this, pages, merge({ reconcile: "off" }, options || {})) }
+    return instance
+  }
 var semantic = { extraction:"semantic", modelHelp:"off" }
 try {
   assert(MiniAGraphBuild.resolve({semantic:true}).modelHelp === "auto", "legacy mapping")

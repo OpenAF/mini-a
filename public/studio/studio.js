@@ -2334,6 +2334,11 @@ async function webCommandWizard(selectedId) {
 }
 
 // Describe section progress and distinguish automatic continuation from explicit retries.
+// Resume retains journal settings unless the user explicitly selects overrides.
+function graphResumeParameters(options, override) {
+  return Object.assign(override ? options : {}, { confirmExpensive: true })
+}
+
 function graphBuildProgressText(p) {
   if (typeof p.indexed === "number" && typeof p.candidates === "number") return human(p.status) + " · " + p.indexed + " discovery pages indexed · " + p.processed + " pages reconciled · " + p.pending + " pending · " + p.added + " memberships added · " + p.calls + " validation calls · " + p.embeddingCalls + " embedding calls · " + p.embeddingHits + " vector cache hits"
   var roles = p.callsByRole || {}
@@ -2498,10 +2503,12 @@ async function graphBuildControls(content, dream) {
     } finally { previewButton.disabled = false }
   })
   var expensive = check(advanced, "Run an expensive staged graph upgrade from current pages")
+  var resumeOverrides = check(advanced, "Override saved upgrade settings with these controls when resuming")
   ;[["Upgrade complete graph", "graph/upgrade"], ["Resume graph upgrade", "graph/resume"]].forEach(function(entry) {
     submitButtons.push(button(advanced, entry[0], async function() {
       if (!expensive.checked) throw new Error("Select the expensive staged graph upgrade first")
-      await submitGraph(entry[1], Object.assign(values(), { confirmExpensive: true }))
+      var parameters = entry[1] === "graph/resume" ? graphResumeParameters(resumeOverrides.checked ? values() : {}, resumeOverrides.checked) : Object.assign(values(), { confirmExpensive: true })
+      await submitGraph(entry[1], parameters)
     }))
   })
   submitButtons.push(button(advanced, "Refresh embedding cache only", async function() {

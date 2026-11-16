@@ -379,6 +379,15 @@
     assert(s.jobWikiRoute(request,w,["graph","rebuild"],"admin").params.retryFailed,true,"Studio forwards retry action")
     assert(s.jobWikiRoute({method:"GET"},w,route,"viewer").effective.retryFailed,false,"Retry action not saved")
     rejects(function(){s.jobWikiRoute({method:"PUT",body:{maxCalls:3}},merge(w,{access:"ro"}),route,"admin")},"read_only")
+    // Resume requests retain pending settings and queue only explicit overrides.
+    io.writeFileJSON(w.root + "/.mini-a-wiki-full-rebuild.json", { version: 2, phase: "graph", settings: { extraction: "semantic", modelHelp: "auto", reconcile: "off", maxCalls: 17 } })
+    var resume = s.jobWikiRoute({ method: "POST", headers: { "idempotency-key": "graph-resume-settings" }, body: { confirmExpensive: true } }, w, ["graph", "resume"], "admin")
+    assert(Object.keys(resume.params).sort(), ["confirmExpensive"], "Resume does not inject current defaults into worker parameters")
+    resume = s.jobWikiRoute({ method: "POST", headers: { "idempotency-key": "graph-resume-override" }, body: { confirmExpensive: true, maxCalls: 3, modelHelp: "auto" } }, w, ["graph", "resume"], "admin")
+    assert(resume.params.maxCalls, 3, "Explicit resume budget is forwarded")
+    assert(isUnDef(resume.params.extraction), true, "Resume does not fill unspecified extraction")
+    assert(runner.spec("graph.resume", { retryFailed: true }).params.retryFailed, true, "Worker specification defers journal-dependent retry validation")
+    rejects(function() { s.jobWikiRoute({ method: "POST", headers: {}, body: { confirmExpensive: true, maxCalls: -1 } }, w, ["graph", "resume"], "admin") }, "invalid_options")
   }) }
   exports.testGraph = function() { fixture(function(s, t) {
     var w = add(s, t)

@@ -21,6 +21,11 @@ try {
   var graph = new MiniAWikiGraph({ graphDir: root + "/graph", modelExtractors: [] })
   var pages = [page("old.md", "The `cacheKey` identifies stored responses."), page("unrelated.md", "Flowers grow near rivers.")]
   graph.build(pages, {})
+  var unchangedProgress = []
+  var unchangedSnapshot = io.readFileString(root + "/graph/graph.json")
+  graph.build(pages, { reconcile: "lexical", onProgress: function(progress) { unchangedProgress.push(progress) } })
+  assert(unchangedProgress[0].stage === "structural" && unchangedProgress[unchangedProgress.length - 1].stage === "complete", "unchanged reconciled builds preserve structural and completion progress")
+  assert(unchangedProgress[unchangedProgress.length - 1].processed === pages.length && io.readFileString(root + "/graph/graph.json") === unchangedSnapshot, "unchanged progress completes without rewriting the graph")
   assert(!graph._state.edges.some(function(edge) { return edge.type === "MENTIONS" }), "legacy structural build is unchanged")
   graph._upsertNode("concept:id:cachekey", "concept", { name: "cacheKey", joinable: true })
   graph._addEdge("doc:old.md", "concept:id:cachekey", "MENTIONS", "EXTRACTED", { page: "old.md", section: "", sourceHash: "obsolete", revision: "obsolete", evidenceLayer: "grounded", evidence: { quote: "cacheKey" } })
@@ -204,6 +209,52 @@ try {
   manager = new MiniAWikiManager({ backend: "fs", root: wiki, access: "ro", usegraph: true, skipBootstrap: true }, function() {})
   assert(manager.graph("upgrade", { preview: true, reconcile: "lexical" }).ok, "read-only upgrade preview works")
   assert(!manager.graph("upgrade", { confirmExpensive: true }).ok, "read-only graph mutation is refused")
+  // Pending semantic work survives changed defaults; live evidence conflicts fail closed.
+  var resumeRoot = root + "/resume"
+  io.mkdir(resumeRoot)
+  io.writeFileString(resumeRoot + "/a.md", "---\ntitle: A\n---\nAlpha and Beta are related. Alpha and Gamma are related.")
+  var resumeManager = new MiniAWikiManager({ backend: "fs", root: resumeRoot, access: "rw", usegraph: true, skipBootstrap: true }, function() {})
+  try {
+    var resumeCalls = 0
+    var resumeExtra = false
+    resumeManager._graph._cfg.modelExtractors = [{ role: "main", fingerprint: "resume-fixture", extract: function() {
+      resumeCalls++
+      var relationships = [{ from: "Alpha", to: "Beta", type: "RELATES_TO", provenance: "EXTRACTED", confidence: 0.9, evidence: { quote: "Alpha and Beta are related." } }]
+      if (resumeExtra) relationships.push({ from: "Alpha", to: "Gamma", type: "RELATES_TO", provenance: "EXTRACTED", confidence: 0.9, evidence: { quote: "Alpha and Gamma are related." } })
+      return { relationships: relationships }
+    } }]
+    resumeManager.graph("build", { reconcile: "off" })
+    try {
+      resumeManager.graph("upgrade", { confirmExpensive: true, extraction: "semantic", modelHelp: "auto", reconcile: "off", onProgress: function(progress) {
+        if (progress.phase === "graph") throw new Error("pause semantic work")
+      } })
+    } catch(error) {}
+    assert(resumeManager._graphResumeSettings({ maxCalls: 1 }).modelHelp === "auto", "resume validation uses the pending model assistance")
+    var resumed = resumeManager.graph("resume", { confirmExpensive: true, maxCalls: 1 })
+    assert(resumed.complete && resumeCalls === 1 && resumed.graph.effective.extraction === "semantic", "resume keeps semantic extraction and applies only explicit budgets")
+    // Begin a structural stage before adding independently supported live model work.
+    var resumeGraphFile = resumeManager._graph._graphDir + "/graph.json"
+    try {
+      resumeManager.graph("upgrade", { confirmExpensive: true, extraction: "structural", reconcile: "off", onProgress: function(progress) {
+        if (progress.phase === "ready") throw new Error("pause publication")
+      } })
+    } catch(error) {}
+    resumeExtra = true
+    var externalManager = new MiniAWikiManager({ backend: "fs", root: resumeRoot, access: "rw", usegraph: true, skipBootstrap: true }, function() {})
+    try {
+      externalManager._graph._cfg.modelExtractors = resumeManager._graph._cfg.modelExtractors
+      externalManager.graph("build", { extraction: "semantic", modelHelp: "auto", reconcile: "off", force: true })
+    } finally { externalManager.close() }
+    var newerGraph = io.readFileString(resumeGraphFile)
+    var journalFile = resumeRoot + "/.mini-a-wiki-full-rebuild.json"
+    var pendingJournal = io.readFileString(journalFile)
+    resumed = resumeManager.graph("resume", { confirmExpensive: true })
+    assert(!resumed.ok && resumed.status === "graph-conflict" && !resumed.resumable, "resume rejects publication over independently committed graph changes")
+    assert(io.readFileString(resumeGraphFile) === newerGraph && io.readFileString(journalFile) === pendingJournal, "conflict leaves live evidence and paused journal unchanged")
+    var conflictId = resumed.id
+    resumed = resumeManager.graph("upgrade", { confirmExpensive: true, extraction: "structural", reconcile: "off" })
+    assert(resumed.complete && resumed.id !== conflictId && resumeManager._graph._state.edges.filter(function(edge) { return edge.props && edge.props.method === "model" }).length === 2, "a new upgrade includes current evidence and retains the old stage")
+  } finally { resumeManager.close() }
   var legacyRoot = root + "/legacy"
   io.mkdir(legacyRoot)
   io.writeFileString(legacyRoot + "/a.md", "---\ntitle: A\n---\nTLS uses HTTP.")

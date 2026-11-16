@@ -67,7 +67,15 @@ WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
     operation = route === "selection/move" ? "wiki.selectionMove" : "wiki.selectionDelete"
   } else if (["graph/upgrade", "graph/resume", "graph/embeddings", "graph/reconcile"].indexOf(route) >= 0) {
     WikiStudio.fields(body, MiniAGraphBuild.fields.concat(["confirmExpensive"]))
-    try { params = this.manager(w, false, function(wm) { return wm.graphBuildSettings(body).effective }) }
+    try {
+      params = this.manager(w, false, function(wm) {
+        if (route === "graph/resume") {
+          wm._graphResumeSettings(body)
+          return clone(body)
+        }
+        return wm.graphBuildSettings(body).effective
+      })
+    }
     catch(e) { WikiStudio.fail(400, "invalid_options", String(e.message || e)) }
     operation = route.replace("/", ".")
     if (operation === "graph.reconcile" && isUnDef(body.reconcile) && params.reconcile === "off") params.reconcile = "lexical"

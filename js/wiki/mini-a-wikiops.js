@@ -162,7 +162,8 @@ MiniAWikiOps.operation = function(id) {
 }
 MiniAWikiOps.prototype.spec = function(id, params) {
   var op = MiniAWikiOps.operation(id), p = merge(clone(op.defaults), MiniAWikiOps.parse(params))
-  if (["graph.build", "graph.defaults", "graph.reconcile", "graph.upgrade", "graph.resume", "graph.embeddings"].indexOf(id) >= 0) MiniAGraphBuild.resolve(p)
+  // Resume settings need the pending journal, which is validated when the manager opens.
+  if (["graph.build", "graph.defaults", "graph.reconcile", "graph.upgrade", "graph.embeddings"].indexOf(id) >= 0) MiniAGraphBuild.resolve(p)
   if (id === "graph.defaults" && ["force","resume","strategy","retryFailed","reconcileRetryFailed"].some(function(k){return isDef(p[k])})) throw new Error("Force, resume, strategy and retryFailed are per-run actions, not saved defaults")
   op.fields.forEach(function(f) {
     if (isUnDef(p[f[0]]) && isDef(f[2])) p[f[0]] = f[2]

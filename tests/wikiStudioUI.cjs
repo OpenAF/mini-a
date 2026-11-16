@@ -300,6 +300,16 @@ run('StudioApi.request=api;StudioApi.background=api;studioSession={canTestWiki:f
   assert(field(graphHost,'Maximum calls').closest('.studio-disclosure'),'Call budget stays inside Advanced');
   const preset=field(graphHost,'Budget preset');preset.value='small';await preset.fire('change');assert.equal(Number(field(graphHost,'Maximum calls').value),20,'Preset changes budget');
   preset.value='reset';await preset.fire('change');assert.equal(field(graphHost,'Maximum calls').value,'100','Reset restores built-in budget');
+  const expensive=descendants(graphHost).find(n=>n.tagName==='LABEL'&&n.textContent.includes('Run an expensive staged')).querySelector('input');
+  const resumeOverrides=descendants(graphHost).find(n=>n.tagName==='LABEL'&&n.textContent.includes('Override saved upgrade settings')).querySelector('input');
+  const resumeRequests=[];
+  context.resumeQueue=async(path,body)=>{resumeRequests.push({path,body});};
+  run('queue=resumeQueue');expensive.checked=true;
+  await click(graphHost,'Resume graph upgrade');
+  assert.deepEqual(JSON.parse(JSON.stringify(resumeRequests[0])),{path:'graph/resume',body:{confirmExpensive:true}},'Resume defaults to journal settings rather than displayed controls');
+  resumeOverrides.checked=true;field(graphHost,'Maximum calls').value='7';
+  await click(graphHost,'Resume graph upgrade');
+  assert.equal(resumeRequests[1].body.maxCalls,7,'Explicit resume override uses current controls');
   const readOnlyHost=new Element('div');context.readOnlyHost=readOnlyHost;run('currentWiki.access="ro"');await run('graphBuildControls(readOnlyHost)');assert(find(readOnlyHost,'button','Save defaults').disabled&&find(readOnlyHost,'button','Run graph build').disabled,'Read-only build controls disabled');
   const folderHost=new Element('div');document.body.append(folderHost);context.folderHost=folderHost;
   let folderName='Guides', folderAnswers=['Renamed'], folderJobs=[];

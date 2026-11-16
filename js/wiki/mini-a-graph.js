@@ -2654,7 +2654,9 @@ MiniAWikiGraph.prototype.build = function(pages, options) {
     pages.length === Object.keys(this._state.summaries.pages).length && pages.every(function(page) {
       return this._state.summaries.pages[page.path] && this._state.summaries.pages[page.path].hash === this._pageHash(page)
     }, this)
-  var result = sameStructure ? { ok: true, stage: "complete", status: "complete", changed: false, calls: 0 } : __miniAGraphBuildBase.call(this, pages, opts)
+  var started = Date.now()
+  if (sameStructure && isFunction(opts.onProgress)) opts.onProgress({ ok: true, stage: "structural", status: "structural", processed: 0, cached: pages.length, index: 0, total: pages.length, calls: 0, effective: clone(effective) })
+  var result = sameStructure ? { ok: true, stage: "complete", status: "complete", changed: false, processed: pages.length, cached: pages.length, calls: 0, effective: clone(effective) } : __miniAGraphBuildBase.call(this, pages, opts)
   if (result.ok !== false && MiniAGraphBuild.resolve(opts).reconcile !== "off") {
     result.reconciliation = new MiniAGraphReconciler(this).run(pages, opts)
     if (result.reconciliation.ok === false) result.ok = false
@@ -2673,5 +2675,6 @@ MiniAWikiGraph.prototype.build = function(pages, options) {
     }
   }
   if (effective.reconcile !== "off" && this._lastPublication) result.publication = clone(this._lastPublication)
+  if (sameStructure && isFunction(opts.onProgress)) opts.onProgress(merge(clone(result), { index: pages.length, total: pages.length, elapsedMs: Date.now() - started }))
   return result
 }
