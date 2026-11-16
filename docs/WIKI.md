@@ -880,3 +880,12 @@ plumbing, but current lint does not consume those values. They are not supported
 lint tuning controls. `dreamwikilevel` has no implementation; select supported
 operations with `dreamwikimode`. The legacy `dreamwikiminpages` option is ignored;
 index finalization runs regardless of page count.
+
+## Optional incremental graph reconciliation
+
+`wikigraphreconcile=lexical` connects grounded concepts across ingestion batches.
+The default is `off`; `wikigraphsemantic` keeps its existing extraction meaning.
+`graph upgrade` reconstructs and enriches the graph from current wiki Markdown
+without original sources, using a verified staging graph and retained predecessor.
+See [Wiki Graph v2](WIKI-GRAPH-V2.md) for settings, diagnostics, budgets, preview,
+resume, rollback and the independent embedding/LLM opt-ins.

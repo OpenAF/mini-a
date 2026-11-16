@@ -505,6 +505,13 @@ MiniAWikiMan.prototype.graphBuildControls = function(runner, saveOnly) {
   if (preset === "reset") options = clone(MiniAGraphBuild.defaults)
   else if (MiniAGraphBuild.presets[preset]) options = merge(options, MiniAGraphBuild.presets[preset])
   else ["maxCalls", "maxTokens", "maxMinutes"].forEach(function(k) { options[k] = Number(self.input(k, options[k])) })
+  options.reconcile = ["off", "lexical", "hybrid"][this.choose("Relationship reconciliation", ["Off (legacy behavior)", "Lexical and grounded concepts", "Hybrid with optional embeddings"])]
+  options.reconcileLlm = options.reconcile !== "off" && this.choose("Relationship validation model", ["Off (deterministic only)", "Automatic with bounded calls"]) === 1 ? "auto" : "off"
+  if (options.reconcile !== "off" && this.yes("Customize relationship and embedding budgets?")) {
+    ;["reconcileMaxCandidates", "reconcileMaxEdges", "reconcileMaxPages", "reconcileMaxCalls", "reconcileMaxTokens", "reconcileMaxMinutes", "embeddingMaxCalls"].forEach(function(key) {
+      options[key] = Number(self.input(key, options[key]))
+    })
+  }
   options.force = !saveOnly && options.extraction === "semantic" && options.strategy !== "resume" && this.yes("Force extraction, ignoring semantic caches?")
   options.retryFailed = !saveOnly && options.extraction === "semantic" && options.modelHelp === "auto" && this.yes("Retry failed sections, preserving successes and resetting failure limits?")
   options = MiniAGraphBuild.resolve(options)

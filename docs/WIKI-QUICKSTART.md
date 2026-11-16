@@ -78,3 +78,12 @@ In the console, try:
 | Query fails with "wiki has no pages" | `wikiroot` points at an empty folder; check the path. |
 | Answers miss pages you know exist | Search results can be partial; check `/wiki context`, and keep `wikilexical` the same as the publisher (`OAF_MINI_A_WIKI_LEXICAL`). |
 | Model errors | Set `OAF_MODEL` or pass `model=` / `mode=`. |
+
+## Connect existing pages without a model
+
+Enable `wikigraphreconcile=lexical` when hydrating, or save
+`{"reconcile":"lexical","reconcileLlm":"off"}` through `graph.defaults`. Existing
+wikis can use `graph.upgrade` with `confirmExpensive=true`; no source reingestion
+is required. Start with a model-free preview and inspect `graph stats detailed=true`.
+See [the reconciliation guide](WIKI-GRAPH-V2.md) for copyable CLI commands and
+recovery instructions. Reconciliation is off unless explicitly selected.

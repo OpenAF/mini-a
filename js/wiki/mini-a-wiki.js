@@ -15,7 +15,13 @@ function __miniAWikiConfigFromArgs(args, overrides) {
   var backend = isString(args.wikibackend) ? args.wikibackend.trim().toLowerCase() : "fs"
   if (backend === "https") backend = "http"
   if (["fs", "s3", "s3fs", "es", "http"].indexOf(backend) < 0) backend = "fs"
-  var cfg = { fileallow: args.fileallow, access: args.wikiaccess, backend: backend, indexdir: args.wikiindexdir,
+  var graphOverrides = {}
+  Object.keys(MiniAGraphBuild.reconcileDefaults).forEach(function(key) {
+    var suffix = key === "embeddingMaxCalls" ? "embeddingmaxcalls" : key === "embeddingMaxComparisons" ? "embeddingmaxcomparisons" : key.toLowerCase()
+    var name = "wikigraph" + suffix
+    if (isDef(args[name])) graphOverrides[key] = args[name]
+  })
+  var cfg = { graphBuildOverrides: graphOverrides, fileallow: args.fileallow, access: args.wikiaccess, backend: backend, indexdir: args.wikiindexdir,
     s3artifactprefix: args.wikis3artifactprefix, s3artifactbundle: args.s3artifactbundle,
     usegraph: toBoolean(args.usewikigraph) === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0),
     graphTagPolicy: toBoolean(args.dreamwikisurgical) === true && toBoolean(args.usewikigraph) === true,
@@ -1804,6 +1810,7 @@ MiniAWikiManager.prototype._searchIndexStatus = function() {
 
 // _graphUpdatePage: re-index one page; derived stats stay lazy (computed on next read).
 MiniAWikiManager.prototype._graphUpdatePage = function(path, raw, parsed) {
+  if (this._deferGraphUpdates === true) return
   if (!isObject(this._graph) || !isFunction(this._graph.updatePage)) return
   try {
     var payload = this._graphPayloadFromRecord(path, raw, parsed)
@@ -1816,6 +1823,7 @@ MiniAWikiManager.prototype._graphUpdatePage = function(path, raw, parsed) {
 
 // _graphRemovePage: drop one page from the graph; derived stats stay lazy.
 MiniAWikiManager.prototype._graphRemovePage = function(path) {
+  if (this._deferGraphUpdates === true) return
   if (!isObject(this._graph) || !isFunction(this._graph.removePage)) return
   if (isMap(this._linkCatalog) && isMap(this._linkCatalog.paths)) delete this._linkCatalog.paths[path]
   try {
@@ -2060,7 +2068,7 @@ MiniAWikiManager.prototype.graphBuildSettings = function(overrides, save) {
   var file = this._getIndexRoot() + "/.mini-a-wiki-state/config.json", config = {}
   if (io.fileExists(file)) config = af.fromJson(io.readFileString(file))
   if (!isMap(config)) throw new Error("Invalid wiki state configuration")
-  var run = merge({}, overrides || {})
+  var run = merge(this._config.graphBuildOverrides || {}, overrides || {})
   var defaults = config.graphBuild || (this._config.wikigraphsemantic === true ? { extraction: "semantic", modelHelp: "auto" } : {})
   var effective = MiniAGraphBuild.resolve(run, defaults)
   if (save === true) {
@@ -2078,12 +2086,34 @@ MiniAWikiManager.prototype.graphBuildSettings = function(overrides, save) {
   return { ok: true, effective: effective, saved: config.graphBuild || {}, presets: clone(MiniAGraphBuild.presets), models: models, fallback: "Semantic extraction always runs deterministically; models are optional. Time limits stop new calls; in-flight calls use their request timeout." }
 }
 
+// Borrow the existing lexical passage index for maintenance discovery without graph recursion.
+MiniAWikiManager.prototype._graphLexicalCandidates = function(path, query, limit) {
+  if (!this._retrievalV2 || !query || !io.fileExists(this._retrievalV2.root + "/current.json")) return []
+  var engine = this._retrievalV2
+  var snapshot
+  try {
+    snapshot = engine.acquire()
+    return engine._query(snapshot, query, limit + 1, 0).hits
+      .filter(function(hit) {
+        return hit.record.path !== path
+      })
+      .slice(0, limit)
+      .map(function(hit, rank) {
+        return { path: hit.record.path, rank: rank, passageId: hit.record.passageId }
+      })
+  } catch(error) {
+    return []
+  } finally {
+    if (snapshot) engine.release(snapshot)
+  }
+}
+
 MiniAWikiManager.prototype.graph = function(op, params) {
   this._maybeRefreshArtifactBundle()
   var action = isString(op) ? op.toLowerCase().trim() : (isObject(params) && isString(params.op) ? params.op.toLowerCase().trim() : "stats")
   var p = isObject(params) ? params : {}
   if (action === "settings" || action === "defaults") return this.graphBuildSettings(p, action === "defaults")
-  if (this._catalog && ["build", "report", "falkor"].indexOf(action) >= 0) return { ok: false, error: this._readOnlyError() }
+  if (this._catalog && ["build", "reconcile", "upgrade", "resume", "rollback", "embeddings", "report", "falkor"].indexOf(action) >= 0) return { ok: false, error: this._readOnlyError() }
   var mountGraphRequest = (action === "neighbors" || action === "retrieve") && isString(p.path) && p.path.startsWith("@")
   if (this._catalog && action === "stats" && toBoolean(this._config.usegraph) === true) {
     // A generated catalog has no graph of its own. Count mounted graphs
@@ -2101,6 +2131,28 @@ MiniAWikiManager.prototype.graph = function(op, params) {
     })
     return summary
   }
+  if (action === "rollback") {
+    if (typeof __miniAGraphRollback !== "function") loadLib(__miniAPath("js/wiki/mini-a-graph-upgrade.js"))
+    return __miniAGraphRollback(this, p)
+  }
+  if (action === "upgrade" || action === "resume") {
+    if (typeof __miniAGraphUpgrade !== "function") loadLib(__miniAPath("js/wiki/mini-a-graph-upgrade.js"))
+    var previewGraph
+    if (p.preview === true && !this._graph && this._config.usegraph === true) {
+      loadLib(__miniAPath("js/wiki/mini-a-graph.js"))
+      previewGraph = new MiniAWikiGraph({ graphDir: this._getGraphPath(), graphRaw: "{}", autosave: "off", modelExtractors: [] })
+      this._graph = previewGraph
+    }
+    try {
+      return __miniAGraphUpgrade(this, merge({ graphOnly: true, resumeOnly: action === "resume" }, p))
+    } finally {
+      if (previewGraph) {
+        previewGraph._pendingSave = false
+        previewGraph.close()
+        this._graph = __
+      }
+    }
+  }
   if (!isObject(this._graph) && !mountGraphRequest) {
     if (toBoolean(this._config.usegraph) !== true) return { ok: false, error: "wiki graph is not enabled (usewikigraph=true; manager config: usegraph=true)" }
     if (this._catalog) return { ok: false, error: "generated wiki catalog has no primary graph; use graph stats for mounted graphs or configure wikiroot for primary graph operations" }
@@ -2109,12 +2161,23 @@ MiniAWikiManager.prototype.graph = function(op, params) {
   // read-only wikis can query an existing graph (local graph.json or external FalkorDB)
   // but never build or persist one
   if (this._access !== "rw") {
-    var mutating = ["build", "report"].indexOf(action) >= 0 || (action === "falkor" && !isString(p.query))
+    var mutating = ["build", "reconcile", "embeddings", "report"].indexOf(action) >= 0 && p.preview !== true || (action === "falkor" && !isString(p.query))
     if (mutating) return { ok: false, error: "wiki is read-only: graph '" + action + "' requires wikiaccess=rw" }
+  }
+  if (action === "embeddings") {
+    var embeddingOptions = merge(p, this.graphBuildSettings(p).effective)
+    return new MiniAGraphReconciler(this._graph).refreshEmbeddings(this._graphPages(), embeddingOptions)
+  }
+  if (action === "reconcile") {
+    var reconcileOptions = merge({}, p)
+    if (isUnDef(p.reconcile) && this.graphBuildSettings({}).effective.reconcile === "off") reconcileOptions.reconcile = "lexical"
+    var reconcileEffective = this.graphBuildSettings(reconcileOptions).effective
+    if (reconcileEffective.reconcile === "off") return { ok: true, status: "off", changed: false, calls: 0 }
+    return this._graph.build(this._graphPages(), merge(reconcileOptions, reconcileEffective, { extraction: "structural", modelHelp: "off", lexicalCandidates: this._graphLexicalCandidates.bind(this) }))
   }
   if (action === "build") {
     var effective = this.graphBuildSettings(p).effective
-    var result = this._graph.build(this._graphPages(), merge(p, effective))
+    var result = this._graph.build(this._graphPages(), merge(p, effective, { lexicalCandidates: this._graphLexicalCandidates.bind(this) }))
     if (p.report === true && p.preview !== true && isFunction(this._graph.saveReport)) this._graph.saveReport()
     return result
   }
@@ -2124,7 +2187,7 @@ MiniAWikiManager.prototype.graph = function(op, params) {
     var vocabulary = Object.keys(this._graph._state.nodes).filter(function(id) { return id.indexOf("tag:") === 0 }).map(function(id) { return id.substring(4) })
     return this._graph.tagSuggestions(p.path, page.meta && page.meta.tags, vocabulary)
   }
-  if (action === "report") return isFunction(this._graph.saveReport) ? this._graph.saveReport() : { ok: false, error: "report not supported" }
+  if (action === "report") return isFunction(this._graph.saveReport) ? this._graph.saveReport(p) : { ok: false, error: "report not supported" }
   if ((action === "neighbors" || action === "retrieve") && isString(p.path) && p.path.startsWith("@")) {
     var mres = this._resolveMountPath(p.path)
     if (!mres || !mres.mount) return { ok: false, error: "mount not found" }
@@ -2150,9 +2213,15 @@ MiniAWikiManager.prototype.graph = function(op, params) {
   if (action === "path") return this._graph.path(p.from || p.a || "", p.to || p.b || "", p)
   if (action === "communities") return this._graph.detectCommunities()
   if (action === "surprise") return this._graph.crossDocumentSurprise()
-  if (action === "stats") return this._graph.stats()
+  if (action === "stats") return this._graph.stats(p)
   if (action === "export") return this._graph.export(isString(p.format) ? p.format : "mermaid")
-  if (action === "falkor") return isString(p.query) ? this._graph.falkorQuery(p.query) : this._graph.falkorSync()
+  if (action === "falkor") {
+    if (isString(p.query)) return this._graph.falkorQuery(p.query)
+    var synchronized = this._graph.falkorSync()
+    var syncMarker = this._graph._graphDir + "/remote-sync.json"
+    if (synchronized && synchronized.ok === true && io.fileExists(syncMarker)) io.rm(syncMarker)
+    return synchronized
+  }
   if (action === "retrieve") return this._graph.retrieve(p.concepts || p.query || "", p)
   if (action === "answer") return this._graph.answer(p.question || p.query || "", p)
   if (action === "cross") {
@@ -5899,7 +5968,7 @@ loadLib(__miniAPath("js/wiki/mini-a-wiki-export.js"), true)
   var original = MiniAWikiManager.prototype[name]
   if (!isFunction(original)) return
   MiniAWikiManager.prototype[name] = function() {
-    var writesGraph = name !== "graph" || ["build", "report", "falkor"].indexOf(String(arguments[0])) >= 0
+    var writesGraph = name !== "graph" || ["build", "reconcile", "upgrade", "resume", "rollback", "embeddings", "report", "falkor"].indexOf(String(arguments[0])) >= 0 && !(arguments[1] && arguments[1].preview === true)
     var pendingMove = function(manager) {
       return writesGraph && name !== "configure" && name !== "move" && manager._knowledgeRecoveringMove !== true &&
         manager._backend && !manager._catalog && io.fileExists(manager._getIndexRoot() + "/.mini-a-wiki-move/journal.json")

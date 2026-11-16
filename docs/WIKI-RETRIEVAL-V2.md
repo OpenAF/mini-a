@@ -1417,3 +1417,16 @@ WIKI_EMBED_OPENAF_SOURCE=../openaf/js/owrap.ai.js WIKI_EMBED_CACHE=/private/tmp/
 `WIKI_EMBED_FIXTURE` accepts a fixture with `pages` and `queries` in the existing retrieval-quality format. The report includes production lexical quality, lexical passage-candidate quality, candidate hybrid quality, call/cache counts, and a conservative gate (at least 0.10 absolute improvement with no per-query regression). It uses exhaustive vector comparison solely as a small-corpus quality oracle, not a large-wiki serving implementation. A passing fixture alone does not enable embeddings. A representative quality win must precede production HNSW integration and the planned 100,000-passage benchmark.
 
 Offline checks: `oaf -f tests/wikiEmbeddings.js` and `oaf -f tests/wikiFullRebuild.js`.
+
+## Optional graph reconciliation
+
+[Graph reconciliation](WIKI-GRAPH-V2.md) can improve the derived graph used by
+bounded expansion. It borrows the existing lexical passage index for candidate
+discovery, grounds independent concept memberships and verifies pair-validation
+dependencies against current revisions. Similarity-only edges are never persisted.
+
+The serving pipeline still makes no embedding or LLM calls. Disabling reconciliation
+preserves existing retrieval ranking. Hybrid graph maintenance only reranks bounded
+lexical/feature candidates; it does not change V2 into vector question answering.
+Missing discovery/cache sidecars after export do not prevent serving the graph;
+they rebuild during explicit maintenance.

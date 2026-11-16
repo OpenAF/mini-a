@@ -165,7 +165,10 @@ MiniAEmbeddings.prototype.peek = function(text) {
   if (isMap(cached)) {
     this.stats.hits++
     MiniAEmbeddings.metrics({ hit: true })
-    return MiniAEmbeddings.vector(cached.vector)
+    var vector = MiniAEmbeddings.vector(cached.vector)
+    var shape = $ch(this.name).get({ identity: this.identity })
+    if (isNumber(this.dimensions) && vector.length !== this.dimensions || isMap(shape) && shape.dimensions !== vector.length) throw new Error("embedding-dimension-mismatch")
+    return vector
   }
   return __
 }

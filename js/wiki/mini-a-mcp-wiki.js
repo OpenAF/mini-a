@@ -569,6 +569,7 @@ function __miniAMcpWikiBuildConfig(args, options) {
     wikisourceurl       : isString(args.wikisourceurl) && args.wikisourceurl.trim().length > 0 ? args.wikisourceurl.trim() : __,
     wikisourcefield     : isString(args.wikisourcefield) && args.wikisourcefield.trim().length > 0 ? args.wikisourcefield.trim() : __,
     wikisourceinline    : toBoolean(args.wikisourceinline) === true,
+    graphBuildOverrides : __miniAWikiConfigFromArgs(args).graphBuildOverrides,
     usegraph            : (isDef(args.usewikigraph) ? toBoolean(args.usewikigraph) : false) || isString(wikiGraphFalkorHost),
     wikigraphcommunity  : isString(args.wikigraphcommunity) && args.wikigraphcommunity.trim().length > 0 ? args.wikigraphcommunity.trim() : __,
     wikigraphsearchhints: isDef(args.wikigraphsearchhints) ? toBoolean(args.wikigraphsearchhints) : true,

@@ -153,6 +153,12 @@ try:
     html = request("wikis/b/graph/html")
     assert "Markdown page links" in html and "mini-a-wiki-graph-node" in html
     job("wikis/a/graph/rebuild", {"semantic": False})
+    preview = request("wikis/a/graph/preview", "POST", {"reconcile": "lexical"})
+    assert preview["preview"] and preview["modelCalls"] == 0
+    job("wikis/a/graph/upgrade", {"confirmExpensive": True, "reconcile": "lexical"})
+    diagnostics = request("wikis/a/graph/stats?detailed=true")
+    assert "connectivity" in diagnostics["stats"]
+    job("wikis/a/graph/reconcile", {"reconcile": "lexical"})
     before = {p.relative_to(root / "a"): p.read_bytes() for p in (root / "a").rglob("*") if p.is_file()}
     job("wikis/a/dreams", {"mode": "plan", "options": {"semantic": False}})
     after = {p.relative_to(root / "a"): p.read_bytes() for p in (root / "a").rglob("*") if p.is_file()}

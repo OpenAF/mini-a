@@ -714,6 +714,9 @@ MiniAIngest.prototype._collectChunks = function(state, oldIds, scope) {
 // Replaying a write already applied is safe only when its resulting signature matches.
 MiniAIngest.prototype._applyJournal = function(wm, journal, path, result) {
   var previous = wm._servingBatchChanges, previousExport = wm._deferServingExport
+  var deferGraph = wm._graph && wm.graphBuildSettings({}).effective.reconcile !== "off"
+  var previousGraphDefer = wm._deferGraphUpdates
+  if (deferGraph) wm._deferGraphUpdates = true
   wm._deferServingExport = true
   try {
     var self = this
@@ -728,7 +731,7 @@ MiniAIngest.prototype._applyJournal = function(wm, journal, path, result) {
     // One graph save and one derived recompute for the whole journal, not one per page.
     if (isFunction(wm._graphBatch)) return wm._graphBatch(function() { return self._applyJournalPages(wm, journal, path, result) })
     return this._applyJournalPages(wm, journal, path, result)
-  } finally { wm._servingBatchChanges = previous; wm._deferServingExport = previousExport }
+  } finally { wm._servingBatchChanges = previous; wm._deferServingExport = previousExport; wm._deferGraphUpdates = previousGraphDefer }
 }
 
 MiniAIngest.prototype._diagnostic = function(result) {
@@ -1324,6 +1327,10 @@ MiniAIngest.prototype.run = function() {
         result.verification = unchangedProof
         result.progress = { pages_committed: true, manifest_committed: true, local_serving_verified: !unchangedProof.skipped, bundle_exported: !!exportCurrent, bundle_export: bundleDestination ? "verified" : "not-configured", remote_delivery: "unverified" }
       }
+    }
+    // A source no-op may still have versioned or budget-limited graph work to finish.
+    if (!incomplete && !operations.length && wm._graph && wm.graphBuildSettings({}).effective.reconcile !== "off") {
+      result.reconciliation = wm.graph("reconcile", wm.graphBuildSettings({}).effective)
     }
     if (!incomplete && self._transformContext) {
       var cachedPaths = self._transformContext.paths.iterator()

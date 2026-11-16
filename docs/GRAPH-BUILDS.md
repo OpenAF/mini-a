@@ -192,3 +192,21 @@ server acceptance require separate environment-specific validation. See the reco
 Structural builds and previews make no model calls. Semantic builds with model help try `OAF_LC_MODEL` first, then `model=` / `OAF_MODEL` if extraction fails validation or needs context. Graph candidate classification uses the bounded Decide API with `modeldec=` / `OAF_DECIDE_MODEL`; `usedecide=false` disables it. Failed or unsupported classification retains the original candidates. Classification never establishes evidence. Decision calls share graph budgets; build reports include `callsByRole`.
 
 Dream auto-repair uses Decide for bounded link choices and the main model for generative repair. Dream reorganization and memory consolidation use the main model.
+
+## Relationship reconciliation and staged upgrades
+
+The build contract also accepts `reconcile=off|lexical|hybrid` (default `off`),
+`reconcileLlm=off|auto` (default `off`), and independent candidate/page/edge,
+validation-call/token/time, embedding-call and comparison budgets. Shared saved
+preferences and explicit CLI/MCP overrides use the same resolver.
+
+`graph.reconcile`, `graph.upgrade`, `graph.resume`, `graph.embeddings` and
+`graph.rollback` extend the existing wiki operation dispatcher. Upgrade previews
+are model-free and safe on read-only filesystem wikis; mutations require write
+access. Full rebuilds stage graph state instead of publishing an empty reset,
+preserve compatible semantic caches and retain a checksum-verified predecessor.
+
+[Wiki Graph v2](WIKI-GRAPH-V2.md) documents exact settings, schemas, operations,
+publication recovery, FalkorDB coordination and measured limits. `wikigraphsemantic`
+continues to mean semantic extraction; vector similarity is candidate discovery,
+not factual evidence. No ANN database or new mandatory dependency is introduced.

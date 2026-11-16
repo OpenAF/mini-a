@@ -125,6 +125,11 @@ MiniAWikiOps.catalog = (function() {
   })
   add("graph.filestats", "Graph", "Stored graph file diagnostics (advanced)", false, [], { top: 10 })
   add("graph.build", "Graph", "Build structural / semantic graph", true)
+  add("graph.reconcile", "Graph", "Reconcile grounded relationships", true)
+  add("graph.upgrade", "Graph", "Upgrade graph from existing pages", true, [], { confirmExpensive: true })
+  add("graph.resume", "Graph", "Resume staged graph upgrade", true, [], { confirmExpensive: true })
+  add("graph.rollback", "Graph", "Restore verified pre-upgrade graph", true, [["runId", "Upgrade run ID"]])
+  add("graph.embeddings", "Graph", "Refresh graph embedding cache", true)
   add("graph.settings", "Graph", "View graph build defaults", false)
   add("graph.defaults", "Graph", "Save graph build defaults", true)
   add("graph.report", "Graph", "Write graph report", true)
@@ -157,8 +162,8 @@ MiniAWikiOps.operation = function(id) {
 }
 MiniAWikiOps.prototype.spec = function(id, params) {
   var op = MiniAWikiOps.operation(id), p = merge(clone(op.defaults), MiniAWikiOps.parse(params))
-  if (id === "graph.build" || id === "graph.defaults") MiniAGraphBuild.resolve(p)
-  if (id === "graph.defaults" && ["force","resume","strategy","retryFailed"].some(function(k){return isDef(p[k])})) throw new Error("Force, resume, strategy and retryFailed are per-run actions, not saved defaults")
+  if (["graph.build", "graph.defaults", "graph.reconcile", "graph.upgrade", "graph.resume", "graph.embeddings"].indexOf(id) >= 0) MiniAGraphBuild.resolve(p)
+  if (id === "graph.defaults" && ["force","resume","strategy","retryFailed","reconcileRetryFailed"].some(function(k){return isDef(p[k])})) throw new Error("Force, resume, strategy and retryFailed are per-run actions, not saved defaults")
   op.fields.forEach(function(f) {
     if (isUnDef(p[f[0]]) && isDef(f[2])) p[f[0]] = f[2]
     if (isUnDef(p[f[0]]) || (isUnDef(f[2]) && String(p[f[0]]).trim() === "")) throw new Error("Required parameter: " + f[0])
@@ -167,7 +172,7 @@ MiniAWikiOps.prototype.spec = function(id, params) {
   Object.keys(p).forEach(function(k) {
     if (/^(wiki|dream|ingest|absorb|__)/.test(k) || ["confirm", "backupconfirmed", "model", "modeldec", "usedecide", "libs", "usewiki", "usewikigraph"].indexOf(k) >= 0) throw new Error("Use configuration arguments, not params, for " + k)
   })
-  ;["dryRun", "dryrun", "offline", "semantic", "withMeta", "force", "retryFailed", "prune", "allowemptyprune", "independent", "nobundle"].forEach(function(k) {
+  ;["dryRun", "dryrun", "offline", "semantic", "withMeta", "force", "retryFailed", "reconcileRetryFailed", "preview", "confirmExpensive", "graphOnly", "detailed", "prune", "allowemptyprune", "independent", "nobundle"].forEach(function(k) {
     if (isDef(p[k])) {
       if ([true, false, "true", "false"].indexOf(p[k]) < 0) throw new Error("Expected boolean parameter: " + k)
       p[k] = toBoolean(p[k]) === true
@@ -187,6 +192,7 @@ MiniAWikiOps.prototype.spec = function(id, params) {
   return { operation: id, params: p }
 }
 MiniAWikiOps.mutates = function(spec) {
+  if (spec.params && spec.params.preview === true && /^graph\./.test(spec.operation)) return false
   if (spec.operation === "wiki.compact") return toBoolean(spec.params.dryRun) !== true
   if (spec.operation === "ingest.run" || spec.operation === "dream.auto") return toBoolean(spec.params.dryrun) !== true
   return MiniAWikiOps.operation(spec.operation).writes
@@ -273,7 +279,7 @@ MiniAWikiOps.prototype._execute = function(spec, gates) {
     if (id === "wiki.compact" && MiniAWikiOps.mutates(spec) && toBoolean(p.offline) !== true) throw new Error("Compaction requires params.offline=true after stopping other readers and writers")
     var a = merge({}, this.args), cfg = this.targetConfig(), group = id.split(".")[0], action = id.split(".")[1]
 
-    if (id === "graph.build" || id === "graph.defaults" || id === "dream.rebuild") cfg.skipBootstrap = true
+    if (group === "graph" || id === "dream.rebuild") cfg.skipBootstrap = true
     if (id.indexOf("wiki.folder") === 0) cfg.skipBootstrap = true
     if (id === "wiki.folderRestore") { cfg.folderRecovery = true; cfg.maintenanceSourceOnly = true }
     delete a.wikiman; delete a.wikitarget

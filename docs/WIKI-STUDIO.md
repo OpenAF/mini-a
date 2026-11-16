@@ -644,3 +644,20 @@ are isolated by wiki and workflow; submitted jobs keep their effective settings.
 Saved defaults contain tuning only, never source selectors, approvals or model
 credentials. Restoring built-in values changes the form; use Save defaults to
 persist them. Required confirmations remain visible outside Advanced.
+
+## Graph reconciliation and upgrades
+
+Maintenance → Rebuild graph keeps **Advanced options** collapsed. Advanced controls
+include lexical/hybrid reconciliation, independent model validation, candidate/page/
+membership limits and separate validation/embedding budgets. **Save defaults**
+also applies these settings to ordinary imports and Dream finalization. Import
+advanced controls can explicitly override reconciliation/validation or use saved
+settings. Activity distinguishes pending enrichment from completed processing.
+
+**Preview graph upgrade** calls `POST /graph/preview` without providers or writes.
+The explicit expensive upgrade selection enables **Upgrade complete graph** and
+**Resume graph upgrade**, via `POST /graph/upgrade` and `/graph/resume`.
+`POST /graph/embeddings` refreshes only vectors, while `/graph/reconcile` runs
+incremental grounding. `GET /graph/stats?detailed=true` powers **Inspect meaningful
+connectivity**. These routes retain existing role/access/job permissions and
+primary-wiki scope. See [Wiki Graph v2](WIKI-GRAPH-V2.md) for recovery and costs.
