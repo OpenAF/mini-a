@@ -62,15 +62,16 @@ WikiStudioServer.prototype.dispatch = function(req) {
     return WikiStudioServer.paginate(events.reverse(), q)
   }
   if (p[2] === "wikis" && p.length >= 4) {
-    // Re-pointing a root is the repair for a failed verify(), so that one request skips it.
+    // Registry-only repair and removal must work when the root no longer exists.
     var repointing = p.length === 4 && req.method === "PATCH" && isDef(body.root)
-    var w = repointing ? this.registry.get(p[3]) : this.registry.verify(this.registry.get(p[3]))
+    var unregistering = p.length === 4 && req.method === "DELETE"
+    var w = repointing || unregistering ? this.registry.get(p[3]) : this.registry.verify(this.registry.get(p[3]))
     if (p.length === 4) {
       if (read) return this.publicWiki(w, role)
       WikiStudio.authorize(role, "admin")
       return WikiStudio.wikiLock(c.home, w.id, function() {
-        // Jobs capture the root at submit time, so a re-point waits until no job is queued or running.
-        if (repointing && self.assertIdle) self.assertIdle(w.id)
+        // Keep queued or running jobs attached to their registered wiki and root.
+        if ((repointing || unregistering) && self.assertIdle) self.assertIdle(w.id)
         if (req.method === "PATCH") return self.registry.update(w.id, body, false)
         if (req.method === "DELETE") return self.registry.update(w.id, {}, true)
         WikiStudio.fail(405, "method_not_allowed", "Method not allowed")

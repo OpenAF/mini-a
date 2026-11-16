@@ -335,5 +335,35 @@ run('StudioApi.request=api;StudioApi.background=api;studioSession={canTestWiki:f
   assert.equal(folderJobs[1].body.confirmation,'Renamed','Deletion forwards exact confirmation');
   assert.equal(run('pageState().folder'),'','Deleted folder selects parent');
   assert(folderHost.textContent.includes('Folder deleted.'),'Deletion feedback visible');
-  console.log('PASS: Pages default, keyboard tree, read/edit, grouped downloads, retained drafts, preview gates, late-save race, chart fallback and recursive folder controls');
+  // Broken registrations can be removed from the dashboard without opening the wiki.
+  const removals = [], prompts = [];
+  let acceptRemoval = false, removalFails = false;
+  context.removalApi = async (path, method) => {
+    removals.push({path, method});
+    if (removalFails) throw Error('Wiki has queued or running maintenance');
+    return {ok:true};
+  };
+  context.removalDialog = async title => { prompts.push(title); return acceptRemoval; };
+  context.refreshDashboard = async () => { removals.push({refresh:true}); };
+  run('StudioApi.request=removalApi;studioDialog=removalDialog;dashboard=refreshDashboard;studioSession={role:"admin"};');
+  const brokenHost = new Element('div');document.body.append(brokenHost);context.brokenHost=brokenHost;
+  run('dashboardWiki(brokenHost,{id:"gone",name:"Gone wiki",access:"rw",root:"/wikis/gone",rootState:"missing"})');
+  assert(find(brokenHost,'button','Gone wiki · rw').disabled,'Missing wiki cannot be opened');
+  assert(find(brokenHost,'button','Change root…'),'Repair remains available');
+  await click(brokenHost,'Unregister…');
+  assert.equal(removals.length,0,'Cancel preserves registration');
+  assert(prompts[0].includes('Gone wiki (gone)')&&prompts[0].includes('/wikis/gone'),'Confirmation identifies selected wiki');
+  acceptRemoval=true;removalFails=true;
+  await click(brokenHost,'Unregister…');
+  assert(!find(brokenHost,'button','Unregister…').disabled,'Failure permits retry');
+  assert(document.getElementById('message').textContent.includes('maintenance'),'Actionable error is shown');
+  removalFails=false;
+  await click(brokenHost,'Unregister…');
+  assert.equal(removals.at(-2).path,'wikis/gone','Removal targets selected registration');
+  assert.equal(removals.at(-2).method,'DELETE');
+  assert.equal(removals.at(-1).refresh,true,'Dashboard refreshes after removal');
+  brokenHost.replaceChildren();
+  run('studioSession={role:"viewer"};dashboardWiki(brokenHost,{id:"gone",name:"Gone wiki",root:"/wikis/gone",rootState:"missing"})');
+  assert(!find(brokenHost,'button','Unregister…'),'Unregister is limited to admins');
+  console.log('PASS: Pages, import, folder controls and missing-root dashboard removal');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -219,6 +219,14 @@ try:
     request("wikis/b/dreams", "POST", {"mode": "apply"}, status=403, headers={"Idempotency-Key": uuid.uuid4().hex})
     request("wikis/b", "DELETE")
     assert (root / "b" / "separate.md").is_file()
+    # A deleted root can still be removed from the initial registry list.
+    (root / "gone").mkdir()
+    request("wikis", "POST", {"id": "gone", "name": "Gone wiki", "root": str(root / "gone"), "access": "rw"})
+    shutil.rmtree(root / "gone")
+    assert next(w for w in request("wikis")["items"] if w["id"] == "gone")["rootState"] == "missing"
+    request("wikis/gone", "DELETE")
+    assert "gone" not in {w["id"] for w in request("wikis")["items"]}
+    assert not (root / "gone").exists()
     # Simulate an abrupt crash; no active engine is being interrupted here.
     os.killpg(proc.pid, signal.SIGKILL)
     proc.wait(timeout=10)

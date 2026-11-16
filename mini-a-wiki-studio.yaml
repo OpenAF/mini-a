@@ -7,6 +7,7 @@ help:
     STUDIO_TOKEN must contain at least 32 characters when set.
     Configure OAF_MODEL for model-backed operations and wiki test servers;
     OAF_LC_MODEL optionally configures the low-cost model.
+    OAF_MINI_A_LIBS loads comma-separated libraries in Studio and its workers.
   expects:
   - name     : studiohome
     desc     : "Directory for Studio state, registry, jobs, backups and audit logs (default: ~/.openaf-mini-a/wiki-studio)"

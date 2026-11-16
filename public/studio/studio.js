@@ -316,21 +316,40 @@ async function dashboard(offset = 0) {
   addWikiForm(host);
 }
 
-// One dashboard entry; a moved or replaced root offers Change root instead of opening.
+// Offer registry repair and removal directly beside an inaccessible wiki.
 function dashboardWiki(host, wiki) {
-  const broken = wiki.rootState && wiki.rootState !== "ok";
-  const entry = broken ? row(host) : host;
-  const open = withIcon(el("button", wiki.name + " · " + wiki.access, entry), wiki.access === "rw" ? "edit" : "lock");
+  var broken = wiki.rootState && wiki.rootState !== "ok"
+  var entry = broken ? row(host) : host
+  var open = withIcon(el("button", wiki.name + " · " + wiki.access, entry), wiki.access === "rw" ? "edit" : "lock")
   if (!broken) {
-    open.onclick = safely(() => openWiki(wiki));
-    return;
+    open.onclick = safely(() => openWiki(wiki))
+    return
   }
-  entry.classList.add("wiki-broken");
-  open.disabled = true;
-  open.title = "Root folder needs attention: " + wiki.root;
-  const labels = { missing: "root folder missing", changed: "root folder replaced", unavailable: "backend unavailable" };
-  el("span", labels[wiki.rootState] || wiki.rootState, entry).className = "badge";
-  if (wiki.rootState !== "unavailable") button(entry, "Change root…", () => changeRoot(wiki), "folder");
+  entry.classList.add("wiki-broken")
+  open.disabled = true
+  open.title = "Root folder needs attention: " + wiki.root
+  var labels = { missing: "root folder missing", changed: "root folder replaced", unavailable: "backend unavailable" }
+  el("span", labels[wiki.rootState] || wiki.rootState, entry).className = "badge"
+  if (wiki.rootState !== "unavailable") button(entry, "Change root…", () => changeRoot(wiki), "folder")
+  if (studioSession.role === "admin") {
+    var unregister = button(entry, "Unregister…", async function() {
+      if (unregister.disabled) return
+      unregister.disabled = true
+      try {
+        await unregisterWiki(wiki)
+      } finally {
+        unregister.disabled = false
+      }
+    }, "trash")
+  }
+}
+
+// Remove only the selected registry entry after confirming its name and path.
+async function unregisterWiki(wiki) {
+  if (!(await askConfirmation("Unregister " + wiki.name + " (" + wiki.id + ")?\n" + wiki.root + "\nOnly the Studio registry entry will be removed. Any wiki files will remain."))) return
+  await StudioApi.request("wikis/" + encodeURIComponent(wiki.id), "DELETE")
+  await dashboard()
+  message("Unregistered " + wiki.name)
 }
 
 // Re-point a registered wiki at another existing folder after showing what that folder holds.

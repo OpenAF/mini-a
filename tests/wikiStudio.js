@@ -130,6 +130,20 @@
     assert(WikiStudioRegistry.capabilities(merge(w, { access: "ro" })).canEdit, false, "Read-only capabilities")
     s.registry.update("alpha", {}, true); assert(io.fileExists(w.root), true, "Unregister preserves data")
     assert(s.registry.list().length, 0, "Unregistered")
+
+    // Missing roots remain removable through the API with authorization and job guards.
+    w = add(s, t)
+    io.rm(w.root)
+    var removal = { method: "DELETE", path: "/api/v1/wikis/alpha", query: {}, headers: {}, role: "viewer" }
+    rejects(function() { s.dispatch(removal) }, "forbidden")
+    removal.role = "admin"
+    s.assertIdle = function() { WikiStudio.fail(423, "wiki_maintenance", "busy") }
+    rejects(function() { s.dispatch(removal) }, "wiki_maintenance")
+    assert(s.registry.list().length, 1, "Busy wiki remains registered")
+    delete s.assertIdle
+    assert(s.dispatch(removal).ok, true, "Missing root can be unregistered")
+    assert(s.registry.list().length, 0, "Missing entry removed")
+    assert(io.fileExists(w.root), false, "Unregister does not recreate a missing folder")
   }) }
   // Root picker lists allowroots, child directories with badges, virtual paths, and refuses escapes.
   exports.testRootBrowse = function() { fixture(function(s, t) {
