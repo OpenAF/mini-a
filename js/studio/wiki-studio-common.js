@@ -108,6 +108,11 @@ WikiStudio.identity = function(root) {
   var a = java.nio.file.Files.readAttributes(WikiStudio.path(root), java.nio.file.attribute.BasicFileAttributes)
   return String(a.fileKey())
 }
+// True when a root-relative path has a hidden segment (e.g. .mini-a-wiki-state/manifest.json, .git/...)
+WikiStudio.internalPath = function(rel) {
+  return /(^|\/)\./.test(rel)
+}
+// Builds the wiki file inventory, enforcing the Studio count and size limits on content files
 WikiStudio.scan = function(root, all, metadataOnly) {
   var files = {}, total = 0, count = 0, linkedFiles = {}
   WikiStudio.noLinks(root)
@@ -121,11 +126,14 @@ WikiStudio.scan = function(root, all, metadataOnly) {
       if (!all && (name.charAt(0) === "." || /^AGENTS\.md$/i.test(name))) continue
       if (f.isDirectory()) walk(String(f), depth + 1)
       else if (f.isFile() && (all || /\.md$/i.test(name))) {
-        total += Number(f.length())
-        WikiStudio.assert(count < 20000 && total <= 536870912 && f.length() <= 16777216, 413, "inventory_limit", "Wiki inventory exceeds Studio limits")
+        // Hidden internal files are still fingerprinted and backed up, but they do not count toward the content limits
+        if (!WikiStudio.internalPath(rel)) {
+          total += Number(f.length())
+          WikiStudio.assert(count < 20000 && total <= 536870912 && f.length() <= 16777216, 413, "inventory_limit", "Wiki inventory exceeds Studio limits")
+          count++
+        }
         files[rel] = { size: Number(f.length()) }
         if (metadataOnly !== true) files[rel].hash = WikiStudio.hash(java.nio.file.Files.readAllBytes(f.toPath()))
-        count++
       }
     }
   }
