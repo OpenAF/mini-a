@@ -844,6 +844,14 @@ MiniA.prototype._stopAgentResources = function() {
   // Disposed agents must not retain closed graph and reader trees.
   this._wikiManager = __
   this._skillWikiManager = __
+
+  // Registered tool callbacks can outlive the agent and retain these same wiki trees.
+  if (isObject(this._skillUtils)) {
+    this._skillUtils._wikiManager = __
+    this._skillUtils._skillWikiManager = __
+    this._skillUtils._skillProvider = __
+  }
+
   if (isFunction(MiniA._untrackInstance)) MiniA._untrackInstance(this)
 }
 

@@ -60,6 +60,51 @@ try {
   memoryAssert(Object.keys(global.__miniAGraphReaders.entries).length === before + 1, "second owner retains graph")
   b.close()
   memoryAssert(Object.keys(global.__miniAGraphReaders.entries).length === before, "last close releases graph")
+
+  // Exercise normal CLI/web configuration, including its unconfigured Falkor map.
+  var wikiRoot = memoryDir + "/wiki"
+  io.mkdir(wikiRoot)
+  io.writeFileString(wikiRoot + "/index.md", "# Memory fixture")
+  var wikiWriter = new MiniAWikiGraph({ graphDir: wikiRoot + "/.mini-a-wiki-graph" })
+  wikiWriter.buildStructural([{ path: "index.md", meta: { title: "Memory fixture" }, body: "# Memory fixture", links: [] }])
+  wikiWriter.close()
+  for (var cycle = 0; cycle < 3; cycle++) {
+    var managers = []
+    try {
+      var hosts = [__, "", "  "]
+      hosts.forEach(function(host) {
+        var config = __miniAWikiConfigFromArgs({ wikiroot: wikiRoot, wikiaccess: "ro", usewikigraph: true, wikigraphfalkorhost: host })
+        var manager = new MiniAWikiManager(config)
+        managers.push(manager)
+        memoryAssert(Object.keys(global.__miniAGraphReaders.entries).length === before, "default manager defers graph loading")
+      })
+      managers.forEach(function(manager) {
+        memoryAssert(manager._graph.stats().nodes > 0, "manager can query the shared graph")
+      })
+      memoryAssert(Object.keys(global.__miniAGraphReaders.entries).length === before + 1, "default managers share one parsed graph")
+      managers[0].close()
+      memoryAssert(managers[1]._graph.stats().nodes > 0, "closing one manager preserves other readers")
+    } finally {
+      managers.forEach(function(manager) { manager.close() })
+    }
+    memoryAssert(Object.keys(global.__miniAGraphReaders.entries).length === before, "manager closure releases shared graphs every cycle")
+  }
+
+  // Configured remote, writable and custom readers must keep private graph state.
+  io.writeFileString(memoryDir + "/remote-sync.json", "{}")
+  var privateConfigs = [
+    { graphDir: memoryDir, readOnly: true, falkor: { host: "fixture.invalid" } },
+    { graphDir: memoryDir, readOnly: false, falkor: {} },
+    { graphDir: memoryDir, readOnly: true, similarConceptsFn: function() { return [] } },
+    { graphDir: memoryDir, readOnly: true, graphRaw: io.readFileString(memoryDir + "/graph.json") }
+  ]
+  privateConfigs.forEach(function(config) {
+    var graph = new MiniAWikiGraph(config)
+    try {
+      memoryAssert(Object.prototype.hasOwnProperty.call(graph, "_cfg"), "configured private reader retains its implementation")
+      memoryAssert(Object.keys(global.__miniAGraphReaders.entries).length === before, "private reader does not publish a shared snapshot")
+    } finally { graph.close() }
+  })
   print("PASS wiki memory streaming and graph ownership")
 } finally {
   io.scanJSON = memoryScan

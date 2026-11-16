@@ -592,6 +592,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testStopAgentResourcesIsIdempotentAndUntracksAgent
 
+- name: MiniA Core Tests::AgentToolWikiShutdown
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testStopAgentResourcesReleasesToolWikiReferences
+
 - name: MiniA Core Tests::ProxyMcpShutdown
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -1380,6 +1385,7 @@ todo:
 - MiniA Core Tests::SubtaskWatchdogShutdown
 - MiniA Core Tests::AgentSubtaskManagerShutdown
 - MiniA Core Tests::AgentResourceShutdownIdempotent
+- MiniA Core Tests::AgentToolWikiShutdown
 - MiniA Core Tests::ProxyMcpShutdown
 - MiniA Core Tests::SubtaskChildArgSanitization
 - MiniA Core Tests::SubtaskExplicitChildArgs

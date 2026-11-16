@@ -13,6 +13,11 @@ Updated files acquire a new snapshot; closing the last owner drops the old one.
 Writable graphs, archive graphs and FalkorDB retain their separate implementations.
 Custom similarity callbacks also retain private graphs.
 
+An empty FalkorDB options map, or a missing/blank host, still uses shared local
+readers. Only a configured nonblank host selects the private FalkorDB reader.
+Agent shutdown also clears wiki references and the cached wiki skill provider
+from utility tools, since registered tool callbacks can outlive their agent.
+
 Run `ojob tests/wikiMemory.yaml`, `ojob tests/graph.yaml` and
 `ojob tests/wiki.yaml` for streaming, ownership and functional regressions.
 The memory test is also included in the wiki suite.

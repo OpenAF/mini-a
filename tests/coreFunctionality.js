@@ -2823,6 +2823,32 @@
     ow.test.assert(MiniA._activeInstances.indexOf(agent) < 0, true, "Stopped agent should not remain in global shutdown tracking")
   }
 
+  // Tool callbacks may outlive a stopped agent, so they must release wiki ownership too.
+  exports.testStopAgentResourcesReleasesToolWikiReferences = function() {
+    var cases = [{ shared: false }, { shared: true }, { shared: false, failClose: true }]
+    cases.forEach(function(testCase) {
+      var agent = createAgent()
+      var closed = 0
+      var wiki = { close: function() {
+        closed++
+        if (testCase.failClose) throw new Error("Fixture close failure")
+      } }
+      var skills = testCase.shared ? wiki : { close: function() { closed++ } }
+      var tool = { _wikiManager: wiki, _skillWikiManager: skills, _skillProvider: { _wm: skills } }
+      agent._wikiManager = wiki
+      agent._skillWikiManager = skills
+      agent._skillUtils = tool
+      try {
+        agent._stopAgentResources()
+        agent._stopAgentResources()
+        ow.test.assert(closed, testCase.shared ? 1 : 2, "Owned wiki managers close once")
+        ow.test.assert(isUnDef(agent._wikiManager) && isUnDef(agent._skillWikiManager), true, "Agent releases direct wiki references")
+        ow.test.assert(isUnDef(tool._wikiManager) && isUnDef(tool._skillWikiManager), true, "Retained tool callbacks release wiki references")
+        ow.test.assert(isUnDef(tool._skillProvider), true, "Retained tool releases its cached wiki provider")
+      } finally { agent._stopAgentResources() }
+    })
+  }
+
   exports.testDestroyMcpProxyConnectionsClosesOwnerClientsOnce = function() {
     var savedProxyState = global.__mcpProxyState__
     var savedProxyHelpers = global.__mcpProxyHelpers__

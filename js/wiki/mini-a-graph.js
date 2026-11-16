@@ -9,7 +9,11 @@ loadLib(__miniAPath("js/wiki/mini-a-graph-reconcile.js"))
 // Description: Optional wiki knowledge-graph layer for Mini-A.
 
 var MiniAWikiGraph = function(config, loggerFn) {
-  if (isMap(config) && config.readOnly === true && !config.__privateReader && !isString(config.graphRaw) && !isMap(config.falkor) && !isFunction(config.similarConceptsFn)) return MiniAWikiGraph.sharedReader(config, loggerFn)
+  // Default wiki options contain a Falkor map even when no remote host is configured.
+  var hasFalkor = isMap(config) && isMap(config.falkor) && isString(config.falkor.host) && config.falkor.host.trim().length > 0
+  if (isMap(config) && config.readOnly === true && !config.__privateReader && !isString(config.graphRaw) && !hasFalkor && !isFunction(config.similarConceptsFn)) {
+    return MiniAWikiGraph.sharedReader(config, loggerFn)
+  }
   this._cfg = isMap(config) ? config : {}
   this._log = isFunction(loggerFn) ? loggerFn : function() {}
   this._graphDir = isString(this._cfg.graphDir) && this._cfg.graphDir.trim().length > 0 ? String(this._cfg.graphDir).trim() : "./.mini-a-wiki-graph"
