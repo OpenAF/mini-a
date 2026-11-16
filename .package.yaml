@@ -428,9 +428,9 @@ filesHash:
   js/skills/mini-a-plugins.js: 98f9452a44ea046f0ad6cee9fe28afb26c26717b
   js/skills/mini-a-skill-runtime.js: 83360a5b4362a0ad97103e438425f468dbe764f7
   js/skills/mini-a-skills.js: 496abeceec1f68fd37888ee7b6f229b7a5c15046
-  js/studio/wiki-studio-api.js: 9454cbec3a0a9574391073cbdf35b29f58e72049
+  js/studio/wiki-studio-api.js: cd42655d2c7a88593415f6a8d1f500528b3b1ef8
   js/studio/wiki-studio-backups.js: a988e76e58702cedd9e460ccbc1d4541a55e6ffd
-  js/studio/wiki-studio-bootstrap.js: b372b762e60f9fce16246ff44ac5b22dee3fa109
+  js/studio/wiki-studio-bootstrap.js: 087d3ab4cae7987fe41f15bbd85117d7a0ecddd1
   js/studio/wiki-studio-common.js: ab82e2f57a5fd6be87a8de4fb592dca27933c6e5
   js/studio/wiki-studio-config.js: 9fea13ace56ab4996e0ab78dd9ab24eacf7cb7a4
   js/studio/wiki-studio-graph.js: 10955546c41707073e8a465b055c4690d4e32d77
@@ -513,7 +513,7 @@ filesHash:
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 47d8268cf58c023da287264bbb275a4602b6f4f4
   mini-a-wiki-studio-worker.yaml: 8c6841c3aa4a0c2e3d4a13fa9b61c9dfde5e49e3
-  mini-a-wiki-studio.yaml: 30c6b0f4d2055064a1939d5fcc60ceb68fc77b4b
+  mini-a-wiki-studio.yaml: 8e6ad956b61ff5be25743ff41be98f89aed06909
   mini-a-wikiman.js: 91add17fe98d8120835e3d1698790f97cd733923
   mini-a-worker.yaml: be28143ec6cb67c9a2c08a6134238560372bb6c2
   mini-a.js: 8553dc16398d24eeb2c6942075b7abb5c1ffc4a3
@@ -530,7 +530,7 @@ filesHash:
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   public/studio/index.html: 594c0185415165d621ecfb528f3bd914b940117b
   public/studio/studio.css: 5276901e63d10fa9320636a7ab7116c0898babdb
-  public/studio/studio.js: 79eda410344cc55771879183264d59bd3e896c6d
+  public/studio/studio.js: 3b750fd14d1ac010f3f252ae14eaff675b97cefb
   skills/mini-a-contract-authoring/SKILL.md: 0d98a31839edfbe86463893816dfd258e5261de7
   skills/mini-a-contract-authoring/references/CONTRACT.md: 58d482c7a033e0c03e7b0fe40d037bcd99e663c9
   skills/mini-a-decisions/SKILL.md: 2f5f011baacbf1bf7d1d37c6268eb78113e62524
