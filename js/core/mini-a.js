@@ -12446,6 +12446,23 @@ MiniA.prototype._storeToolResultInCache = function(cacheKey, result, ttl) {
   })
 }
 
+// Extract provider request rejections from raw or serialized response envelopes.
+MiniA.prototype._providerRequestError = function(payload) {
+  if (isString(payload)) payload = jsonParse(payload, __, __, true)
+  if (!isObject(payload)) return
+
+  var error = payload.error
+  if (isString(error)) {
+    var parsed = jsonParse(error, __, __, true)
+    error = isObject(parsed) && isDef(parsed.error) ? parsed.error : parsed
+  }
+  if (!isObject(error)) error = payload
+  if (error.type !== "invalid_request_error" && error.code !== "unsupported_value" && error.code !== "unsupported_parameter") return
+  if (error.code === "tool_use_failed" || this._isContextOverflowError(error)) return
+  if (!isString(error.message) || error.message.length === 0) return
+  return error
+}
+
 MiniA.prototype._categorizeError = function(error, context) {
   var err = isObject(error) ? error : {}
   if (isString(error)) err = { message: error }
@@ -23256,6 +23273,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var baseMsg = msg
       if (isMap(baseMsg) && isUnDef(baseMsg.action) && (isDef(baseMsg.error) || isDef(baseMsg.message))) {
         var payloadErrorInfo = this._categorizeError(baseMsg, { source: "llm", llmType: llmType, step: step + 1, sourceType: "response-payload" })
+        var requestError = this._providerRequestError(baseMsg) || this._providerRequestError(responseWithStats.raw)
+        // A tool-free retry can recover the provider's restriction on reasoning with tools.
+        var canRecoverToolReasoning = isDef(requestError) && requestError.param === "reasoning_effort" &&
+          /function tools with reasoning_effort/i.test(requestError.message) &&
+          this._useToolsActual === true && isDef(this._llmNoTools)
         if (isObject(payloadErrorInfo) && payloadErrorInfo.contextOverflow === true) {
           runtime.context.push(`[OBS ${step + 1}] (error) ${llmType} model returned context-window overflow payload: ${payloadErrorInfo.reason}`)
           this._registerRuntimeError(runtime, {
@@ -23269,6 +23291,16 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             }
             continue
           }
+        } else if (isDef(requestError) && !canRecoverToolReasoning) {
+          var requestErrorParam = isString(requestError.param) && requestError.param.length > 0 ? " (" + requestError.param + ")" : ""
+          runtime.providerRequestFailure = llmType + " model request rejected" + requestErrorParam + ": " + requestError.message
+          this._triggerEarlyStop(runtime, { reason: runtime.providerRequestFailure })
+          this._registerRuntimeError(runtime, {
+            category: "permanent",
+            message : runtime.providerRequestFailure,
+            context : { step: step + 1, llmType: llmType, source: "response-payload" }
+          })
+          break
         } else if (this._useToolsActual === true && isDef(baseMsg.error) && isUnDef(baseMsg.action) && isDef(this._llmNoTools)) {
           // Model returned a bare {"error":"..."} with tools active — likely the model/runtime
           // doesn't support tool calling (e.g. Ollama thinking models). Fall back to the bare
@@ -24339,6 +24371,15 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (this._execution) {
       if (this._execution.state.outcome === "running") { this._execution.state.outcome = "partial"; this._execution.state.reason = runtime.earlyStopReason || "Execution stopped before acceptance" }
       return this._processFinalAnswer(this._origAnswer || this._executionPartialAnswer(this._execution.state.reason, args), args)
+    }
+
+    // A terminal request rejection also prevents a final-answer request.
+    if (isString(runtime.providerRequestFailure)) {
+      if (this._supervised) {
+        this._supervised.stopped = true
+        this._supervised.reason = runtime.providerRequestFailure
+      }
+      return this._processFinalAnswer(runtime.providerRequestFailure, args)
     }
 
     // If max steps hit without final action

@@ -6,6 +6,32 @@
     return new MiniA()
   }
 
+  // Provider request rejections stop the executor before a retry or final model call.
+  exports.testProviderRequestRejectionStopsExecutor = function() {
+    var agent = createAgent(), requests = 0
+    var error = { type: "invalid_request_error", code: "unsupported_value", param: "temperature", message: "Only the default temperature is supported." }
+    var args = { goal: "Inspect fixture", raw: true, usememory: false, usetools: false, usestream: true }
+    agent.fnI = function() {}
+    try {
+      agent.init(args)
+      agent._use_lc = false
+      agent._supportsPromptStreamWithStatsCompat = function() { return true }
+      agent._prepareContextInvocation = function(llm, prompt) {
+        if (requests > 0) throw new Error("Rejected request must not be retried")
+        return prompt
+      }
+      agent._promptStreamWithStatsCompat = function() {
+        requests++
+        return { response: { error: JSON.stringify({ error: error }) }, stats: {} }
+      }
+      var answer = agent.start(merge({}, args))
+      ow.test.assert(answer.indexOf("(temperature): " + error.message) >= 0, true, "Preserve the provider parameter and message in the answer")
+      ow.test.assert(requests, 1, "Stop after the rejected request")
+    } finally {
+      agent._stopAgentResources()
+    }
+  }
+
   exports.testStreamEnvelopeTextNeverStringifiesChunks = function() {
     var agent = createAgent()
     var ev = function(c, t) { return { model: "m", message: { role: "assistant", content: c, thinking: t }, done: false } }

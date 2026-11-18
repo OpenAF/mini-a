@@ -1,4 +1,9 @@
 jobs:
+- name: MiniA Core Tests::ProviderRequestRejectionStopsExecutor
+  from: MiniA Core Tests::Init
+  to: oJob Test
+  exec: args.func = args.tests.testProviderRequestRejectionStopsExecutor
+
 - name: MiniA Core Tests::StreamEnvelopeTextNeverStringifiesChunks
   from: MiniA Core Tests::Init
   to: oJob Test
@@ -1275,6 +1280,7 @@ ojob:
   - oJob-common
 
 todo:
+- MiniA Core Tests::ProviderRequestRejectionStopsExecutor
 - MiniA Core Tests::StreamEnvelopeTextNeverStringifiesChunks
 - MiniA Core Tests::NativeFinalWithPrefixedAction
 - MiniA Core Tests::SubtaskForkUtf8Budget
