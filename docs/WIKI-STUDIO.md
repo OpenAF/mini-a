@@ -37,14 +37,17 @@ Do not put credentials in arguments, URLs or bookmarks. The browser retains the
 token in memory only; reload requires signing in again. Tokens are not saved in
 the registry/configuration. Securely manage any local terminal output yourself.
 
-The listener binds an explicit `InetSocketAddress("127.0.0.1", port)` using the
-JVM streaming HTTP server. OpenAF's own `httpd.start(port, host)` also supports an
-explicit host; Studio uses the JVM interface to bound input while streaming.
-Non-loopback binding is rejected. Host and Origin must match the local listener.
-This release does **not** provide remote-origin/proxy trust configuration. Use a
-local browser or a trusted local tunnel retaining the loopback origin; do not
-expose it publicly or strip Origin checks to make a remote proxy work. A future
-HTTPS proxy mode needs an explicit allowed public origin and proxy trust policy.
+Studio listens on `127.0.0.1` by default. Set `studiohost` to a local IPv4
+address to select an interface. For a container, run the job with
+`studiohost=0.0.0.0 openbrowser=false`, publish the Docker port with
+`-p 127.0.0.1:8890:8890`, and open `http://localhost:8890` on the host.
+For a different published port or hostname, set the exact browser origin,
+for example `studioorigin=http://localhost:9000` with `-p 127.0.0.1:9000:8890`.
+A TLS proxy must preserve the browser's Host header and use its HTTPS origin
+as `studioorigin`.
+
+Studio logs warnings for non-loopback listeners. The bearer token grants admin
+access and Studio serves plain HTTP. Restrict network access to the listener.
 
 ## Architecture and persistent state
 

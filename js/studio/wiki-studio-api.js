@@ -6,8 +6,14 @@ loadLib(__miniAPath("js/studio/wiki-studio-registry.js"))
 var WikiStudioServer = function(config) { this.config = config; this.registry = new WikiStudioRegistry(config) }
 WikiStudioServer.prototype.auth = function(headers, method) {
   var c = this.config, host = headers.host || "", origin = headers.origin
-  WikiStudio.assert(["127.0.0.1:" + c.port, "localhost:" + c.port].indexOf(host) >= 0, 403, "invalid_host", "Host rejected")
-  if (origin) WikiStudio.assert(["http://127.0.0.1:" + c.port, "http://localhost:" + c.port].indexOf(origin) >= 0, 403, "invalid_origin", "Cross-origin requests are denied")
+  var suffix = c.port === 80 ? "" : ":" + c.port
+  var origins = ["http://127.0.0.1" + suffix, "http://localhost" + suffix]
+  if (c.origin) origins.push(c.origin)
+  var matching = origins.filter(function(candidate) {
+    return candidate.split("//")[1] === host
+  })
+  WikiStudio.assert(matching.length > 0, 403, "invalid_host", "Host rejected")
+  if (origin) WikiStudio.assert(matching.indexOf(origin) >= 0, 403, "invalid_origin", "Cross-origin requests are denied")
   WikiStudio.assert(java.security.MessageDigest.isEqual(WikiStudio.bytes(headers.authorization || ""), WikiStudio.bytes("Bearer " + c.token)), 401, "unauthorized", "A valid bearer token is required")
   return "admin"
 }
@@ -125,13 +131,17 @@ WikiStudioServer.prototype.start = function() {
   java.lang.System.setProperty("sun.net.httpserver.maxReqTime", "60")
   java.lang.System.setProperty("sun.net.httpserver.maxRspTime", "60")
   java.lang.System.setProperty("sun.net.httpserver.maxConnections", "64")
+  if (!new java.net.InetSocketAddress(c.host, c.port).getAddress().isLoopbackAddress()) {
+    logWarn("Wiki Studio is binding to " + c.host + ":" + c.port + ". Anyone who can reach this listener and obtain the bearer token has administrator access to the configured wikis.")
+    logWarn("Studio serves plain HTTP. Publish the container port on host loopback or restrict access behind a trusted HTTPS proxy.")
+  }
   var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(c.host, c.port), 32)
   server.createContext("/", new com.sun.net.httpserver.HttpHandler({ handle: function(ex) { self.handle(ex) } }))
   this._httpExecutor=java.util.concurrent.Executors.newFixedThreadPool(8)
   server.setExecutor(this._httpExecutor); this.http = server
   if (this.startJobs) this.startJobs()
   server.start()
-  var url = "http://127.0.0.1:" + c.port
+  var url = c.origin || "http://127.0.0.1:" + c.port
   print("Wiki Studio: " + url)
   if (c.openBrowser) this.openBrowser(url + "/#token=" + encodeURIComponent(c.token))
 }
@@ -143,7 +153,7 @@ WikiStudioServer.prototype.openBrowser = function(url) {
       return
     }
   } catch(ignoreDesktop) {}
-  logWarn("Could not open the browser automatically. Open " + "http://127.0.0.1:" + this.config.port + " and paste the access token.")
+  logWarn("Could not open the browser automatically. Open " + url.split("#")[0] + " and paste the access token.")
 }
 WikiStudioServer.prototype.stop = function() {
   var server=this.http;this.http=null
@@ -157,7 +167,7 @@ WikiStudioServer.prototype.handle = function(ex) {
   var id = WikiStudio.id(), status = 200, mime = "application/json; charset=utf-8", result, c = this.config, headers = {}, role
   var response = ex.getResponseHeaders()
   response.set("Cache-Control", "no-store"); response.set("X-Content-Type-Options", "nosniff"); response.set("Referrer-Policy", "no-referrer")
-  response.set("Content-Security-Policy", "default-src 'none'; script-src 'self' 'nonce-" + c.graphNonce + "'; style-src 'self' 'nonce-" + c.graphNonce + "'; connect-src 'self'; img-src 'self' data: blob:; frame-src blob:; base-uri 'none'; form-action 'self'; frame-ancestors http://127.0.0.1:" + c.port + " http://localhost:" + c.port)
+  response.set("Content-Security-Policy", "default-src 'none'; script-src 'self' 'nonce-" + c.graphNonce + "'; style-src 'self' 'nonce-" + c.graphNonce + "'; connect-src 'self'; img-src 'self' data: blob:; frame-src blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'self'")
   response.set("X-Request-ID", id)
   try {
     var uri = ex.getRequestURI(), path = String(uri.getPath()), method = String(ex.getRequestMethod()), rawPath = String(uri.getRawPath())

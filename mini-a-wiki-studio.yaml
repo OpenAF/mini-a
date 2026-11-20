@@ -26,10 +26,13 @@ help:
     example  : "8890"
     mandatory: false
   - name     : studiohost
-    desc     : "Listener address (default and only supported value: 127.0.0.1). Non-loopback binding is rejected."
+    desc     : "IPv4 listener address (default: 127.0.0.1). Use 0.0.0.0 for all container interfaces."
     example  : "127.0.0.1"
     mandatory: false
-    options  : ["127.0.0.1"]
+  - name     : studioorigin
+    desc     : "Exact browser origin when the published hostname, scheme or port differs from the listener."
+    example  : "http://localhost:9000"
+    mandatory: false
   - name     : openbrowser
     desc     : "Open the Studio browser automatically with the access token in the URL fragment (default: true)"
     example  : "false"

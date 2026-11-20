@@ -17,8 +17,23 @@ var wikiStudioConfig = function(args, base) {
   })
   var port = Number(args.onport || 8890)
   WikiStudio.assert(port > 0 && port < 65536 && Math.floor(port) === port, 400, "invalid_port", "Invalid port")
-  // Remote listeners are deliberately unavailable until a separately audited proxy configuration exists.
-  WikiStudio.assert(!args.studiohost || args.studiohost === "127.0.0.1", 400, "invalid_host", "Studio binds only 127.0.0.1; use a trusted HTTPS reverse proxy")
+  // Require a literal IPv4 address so the bind target cannot change through DNS.
+  var host = String(isDef(args.studiohost) ? args.studiohost : "127.0.0.1")
+  var octets = host.split(".")
+  WikiStudio.assert(octets.length === 4 && octets.every(function(part) {
+    return /^(0|[1-9][0-9]{0,2})$/.test(part) && Number(part) <= 255
+  }), 400, "invalid_host", "studiohost must be an IPv4 address")
+
+  // A published container port can have a different browser address.
+  var browserHost = host === "0.0.0.0" ? "127.0.0.1" : host
+  var origin = "http://" + browserHost + (port === 80 ? "" : ":" + port)
+  if (isDef(args.studioorigin)) {
+    origin = String(args.studioorigin)
+    var uri = java.net.URI.create(origin)
+    WikiStudio.assert(/^https?:\/\//.test(origin) && uri.getHost() !== null && uri.getUserInfo() === null &&
+      origin === uri.getScheme() + "://" + uri.getRawAuthority() && uri.getPort() !== 0 && uri.getPort() <= 65535,
+      400, "invalid_origin", "studioorigin must be an exact HTTP or HTTPS browser origin")
+  }
   var token = String(getEnv("STUDIO_TOKEN") || "")
   if (!token) {
     var b = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 32); new java.security.SecureRandom().nextBytes(b)
@@ -33,7 +48,7 @@ var wikiStudioConfig = function(args, base) {
     var seen={}
     directories=directories.map(function(d){WikiStudio.fields(d,["id","path"]);WikiStudio.name(d.id);WikiStudio.assert(!seen[d.id],400,"invalid_config","Duplicate directory ID");seen[d.id]=true;WikiStudio.noLinks(d.path);var path=WikiStudio.canonical(d.path);WikiStudio.assert(new java.io.File(path).isDirectory()&&!WikiStudio.inside(path,home)&&path.split("/").length>3&&!/(?:^|\/)\.[^/]+/.test(path),400,"invalid_config","Choose a dedicated visible source directory");return{id:d.id,path:path,identity:WikiStudio.identity(path)}})
   }
-  var c = { home: home, roots: roots, host: "127.0.0.1", port: port, token: token, openBrowser: !(args.openbrowser === false || String(args.openbrowser) === "false"), graphNonce: WikiStudio.id(), maxPageBytes: 1048576, maxBodyBytes: 2097152, workers: 2, base: __miniAPath(".", base) }
+  var c = { home: home, roots: roots, host: host, origin: origin, port: port, token: token, openBrowser: !(args.openbrowser === false || String(args.openbrowser) === "false"), graphNonce: WikiStudio.id(), maxPageBytes: 1048576, maxBodyBytes: 2097152, workers: 2, base: __miniAPath(".", base) }
   c.directories=directories
   ;["sources", "jobs", "backups", "graph-cache", "locks", "audit"].forEach(function(d) { WikiStudio.privateDir(home + "/" + d) })
   WikiStudio.atomic(home + "/config.json", { version: 1, host: c.host, port: port, roots: roots, maxPageBytes: c.maxPageBytes, workers: c.workers })
