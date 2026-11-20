@@ -238,7 +238,11 @@ try:
         directory.mkdir()
         (directory / "job.json").write_text(json.dumps({"version": 1, "id": job_id, "wikiId": "a", "operation": "dream.reorg", "params": {}, "status": state, "createdAt": "2026-01-01T00:00:00Z", "phase": state}))
         seeded.append(job_id)
-    proc = subprocess.Popen([shutil.which("ojob") or "ojob", str(base / "mini-a-wiki-studio.yaml"), f"onport={port}", f"studiohome={temp / 'state'}", "studioallowroots=" + json.dumps([str(root)]), "openbrowser=false"], cwd=temp, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    # Restart with a SLON array and verify that both roots reach the active configuration.
+    second_root = temp / "team wikis"
+    second_root.mkdir()
+    slon_roots = f'["{root}" | "{second_root}"]'
+    proc = subprocess.Popen([shutil.which("ojob") or "ojob", str(base / "mini-a-wiki-studio.yaml"), f"onport={port}", f"studiohome={temp / 'state'}", "studioallowroots=" + slon_roots, "openbrowser=false"], cwd=temp, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     deadline = time.monotonic() + 40
     while True:
         try:
@@ -248,6 +252,7 @@ try:
             if time.monotonic() > deadline:
                 raise AssertionError((temp / "server.log").read_text())
             time.sleep(0.3)
+    assert json.loads((temp / "state/config.json").read_text())["roots"] == [str(root), str(second_root)]
     for job_id in seeded:
         assert request("jobs/" + job_id)["status"] == "interrupted"
     request("jobs", "DELETE", {"wikiId": "a", "ids": seeded, "confirmation": "delete-history"}, status=409)

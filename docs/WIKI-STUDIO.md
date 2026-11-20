@@ -25,6 +25,9 @@ ojob /path/to/mini-a/mini-a-wiki-studio.yaml \
   studioallowroots='["/private/tmp/studio-demo/wikis"]'
 ```
 
+`studioallowroots` also accepts SLON arrays. Quote each path and separate paths
+with `|`, for example `studioallowroots='["/data/wikis" | "/data/team wikis"]'`.
+
 Use the absolute path to the installed oPack's job when launching outside its
 directory. Libraries and assets are anchored to that job's bundle, even when a
 different Mini-A version is installed. Updating the oPack requires restarting

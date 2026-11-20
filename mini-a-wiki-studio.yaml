@@ -14,7 +14,7 @@ help:
     example  : "/data/studio"
     mandatory: false
   - name     : studioallowroots
-    desc     : "JSON array of existing dedicated parent directories allowed to contain wiki roots (default: []). Use canonical paths outside Studio home; system and hidden directories are rejected."
+    desc     : "JSON or SLON array of existing dedicated parent directories allowed to contain wiki roots (default: []). Use canonical paths outside Studio home. System and hidden directories are rejected."
     example  : '["/data/wikis"]'
     mandatory: false
   - name     : studiosourcedirs

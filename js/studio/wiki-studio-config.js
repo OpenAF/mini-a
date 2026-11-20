@@ -4,11 +4,22 @@ if (typeof __miniAPath !== "function") loadLib(String(new java.io.File(String(__
 loadLib(__miniAPath("js/studio/wiki-studio-common.js"))
 var wikiStudioConfig = function(args, base) {
   var home = WikiStudio.canonical(String(args.studiohome || (java.lang.System.getProperty("user.home") + "/.openaf-mini-a/wiki-studio")))
-  WikiStudio.noLinks(home); WikiStudio.privateDir(home)
-  var roots
-  try { roots = JSON.parse(String(args.studioallowroots || "[]")) } catch(e) { throw new Error("studioallowroots must be a JSON array") }
-  WikiStudio.assert(isArray(roots), 400, "invalid_config", "studioallowroots must be a JSON array")
+  WikiStudio.noLinks(home)
+  WikiStudio.privateDir(home)
+
+  // Parse JSON first because fromJSSLON can return JSON string arrays as text.
+  var roots = args.studioallowroots
+  if (isUnDef(roots) || roots === "") roots = []
+  if (isString(roots)) {
+    try {
+      roots = JSON.parse(roots)
+    } catch (e) {
+      roots = af.fromJSSLON(roots)
+    }
+  }
+  WikiStudio.assert(isArray(roots), 400, "invalid_config", "studioallowroots must be a JSON or SLON array")
   roots = roots.map(function(p) {
+    WikiStudio.assert(isString(p) && p.trim().length > 0, 400, "invalid_config", "Each studioallowroots entry must be a directory path")
     WikiStudio.noLinks(p)
     var r = WikiStudio.canonical(p)
     WikiStudio.assert(new java.io.File(r).isDirectory() && !/^\/(?:System|Library|Applications|etc|private\/etc|usr|bin|sbin|var|private\/var)(?:\/|$)/.test(r) && r.split("/").length > 2 && !/(?:^|\/)\.[^/]+/.test(r), 400, "unsafe_allowroot", "Choose a dedicated data directory as allowroot")
