@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20261118'
+version: '20261120'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -351,7 +351,7 @@ filesHash:
   docs/WIKI-QUICKSTART.md: e44a15892c3032da3bec349ff4ea7e63fbd2510f
   docs/WIKI-RETRIEVAL-V2.md: 460b2bcd3b42d43fa68dc5ce2ec105da500cf86c
   docs/WIKI-STUDIO-IMPLEMENTATION.md: 763c1ce0e6268f1853823fb1e904b65be651bb5c
-  docs/WIKI-STUDIO.md: 56a0fb765eefefada0b9a60ca591b63c5f70d1db
+  docs/WIKI-STUDIO.md: 873b0266f03504c433d00b45c2f4e789a78dddd0
   docs/WIKI.md: 4a51df6f3d4837a10a0192c3f748d16c9eca25cd
   docs/WORKERS-QUICKSTART.md: 8090219ee3eb7d281bd1029c8f1dfb91ee52159a
   docs/WORKIQ.md: 9d2a64d6e06e148775a77b8c4df40427ffb16524
@@ -428,11 +428,11 @@ filesHash:
   js/skills/mini-a-plugins.js: 98f9452a44ea046f0ad6cee9fe28afb26c26717b
   js/skills/mini-a-skill-runtime.js: 83360a5b4362a0ad97103e438425f468dbe764f7
   js/skills/mini-a-skills.js: 496abeceec1f68fd37888ee7b6f229b7a5c15046
-  js/studio/wiki-studio-api.js: cd42655d2c7a88593415f6a8d1f500528b3b1ef8
+  js/studio/wiki-studio-api.js: 9f868c0f88d78124a373353ae6b602e363f57849
   js/studio/wiki-studio-backups.js: a988e76e58702cedd9e460ccbc1d4541a55e6ffd
   js/studio/wiki-studio-bootstrap.js: 087d3ab4cae7987fe41f15bbd85117d7a0ecddd1
   js/studio/wiki-studio-common.js: ab82e2f57a5fd6be87a8de4fb592dca27933c6e5
-  js/studio/wiki-studio-config.js: 9fea13ace56ab4996e0ab78dd9ab24eacf7cb7a4
+  js/studio/wiki-studio-config.js: 2a79a5370772a6fe2f9d24ad1ba6d2aec99b91d2
   js/studio/wiki-studio-graph.js: 10955546c41707073e8a465b055c4690d4e32d77
   js/studio/wiki-studio-ingestion.js: 4a636b272a9826a519d74acea473503ff4e2c4ad
   js/studio/wiki-studio-jobs.js: 155dcc7e78ce604abcbaa13495f303a6b7792322
@@ -513,7 +513,7 @@ filesHash:
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 47d8268cf58c023da287264bbb275a4602b6f4f4
   mini-a-wiki-studio-worker.yaml: 8c6841c3aa4a0c2e3d4a13fa9b61c9dfde5e49e3
-  mini-a-wiki-studio.yaml: 8e6ad956b61ff5be25743ff41be98f89aed06909
+  mini-a-wiki-studio.yaml: 0cb2ceb80f45d244c21cc118e0894305fcb20228
   mini-a-wikiman.js: 91add17fe98d8120835e3d1698790f97cd733923
   mini-a-worker.yaml: be28143ec6cb67c9a2c08a6134238560372bb6c2
   mini-a.js: 8553dc16398d24eeb2c6942075b7abb5c1ffc4a3
