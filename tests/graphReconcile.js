@@ -67,7 +67,8 @@ try {
   var many = []
   for (var i = 0; i < 5; i++) many.push(page("p" + i + ".md", "Use `sharedKey`."))
   var limited = graph.build(many, { reconcile: "lexical", reconcileMaxPages: 2, reconcileMaxDf: 1 })
-  assert(limited.partial && limited.reconciliation.pendingIndex === 3, "indexing has bounded durable work")
+  // The first run indexes at most reconcileMaxPages; one build repeats larger runs until the corpus settles.
+  assert(!limited.partial && limited.reconciliation.runs >= 2 && limited.reconciliation.indexed === 5, "indexing has bounded durable work per run")
   graph = new MiniAWikiGraph({ graphDir: root + "/graph", modelExtractors: [] })
   for (var attempt = 0; attempt < 5; attempt++) {
     limited = graph.build(many, { reconcile: "lexical", reconcileMaxPages: 2, reconcileMaxDf: 1 })
@@ -88,6 +89,11 @@ try {
   assert(embeddingCalls === 2 && hybridResult.reconciliation.cached === 2, "warm hybrid performs no provider calls")
   var vectorRefresh = new MiniAGraphReconciler(hybrid).refreshEmbeddings(pair, { embeddingMaxCalls: 0 })
   assert(vectorRefresh.complete && vectorRefresh.calls === 0 && vectorRefresh.hits === 2, "embedding-only refresh reuses the same inputs")
+  var budgetedHybrid = new MiniAWikiGraph({ graphDir: root + "/budgeted-hybrid", modelExtractors: [], reconcileEmbeddingModel: { type: "ollama", model: "fixture" }, reconcileEmbeddingRequest: function() { return [1, 2, 3] } })
+  var trio = pair.concat([page("three.md", "Find `bucketKey`.")])
+  new MiniAGraphReconciler(budgetedHybrid).refreshEmbeddings(trio, { embeddingMaxCalls: 3 })
+  var budgeted = budgetedHybrid.build(trio, { reconcile: "hybrid", reconcileMaxPages: 1, reconcileMaxDf: 1, embeddingMaxComparisons: 2 })
+  assert(budgeted.partial && budgeted.reconciliation.runs > 1 && budgeted.reconciliation.comparisons === 2 && budgeted.reconciliation.embeddingCalls === 0, "cached vectors share one comparison budget across reconciliation runs")
   var originalClose = MiniAWikiEmbeddings.prototype.close
   var closeFailure = new MiniAWikiGraph({ graphDir: root + "/close-failure", modelExtractors: [], reconcileEmbeddingModel: { type: "ollama", model: "fixture" }, reconcileEmbeddingRequest: function() { return [1, 2, 3] } })
   try {

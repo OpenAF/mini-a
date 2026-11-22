@@ -173,9 +173,43 @@ retrieval support. Rebuild semantic extraction to refresh them. OpenAF keeps gen
 storage and traversal; `neighbors`, `path` and `traverse` share direction, type,
 provenance, evidence-layer and minimum-confidence filters.
 
+## Unlinked page mentions and edit-stable connections
+
+Reconciliation (`reconcile=lexical`, the default) also records **unlinked page mentions**:
+when page B's body names page A's title or alias verbatim and B does not already link to A,
+B gets a grounded `MENTIONS_PAGE` edge to A (`method: "reconcile-implicit"`) carrying the
+exact quote, section, body offsets and B's revision. Only names that identify exactly one
+page are used, a page never mentions itself, and a single plain word (for example a page
+titled `Notes`) only links while it appears on at most `max(5, reconcileMaxDf × pages)`
+pages. Multi-word names and identifiers have no such cap. These edges are first-class:
+they appear in `neighbors`, exports, FalkorDB sync and `graph stats` (`implicitLinks`, and
+`connectivity.implicitDocumentEdges` in detailed stats). Ranking weights them below explicit links:
+1 instead of 2 in related pages, 3.5 instead of 4 in Retrieval V2 expansion, 0.5 instead of 1 in
+communities. They are also traversed by proximity. `wikigraphimplicitlinks=false` removes them on the next
+reconciliation. Markdown is never edited.
+
+Editing a page no longer drops its grounded connections until the next build. Deterministic,
+reconciled and implicit edges whose quote still occurs as a whole term in the new body
+are re-attached with updated offsets, section, revision and source hash. Edges whose quote
+is gone are dropped. Model edges keep using `semantic_carry`. Renaming a page (title or
+alias change) drops other pages' mentions of the old names, and deleting a page drops its
+incoming mentions. In both cases the mentioning pages are queued for reconciliation.
+
+A build repeats reconciliation runs (the first indexing or reconciling at most
+`reconcileMaxPages` pages, later ones ten times that) until every page settles, a run makes no progress, or the
+build-wide `reconcileMaxMinutes`, call, token or embedding budget is spent. Before this, large
+wikis needed one build per 100 pages before any shared-concept connection appeared.
+
+On local writable wikis with at most `wikigraphautoreconcilemaxpages` (200) pages, a
+successful `write`, `delete` or `move` runs one bounded (3 s) reconciliation at the end of
+the outermost operation. This happens at most once every 10 s. It only applies to lexical, model-free settings (`reconcile=lexical`,
+`reconcileLlm=off`). Hybrid or model-assisted settings, larger wikis and batch operations (ingest, dreams)
+leave pages queued for the next graph build, which always reconciles them.
+`wikigraphautoreconcile=false` disables it.
+
 ## Verification
 
-Run `oaf -f tests/graphBuild.js`, `oaf -f tests/graphParity.js` (requires sibling OpenAF),
+Run `oaf -f tests/graphBuild.js`, `oaf -f tests/graphImplicitLinks.js`, `oaf -f tests/graphParity.js` (requires sibling OpenAF),
 `oaf -f tests/graphConnectionBenchmark.js`, and the graph, wiki, wikiCross, wikiManager,
 wikiStudio and dreams oJob suites. Run module-path checks after loading changes.
 
@@ -195,7 +229,7 @@ Dream auto-repair uses Decide for bounded link choices and the main model for ge
 
 ## Relationship reconciliation and staged upgrades
 
-The build contract also accepts `reconcile=off|lexical|hybrid` (default `off`),
+The build contract also accepts `reconcile=off|lexical|hybrid` (default `lexical`),
 `reconcileLlm=off|auto` (default `off`), and independent candidate/page/edge,
 validation-call/token/time, embedding-call and comparison budgets. Shared saved
 preferences and explicit CLI/MCP overrides use the same resolver.

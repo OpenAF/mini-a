@@ -679,6 +679,23 @@
     } finally {if(root)root.close();if(a)a.close();if(b)b.close();io.rm(dir)}
   }
 
+  // An unlinked page-title mention lets graph expansion reach a non-lexical page.
+  exports.testImplicitMentionGraphExpansion = function() {
+    var dir = temporary(), wm
+    try {
+      wm = make(dir,{usegraph:true})
+      wm.write("seed.md",{title:"Seed"},"# Seed\nimplicitneedle appears with the Quiet Harbor Protocol.")
+      wm.write("harbor.md",{title:"Quiet Harbor Protocol"},"# Details\nUseful additional evidence without the search term.")
+      ow.test.assert(wm.reindex().ok,true,"implicit fixture published")
+      wm.graph("build",{})
+      ow.test.assert(wm._graph._state.edges.some(function(e){return e._deleted!==true && e.type==="MENTIONS_PAGE" && e.from==="doc:seed.md" && e.to==="doc:harbor.md"}),true,"unlinked mention recorded")
+      var on=wm.agenticSearch("implicitneedle",{expandGraph:true})
+      var hit=on.results.filter(function(r){return r.path==="harbor.md" && r.retrievalMethod==="graph"})[0]
+      ow.test.assert(isDef(hit),true,"graph expansion follows the unlinked mention")
+      ow.test.assert(hit.graphExplanation.relation==="mentions_page" && hit.graphExplanation.evidenceLayer==="grounded",true,"expansion explains the grounded mention")
+    } finally { if (wm) wm.close(); io.rm(dir) }
+  }
+
   exports.testBoundedGraphExpansion = function() {
     var dir = temporary(), wm
     try {

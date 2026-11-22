@@ -71,7 +71,9 @@ try {
   scope.build(acronyms,semantic);assert(!scope._state.edges.some(function(e){return e.type==="MENTIONS"&&e.props.page==="consumer.md"}),"ambiguous technical aliases never collapse to identifier identity")
   g.buildStructural(pages);assert(g._state.edges.filter(function(e){return e.type==="MENTIONS"}).length===count,"full structural retains valid enrichment")
   pages[0]=page("a.md","# Alpha\nDifferent body.",{title:"Alpha"});g.build(pages,{extraction:"structural"})
-  assert(!g._state.edges.some(function(e){return e.type==="MENTIONS"&&e.props.page==="a.md"}),"edited evidence invalidated")
+  // Mentions whose term left the page are invalidated; ones still quoted in the new body are rebased.
+  var survivors=g._state.edges.filter(function(e){return e._deleted!==true&&e.type==="MENTIONS"&&e.props.page==="a.md"})
+  assert(survivors.every(function(e){return g._currentEvidence(e)&&pages[0].body.substring(e.props.evidence.start,e.props.evidence.end)===e.props.evidence.quote})&&!survivors.some(function(e){return ["concept:id:node.js","concept:id:c++","concept:id:econnrefused"].indexOf(e.to)>=0}),"edited evidence invalidated")
   g.build([pages[0]],{extraction:"structural"});assert(!g._state.enrichment["b.md"],"deletion clears pending and evidence")
   var stub=function(payload){calls++;return {relationships:[]}}, modelPages=[page("one.md","TLS uses HTTP."),page("two.md","TLS uses HTTPS."),page("three.md","TCP supports TLS.")]
   var models=[{role:"lc",fingerprint:"stub1",extract:stub}], m=graph("models",{modelExtractors:models});calls=0

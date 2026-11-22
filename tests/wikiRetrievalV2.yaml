@@ -62,6 +62,9 @@ jobs:
 - name: MiniA Wiki V2::BoundedGraphExpansion
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testBoundedGraphExpansion
+- name: MiniA Wiki V2::ImplicitMentionGraphExpansion
+  to: oJob Test
+  exec: args.func = require("tests/wikiRetrievalV2.js").testImplicitMentionGraphExpansion
 - name: MiniA Wiki V2::GraphSelectedWikiBudgets
   to: oJob Test
   exec: args.func = require("tests/wikiRetrievalV2.js").testGraphSelectedWikiBudgets
@@ -232,6 +235,7 @@ todo:
 - MiniA Wiki V2::CrossWikiGraphSharedJoins
 - MiniA Wiki V2::CrossWikiGraphSourceNamespaces
 - MiniA Wiki V2::BoundedGraphExpansion
+- MiniA Wiki V2::ImplicitMentionGraphExpansion
 - MiniA Wiki V2::GraphSelectedWikiBudgets
 - MiniA Wiki V2::CompactBacklinkActivity
 - MiniA Wiki V2::TargetedMetadataAndShardCache

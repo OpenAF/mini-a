@@ -5107,6 +5107,9 @@ Console parameters appear in `mini-a --help` and interactive `/set` completion. 
 | `wikigraphcrossmaxdf` | number | `0.25` | Skip a shared tag/alias/concept join key present on more than this fraction of a mount's docs. |
 | `wikigraphcrossminkeylen` | number | `3` | Minimum length for a shared join key to be used for cross-wiki matching. |
 | `wikigraphproximity` | boolean | `false` | Re-rank graph-discovered Retrieval V2 hits by personalized PageRank proximity to the query's lexical seeds (bounded by the graph edge budget). |
+| `wikigraphimplicitlinks` | boolean | `true` | Turn unlinked mentions of another page's unique title or alias into grounded `MENTIONS_PAGE` graph edges, weighted below explicit links. Set `false` to remove them on the next reconciliation. |
+| `wikigraphautoreconcile` | boolean | `true` | Reconcile graph connections right after single page writes on local wikis up to `wikigraphautoreconcilemaxpages` pages (lexical, model-free settings only; others wait for the next graph build). |
+| `wikigraphautoreconcilemaxpages` | number | `200` | Largest wiki (in pages) for which `wikigraphautoreconcile` runs after each write. |
 | `wikigraphfalkorpass` | string | unset | FalkorDB password for wiki graph. |
 
 ### Memory and knowledge — Wiki retrieval and maintenance

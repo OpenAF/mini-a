@@ -30,7 +30,7 @@ function __miniAWikiConfigFromArgs(args, overrides) {
   ;["wikihttpindexurl", "wikihttptimeout", "wikiartifactrefreshsecs", "wikilexical", "wikiretrievalv2", "wikitelemetry", "wikiretrievalconfig",
     "wikisourceurl", "wikisourcefield", "wikisourceinline", "wikimetacache", "wikigraphcommunity", "wikigraphhintcap", "wikigraphsearchhints",
     "wikigraphmounts", "wikimountgraphttlms", "wikigraphcross", "wikigraphcrossjoin", "wikigraphcrosscap", "wikigraphcrossdepth",
-    "wikigraphcrossmaxdf", "wikigraphcrossminkeylen", "wikigraphproximity", "wikigraphautosave", "wikigraphsavedebouncems", "wikilintstreamthreshold", "wikilintmaxpairs"
+    "wikigraphcrossmaxdf", "wikigraphcrossminkeylen", "wikigraphproximity", "wikigraphimplicitlinks", "wikigraphautoreconcile", "wikigraphautoreconcilemaxpages", "wikigraphautosave", "wikigraphsavedebouncems", "wikilintstreamthreshold", "wikilintmaxpairs"
   ].forEach(function(key) { cfg[key] = args[key] })
   cfg.wikigraphfalkor = { host: args.wikigraphfalkorhost, port: args.wikigraphfalkorport, graph: args.wikigraphfalkorgraph, user: args.wikigraphfalkoruser, pass: args.wikigraphfalkorpass }
   if (backend === "s3" || backend === "s3fs") {
@@ -2148,7 +2148,10 @@ MiniAWikiManager.prototype.graph = function(op, params) {
     var previewGraph
     if (p.preview === true && !this._graph && this._config.usegraph === true) {
       loadLib(__miniAPath("js/wiki/mini-a-graph.js"))
-      previewGraph = new MiniAWikiGraph({ graphDir: this._getGraphPath(), graphRaw: "{}", autosave: "off", modelExtractors: [] })
+      previewGraph = new MiniAWikiGraph({
+        graphDir: this._getGraphPath(), graphRaw: "{}", autosave: "off", modelExtractors: [],
+        implicitLinks: isUnDef(this._config.wikigraphimplicitlinks) || toBoolean(this._config.wikigraphimplicitlinks) !== false
+      })
       this._graph = previewGraph
     }
     try {
@@ -2670,7 +2673,9 @@ MiniAWikiManager.prototype._initializeGraph = function() {
         modelFingerprint: cfg.modelFingerprint,
         readOnly: this._access !== "rw",
         autosave: isString(cfg.wikigraphautosave) ? cfg.wikigraphautosave : "always",
-        saveDebounceMs: isNumber(cfg.wikigraphsavedebouncems) ? cfg.wikigraphsavedebouncems : 5000
+        saveDebounceMs: isNumber(cfg.wikigraphsavedebouncems) ? cfg.wikigraphsavedebouncems : 5000,
+        // Unlinked page-title mentions become MENTIONS_PAGE edges unless explicitly disabled.
+        implicitLinks: isDef(cfg.wikigraphimplicitlinks) ? toBoolean(cfg.wikigraphimplicitlinks) !== false : true
       }
       graphCfg.graphRaw = this._readArchiveGraph()
       // read-only wikis consume an existing graph (local graph.json or an external FalkorDB);
@@ -5969,6 +5974,56 @@ MiniAWikiManager.prototype._assembleContextPlaceholder = MiniAWikiManager.protot
 
 loadLib(__miniAPath("js/wiki/mini-a-wiki-folders.js"), true)
 loadLib(__miniAPath("js/wiki/mini-a-wiki-export.js"), true)
+
+// _autoReconcileGraph: keep graph connections current after single edits on small local wikis.
+// One bounded, CPU-only reconciliation runs at the end of the outermost write/delete/move, at most
+// once per interval (force skips the interval). Queued pages settle on a later write or the next build. Larger wikis, model- or embedding-assisted settings
+// and deferred batches keep pages queued for the next graph build, which always reconciles them.
+MiniAWikiManager.prototype._autoReconcileGraph = function(force) {
+  try {
+    var cfg = this._config || {}
+    if (!isObject(this._graph) || this._access !== "rw" || this._graph._readOnly === true || this._deferGraphUpdates === true || this._catalog) return __
+    // Local filesystem wikis only: remote backends would re-read every page per write, unlocked.
+    if (this._backendType !== "fs" || !isObject(this._backend) || new java.io.File(String(this._backend.root)).isFile()) return __
+    if (isDef(cfg.wikigraphautoreconcile) && toBoolean(cfg.wikigraphautoreconcile) === false) return __
+    var state = this._graph._state.reconciliation
+    if (isMap(state) && !(state.dirtyCount > 0)) return __
+    var interval = isDef(cfg.wikigraphautoreconcileintervalms) && isNumber(Number(cfg.wikigraphautoreconcileintervalms)) ? Number(cfg.wikigraphautoreconcileintervalms) : 10000
+    if (force !== true && now() - (this._lastAutoReconcileAt || 0) < interval) return __
+    var effective = this.graphBuildSettings({}).effective
+    if (effective.reconcile !== "lexical" || effective.reconcileLlm !== "off") return __
+
+    // A fresh or incomplete graph can undercount the pages on disk.
+    var maxPages = isDef(cfg.wikigraphautoreconcilemaxpages) && isNumber(Number(cfg.wikigraphautoreconcilemaxpages)) ? Number(cfg.wikigraphautoreconcilemaxpages) : 200
+    if (!isFunction(this._graph._pageCount) || this._graph._pageCount() > maxPages) return __
+    var self = this
+    var pages = this._safeListPages("").filter(function(path) { return !self._isSearchExcludedPath(path) })
+    if (pages.length > maxPages) return __
+    this._lastAutoReconcileAt = now()
+    return this.graph("reconcile", { reconcileMaxMinutes: 0.05 })
+  } catch(e) {
+    // Logging is best-effort after the mutation has committed.
+    try { this._logFn("warn", "Graph auto-reconciliation skipped: " + __miniAErrMsg(e)) } catch(ignoreLog) {}
+    return __
+  }
+}
+
+// Reconcile once the outermost mutating call finishes, inside the writer lock installed below.
+;["write", "delete", "move"].forEach(function(name) {
+  var original = MiniAWikiManager.prototype[name]
+  if (!isFunction(original)) return
+  MiniAWikiManager.prototype[name] = function() {
+    this._autoReconcileDepth = (this._autoReconcileDepth || 0) + 1
+    var result
+    try {
+      result = original.apply(this, arguments)
+    } finally {
+      this._autoReconcileDepth--
+    }
+    if (this._autoReconcileDepth === 0 && isMap(result) && result.ok !== false) this._autoReconcileGraph(false)
+    return result
+  }
+})
 
 // Hold one shared lock across complete operations, including link rewrites and
 // publication. Nested manager operations and journal recovery are reentrant.
