@@ -17,6 +17,7 @@ function wikiWith(name, pages, extra) {
   var dir = root + "/" + name
   io.mkdir(dir)
   Object.keys(pages).forEach(function(path) {
+    io.mkdir(String(new java.io.File(dir + "/" + path).getParent()))
     io.writeFileString(dir + "/" + path, "---\ntitle: " + pages[path][0] + "\n---\n" + pages[path][1])
   })
   var manager = new MiniAWikiManager(merge({ backend: "fs", root: dir, access: "rw", usegraph: true, skipBootstrap: true }, extra || {}), function() {})
@@ -101,8 +102,15 @@ try {
   off.graph("build", {})
   assert(owned(off, "b.md", "MENTIONS_PAGE").length === 0, "wikigraphimplicitlinks=false removes implicit links")
   var offManager = wikiWith("optout-arg", { "a.md": ["Alpha Service Guide", "Alpha."], "b.md": ["Beta", "Read the Alpha Service Guide first."] }, { wikigraphimplicitlinks: false })
-  offManager.graph("build", {})
+  var previewOff = offManager.graph("build", { preview: true, reconcileMaxPages: 1 })
+  var builtOff = offManager.graph("build", { reconcileMaxPages: 1 })
   assert(owned(offManager, "b.md", "MENTIONS_PAGE").length === 0, "the manager option disables implicit links")
+  var previewOn = wikiWith("preview-on", { "a.md": ["Alpha Service Guide", "Alpha."], "b.md": ["Beta", "Read the Alpha Service Guide first."] })
+  var preview = previewOn.graph("build", { preview: true, reconcileMaxPages: 1 })
+  assert(preview.reconciliation.complete && preview.reconciliation.runs > 1 && preview.reconciliation.implicitAdded === 1, "preview settles bounded lexical batches")
+  assert(previewOff.reconciliation.complete && !previewOff.reconciliation.implicitAdded && !builtOff.reconciliation.implicitAdded, "preview respects the implicit-link opt-out")
+  assert(preview.previewChanges.relationshipsToAdd === previewOff.previewChanges.relationshipsToAdd + 1, "preview reports the implicit relationship only when enabled")
+  assert(owned(previewOn, "b.md", "MENTIONS_PAGE").length === 0, "preview leaves the live graph untouched")
 
   // A single plain word naming a page only links while few pages use it.
   var common = { "notes.md": ["Notes", "Index of notes."] }
@@ -111,6 +119,27 @@ try {
   df.graph("build", {})
   var noteLinks = edgesOf(df, "notes.md", "MENTIONS_PAGE").length
   assert(noteLinks === 0, "a widely used single-word title does not link every page (" + noteLinks + ")")
+
+  // Frequency changes invalidate unchanged source pages and keep independent aliases eligible.
+  var falconPages = { "target.md": ["Falcon", "Migration checklist."], "sixth.md": ["Extra", "Unrelated."], "alias.md": ["Alias Example", "Falcon and Harbor are mentioned here."] }
+  for (var f = 0; f < 4; f++) falconPages["falcon" + f + ".md"] = ["Observer " + f, "Falcon appeared."]
+  var falcon = wikiWith("frequency", falconPages, { wikigraphautoreconcile: false })
+  falcon.write("target.md", { title: "Falcon", aliases: ["Harbor"] }, "Migration checklist.")
+  falcon.graph("build", {})
+  assert(edgesOf(falcon, "target.md", "MENTIONS_PAGE").length === 5, "five sources qualify at the frequency cap")
+  falcon.write("sixth.md", { title: "Extra" }, "Falcon appeared.")
+  falcon.graph("build", {})
+  var aliasEdges = edgesOf(falcon, "target.md", "MENTIONS_PAGE")
+  assert(aliasEdges.length === 1 && aliasEdges[0].props.evidence.quote === "Harbor", "crossing the cap drops title links and switches to independently eligible alias evidence")
+  falcon.write("sixth.md", { title: "Extra" }, "Unrelated again.")
+  falcon.graph("build", {})
+  assert(edgesOf(falcon, "target.md", "MENTIONS_PAGE").length === 5, "falling below the cap restores links on unchanged pages")
+
+  // A delimiter inside a nested path must not redirect a mention to a flat page.
+  var nested = wikiWith("nested", { "t.md": ["Flat Page", "Flat."], "t.md:archive/more.md": ["Quiet Harbor", "Nested."], "source.md": ["Source Page", "See Quiet Harbor."] })
+  nested.graph("build", {})
+  var nestedEdges = owned(nested, "source.md", "MENTIONS_PAGE")
+  assert(nestedEdges.length === 1 && nestedEdges[0].to === "doc:t.md:archive/more.md", "implicit evidence points to the exact nested target")
 
   // One build backfills reconciliation beyond reconcileMaxPages instead of stopping at one run.
   var many = {}
@@ -128,6 +157,23 @@ try {
   assert(owned(manual, "b.md", "MENTIONS_PAGE").length === 0 && manual._graph._state.reconciliation.dirtyCount > 0, "wikigraphautoreconcile=false defers to the next build")
   manual.graph("build", {})
   assert(owned(manual, "b.md", "MENTIONS_PAGE").length === 1, "the next build reconciles queued pages")
+  manual.write("b.md", { title: "Delta" }, "See the [Gamma Runbook](a.md).")
+  assert(edgesOf(manual, "b.md", "LINKS_TO").some(function(edge) { return edge.to === "doc:a.md" }) &&
+    owned(manual, "b.md", "MENTIONS_PAGE").length === 0, "an explicit link replaces the carried implicit edge immediately")
+
+  // The first eligible edit initializes automatic reconciliation.
+  var fresh = wikiWith("fresh", { "a.md": ["Gamma Runbook", "Gamma."] })
+  assert(!fresh._graph._state.reconciliation, "fresh graph has no reconciliation state")
+  fresh.write("b.md", { title: "Delta" }, "See the Gamma Runbook.")
+  assert(owned(fresh, "b.md", "MENTIONS_PAGE").length === 1, "the first edit reconciles before any manual build")
+
+  // Invalid graph settings cannot make a committed write look like a failure.
+  var broken = wikiWith("broken-settings", { "a.md": ["Gamma Runbook", "Gamma."] })
+  broken.graph("build", {})
+  broken.graphBuildSettings({}, true)
+  io.writeFileJSON(broken._getIndexRoot() + "/.mini-a-wiki-state/config.json", { graphBuild: { reconcile: "invalid" } })
+  var written = broken.write("b.md", { title: "Delta" }, "Committed content.")
+  assert(written.ok === true && broken.read("b.md").body.indexOf("Committed content.") >= 0, "write reports success even when saved graph settings are invalid")
   print("PASS graph implicit links: " + checks + " assertions")
 } finally {
   managers.forEach(function(manager) { try { manager.close() } catch(ignoreClose) {} })

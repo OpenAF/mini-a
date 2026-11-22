@@ -2148,7 +2148,10 @@ MiniAWikiManager.prototype.graph = function(op, params) {
     var previewGraph
     if (p.preview === true && !this._graph && this._config.usegraph === true) {
       loadLib(__miniAPath("js/wiki/mini-a-graph.js"))
-      previewGraph = new MiniAWikiGraph({ graphDir: this._getGraphPath(), graphRaw: "{}", autosave: "off", modelExtractors: [] })
+      previewGraph = new MiniAWikiGraph({
+        graphDir: this._getGraphPath(), graphRaw: "{}", autosave: "off", modelExtractors: [],
+        implicitLinks: isUnDef(this._config.wikigraphimplicitlinks) || toBoolean(this._config.wikigraphimplicitlinks) !== false
+      })
       this._graph = previewGraph
     }
     try {
@@ -5977,24 +5980,30 @@ loadLib(__miniAPath("js/wiki/mini-a-wiki-export.js"), true)
 // once per interval (force skips the interval). Queued pages settle on a later write or the next build. Larger wikis, model- or embedding-assisted settings
 // and deferred batches keep pages queued for the next graph build, which always reconciles them.
 MiniAWikiManager.prototype._autoReconcileGraph = function(force) {
-  var cfg = this._config || {}
-  if (!isObject(this._graph) || this._access !== "rw" || this._graph._readOnly === true || this._deferGraphUpdates === true || this._catalog) return __
-  // Local filesystem wikis only: remote backends would re-read every page per write, unlocked.
-  if (this._backendType !== "fs" || !isObject(this._backend) || new java.io.File(String(this._backend.root)).isFile()) return __
-  if (isDef(cfg.wikigraphautoreconcile) && toBoolean(cfg.wikigraphautoreconcile) === false) return __
-  var state = isMap(this._graph._state) ? this._graph._state.reconciliation : __
-  if (!isMap(state) || !(state.dirtyCount > 0)) return __
-  var effective = this.graphBuildSettings({}).effective
-  if (effective.reconcile !== "lexical" || effective.reconcileLlm !== "off") return __
-  var maxPages = isDef(cfg.wikigraphautoreconcilemaxpages) && isNumber(Number(cfg.wikigraphautoreconcilemaxpages)) ? Number(cfg.wikigraphautoreconcilemaxpages) : 200
-  if (!isFunction(this._graph._pageCount) || this._graph._pageCount() > maxPages) return __
-  var interval = isDef(cfg.wikigraphautoreconcileintervalms) && isNumber(Number(cfg.wikigraphautoreconcileintervalms)) ? Number(cfg.wikigraphautoreconcileintervalms) : 10000
-  if (force !== true && now() - (this._lastAutoReconcileAt || 0) < interval) return __
-  this._lastAutoReconcileAt = now()
   try {
+    var cfg = this._config || {}
+    if (!isObject(this._graph) || this._access !== "rw" || this._graph._readOnly === true || this._deferGraphUpdates === true || this._catalog) return __
+    // Local filesystem wikis only: remote backends would re-read every page per write, unlocked.
+    if (this._backendType !== "fs" || !isObject(this._backend) || new java.io.File(String(this._backend.root)).isFile()) return __
+    if (isDef(cfg.wikigraphautoreconcile) && toBoolean(cfg.wikigraphautoreconcile) === false) return __
+    var state = this._graph._state.reconciliation
+    if (isMap(state) && !(state.dirtyCount > 0)) return __
+    var interval = isDef(cfg.wikigraphautoreconcileintervalms) && isNumber(Number(cfg.wikigraphautoreconcileintervalms)) ? Number(cfg.wikigraphautoreconcileintervalms) : 10000
+    if (force !== true && now() - (this._lastAutoReconcileAt || 0) < interval) return __
+    var effective = this.graphBuildSettings({}).effective
+    if (effective.reconcile !== "lexical" || effective.reconcileLlm !== "off") return __
+
+    // A fresh or incomplete graph can undercount the pages on disk.
+    var maxPages = isDef(cfg.wikigraphautoreconcilemaxpages) && isNumber(Number(cfg.wikigraphautoreconcilemaxpages)) ? Number(cfg.wikigraphautoreconcilemaxpages) : 200
+    if (!isFunction(this._graph._pageCount) || this._graph._pageCount() > maxPages) return __
+    var self = this
+    var pages = this._safeListPages("").filter(function(path) { return !self._isSearchExcludedPath(path) })
+    if (pages.length > maxPages) return __
+    this._lastAutoReconcileAt = now()
     return this.graph("reconcile", { reconcileMaxMinutes: 0.05 })
   } catch(e) {
-    this._logFn("warn", "Graph auto-reconciliation skipped: " + __miniAErrMsg(e))
+    // Logging is best-effort after the mutation has committed.
+    try { this._logFn("warn", "Graph auto-reconciliation skipped: " + __miniAErrMsg(e)) } catch(ignoreLog) {}
     return __
   }
 }

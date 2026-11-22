@@ -643,6 +643,7 @@ MiniAWikiGraph.prototype._rebaseGrounded = function(p, carried) {
   var hash = summary.hash
   var revision = p.revision || hash
   var boundary = /[A-Za-z0-9_$]/
+  var links = isArray(p.links) ? p.links : []
   var sections
 
   // fits: the quote sits at offset at without being part of a longer identifier.
@@ -665,8 +666,10 @@ MiniAWikiGraph.prototype._rebaseGrounded = function(p, carried) {
     var props = clone(e.props)
     var at = locate(props.evidence.quote, props.evidence.start)
     if (at < 0) return
-    // A page connection needs a live target page; concept endpoints are restored from copies.
-    if (e.type === "MENTIONS_PAGE" && !self._isLivePage(e.to)) return
+    // Carry only unlinked mentions of live pages.
+    if (e.type === "MENTIONS_PAGE" && (!self._isLivePage(e.to) || links.some(function(target) {
+      return "doc:" + String(target).trim() === e.to
+    }))) return
     ;[[e.from, e.fromNode], [e.to, e.toNode]].forEach(function(end) {
       if (!isMap(self._state.nodes[end[0]]) && isMap(end[1])) self._upsertNode(end[0], end[1].type, end[1].props)
     })
@@ -887,7 +890,7 @@ MiniAWikiGraph.prototype._emphasisTerms = function(page) {
 // _conceptVocabulary: page identities (titles and aliases, never joinable across wikis) plus
 // emphasised terms used on two or more pages (joinable concepts). A page identity always
 // claims its name before a shared term does.
-MiniAWikiGraph.prototype._conceptVocabulary = function(pages) {
+MiniAWikiGraph.prototype._conceptVocabulary = function(pages, includeTargetPaths) {
   var names = Object.create(null)
   var first = Object.create(null)
   var identities = Object.create(null)
@@ -899,19 +902,22 @@ MiniAWikiGraph.prototype._conceptVocabulary = function(pages) {
       names[name] = []
       identities[name] = Object.create(null)
     }
-    if (!identities[name][identity.id]) {
-      identities[name][identity.id] = true
+    var key = identity.targetPath || identity.id
+    if (!identities[name][key]) {
+      identities[name][key] = true
       names[name].push(identity)
     }
   }
 
-  // Page identities.
+  // Reconciliation carries target paths while semantic builds keep their existing vocabulary keys.
   pages.forEach(function(page) {
     var meta = page.meta || {}
     var title = String(meta.title || page.path.replace(/\.md$/, "").split("/").pop())
     var id = "concept:page:" + page.path + ":" + title
+    var identity = { id: id, name: title, joinable: false }
+    if (includeTargetPaths) identity.targetPath = page.path
     ;[title].concat(isArray(meta.aliases) ? meta.aliases : []).forEach(function(name) {
-      addIdentity(name, { id: id, name: title, joinable: false })
+      addIdentity(name, identity)
     })
   })
   // Pre-v3 key component, used only to migrate completed model work.
@@ -946,6 +952,7 @@ MiniAWikiGraph.prototype._usefulConcept = function(value) {
 MiniAWikiGraph.prototype._deterministicMentions = function(page, sections, vocabulary, pageHash) {
   var self = this
   var result = []
+  var pageMentions = Object.create(null)
   var used = {}
   var hash = isString(pageHash) ? pageHash : this._pageHash(page)
   var revision = page.revision || hash
@@ -955,14 +962,16 @@ MiniAWikiGraph.prototype._deterministicMentions = function(page, sections, vocab
     var re = /[A-Za-z_$][A-Za-z0-9_.$:+#/-]*/g
     var match
 
-    // add: one mention per concept per section, at most 64 per section.
+    // Record up to 64 concept mentions per section and one match per page name.
     var add = function(term, index, identity) {
-      if (count >= 64 || !self._usefulConcept(term)) return
+      if (!self._usefulConcept(term)) return
       var id = identity ? identity.id : self._conceptId(term)
-      if (seen[id]) return
-      seen[id] = true
-      count++
-      result.push({
+      var keepConcept = count < 64 && !seen[id]
+      // Track each matched page name independently of concept membership limits.
+      var targetPath = identity && identity.targetPath
+      var keepName = targetPath && !pageMentions[term]
+      if (!keepConcept && !keepName) return
+      var mention = {
         id: id,
         name: identity ? identity.name : term,
         joinable: identity ? identity.joinable : true,
@@ -976,7 +985,13 @@ MiniAWikiGraph.prototype._deterministicMentions = function(page, sections, vocab
           confidence: 1,
           evidence: { start: section.start + index, end: section.start + index + term.length, line: section.line + section.text.substring(0, index).split("\n").length - 1, quote: term }
         }
-      })
+      }
+      if (keepConcept) {
+        seen[id] = true
+        count++
+        result.push(mention)
+      }
+      if (keepName) pageMentions[term] = { targetPath: targetPath, name: mention.name, props: mention.props }
     }
 
     while ((match = re.exec(section.text)) !== null) {
@@ -998,7 +1013,7 @@ MiniAWikiGraph.prototype._deterministicMentions = function(page, sections, vocab
     var choices = vocabulary.names[name]
     return [name, choices.length === 1 ? [choices[0].id] : ["ambiguous"]]
   })
-  return { mentions: result, vocabHash: sha1(stringify(deps, __, "")) }
+  return { mentions: result, pageMentions: Object.keys(pageMentions).map(function(term) { return pageMentions[term] }), vocabHash: sha1(stringify(deps, __, "")) }
 }
 
 MiniAWikiGraph.prototype._currentEvidence = function(edge) {
@@ -2734,7 +2749,8 @@ MiniAWikiGraph.sharedReader = function(config, loggerFn) {
     store.lock.lock()
     try {
       if (closed) throw new Error("graph-reader-closed")
-      var key = String(file.getCanonicalPath()) + ":" + (config.communityAlgo || "louvain")
+      var readerKey = String(file.getCanonicalPath()) + ":" + (config.communityAlgo || "louvain") + ":" + (config.implicitLinks !== false)
+      var key = readerKey
       if (file.isFile()) {
         var attrs = java.nio.file.Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes)
         key += ":" + String(attrs.fileKey()) + ":" + String(attrs.lastModifiedTime()) + ":" + Number(attrs.size())
@@ -2743,11 +2759,11 @@ MiniAWikiGraph.sharedReader = function(config, loggerFn) {
         release()
         entry = store.entries[key]
         if (!entry) {
-          var graph = new MiniAWikiGraph({ graphDir: config.graphDir, communityAlgo: config.communityAlgo, readOnly: true, __privateReader: true })
+          var graph = new MiniAWikiGraph({ graphDir: config.graphDir, communityAlgo: config.communityAlgo, implicitLinks: config.implicitLinks, readOnly: true, __privateReader: true })
           // Never publish data read across an artifact replacement.
           if (file.isFile()) {
             var after = java.nio.file.Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes)
-            var afterKey = String(file.getCanonicalPath()) + ":" + (config.communityAlgo || "louvain") + ":" + String(after.fileKey()) + ":" + String(after.lastModifiedTime()) + ":" + Number(after.size())
+            var afterKey = readerKey + ":" + String(after.fileKey()) + ":" + String(after.lastModifiedTime()) + ":" + Number(after.size())
             if (afterKey !== key) throw new Error("graph-artifact-changed-during-load")
           } else if (!key.endsWith(":missing")) throw new Error("graph-artifact-changed-during-load")
           entry = { key: key, graph: graph, refs: 0 }
@@ -2806,7 +2822,7 @@ MiniAWikiGraph.prototype._reconcileUntilSettled = function(pages, opts, effectiv
       reconcileMaxTokens: Math.max(0, effective.reconcileMaxTokens - used.tokens),
       embeddingMaxCalls: Math.max(0, effective.embeddingMaxCalls - used.embeddings)
     })
-    report = reconciler.run(pages, runOpts)
+    report = reconciler.run(pages, runOpts, effective.embeddingMaxComparisons - (totals.comparisons || 0))
     runs++
     if (report.ok === false) return report
     summed.forEach(function(key) { if (isNumber(report[key])) totals[key] = (totals[key] || 0) + report[key] })
@@ -2814,7 +2830,7 @@ MiniAWikiGraph.prototype._reconcileUntilSettled = function(pages, opts, effectiv
     used.tokens += report.estimatedTokens || 0
     used.embeddings += report.embeddingCalls || 0
     var progressed = (report.indexed || 0) > 0 || settledCount() > before || (report.implicitAdded || 0) + (report.implicitRemoved || 0) > 0
-    if (!report.partial || !report.resumable || !progressed || opts.preview === true || runs >= 1000) break
+    if (!report.partial || !report.resumable || !progressed || runs >= 1000) break
     if (isFunction(opts.isCancelled) && opts.isCancelled()) break
   }
   summed.forEach(function(key) { if (isDef(totals[key])) report[key] = totals[key] })
@@ -2828,7 +2844,7 @@ var __miniAGraphBuildBase = MiniAWikiGraph.prototype.build
 MiniAWikiGraph.prototype.build = function(pages, options) {
   var opts = options || {}
   if (opts.preview === true && this._privatePreview !== true) {
-    var previewGraph = new MiniAWikiGraph({ graphDir: this._graphDir, graphRaw: stringify(this._state, __, ""), autosave: "off", modelExtractors: [] })
+    var previewGraph = new MiniAWikiGraph({ graphDir: this._graphDir, graphRaw: stringify(this._state, __, ""), autosave: "off", modelExtractors: [], implicitLinks: this._cfg.implicitLinks })
     previewGraph._privatePreview = true
     try {
       var previewResult = previewGraph.build(pages, merge(opts, { modelHelp: "off", retryFailed: false, reconcileRetryFailed: false, reconcileLlm: "off", embeddingMaxCalls: 0 }))

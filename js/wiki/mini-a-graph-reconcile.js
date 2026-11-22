@@ -241,41 +241,36 @@ MiniAGraphReconciler.prototype.validate = function(candidate, index) {
   return { status: candidate.validation, matches: matches }
 }
 
-// Page identity concepts are named concept:page:<path>:<title>; wiki pages always end in .md.
-MiniAGraphReconciler.mentionTarget = function(id) {
-  var match = /^concept:page:(.+?\.md):/.exec(String(id || ""))
-  return match ? match[1] : ""
-}
-
-// Unlinked mentions of another page's unique title or alias become grounded page-to-page
-// MENTIONS_PAGE edges. Explicitly linked targets are skipped, and a single plain word that
-// names a page counts only while few pages use it.
-MiniAGraphReconciler.prototype.implicitLinks = function(path, index, options) {
+// Select one eligible title or alias per unlinked target.
+MiniAGraphReconciler.prototype.implicitTargets = function(path, index, options) {
   var graph = this.graph
   var record = index.pages[path]
   var wanted = Object.create(null)
+  if (graph._cfg.implicitLinks === false || !record) return wanted
+  var linked = Object.create(null)
+  ;(record.links || []).forEach(function(target) { linked[target] = true })
+  var maxDf = Math.max(5, Math.floor(index.paths.length * options.reconcileMaxDf))
+  record.pageMentions.forEach(function(mention) {
+    var target = mention.targetPath
+    if (target === path || linked[target] || wanted[target] || !index.pages[target]) return
+    var term = mention.props.evidence.quote
+    var plainWord = !/\s/.test(term) && !graph._isCodeLike(term)
+    if (term.length < 3 || plainWord && index.postings["name:" + term].length > maxDf) return
+    wanted[target] = mention
+  })
+  return wanted
+}
+
+// Keep one current edge per wanted target, with evidence from an eligible name.
+MiniAGraphReconciler.prototype.implicitLinks = function(path, index, wanted) {
+  var graph = this.graph
+  var record = index.pages[path]
   var kept = Object.create(null)
   var result = { added: 0, removed: 0 }
-  if (graph._cfg.implicitLinks !== false && record) {
-    var linked = Object.create(null)
-    ;(record.links || []).forEach(function(target) { linked[target] = true })
-    var maxDf = Math.max(5, Math.floor(index.paths.length * options.reconcileMaxDf))
-    ;(record.mentions || []).forEach(function(mention) {
-      var target = MiniAGraphReconciler.mentionTarget(mention.id)
-      var evidence = mention.props && mention.props.evidence
-      if (!target || target === path || linked[target] || wanted[target] || !index.pages[target] || !isMap(evidence)) return
-      var term = String(evidence.quote || "")
-      var plainWord = !/\s/.test(term) && !graph._isCodeLike(term)
-      if (term.length < 3 || plainWord && (index.postings["concept:" + mention.id] || []).length > maxDf) return
-      wanted[target] = mention
-    })
-  }
-
-  // Keep one current edge per wanted target; everything else this page owned is stale.
   ;(graph._edgesByOwner[path] || []).slice().forEach(function(edge) {
     if (edge._deleted === true || edge.type !== "MENTIONS_PAGE") return
     var target = edge.to.substring(4)
-    if (wanted[target] && !kept[target] && graph._implicitCurrent(edge)) {
+    if (wanted[target] && !kept[target] && graph._implicitCurrent(edge) && edge.props.evidence.quote === wanted[target].props.evidence.quote) {
       kept[target] = true
       return
     }
@@ -296,10 +291,11 @@ MiniAGraphReconciler.prototype.implicitLinks = function(path, index, options) {
 }
 
 // Cache compact page inputs and completed work in the existing graph envelope.
-MiniAGraphReconciler.prototype.run = function(pages, options) {
+MiniAGraphReconciler.prototype.run = function(pages, options, remainingComparisons) {
   var graph = this.graph
   options = options || {}
   var opts = MiniAGraphBuild.resolve(options)
+  var comparisonLimit = isNumber(remainingComparisons) ? remainingComparisons : opts.embeddingMaxComparisons
   if (opts.reconcile === "off") return { ok: true, status: "off", changed: false, calls: 0 }
   if (graph._readOnly) return { ok: false, error: "graph is read-only" }
   var started = Date.now()
@@ -315,7 +311,7 @@ MiniAGraphReconciler.prototype.run = function(pages, options) {
   var byPath = Object.create(null)
   list.forEach(function(page) { byPath[page.path] = page })
   var paths = Object.keys(byPath)
-  var vocabulary = graph._conceptVocabulary(list)
+  var vocabulary = graph._conceptVocabulary(list, true)
   var changed = false
   var self = this
   var deferredPairs = 0
@@ -372,18 +368,18 @@ MiniAGraphReconciler.prototype.run = function(pages, options) {
     var tokens = old && old.hash === hash ? old.tokens : MiniAGraphReconciler.tokens(page.body)
     var relevant = tokens.filter(function(token) { return vocabulary.first[token] }).map(function(token) { return [token, vocabulary.first[token].slice(0, 32).map(function(name) { return [name, vocabulary.names[name].length === 1 ? vocabulary.names[name] : "ambiguous"] })] })
     var input = sha1(stringify([hash, relevant], __, ""))
-    if (!old || old.input !== input) needsIndex.push({ page: page, hash: hash, input: input, tokens: tokens })
+    if (!old || old.input !== input || !isArray(old.pageMentions)) needsIndex.push({ page: page, hash: hash, input: input, tokens: tokens })
   })
   for (var i = 0; i < needsIndex.length && report.indexed < opts.reconcileMaxPages && !stopped(); i++) {
     var item = needsIndex[i]
     var page = item.page
-    var mentions = graph._deterministicMentions(page, graph._semanticSections(page), vocabulary, item.hash).mentions
+    var matched = graph._deterministicMentions(page, graph._semanticSections(page), vocabulary, item.hash)
     var unique = Object.create(null)
-    mentions.forEach(function(mention) { if (!unique[mention.id]) unique[mention.id] = mention })
+    matched.mentions.forEach(function(mention) { if (!unique[mention.id]) unique[mention.id] = mention })
     var meta = page.meta || {}
     var words = MiniAGraphReconciler.tokens(String(meta.title || "") + " " + String(meta.description || "") + " " + (meta.aliases || []).join(" ")).map(function(word) { return word.toLowerCase() })
     words = words.filter(function(word, at) { return word.length >= 4 && graph._usefulConcept(word) && words.indexOf(word) === at }).slice(0, 32)
-    state.pages[page.path] = { hash: item.hash, revision: page.revision || item.hash, input: item.input, tokens: item.tokens, mentions: Object.keys(unique).sort().map(function(id) { return unique[id] }), words: words, tags: (meta.tags || []).map(function(tag) { return String(tag).toLowerCase() }).sort(), links: page.links || [] }
+    state.pages[page.path] = { hash: item.hash, revision: page.revision || item.hash, input: item.input, tokens: item.tokens, mentions: Object.keys(unique).sort().map(function(id) { return unique[id] }), pageMentions: matched.pageMentions, words: words, tags: (meta.tags || []).map(function(tag) { return String(tag).toLowerCase() }).sort(), links: page.links || [] }
     delete state.completed[page.path]
     report.indexed++
     state.indexDirty = true
@@ -401,6 +397,7 @@ MiniAGraphReconciler.prototype.run = function(pages, options) {
     paths.forEach(function(path) {
       var record = state.pages[path]
       record.mentions.forEach(function(mention) { post("concept:" + mention.id, path) })
+      record.pageMentions.forEach(function(mention) { post("name:" + mention.props.evidence.quote, path) })
       record.tags.forEach(function(tag) { post("tag:" + tag, path) })
       record.words.forEach(function(word) { post("word:" + word, path) })
     })
@@ -415,7 +412,7 @@ MiniAGraphReconciler.prototype.run = function(pages, options) {
   // Hybrid ranks a bounded candidate set; unavailable vectors never block grounding.
   function hybrid(path, candidates) {
     if (opts.reconcile !== "hybrid" || !candidates.length || options.preview === true) return candidates
-    if (embeddingDisabled) {
+    if (embeddingDisabled || report.comparisons >= comparisonLimit) {
       embeddingPending = true
       return candidates
     }
@@ -456,14 +453,14 @@ MiniAGraphReconciler.prototype.run = function(pages, options) {
       var source = vector(path)
       if (!source) return candidates
       candidates.forEach(function(candidate) {
-        if (report.comparisons >= opts.embeddingMaxComparisons || stopped()) {
+        if (report.comparisons >= comparisonLimit || stopped()) {
           embeddingPending = true
           return
         }
         var target = vector(candidate.target)
         if (!target) return
-        candidate.similarity = MiniAEmbeddings.cosine(source, target)
         report.comparisons++
+        candidate.similarity = MiniAEmbeddings.cosine(source, target)
       })
       candidates.sort(function(a, b) {
         return (isNumber(b.similarity) ? b.similarity : -1) - (isNumber(a.similarity) ? a.similarity : -1) || b.score - a.score || a.target.localeCompare(b.target)
@@ -597,8 +594,11 @@ MiniAGraphReconciler.prototype.run = function(pages, options) {
       for (var at = 0; at < paths.length && report.processed < opts.reconcileMaxPages && !stopped(); at++) {
         var path = paths[at]
         var candidates = self.discover(path, index, merge(opts, { lexicalCandidates: options.lexicalCandidates }))
-        // The implicit-link marker lives here, not in policy, so pair validation receipts stay valid.
-        var implicitMarker = graph._cfg.implicitLinks === false ? "implicit-off" : "implicit-" + MiniAWikiGraph.IMPLICIT_LINK_VERSION
+        // Include the selected names so changes in frequency invalidate otherwise unchanged pages.
+        var implicitTargets = self.implicitTargets(path, index, opts)
+        var implicitMarker = [MiniAWikiGraph.IMPLICIT_LINK_VERSION, Object.keys(implicitTargets).sort().map(function(target) {
+          return [target, implicitTargets[target].props.evidence.quote]
+        })]
         var signature = sha1(stringify([policy, state.pages[path].input, candidates.map(function(candidate) { return [candidate.target, candidate.targetRevision, candidate.matches.map(function(mention) { return mention.id })] }), implicitMarker], __, ""))
         if (state.completed[path] === signature) {
           report.cached++
@@ -637,7 +637,7 @@ MiniAGraphReconciler.prototype.run = function(pages, options) {
           }
         })
         Object.keys(wanted).sort().forEach(function(id) { materialize(path, wanted[id], wanted[id].model ? "reconcile-model" : "reconcile-deterministic") })
-        var implicit = self.implicitLinks(path, index, opts)
+        var implicit = self.implicitLinks(path, index, implicitTargets)
         report.implicitAdded = (report.implicitAdded || 0) + implicit.added
         report.implicitRemoved = (report.implicitRemoved || 0) + implicit.removed
         if (implicit.added || implicit.removed) changed = true
@@ -675,7 +675,7 @@ MiniAGraphReconciler.prototype.run = function(pages, options) {
     changed = true
   }
   report.elapsedMs = Date.now() - started
-  if (report.calls || report.embeddingCalls) changed = true
+  if (report.calls || report.embeddingCalls || report.comparisons) changed = true
   report.changed = changed
   if (changed) {
     if (!state.usage) state.usage = { validationCalls: 0, estimatedValidationTokens: 0, embeddingCalls: 0, comparisons: 0 }

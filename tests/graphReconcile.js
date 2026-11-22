@@ -89,6 +89,11 @@ try {
   assert(embeddingCalls === 2 && hybridResult.reconciliation.cached === 2, "warm hybrid performs no provider calls")
   var vectorRefresh = new MiniAGraphReconciler(hybrid).refreshEmbeddings(pair, { embeddingMaxCalls: 0 })
   assert(vectorRefresh.complete && vectorRefresh.calls === 0 && vectorRefresh.hits === 2, "embedding-only refresh reuses the same inputs")
+  var budgetedHybrid = new MiniAWikiGraph({ graphDir: root + "/budgeted-hybrid", modelExtractors: [], reconcileEmbeddingModel: { type: "ollama", model: "fixture" }, reconcileEmbeddingRequest: function() { return [1, 2, 3] } })
+  var trio = pair.concat([page("three.md", "Find `bucketKey`.")])
+  new MiniAGraphReconciler(budgetedHybrid).refreshEmbeddings(trio, { embeddingMaxCalls: 3 })
+  var budgeted = budgetedHybrid.build(trio, { reconcile: "hybrid", reconcileMaxPages: 1, reconcileMaxDf: 1, embeddingMaxComparisons: 2 })
+  assert(budgeted.partial && budgeted.reconciliation.runs > 1 && budgeted.reconciliation.comparisons === 2 && budgeted.reconciliation.embeddingCalls === 0, "cached vectors share one comparison budget across reconciliation runs")
   var originalClose = MiniAWikiEmbeddings.prototype.close
   var closeFailure = new MiniAWikiGraph({ graphDir: root + "/close-failure", modelExtractors: [], reconcileEmbeddingModel: { type: "ollama", model: "fixture" }, reconcileEmbeddingRequest: function() { return [1, 2, 3] } })
   try {
