@@ -67,7 +67,7 @@ use camel case. Saved preferences live in `.mini-a-wiki-state/config.json`.
 | `wikigraphreconcilellm` | `reconcileLlm` | `off`: `off`, `auto` |
 | `wikigraphreconcilemaxcandidates` | `reconcileMaxCandidates` | 16 per page, maximum 128 |
 | `wikigraphreconcilemaxedges` | `reconcileMaxEdges` | 16 added memberships per page, maximum 128 |
-| `wikigraphreconcilemaxpages` | `reconcileMaxPages` | 100 indexing/reconciliation pages per invocation, maximum 10000 |
+| `wikigraphreconcilemaxpages` | `reconcileMaxPages` | 100 indexing/reconciliation pages for the first run (follow-up runs in the same build take 10×), maximum 10000; a build repeats runs until settled within the time and provider budgets |
 | `wikigraphreconcilemaxcalls` | `reconcileMaxCalls` | 8 validation calls per invocation, maximum 1000 |
 | `wikigraphreconcilemaxtokens` | `reconcileMaxTokens` | 16000 estimated validation tokens |
 | `wikigraphreconcilemaxminutes` | `reconcileMaxMinutes` | 1 minute per invocation |

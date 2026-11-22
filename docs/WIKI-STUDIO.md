@@ -27,6 +27,9 @@ ojob /path/to/mini-a/mini-a-wiki-studio.yaml \
 
 `studioallowroots` also accepts SLON arrays. Quote each path and separate paths
 with `|`, for example `studioallowroots='["/data/wikis" | "/data/team wikis"]'`.
+If you mount a host directory with `-v "$PWD/__data:/data"`, use
+`studioallowroots='["/data"]'` and register each wiki in its own folder under
+`/data`. Other top-level directories still require a dedicated subdirectory.
 
 Use the absolute path to the installed oPack's job when launching outside its
 directory. Libraries and assets are anchored to that job's bundle, even when a

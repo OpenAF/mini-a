@@ -241,6 +241,60 @@ MiniAGraphReconciler.prototype.validate = function(candidate, index) {
   return { status: candidate.validation, matches: matches }
 }
 
+// Page identity concepts are named concept:page:<path>:<title>; wiki pages always end in .md.
+MiniAGraphReconciler.mentionTarget = function(id) {
+  var match = /^concept:page:(.+?\.md):/.exec(String(id || ""))
+  return match ? match[1] : ""
+}
+
+// Unlinked mentions of another page's unique title or alias become grounded page-to-page
+// MENTIONS_PAGE edges. Explicitly linked targets are skipped, and a single plain word that
+// names a page counts only while few pages use it.
+MiniAGraphReconciler.prototype.implicitLinks = function(path, index, options) {
+  var graph = this.graph
+  var record = index.pages[path]
+  var wanted = Object.create(null)
+  var kept = Object.create(null)
+  var result = { added: 0, removed: 0 }
+  if (graph._cfg.implicitLinks !== false && record) {
+    var linked = Object.create(null)
+    ;(record.links || []).forEach(function(target) { linked[target] = true })
+    var maxDf = Math.max(5, Math.floor(index.paths.length * options.reconcileMaxDf))
+    ;(record.mentions || []).forEach(function(mention) {
+      var target = MiniAGraphReconciler.mentionTarget(mention.id)
+      var evidence = mention.props && mention.props.evidence
+      if (!target || target === path || linked[target] || wanted[target] || !index.pages[target] || !isMap(evidence)) return
+      var term = String(evidence.quote || "")
+      var plainWord = !/\s/.test(term) && !graph._isCodeLike(term)
+      if (term.length < 3 || plainWord && (index.postings["concept:" + mention.id] || []).length > maxDf) return
+      wanted[target] = mention
+    })
+  }
+
+  // Keep one current edge per wanted target; everything else this page owned is stale.
+  ;(graph._edgesByOwner[path] || []).slice().forEach(function(edge) {
+    if (edge._deleted === true || edge.type !== "MENTIONS_PAGE") return
+    var target = edge.to.substring(4)
+    if (wanted[target] && !kept[target] && graph._implicitCurrent(edge)) {
+      kept[target] = true
+      return
+    }
+    graph._removeEdge(edge)
+    result.removed++
+  })
+  Object.keys(wanted).sort().forEach(function(target) {
+    if (kept[target]) return
+    var mention = wanted[target]
+    graph._addEdge("doc:" + path, "doc:" + target, "MENTIONS_PAGE", "EXTRACTED", {
+      page: path, revision: record.revision, sourceHash: record.hash, section: mention.props.section,
+      evidenceLayer: "grounded", method: "reconcile-implicit", confidence: 1, title: mention.name,
+      evidence: clone(mention.props.evidence), reconcileVersion: 1, implicitVersion: MiniAWikiGraph.IMPLICIT_LINK_VERSION
+    })
+    result.added++
+  })
+  return result
+}
+
 // Cache compact page inputs and completed work in the existing graph envelope.
 MiniAGraphReconciler.prototype.run = function(pages, options) {
   var graph = this.graph
@@ -543,7 +597,9 @@ MiniAGraphReconciler.prototype.run = function(pages, options) {
       for (var at = 0; at < paths.length && report.processed < opts.reconcileMaxPages && !stopped(); at++) {
         var path = paths[at]
         var candidates = self.discover(path, index, merge(opts, { lexicalCandidates: options.lexicalCandidates }))
-        var signature = sha1(stringify([policy, state.pages[path].input, candidates.map(function(candidate) { return [candidate.target, candidate.targetRevision, candidate.matches.map(function(mention) { return mention.id })] })], __, ""))
+        // The implicit-link marker lives here, not in policy, so pair validation receipts stay valid.
+        var implicitMarker = graph._cfg.implicitLinks === false ? "implicit-off" : "implicit-" + MiniAWikiGraph.IMPLICIT_LINK_VERSION
+        var signature = sha1(stringify([policy, state.pages[path].input, candidates.map(function(candidate) { return [candidate.target, candidate.targetRevision, candidate.matches.map(function(mention) { return mention.id })] }), implicitMarker], __, ""))
         if (state.completed[path] === signature) {
           report.cached++
           continue
@@ -581,6 +637,10 @@ MiniAGraphReconciler.prototype.run = function(pages, options) {
           }
         })
         Object.keys(wanted).sort().forEach(function(id) { materialize(path, wanted[id], wanted[id].model ? "reconcile-model" : "reconcile-deterministic") })
+        var implicit = self.implicitLinks(path, index, opts)
+        report.implicitAdded = (report.implicitAdded || 0) + implicit.added
+        report.implicitRemoved = (report.implicitRemoved || 0) + implicit.removed
+        if (implicit.added || implicit.removed) changed = true
         if (!pairPending && !embeddingPending) {
           state.completed[path] = signature
           changed = true

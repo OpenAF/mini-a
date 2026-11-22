@@ -54,6 +54,9 @@ jobs:
 - name: Studio paths
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testPaths
+- name: Studio allowroot configuration
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testAllowrootConfig
 - name: Studio atomic persistence
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testAtomicAndLocks
@@ -114,5 +117,6 @@ todo:
 - Studio search modes
 - Studio authorization
 - Studio paths
+- Studio allowroot configuration
 - Studio atomic persistence
 

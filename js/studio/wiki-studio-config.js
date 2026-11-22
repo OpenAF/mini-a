@@ -22,7 +22,12 @@ var wikiStudioConfig = function(args, base) {
     WikiStudio.assert(isString(p) && p.trim().length > 0, 400, "invalid_config", "Each studioallowroots entry must be a directory path")
     WikiStudio.noLinks(p)
     var r = WikiStudio.canonical(p)
-    WikiStudio.assert(new java.io.File(r).isDirectory() && !/^\/(?:System|Library|Applications|etc|private\/etc|usr|bin|sbin|var|private\/var)(?:\/|$)/.test(r) && r.split("/").length > 2 && !/(?:^|\/)\.[^/]+/.test(r), 400, "unsafe_allowroot", "Choose a dedicated data directory as allowroot")
+
+    // Accept the conventional /data volume as a parent while keeping other top-level directories restricted.
+    var dedicated = r === "/data" || r.split("/").length > 2
+    var system = /^\/(?:System|Library|Applications|etc|private\/etc|usr|bin|sbin|var|private\/var)(?:\/|$)/.test(r)
+    WikiStudio.assert(dedicated && !system && !/(?:^|\/)\.[^/]+/.test(r), 400, "unsafe_allowroot", "Choose /data or a dedicated subdirectory as allowroot: " + r)
+    WikiStudio.assert(new java.io.File(r).isDirectory(), 400, "unsafe_allowroot", "Allowroot must be an existing directory: " + r)
     WikiStudio.assert(!WikiStudio.inside(r, home), 400, "unsafe_allowroot", "Allowroot cannot be inside Studio home")
     return r
   })

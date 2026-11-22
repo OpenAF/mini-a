@@ -119,8 +119,13 @@ jobs:
   to: oJob Test
   exec: args.func = function() { load("tests/graphReconcile.js") }
 
+- name: MiniA Graph Tests::ImplicitLinks
+  to: oJob Test
+  exec: args.func = function() { load("tests/graphImplicitLinks.js") }
+
 todo:
 - MiniA Graph Tests::ReconciliationV2
+- MiniA Graph Tests::ImplicitLinks
 - MiniA Graph Tests::StructuralBuild
 - MiniA Graph Tests::QueryNeighbors
 - MiniA Graph Tests::RelatedAndExport

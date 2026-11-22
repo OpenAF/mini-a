@@ -14,6 +14,7 @@ var MiniAGraphConnectivity = function(state, options) {
   var unverifiable = 0
   var dangling = 0
   var explicit = 0
+  var implicit = 0
   var physical = 0
   var paths = Array.isArray(opts.pages) ? opts.pages : null
   var actual = paths ? Object.create(null) : null
@@ -98,8 +99,11 @@ var MiniAGraphConnectivity = function(state, options) {
       if (!p.sourceHash || !p.revision) unverifiable++
       else if (!revisionCurrent(edge)) stale++
     }
-    if ((edge.type === 'LINKS_TO' || edge.type === 'SUPERSEDES') && docs[edge.from] && docs[edge.to] && edge.from !== edge.to) {
-      explicit++
+    // Current unlinked page mentions connect pages like links do, counted separately.
+    var implicitLink = edge.type === 'MENTIONS_PAGE' && current(edge)
+    if (implicitLink && docs[edge.from] && docs[edge.to] && edge.from !== edge.to) implicit++
+    if ((edge.type === 'LINKS_TO' || edge.type === 'SUPERSEDES' || implicitLink) && docs[edge.from] && docs[edge.to] && edge.from !== edge.to) {
+      if (!implicitLink) explicit++
       if (isNavigation(edge.from) || isNavigation(edge.to)) {
         navigation[edge.from] = true
         navigation[edge.to] = true
@@ -176,7 +180,7 @@ var MiniAGraphConnectivity = function(state, options) {
   return {
     version: 1, authority: actual ? 'inventory' : 'snapshot', documentNodes: physical,
     actualPages: ids.length, placeholderDocuments: physical - ids.length,
-    explicitDocumentEdges: explicit, documentsWithSharedTags: tagDocs,
+    explicitDocumentEdges: explicit, implicitDocumentEdges: implicit, documentsWithSharedTags: tagDocs,
     documentsWithGroundedConcepts: conceptDocs, navigationOnlyDocuments: navOnly,
     semanticallyIsolatedDocuments: semanticIsolated, meaningfullyIsolatedDocuments: isolated,
     components: distribution.length, componentSizes: distribution,

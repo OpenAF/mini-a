@@ -1587,6 +1587,17 @@ help:
     desc     : "Re-rank graph-discovered Retrieval V2 hits by personalized PageRank proximity to the query's lexical seeds (bounded by the graph edge budget)."
     mandatory: false
     options  : ["true", "false"]
+  - name     : wikigraphautoreconcile
+    desc     : "Reconcile graph connections right after single page writes on local wikis up to wikigraphautoreconcilemaxpages pages (CPU-only settings only; others wait for the next graph build). Default true."
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikigraphautoreconcilemaxpages
+    desc     : "Largest wiki (in pages) for which wikigraphautoreconcile runs after each write. Default 200."
+    mandatory: false
+  - name     : wikigraphimplicitlinks
+    desc     : "Turn unlinked mentions of another page's unique title or alias into grounded MENTIONS_PAGE graph edges, weighted below explicit links (default true)."
+    mandatory: false
+    options  : ["true", "false"]
   - name     : wikigraphfalkorgraph
     desc     : "FalkorDB graph name for wiki graph."
     mandatory: false

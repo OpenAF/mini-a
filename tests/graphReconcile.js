@@ -67,7 +67,8 @@ try {
   var many = []
   for (var i = 0; i < 5; i++) many.push(page("p" + i + ".md", "Use `sharedKey`."))
   var limited = graph.build(many, { reconcile: "lexical", reconcileMaxPages: 2, reconcileMaxDf: 1 })
-  assert(limited.partial && limited.reconciliation.pendingIndex === 3, "indexing has bounded durable work")
+  // The first run indexes at most reconcileMaxPages; one build repeats larger runs until the corpus settles.
+  assert(!limited.partial && limited.reconciliation.runs >= 2 && limited.reconciliation.indexed === 5, "indexing has bounded durable work per run")
   graph = new MiniAWikiGraph({ graphDir: root + "/graph", modelExtractors: [] })
   for (var attempt = 0; attempt < 5; attempt++) {
     limited = graph.build(many, { reconcile: "lexical", reconcileMaxPages: 2, reconcileMaxDf: 1 })

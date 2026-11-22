@@ -606,6 +606,140 @@ MiniAWikiGraph.prototype._buildStructural = function(pages, opts, deferStats) {
   return deferStats ? { ok: true } : this.stats()
 }
 
+// Implicit page mentions: page B names page A's title or alias without linking to it.
+// Bumping the version re-examines every page on the next reconciliation (CPU only).
+MiniAWikiGraph.IMPLICIT_LINK_VERSION = 1
+
+// Grounded methods whose evidence is a literal quote that can follow an edited page.
+MiniAWikiGraph.REBASE_METHODS = { "deterministic": true, "reconcile-deterministic": true, "reconcile-model": true, "reconcile-implicit": true }
+
+// _groundedCarry: copies of a page's grounded, quote-backed edges taken before an edit removes
+// them, so connections whose quote survives the edit stay attached until the next reconciliation.
+MiniAWikiGraph.prototype._groundedCarry = function(path) {
+  if (this._cfg.preserveOnEdit === false) return []
+  this._ensureIndexes()
+  var self = this
+  var nodeCopy = function(id) {
+    var node = self._state.nodes[id]
+    return isMap(node) ? { type: node.type, props: clone(node.props || {}) } : __
+  }
+  return (this._edgesByOwner[path] || []).filter(function(e) {
+    var p = e.props || {}
+    return e._deleted !== true && p.evidenceLayer === "grounded" && MiniAWikiGraph.REBASE_METHODS[p.method] === true &&
+           isMap(p.evidence) && isString(p.evidence.quote) && p.evidence.quote.length > 0
+  }).map(function(e) {
+    return { from: e.from, to: e.to, type: e.type, provenance: e.provenance, props: clone(e.props), fromNode: nodeCopy(e.from), toNode: nodeCopy(e.to) }
+  })
+}
+
+// _rebaseGrounded: re-attach carried edges whose quote still occurs as a whole term in the new
+// body, moving offsets, section, revision and source hash to the new page revision.
+MiniAWikiGraph.prototype._rebaseGrounded = function(p, carried) {
+  if (!isArray(carried) || carried.length === 0) return 0
+  var self = this
+  var body = String(p.body || "")
+  var summary = this._state.summaries.pages[p.path]
+  if (!isMap(summary)) return 0
+  var hash = summary.hash
+  var revision = p.revision || hash
+  var boundary = /[A-Za-z0-9_$]/
+  var sections
+
+  // fits: the quote sits at offset at without being part of a longer identifier.
+  var fits = function(quote, at) {
+    if (at < 0 || body.substring(at, at + quote.length) !== quote) return false
+    if (boundary.test(quote.charAt(0)) && boundary.test(body.charAt(at - 1))) return false
+    return !(boundary.test(quote.charAt(quote.length - 1)) && boundary.test(body.charAt(at + quote.length)))
+  }
+
+  // locate: the previous offset while it still holds the quote, else the first whole-term match.
+  var locate = function(quote, start) {
+    if (isNumber(start) && fits(quote, start)) return start
+    var at = body.indexOf(quote)
+    while (at >= 0 && !fits(quote, at)) at = body.indexOf(quote, at + 1)
+    return at
+  }
+
+  var count = 0
+  carried.forEach(function(e) {
+    var props = clone(e.props)
+    var at = locate(props.evidence.quote, props.evidence.start)
+    if (at < 0) return
+    // A page connection needs a live target page; concept endpoints are restored from copies.
+    if (e.type === "MENTIONS_PAGE" && !self._isLivePage(e.to)) return
+    ;[[e.from, e.fromNode], [e.to, e.toNode]].forEach(function(end) {
+      if (!isMap(self._state.nodes[end[0]]) && isMap(end[1])) self._upsertNode(end[0], end[1].type, end[1].props)
+    })
+    if (props.method !== "reconcile-model") {
+      if (!sections) sections = self._semanticSections(p)
+      var section = sections.filter(function(s) { return s.start <= at && at < s.start + s.text.length })[0]
+      if (section) props.section = section.section
+    }
+    if (isArray(props.supports)) props.supports.forEach(function(support) { if (support.path === p.path) support.revision = revision })
+    props.revision = revision
+    props.sourceHash = hash
+    props.evidence = merge(props.evidence, { start: at, end: at + props.evidence.quote.length, line: body.substring(0, at).split("\n").length })
+    self._addEdge(e.from, e.to, e.type, e.provenance, props)
+    count++
+  })
+  return count
+}
+
+// _isLivePage: true for an indexed page, false for a placeholder of a missing link target.
+MiniAWikiGraph.prototype._isLivePage = function(id) {
+  var node = this._state.nodes[id]
+  return isMap(node) && node.type === "document" && isMap(node.props) && isString(node.props.hash)
+}
+
+// _implicitCurrent: an unlinked page mention whose source revision and target page are current.
+MiniAWikiGraph.prototype._implicitCurrent = function(edge) {
+  return isMap(edge) && edge.type === "MENTIONS_PAGE" && this._currentEvidence(edge) && this._isLivePage(edge.to)
+}
+
+// _pageNames: the names (title, else file stem, plus aliases) other pages can mention a page by.
+MiniAWikiGraph.prototype._pageNames = function(path) {
+  var docId = "doc:" + path
+  var node = this._state.nodes[docId]
+  var names = {}
+  if (isMap(node) && isMap(node.props) && isString(node.props.title)) {
+    names[node.props.title === path ? path.replace(/\.md$/, "").split("/").pop() : node.props.title] = true
+  }
+  ;(this._adj[docId] || []).forEach(function(e) {
+    if (e._deleted === true || e.type !== "ALIAS_OF" || e.to !== docId) return
+    var alias = this._state.nodes[e.from]
+    if (isMap(alias) && isMap(alias.props) && isString(alias.props.value)) names[alias.props.value.trim()] = true
+  }, this)
+  return names
+}
+
+// _dropIncomingMentions: remove other pages' unlinked mentions of a page that match the
+// predicate, and queue their owners for reconciliation.
+MiniAWikiGraph.prototype._dropIncomingMentions = function(path, predicate, removed) {
+  var docId = "doc:" + path
+  var self = this
+  var count = 0
+  ;(this._adj[docId] || []).slice().forEach(function(e) {
+    if (e._deleted === true || e.type !== "MENTIONS_PAGE" || e.to !== docId || !predicate(e)) return
+    if (isMap(removed) && isArray(removed.deleteEdges)) {
+      removed.deleteEdges.push({ from: e.from, to: e.to, type: e.type, provenance: e.provenance, props: clone(e.props || {}) })
+    }
+    self._removeEdge(e)
+    self._markReconciliationDirty(e.props.page)
+    count++
+  })
+  return count
+}
+
+// _dropRetitledMentions: after a title or alias change, other pages' mentions of the old names
+// no longer identify the page.
+MiniAWikiGraph.prototype._dropRetitledMentions = function(path, oldNames, removed) {
+  var names = this._pageNames(path)
+  if (Object.keys(oldNames).sort().join("\n") === Object.keys(names).sort().join("\n")) return 0
+  return this._dropIncomingMentions(path, function(e) {
+    return !(isMap(e.props.evidence) && names[e.props.evidence.quote] === true)
+  }, removed)
+}
+
 MiniAWikiGraph.prototype.updatePage = function(p) { return this._updatePage(p, false) }
 
 // Batch builds defer derived statistics until every page change is present.
@@ -616,8 +750,12 @@ MiniAWikiGraph.prototype._updatePage = function(p, deferStats) {
   var prev = isMap(this._state.summaries.pages[p.path]) ? this._state.summaries.pages[p.path] : __
   if (isMap(prev) && prev.hash === newHash) return { ok: true, changed: false }
   if (this._inBatch()) deferStats = true
+  var carried = isMap(prev) ? this._groundedCarry(p.path) : []
+  var oldNames = isMap(prev) ? this._pageNames(p.path) : __
   var removed = this._removePageState(p.path)
   this._indexPageStructural(p)
+  this._rebaseGrounded(p, carried)
+  if (isDef(oldNames)) this._dropRetitledMentions(p.path, oldNames, removed)
   this._markReconciliationDirty(p.path)
   this._markDerivedDirty()
   this._scheduleSave(this._inBatch() ? __ : this._pageDiff(p.path, removed))
@@ -655,6 +793,8 @@ MiniAWikiGraph.prototype._removePage = function(path, deferStats) {
   if (!isString(path) || path.length === 0) return { ok: false, error: "path is required" }
   if (this._inBatch()) deferStats = true
   var removed = this._removePageState(path)
+  // Other pages' unlinked mentions of a deleted page no longer name anything.
+  this._dropIncomingMentions(path, function() { return true }, removed)
   // A deleted page has nothing to re-attach carried model work to.
   if (isMap(this._state.semantic_carry)) delete this._state.semantic_carry[path]
   var placeholder = this._state.nodes[this._id("doc", path)]
@@ -1435,11 +1575,14 @@ MiniAWikiGraph.prototype.detectCommunities = function() {
     var weight = e.type === "MENTIONS" && self._currentEvidence(e) ? (e.props.confidence || 0) * 2 / Math.log(2 + (self._adj[e.to] || []).length) : e.type === "HAS_TAG" ? 1 / Math.log(2 + (self._adj[e.to] || []).length) : 1
     deg[e.from] = (deg[e.from] || 0) + weight
     deg[e.to] = (deg[e.to] || 0) + weight
-    if ((e.type === "LINKS_TO" || e.type === "SUPERSEDES") && isDoc[e.from] && isDoc[e.to] && e.from !== e.to) {
-      linkNeighbors[e.from][e.to] = true
-      linkNeighbors[e.to][e.from] = true
+    // Explicit links weigh 1; a current unlinked page mention weighs half as much.
+    var linkWeight = (e.type === "LINKS_TO" || e.type === "SUPERSEDES") ? 1 : self._implicitCurrent(e) ? 0.5 : 0
+    if (linkWeight > 0 && isDoc[e.from] && isDoc[e.to] && e.from !== e.to) {
+      linkNeighbors[e.from][e.to] = Math.max(linkNeighbors[e.from][e.to] || 0, linkWeight)
+      linkNeighbors[e.to][e.from] = Math.max(linkNeighbors[e.to][e.from] || 0, linkWeight)
       return
     }
+    if (e.type === "MENTIONS_PAGE") return
     var feature = e.type === "HAS_TAG" ? e.to : e.type === "MENTIONS" && self._currentEvidence(e) ? e.to : ""
     if (feature.length === 0 || !isDoc[e.from]) return
     if (!isMap(featureDocs[feature])) featureDocs[feature] = {}
@@ -1473,8 +1616,8 @@ MiniAWikiGraph.prototype.detectCommunities = function() {
       kSum += idfs[feature]
     })
     Object.keys(linkNeighbors[id]).forEach(function(other) {
-      links[other] = 1
-      kSum += 1
+      links[other] = linkNeighbors[id][other]
+      kSum += linkNeighbors[id][other]
     })
     units[id] = { members: [id], feats: feats, links: links, k: kSum }
     twoM += kSum
@@ -1704,6 +1847,10 @@ MiniAWikiGraph.prototype.expansionCandidates = function(path, options) {
     var edge = edges[i], other = edge.from === docId ? edge.to : edge.from
     if (edge._deleted) continue
     if (other.indexOf("doc:") === 0 && (edge.type === "LINKS_TO" || edge.type === "SUPERSEDES")) add(other.substring(4), edge.type, [support(edge.from.substring(4))], 4, "structural")
+    else if (other.indexOf("doc:") === 0 && edge.type === "MENTIONS_PAGE") {
+      // Unlinked page mentions rank between explicit links and shared concepts.
+      if (this._implicitCurrent(edge)) add(other.substring(4), "mentions_page", [support(edge.props.page, edge)], 3.5, "grounded", edge.props.evidence.quote)
+    }
     else if (edge.type === "HAS_TAG" || edge.type === "ALIAS_OF") {
       var shared = this._adj[other] || []
       for (var j = 0; j < shared.length; j++) {
@@ -1763,7 +1910,7 @@ MiniAWikiGraph.prototype.proximity = function(seedPaths, options) {
       budget.used++
       var e = edges[i]
       if (e._deleted === true) continue
-      var traversable = e.type === "LINKS_TO" || e.type === "SUPERSEDES" || e.type === "HAS_TAG" || e.type === "MENTIONS" && self._currentEvidence(e)
+      var traversable = e.type === "LINKS_TO" || e.type === "SUPERSEDES" || e.type === "HAS_TAG" || e.type === "MENTIONS" && self._currentEvidence(e) || self._implicitCurrent(e)
       if (!traversable) continue
       out.push(e.from === id ? e.to : e.from)
     }
@@ -1882,6 +2029,11 @@ MiniAWikiGraph.prototype.relatedFor = function(paths, opts) {
     adj.forEach(function(e) {
       var otherId = e.from === id ? e.to : e.from
       if (!String(otherId).startsWith("doc:")) return
+      // An unlinked mention counts half as much as an explicit link, and only while current.
+      if (e.type === "MENTIONS_PAGE") {
+        if (self._implicitCurrent(e)) add(String(otherId).substring(4), e.type, e.provenance, 1)
+        return
+      }
       add(String(otherId).substring(4), e.type, e.provenance, 2)
     })
   })
@@ -2232,16 +2384,18 @@ MiniAWikiGraph.prototype.stats = function(options) {
   var edges = this._state.edges.filter(function(e) { return e._deleted !== true }).length
   var byProv = { EXTRACTED: 0, INFERRED: 0, AMBIGUOUS: 0 }
   var dangling = 0
+  var implicit = 0
   this._state.edges.forEach(function(e) {
     if (e._deleted === true) return
     byProv[this._normalizeProvenance(e.provenance)]++
+    if (this._implicitCurrent(e)) implicit++
     // A page link whose target never became an indexed page (cross-wiki @links excluded).
     if (e.type === "LINKS_TO" && String(e.to).indexOf("doc:@") !== 0) {
       var target = this._state.nodes[e.to]
       if (!isMap(target) || !isMap(target.props) || !isString(target.props.hash)) dangling++
     }
   }.bind(this))
-  var result = { nodes: nodes, edges: edges, provenance: byProv, danglingLinks: dangling, communities: isArray(this._state.communities) ? this._state.communities.length : 0 }
+  var result = { nodes: nodes, edges: edges, provenance: byProv, danglingLinks: dangling, implicitLinks: implicit, communities: isArray(this._state.communities) ? this._state.communities.length : 0 }
   if (options && options.detailed === true) result.connectivity = MiniAGraphConnectivity(this._state, options)
   return result
 }
@@ -2620,6 +2774,55 @@ MiniAWikiGraph.sharedReader = function(config, loggerFn) {
   return facade
 }
 
+// _reconcileUntilSettled: repeat resumable reconciliation runs (the first capped at reconcileMaxPages,
+// later ones at ten times that)
+// until the corpus settles, no run makes progress, or the build's time, call, token or embedding
+// budget is spent. Budgets cover the whole loop, never each run. Counters are summed.
+MiniAWikiGraph.prototype._reconcileUntilSettled = function(pages, opts, effective) {
+  var reconciler = new MiniAGraphReconciler(this)
+  var started = Date.now()
+  var self = this
+  var used = { calls: 0, tokens: 0, embeddings: 0 }
+  var summed = ["indexed", "processed", "added", "removed", "rejected", "calls", "estimatedTokens", "embeddingCalls", "embeddingHits", "comparisons", "candidates", "discoveryTruncated", "implicitAdded", "implicitRemoved"]
+  var totals = {}
+  var report
+  var runs = 0
+
+  // settledCount: completed page signatures, the unit of durable reconciliation progress.
+  var settledCount = function() {
+    var state = self._state.reconciliation
+    return isMap(state) && isMap(state.completed) ? Object.keys(state.completed).length : 0
+  }
+
+  while (true) {
+    var remainingMs = effective.reconcileMaxMinutes * 60000 - (Date.now() - started)
+    if (runs > 0 && remainingMs <= 0) break
+    var before = settledCount()
+    // Follow-up runs take larger batches: each run rescans the corpus, so fewer runs settle faster.
+    var runOpts = runs === 0 ? opts : merge(opts, {
+      reconcileMaxPages: Math.min(10000, effective.reconcileMaxPages * 10),
+      reconcileMaxMinutes: remainingMs / 60000,
+      reconcileMaxCalls: Math.max(0, effective.reconcileMaxCalls - used.calls),
+      reconcileMaxTokens: Math.max(0, effective.reconcileMaxTokens - used.tokens),
+      embeddingMaxCalls: Math.max(0, effective.embeddingMaxCalls - used.embeddings)
+    })
+    report = reconciler.run(pages, runOpts)
+    runs++
+    if (report.ok === false) return report
+    summed.forEach(function(key) { if (isNumber(report[key])) totals[key] = (totals[key] || 0) + report[key] })
+    used.calls += report.calls || 0
+    used.tokens += report.estimatedTokens || 0
+    used.embeddings += report.embeddingCalls || 0
+    var progressed = (report.indexed || 0) > 0 || settledCount() > before || (report.implicitAdded || 0) + (report.implicitRemoved || 0) > 0
+    if (!report.partial || !report.resumable || !progressed || opts.preview === true || runs >= 1000) break
+    if (isFunction(opts.isCancelled) && opts.isCancelled()) break
+  }
+  summed.forEach(function(key) { if (isDef(totals[key])) report[key] = totals[key] })
+  report.runs = runs
+  report.elapsedMs = Date.now() - started
+  return report
+}
+
 // Preview builds operate on a private snapshot; reconciliation never authorizes providers implicitly.
 var __miniAGraphBuildBase = MiniAWikiGraph.prototype.build
 MiniAWikiGraph.prototype.build = function(pages, options) {
@@ -2662,7 +2865,7 @@ MiniAWikiGraph.prototype.build = function(pages, options) {
   if (sameStructure && isFunction(opts.onProgress)) opts.onProgress({ ok: true, stage: "structural", status: "structural", processed: 0, cached: pages.length, index: 0, total: pages.length, calls: 0, effective: clone(effective) })
   var result = sameStructure ? { ok: true, stage: "complete", status: "complete", changed: false, processed: pages.length, cached: pages.length, calls: 0, effective: clone(effective) } : __miniAGraphBuildBase.call(this, pages, opts)
   if (result.ok !== false && MiniAGraphBuild.resolve(opts).reconcile !== "off") {
-    result.reconciliation = new MiniAGraphReconciler(this).run(pages, opts)
+    result.reconciliation = this._reconcileUntilSettled(pages, opts, effective)
     if (result.reconciliation.ok === false) result.ok = false
     var requestedSemantic = effective.extraction === "semantic" && effective.modelHelp === "auto"
     result.semanticPending = result.pending || 0

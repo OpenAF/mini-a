@@ -200,6 +200,18 @@ help:
     desc     : "Re-rank graph-discovered Retrieval V2 hits by personalized PageRank proximity to the query's lexical seeds (bounded by the graph edge budget)."
     example  : "false"
     mandatory: false
+  - name     : wikigraphautoreconcile
+    desc     : "Reconcile graph connections right after single page writes on local wikis up to wikigraphautoreconcilemaxpages pages (CPU-only settings only; others wait for the next graph build). Default true."
+    example  : "true"
+    mandatory: false
+  - name     : wikigraphautoreconcilemaxpages
+    desc     : "Largest wiki (in pages) for which wikigraphautoreconcile runs after each write. Default 200."
+    example  : "200"
+    mandatory: false
+  - name     : wikigraphimplicitlinks
+    desc     : "Turn unlinked mentions of another page's unique title or alias into grounded MENTIONS_PAGE graph edges, weighted below explicit links (default true)."
+    example  : "true"
+    mandatory: false
   - name     : audit
     desc     : "If true (or env OJOB_MCP_AUDIT), logs every MCP tool call (tool name and arguments, handled generically by oJobMCP.yaml) plus every page actually fetched from a remote wikibackend (s3, http, es) -- backend, resolved location (s3://bucket/key, URL, or es:index/path), and byte count -- via OpenAF's log() function. The latter also covers pages fetched internally while serving search/lint/list, not just the top-level read tool call."
     example  : "false"
@@ -570,6 +582,9 @@ jobs:
       wikigraphcrossmaxdf : toNumber.isNumber.default(__)
       wikigraphcrossminkeylen: toNumber.isNumber.default(__)
       wikigraphproximity  : toBoolean.isBoolean.default(__)
+      wikigraphimplicitlinks: toBoolean.isBoolean.default(__)
+      wikigraphautoreconcile: toBoolean.isBoolean.default(__)
+      wikigraphautoreconcilemaxpages: toNumber.isNumber.default(__)
       label               : isString.default("wiki")
       wikimounts          : isString.default(__)
       wikimountshint      : toBoolean.isBoolean.default(false)

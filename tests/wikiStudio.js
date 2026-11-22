@@ -1,4 +1,5 @@
 (function() {
+  loadLib(String(new java.io.File("js/studio/wiki-studio-config.js").getCanonicalPath()))
   loadLib(String(new java.io.File("js/studio/wiki-studio-api.js").getCanonicalPath()))
   loadLib(String(new java.io.File("js/studio/wiki-studio-pages.js").getCanonicalPath()))
   loadLib(String(new java.io.File("js/studio/wiki-studio-graph.js").getCanonicalPath()))
@@ -248,6 +249,36 @@
     rejects(function() { WikiStudio.authorize("viewer", "editor") }, "forbidden")
     rejects(function() { WikiStudio.authorize("admin", "editor", {access:"ro"}) }, "read_only")
   }) }
+  // Exercise startup with the Docker volume path on hosts with and without /data.
+  exports.testAllowrootConfig = function() {
+    fixture(function(s, t) {
+      function configure(root) {
+        return wikiStudioConfig({ studiohome: s.config.home, studioallowroots: JSON.stringify([root]) })
+      }
+
+      if (java.nio.file.Files.isSymbolicLink(WikiStudio.path("/data"))) {
+        rejects(function() { configure("/data") }, "unsafe_path")
+      } else if (new java.io.File("/data").isDirectory()) {
+        assert(configure("/data").roots, ["/data"], "Studio accepts an existing /data volume")
+      } else {
+        var message
+        try {
+          configure("/data")
+        } catch (e) {
+          message = e.message
+        }
+        assert(message, "Allowroot must be an existing directory: /data", "A missing /data passes the path policy but fails the directory check")
+      }
+
+      // Other top-level directories, system trees and hidden directories remain restricted.
+      var restricted = ["/", "/usr", "/usr/share", t + "/.hidden"]
+      WikiStudio.privateDir(t + "/.hidden")
+      restricted.forEach(function(root) {
+        rejects(function() { configure(root) }, "unsafe_allowroot")
+      })
+    })
+  }
+
   exports.testPaths = function() { fixture(function(s, t) {
     ["../secret.md", "/etc/passwd.md", "a/%2e%2e/x.md", "AGENTS.md", ".git/config.md", "a\\b.md", "x.txt", "a/.mini-a-x/foo.md"].forEach(function(p) { rejects(function() { WikiStudio.safeFile(t, p) }, "unsafe_path") })
     var w = add(s, t)
