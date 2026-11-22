@@ -251,6 +251,7 @@ function jsonView(value, parent) {
 }
 // Line icons share Mini-A web Advanced's 24px, rounded, currentColor style (see public/advanced.js tabIcons).
 const ICONS = {
+  warning: "M12 3 2 21h20L12 3ZM12 9v5m0 3v.1",
   logo: "M12 5v16M12 5C9 3 5 3 3 4v15c3-1 6-1 9 2 3-3 6-3 9-2V4c-2-1-6-1-9 1Z",
   overview: "m3 11 9-8 9 8M5 9.5V20h14V9.5M10 20v-6h4v6",
   pages: "M5 3h14v18H5ZM8 7h8m-8 4h8m-8 4h6",
@@ -298,6 +299,7 @@ const message = (text, error = false) => { const node = document.getElementById(
 const safely = fn => async (...args) => { try { await fn(...args); } catch (error) { message(error.message, error.name !== "AbortError"); } };
 async function unlock(token) {
   StudioApi.token = token; studioSession = await StudioApi.request("session");
+  showModelAvailability();
   document.getElementById("token").value = ""; document.getElementById("login").hidden = true; await dashboard();
 }
 withIcon(document.querySelector("#login button"), "unlock");
@@ -734,8 +736,82 @@ function date(value) {
   var pad = function(part) { return String(part).padStart(2, "0") }
   return timestamp.getFullYear() + "-" + pad(timestamp.getMonth() + 1) + "-" + pad(timestamp.getDate()) + ", " + pad(timestamp.getHours()) + ":" + pad(timestamp.getMinutes()) + ":" + pad(timestamp.getSeconds())
 }
-function disable(control, reason) { control.disabled = !!reason; control.title = reason || ""; if (reason) { const note = el("small", reason, control.parentElement); note.className = "muted control-reason"; } return control; }
-function writeReason(model = false) { return currentWiki.access !== "rw" ? "This wiki is read-only" : model && !studioSession?.canTestWiki ? "Configure OAF_MODEL to use this action" : ""; }
+// Associate visible reasons with the form control for assistive technology.
+let controlReasonId = 0
+function explainControl(control, reason) {
+  const note = el("small", reason, control.parentElement)
+  note.className = "muted control-reason"
+  note.id = "control-reason-" + ++controlReasonId
+  control.setAttribute("aria-describedby", note.id)
+}
+function disable(control, reason) {
+  control.disabled = !!reason
+  control.title = reason || ""
+  if (reason) explainControl(control, reason)
+  return control
+}
+// Explain configuration for each capability without exposing server model settings.
+const modelRequirements = {
+  test: "OAF_MODEL", distill: "OAF_MODEL", absorb: "OAF_MODEL", reorg: "OAF_MODEL",
+  graphEnrichment: "OAF_LC_MODEL, OAF_MODEL or OAF_DECIDE_MODEL",
+  relationshipValidation: "OAF_LC_MODEL or OAF_MODEL", embeddings: "OAF_EMBED_MODEL"
+}
+function modelReason(action) {
+  if (studioSession?.models?.actions[action] === true || !studioSession?.models && studioSession?.canTestWiki) return ""
+  return "Configure " + modelRequirements[action] + " in the Studio server environment"
+}
+function showModelAvailability() {
+  const host = document.getElementById("model-availability")
+  const roles = studioSession?.models?.roles
+  if (!host || !roles) return
+  host.replaceChildren()
+  host.hidden = false
+  const missing = Object.values(roles).every(role => role.status === "missing")
+  const needsAttention = Object.values(roles).some(role => role.status !== "configured")
+  const trigger = el("button", "Model availability", host)
+  trigger.type = "button"
+  trigger.className = "model-availability-trigger"
+  trigger.setAttribute("aria-haspopup", "dialog")
+  const icon = svgIcon(needsAttention ? "warning" : "check")
+  icon.classList.add(needsAttention ? "model-status-warning" : "model-status-ready")
+  trigger.prepend(icon)
+
+  // Keep the report in Studio's modal layer and restore focus to its footer control.
+  const dialog = el("dialog", undefined, host)
+  const heading = el("h3", "Model availability", dialog)
+  heading.id = "model-availability-title"
+  dialog.setAttribute("aria-labelledby", heading.id)
+  el("p", (missing ? "No models configured. " : "") + "Browse, edit, search, import text and build structural graphs without a model. Configuration is checked locally.", dialog)
+  const list = el("ul", undefined, dialog)
+  const uses = { main: "Wiki test, distillation, absorption, reorganization and graph assistance", lowCost: "Graph assistance and relationship validation", decision: "Graph assistance", vision: "Image descriptions", embedding: "Hybrid graph reconciliation and embedding cache" }
+  const statuses = { missing: "Missing", invalid: "Invalid or unresolved", configured: "Configured locally", "main-fallback": "Uses main model · vision support unverified" }
+  Object.entries(roles).forEach(([role, state]) => {
+    const item = el("li", state.variable + " · ", list)
+    const status = el("span", statuses[state.status], item)
+    status.className = state.status === "configured" ? "model-status-ready" : state.status === "main-fallback" ? "model-status-warning" : "model-status-unavailable"
+    item.append(" · " + uses[role])
+  })
+  const close = el("button", "Close", dialog)
+  close.type = "button"
+  close.onclick = () => dialog.close()
+  trigger.onclick = () => {
+    dialog.showModal()
+    close.focus()
+  }
+  dialog.addEventListener("close", () => trigger.focus())
+}
+
+// Disable a model-dependent choice while keeping the rest of the selector usable.
+function modelOption(control, value, action) {
+  const reason = modelReason(action)
+  const option = Array.from(control.children).find(item => item.value === value)
+  if (option && reason) {
+    option.disabled = true
+    explainControl(control, option.textContent + " unavailable. " + reason + ".")
+  }
+  return !!reason
+}
+function writeReason(model = false) { return currentWiki.access !== "rw" ? "This wiki is read-only" : model ? modelReason(model === true ? "reorg" : model) : ""; }
 async function allItems(path) {
   let result, offset = 0, items = [];
   do { result = await StudioApi.request(path + (path.includes("?") ? "&" : "?") + "limit=100&offset=" + offset); items.push(...result.items); offset += result.items.length; } while (result.truncated && result.items.length);
@@ -762,6 +838,21 @@ function metricChart(parent, title, values, unit = "Count") {
 function destroyDetachedCharts() { for (const chart of charts) if (!chart.canvas?.isConnected) { chart.destroy(); charts.delete(chart); } }
 function outcome(parent, result) {
   if (!result) return;
+  if (result.skipped_model?.length) {
+    const section = el("section", undefined, parent)
+    el("h4", result.skipped_model.length + " skipped · Vision model required", section)
+    const list = el("ul", undefined, section)
+    result.skipped_model.forEach(item => el("li", item.path + " · " + item.reason, list))
+    if (result.dryrun && result.eligible_sources.length) {
+      el("h4", result.eligible_sources.length + " eligible files", section)
+      const eligible = el("ul", undefined, section)
+      result.eligible_sources.forEach(path => el("li", path, eligible))
+    }
+    if (!result.dryrun) el("p", result.written.length + " pages written", section)
+  }
+  if (result.dryrun && result.pending_image_extraction?.length) {
+    el("p", result.pending_image_extraction.length + " image files will be described by the configured model during import.", parent)
+  }
   // Summary fields (ok, status, dryrun, discovered, ...) render as one nJSMap table instead of loose lines
   var scalar = Object.entries(result)
                      .filter(([k, v]) => ["string", "number", "boolean"].includes(typeof v) && !/^(?:id|version)$/.test(k))
@@ -888,6 +979,10 @@ async function showView(name, content) {
           try { const result = await StudioApi.wiki("test", "POST", {advanced:advanced.checked,tuning:launch.values()}); tab.location.replace(result.url); await refreshTestServers(); }
           catch(error) { tab.close(); throw error; }
         }, "open");
+      } else {
+        const test = el("section", undefined, content)
+        el("h4", "Test this wiki", test)
+        disable(button(test, "Open wiki test in new tab", () => {}, "open"), modelReason("test"))
       }
     }
     await summaryView(content, name === "Health");
@@ -1709,12 +1804,15 @@ async function sourcesView(content) {
 
     var semantic = check(advanced, "Semantic extraction")
     var prune = check(advanced, "Remove source-owned pages missing from this revision")
-    disable(semantic, writeReason(true))
+    disable(semantic, writeReason("graphEnrichment"))
     var importReconcile = field(advanced, "Relationship reconciliation", ["saved", "off", "lexical", "hybrid"])
     var importValidation = field(advanced, "Relationship validation model", ["saved", "off", "auto"])
+    if (modelOption(mode, "distill", "distill")) mode.value = "normalize"
+    modelOption(importReconcile, "hybrid", "embeddings")
+    modelOption(importValidation, "auto", "relationshipValidation")
     var tuning = await workflowTuning(advanced, "ingestion", { maxfiles: "Maximum files", maxfilesize: "Maximum file size (bytes)", wikiingestmaxcalls: "Distillation calls per source (0 disables split recovery)", wikiingestbudget: "Estimated operation tokens (-1 unlimited; 0 defers model work)", wikimaxprompttokens: "Prompt tokens (0 automatic)", chunkchars: "Chunk characters", concurrency: "Concurrent distillations" })
     var force = check(tuning.box, "Force reprocessing")
-    const actions=row(body),result=el("div",undefined,body);let approved=null,working=false;
+    const actions=row(body),result=el("div",undefined,body);let approved=null,expectedModelSkips,working=false;
     var options = function() {
       var selected = { mode: mode.value, layout: layout.value, section: folder(), include: include.value, exclude: exclude.value, semantic: semantic.checked, prune: prune.checked, tuning: tuning.values(), force: force.checked }
       if (importReconcile.value !== "saved") selected.reconcile = importReconcile.value
@@ -1726,15 +1824,26 @@ async function sourcesView(content) {
       working=true;preview.disabled=true;apply.disabled=true;const requested=signature();result.replaceChildren();el("p","Preparing preview…",result);
       try {const job=await queue("ingestions",{sourceId:source.id,revision:source.revision,preview:true,options:options(),confirmation:{acknowledgePrune:prune.checked}});const finished=await job.finished;
         result.replaceChildren();outcome(result,finished.result);
-        if(finished.status==="completed"&&requested===signature()){approved=requested;apply.disabled=!!writeReason();el("p","Preview ready. Review the result, then import.",result);}else el("p","Preview is unavailable or options changed. Run Preview changes again.",result);
+        const skipped = finished.result?.skipped_model || []
+        const eligible = finished.result?.eligible_sources
+        expectedModelSkips = Array.isArray(eligible) ? skipped.map(item => item.path) : undefined
+        if (finished.status === "completed" && requested === signature() && !(skipped.length && !eligible?.length)) {
+          approved = requested
+          apply.disabled = !!writeReason()
+          apply.textContent = skipped.length ? "Import eligible files" : "4. Import into wiki"
+          el("p", "Preview ready. Review the result, then import.", result)
+        } else {
+          approved = null
+          el("p", skipped.length && !eligible?.length ? "Every selected file requires a vision model." : "Preview is unavailable or options changed. Run Preview changes again.", result)
+        }
       }finally{working=false;if(preview.isConnected)preview.disabled=!!writeReason();}
     });disable(preview,writeReason());
     const apply=button(actions,"4. Import into wiki",async()=>{
       if(!approved||approved!==signature())throw new Error("Run a fresh preview first");
       const latest=await allItems(wikiPath("sources"));if(latest.find(x=>x.id===source.id)?.revision!==source.revision){approved=null;apply.disabled=true;throw new Error("Source revision changed. Select the current source from the library and preview again.");}
       if(prune.checked&&!(await askConfirmation("Remove source-owned pages missing from this revision? Engine conflict checks still protect manual edits.")))return;
-      apply.disabled=true;const job=await queue("ingestions",{sourceId:source.id,revision:source.revision,preview:false,options:options(),confirmation:{acknowledgePrune:prune.checked}});approved=null;
-      const finished=await job.finished;if(result.isConnected){result.replaceChildren();el("h4",human(finished.status),result);outcome(result,finished.result);button(result,"Inspect activity",()=>jobDetail(job.id));if(source.adhoc&&finished.status==="completed")el("p","Ad-hoc source discarded; it is no longer in the library.",result).className="muted";}
+      apply.disabled=true;const job=await queue("ingestions",{sourceId:source.id,revision:source.revision,preview:false,options:options(),expectedModelSkips,confirmation:{acknowledgePrune:prune.checked}});approved=null;
+      const finished=await job.finished;if(result.isConnected){result.replaceChildren();el("h4",human(finished.status),result);outcome(result,finished.result);button(result,"Inspect activity",()=>jobDetail(job.id));if(source.adhoc&&finished.status==="completed"&&!finished.result?.skipped_model?.length)el("p","Ad-hoc source discarded; it is no longer in the library.",result).className="muted";}
     });apply.disabled=true;
     // Any destination or option change refreshes the expected paths and requires a new preview
     var changed = function() {
@@ -1764,8 +1873,8 @@ async function absorbView(content) {
     const body = { action: "plan", tuning: budgets.values(), sourceWikiIds: selected.filter(([, box]) => box.checked).map(([id]) => id) };
     for (const [k, input] of [["paths", paths], ["tags", tags], ["exclude", exclude]]) if (input.value.trim()) body[k] = input.value.split(",").map(s => s.trim()).filter(Boolean);
     if (topic.value) body.topic = topic.value; await queue("absorptions", body);
-  }).disabled = currentWiki.access !== "rw" || !studioSession?.canTestWiki;
-  if(!studioSession?.canTestWiki)el("p","Configure OAF_MODEL to generate a plan. Existing saved plans can still be applied.",content).className="muted";
+  }).disabled = currentWiki.access !== "rw" || !!modelReason("absorb");
+  if(modelReason("absorb"))el("p","Configure OAF_MODEL to generate a plan. Existing saved plans can still be applied.",content).className="muted";
   const plan = field(content, "Saved plan ID");
   for (const action of ["status", "show", "apply", "resume", "delete", "cancel"]) button(content, action, async () => {
     if (["apply", "resume", "delete", "cancel"].includes(action) && !(await askConfirmation(action + " saved plan " + plan.value + "? Deleting a plan does not undo applied pages."))) return;
@@ -2134,6 +2243,7 @@ async function dreamsView(content, openTab) {
     // Full reconstruction has an explicit cost acknowledgement and bounded model work.
     if (mode === "rebuild") {
       var modelHelp = field(optionsPanel, "Model enrichment", ["off", "auto"])
+      modelOption(modelHelp, "auto", "graphEnrichment")
       var rebuildAdvanced = advancedOptions(optionsPanel)
       var retryFailed = check(rebuildAdvanced, "Retry failed sections")
       el("p", "Preserves successful work and resets the two-cycle failure limits.", rebuildAdvanced)
@@ -2176,7 +2286,7 @@ async function dreamsView(content, openTab) {
       el("h4", "Options", optionsBlock)
     }
     var semantic = ["graph", "reorg"].includes(mode) ? check(optionsBlock, "Use model semantic extraction") : null
-    if (semantic) disable(semantic, writeReason(true))
+    if (semantic) disable(semantic, writeReason("graphEnrichment"))
     var organize = mode === "reorg" ? field(optionsBlock, "Organization", ["none", "topics"]) : null
     var instructions = mode === "reorg" ? field(optionsBlock, "Reorganization guidance") : null
     var tuning = null
@@ -2401,18 +2511,21 @@ async function graphBuildControls(content, dream) {
   // Restore reusable extraction and budget preferences.
   function apply(value) {
     extraction.value = value.extraction
-    modelHelp.value = value.modelHelp
+    modelHelp.value = noGraphModels ? "off" : value.modelHelp
     calls.value = String(value.maxCalls)
     tokens.value = String(value.maxTokens)
     minutes.value = String(value.maxMinutes)
     retryFailed.checked = false
-    reconcile.value = value.reconcile || "off"
-    reconcileLlm.value = value.reconcileLlm || "off"
+    reconcile.value = noEmbeddingModel && value.reconcile === "hybrid" ? "lexical" : value.reconcile || "off"
+    reconcileLlm.value = noValidationModel ? "off" : value.reconcileLlm || "off"
     reconcileRetry.checked = false
     Object.keys(reconcileInputs).forEach(function(key) {
       if (typeof value[key] === "number") reconcileInputs[key].value = String(value[key])
     })
   }
+  var noGraphModels = modelOption(modelHelp, "auto", "graphEnrichment")
+  var noEmbeddingModel = modelOption(reconcile, "hybrid", "embeddings")
+  var noValidationModel = modelOption(reconcileLlm, "auto", "relationshipValidation")
   apply(settings.effective)
   strategy.value = "incremental"
 
@@ -2497,7 +2610,7 @@ async function graphBuildControls(content, dream) {
       if (queued && queued.finished) await queued.finished
     } finally {
       submitting = false
-      submitButtons.forEach(function(control) { control.disabled = currentWiki.access !== "rw" })
+      refreshSubmitControls()
     }
   }
   var runButton = button(box, "Run graph build", async function() {
@@ -2523,16 +2636,29 @@ async function graphBuildControls(content, dream) {
   })
   var expensive = check(advanced, "Run an expensive staged graph upgrade from current pages")
   var resumeOverrides = check(advanced, "Override saved upgrade settings with these controls when resuming")
-  ;[["Upgrade complete graph", "graph/upgrade"], ["Resume graph upgrade", "graph/resume"]].forEach(function(entry) {
-    submitButtons.push(button(advanced, entry[0], async function() {
-      if (!expensive.checked) throw new Error("Select the expensive staged graph upgrade first")
-      var parameters = entry[1] === "graph/resume" ? graphResumeParameters(resumeOverrides.checked ? values() : {}, resumeOverrides.checked) : Object.assign(values(), { confirmExpensive: true })
-      await submitGraph(entry[1], parameters)
-    }))
+  var upgrade = button(advanced, "Upgrade complete graph", async function() {
+    if (!expensive.checked) throw new Error("Select the expensive staged graph upgrade first")
+    await submitGraph("graph/upgrade", Object.assign(values(), { confirmExpensive: true }))
   })
-  submitButtons.push(button(advanced, "Refresh embedding cache only", async function() {
+  var resume = button(advanced, "Resume graph upgrade", async function() {
+    if (!expensive.checked) throw new Error("Select the expensive staged graph upgrade first")
+    await submitGraph("graph/resume", graphResumeParameters(resumeOverrides.checked ? values() : {}, resumeOverrides.checked))
+  })
+  var embeddings = button(advanced, "Refresh embedding cache only", async function() {
     await submitGraph("graph/embeddings", values())
-  }))
-  submitButtons.forEach(function(control) { disable(control, writeReason(false)) })
+  })
+  disable(embeddings, writeReason("embeddings"))
+  var resumeReason = settings.resumeModelReason
+  if (resumeReason) explainControl(resume, resumeReason + ". You can override the saved settings with the controls above.")
+  submitButtons.push(upgrade, resume, embeddings)
+
+  // Keep model and permission restrictions in effect after each job settles.
+  function refreshSubmitControls() {
+    submitButtons.forEach(control => { control.disabled = submitting || !!writeReason() })
+    if (resumeReason && !resumeOverrides.checked) resume.disabled = true
+    if (modelReason("embeddings")) embeddings.disabled = true
+  }
+  resumeOverrides.onchange = refreshSubmitControls
+  refreshSubmitControls()
   refresh()
 }

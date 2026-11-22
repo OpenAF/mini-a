@@ -208,3 +208,46 @@ aside button{width:auto;display:inline-flex;margin:0}.page-tree{min-width:180px;
   text-transform: none;
   white-space: nowrap;
 }
+
+#model-availability {
+  --model-warning: #825600;
+  margin: 1rem 0 0;
+  text-align: center;
+}
+#model-availability .model-availability-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  min-height: 24px;
+  margin: 0;
+  padding: .15rem .35rem;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: .8125rem;
+  font-weight: 400;
+}
+#model-availability .model-availability-trigger:hover { text-decoration: underline; }
+#model-availability .model-availability-trigger .studio-icon {
+  width: .85rem;
+  height: .85rem;
+}
+#model-availability dialog {
+  box-sizing: border-box;
+  width: min(32rem, calc(100% - 2rem));
+  padding: 1rem 1.25rem;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+#model-availability dialog h3 { margin: 0 0 .5rem; }
+#model-availability dialog p,
+#model-availability dialog ul { margin-block: .5rem; }
+#model-availability dialog li span { font-weight: 600; }
+#model-availability dialog > button { margin: .5rem 0 0; }
+#model-availability .model-status-ready { color: var(--green); }
+#model-availability .model-status-warning { color: var(--model-warning); }
+#model-availability .model-status-unavailable { color: var(--error); }
+
+@media (prefers-color-scheme: dark) {
+  #model-availability { --model-warning: #ffd166; }
+}

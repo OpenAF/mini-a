@@ -81,6 +81,28 @@
     var changed = runner.run()
     assert(changed.ok,false,'source changing during extraction rejected'); assert(changed.failed.length>0,true,'failed extraction reported')
     assert(io.readFileString(f.wiki+'/docs/diagram.md'), before, 'changed bytes cannot publish replacement')
+    io.writeFileString(f.src + '/gone.md', '# Gone\nPreviously imported text')
+    assert(f.run().ok, true, 'restore baseline and add a page eligible for pruning')
+    before = io.readFileString(f.wiki + '/docs/diagram.md')
+    io.rm(f.src + '/gone.md')
+    f.image(0x0000ff)
+    io.writeFileString(f.src + '/notes.md', '# Notes\nEligible model-free text')
+    var modelFree = { ingeststudiosource: true, ingestvisionavailable: false, ingestprune: true, model: "" }
+    var mixed = f.run(merge(modelFree, { ingestdryrun: true }))
+    assert(mixed.skipped_model.map(function(item) { return item.path }), ['diagram.png'], 'preview flags the image')
+    assert(mixed.eligible_sources, ['notes.md'], 'preview identifies eligible text')
+    var mismatch = f.run(merge(modelFree, { ingestexpectedmodelskips: [] }))
+    assert(mismatch.ok, false, 'changed preview selection is rejected')
+    assert(io.fileExists(f.wiki + '/docs/notes.md'), false, 'mismatch writes no pages')
+    var applied = f.run(merge(modelFree, { ingestexpectedmodelskips: ['diagram.png'] }))
+    assert(applied.ok, true, stringify(applied))
+    assert(applied.llm_calls, 0, 'model-free prune validates skipped image bytes without vision')
+    assert(applied.removed, ['docs/gone.md'], 'only the genuinely absent source is pruned')
+    assert(io.readFileString(f.wiki + '/docs/diagram.md'), before, 'skipped image preserves its existing page')
+    var retry = f.run({ ingeststudiosource: true, ingestvisionavailable: true })
+    assert(retry.ok, true, stringify(retry))
+    assert(retry.llm_calls, 1, 'image can be processed once vision is available')
+
   }) }
   exports.testIngestClientOwnership = function() { fixture(function(f) {
     var closed = 0, built = 0, runner = f.runner({ingestmode:'distill'})

@@ -27,7 +27,16 @@ WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
     WikiStudio.fields(body, MiniAGraphBuild.preferenceFields.concat(["preset"]))
     return WikiStudio.wikiLock(this.config.home, w.id, function() {
       if (req.method === "PUT" && self.assertIdle) self.assertIdle(w.id)
-      return self.manager(w, req.method === "PUT", function(wm) { return wm.graphBuildSettings(body, req.method === "PUT") }, {skipBootstrap:true})
+      return self.manager(w, req.method === "PUT", function(wm) {
+        var settings = wm.graphBuildSettings(body, req.method === "PUT")
+        if (req.method === "GET") {
+          try { WikiStudio.requireOperationModels("graph.resume", wm._graphResumeSettings({})) }
+          catch(error) {
+            if (error.code === "model_required") settings.resumeModelReason = error.message
+          }
+        }
+        return settings
+      }, { skipBootstrap: true })
     })
   }
   WikiStudio.assert(req.method === "POST", 405, "method_not_allowed", "Use POST to submit jobs")
@@ -70,13 +79,13 @@ WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
     try {
       params = this.manager(w, false, function(wm) {
         if (route === "graph/resume") {
-          wm._graphResumeSettings(body)
+          WikiStudio.requireOperationModels("graph.resume", wm._graphResumeSettings(body))
           return clone(body)
         }
         return wm.graphBuildSettings(body).effective
       })
     }
-    catch(e) { WikiStudio.fail(400, "invalid_options", String(e.message || e)) }
+    catch(e) { if (e.code === "model_required") throw e; WikiStudio.fail(400, "invalid_options", String(e.message || e)) }
     operation = route.replace("/", ".")
     if (operation === "graph.reconcile" && isUnDef(body.reconcile) && params.reconcile === "off") params.reconcile = "lexical"
     if (operation === "graph.upgrade" || operation === "graph.resume") {
@@ -118,7 +127,11 @@ WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
   } else if (this.sourceOperation && ["ingestions", "absorptions", "maintenance"].indexOf(route) >= 0) {
     var spec = this.sourceOperation(w, route, body); operation = spec.operation; params = spec.params
   } else WikiStudio.fail(501, "operation_unavailable", "This operation has no safe adapter in this build")
-  if (operation !== "graph.build" && params.semantic || operation === "dream.reorg") WikiStudio.assert(String(getEnv("OAF_MODEL") || "").length > 0, 422, "model_required", "Configure OAF_MODEL in the trusted server environment for this operation")
+  if (operation.indexOf("graph.") === 0 && operation !== "graph.resume") {
+    WikiStudio.requireOperationModels(operation, body)
+    params = WikiStudio.availableGraphOptions(params)
+  }
+  WikiStudio.requireOperationModels(operation, params)
   // Reject a new submission while a synchronous Studio page mutation holds the
   // same lock. Queued jobs then block subsequent page reads/writes.
   return WikiStudio.wikiLock(this.config.home, w.id, function() { self.registry.verify(w); return WikiStudioJobs.publicJob(jobs.submit(w, operation, params, req.headers["idempotency-key"], role)) })
@@ -145,6 +158,12 @@ var wikiStudioRunWorker = function(config, id) {
       var before = WikiStudio.scan(w.root, false), beforeState = WikiStudio.scan(w.root, true)
       WikiStudio.atomic(jobs.dir(id) + "/before.json", before)
       var operation = j.operation, params = j.params, needsBackup = /^(dream\.(apply|repair|indexes|rebuild|reorg)|ingest\.resume|absorb\.(apply|resume)|backup.restore)$/.test(operation) || operation === "dream.auto" && !params.dryrun || operation === "ingest.run" && !params.dryrun
+      if (operation === "graph.resume") {
+        new WikiStudioServer(config).manager(w, false, function(wm) {
+          WikiStudio.requireOperationModels(operation, wm._graphResumeSettings(params))
+        }, { skipBootstrap: true })
+      }
+      WikiStudio.requireOperationModels(operation, params)
       if(!/^(ingest\.(recovery|resume|discard)|absorb\.(status|show|resume)|backup\.)/.test(operation)) WikiStudio.assert(WikiStudio.pending(w.root).length===0,423,"recovery_pending","Pending engine journal must be reviewed/resumed before a new operation")
       var backup
       if (needsBackup) {
@@ -213,6 +232,14 @@ var wikiStudioExecute = function(config, w, job, logFn, backup) {
   // A writable manager may bootstrap an empty registered directory even for a
   // preview. Plan must open a reader and must never bootstrap Markdown/state.
   if (operation === "dream.plan" || operation === "dream.auto" && p.dryrun) a.wikiaccess = "ro"
+  var models = WikiStudio.modelAvailability().actions
+  if (!models.dreamRepair && operation === "dream.auto") a.dreamwikillm = false
+  if (w.graph.enabled && operation.indexOf("dream.") === 0 && p.dryrun !== true) {
+    var server = new WikiStudioServer(config)
+    var configuredGraph = server.manager(w, false, function(wm) { return wm.graphBuildSettings({}).effective }, { skipBootstrap: true })
+    var supportedGraph = WikiStudio.availableGraphOptions(configuredGraph)
+    ;["reconcile", "reconcileLlm"].forEach(function(key) { a["wikigraph" + key.toLowerCase()] = supportedGraph[key] })
+  }
   if (operation === "dream.reorg") { a.dreamwikireorg = true; a.dreamwikiapproval = "auto" }
   var params = operation.indexOf("graph.") === 0 ? clone(p) : operation.indexOf("dream.") === 0 ? {dryrun:p.dryrun === true} : {}
   if (operation === "graph.build") delete params.compact

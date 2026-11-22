@@ -419,20 +419,36 @@
     rejects(function(){s.jobWikiRoute({method:"POST",headers:{"idempotency-key":"invalid-options"},body:{extraction:"semantic",strategy:"resume",force:true}},w,["graph","rebuild"],"admin")},"invalid_options")
     rejects(function(){s.jobWikiRoute({method:"POST",headers:{},body:{extraction:"semantic",modelHelp:"off",retryFailed:true}},w,["graph","rebuild"],"admin")},"invalid_options")
     rejects(function(){s.jobWikiRoute({method:"POST",headers:{},body:{extraction:"semantic",modelHelp:"auto",retryFailed:"yes"}},w,["graph","rebuild"],"admin")},"invalid_options")
-    request.headers["idempotency-key"] = "retry-failed-options"
-    request.body = { extraction: "semantic", modelHelp: "auto", retryFailed: true }
-    assert(s.jobWikiRoute(request,w,["graph","rebuild"],"admin").params.retryFailed,true,"Studio forwards retry action")
-    assert(s.jobWikiRoute({method:"GET"},w,route,"viewer").effective.retryFailed,false,"Retry action not saved")
-    rejects(function(){s.jobWikiRoute({method:"PUT",body:{maxCalls:3}},merge(w,{access:"ro"}),route,"admin")},"read_only")
-    // Resume requests retain pending settings and queue only explicit overrides.
-    io.writeFileJSON(w.root + "/.mini-a-wiki-full-rebuild.json", { version: 2, phase: "graph", settings: { extraction: "semantic", modelHelp: "auto", reconcile: "off", maxCalls: 17 } })
-    var resume = s.jobWikiRoute({ method: "POST", headers: { "idempotency-key": "graph-resume-settings" }, body: { confirmExpensive: true } }, w, ["graph", "resume"], "admin")
-    assert(Object.keys(resume.params).sort(), ["confirmExpensive"], "Resume does not inject current defaults into worker parameters")
-    resume = s.jobWikiRoute({ method: "POST", headers: { "idempotency-key": "graph-resume-override" }, body: { confirmExpensive: true, maxCalls: 3, modelHelp: "auto" } }, w, ["graph", "resume"], "admin")
-    assert(resume.params.maxCalls, 3, "Explicit resume budget is forwarded")
-    assert(isUnDef(resume.params.extraction), true, "Resume does not fill unspecified extraction")
-    assert(runner.spec("graph.resume", { retryFailed: true }).params.retryFailed, true, "Worker specification defers journal-dependent retry validation")
-    rejects(function() { s.jobWikiRoute({ method: "POST", headers: {}, body: { confirmExpensive: true, maxCalls: -1 } }, w, ["graph", "resume"], "admin") }, "invalid_options")
+    var mainModel = WikiStudio.modelAvailability(function(name) {
+      return name === "OAF_MODEL" ? "(type: openai, model: example)" : ""
+    })
+    assert(mainModel.roles.vision.status, "main-fallback", "Vision falls back to the main model")
+    var expected = { OAF_LC_MODEL: "graphEnrichment", OAF_DECIDE_MODEL: "graphEnrichment", OAF_VISUAL_MODEL: "vision", OAF_EMBED_MODEL: "embeddings" }
+    Object.keys(expected).forEach(function(variable) {
+      var standalone = WikiStudio.modelAvailability(function(name) { return name === variable ? "(type: openai, model: example)" : "" })
+      assert(standalone.actions[expected[variable]], true, variable + " enables its own capability")
+      assert(standalone.actions.test, false, variable + " cannot start Mini-A Web")
+    })
+    var invalid = WikiStudio.modelAvailability(function() { return "(type: )" })
+    assert(invalid.roles.main.status, "invalid", "Invalid settings do not enable actions")
+    var availability = WikiStudio.modelAvailability
+    WikiStudio.modelAvailability = function() { return mainModel }
+    try {
+      request.headers["idempotency-key"] = "retry-failed-options"
+      request.body = { extraction: "semantic", modelHelp: "auto", retryFailed: true }
+      assert(s.jobWikiRoute(request,w,["graph","rebuild"],"admin").params.retryFailed,true,"Studio forwards retry action")
+      assert(s.jobWikiRoute({method:"GET"},w,route,"viewer").effective.retryFailed,false,"Retry action not saved")
+      rejects(function(){s.jobWikiRoute({method:"PUT",body:{maxCalls:3}},merge(w,{access:"ro"}),route,"admin")},"read_only")
+      // Resume requests retain pending settings and queue only explicit overrides.
+      io.writeFileJSON(w.root + "/.mini-a-wiki-full-rebuild.json", { version: 2, phase: "graph", settings: { extraction: "semantic", modelHelp: "auto", reconcile: "off", maxCalls: 17 } })
+      var resume = s.jobWikiRoute({ method: "POST", headers: { "idempotency-key": "graph-resume-settings" }, body: { confirmExpensive: true } }, w, ["graph", "resume"], "admin")
+      assert(Object.keys(resume.params).sort(), ["confirmExpensive"], "Resume does not inject current defaults into worker parameters")
+      resume = s.jobWikiRoute({ method: "POST", headers: { "idempotency-key": "graph-resume-override" }, body: { confirmExpensive: true, maxCalls: 3, modelHelp: "auto" } }, w, ["graph", "resume"], "admin")
+      assert(resume.params.maxCalls, 3, "Explicit resume budget is forwarded")
+      assert(isUnDef(resume.params.extraction), true, "Resume does not fill unspecified extraction")
+      assert(runner.spec("graph.resume", { retryFailed: true }).params.retryFailed, true, "Worker specification defers journal-dependent retry validation")
+      rejects(function() { s.jobWikiRoute({ method: "POST", headers: {}, body: { confirmExpensive: true, maxCalls: -1 } }, w, ["graph", "resume"], "admin") }, "invalid_options")
+    } finally { WikiStudio.modelAvailability = availability }
   }) }
   exports.testGraph = function() { fixture(function(s, t) {
     var w = add(s, t)
@@ -640,7 +656,10 @@
     // A deterministic injected engine verifies worker backup/diff contracts. It
     // does not claim provider or real agent restructuring quality coverage.
     wikiStudioExecute=function(config,wiki,job,log,backup){assert(backup.verified,true,"Fake engine cannot start before verified backup");io.writeFileString(wiki.root+"/page.md","# After fake engine\n");return {ok:true}}
-    try{wikiStudioRunWorker(s.config,j.id)}finally{wikiStudioExecute=original}
+    var availability = WikiStudio.modelAvailability
+    WikiStudio.modelAvailability = function() { return { actions: { distill: true } } }
+    try { wikiStudioRunWorker(s.config,j.id) }
+    finally { wikiStudioExecute = original; WikiStudio.modelAvailability = availability }
     assert(s.jobs.get(j.id).status,"completed","Fake restructuring finalizes")
     var diff=WikiStudio.json(s.jobs.dir(j.id)+"/changes.json")
     assert(diff.changedPageCount,1,"Actual changed page count")
@@ -701,7 +720,10 @@
     MiniAIngest.prototype._buildLlm=function(){return{promptJSONWithStats:function(){return{response:{proposals:[{path:"knowledge.md",classification:"enrichment",edits:[{before:"",after:"# Evidence\nA verified fact.\n",evidence:["beta:knowledge.md"]}],evidence:["beta:knowledge.md"],mappings:[{evidence:"beta:knowledge.md",anchor:""}],dependencies:[]}],findings:[]}}}}}
     function run(body,key){var spec=s.sourceOperation(w,"absorptions",body),j=s.jobs.submit(w,spec.operation,spec.params,key,"admin");s.jobs.update(j.id,{status:"acquiring-lock"});wikiStudioRunWorker(s.config,j.id);return {job:s.jobs.get(j.id),result:WikiStudio.json(s.jobs.dir(j.id)+"/result.json")}}
     var planned
-    try{planned=run({action:"plan",sourceWikiIds:["beta"]},"absorb-plan-123")}finally{MiniAIngest.prototype._buildLlm=original}
+    var availability = WikiStudio.modelAvailability
+    WikiStudio.modelAvailability = function() { return { actions: { distill: true } } }
+    try { planned = run({action:"plan",sourceWikiIds:["beta"]},"absorb-plan-123") }
+    finally { MiniAIngest.prototype._buildLlm = original; WikiStudio.modelAvailability = availability }
     assert(planned.job.status,"completed","Real saved plan with injected model: "+JSON.stringify(planned.result))
     s.jobs.removeHistory(w,[planned.job.id])
     assert(s.jobs.list().length,0,"Plan history removed before application")

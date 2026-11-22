@@ -146,7 +146,7 @@ WikiStudio.scan = function(root, all, metadataOnly) {
 WikiStudio.fingerprint = function(files) { return WikiStudio.hash(JSON.stringify(Object.keys(files).sort().map(function(k) { return [k, files[k].hash] }))) }
 WikiStudio.redact = function(value) {
   var text = String(value).replace(/Bearer\s+[^\s"']+/gi, "Bearer [redacted]").replace(/(https?:\/\/)[^/\s@]+@/gi, "$1[redacted]@")
-  ;["OAF_MODEL", "OAF_LC_MODEL", "OAF_DECIDE_MODEL", "STUDIO_TOKEN"].forEach(function(k) {
+  ;["OAF_MODEL", "OAF_LC_MODEL", "OAF_DECIDE_MODEL", "OAF_VISUAL_MODEL", "OAF_EMBED_MODEL", "STUDIO_TOKEN"].forEach(function(k) {
     var s = String(getEnv(k) || ""); if (s) text = text.split(s).join("[redacted]")
     try {
       var parsed=af.fromJSSLON(s)
@@ -166,4 +166,62 @@ WikiStudio.authorize = function(role, needed, wiki) {
   var roles = ["viewer", "editor", "admin"]
   WikiStudio.assert(roles.indexOf(role) >= roles.indexOf(needed), 403, "forbidden", "This action requires " + needed)
   if (wiki && needed !== "viewer") WikiStudio.assert(wiki.access === "rw", 403, "read_only", "This wiki is read-only")
+}
+
+// Inspect trusted model settings without constructing a client or contacting a provider.
+WikiStudio.modelAvailability = function(readEnvironment) {
+  var read = readEnvironment || getEnv
+  var roles = {}
+  var variables = { main: "OAF_MODEL", lowCost: "OAF_LC_MODEL", decision: "OAF_DECIDE_MODEL", vision: "OAF_VISUAL_MODEL", embedding: "OAF_EMBED_MODEL" }
+  Object.keys(variables).forEach(function(role) {
+    var variable = variables[role], raw = String(read(variable) || "").trim(), config
+    if (raw.length > 0) {
+      try {
+        try { config = af.fromJSSLON(raw) } catch(ignoreParse) { config = raw }
+        if (isString(config) && role !== "embedding") config = $sec("mini-a", "models").get(config, "models")
+      } catch(ignoreConfig) { config = __ }
+    }
+    var configured = isMap(config) && isString(config.type) && config.type.trim().length > 0 &&
+      (["embedding", "decision"].indexOf(role) < 0 || isString(config.model) && config.model.trim().length > 0)
+    roles[role] = { variable: variable, status: configured ? "configured" : raw.length > 0 ? "invalid" : "missing" }
+  })
+  var main = roles.main.status === "configured", lowCost = roles.lowCost.status === "configured"
+  if (roles.vision.status === "missing" && main) roles.vision.status = "main-fallback"
+  return { roles: roles, actions: {
+    test: main, distill: main, absorb: main, reorg: main,
+    dreamRepair: main || roles.decision.status === "configured",
+    graphEnrichment: main || lowCost || roles.decision.status === "configured",
+    relationshipValidation: main || lowCost,
+    vision: ["configured", "main-fallback"].indexOf(roles.vision.status) >= 0,
+    embeddings: roles.embedding.status === "configured"
+  } }
+}
+
+// Guard explicit model work before queuing and again before the worker takes a snapshot.
+WikiStudio.requireOperationModels = function(operation, params) {
+  var models = WikiStudio.modelAvailability().actions
+  var graph = params.rebuild || params.graphOverrides || params
+  var requirements = []
+  if (operation === "dream.reorg" || operation === "absorb.plan" || operation === "ingest.run" && params.mode === "distill") requirements.push([models.distill, "OAF_MODEL"])
+  if (operation === "graph.embeddings" || graph.reconcile === "hybrid") requirements.push([models.embeddings, "OAF_EMBED_MODEL"])
+  if (graph.reconcileLlm === "auto") requirements.push([models.relationshipValidation, "OAF_LC_MODEL or OAF_MODEL"])
+  if (graph.extraction === "semantic" && graph.modelHelp === "auto" || params.semantic === true) requirements.push([models.graphEnrichment, "OAF_LC_MODEL, OAF_MODEL or OAF_DECIDE_MODEL"])
+  requirements.forEach(function(requirement) {
+    WikiStudio.assert(requirement[0], 422, "model_required", "Configure " + requirement[1] + " in the Studio server environment for this operation")
+  })
+}
+
+// Use deterministic graph settings when a saved preference needs an unavailable model.
+WikiStudio.availableGraphOptions = function(options) {
+  var actions = WikiStudio.modelAvailability().actions, out = merge({}, options)
+  if (!actions.graphEnrichment) {
+    out.modelHelp = "off"
+    out.retryFailed = false
+  }
+  if (!actions.relationshipValidation) {
+    out.reconcileLlm = "off"
+    out.reconcileRetryFailed = false
+  }
+  if (!actions.embeddings && out.reconcile === "hybrid") out.reconcile = "lexical"
+  return out
 }

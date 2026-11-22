@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Model-free HTTP/worker E2E using isolated disposable wiki/state directories."""
 import argparse
+import base64
 import json
 import io
 import os
@@ -49,7 +50,7 @@ def request(path, method="GET", body=None, status=200, auth=True, headers=None, 
     return content.decode()
 
 
-def job(path, body):
+def job(path, body, expected="completed"):
     key = uuid.uuid4().hex
     submitted = request(path, "POST", body, headers={"Idempotency-Key": key})
     duplicate = request(path, "POST", body, headers={"Idempotency-Key": key})
@@ -58,7 +59,7 @@ def job(path, body):
     while time.monotonic() < deadline:
         result = request("jobs/" + submitted["id"])
         if result["status"] in {"completed", "failed", "partial", "recovery-required", "interrupted", "cancelled"}:
-            assert result["status"] == "completed", result
+            assert result["status"] == expected, result
             events = request("jobs/" + result["id"] + "/events")
             assert "event: progress" in events
             last_seq = max(int(line[4:]) for line in events.splitlines() if line.startswith("id: "))
@@ -77,8 +78,8 @@ for name in ["a", "b"]:
 (root / "b" / "separate.md").write_text("# Separate wiki\n")
 env = os.environ.copy()
 env["STUDIO_TOKEN"] = token
-env.pop("OAF_MODEL", None)
-env.pop("OAF_LC_MODEL", None)
+for variable in ("OAF_MODEL", "OAF_LC_MODEL", "OAF_DECIDE_MODEL", "OAF_VISUAL_MODEL", "OAF_EMBED_MODEL"):
+    env.pop(variable, None)
 log = open(temp / "server.log", "w")
 proc = subprocess.Popen([shutil.which("ojob") or "ojob", str(base / "mini-a-wiki-studio.yaml"), f"onport={port}", f"studiohome={temp / 'state'}", "studioallowroots=" + json.dumps([str(root)]), "openbrowser=false"], cwd=temp, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 try:
@@ -257,6 +258,26 @@ try:
         assert request("jobs/" + job_id)["status"] == "interrupted"
     request("jobs", "DELETE", {"wikiId": "a", "ids": seeded, "confirmation": "delete-history"}, status=409)
     assert before_restart == {p.relative_to(root / "a"): p.read_bytes() for p in (root / "a").rglob("*") if p.is_file()}, "Restart replayed a mutating job"
+    session = request("session")
+    assert not session["canTestWiki"] and not any(session["models"]["actions"].values())
+    assert all(role["status"] == "missing" for role in session["models"]["roles"].values())
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=")
+    mixed_id = str(uuid.uuid4())
+    for filename, data in (("notes.md", b"# Notes\n\nModel-free notes.\n"), ("figure.png", png)):
+        request("uploads", "POST", headers={"X-Upload-ID": mixed_id, "X-Upload-Path": filename}, raw=data)
+    request("wikis/a/sources", "POST", {"id": "mixed", "name": "Mixed", "type": "upload", "uploadId": mixed_id, "adhoc": True})
+    mixed = {"sourceId": "mixed", "revision": mixed_id}
+    preview = job("wikis/a/ingestions", mixed)
+    assert preview["result"]["eligible_sources"] == ["notes.md"], preview
+    assert [item["path"] for item in preview["result"]["skipped_model"]] == ["figure.png"], preview
+    imported = job("wikis/a/ingestions", dict(mixed, preview=False, expectedModelSkips=["figure.png"]), expected="partial")
+    assert imported["result"]["llm_calls"] == 0 and imported["result"]["written"] == ["mixed/notes.md"], imported
+    assert any(item["id"] == "mixed" for item in request("wikis/a/sources")["items"])
+    request("wikis/a/ingestions", "POST", dict(mixed, options={"mode": "distill"}), status=422, headers={"Idempotency-Key": uuid.uuid4().hex})
+    only_image = job("wikis/a/ingestions", dict(mixed, options={"include": "figure.png"}))
+    assert only_image["result"]["eligible_sources"] == [] and len(only_image["result"]["skipped_model"]) == 1
+
+
     print(f"PASS: {checks} HTTP assertions; real isolated worker, raw ingest, plan, graph, indexes, backup and restore; no model/network")
 finally:
     try:

@@ -14,7 +14,12 @@ listed at the end rather than represented as working integrations.
 Requirements: an OpenAF installation with oJob, the JVM `jdk.httpserver` module,
 POSIX filesystem permissions/file locks, and a supported modern browser. Node is
 used only by development tests. No model or Internet connection is needed to
-start, register wikis, edit, search, export a graph or run maintenance plan.
+start, register wikis, edit, search, import text, build a structural graph or
+preview maintenance. After sign-in, expand **Model availability** to see which
+features each model setting enables. Disabled controls explain which setting they
+need. Studio checks local configuration without contacting a provider. Restart
+Studio after updating the environment. **Open wiki test in new tab** starts a
+separate Mini-A Web server and requires `OAF_MODEL`.
 
 Create a dedicated parent directory for allowed wiki roots, then run:
 
@@ -234,9 +239,14 @@ Preview is the ingestion engine's dry run, not a guaranteed model-generated diff
 Auto/normalize/raw/distill, source/flat layout, section, include/exclude, prune and
 explicit semantic settings map to the existing bounded engine. `maxfilesize` is
 translated to HEAD's `ingestmaxfilekb`; selected file-count limits are checked by
-Studio before dispatch. Raw mode is useful for the model-free walkthrough.
+Studio before dispatch. Studio defaults to **Normalize** when the main model is
+unavailable. **Raw** also skips distillation. For a mixed source, the preview lists
+images that require a vision model. **Import eligible files** preserves existing
+pages for skipped files and keeps a partially imported ad-hoc source available
+for retry. If every selected file is skipped, Apply is unavailable. Configure
+`OAF_VISUAL_MODEL` or a vision-capable `OAF_MODEL` to describe images.
 
-Uploads stream one file per request to disk. Limits: 8 MiB per Markdown/text/PDF,
+Uploads stream one file per request to disk. Limits: 8 MiB per Markdown/text/PDF/PNG/JPEG,
 20 MiB per ZIP, 2,000 entries, 64 MiB expanded batch, depth 16, expansion ratio 100.
 ZIP preflight rejects encrypted/special/symlink entries, traversal, duplicate
 case-folded paths, unsupported members, ZIP64 and multipart archives. Extraction
@@ -468,7 +478,7 @@ and an exact LLM reorg pre-approval plan are intentional non-goals.
 
 ### Test a wiki in Mini-A Web
 
-When Studio inherits a non-empty `OAF_MODEL`, the wiki Overview offers **Open wiki test in new tab**. **Enable Advanced view** is an explicit, unchecked opt-in for trusted console controls. The child server inherits model configuration and opens the selected wiki with `wikiaccess=ro`, retrieval v2 enabled, and `useshell=false`. Each wiki/view-mode pair reuses its running test server; child servers stop when the Studio process exits normally. Allow browser pop-ups for Studio. Startup reports an error if the server does not listen within 30 seconds.
+The wiki Overview enables **Open wiki test in new tab** when Studio can resolve `OAF_MODEL`. **Enable Advanced view** is an explicit, unchecked opt-in for trusted console controls. The child server inherits model configuration and opens the selected wiki with `wikiaccess=ro`, retrieval v2 enabled, and `useshell=false`. Each wiki/view-mode pair reuses its running test server; child servers stop when the Studio process exits normally. Allow browser pop-ups for Studio. Startup reports an error if the server does not listen within 30 seconds.
 
 **Build web command**, available on the wiki dashboard and Overview, opens a command-preview wizard even without a configured model. Select one or more registered wikis, choose a port and mode (`webini` by default), and optionally enable Advanced view. A single wiki uses `wikiroot`; multiple wikis use named read-only `wikimounts`. The copyable `ojob` command uses this installation's `mini-a-web.yaml` and quotes arguments for macOS/Linux shells. Run it in a terminal with `OAF_MODEL` configured. Generating or copying the command does not execute it.
 

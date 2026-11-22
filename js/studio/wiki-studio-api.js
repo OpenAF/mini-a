@@ -36,7 +36,10 @@ WikiStudioServer.prototype.dispatch = function(req) {
   var read = req.method === "GET", c = this.config
   WikiStudio.assert(p[0] === "api" && p[1] === "v1", 404, "not_found", "Route not found")
   if (read && p.length === 3 && p[2] === "health") return { ok: true, version: 1 }
-  if (read && p.length === 3 && p[2] === "session") return { role: role, version: 1, webJob: c.base + "/mini-a-web.yaml", canTestWiki: String(getEnv("OAF_MODEL") || "").trim().length > 0, csrf: "bearer-header-and-same-origin", backends: { fs: "supported", mounts: "unavailable in Studio", s3: "unavailable in Studio", es: "unavailable in Studio", http: "unavailable in Studio", archive: "unavailable in Studio" }, adapters: { upload: true, directory: (c.directories||[]).map(function(d){return{id:d.id}}), git: "allowlisted-local-checkout-only", url: true, youtube: true }, limits: { pageBytes: c.maxPageBytes } }
+  if (read && p.length === 3 && p[2] === "session") {
+    var models = WikiStudio.modelAvailability()
+    return { role: role, version: 1, models: models, webJob: c.base + "/mini-a-web.yaml", canTestWiki: models.actions.test, csrf: "bearer-header-and-same-origin", backends: { fs: "supported", mounts: "unavailable in Studio", s3: "unavailable in Studio", es: "unavailable in Studio", http: "unavailable in Studio", archive: "unavailable in Studio" }, adapters: { upload: true, directory: (c.directories||[]).map(function(d){return{id:d.id}}), git: "allowlisted-local-checkout-only", url: true, youtube: true }, limits: { pageBytes: c.maxPageBytes } }
+  }
   if (p[2] === "wikis" && p.length === 3) {
     // The list carries each root's health so the dashboard can offer Change root for moved wikis.
     if (read) return WikiStudioServer.paginate(this.registry.list().map(function(w) { var out = self.publicWiki(w, role); out.rootState = self.registry.rootState(w); return out }), q)
@@ -222,7 +225,7 @@ WikiStudioServer.prototype.testWiki = function(w, body, role) {
   WikiStudio.fields(body, ["advanced", "tuning"])
   var tuning = this.resolveTuning(w, "test", body.tuning || {})
   WikiStudio.assert(isBoolean(body.advanced), 400, "invalid_options", "Advanced must be boolean")
-  WikiStudio.assert(String(getEnv("OAF_MODEL") || "").trim().length > 0, 422, "model_required", "Configure OAF_MODEL before testing a wiki")
+  WikiStudio.assert(WikiStudio.modelAvailability().actions.test, 422, "model_required", "Configure OAF_MODEL before testing a wiki")
   var self = this
   return WikiStudio.lock(this.config.home, "test-" + w.id, function() {
     self.testServers = self.testServers || {}
