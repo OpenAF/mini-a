@@ -351,7 +351,7 @@ filesHash:
   docs/WIKI-QUICKSTART.md: e44a15892c3032da3bec349ff4ea7e63fbd2510f
   docs/WIKI-RETRIEVAL-V2.md: 460b2bcd3b42d43fa68dc5ce2ec105da500cf86c
   docs/WIKI-STUDIO-IMPLEMENTATION.md: 763c1ce0e6268f1853823fb1e904b65be651bb5c
-  docs/WIKI-STUDIO.md: e1f3c71936c82b2f56b5d4677389d781f82de8f4
+  docs/WIKI-STUDIO.md: 0d69f0cf899c4b3f04b8d7e63f092350fa16b960
   docs/WIKI.md: 4a51df6f3d4837a10a0192c3f748d16c9eca25cd
   docs/WORKERS-QUICKSTART.md: 8090219ee3eb7d281bd1029c8f1dfb91ee52159a
   docs/WORKIQ.md: 9d2a64d6e06e148775a77b8c4df40427ffb16524
@@ -428,19 +428,19 @@ filesHash:
   js/skills/mini-a-plugins.js: 98f9452a44ea046f0ad6cee9fe28afb26c26717b
   js/skills/mini-a-skill-runtime.js: 83360a5b4362a0ad97103e438425f468dbe764f7
   js/skills/mini-a-skills.js: 496abeceec1f68fd37888ee7b6f229b7a5c15046
-  js/studio/wiki-studio-api.js: 9f868c0f88d78124a373353ae6b602e363f57849
+  js/studio/wiki-studio-api.js: 26c15ed9406ca10c89257397c6ca840a7d70aa52
   js/studio/wiki-studio-backups.js: a988e76e58702cedd9e460ccbc1d4541a55e6ffd
   js/studio/wiki-studio-bootstrap.js: 087d3ab4cae7987fe41f15bbd85117d7a0ecddd1
-  js/studio/wiki-studio-common.js: ab82e2f57a5fd6be87a8de4fb592dca27933c6e5
+  js/studio/wiki-studio-common.js: e7d3d7ee965ebc51251b57e56b921e4902d31c18
   js/studio/wiki-studio-config.js: 2b08cc6a291119f9823e3b68d1d3389967659639
   js/studio/wiki-studio-graph.js: 10955546c41707073e8a465b055c4690d4e32d77
-  js/studio/wiki-studio-ingestion.js: 4a636b272a9826a519d74acea473503ff4e2c4ad
+  js/studio/wiki-studio-ingestion.js: 35e0816c0568f8ea58e24b3b7cd34ac6c6c08819
   js/studio/wiki-studio-jobs.js: 155dcc7e78ce604abcbaa13495f303a6b7792322
-  js/studio/wiki-studio-operations.js: 2cd190c6a99aee77b8059ccfd7691ac47096a2db
+  js/studio/wiki-studio-operations.js: 8acfa2fce7d2f9da7aaaf183b5413dcd45b28ea6
   js/studio/wiki-studio-outbound.js: d86a20b91903266438a393b2a5d11f90fe07d191
   js/studio/wiki-studio-pages.js: 070f75de760711101bb61b3704b58920250fa525
   js/studio/wiki-studio-registry.js: 8d96e3a5241d64522c15fc96a932619ae4204856
-  js/studio/wiki-studio-sources.js: cfededa8d71060b4aff502f4de7745df6cc83f5b
+  js/studio/wiki-studio-sources.js: bf0972384b5cf6d53c3b4dbaf27c7f51c8fc4e58
   js/web/mini-a-advanced.js: 179432f70c11becfeeb0da3a47b032d8f9dcaeb4
   js/web/mini-a-web-artifacts.js: 6ea40e66e8216d7e4f32feee5ebdb134a0287508
   js/web/mini-a-web-attachments.js: 620520932fe1054d0ac17ce1ad613bb9851f57ae
@@ -452,7 +452,7 @@ filesHash:
   js/wiki/mini-a-graph-reconcile.js: b81e4164b0fdaf93eb3a47d32e95314dc1de36d8
   js/wiki/mini-a-graph-upgrade.js: b9818939ddeaf5b40e570d23238a35d10077c2ae
   js/wiki/mini-a-graph.js: f3d9ac62d1243be30665c004c4a024463ee2d149
-  js/wiki/mini-a-ingest.js: ace44bdf3a69808c2d5d08d25d0ce44e175f1c3b
+  js/wiki/mini-a-ingest.js: 6968952c8d0ff35eb8b3eb2883b5bf118c632a6a
   js/wiki/mini-a-mcp-wiki.js: a535147a30ee46e163fae37853146419dd9b93f2
   js/wiki/mini-a-wiki-embeddings.js: 258805ed2e05b125c6d48081869036f09fc75070
   js/wiki/mini-a-wiki-export.js: 2c43e40d61eba88146a28dd07829190bd088a0ca
@@ -528,9 +528,9 @@ filesHash:
   public/favicon.ico: 7d62af53ff8c43ba32d022107153e6877567ba75
   public/index.md: 82fc2b942e5293c2469e5fce6c2d4589a5ec0f6c
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
-  public/studio/index.html: 594c0185415165d621ecfb528f3bd914b940117b
-  public/studio/studio.css: 5276901e63d10fa9320636a7ab7116c0898babdb
-  public/studio/studio.js: 3b750fd14d1ac010f3f252ae14eaff675b97cefb
+  public/studio/index.html: ef96bd8d898269d8394b3d6ce67c5056b2b85a3f
+  public/studio/studio.css: a93f70472efd51b44733023124723865c8a47125
+  public/studio/studio.js: 8cf4725a16362b73dbfac324a983927c9c1aa546
   skills/mini-a-contract-authoring/SKILL.md: 0d98a31839edfbe86463893816dfd258e5261de7
   skills/mini-a-contract-authoring/references/CONTRACT.md: 58d482c7a033e0c03e7b0fe40d037bcd99e663c9
   skills/mini-a-decisions/SKILL.md: 2f5f011baacbf1bf7d1d37c6268eb78113e62524
