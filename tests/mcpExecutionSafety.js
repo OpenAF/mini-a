@@ -219,6 +219,59 @@ equal(p1.counts.write, formatWrites + 1, "Formatting failure cannot repeat downs
 MiniA._destroyMcpProxyConnections(p1.agent._id)
 equal(proxyData(proxyCall(p2, "read")).value, "two:1", "Closing another proxy preserves current owner")
 MiniA._destroyMcpProxyConnections(p2.agent._id)
+
+// Exercise statistics through the hooks that Mini-A installs on its MCP clients.
+var echoDispatches = 0
+var statsConfig = { id: "stats-fixture", type: "dummy", options: {
+  fns: {
+    stats_echo: function() {
+      echoDispatches++
+      return { content: [{ type: "text", text: "Echo succeeded" }] }
+    },
+    stats_lookup: function() { return { isError: true, content: [{ type: "text", text: "Lookup failed" }] } }
+  },
+  fnsMeta: {
+    stats_echo: tool("stats_echo", { readOnlyHint: true, cacheable: true }),
+    stats_lookup: tool("stats_lookup")
+  }
+} }
+var directStats = agent(), proxyStats = agent()
+try {
+  directStats._getPluginsDiscovery = proxyStats._getPluginsDiscovery = function() {
+    return { mcpConfigs: [statsConfig], skillsRoots: [] }
+  }
+  var statsArgs = {
+    model: stringify({ type: "openai", model: "fixture", key: "fixture" }),
+    usetools: true, useutils: false, usememory: false, usedecide: false
+  }
+  directStats.init(merge({}, statsArgs))
+  var directResult = directStats._callMcpTool("stats_echo", {})
+  check(!directResult.error, "Direct fixture tool succeeds (" + stringify(directResult.rawResult) + ")")
+
+  proxyStats.init(merge(statsArgs, { mcpproxy: true }))
+  var statsClient = proxyStats._mcpConnections[proxyStats.mcpToolToConnection["proxy-dispatch"]]
+  check(!proxyStats._callMcpTool("proxy-dispatch", { action: "call", tool: "stats_echo" }).error, "Proxy action call succeeds")
+  var repaired = statsClient.callTool("proxy-dispatch", { params: { action: "run", tool: "stats_echo" } })
+  equal(repaired.tool, "stats_echo", "Native tool path resolves nested envelope and action alias")
+  equal(echoDispatches, 2, "The second proxied echo uses the downstream cache")
+  var failedLookup = statsClient.callTool("proxy-dispatch", { action: "call", arguments: { tool: "stats_lookup" } })
+  equal(failedLookup.isError, true, "MCP isError survives the proxy envelope and nested tool name repair")
+
+  var usage = proxyStats.getMetrics().per_tool_usage
+  check(usage.stats_echo.calls === 3 && usage.stats_echo.successes === 3 && usage.stats_echo.failures === 0, "Direct and proxied calls share one row per tool")
+  check(usage.stats_lookup.calls === 1 && usage.stats_lookup.successes === 0 && usage.stats_lookup.failures === 1, "Downstream MCP errors count against the resolved tool")
+  check(!usage["proxy-dispatch"], "Forwarding does not create a duplicate proxy row")
+
+  statsClient.callTool("proxy-dispatch", { action: "list" })
+  statsClient.callTool("proxy-dispatch", { action: "call", tool: "missing" })
+  usage = proxyStats.getMetrics().per_tool_usage
+  var dispatcher = usage["proxy-dispatch"]
+  check(dispatcher.calls === 2 && dispatcher.successes === 1 && dispatcher.failures === 1, "Proxy management and unresolved requests retain proxy counters")
+  check(!usage.missing, "An unresolved request does not create a downstream tool counter")
+} finally {
+  directStats._stopAgentResources()
+  proxyStats._stopAgentResources()
+}
 print("PASS MCP execution safety: " + assertions + " assertions")
 
 } catch(e) { printErr(e); if (e.stack) printErr(e.stack); exit(1) }

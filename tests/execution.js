@@ -75,6 +75,14 @@
     assert(a._considerFinalCandidate("", {}, a._runtime), false, "Empty response cannot replace draft")
     assert(a._latestAnswerCandidate, "Useful deliverable", "Empty response preserves draft")
   }) }
+  // Console status keeps the child identity and its local acceptance outcome.
+  exports.testDelegatedPartialAnswerConsoleStatus = function() {
+    var agent = new MiniA(), messages = []
+    var display = function(icon, message) { messages.push(message) }
+    agent.defaultInteractionFn("answer_attempt", '[subtask:abcd1234] {"status":"partial","reason":"Evidence unavailable"}', display)
+    agent.defaultInteractionFn("answer_attempt", '{"status":"accepted"}', display)
+    assert(messages, ["[subtask:abcd1234] Partial answer: Evidence unavailable", "Answer accepted"], "Only an accepted answer gets the accepted label")
+  }
   // Automatic read-only work gets bounded, targeted repair with unchanged criteria.
   exports.testAutomaticDeliverableRepairBounded = function() { fixture(function(a, m) {
     var id = m.submitAndRun("Return ready", {}, { task: task("repair-worker") })
@@ -1527,6 +1535,77 @@
     assert(a._execution.state.progress, 1, "Changed timing or mtime alone is not new evidence")
     a._trace("tool_result", { name: "proxy-dispatch", params: { tool: "subtask-status", arguments: {} }, result: { status: "running" } })
     assert(a._execution.state.progress, 1, "Proxy coordination also leaves progress unchanged")
+  }) }
+  // A prior conversation can provide evidence. Re-reading the active goal's tool exchanges cannot.
+  exports.testHistoryProgressUsesEarlierEvidence = function() { fixture(function(a) {
+    var root = io.createTempDir()
+    try {
+      a._lastStartArgs.goal = "Return report contents"
+      var vm = a._initHistoryVm({ historyvm: true, contextvirtualization: true, conversation: root + "/conversation.json" })
+      var prior = vm.captureAssistantMessage("Earlier verified report contents")
+      a._executionHistoryStart = vm.captureUserMessage("Return report contents").seq
+      var failed = vm.captureToolExchange("read", { path: "report.txt" }, { error: "Path outside of allowed root" })
+      var priorObject = vm.objects[prior.seq - 1]
+      var failedObject = vm.objects[failed.seq - 1]
+      a._trace("tool_result", { name: "history_get", params: { id: priorObject.id }, result: vm.get(priorObject.id) })
+      assert(a._execution.state.progress, 1, "Archived source from before the goal counts")
+      a._trace("tool_result", { name: "history_get", params: { id: failedObject.id }, result: vm.get(failedObject.id) })
+      var replay = vm.readContext(failedObject.handle, { offset: 10, limit: 250 })
+      a._trace("tool_result", { name: "proxy-dispatch", params: { action: "call", tool: "context_expand", arguments: { id: failedObject.handle } }, result: {
+        resultFormat: "toon", content: [{ type: "text", text: af.toTOON(replay) }]
+      } })
+      assert(a._execution.state.progress, 1, "Rereading failed results through either history tool makes no progress")
+    } finally {
+      io.rm(root)
+    }
+  }) }
+  // Failed reads and changing lookup metadata leave the existing recovery limit in control.
+  exports.testRejectedDelegationRecoveryStopsWithoutNewEvidence = function() { fixture(function(a, m) {
+    a._lastStartArgs.goal = "Return report contents"
+    var child = m.submitAndRun("Return ready", {}, { task: task("report") })
+    m._completeSubtask(m.subtasks[child], "fixture", "Found a source reference", {}, { execution: { outcome: "succeeded" } })
+    assert(m.result(child).acceptance, "rejected", "Child settled with incomplete evidence")
+    assert(m.runningCount, 0, "Parent is no longer waiting for the child")
+
+    for (var step = 1; step <= 12; step++) {
+      a._trace("tool_result", { name: "proxy-dispatch", params: { action: "search", query: "report " + step }, result: { results: ["read"], count: step } })
+      a._trace("tool_result", { name: "proxy-dispatch", params: { action: "call", tool: "history_search", arguments: { query: "report " + step } }, result: { retrieval: { calls: step } } })
+      var result = { totalOperations: 1, completed: 1, results: [{ success: false, operation: "read", error: "Path outside of allowed root: report-" + step }] }
+      a._trace("tool_result", { name: "proxy-dispatch", params: { action: "call", tool: "filesystemBatch" }, result: {
+        resultFormat: "toon", content: [{ type: "text", text: af.toTOON(result) }]
+      } })
+      assert(a._executionStep(a._runtime, step), step < 12, "Only meaningful evidence can extend recovery")
+    }
+    assert(a._execution.state.outcome, "blocked", "Parent exits the recovery loop")
+    var partial = a._executionPartialAnswer(a._execution.state.reason, { format: "md" })
+    assert(partial.indexOf("Found a source reference") >= 0, true, "Partial response keeps the child's findings")
+  }) }
+  // The utility MCP reports failed batches while mixed batches keep their successful reads.
+  exports.testFilesystemBatchFailureAccounting = function() { fixture(function(a) {
+    var root = io.createTempDir(), outside = io.createTempFile("mini-a-batch-outside-", ".txt")
+    try {
+      io.writeFileString(root + "/report.txt", "report contents")
+      a._lastStartArgs.goal = "Return report contents"
+      var batch = a._createUtilsMcpConfig({ useutils: true, utilsroot: root }).options.fns.filesystemBatch
+      var denied = { type: "read", params: { path: outside } }
+      var result = batch({ operations: [denied] })
+      assert(result.error.indexOf("Path outside of allowed root") >= 0, true, "All-failed batch exposes the access error")
+      assert(result.retryable, false, "Route recovery does not replay an all-failed batch")
+      assert(JSON.parse(result.content[0].text).results[0].success, false, "Individual operation result survives")
+      assert(a._execution.state.progress, 0, "Denied file access makes no progress")
+
+      var read = { type: "read", params: { path: "report.txt" } }
+      var mixed = batch({ operations: [denied, read] })
+      assert(isDef(mixed.error), false, "Mixed batch returns its data")
+      var entries = JSON.parse(mixed.content[0].text)
+      assert(entries.results.map(function(entry) { return entry.success }), [false, true], "Both operation outcomes are preserved")
+      assert(a._execution.state.progress, 1, "Successful read advances progress")
+      batch({ operations: [{ type: "read", params: { path: outside + "-other" } }, read] })
+      assert(a._execution.state.progress, 1, "Changing a denied result adds no progress")
+    } finally {
+      io.rm(root)
+      io.rm(outside)
+    }
   }) }
   exports.testToolModeRecoveryRetainsAcceptedResults = function() { fixture(function(a) {
     var t = task("done"); a._execution.put(t)

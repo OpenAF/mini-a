@@ -1632,8 +1632,11 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   // Render lifecycle metadata as a concise console status.
   if (e === "answer_attempt") {
     try {
-      var attempt = jsonParse(m)
-      m = attempt.status === "started" ? "Draft" : attempt.status === "checking" ? "Checking answer" : attempt.status === "rejected" ? "Retrying: " + attempt.reason : "Answer accepted"
+      var prefix = String(m).match(/^(?:\[subtask:[^\]]+\]\s*)+/)
+      var attempt = JSON.parse(prefix ? String(m).substring(prefix[0].length) : m)
+      var labels = { started: "Draft", checking: "Checking answer", rejected: "Retrying", partial: "Partial answer", accepted: "Answer accepted" }
+      if (!Object.prototype.hasOwnProperty.call(labels, attempt.status)) return
+      m = (prefix ? prefix[0] : "") + labels[attempt.status] + (attempt.reason ? ": " + attempt.reason : "")
       e = "info"
     } catch(ignoreAttempt) { return }
   }
@@ -1751,17 +1754,49 @@ MiniA.prototype._trace = function(kind, payload) {
   if (this._artifactBinding && /^tool_/.test(kind) && isMap(payload) && isDef(payload.params)) payload = merge(payload, { params: { redacted: true } })
   if (this._execution && this._executionActive !== false && /^(tool_result|shell_result|wiki_result)$/.test(kind) && payload && !payload.error && !payload.blocked && !(isMap(payload.result) && (payload.result.error || payload.result.isError))) {
     var tool = payload.name || payload.op || "shell"
+    var proxyAction = tool === "proxy-dispatch" && payload.params ? String(payload.params.action || payload.params.operation || "").toLowerCase().trim() : ""
     if (tool === "proxy-dispatch" && payload.params && payload.params.tool) tool = payload.params.tool
-    if (!/^(delegate-subtask|subtask-status|execution-task|agent-comms|agent-state)$/.test(tool)) {
+
+    // Catalog and history index responses locate evidence. Their changing
+    // queries, counters and summaries cannot keep a stalled executor alive.
+    var discovery = ["status", "list", "search"].indexOf(proxyAction) >= 0 ||
+      /^(history_search|history_expand|context_search|context_children|context_related)$/.test(tool)
+    if (!discovery && !/^(delegate-subtask|subtask-status|execution-task|agent-comms|agent-state)$/.test(tool)) {
       if (this._runtime) this._runtime.executionWaiting = false
       var value = isDef(payload.result) ? payload.result : payload.output
       if (isMap(value) && isDef(value.routeUsed) && isDef(value.rawResult)) value = value.rawResult
       var normalized = isMap(value) && isArray(value.content) ? this._normalizeToolResult(value).processed : value
+      // Proxy inline payloads can also be encoded as TOON.
+      if (isMap(value) && value.resultFormat === "toon" && isUnDef(value.resultFile) && isString(normalized)) {
+        try { normalized = af.fromTOON(normalized) } catch(ignoreToon) {}
+      }
       var actualParams = payload.name === "proxy-dispatch" && payload.params ? payload.params.arguments || {} : payload.params || {}
+      // Reading back a result already archived during this goal cannot turn
+      // the same child output or tool failure into new evidence.
+      if (/^(history_get|context_get|context_expand)$/.test(tool) && isNumber(this._executionHistoryStart) && this._historyVm) {
+        var reference = isMap(normalized) && isString(normalized.handle) ? normalized.handle : actualParams.id
+        var archived = this._historyVm._resolveObject(reference)
+        if (archived && archived.canonicalRef.sequence >= this._executionHistoryStart) normalized = __
+      }
       if (isMap(normalized) && isString(normalized.content)) value = { path: normalized.path || normalized.relativePath || actualParams.path, content: normalized.content }
       else if (/^(filesystemModify|write_file|writeFile)$/.test(tool) && isDef(actualParams.content)) value = { path: actualParams.path, content: actualParams.content, append: actualParams.append === true }
       else if (isMap(normalized) && isDef(normalized.body)) value = { status: normalized.status || normalized.statusCode, body: normalized.body }
       else value = normalized
+
+      // A mixed batch contributes only successful operations. Varying the
+      // denied or invalid paths in the same batch adds no evidence.
+      if (tool === "filesystemBatch" && isMap(value) && isArray(value.results)) {
+        var successful = value.results
+          .filter(function(entry) { return isMap(entry) && entry.success === true })
+          .map(function(entry) {
+            var data = entry.data
+            // Reading a file can change its access timestamp without changing its content.
+            if (isMap(data) && isString(data.content)) data = { path: data.path || data.relativePath, content: data.content }
+            return { operation: entry.operation, data: data }
+          })
+        value = successful.length > 0 ? successful : __
+      }
+
       // A temporary spill handle is not source evidence and can change on every call.
       if (isMap(value) && (isDef(value.resultFile) || isDef(value.resultId)) && !isDef(value.content) && !isDef(value.body) && !isDef(value.result)) value = __
       var serialized = isDef(value) ? this._stableStringify(value) : ""
@@ -2977,6 +3012,26 @@ MiniA.prototype._logToolUsage = function(toolName, params, answer, meta) {
   }
 }
 
+// Record each start and outcome against shared per-tool counters.
+MiniA._recordMcpToolStats = function(toolName, countCall, failed) {
+  var metrics = global.__mini_a_metrics
+  sync(function() {
+    var tools = metrics.per_tool_stats
+    if (!Object.prototype.hasOwnProperty.call(tools, toolName)) {
+      // A reset may have discarded an in-flight direct call.
+      if (!countCall) return
+      Object.defineProperty(tools, toolName, {
+        enumerable: true,
+        value: { calls: $atomic(0, "long"), successes: $atomic(0, "long"), failures: $atomic(0, "long") }
+      })
+    }
+    var stats = tools[toolName]
+    if (countCall) stats.calls.inc()
+    if (failed === true) stats.failures.inc()
+    if (failed === false) stats.successes.inc()
+  }, metrics)
+}
+
 /**
  * <odoc>
  * <key>MinA.getMetrics() : Object</key>
@@ -3218,16 +3273,20 @@ MiniA.prototype.getMetrics = function() {
             lazy_init_failed: global.__mini_a_metrics.mcp_lazy_init_failed.get()
         },
         per_tool_usage: (function() {
-            var toolStats = {}
-            Object.keys(global.__mini_a_metrics.per_tool_stats).forEach(function(toolName) {
-                var tool = global.__mini_a_metrics.per_tool_stats[toolName]
-                toolStats[toolName] = {
-                    calls: tool.calls.get(),
-                    successes: tool.successes.get(),
-                    failures: tool.failures.get()
-                }
+          var tools = global.__mini_a_metrics.per_tool_stats
+          var toolStats = {}
+          Object.keys(tools).forEach(function(toolName) {
+            var tool = tools[toolName]
+            var successes = tool.successes.get()
+            var failures = tool.failures.get()
+            Object.defineProperty(toolStats, toolName, {
+              enumerable: true,
+              configurable: true,
+              writable: true,
+              value: { calls: tool.calls.get(), successes: successes, failures: failures }
             })
-            return toolStats
+          })
+          return toolStats
         })(),
         delegation: {
             manager_id: this._subtaskManager ? this._subtaskManager._transitionLock : __,
@@ -13195,6 +13254,13 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       if (!isString(text) || text.length === 0) text = stringify(output, __, "")
       if (!isString(text) || text.length === 0) text = "null"
 
+      // Preserve the per-operation results and expose an entirely failed batch
+      // as a tool error to native and proxy callers.
+      if (toolName === "filesystemBatch" && isMap(output) && isArray(output.results) && output.results.length > 0 &&
+          output.results.every(function(entry) { return entry.success === false })) {
+        return { error: output.results[0].error, retryable: false, content: [{ type: "text", text: text }] }
+      }
+
       return {
         content: [{ type: "text", text: text }]
       }
@@ -13464,7 +13530,6 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
             toolPayload._renderArgs = renderArgs
           }
           var result = parent._runRawOutputGuarded(function() { return fileTool[name](toolPayload) })
-          parent._captureContextToolResult(name, payload, result)
           if (name === "skills" || name === "skill") {
             _logSkillSourceUsage(payload, result)
             if (isMap(result) && !result.error) parent._recordSkillContent("local:" + result.name, result)
@@ -13473,6 +13538,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
             parent._recordSkillContent(payload.ref || payload.path, result)
           }
           var response = formatResponse(result, name, meta.inputSchema, payload)
+          if (isUnDef(response.error)) parent._captureContextToolResult(name, payload, result)
           if ((name === "skills" || name === "skill" || name === "skillwiki") && isMap(response) && response.error) {
             var requestedRef = name === "skillwiki" ? payload.ref || payload.path : "local:" + String(payload.name || "").replace(/^local:/, "")
             if (parent._skillRuntime.records[requestedRef] && /source|revision|budget|max.chars|max.loaded|denied|not.found|exceeds/.test(String(response.error))) parent._skillRuntime.block(requestedRef, String(response.error))
@@ -19492,6 +19558,8 @@ MiniA.prototype.init = function(args) {
           if (isExisting) {
             mcp = this._mcpConnections[id]
           } else {
+            var isEmbeddedProxy = mcpConfig.id === "mini-a-mcp-proxy"
+
             // Mini-A decorates every MCP client with session-bound closures (pre/post hooks and
             // the callTool wrapper below). Reusing a shared client across runs can keep stale
             // references to a previous agent instance and trigger errors such as
@@ -19510,15 +19578,8 @@ MiniA.prototype.init = function(args) {
                 }
                 parent._trace("tool_call", { name: t, params: a })
 
-                // Track per-tool call count
-                if (!isObject(global.__mini_a_metrics.per_tool_stats[t])) {
-                  global.__mini_a_metrics.per_tool_stats[t] = {
-                    calls: $atomic(0, "long"),
-                    successes: $atomic(0, "long"),
-                    failures: $atomic(0, "long")
-                  }
-                }
-                global.__mini_a_metrics.per_tool_stats[t].calls.inc()
+                // The embedded proxy response identifies the tool it actually invoked.
+                if (!isEmbeddedProxy || t !== "proxy-dispatch") MiniA._recordMcpToolStats(t, true)
 
                 if (typeof parent._prepareToolExecution === "function") {
                   var currentCtx = parent._runtime && parent._runtime.currentTool
@@ -19533,22 +19594,21 @@ MiniA.prototype.init = function(args) {
                 }
               },
               posFn : (t, a, r) => {
-                var hasError = isMap(r) && isDef(r.error)
+                var hasError = isMap(r) && (isDef(r.error) || r.isError === true)
+                var isProxyDispatch = isEmbeddedProxy && t === "proxy-dispatch"
+                var statsName = t
+                if (isProxyDispatch && isMap(r) && r.action === "call" && isMap(r.connection) && isString(r.tool)) statsName = r.tool
+
+                // Count each completed proxy request once, including cache hits and errors.
+                MiniA._recordMcpToolStats(statsName, isProxyDispatch, hasError)
+
                 parent._trace("tool_result", { name: t, params: a, result: r, error: hasError })
                 if (hasError) {
                   parent.fnI("error", `Execution of action '${t}' finished unsuccessfully: ${af.toSLON(r)}`)
                   global.__mini_a_metrics.mcp_actions_failed.inc()
-                  // Track per-tool failures
-                  if (isObject(global.__mini_a_metrics.per_tool_stats[t])) {
-                    global.__mini_a_metrics.per_tool_stats[t].failures.inc()
-                  }
                 } else {
                   parent.fnI(MiniA._isCommsTool(t, a) ? "comms" : "info", `Execution of action '${t}' finished successfully (${stringify(r, __, "").length} bytes) for parameters: ${MiniA._isCommsTool(t, a) ? "[payload omitted]" : parent._truncateAuditValue(af.toCSLON(a), 800)}`)
                   global.__mini_a_metrics.mcp_actions_executed.inc()
-                  // Track per-tool successes
-                  if (isObject(global.__mini_a_metrics.per_tool_stats[t])) {
-                    global.__mini_a_metrics.per_tool_stats[t].successes.inc()
-                  }
                 }
                 if (args.debug) {
                   if (parent._debugFile) {
@@ -21193,8 +21253,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this.init(args)
     this._initialSkillActivationArgs = __
     args.goal = this._coerceGoalText(args.goal)
+    this._executionHistoryStart = __
     if (isObject(this._historyVm) && !this._historyVm.degraded) {
-      this._historyVm.captureUserMessage(args.goal, { interactionId: "goal-" + String(nowNano()), explicitPin: true })
+      var goalEvent = this._historyVm.captureUserMessage(args.goal, { interactionId: "goal-" + String(nowNano()), explicitPin: true })
+      if (isMap(goalEvent)) this._executionHistoryStart = goalEvent.seq
     }
     if (isFunction(this._historyCheckpointFn)) this._historyCheckpointFn(args.goal)
     if (args.debug === true) {
