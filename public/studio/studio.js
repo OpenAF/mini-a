@@ -1731,16 +1731,30 @@ async function sourcesView(content) {
         const dirs=studioSession.adapters.directory||[];
         if(!dirs.length){el("p","Configure studiosourcedirs to select a trusted local directory or Git checkout.",inputRow);return;}
         const dir=field(inputRow,"Configured directory",dirs.map(d=>d.id)),kind=field(inputRow,"Kind",["directory","git"]);submit=button(inputRow,"Prepare source",()=>stage({type:kind.value,directoryId:dir.value}));
-      }else{
-        const file=field(inputRow,method.value==="Folder"?"Choose folder":"Choose files or one ZIP");file.type="file";file.multiple=true;if(method.value==="Folder")file.setAttribute("webkitdirectory","");
-        const inventory=el("p","No files selected.",panel);file.onchange=()=>{inventory.textContent=file.files.length+" files · "+bytes([...file.files].reduce((n,f)=>n+f.size,0));};
-        submit=button(inputRow,"Upload and prepare",async()=>{
-          if(!file.files.length)throw new Error("Select files first");
-          if(!name.value.trim()||!id.value)throw new Error("Enter a source name and ID before uploading");
-          const uploadId=crypto.randomUUID();let index=0;
-          for(const f of file.files){status.textContent="Uploading "+(++index)+" / "+file.files.length+" · "+f.name;await StudioApi.upload(uploadId,f.webkitRelativePath||f.name,f);}
-          await stage({type:"upload",uploadId});
-        },"upload");
+      } else {
+        // Keep the supported formats visible before users select files.
+        var file = field(inputRow, method.value === "Folder" ? "Choose folder" : "Choose files or one ZIP")
+        file.type = "file"
+        file.multiple = true
+        if (method.value === "Folder") file.setAttribute("webkitdirectory", "")
+        el("p", "Use Markdown, plain text, Word, Excel, PowerPoint, RTF, PDF, PNG or JPEG. Office, RTF and PDF text extraction uses the Tika oPack on the Studio server.", panel).className = "muted"
+        var inventory = el("p", "No files selected.", panel)
+        file.onchange = function() {
+          inventory.textContent = file.files.length + " files · " + bytes([...file.files].reduce((n, f) => n + f.size, 0))
+        }
+
+        // Upload each file under its original relative path before staging.
+        submit = button(inputRow, "Upload and prepare", async function() {
+          if (file.files.length === 0) throw new Error("Select files first")
+          if (name.value.trim().length === 0 || id.value.length === 0) throw new Error("Enter a source name and ID before uploading")
+          var uploadId = crypto.randomUUID()
+          var index = 0
+          for (var f of file.files) {
+            status.textContent = "Uploading " + (++index) + " / " + file.files.length + " · " + f.name
+            await StudioApi.upload(uploadId, f.webkitRelativePath || f.name, f)
+          }
+          await stage({ type: "upload", uploadId: uploadId })
+        }, "upload")
       }
       disable(submit,writeReason());
       const action=submit.onclick;submit.onclick=async event=>{status.className="";submit.disabled=true;try{await action(event);}finally{if(submit.isConnected)submit.disabled=!!writeReason();}};

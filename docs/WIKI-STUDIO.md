@@ -246,14 +246,18 @@ pages for skipped files and keeps a partially imported ad-hoc source available
 for retry. If every selected file is skipped, Apply is unavailable. Configure
 `OAF_VISUAL_MODEL` or a vision-capable `OAF_MODEL` to describe images.
 
-Uploads stream one file per request to disk. Limits: 8 MiB per Markdown/text/PDF/PNG/JPEG,
-20 MiB per ZIP, 2,000 entries, 64 MiB expanded batch, depth 16, expansion ratio 100.
+Upload Markdown (`.md`, `.markdown`), plain text (`.txt`), Word (`.doc`, `.docx`),
+Excel (`.xls`, `.xlsx`), PowerPoint (`.ppt`, `.pptx`), RTF, PDF, PNG or JPEG as
+individual files, from a folder, or in one ZIP. Office, RTF and PDF text extraction
+uses the Tika oPack on the Studio server. Preinstall it with `opack install Tika`
+for offline use. Scanned PDFs require OCR, which is disabled during ingestion.
+
+Uploads stream one file per request to disk. Limits are 8 MiB per source file,
+20 MiB per ZIP, 2,000 entries, a 64 MiB expanded batch, depth 16 and expansion ratio 100.
 ZIP preflight rejects encrypted/special/symlink entries, traversal, duplicate
 case-folded paths, unsupported members, ZIP64 and multipart archives. Extraction
-checks actual byte counts and CRC. Imported scripts are never executed. PDF
-ingestion depends on the converters available to the existing engine; staging
-acceptance does not promise successful conversion. ZIPs containing other file
-types must be filtered before upload. Upload resume/TTL cleanup is not implemented.
+checks actual byte counts and CRC. Imported scripts are never executed. Upload
+resume/TTL cleanup is not implemented.
 
 For operator-allowlisted local folders or existing Git checkouts, add:
 
@@ -262,8 +266,8 @@ studiosourcedirs='[{"id":"docs","path":"/data/source-checkout"}]'
 ```
 
 Sources then offers that named directory. The browser supplies only its ID, never
-an arbitrary source path. Intake snapshots visible `.md`, `.txt` and `.pdf` files;
-hidden state/instructions and other formats are skipped. It does not execute Git
+an arbitrary source path. Intake snapshots visible files in the same source formats
+and skips hidden state, instructions and unsupported formats. It does not execute Git
 hooks, update the checkout or infer a remote commit. Refresh the checkout outside
 Studio, then create a new source revision with the same source ID.
 

@@ -145,6 +145,11 @@ var _INGEST_DEFAULT_EXCLUDES = [
   "/.venv/", "/__pycache__/", "/.idea/", "/.vscode/"
 ]
 
+// These sources need document or image extraction before normalization.
+function __miniAIngestNeedsExtraction(path) {
+  return __miniAIsTikaDocument(path) || /\.(png|jpe?g)$/i.test(path)
+}
+
 // Only passive, file-shaped oafp inputs may be used for source files. Other
 // advertised inputs can run commands, access services, or inspect the host.
 var _INGEST_OAFP_FILE_INPUTS = ["csv", "dsv", "ini", "json", "jsonschema", "jwt", "ndjson", "ndslon", "openmetrics", "slon", "toml", "toon", "xml", "yaml"]
@@ -218,7 +223,11 @@ MiniAIngest.prototype._discover = function(resolved) {
       if (rel.length === 0) return
       present[rel] = { ignored: self._shouldSkipPath(rel), directory: f.isDirectory, size: Number(f.size || 0), reason: self._shouldSkipPath(rel) ? "filtered" : "" }; if (self._shouldSkipPath(rel)) return
       if (f.isDirectory) { walk(full); return }
-      if (!/\.(md|markdown|mdx|txt|rst|adoc|html?|docx?|xlsx?|pptx?|pdf|png|jpe?g)$/i.test(rel) && !self._oafpFormat(rel)) { present[rel].ignored = true; present[rel].reason = "unsupported extension"; return }
+      if (!/\.(md|markdown|mdx|txt|rst|adoc|html?)$/i.test(rel) && !__miniAIngestNeedsExtraction(rel) && !self._oafpFormat(rel)) {
+        present[rel].ignored = true
+        present[rel].reason = "unsupported extension"
+        return
+      }
       var kb = Number(f.size || 0) / 1024
       if (kb > maxKb) {
         // skip rather than silently truncate: a half-read document distills into a lie
@@ -1109,7 +1118,7 @@ MiniAIngest.prototype.run = function() {
     })
     found.sources.forEach(function(src, sourceIndex) {
       if (sourceIndex > 0 && sourceIndex % 25 === 0) self._log("[ingest] Planned " + sourceIndex + "/" + found.sources.length + " source(s).")
-      if (/\.(docx?|xlsx?|pptx?|pdf|png|jpe?g)$/i.test(String(src.rel || ""))) self._log("[ingest] Extracting " + src.rel + " (" + (sourceIndex + 1) + "/" + found.sources.length + ")...")
+      if (__miniAIngestNeedsExtraction(src.rel)) self._log("[ingest] Extracting " + src.rel + " (" + (sourceIndex + 1) + "/" + found.sources.length + ")...")
       observed[src.id] = { hash: "" }
       var key = sha1(scope + "|" + src.id), oldKey = sha1(resolved.type + "|" + (resolved.origin || resolved.root || "") + "|" + src.id)
       src.sourceKey = key
@@ -1567,7 +1576,7 @@ MiniAIngest.prototype._readSource = function(src) {
     }
   }
   var rel = String(src.rel || src.path || "")
-  if (/\.(docx?|xlsx?|pptx?|pdf|png|jpe?g)$/i.test(rel)) {
+  if (__miniAIngestNeedsExtraction(rel)) {
     try {
       loadLib(__miniAPath("js/core/mini-a-utils.js"))
       var file = new java.io.File(String(src.path)).getCanonicalFile()

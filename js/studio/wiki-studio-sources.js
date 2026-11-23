@@ -1,15 +1,22 @@
 // Resolve dependencies from this package before loading other modules.
 if (typeof __miniAPath !== "function") loadLib(String(new java.io.File(String(__loadedfrom)).getCanonicalFile().getParentFile().getParent()) + "/mini-a-paths.js")
 
+loadLib(__miniAPath("js/core/mini-a-common.js"))
 loadLib(__miniAPath("js/studio/wiki-studio-common.js"))
 loadLib(__miniAPath("js/studio/wiki-studio-outbound.js"))
+
+// File uploads, archive members and directory snapshots accept the same sources.
+WikiStudio.isSourceFile = function(path) {
+  return /\.(md|markdown|txt|png|jpe?g)$/i.test(path) || __miniAIsTikaDocument(path)
+}
+
 WikiStudioServer.prototype.streamUpload = function(req, input) {
   WikiStudio.authorize(req.role, "admin")
   var c = this.config, id = req.headers["x-upload-id"], relative
   WikiStudio.assert(isString(id) && /^[a-f0-9-]{36}$/.test(id), 400, "invalid_upload", "Supply a UUID in X-Upload-ID")
   try { relative = decodeURIComponent(req.headers["x-upload-path"] || "") } catch(e) { WikiStudio.fail(400, "invalid_upload", "Invalid upload path") }
   WikiStudio.pagePath(relative, false)
-  WikiStudio.assert(/\.(md|txt|pdf|png|jpe?g|zip)$/i.test(relative), 415, "unsupported_file", "Upload Markdown, text, PDF, PNG, JPEG or a ZIP archive")
+  WikiStudio.assert(WikiStudio.isSourceFile(relative) || /\.zip$/i.test(relative), 415, "unsupported_file", "Upload Markdown, text, Word, Excel, PowerPoint, RTF, PDF, PNG, JPEG or a ZIP archive")
   var dir = c.home + "/sources/uploads/" + id, self = this
   return WikiStudio.lock(c.home, "upload-" + id, function() {
     WikiStudio.assert(!io.fileExists(dir + "/sealed.json"), 409, "upload_sealed", "This upload revision is immutable")
@@ -62,7 +69,7 @@ WikiStudio.validateZip = function(file) {
       WikiStudio.pagePath(name, false)
       WikiStudio.assert(name.split("/").length <= 16 && !names[name.toLowerCase()], 400, "unsafe_zip", "Duplicate or deep ZIP path")
       names[name.toLowerCase()] = true
-      WikiStudio.assert(entry.isDirectory() || /\.(md|txt|pdf|png|jpe?g)$/i.test(name), 415, "unsupported_zip_file", "ZIP may contain only Markdown, text, PDF, PNG and JPEG sources")
+      WikiStudio.assert(entry.isDirectory() || WikiStudio.isSourceFile(name), 415, "unsupported_zip_file", "ZIP may contain Markdown, text, Word, Excel, PowerPoint, RTF, PDF, PNG and JPEG sources")
       total += Number(entry.getSize())
       WikiStudio.assert(total <= 67108864 && entry.getSize() >= 0 && entry.getSize() <= 8388608, 413, "zip_limit", "Uncompressed ZIP limit exceeded")
       entries.push(name)
@@ -166,7 +173,28 @@ WikiStudioServer.prototype.sourceAdd = function(w, body) {
     var uploadId=WikiStudio.id(),stage=this.config.home+"/sources/uploads/"+uploadId+"/files"
     WikiStudio.privateDir(stage)
     var count=0,total=0
-    var copy=function(dir,depth){WikiStudio.assert(depth<16,413,"source_limit","Source depth exceeded");var entries=io.listFiles(dir).files;entries.forEach(function(f){if(String(f.filename).charAt(0)==="."||/^AGENTS\.md$/i.test(f.filename))return;WikiStudio.noLinks(f.filepath);if(f.isDirectory){copy(f.filepath,depth+1);return}if(!/\.(md|txt|pdf|png|jpe?g)$/i.test(f.filename))return;count++;var bytes=Number(new java.io.File(f.filepath).length());total+=bytes;WikiStudio.assert(count<=2000&&total<=67108864&&bytes<=8388608,413,"source_limit","Source byte/count limit exceeded");var rel=String(f.filepath).substring(selected.path.length+1),dest=WikiStudio.safeFile(stage,rel,false);WikiStudio.privateDir(String(new java.io.File(dest).getParent()));java.nio.file.Files.copy(WikiStudio.path(f.filepath),WikiStudio.path(dest))})}
+    // Snapshot supported source files with their paths relative to the configured root.
+    var copy = function(dir, depth) {
+      WikiStudio.assert(depth < 16, 413, "source_limit", "Source depth exceeded")
+      io.listFiles(dir).files.forEach(function(f) {
+        if (String(f.filename).charAt(0) === "." || /^AGENTS\.md$/i.test(f.filename)) return
+        WikiStudio.noLinks(f.filepath)
+        if (f.isDirectory) {
+          copy(f.filepath, depth + 1)
+          return
+        }
+        if (!WikiStudio.isSourceFile(f.filename)) return
+
+        count++
+        var bytes = Number(new java.io.File(f.filepath).length())
+        total += bytes
+        WikiStudio.assert(count <= 2000 && total <= 67108864 && bytes <= 8388608, 413, "source_limit", "Source byte/count limit exceeded")
+        var rel = String(f.filepath).substring(selected.path.length + 1)
+        var dest = WikiStudio.safeFile(stage, rel, false)
+        WikiStudio.privateDir(String(new java.io.File(dest).getParent()))
+        java.nio.file.Files.copy(WikiStudio.path(f.filepath), WikiStudio.path(dest))
+      })
+    }
     try{copy(selected.path,0)}catch(e){io.rm(String(new java.io.File(stage).getParent()));throw e}
     body={id:body.id,name:body.name,type:"upload",uploadId:uploadId,adhoc:adhoc}
   }

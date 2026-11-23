@@ -609,7 +609,7 @@ normalized without a model call. Use `normalize` or `raw` to avoid distillation 
 and a positive `wikimaxprompttokens` defer over-budget ingestion work. With the default
 `wikimaxprompttokens=0`, a context-limit error triggers bounded split-and-synthesize
 recovery, controlled by `wikiingestmaxcalls` (default 32; 0 disables recovery).
-The ingest source reader also extracts text from DOCX/DOC, XLSX/XLS, PPTX/PPT and PDF
+The ingest source reader also extracts text from DOCX/DOC, XLSX/XLS, PPTX/PPT, RTF and PDF
 through Tika, and describes PNG/JPEG through the configured vision model. Extraction
 failures and truncated documents leave their source pages untouched. The default
 `ingestmaxfilekb=512` input limit applies to these formats.

@@ -3572,7 +3572,7 @@ Commands refer to sensitive argument values through `MINIA_WIKIOPS_<ARGUMENT>` e
 
 `js/wiki/mini-a-ingest.js` turns an existing body of documentation into wiki pages. Discovery, filtering, chunking, the re-ingest ledger, writing and finalization are deterministic; distillation and image descriptions call the LLM.
 
-**Sources**: a documentation folder, a git repository (local checkout or clone URL), or a web page URL. Folders and repositories may include Markdown, plain text, HTML, DOCX/DOC, XLSX/XLS, PPTX/PPT, PDF, PNG, and JPEG files. Other supported structured file types are read through oafp, including YAML, CSV, NDJSON, JSON, SLON, NDSLON, OpenMetrics, TOML, XML, INI, DSV and TOON. The type is auto-detected; `ingesttype=` overrides.
+**Sources**: a documentation folder, a git repository (local checkout or clone URL), or a web page URL. Folders and repositories may include Markdown, plain text, HTML, DOCX/DOC, XLSX/XLS, PPTX/PPT, RTF, PDF, PNG, and JPEG files. Other supported structured file types are read through oafp, including YAML, CSV, NDJSON, JSON, SLON, NDSLON, OpenMetrics, TOML, XML, INI, DSV and TOON. The type is auto-detected; `ingesttype=` overrides.
 
 ```bash
 # a docs folder
@@ -3716,7 +3716,7 @@ If a move is interrupted, repeat the wiki move or run writable ingestion to repl
 6. **Write** — one source produces **one page**. Topic organization is available through explicit `/dream reorg topics`; deterministic maintenance uses `/dream wiki apply`.
 7. **Finalize and verify** — regenerate indexes, publish search and graph updates, append to `log.md`, verify the active V2 generation, then validate and export any configured bundle before clearing recovery.
 
-Office and PDF text extraction uses the `readDocument` utility and Tika (installed lazily unless preinstalled). Scanned PDFs need OCR, which is not enabled. PNG/JPEG descriptions use `inspectImage` and require a vision-capable `modelvisual` / `OAF_VISUAL_MODEL` (falling back to `OAF_MODEL`); image text is treated as untrusted source data. Empty or truncated extraction fails that source without writing a partial page. The input size limit applies to these files too.
+Office, RTF and PDF text extraction uses the `readDocument` utility and Tika (installed lazily unless preinstalled). Scanned PDFs need OCR, which is not enabled. PNG/JPEG descriptions use `inspectImage` and require a vision-capable `modelvisual` / `OAF_VISUAL_MODEL` (falling back to `OAF_MODEL`); image text is treated as untrusted source data. Empty or truncated extraction fails that source without writing a partial page. The input size limit applies to these files too.
 For other passive structured formats, oafp parses the source into JSON shown in a fenced wiki page. NDJSON and NDSLON retain every record. Inputs that execute commands, query services or inspect the host are excluded from file ingestion even when oafp advertises them.
 
 Ingested pages carry provenance front-matter: `source`, `source_ref` (commit SHA or origin), `source_hash` (sha1 of the ingested content) and `ingested`. A later ingest of a changed source overwrites the page, so record durable additions elsewhere.

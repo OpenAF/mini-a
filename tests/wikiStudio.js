@@ -485,8 +485,11 @@
     WikiStudio.privateDir(s.config.home+"/sources")
     var req={role:"admin",headers:{"x-upload-id":id,"x-upload-path":"nested%2Fsource.md"}}
     s.streamUpload(req,new java.io.ByteArrayInputStream(WikiStudio.bytes("# Staged\n")))
+    req.headers["x-upload-path"] = "nested%2Freport.DOCX"
+    s.streamUpload(req, new java.io.ByteArrayInputStream(io.readFileBytes("tests/fixtures/documents/sample.docx")))
     var source=s.sourceAdd(w,{id:"docs",name:"Documents",type:"upload",uploadId:id})
     assert(source.files["nested/source.md"].size,9,"Preserve directory paths")
+    assert(source.files["nested/report.DOCX"].size, io.fileInfo("tests/fixtures/documents/sample.docx").size, "Stage Word uploads with uppercase extensions")
     ;[{}, {section:""}, {section:"guides/reference"}].forEach(function(options) {
       var spec=s.sourceOperation(w,"ingestions",{sourceId:source.id,revision:source.revision,options:options})
       assert(spec.params.section,options.section||"docs","Default section uses source ID and preserves explicit overrides")
@@ -501,13 +504,22 @@
     rejects(function(){WikiStudio.validateZip(archive("slip.zip","../escape.md"))},"unsafe_path")
     var good=archive("good.zip","folder/page.md"); WikiStudio.extractZip(good,t+"/expanded")
     assert(io.readFileString(t+"/expanded/folder/page.md"),"safe content","Safe ZIP extraction")
+    var documents = archive("documents.zip", "folder/notes.rtf")
+    WikiStudio.extractZip(documents, t + "/expanded-documents")
+    assert(io.readFileString(t + "/expanded-documents/folder/notes.rtf"), "safe content", "Extract document members for ingestion")
+    rejects(function() { WikiStudio.validateZip(archive("unsupported.zip", "folder/tool.bin")) }, "unsupported_zip_file")
     req.headers["x-upload-id"]=WikiStudio.id();req.headers["x-upload-path"]="..%2Fescape.md"
     rejects(function(){s.streamUpload(req,new java.io.ByteArrayInputStream(WikiStudio.bytes("x")))},"unsafe_path")
+    req.headers["x-upload-path"] = "tool.bin"
+    rejects(function() { s.streamUpload(req, new java.io.ByteArrayInputStream(WikiStudio.bytes("x"))) }, "unsupported_file")
     WikiStudio.privateDir(t+"/checkout");io.writeFileString(t+"/checkout/doc.md","# Local checkout\n")
+    io.writeFileBytes(t + "/checkout/budget.xlsx", io.readFileBytes("tests/fixtures/documents/sample.xlsx"))
+    io.writeFileString(t + "/checkout/tool.bin", "ignored")
     s.config.directories=[{id:"checkout",path:t+"/checkout",identity:WikiStudio.identity(t+"/checkout")}]
     var local=s.sourceAdd(w,{id:"local",name:"Local",type:"git",directoryId:"checkout"})
     assert(local.type,"git","Allowlisted local checkout adapter")
     assert(!!local.files["doc.md"],true,"Directory snapshot inventory")
+    assert(Object.keys(local.files).sort().join(","), "budget.xlsx,doc.md", "Directory snapshots include Office and skip unsupported extensions")
     // YouTube captions: the operator chooses the Markdown (page) file name.
     assert(WikiStudio.markdownFileName("My Talk.md"),"my-talk.md","File names use page slug rules")
     rejects(function(){WikiStudio.markdownFileName("index")},"invalid_filename")

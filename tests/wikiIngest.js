@@ -119,6 +119,7 @@
       io.writeFileString(src + "/report.docx", "document fixture")
       io.writeFileString(src + "/budget.xlsx", "spreadsheet fixture")
       io.writeFileString(src + "/brief.pdf", "pdf fixture")
+      io.writeFileString(src + "/notes.RTF", "rich text fixture")
       var image = new java.awt.image.BufferedImage(2, 2, java.awt.image.BufferedImage.TYPE_INT_RGB)
       javax.imageio.ImageIO.write(image, "png", new java.io.File(src + "/diagram.png"))
       image.flush()
@@ -134,12 +135,13 @@
       } })
       var result = ing.run()
       ow.test.assert(result.ok, true, stringify(result))
-      ow.test.assert(result.discovered, 4, "all supported binary formats discovered")
+      ow.test.assert(result.discovered, 5, "all supported documents and images discovered")
       ow.test.assert(images, 1, "image inspected once")
       ow.test.assert(io.readFileString(wiki + "/" + ing._wikiPathFor(result.section, { rel: "report.docx" })).indexOf("Extracted report.docx") >= 0, true, "document text written to wiki")
+      ow.test.assert(io.readFileString(wiki + "/" + ing._wikiPathFor(result.section, { rel: "notes.RTF" })).indexOf("Extracted notes.RTF") >= 0, true, "RTF is extracted instead of read as plain text")
       ow.test.assert(io.readFileString(wiki + "/" + ing._wikiPathFor(result.section, { rel: "diagram.png" })).indexOf("A diagram labeled Widget") >= 0, true, "image description written to wiki")
       var again = ing.run()
-      ow.test.assert(again.skipped_unchanged, 4, "unchanged extracted sources retain provenance")
+      ow.test.assert(again.skipped_unchanged, 5, "unchanged extracted sources retain provenance")
     } finally {
       MiniUtilsTool.prototype._createDocumentExtractor = originalExtractor
       cleanup(src, wiki)

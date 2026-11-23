@@ -2,6 +2,11 @@
 // License: Apache 2.0
 // Description: Shared utility functions used across mini-a components.
 
+// Document extensions accepted by wiki ingestion through the Tika oPack.
+function __miniAIsTikaDocument(path) {
+  return /\.(docx?|xlsx?|pptx?|rtf|pdf)$/i.test(path)
+}
+
 // Per-instance policy: never install a process-global IO hook (web sessions share a JVM).
 function MiniAFileAccess(allowed) {
   this.enabled = isDef(allowed)
