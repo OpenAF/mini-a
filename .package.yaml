@@ -1,60 +1,26 @@
-author: Nuno Aguiar
+author: The author(s) name(s)
 scripts:
   preerase: ''
   posterase: ''
   preinstall: ''
-  postinstall: |
-    var path = args.OPACK_PATH
-
-    $sh(`chmod +x ${path}/mini-a.sh`)
-    .sh(`chmod +x ${path}/mini-a-web.sh`)
-    .exec()
-
-    print("Using Mini-A")
-    print("------------")
-    print()
-    print("  1) Set the OAF_MODEL environment variable.")
-    print("     If you need an interactive helper, run:")
-    print("       ojob ojob.io/ai/buildOAFModel")
-    print()
-    print("  2) CLI usage/help:")
-    print("       opack exec mini-a -jobhelp")
-    print()
-    print("  3) Web interface:")
-    print("       opack exec mini-a onport=12345 [arguments]")
-    print()
-    print(`  4) Examples (oJob-based orchestration): ${path}/examples`)
-    print()
-    print("  5) Optional Unix alias 'mini-a' to run opack exec mini-a:")
-    print("       Bash: echo 'alias mini-a=\"opack exec mini-a\"' >> ~/.bashrc && . ~/.bashrc")
-    print("       Zsh:  echo 'alias mini-a=\"opack exec mini-a\"' >> ~/.zshrc && . ~/.zshrc")
-    print("       sh:   echo 'alias mini-a=\"opack exec mini-a\"' >> ~/.profile && . ~/.profile")
-    print("     Or create a portable wrapper:")
-    print("       mkdir -p ~/.local/bin && printf '#!/usr/bin/env sh\\nopack exec mini-a \"$@\"\\n' > ~/.local/bin/mini-a && chmod +x ~/.local/bin/mini-a")
-    print("       Ensure ~/.local/bin is on your PATH")
-    print()
-    print("Visit https://github.com/openaf/mini-a for documentation and examples.")
-    print()
+  postinstall: ''
 keywords:
-- agent
-- mini-a
-- ai
-- llm
-- gpt
-- mcp
+- Keyword1
+- keyword2
 bugs:
-  url: https://github.com/OpenAF/mini-a/issues
+  url: URL to track bugs
 repository:
   type: http
-  url: https://openaf.io/opacks/mini-a.opack
-description: Mini-A is a minimalist autonomous agent that uses LLMs, shell commands and/or MCP stdio or http(s) servers to achieve user-defined goals. It is designed to be simple, flexible, and easy to use.
-name: mini-a
-main: mini-a-con.js
+  url: URL to main repository
+description: A nice description
+name: A_nice_name
+main: ''
 mainJob: ''
-license: Apache 2.0 license
-version: '20261123'
+license: The licence description
+version: '20010101'
 dependencies:
-  openaf: '>=20250915'
+  packa: '>=20100101'
+  packb: <20120101
 files:
 - .gitignore
 - .local/state/gh/device-id
@@ -141,7 +107,7 @@ files:
 - examples/wiki-studio/source/lesson.md
 - js/.openaf_precompiled/.t8-20261123-j2
 - js/.openaf_precompiled/mini-a-paths_js.jar
-- js/artifacts/.openaf_precompiled/.t8-20261122-j2
+- js/artifacts/.openaf_precompiled/.t8-20261123-j2
 - js/artifacts/.openaf_precompiled/mini-a-artifact-policy_js.jar
 - js/artifacts/mini-a-artifact-policy.js
 - js/artifacts/mini-a-artifact-worker.js
@@ -200,13 +166,14 @@ files:
 - js/skills/.openaf_precompiled/mini-a-plugin-manager_js.jar
 - js/skills/.openaf_precompiled/mini-a-plugins_js.jar
 - js/skills/.openaf_precompiled/mini-a-skill-runtime_js.jar
+- js/skills/.openaf_precompiled/mini-a-skills_js.jar
 - js/skills/mini-a-mcp-skills.js
 - js/skills/mini-a-plugin-acquisition.js
 - js/skills/mini-a-plugin-manager.js
 - js/skills/mini-a-plugins.js
 - js/skills/mini-a-skill-runtime.js
 - js/skills/mini-a-skills.js
-- js/studio/.openaf_precompiled/.t8-20261122-j2
+- js/studio/.openaf_precompiled/.t8-20261123-j2
 - js/studio/.openaf_precompiled/wiki-studio-api_js.jar
 - js/studio/.openaf_precompiled/wiki-studio-backups_js.jar
 - js/studio/.openaf_precompiled/wiki-studio-bootstrap_js.jar
@@ -233,8 +200,7 @@ files:
 - js/studio/wiki-studio-pages.js
 - js/studio/wiki-studio-registry.js
 - js/studio/wiki-studio-sources.js
-- js/web/.openaf_precompiled/.t8-20261122-j2
-- js/web/.openaf_precompiled/mini-a-advanced_js.jar
+- js/web/.openaf_precompiled/.t8-20261123-j2
 - js/web/.openaf_precompiled/mini-a-web-artifacts_js.jar
 - js/web/.openaf_precompiled/mini-a-web-attachments_js.jar
 - js/web/.openaf_precompiled/mini-a-web-embed_js.jar
@@ -245,18 +211,22 @@ files:
 - js/web/mini-a-web-embed.js
 - js/web/mini-a-web-session.js
 - js/wiki/.openaf_precompiled/.t8-20261123-j2
+- js/wiki/.openaf_precompiled/mini-a-absorb_js.jar
 - js/wiki/.openaf_precompiled/mini-a-graph-connectivity_js.jar
 - js/wiki/.openaf_precompiled/mini-a-graph-options_js.jar
 - js/wiki/.openaf_precompiled/mini-a-graph-reconcile_js.jar
+- js/wiki/.openaf_precompiled/mini-a-graph-upgrade_js.jar
 - js/wiki/.openaf_precompiled/mini-a-graph_js.jar
+- js/wiki/.openaf_precompiled/mini-a-mcp-wiki_js.jar
+- js/wiki/.openaf_precompiled/mini-a-office-parts_js.jar
 - js/wiki/.openaf_precompiled/mini-a-wiki-export_js.jar
 - js/wiki/.openaf_precompiled/mini-a-wiki-folders_js.jar
 - js/wiki/.openaf_precompiled/mini-a-wiki-knowledge_js.jar
 - js/wiki/.openaf_precompiled/mini-a-wiki-maintenance_js.jar
 - js/wiki/.openaf_precompiled/mini-a-wiki-retrieval_js.jar
 - js/wiki/.openaf_precompiled/mini-a-wiki_js.jar
+- js/wiki/.openaf_precompiled/mini-a-wikiops_js.jar
 - js/wiki/MiniAOfficeParts.java
-- js/wiki/mini-a-office-parts.js
 - js/wiki/mini-a-absorb.js
 - js/wiki/mini-a-graph-connectivity.js
 - js/wiki/mini-a-graph-options.js
@@ -265,6 +235,7 @@ files:
 - js/wiki/mini-a-graph.js
 - js/wiki/mini-a-ingest.js
 - js/wiki/mini-a-mcp-wiki.js
+- js/wiki/mini-a-office-parts.js
 - js/wiki/mini-a-wiki-embeddings.js
 - js/wiki/mini-a-wiki-export.js
 - js/wiki/mini-a-wiki-folders.js
@@ -330,7 +301,7 @@ files:
 - mini-a.js
 - mini-a.sh
 - mini-a.yaml
-- public/.openaf_precompiled/.t8-20261122-j2
+- public/.openaf_precompiled/.t8-20261123-j2
 - public/.openaf_precompiled/embed-context_js.jar
 - public/advanced.css
 - public/advanced.js
@@ -466,8 +437,8 @@ filesHash:
   examples/wiki-studio/source/lesson.md: 5ad4f0d89460cccc8905e199ab8c5c9a501357d6
   js/.openaf_precompiled/.t8-20261123-j2: da39a3ee5e6b4b0d3255bfef95601890afd80709
   js/.openaf_precompiled/mini-a-paths_js.jar: e84b2bd2ddcb3ff1d569478cf2431743b6dc2f29
-  js/artifacts/.openaf_precompiled/.t8-20261122-j2: da39a3ee5e6b4b0d3255bfef95601890afd80709
-  js/artifacts/.openaf_precompiled/mini-a-artifact-policy_js.jar: 483aa91051028427fecf115a2b77567bf91f17b8
+  js/artifacts/.openaf_precompiled/.t8-20261123-j2: da39a3ee5e6b4b0d3255bfef95601890afd80709
+  js/artifacts/.openaf_precompiled/mini-a-artifact-policy_js.jar: cee6dc5206ccc7b9e9fed0b3b69dba97cadf9227
   js/artifacts/mini-a-artifact-policy.js: b9254c2f4769d054bee59f1073261bedb7484db2
   js/artifacts/mini-a-artifact-worker.js: a97f74429d1e0258158756ea81b69fc403ab31fa
   js/core/.openaf_precompiled/.t8-20261123-j2: da39a3ee5e6b4b0d3255bfef95601890afd80709
@@ -525,27 +496,28 @@ filesHash:
   js/skills/.openaf_precompiled/mini-a-plugin-manager_js.jar: b48a36e54887aba34ea542ec0861583d6c226011
   js/skills/.openaf_precompiled/mini-a-plugins_js.jar: aba8f030b0f391898faa06325b56b0f06440ec27
   js/skills/.openaf_precompiled/mini-a-skill-runtime_js.jar: 59b885b4f2ddd7222b340a193c04654dab7bdfb9
+  js/skills/.openaf_precompiled/mini-a-skills_js.jar: 9230e37688f5e715c7b40bdd6bb4cd462d849282
   js/skills/mini-a-mcp-skills.js: 36b3790c0303922ae5742bacbf887295300ff285
   js/skills/mini-a-plugin-acquisition.js: fe01bd9962e8e04764ffd8031cf061720a91f693
   js/skills/mini-a-plugin-manager.js: 75f8731758fe933e424665622b5356bf07005cda
   js/skills/mini-a-plugins.js: 98f9452a44ea046f0ad6cee9fe28afb26c26717b
   js/skills/mini-a-skill-runtime.js: 83360a5b4362a0ad97103e438425f468dbe764f7
   js/skills/mini-a-skills.js: 496abeceec1f68fd37888ee7b6f229b7a5c15046
-  js/studio/.openaf_precompiled/.t8-20261122-j2: da39a3ee5e6b4b0d3255bfef95601890afd80709
-  js/studio/.openaf_precompiled/wiki-studio-api_js.jar: 3a58ad70303946fb725f4374546b68fe6669034b
-  js/studio/.openaf_precompiled/wiki-studio-backups_js.jar: 337a040483480cf33babbedc0ff9349cfd6f9903
-  js/studio/.openaf_precompiled/wiki-studio-bootstrap_js.jar: 656f822dc7a26701c3223831723f8624b11023e7
-  js/studio/.openaf_precompiled/wiki-studio-common_js.jar: e2b1799d537e238c37679e41266899a869735216
-  js/studio/.openaf_precompiled/wiki-studio-config_js.jar: b9385cc7a73ad953711edf6dc0664dcba70edadc
-  js/studio/.openaf_precompiled/wiki-studio-graph_js.jar: 482e8e9e7875c0047b5b0e59cf28bc5056f3651b
-  js/studio/.openaf_precompiled/wiki-studio-ingestion_js.jar: f357234ba37cf7c88eb74014d11ead0dd27f4b08
-  js/studio/.openaf_precompiled/wiki-studio-jobs_js.jar: ae920c5a6206666db854046935bdc37d82450c60
-  js/studio/.openaf_precompiled/wiki-studio-operations_js.jar: c83659d3eabd58a5279a83276b81a194936a109f
-  js/studio/.openaf_precompiled/wiki-studio-outbound_js.jar: cbb700c5a53f07eca45de228642ae433190f5910
-  js/studio/.openaf_precompiled/wiki-studio-pages_js.jar: 8e370c88358e92f111b3b1b59a75a3ed351def02
-  js/studio/.openaf_precompiled/wiki-studio-registry_js.jar: 5fcd48b926294d34497b3a152a6ed04b036d2851
-  js/studio/.openaf_precompiled/wiki-studio-sources_js.jar: 48778d0ba2a3d88d7b3603fea6eff399a0a94695
-  js/studio/wiki-studio-api.js: 26c15ed9406ca10c89257397c6ca840a7d70aa52
+  js/studio/.openaf_precompiled/.t8-20261123-j2: da39a3ee5e6b4b0d3255bfef95601890afd80709
+  js/studio/.openaf_precompiled/wiki-studio-api_js.jar: ef1061bef9378655bd1b93bd15abda2ae6cfe497
+  js/studio/.openaf_precompiled/wiki-studio-backups_js.jar: 8472362a9269db1d641a39dc3bcc75ff0194c364
+  js/studio/.openaf_precompiled/wiki-studio-bootstrap_js.jar: 017dbc5815ad5bcc086eb73eb0334cee27507c35
+  js/studio/.openaf_precompiled/wiki-studio-common_js.jar: ea98560a1263f4060306b260b18ca5913c363b99
+  js/studio/.openaf_precompiled/wiki-studio-config_js.jar: 96c480863907b79ad6c4fc72b8d56adb5247e3cf
+  js/studio/.openaf_precompiled/wiki-studio-graph_js.jar: 200bf874ab5763efdb7f5fb6c7465c25e06b2bfa
+  js/studio/.openaf_precompiled/wiki-studio-ingestion_js.jar: 2be4126d6496a6b0c2f4d8f9262d193d475087fc
+  js/studio/.openaf_precompiled/wiki-studio-jobs_js.jar: 9d76e42729f32eba21c71b89738d0d923d5d6f86
+  js/studio/.openaf_precompiled/wiki-studio-operations_js.jar: 1e1f7aeac84718e6ad234a9ce7c85583eafc22cb
+  js/studio/.openaf_precompiled/wiki-studio-outbound_js.jar: 37eacfcd83cd3b208aa71c2a15dd75696b0004e7
+  js/studio/.openaf_precompiled/wiki-studio-pages_js.jar: 8fa13b79d937d4ae998a7a05322a08b00d32a855
+  js/studio/.openaf_precompiled/wiki-studio-registry_js.jar: 89c24e00f9798cdf969e638435023c0f6723a33f
+  js/studio/.openaf_precompiled/wiki-studio-sources_js.jar: fbb702b2ec7dde56e9b9530e110ee81f6a3afb26
+  js/studio/wiki-studio-api.js: d6eeef2289e7fd7bc1abba29c9b6d4011f3add1b
   js/studio/wiki-studio-backups.js: a988e76e58702cedd9e460ccbc1d4541a55e6ffd
   js/studio/wiki-studio-bootstrap.js: 087d3ab4cae7987fe41f15bbd85117d7a0ecddd1
   js/studio/wiki-studio-common.js: 7046bacd937efdfdb42b8d23db13fd1d126edbce
@@ -558,30 +530,33 @@ filesHash:
   js/studio/wiki-studio-pages.js: 070f75de760711101bb61b3704b58920250fa525
   js/studio/wiki-studio-registry.js: 8d96e3a5241d64522c15fc96a932619ae4204856
   js/studio/wiki-studio-sources.js: 30c786d9a35b2c57d09ba77dab5af7c6ed35dfb5
-  js/web/.openaf_precompiled/.t8-20261122-j2: da39a3ee5e6b4b0d3255bfef95601890afd80709
-  js/web/.openaf_precompiled/mini-a-advanced_js.jar: 6060af5cf5f70ec440e7d5031fb11707e90ce76d
-  js/web/.openaf_precompiled/mini-a-web-artifacts_js.jar: dff0c57ba1610428b3ee2ce9cb9d774593aefe01
-  js/web/.openaf_precompiled/mini-a-web-attachments_js.jar: ca69ba64f9f4c3879391d962441b661d9142db53
-  js/web/.openaf_precompiled/mini-a-web-embed_js.jar: d6bdf99bcbbdac920de4cfcd786ecd408ec26720
-  js/web/.openaf_precompiled/mini-a-web-session_js.jar: dfd6d496b26b24731159687ba871ba94fad5a5a6
+  js/web/.openaf_precompiled/.t8-20261123-j2: da39a3ee5e6b4b0d3255bfef95601890afd80709
+  js/web/.openaf_precompiled/mini-a-web-artifacts_js.jar: a8551925c10f114709c762e445548917889e249c
+  js/web/.openaf_precompiled/mini-a-web-attachments_js.jar: c9dcabd5d871114163a5dd7e690a12e56d481dc1
+  js/web/.openaf_precompiled/mini-a-web-embed_js.jar: 5a8b4251a3fa2fcb9e1688e9c8e0ae280f42e242
+  js/web/.openaf_precompiled/mini-a-web-session_js.jar: 2ea354ebc376d8dc9f15f8e1fd8a7003280b8b8a
   js/web/mini-a-advanced.js: 179432f70c11becfeeb0da3a47b032d8f9dcaeb4
   js/web/mini-a-web-artifacts.js: 6ea40e66e8216d7e4f32feee5ebdb134a0287508
   js/web/mini-a-web-attachments.js: 620520932fe1054d0ac17ce1ad613bb9851f57ae
   js/web/mini-a-web-embed.js: f65398c2ff830977b39b69368fdac50a3c924e55
   js/web/mini-a-web-session.js: b594b811d5c077402e6bfb2a6b748416a7b157fa
   js/wiki/.openaf_precompiled/.t8-20261123-j2: da39a3ee5e6b4b0d3255bfef95601890afd80709
+  js/wiki/.openaf_precompiled/mini-a-absorb_js.jar: c6e1fc86c6bc5fb1ee4d0de6d027e3d747461ccd
   js/wiki/.openaf_precompiled/mini-a-graph-connectivity_js.jar: e2a6118012a019c1b621972ba96b4fa35415b3aa
   js/wiki/.openaf_precompiled/mini-a-graph-options_js.jar: 127c5e732229b56f4716483f39766a42ba991258
   js/wiki/.openaf_precompiled/mini-a-graph-reconcile_js.jar: e6c2d41ab3a958d9291d18a6c4e1946e4f76cb7c
+  js/wiki/.openaf_precompiled/mini-a-graph-upgrade_js.jar: 2dfcffe86d3b38e7e421bde18f6c06601afa2ce5
   js/wiki/.openaf_precompiled/mini-a-graph_js.jar: 4870cce31047688c8e8fbd85e6d2151996917f76
+  js/wiki/.openaf_precompiled/mini-a-mcp-wiki_js.jar: a9926a583b7db328042efd89bf897a9b758a44ff
+  js/wiki/.openaf_precompiled/mini-a-office-parts_js.jar: cf396ce9363cf2e28efb6813b137c330c600f0a2
   js/wiki/.openaf_precompiled/mini-a-wiki-export_js.jar: 21c0e2ce2e549b4da181a8f1d4fa7583a9314e76
   js/wiki/.openaf_precompiled/mini-a-wiki-folders_js.jar: f5d0f886cdae142d30b9b18569254c6634ca9ca8
-  js/wiki/.openaf_precompiled/mini-a-wiki-knowledge_js.jar: dbb4333bfa7d75d017978a0e3d24cf89b5237431
+  js/wiki/.openaf_precompiled/mini-a-wiki-knowledge_js.jar: 173282a81350042825a7a6d02c29cf3a6994b22d
   js/wiki/.openaf_precompiled/mini-a-wiki-maintenance_js.jar: 82c6ca699c81b4cb68a72c87cff3b92ee979a572
-  js/wiki/.openaf_precompiled/mini-a-wiki-retrieval_js.jar: 95198d43782f5a95820a5c3cd3e8c17e95901c7f
+  js/wiki/.openaf_precompiled/mini-a-wiki-retrieval_js.jar: 033a90a5384f0d64bf44e742c5aa85af62d24f7e
   js/wiki/.openaf_precompiled/mini-a-wiki_js.jar: c653eb379e142ffa01954e0c77d73b8278fe39a1
+  js/wiki/.openaf_precompiled/mini-a-wikiops_js.jar: e822a35d9b58149ab3f919f08d101b52e01d618e
   js/wiki/MiniAOfficeParts.java: ded07ae928bd25aeb568e2f3998b8a713701738e
-  js/wiki/mini-a-office-parts.js: cdd22b1caaef9d31241048b137fa1d86d396a967
   js/wiki/mini-a-absorb.js: 6e5ec9a54eb3485c8787e693c7c8baba30cd9834
   js/wiki/mini-a-graph-connectivity.js: adde993af481c24d2b45c930ed62a138344e52f9
   js/wiki/mini-a-graph-options.js: 8be4c49be1ad33a97ab3a31f4631b0e8e2932451
@@ -590,6 +565,7 @@ filesHash:
   js/wiki/mini-a-graph.js: f3d9ac62d1243be30665c004c4a024463ee2d149
   js/wiki/mini-a-ingest.js: 7df86afdfced9c7e1ebe8d610aea3d45d512d628
   js/wiki/mini-a-mcp-wiki.js: a535147a30ee46e163fae37853146419dd9b93f2
+  js/wiki/mini-a-office-parts.js: cdd22b1caaef9d31241048b137fa1d86d396a967
   js/wiki/mini-a-wiki-embeddings.js: 258805ed2e05b125c6d48081869036f09fc75070
   js/wiki/mini-a-wiki-export.js: 2c43e40d61eba88146a28dd07829190bd088a0ca
   js/wiki/mini-a-wiki-folders.js: d22e361f8ef7f0e32f09c466e169283d4796b50a
@@ -655,8 +631,8 @@ filesHash:
   mini-a.js: 8553dc16398d24eeb2c6942075b7abb5c1ffc4a3
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: eb6717a6dcf356a7fc4c7e6b7801df44140b8a06
-  public/.openaf_precompiled/.t8-20261122-j2: da39a3ee5e6b4b0d3255bfef95601890afd80709
-  public/.openaf_precompiled/embed-context_js.jar: 86e11cad2cd13fdf5c1da6600c22b3e1167dfb2d
+  public/.openaf_precompiled/.t8-20261123-j2: da39a3ee5e6b4b0d3255bfef95601890afd80709
+  public/.openaf_precompiled/embed-context_js.jar: 4fa4c968dd0a57c11fa5913dc1a0cd23d7d89791
   public/advanced.css: 571c702d4516468bc309126d28ba5859031c5be0
   public/advanced.js: 8f8a93f207c388c894dd64f8ffae6bf0bec7f7a0
   public/apple-touch-icon.png: 5e22ed6b303b377787779423b97c22f7b20b56ed
