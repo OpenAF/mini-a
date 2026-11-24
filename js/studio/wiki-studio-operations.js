@@ -267,7 +267,10 @@ var wikiStudioExecute = function(config, w, job, logFn, backup) {
       return operation === "wiki.selectionMove" ? sm.moveSelection(p.items,p.to,selectionOptions) : sm.deleteSelection(p.items,selectionOptions)
     } finally { sm.close() }
   }
-  if (isFunction(WikiStudio.executeSource) && /^(ingest|absorb|backup|wiki)\./.test(operation)) return WikiStudio.executeSource(config,w,job,logFn,backup)
+  if (isFunction(WikiStudio.executeSource) && /^(ingest|absorb|backup|wiki)\./.test(operation)) {
+    var sourceJobs = new WikiStudioJobs(config)
+    return WikiStudio.executeSource(config, w, job, logFn, backup, function() { return sourceJobs.get(job.id).cancelRequested === true })
+  }
   WikiStudio.assert(/^graph\.(build|reconcile|upgrade|resume|embeddings)$/.test(operation) || /^dream\.(plan|apply|repair|reindex|rebuild|graph|indexes|auto|reorg)$/.test(operation), 400, "invalid_operation", "Worker operation is not allowlisted")
   var runner = new MiniAWikiOps(a,logFn)
   if (operation.indexOf("graph.") === 0 || operation === "dream.rebuild" || operation === "dream.graph") {

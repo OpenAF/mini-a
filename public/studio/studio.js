@@ -1825,10 +1825,11 @@ async function sourcesView(content) {
     modelOption(importReconcile, "hybrid", "embeddings")
     modelOption(importValidation, "auto", "relationshipValidation")
     var tuning = await workflowTuning(advanced, "ingestion", { maxfiles: "Maximum files", maxfilesize: "Maximum file size (bytes)", wikiingestmaxcalls: "Distillation calls per source (0 disables split recovery)", wikiingestbudget: "Estimated operation tokens (-1 unlimited; 0 defers model work)", wikimaxprompttokens: "Prompt tokens (0 automatic)", chunkchars: "Chunk characters", concurrency: "Concurrent distillations" })
+    var officeParts = field(tuning.box, "Office extraction", ["auto", "always", "off"], "auto")
     var force = check(tuning.box, "Force reprocessing")
     const actions=row(body),result=el("div",undefined,body);let approved=null,expectedModelSkips,working=false;
     var options = function() {
-      var selected = { mode: mode.value, layout: layout.value, section: folder(), include: include.value, exclude: exclude.value, semantic: semantic.checked, prune: prune.checked, tuning: tuning.values(), force: force.checked }
+      var selected = { mode: mode.value, layout: layout.value, section: folder(), include: include.value, exclude: exclude.value, semantic: semantic.checked, prune: prune.checked, officeparts: officeParts.value, tuning: tuning.values(), force: force.checked }
       if (importReconcile.value !== "saved") selected.reconcile = importReconcile.value
       if (importValidation.value !== "saved") selected.reconcileLlm = importValidation.value
       return selected

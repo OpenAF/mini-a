@@ -22,8 +22,16 @@ help:
     example  : '[{"id":"docs","path":"/data/sources/docs"}]'
     mandatory: false
   - name     : studiomaxsourcebytes
-    desc     : "Per-source file quota in bytes, from 1 to 67108864 (default: 8388608)"
+    desc     : "Per-source file quota in bytes, as a positive whole number (default: 8388608)"
     example  : "33554432"
+    mandatory: false
+  - name     : studiomaxbatchbytes
+    desc     : "Total source bytes per upload, expanded ZIP or local snapshot (default: 67108864)"
+    example  : "134217728"
+    mandatory: false
+  - name     : studiomaxstagebytes
+    desc     : "Maximum bytes for one Office extraction stage (default: 268435456)"
+    example  : "268435456"
     mandatory: false
   - name     : onport
     desc     : "Local HTTP listener port, from 1 to 65535 (default: 8890)"

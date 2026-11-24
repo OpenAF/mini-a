@@ -36,6 +36,14 @@ help:
   - name     : ingestexclude
     desc     : Comma-separated path fragments to exclude
     mandatory: false
+  - name     : officeparts
+    desc     : "Office extraction policy (auto, always, or off)"
+    example  : "always"
+    mandatory: false
+  - name     : maxstagebytes
+    desc     : "Maximum bytes for one Office extraction stage (default: 268435456)"
+    example  : "268435456"
+    mandatory: false
   - name     : ingestchunkchars
     desc     : Maximum characters per distillation chunk (default 24000)
     mandatory: false

@@ -731,7 +731,8 @@ MiniAIngest.prototype._applyJournal = function(wm, journal, path, result) {
     var self = this
     journal.operations.forEach(function(op) {
       if (!op || ["write", "delete"].indexOf(op.kind) < 0 || !isString(op.path) || op.path !== __miniAWikiNormalizePath(op.path, { requireMarkdown: true }) || /(^|\/)(\.|@)/.test(op.path) || /(^|\/)(AGENTS|log|index)\.md$/i.test(op.path)) throw new Error("unsafe journal operation")
-      if (op.kind === "write" && (!isMap(op.meta) || !isString(op.body) || self._signature({ meta: op.meta, body: op.body }) !== op.after)) throw new Error("ingest-journal-corrupt: invalid replacement payload: " + op.path)
+      var body = op.bodyRef ? wm._officePayload(op.bodyRef) : op.body
+      if (op.kind === "write" && (!isMap(op.meta) || !isString(body) || self._signature({ meta: op.meta, body: body }) !== op.after)) throw new Error("ingest-journal-corrupt: invalid replacement payload: " + op.path)
     })
     if (wm._retrievalV2) {
       wm._servingBatchChanges = {}
@@ -917,7 +918,7 @@ MiniAIngest.prototype._applyJournalPages = function(wm, journal, path, result) {
       if (!observed.complete || !Object.keys(observed.present).length && journal.allowEmptyPrune !== true) throw new Error("prune recovery inventory is incomplete or newly empty")
     }
     if (sig !== op.before) throw new Error("journal ownership conflict: " + op.path)
-    var applied = op.kind === "write" ? wm.write(op.path, op.meta, op.body) : wm.delete(op.path)
+    var applied = op.kind === "write" ? wm.write(op.path, op.meta, op.bodyRef ? wm._officePayload(op.bodyRef) : op.body) : wm.delete(op.path)
     if (!isMap(applied) || applied.ok !== true) throw new Error(op.kind + " failed: " + op.path + " " + (applied && applied.error || ""))
     if (op.kind === "write") {
       if (self._signature(self._page(wm, op.path)) !== op.after) throw new Error("written page signature mismatch: " + op.path)
@@ -1101,6 +1102,11 @@ MiniAIngest.prototype.run = function() {
     try { model = modelRaw.charAt(0) === "{" ? af.fromJson(modelRaw) : af.fromSLON(modelRaw) } catch(ignoreModel) {}
     var publicModel = {}; ["type", "model", "temperature", "url", "maxTokens"].forEach(function(k) { if (isDef(model[k])) publicModel[k] = model[k] })
     var fingerprint = sha1(mode + "|" + this._num("ingestchunkchars", 24000) + "|" + stringify(global.__miniAWikiKnowledge.versions, __, "") + "|" + stringify(publicModel, __, "") + "|" + this._distillPrompt({ id: "" }, [], []))
+    var officeMode = String(a.ingestofficeparts || a.officeparts || "auto")
+    var officeLimit = Number(isDef(a.ingestmaxstagebytes) ? a.ingestmaxstagebytes : isDef(a.maxstagebytes) ? a.maxstagebytes : 268435456)
+    var stagedOfficeBytes = 0
+    if (["auto", "always", "off"].indexOf(officeMode) < 0) throw new Error("officeparts must be auto, always or off")
+    if (!(officeLimit > 0 && officeLimit <= 9007199254740991 && Math.floor(officeLimit) === officeLimit)) throw new Error("maxstagebytes must be a positive safe integer")
     var budget = new global.__miniAWikiKnowledge.Budget(a, "ingest")
     self._operationContext = { root: wm._getIndexRoot() + "/.mini-a-wiki-ingest/extractions/" + scope, scope: scope, dry: dry,
       budget: budget, budgetLock: new java.util.concurrent.locks.ReentrantLock(), calls: new java.util.concurrent.atomic.AtomicInteger(0),
@@ -1110,19 +1116,46 @@ MiniAIngest.prototype.run = function() {
       result.skipped_model = []
       result.pending_image_extraction = []
     }
-    var sourcePaths = {}, legacy = this._loadLedger(wm), paths = {}, pending = [], unchanged = [], deletions = [], observed = {}, oldIds = [], migration = false
+    var sourcePaths = {}, legacy = this._loadLedger(wm), paths = {}, pending = [], unchanged = [], deletions = [], observed = {}, oldIds = [], officePlans = [], migration = false
     Object.keys(manifest.sources).forEach(function(k) {
       var record = manifest.sources[k], p = record.page
       if (p) paths[p] = k
-      if (p && record.scopeId === scope) sourcePaths[record.source] = p
+      if (p && record.scopeId === scope && (!record.officeParent || record.officeParent === k)) sourcePaths[record.source] = p
     })
+    var officeCancelled = false
     found.sources.forEach(function(src, sourceIndex) {
+      if (officeCancelled) return
+      if (sourceIndex % 25 === 0 && isFunction(self._officeCancelled) && self._officeCancelled()) {
+        officeCancelled = true
+        return
+      }
       if (sourceIndex > 0 && sourceIndex % 25 === 0) self._log("[ingest] Planned " + sourceIndex + "/" + found.sources.length + " source(s).")
       if (__miniAIngestNeedsExtraction(src.rel)) self._log("[ingest] Extracting " + src.rel + " (" + (sourceIndex + 1) + "/" + found.sources.length + ")...")
       observed[src.id] = { hash: "" }
       var key = sha1(scope + "|" + src.id), oldKey = sha1(resolved.type + "|" + (resolved.origin || resolved.root || "") + "|" + src.id)
       src.sourceKey = key
-      var sourceText = self._readSource(src)
+      var office = officeMode !== "off" && /\.(xlsx?|docx?|pptx?)$/i.test(src.rel)
+      var structured = office && (officeMode === "always" || src.size > 8388608 || manifest.sources[key] && manifest.sources[key].officeParent === key)
+      var sourceText = structured ? __ : self._readSource(src)
+      if (structured || office && src._officeTruncated) {
+        try {
+          loadLib(__miniAPath("js/wiki/mini-a-office-parts.js"))
+          if (stagedOfficeBytes >= officeLimit) throw new Error("Office staging byte limit exceeded")
+          var stage = self._officeStage(src, officeLimit - stagedOfficeBytes)
+          stagedOfficeBytes += stage.bytes
+          var plan = self._planOffice(wm, src, stage, {
+            state: manifest, result: result, paths: paths, section: section, origin: String(resolved.ref || resolved.origin || ""),
+            scope: scope, dry: dry, prune: prune, force: toBoolean(a.ingestforce) === true, fingerprint: fingerprint + "|" + officeMode
+          })
+          sourcePaths[src.rel] = plan.path
+          officePlans.push(plan)
+          observed[src.id].verify = stage.verify
+          observed[src.id].hash = stage.hash
+        } catch(error) {
+          result.failed.push({ source: src.rel, error: __miniAErrMsg(error) })
+        }
+        return
+      }
       if (src._modelSkipped) {
         result.skipped_model.push({ path: src.rel, reason: "Configure OAF_VISUAL_MODEL or a vision-capable OAF_MODEL" })
         return
@@ -1196,6 +1229,10 @@ MiniAIngest.prototype.run = function() {
       pending.push(candidate)
       result.planned_writes.push(pagePath)
     })
+    if (officeCancelled || isFunction(self._officeCancelled) && self._officeCancelled()) {
+      result.status = "cancelled"
+      return result
+    }
     if (isArray(a.ingestexpectedmodelskips) &&
         stringify(a.ingestexpectedmodelskips.slice().sort(), __, "") !== stringify(result.skipped_model.map(function(item) { return item.path }).sort(), __, "")) {
       throw new Error("Model availability changed for this source. Preview again before importing.")
@@ -1236,7 +1273,7 @@ MiniAIngest.prototype.run = function() {
       pending.push(p); result.sources_changed++; result.planned_writes.push(p.path)
     })
     if (!found.complete) result.failed.push({ source: "discovery", error: "incomplete source inventory" })
-    this._log("[ingest] Planned " + found.sources.length + " source(s): " + pending.length + " changed, " + result.skipped_unchanged + " unchanged, " + result.failed.length + " failed.")
+    this._log("[ingest] Planned " + found.sources.length + " source(s): " + result.sources_changed + " changed, " + result.skipped_unchanged + " unchanged, " + result.failed.length + " failed.")
     // Sibling destinations are what [[links]] must resolve to, not source filenames.
     var siblings = pending.map(function(p) { return p.path }), llm
     pending.forEach(function(p) {
@@ -1303,6 +1340,15 @@ MiniAIngest.prototype.run = function() {
         fingerprint: fingerprint, sourceLinksHash: p.sourceLinksHash, discoveryConfig: discoveryConfig, page: p.path, chunks: p.chunks, generation: generation, signature: after, active: true }
       operations.push({ kind: "write", path: p.path, before: p.before, after: after, meta: meta, body: d.page.body })
     }
+    officePlans = officePlans.filter(function(plan) {
+      if (plan.verify() === plan.hash) return true
+      result.failed.push({ source: plan.source, error: "Office source changed before apply" })
+      return false
+    })
+    var allowOfficePrune = found.complete && !result.failed.length && !result.deferred.length && !result.conflicts.length
+    officePlans.forEach(function(plan) {
+      self._appendOfficeOperations(manifest, plan, operations, oldIds, generation, scope, fingerprint + "|" + officeMode, discoveryConfig, result, allowOfficePrune)
+    })
     // No destructive operations after failed/deferred writes or conflicts.
     if (result.failed.length || result.deferred.length || result.conflicts.length) deletions.forEach(function(op) { result.prune_blocked.push({ page: op.path, reason: "reconciliation has failures, deferrals or conflicts" }) })
     else if (deletions.length) {
@@ -1310,7 +1356,7 @@ MiniAIngest.prototype.run = function() {
       // not a claim of an atomic filesystem snapshot.
       var again = resolved.type === "url" ? found : self._discover(resolved)
       var same = again.complete && stringify(again.present, __, "") === stringify(found.present, __, "") && again.sources.every(function(s) { var original = found.sources.filter(function(o) { return o.id === s.id })[0]; return original && original.size === s.size })
-      found.sources.forEach(function(s) { if (s._imageDigest ? !self._imageBytesMatch(s) : sha1(String(self._readSource(s) || "")) !== observed[s.id].hash) same = false })
+      found.sources.forEach(function(s) { if (observed[s.id].verify ? observed[s.id].verify() !== observed[s.id].hash : s._imageDigest ? !self._imageBytesMatch(s) : sha1(String(self._readSource(s) || "")) !== observed[s.id].hash) same = false })
       deletions.forEach(function(op) {
         if (!same || io.fileExists(resolved.root + "/" + manifest.sources[op.key].source)) { result.prune_blocked.push({ page: op.path, reason: "source changed during reconciliation" }); return }
         self._invalidate(manifest, op.key, result); (manifest.sources[op.key].chunks || []).forEach(function(c) { oldIds.push(c.id) })
@@ -1597,7 +1643,10 @@ MiniAIngest.prototype._readSource = function(src) {
       output = tool.readDocument({ path: String(file), maxBytes: maxBytes, maxChars: 1000000 })
       if (isString(output)) throw new Error(output)
       if (!isString(output.text) || !output.text.trim()) throw new Error(output.message || "no text extracted")
-      if (output.truncated === true) throw new Error("document text was truncated")
+      if (output.truncated === true) {
+        src._officeTruncated = true
+        throw new Error("document text was truncated")
+      }
       return "# " + title + "\n\n" + output.text
     } catch(e) {
       this._log("[ingest] Extraction failed for " + rel + ": " + __miniAErrMsg(e))

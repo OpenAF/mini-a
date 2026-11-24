@@ -2027,6 +2027,10 @@ MiniAWikiRetrievalV2.trustedProvenance = function(metadata) {
   Object.keys(fields).forEach(function(field) {
     if (isString(source[field]) && source[field].trim().length) out[fields[field]] = source[field]
   })
+  if (isString(source.source) && isString(source.source_locator) && /^[a-f0-9]{40}$/.test(String(source.ingest_source_key || ""))) {
+    out.sourceFile = source.source.substring(0, 512)
+    out.sourceLocation = source.source_locator.substring(0, 512)
+  }
   return out
 }
 MiniAWikiRetrievalV2.prototype._constraints = function(page, options) {
@@ -2360,6 +2364,11 @@ MiniAWikiRetrievalV2.prototype.search = function(query, options) {
       }
       seen[hit.path] = true
       var result = { path: hit.path, ref: self.manager._agenticRef(hit.path), wiki: hit.wiki, title: String(hit.page.title).substring(0, 512), description: String(hit.page.description).substring(0, 256), summary: String(hit.page.description).substring(0, 256), nativeScore: hit.nativeScore, rankScore: hit.rankScore, score: hit.rankScore, scoreComponents: hit.scoreComponents, retrievalMethod: hit.retrievalMethod, passage: self._reference(hit) }
+      var provenance = MiniAWikiRetrievalV2.trustedProvenance(hit.page.metadata)
+      if (provenance.sourceLocation) {
+        result.sourceFile = provenance.sourceFile
+        result.sourceLocation = provenance.sourceLocation
+      }
       if (hit.graphExplanation) result.graphExplanation = clone(hit.graphExplanation)
       if (hit.graphSupports) result.graphReferences = hit.graphSupports.map(function(s) {return {path:s.path,revision:s.page.revision}})
       if (opts.compact === false || Number(opts.contextLines) > 0) {

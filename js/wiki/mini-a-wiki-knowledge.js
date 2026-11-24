@@ -392,9 +392,9 @@ MiniAWikiManager.prototype.assembleContext = function(query, options) {
       seen[c.normalizedHash] = true; used += c.estimatedTokens
       // The path/anchor fields are legacy navigation mappings, not evidence
       // positions in the distilled page. Never invent source quotation locators.
-      out.push({ path: c.page, source: c.source, anchor: c.anchor, heading: c.section, text: c.text, estimatedTokens: c.estimatedTokens, score: h.score,
+      out.push({ path: c.page, source: c.source, anchor: c.anchor, heading: c.section, text: c.textRef ? self._officePayload(c.textRef) : c.text, sourceLocator: c.sourceLocator, estimatedTokens: c.estimatedTokens, score: h.score,
         origin: c.sourceKey ? "original-source" : "unknown", evidenceRole: c.sourceKey ? "ingestion-input" : "legacy-context",
-        wikiPath: c.page, quotationStatus: "not-a-verbatim-wiki-quotation", sourceLocatorStatus: "unverified", scoreOrigin: "parent-wiki-page" })
+        wikiPath: c.page, quotationStatus: "not-a-verbatim-wiki-quotation", sourceLocatorStatus: c.sourceLocator ? "located" : "unverified", scoreOrigin: "parent-wiki-page" })
     })
   })
   return { query: query, chunks: out, estimatedTokens: used, budget: budget, requestBudget:hits.budget }
@@ -617,6 +617,19 @@ MiniAWikiManager.prototype.knowledgeReconcileDerivatives = function(options) {
 
 // Legacy ingestion records are usable only when referenced by their complete source list.
 // Other producers retain their existing contract.
+// Resolve Office evidence and journal payloads against the wiki-local content store.
+MiniAWikiManager.prototype._officePayload = function(ref) {
+  if (!isString(ref) || !/^[a-f0-9]{64}$/.test(ref)) return __
+  var file = new java.io.File(this._getIndexRoot() + "/.mini-a-wiki-ingest/office-blobs/" + ref + ".txt")
+  if (!file.isFile() || java.nio.file.Files.isSymbolicLink(file.toPath()) || file.length() > 1048576) return __
+  try {
+    var text = io.readFileString(String(file))
+    return String(sha256(text)) === ref ? text : __
+  } catch(error) {
+    return __
+  }
+}
+
 MiniAWikiManager.prototype.knowledgeChunkActive = function(state, chunk) {
   var key = chunk.sourceKey
   if (!key) {
@@ -625,7 +638,7 @@ MiniAWikiManager.prototype.knowledgeChunkActive = function(state, chunk) {
     return owners.some(function(k) { return (state.sources[k].chunks || []).some(function(c) { return c.id === chunk.id && c.hash === chunk.hash }) })
   }
   var source = state.sources[key]
-  return isMap(source) && source.active !== false && source.page === chunk.page && source.generation === chunk.generation && sha1(String(chunk.text || "")) === chunk.hash &&
+  return isMap(source) && source.active !== false && source.page === chunk.page && source.generation === chunk.generation && sha1(String((chunk.textRef ? this._officePayload(chunk.textRef) : chunk.text) || "")) === chunk.hash &&
     (source.chunks || []).some(function(c) { return c.id === chunk.id && c.hash === chunk.hash })
 }
 

@@ -343,6 +343,7 @@ MiniAWikiOps.prototype._execute = function(spec, gates) {
         Object.keys(p).forEach(function(k) { if (["source", "section", "dryrun"].indexOf(k) < 0) a["ingest" + k] = p[k] })
       }
       var ingest = new MiniAIngest(a, this.log)
+      ingest._officeCancelled = self.isCancelled
       // A V2 manager references its engine and cannot be deep-merged into Dream args.
       // Preview/recovery borrow only the reader; resolve configuration independently.
       ingest._buildWikiConfig = function() { return cfg }

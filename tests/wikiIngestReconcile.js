@@ -878,6 +878,23 @@
     runner = f.runner({ ingestprune: true }); var discover = runner._discover; runner._discover = function(r) { var v = discover.call(this, r); v.complete = false; return v }
     var r = runner.run(); assert(r.ok, false, 'incomplete recovery inventory blocked'); assert(io.fileExists(f.wiki + '/docs/b.md'), true, 'recovery never deletes on inaccessible inventory')
   }) }
+  // Office recovery must read durable page payloads even after staging and source disappear.
+  exports.testOfficePartRecovery = function() { fixture(function(f) {
+    var source = f.src + "/sample.xlsx"
+    java.nio.file.Files.copy(new java.io.File("tests/fixtures/documents/sample.xlsx").toPath(), new java.io.File(source).toPath())
+    var options = { officeparts: "always" }, runner = f.runner(options)
+    runner._applyJournal = function() { throw new Error("interrupted before applying Office pages") }
+    assert(runner.run().ok, false, "Office journal remains prepared")
+    var journal = io.readFileJSON(f.wiki + "/.mini-a-wiki-ingest/journal.json")
+    assert(journal.operations.length > 1, true, "Office page and index prepared")
+    assert(journal.operations.every(function(op) { return isString(op.bodyRef) && isUnDef(op.body) }), true, "Journal contains bounded payload references")
+    io.rm(f.src)
+    var recovered = f.run(options)
+    assert(recovered.ok, true, "Office recovery completes without source: " + stringify(recovered.error))
+    var state = f.state(), refs = Object.keys(state.chunks).map(function(id) { return state.chunks[id] })
+    assert(refs.length > 0 && refs.every(function(chunk) { return isString(chunk.textRef) && isUnDef(chunk.text) }), true, "Source evidence is disk-backed")
+    assert(io.fileExists(f.wiki + "/docs/sample.md"), true, "Office document index recovered")
+  }) }
   exports.testDurableRecoveryBoundaries = function() {
     ['prepared', 'pages-applied', 'finalization-pending', 'finalized', 'verified', 'exported'].forEach(function(boundary) { fixture(function(f) {
       f.write('a.md', '# A\n\ncheckpointneedle')

@@ -257,9 +257,29 @@ is 8 MiB. To raise it, restart Studio with a launch argument such as
 `studiomaxsourcebytes=33554432` (32 MiB), then set **Maximum file size (bytes)**
 under the import workflow's **Advanced options**. Save the workflow defaults
 to reuse that value for the wiki. The launch argument applies to individual
-uploads, ZIP members and local source snapshots and accepts up to 64 MiB.
+uploads, ZIP members and local source snapshots. Set `studiomaxbatchbytes`
+to raise the 64 MiB total for an upload, expanded ZIP, or local snapshot.
+Raise both launch settings to admit a single source larger than 64 MiB.
+These launch settings govern intake. The import workflow still applies its
+selected maximum file size and the document extractor’s text limits.
 
-ZIP limits include 20 MiB per archive, 2,000 entries, a 64 MiB expanded batch,
+For Excel, Word and PowerPoint documents, **Office extraction** in Advanced
+options defaults to `auto`. It stages parts for Office files above 8 MiB or
+when the ordinary text extractor reaches its character limit. Select `always`
+for small documents you want to browse as an index with child pages. Select
+`off` to use ordinary extraction. The CLI accepts the same `officeparts`
+option. Structured pages preserve the original text and source locations and use
+normalization for the Office parts.
+Run Preview to inspect the proposed index and parts before applying.
+
+The reader requires a Java 17 or newer JDK and the Tika 4 oPack. It runs in a
+256 MiB heap with temporary files, and Preview and Apply reuse completed
+parts when the source checksum and extraction configuration match. The
+default staging budget is 256 MiB per import. Change it with
+`studiomaxstagebytes` in Studio or `maxstagebytes` on the CLI. Some legacy
+documents can exceed the reader heap before it emits their text.
+
+ZIP limits include 20 MiB per archive, 2,000 entries, a 64 MiB expanded batch by default,
 depth 16 and expansion ratio 100.
 ZIP preflight rejects encrypted/special/symlink entries, traversal, duplicate
 case-folded paths, unsupported members, ZIP64 and multipart archives. Extraction

@@ -11,6 +11,17 @@ WikiStudio.path = function(path) { return new java.io.File(String(path)).toPath(
 WikiStudio.canonical = function(path) { return String(new java.io.File(String(path)).getCanonicalPath()) }
 WikiStudio.inside = function(path, root) { return path === root || path.indexOf(root + "/") === 0 }
 WikiStudio.hash = function(bytes) { return String(sha256(bytes)) }
+
+// Hash large sources without allocating an array for the entire file.
+WikiStudio.hashFile = function(path) {
+  var input = java.nio.file.Files.newInputStream(WikiStudio.path(path))
+  try {
+    return WikiStudio.hash(input)
+  } finally {
+    input.close()
+  }
+}
+
 WikiStudio.bytes = function(text) { return new java.lang.String(String(text)).getBytes("UTF-8") }
 WikiStudio.privateDir = function(path) {
   var f = new java.io.File(String(path))
@@ -113,8 +124,9 @@ WikiStudio.internalPath = function(rel) {
   return /(^|\/)\./.test(rel)
 }
 // Builds the wiki file inventory, enforcing the Studio count and size limits on content files
-WikiStudio.scan = function(root, all, metadataOnly, maxFileBytes) {
+WikiStudio.scan = function(root, all, metadataOnly, maxFileBytes, maxTotalBytes) {
   if (isUnDef(maxFileBytes)) maxFileBytes = 16777216
+  if (isUnDef(maxTotalBytes)) maxTotalBytes = 536870912
   var files = {}, total = 0, count = 0, linkedFiles = {}
   WikiStudio.noLinks(root)
   var walk = function(dir, depth) {
@@ -130,11 +142,11 @@ WikiStudio.scan = function(root, all, metadataOnly, maxFileBytes) {
         // Hidden internal files are still fingerprinted and backed up, but they do not count toward the content limits
         if (!WikiStudio.internalPath(rel)) {
           total += Number(f.length())
-          WikiStudio.assert(count < 20000 && total <= 536870912 && f.length() <= maxFileBytes, 413, "inventory_limit", "Wiki inventory exceeds Studio limits")
+          WikiStudio.assert(count < 20000 && total <= maxTotalBytes && f.length() <= maxFileBytes, 413, "inventory_limit", "Wiki inventory exceeds Studio limits")
           count++
         }
         files[rel] = { size: Number(f.length()) }
-        if (metadataOnly !== true) files[rel].hash = WikiStudio.hash(java.nio.file.Files.readAllBytes(f.toPath()))
+        if (metadataOnly !== true) files[rel].hash = WikiStudio.hashFile(String(f))
       }
     }
   }

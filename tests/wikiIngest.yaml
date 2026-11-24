@@ -2,6 +2,10 @@ include:
 - oJobTest.yaml
 
 jobs:
+- name: MiniA Wiki Ingest Tests::OfficePartRecovery
+  to: oJob Test
+  exec: args.func = require("tests/wikiIngestReconcile.js").testOfficePartRecovery
+
 - name: MiniA Wiki Ingest Tests::ImageBudgetDryRunAndCache
   to: oJob Test
   exec: args.func = require("tests/wikiIngestImages.js").testImageBudgetDryRunAndCache
@@ -427,6 +431,7 @@ jobs:
   exec: args.func = require("tests/wikiIngestReconcile.js").testPreparedRecoveryWithIncompleteOrigin
 
 todo:
+- MiniA Wiki Ingest Tests::OfficePartRecovery
 - MiniA Wiki Ingest Tests::ImageBudgetDryRunAndCache
 - MiniA Wiki Ingest Tests::ImageBudgetSharedWithDistillation
 - MiniA Wiki Ingest Tests::ImagePruneAndByteValidation

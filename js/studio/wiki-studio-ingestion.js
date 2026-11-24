@@ -15,9 +15,11 @@ WikiStudioServer.prototype.sourceOperation = function(w, route, body) {
       return isString(path) && Object.prototype.hasOwnProperty.call(source.files || {}, path)
     }), 400, "invalid_preview", "Preview again before importing")
     var models = WikiStudio.modelAvailability().actions
-    var o=body.options||{}; WikiStudio.fields(o,["mode","layout","section","include","exclude","prune","semantic","maxfiles","maxfilesize","tuning","force"].concat(Object.keys(MiniAGraphBuild.reconcileDefaults)))
+    var o=body.options||{}; WikiStudio.fields(o,["mode","layout","section","include","exclude","prune","semantic","maxfiles","maxfilesize","tuning","force","officeparts"].concat(Object.keys(MiniAGraphBuild.reconcileDefaults)))
     WikiStudio.assert(!isDef(body.preview)||isBoolean(body.preview),400,"invalid_options","Preview must be boolean")
     WikiStudio.assert(!isDef(o.mode)||["auto","normalize","raw","distill"].indexOf(o.mode)>=0,400,"invalid_options","Unsupported ingestion mode")
+    WikiStudio.assert(isUnDef(o.officeparts) || ["auto", "always", "off"].indexOf(o.officeparts) >= 0,
+      400, "invalid_options", "Unsupported Office extraction policy")
     WikiStudio.assert(!isDef(o.layout)||["source","flat"].indexOf(o.layout)>=0,400,"invalid_options","Unsupported ingestion layout")
     // Use the logical source identity instead of the private staging directory name.
     var section=o.section||source.id
@@ -38,7 +40,7 @@ WikiStudioServer.prototype.sourceOperation = function(w, route, body) {
     tuning = merge(tuning, WikiStudio.validateTuning("ingestion", directLimits, this.config.maxSourceBytes))
     WikiStudio.assert(isUnDef(o.force) || isBoolean(o.force), 400, "invalid_options", "Force must be boolean")
     if(o.prune===true) WikiStudio.assert(body.confirmation&&body.confirmation.acknowledgePrune===true,400,"confirmation_required","Explicit prune confirmation required; empty-source authorization is not available")
-    return {operation:"ingest.run",params:{graphOverrides:graphOverrides,sourceId:source.id,revision:source.revision,staging:source.staging,inventoryChecksum:source.inventoryChecksum,dryrun:body.preview!==false,mode:o.mode || (models.distill ? "auto" : "normalize"),expectedModelSkips:modelSkips,layout:o.layout||"source",section:section,include:o.include||"",exclude:o.exclude||"",prune:o.prune===true,semantic:o.semantic===true,tuning:tuning,force:o.force===true,maxfiles:tuning.maxfiles,maxfilesize:tuning.maxfilesize}}
+    return {operation:"ingest.run",params:{graphOverrides:graphOverrides,sourceId:source.id,revision:source.revision,staging:source.staging,inventoryChecksum:source.inventoryChecksum,dryrun:body.preview!==false,mode:o.mode || (models.distill ? "auto" : "normalize"),expectedModelSkips:modelSkips,layout:o.layout||"source",section:section,include:o.include||"",exclude:o.exclude||"",prune:o.prune===true,semantic:o.semantic===true,tuning:tuning,force:o.force===true,officeparts:o.officeparts || "auto",maxfiles:tuning.maxfiles,maxfilesize:tuning.maxfilesize}}
   }
   if(route==="absorptions") {
     WikiStudio.fields(body,["action","sourceWikiIds","paths","tags","topic","exclude","planId","confirmation","tuning"])
@@ -69,7 +71,7 @@ WikiStudioServer.prototype.sourceOperation = function(w, route, body) {
   }
   WikiStudio.fail(400,"invalid_operation","Unsupported source operation")
 }
-WikiStudio.executeSource = function(config,w,job,logFn,backup) {
+WikiStudio.executeSource = function(config,w,job,logFn,backup,isCancelled) {
   var op=job.operation,p=job.params
   if(op==="backup.snapshot") return {ok:true,backupId:WikiStudio.snapshot(config,w,job.id).id}
   if(op==="backup.restore") return WikiStudio.restore(config,w,job,backup)
@@ -81,14 +83,14 @@ WikiStudio.executeSource = function(config,w,job,logFn,backup) {
   Object.keys(p.tuning || {}).forEach(function(key) { if (/^(wiki|absorb)/.test(key)) a[key] = p.tuning[key] })
   if(op==="ingest.run") {
     WikiStudio.assert(WikiStudio.inside(p.staging,config.home+"/sources/uploads"),400,"invalid_source","Source staging leaves trusted area")
-    var inventory = WikiStudio.scan(p.staging, true, false, 67108864)
+    var inventory = WikiStudio.scan(p.staging, true, false, config.maxSourceBytes, config.maxBatchBytes || 67108864)
     WikiStudio.assert(WikiStudio.fingerprint(inventory)===p.inventoryChecksum,409,"source_changed","Immutable staging revision changed; upload it again")
     WikiStudio.assert(Object.keys(inventory).length<=p.maxfiles,413,"source_limit","Source exceeds selected file-count limit")
     var server = new WikiStudioServer(config)
     var effective = server.manager(w, false, function(wm) { return wm.graphBuildSettings(p.graphOverrides || {}).effective }, { skipBootstrap: true })
     var graph = WikiStudio.availableGraphOptions(effective)
     ;["reconcile", "reconcileLlm", "modelHelp"].forEach(function(key) { a["wikigraph" + key.toLowerCase()] = graph[key] })
-    params={studiosource:true,visionavailable:WikiStudio.modelAvailability().actions.vision,expectedmodelskips:p.expectedModelSkips,source:p.staging,sourceid:w.id+"--"+p.sourceId,mode:p.mode,layout:p.layout,section:p.section,dryrun:p.dryrun,include:p.include,exclude:p.exclude,prune:p.prune,maxfilekb:p.maxfilesize/1024,chunkchars:p.tuning?p.tuning.chunkchars:24000,concurrency:p.tuning?p.tuning.concurrency:4,force:p.force===true}
+    params={studiosource:true,visionavailable:WikiStudio.modelAvailability().actions.vision,expectedmodelskips:p.expectedModelSkips,source:p.staging,sourceid:w.id+"--"+p.sourceId,mode:p.mode,layout:p.layout,section:p.section,dryrun:p.dryrun,include:p.include,exclude:p.exclude,prune:p.prune,maxfilekb:p.maxfilesize/1024,chunkchars:p.tuning?p.tuning.chunkchars:24000,concurrency:p.tuning?p.tuning.concurrency:4,force:p.force===true,officeparts:p.officeparts || "auto",maxstagebytes:config.maxStageBytes || 268435456}
   } else if(/^ingest\.(recovery|resume|discard)$/.test(op))params=p.id?{id:p.id}:{}
   else if(op.indexOf("absorb.")===0) {
     params=p.spec?{spec:p.spec}:p.id?{id:p.id}:{}
@@ -97,6 +99,7 @@ WikiStudio.executeSource = function(config,w,job,logFn,backup) {
   else if(op==="wiki.compact")params={dryRun:false,offline:true}
   else WikiStudio.fail(400,"invalid_operation","Source operation not allowlisted")
   var runner=new MiniAWikiOps(a,logFn),result
+  runner.isCancelled = isCancelled
   function run(){return runner.execute(runner.spec(op,params),{confirm:true})}
   var ids=Object.keys(p.sourceIdentities||{}).sort(),registry=new WikiStudioRegistry(config)
   function locked(index){if(index===ids.length)return run();var id=ids[index];return WikiStudio.wikiLock(config.home,id,function(){var source=registry.verify(registry.get(id)),expected=p.sourceIdentities[id];WikiStudio.assert(source.root===expected.root&&source.identity===expected.identity,409,"source_changed","Absorption source root identity changed; replan");return locked(index+1)})}
@@ -120,7 +123,7 @@ WikiStudioServer.prototype.sourceUpdateRun = function(w, job, result) {
     }
 
     record.lastRun = job.id
-    record.lastStatus = result.ok === false ? "failed" : p.dryrun ? "previewed" : (result.skipped_model || []).length ? "partially-imported" : "ingested"
+    record.lastStatus = result.status === "cancelled" ? "cancelled" : result.ok === false ? "failed" : p.dryrun ? "previewed" : (result.skipped_model || []).length ? "partially-imported" : "ingested"
     record.lastInventoryChecksum = p.inventoryChecksum
     WikiStudio.atomic(self.sourcePath(w, p.sourceId), record)
     return true

@@ -2,6 +2,7 @@
 """Model-free HTTP/worker E2E using isolated disposable wiki/state directories."""
 import argparse
 import base64
+import hashlib
 import json
 import io
 import os
@@ -81,7 +82,7 @@ env["STUDIO_TOKEN"] = token
 for variable in ("OAF_MODEL", "OAF_LC_MODEL", "OAF_DECIDE_MODEL", "OAF_VISUAL_MODEL", "OAF_EMBED_MODEL"):
     env.pop(variable, None)
 log = open(temp / "server.log", "w")
-proc = subprocess.Popen([shutil.which("ojob") or "ojob", str(base / "mini-a-wiki-studio.yaml"), f"onport={port}", f"studiohome={temp / 'state'}", "studioallowroots=" + json.dumps([str(root)]), "studiomaxsourcebytes=18874368", "openbrowser=false"], cwd=temp, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+proc = subprocess.Popen([shutil.which("ojob") or "ojob", str(base / "mini-a-wiki-studio.yaml"), f"onport={port}", f"studiohome={temp / 'state'}", "studioallowroots=" + json.dumps([str(root)]), "studiomaxsourcebytes=69206016", "studiomaxbatchbytes=70254592", "openbrowser=false"], cwd=temp, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 try:
     deadline = time.monotonic() + 40
     while True:
@@ -110,15 +111,65 @@ try:
     settings_path = "wikis/a/settings/ingestion"
     settings = request(settings_path)
     assert settings["effective"]["maxfilesize"] == 8388608
-    assert settings["limits"]["maxfilesize"] == 18874368
-    large_size = 17 * 1024 * 1024
+    assert settings["limits"]["maxfilesize"] == 69206016
+    large_workbook = io.BytesIO()
+    sample = base / "tests" / "fixtures" / "documents" / "sample.xlsx"
+    with zipfile.ZipFile(sample) as original, zipfile.ZipFile(large_workbook, "w") as enlarged:
+        for name in original.namelist():
+            content = original.read(name)
+            if name == "[Content_Types].xml":
+                content = content.replace(b"</Types>", b'<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>')
+            if name == "xl/_rels/workbook.xml.rels":
+                content = content.replace(b"</Relationships>", b'<Relationship Id="rId99" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>')
+            enlarged.writestr(name, content)
+        with enlarged.open("xl/sharedStrings.xml", "w") as strings:
+            strings.write(b'<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">')
+            for index in range(65536):
+                strings.write(f"<si><t>Row {index} ".encode() + b"x" * 1024 + b"</t></si>")
+            strings.write(b"</sst>")
+    payload = large_workbook.getvalue()
+    large_workbook.close()
+    large_size = len(payload)
+    assert 64 * 1024 * 1024 < large_size < 69206016
     settings = request(settings_path, "PUT", {"maxfilesize": large_size})
     assert settings["effective"]["maxfilesize"] == large_size
-    request(settings_path, "PUT", {"maxfilesize": 18874369}, status=400)
+    request(settings_path, "PUT", {"maxfilesize": 69206017}, status=400)
     large_id = str(uuid.uuid4())
-    request("uploads", "POST", headers={"X-Upload-ID": large_id, "X-Upload-Path": "large.md"}, raw=b" " * large_size)
+    uploaded = request("uploads", "POST", headers={"X-Upload-ID": large_id, "X-Upload-Path": "large.xlsx"}, raw=payload)
+    assert uploaded["checksum"] == hashlib.sha256(payload).hexdigest()
+    del payload
+    request("uploads", "POST", headers={"X-Upload-ID": large_id, "X-Upload-Path": "over-batch.md"},
+            raw=b" " * (70254592 - large_size + 1), status=413)
     request("wikis/a/sources", "POST", {"id": "large", "name": "Large", "type": "upload", "uploadId": large_id, "adhoc": True})
+    preview = job("wikis/a/ingestions", {"sourceId": "large", "revision": large_id, "preview": True, "options": {"mode": "normalize"}})
+    assert preview["result"]["office_documents"][0]["source"] == "large.xlsx"
     request(settings_path, "PUT", {})
+    # Structured imports preserve original source names and reuse the preview's parts.
+    office_id = str(uuid.uuid4())
+    for suffix in ("docx", "xlsx"):
+        filename = "sample." + suffix
+        fixture = base / "tests" / "fixtures" / "documents" / filename
+        request("uploads", "POST", headers={"X-Upload-ID": office_id, "X-Upload-Path": filename}, raw=fixture.read_bytes())
+    request("wikis/a/sources", "POST", {"id": "office", "name": "Office", "type": "upload", "uploadId": office_id})
+    office_run = {"sourceId": "office", "revision": office_id, "preview": True, "options": {"mode": "normalize", "officeparts": "always"}}
+    office_preview = job("wikis/a/ingestions", office_run)["result"]
+    assert {item["source"] for item in office_preview["office_documents"]} == {"sample.xlsx", "sample.docx"}
+    assert not (root / "a" / "office").exists()
+    office_apply = job("wikis/a/ingestions", dict(office_run, preview=False))
+    assert office_apply["result"]["written"] == office_preview["planned_writes"]
+    office_events = request("jobs/" + office_apply["id"] + "/events")
+    assert "Reusing staged Office parts" in office_events
+    for document in office_preview["office_documents"]:
+        index = root / "a" / document["index"]
+        assert index.is_file() and "-parts/" in index.read_text()
+        prefix = str(index.with_name(index.stem + "-parts").relative_to(root / "a")) + "/"
+        parts = [root / "a" / name for name in office_preview["planned_writes"] if name.startswith(prefix)]
+        assert len(parts) == document["parts"]
+        assert all("source_locator:" in part.read_text() for part in parts)
+    office_hits = request("wikis/a/search?q=OpenAF%20DOCX")
+    assert any("-parts/" in hit["path"] and hit.get("sourceFile") == "sample.docx" and hit.get("sourceLocation") for hit in office_hits["results"])
+    office_again = job("wikis/a/ingestions", dict(office_run, preview=False))["result"]
+    assert office_again["skipped_unchanged"] == 2
     page = request("wikis/a/pages", "POST", {"path": "first.md", "content": "---\r\ntitle: 'First' # keep\r\n---\r\n# First\r\n[[next]]\r\n", "expectedRevision": None})
     assert "# keep\r\n" in page["content"]
     request("wikis/a/page?path=first.md", "PUT", {"content": "# Conflict", "expectedRevision": "old"}, status=409)
