@@ -89,18 +89,20 @@ WikiStudioServer.prototype.dispatch = function(req) {
     if (p.length === 6 && p[4] === "settings") {
       WikiStudio.authorize(role, "admin")
       WikiStudio.assert(read || req.method === "PUT", 405, "method_not_allowed", "Use GET or PUT")
-      var workflow = p[5], defaults = WikiStudio.tuningDefaults[workflow]
-      WikiStudio.assert(isDef(defaults), 404, "not_found", "Unknown workflow")
+      var workflow = p[5]
+      WikiStudio.assert(isDef(WikiStudio.tuningDefaults[workflow]), 404, "not_found", "Unknown workflow")
+      var defaults = clone(WikiStudio.tuningDefaults[workflow])
+      if (workflow === "ingestion") defaults.maxfilesize = Math.min(defaults.maxfilesize, c.maxSourceBytes)
       return WikiStudio.lock(c.home, "settings-" + w.id, function() {
         var file = c.home + "/settings/" + w.id + ".json"
         var saved = WikiStudio.json(file, {})
         if (saved.identity !== w.identity) saved = { identity: w.identity, workflows: {} }
         if (!read) {
           WikiStudio.authorize(role, "admin", w)
-          saved.workflows[workflow] = WikiStudio.validateTuning(workflow, body)
+          saved.workflows[workflow] = WikiStudio.validateTuning(workflow, body, c.maxSourceBytes)
           WikiStudio.atomic(file, saved)
         }
-        return { defaults: defaults, effective: merge(clone(defaults), saved.workflows[workflow] || {}) }
+        return { defaults: defaults, effective: self.resolveTuning(w, workflow), limits: workflow === "ingestion" ? { maxfilesize: c.maxSourceBytes } : {} }
       })
     }
     if (p.length === 5 && p[4] === "test" && req.method === "POST") return this.testWiki(w, body, role)
@@ -265,7 +267,7 @@ WikiStudio.tuningDefaults = {
 }
 
 // Validate both saved preferences and run overrides through the same allowlist.
-WikiStudio.validateTuning = function(workflow, values) {
+WikiStudio.validateTuning = function(workflow, values, maxSourceBytes) {
   var defaults = WikiStudio.tuningDefaults[workflow]
   var fields = workflow === "test" ? ["maxsteps", "maxcontext"] : Object.keys(defaults)
   WikiStudio.fields(values, fields)
@@ -276,7 +278,7 @@ WikiStudio.validateTuning = function(workflow, values) {
       return
     }
     var minimum = key === "wikiingestbudget" ? -1 : /^(wikiingestmaxcalls|wikimaxprompttokens)$/.test(key) ? 0 : 1
-    var maximum = key === "maxfiles" ? 2000 : key === "maxfilesize" ? 8388608 : key === "dreammaxsteps" ? 100 : key === "limit" ? 200 : 2147483647
+    var maximum = key === "maxfiles" ? 2000 : key === "maxfilesize" ? maxSourceBytes : key === "dreammaxsteps" ? 100 : key === "limit" ? 200 : 2147483647
     WikiStudio.assert(isNumber(value) && isFinite(value) && Math.floor(value) === value && value >= minimum && value <= maximum, 400, "invalid_options", "Invalid tuning value: " + key)
   })
   return clone(values)
@@ -286,5 +288,9 @@ WikiStudio.validateTuning = function(workflow, values) {
 WikiStudioServer.prototype.resolveTuning = function(w, workflow, values) {
   var saved = WikiStudio.json(this.config.home + "/settings/" + w.id + ".json", {})
   var preferences = saved.identity === w.identity ? (saved.workflows || {})[workflow] || {} : {}
-  return merge(merge(clone(WikiStudio.tuningDefaults[workflow]), preferences), WikiStudio.validateTuning(workflow, values || {}))
+  var effective = merge(clone(WikiStudio.tuningDefaults[workflow]), preferences)
+
+  // Apply the active quota to defaults and preferences saved before a quota change.
+  if (workflow === "ingestion") effective.maxfilesize = Math.min(effective.maxfilesize, this.config.maxSourceBytes)
+  return merge(effective, WikiStudio.validateTuning(workflow, values || {}, this.config.maxSourceBytes))
 }

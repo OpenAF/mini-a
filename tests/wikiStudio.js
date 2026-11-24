@@ -10,7 +10,7 @@
   loadLib(String(new java.io.File("js/studio/wiki-studio-ingestion.js").getCanonicalPath()))
   function fixture(fn) {
     var temp = WikiStudio.canonical(String(io.createTempDir("wiki-studio-test-")))
-    var config = { home: temp + "/state", roots: [temp + "/wikis"], base: WikiStudio.canonical("."), port: 18891, host: "127.0.0.1", token: "test-token-with-more-than-32-characters", maxPageBytes: 1048576, maxBodyBytes: 2097152, workers: 2 }
+    var config = { home: temp + "/state", roots: [temp + "/wikis"], base: WikiStudio.canonical("."), port: 18891, host: "127.0.0.1", token: "test-token-with-more-than-32-characters", maxPageBytes: 1048576, maxBodyBytes: 2097152, maxSourceBytes: 8388608, workers: 2 }
     WikiStudio.privateDir(config.home); WikiStudio.privateDir(temp + "/wikis"); WikiStudio.privateDir(temp + "/wikis/existing")
     var server = new WikiStudioServer(config)
     try { fn(server, temp) } finally { io.rm(temp) }

@@ -64,9 +64,13 @@ var wikiStudioConfig = function(args, base) {
     var seen={}
     directories=directories.map(function(d){WikiStudio.fields(d,["id","path"]);WikiStudio.name(d.id);WikiStudio.assert(!seen[d.id],400,"invalid_config","Duplicate directory ID");seen[d.id]=true;WikiStudio.noLinks(d.path);var path=WikiStudio.canonical(d.path);WikiStudio.assert(new java.io.File(path).isDirectory()&&!WikiStudio.inside(path,home)&&path.split("/").length>3&&!/(?:^|\/)\.[^/]+/.test(path),400,"invalid_config","Choose a dedicated visible source directory");return{id:d.id,path:path,identity:WikiStudio.identity(path)}})
   }
-  var c = { home: home, roots: roots, host: host, origin: origin, port: port, token: token, openBrowser: !(args.openbrowser === false || String(args.openbrowser) === "false"), graphNonce: WikiStudio.id(), maxPageBytes: 1048576, maxBodyBytes: 2097152, workers: 2, base: __miniAPath(".", base) }
+  // Keep the per-file quota within the existing batch budget.
+  var maxSourceBytes = Number(isDef(args.studiomaxsourcebytes) ? args.studiomaxsourcebytes : 8388608)
+  WikiStudio.assert(maxSourceBytes >= 1 && maxSourceBytes <= 67108864 && Math.floor(maxSourceBytes) === maxSourceBytes,
+    400, "invalid_config", "studiomaxsourcebytes must be a whole number from 1 to 67108864")
+  var c = { maxSourceBytes: maxSourceBytes, home: home, roots: roots, host: host, origin: origin, port: port, token: token, openBrowser: !(args.openbrowser === false || String(args.openbrowser) === "false"), graphNonce: WikiStudio.id(), maxPageBytes: 1048576, maxBodyBytes: 2097152, workers: 2, base: __miniAPath(".", base) }
   c.directories=directories
   ;["sources", "jobs", "backups", "graph-cache", "locks", "audit"].forEach(function(d) { WikiStudio.privateDir(home + "/" + d) })
-  WikiStudio.atomic(home + "/config.json", { version: 1, host: c.host, port: port, roots: roots, maxPageBytes: c.maxPageBytes, workers: c.workers })
+  WikiStudio.atomic(home + "/config.json", { version: 1, host: c.host, port: port, roots: roots, maxPageBytes: c.maxPageBytes, maxSourceBytes: c.maxSourceBytes, workers: c.workers })
   return c
 }

@@ -113,7 +113,8 @@ WikiStudio.internalPath = function(rel) {
   return /(^|\/)\./.test(rel)
 }
 // Builds the wiki file inventory, enforcing the Studio count and size limits on content files
-WikiStudio.scan = function(root, all, metadataOnly) {
+WikiStudio.scan = function(root, all, metadataOnly, maxFileBytes) {
+  if (isUnDef(maxFileBytes)) maxFileBytes = 16777216
   var files = {}, total = 0, count = 0, linkedFiles = {}
   WikiStudio.noLinks(root)
   var walk = function(dir, depth) {
@@ -129,7 +130,7 @@ WikiStudio.scan = function(root, all, metadataOnly) {
         // Hidden internal files are still fingerprinted and backed up, but they do not count toward the content limits
         if (!WikiStudio.internalPath(rel)) {
           total += Number(f.length())
-          WikiStudio.assert(count < 20000 && total <= 536870912 && f.length() <= 16777216, 413, "inventory_limit", "Wiki inventory exceeds Studio limits")
+          WikiStudio.assert(count < 20000 && total <= 536870912 && f.length() <= maxFileBytes, 413, "inventory_limit", "Wiki inventory exceeds Studio limits")
           count++
         }
         files[rel] = { size: Number(f.length()) }

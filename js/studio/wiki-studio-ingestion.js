@@ -24,7 +24,6 @@ WikiStudioServer.prototype.sourceOperation = function(w, route, body) {
     WikiStudio.pagePath(section,false)
     ;["include","exclude"].forEach(function(k){ if(isDef(o[k])) WikiStudio.assert(isString(o[k])&&o[k].length<=1000&&!/[\x00-\x1f]/.test(o[k]),400,"invalid_options","Invalid include/exclude patterns") })
     ;["prune","semantic"].forEach(function(k){if(isDef(o[k]))WikiStudio.assert(isBoolean(o[k]),400,"invalid_options","Expected boolean")})
-    ;["maxfiles","maxfilesize"].forEach(function(k){if(isDef(o[k]))WikiStudio.assert(isNumber(o[k])&&o[k]>=1&&Math.floor(o[k])===o[k]&&o[k]<=(k==="maxfiles"?2000:8388608),400,"invalid_options","Limit exceeds Studio quota")})
     var graphOverrides = {}
     Object.keys(MiniAGraphBuild.reconcileDefaults).forEach(function(key) {
       if (isDef(o[key])) graphOverrides[key] = o[key]
@@ -32,7 +31,11 @@ WikiStudioServer.prototype.sourceOperation = function(w, route, body) {
     try { this.manager(w, false, function(wm) { return wm.graphBuildSettings(graphOverrides) }) }
     catch(error) { WikiStudio.fail(400, "invalid_options", String(error.message || error)) }
     var tuning = this.resolveTuning(w, "ingestion", o.tuning || {})
-    ;["maxfiles", "maxfilesize"].forEach(function(key) { if (isDef(o[key])) tuning[key] = o[key] })
+    var directLimits = {}
+    ;["maxfiles", "maxfilesize"].forEach(function(key) {
+      if (isDef(o[key])) directLimits[key] = o[key]
+    })
+    tuning = merge(tuning, WikiStudio.validateTuning("ingestion", directLimits, this.config.maxSourceBytes))
     WikiStudio.assert(isUnDef(o.force) || isBoolean(o.force), 400, "invalid_options", "Force must be boolean")
     if(o.prune===true) WikiStudio.assert(body.confirmation&&body.confirmation.acknowledgePrune===true,400,"confirmation_required","Explicit prune confirmation required; empty-source authorization is not available")
     return {operation:"ingest.run",params:{graphOverrides:graphOverrides,sourceId:source.id,revision:source.revision,staging:source.staging,inventoryChecksum:source.inventoryChecksum,dryrun:body.preview!==false,mode:o.mode || (models.distill ? "auto" : "normalize"),expectedModelSkips:modelSkips,layout:o.layout||"source",section:section,include:o.include||"",exclude:o.exclude||"",prune:o.prune===true,semantic:o.semantic===true,tuning:tuning,force:o.force===true,maxfiles:tuning.maxfiles,maxfilesize:tuning.maxfilesize}}
@@ -78,7 +81,7 @@ WikiStudio.executeSource = function(config,w,job,logFn,backup) {
   Object.keys(p.tuning || {}).forEach(function(key) { if (/^(wiki|absorb)/.test(key)) a[key] = p.tuning[key] })
   if(op==="ingest.run") {
     WikiStudio.assert(WikiStudio.inside(p.staging,config.home+"/sources/uploads"),400,"invalid_source","Source staging leaves trusted area")
-    var inventory = WikiStudio.scan(p.staging,true)
+    var inventory = WikiStudio.scan(p.staging, true, false, 67108864)
     WikiStudio.assert(WikiStudio.fingerprint(inventory)===p.inventoryChecksum,409,"source_changed","Immutable staging revision changed; upload it again")
     WikiStudio.assert(Object.keys(inventory).length<=p.maxfiles,413,"source_limit","Source exceeds selected file-count limit")
     var server = new WikiStudioServer(config)

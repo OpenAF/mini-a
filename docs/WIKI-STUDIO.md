@@ -252,8 +252,15 @@ individual files, from a folder, or in one ZIP. Office, RTF and PDF text extract
 uses the Tika oPack on the Studio server. Preinstall it with `opack install Tika`
 for offline use. Scanned PDFs require OCR, which is disabled during ingestion.
 
-Uploads stream one file per request to disk. Limits are 8 MiB per source file,
-20 MiB per ZIP, 2,000 entries, a 64 MiB expanded batch, depth 16 and expansion ratio 100.
+Uploads stream one file per request to disk. The default per-source file quota
+is 8 MiB. To raise it, restart Studio with a launch argument such as
+`studiomaxsourcebytes=33554432` (32 MiB), then set **Maximum file size (bytes)**
+under the import workflow's **Advanced options**. Save the workflow defaults
+to reuse that value for the wiki. The launch argument applies to individual
+uploads, ZIP members and local source snapshots and accepts up to 64 MiB.
+
+ZIP limits include 20 MiB per archive, 2,000 entries, a 64 MiB expanded batch,
+depth 16 and expansion ratio 100.
 ZIP preflight rejects encrypted/special/symlink entries, traversal, duplicate
 case-folded paths, unsupported members, ZIP64 and multipart archives. Extraction
 checks actual byte counts and CRC. Imported scripts are never executed. Upload

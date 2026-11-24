@@ -1494,7 +1494,7 @@ async function workflowTuning(parent, workflow, labels, wikiId) {
       input.min = key === "wikiingestbudget" ? "-1" : ["wikiingestmaxcalls", "wikimaxprompttokens"].includes(key) ? "0" : "1"
       input.step = "1"
       if (key === "maxfiles") input.max = "2000"
-      if (key === "maxfilesize") input.max = "8388608"
+      if (key === "maxfilesize" && settings.limits) input.max = String(settings.limits.maxfilesize)
       if (key === "dreammaxsteps") input.max = "100"
       if (key === "limit") input.max = "200"
     }
@@ -1509,7 +1509,7 @@ async function workflowTuning(parent, workflow, labels, wikiId) {
         if (!Number.isFinite(Number(input.value)) || !Number.isInteger(Number(input.value)) || Number(input.value) < Number(input.min) || input.max && Number(input.value) > Number(input.max)) {
           box.open = true
           input.focus()
-          throw new Error("Enter a finite number for " + labels[key])
+          throw new Error("Enter a whole number for " + labels[key] + " (minimum " + input.min + (input.max ? ", maximum " + input.max : "") + ")")
         }
         out[key] = Number(input.value)
       }

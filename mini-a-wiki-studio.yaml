@@ -21,6 +21,10 @@ help:
     desc     : 'JSON array of allowlisted local source directories for directory/Git checkout intake, each with id and path (default: []; maximum 50). Use existing dedicated visible directories outside Studio home.'
     example  : '[{"id":"docs","path":"/data/sources/docs"}]'
     mandatory: false
+  - name     : studiomaxsourcebytes
+    desc     : "Per-source file quota in bytes, from 1 to 67108864 (default: 8388608)"
+    example  : "33554432"
+    mandatory: false
   - name     : onport
     desc     : "Local HTTP listener port, from 1 to 65535 (default: 8890)"
     example  : "8890"

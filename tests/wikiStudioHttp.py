@@ -81,7 +81,7 @@ env["STUDIO_TOKEN"] = token
 for variable in ("OAF_MODEL", "OAF_LC_MODEL", "OAF_DECIDE_MODEL", "OAF_VISUAL_MODEL", "OAF_EMBED_MODEL"):
     env.pop(variable, None)
 log = open(temp / "server.log", "w")
-proc = subprocess.Popen([shutil.which("ojob") or "ojob", str(base / "mini-a-wiki-studio.yaml"), f"onport={port}", f"studiohome={temp / 'state'}", "studioallowroots=" + json.dumps([str(root)]), "openbrowser=false"], cwd=temp, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+proc = subprocess.Popen([shutil.which("ojob") or "ojob", str(base / "mini-a-wiki-studio.yaml"), f"onport={port}", f"studiohome={temp / 'state'}", "studioallowroots=" + json.dumps([str(root)]), "studiomaxsourcebytes=18874368", "openbrowser=false"], cwd=temp, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 try:
     deadline = time.monotonic() + 40
     while True:
@@ -106,6 +106,19 @@ try:
     request("session", headers={"Origin": "https://evil.invalid"}, status=403)
     for name in ["a", "b"]:
         request("wikis", "POST", {"id": name, "name": name.upper(), "root": str(root / name), "access": "rw"})
+    # A raised quota must pass settings validation, upload and source inventory.
+    settings_path = "wikis/a/settings/ingestion"
+    settings = request(settings_path)
+    assert settings["effective"]["maxfilesize"] == 8388608
+    assert settings["limits"]["maxfilesize"] == 18874368
+    large_size = 17 * 1024 * 1024
+    settings = request(settings_path, "PUT", {"maxfilesize": large_size})
+    assert settings["effective"]["maxfilesize"] == large_size
+    request(settings_path, "PUT", {"maxfilesize": 18874369}, status=400)
+    large_id = str(uuid.uuid4())
+    request("uploads", "POST", headers={"X-Upload-ID": large_id, "X-Upload-Path": "large.md"}, raw=b" " * large_size)
+    request("wikis/a/sources", "POST", {"id": "large", "name": "Large", "type": "upload", "uploadId": large_id, "adhoc": True})
+    request(settings_path, "PUT", {})
     page = request("wikis/a/pages", "POST", {"path": "first.md", "content": "---\r\ntitle: 'First' # keep\r\n---\r\n# First\r\n[[next]]\r\n", "expectedRevision": None})
     assert "# keep\r\n" in page["content"]
     request("wikis/a/page?path=first.md", "PUT", {"content": "# Conflict", "expectedRevision": "old"}, status=409)
