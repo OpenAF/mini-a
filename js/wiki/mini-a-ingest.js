@@ -203,6 +203,7 @@ MiniAIngest.prototype._discover = function(resolved) {
   // contain aliases such as /var -> /private/var on macOS.
   var root = String(new java.io.File(String(resolved.root)).getCanonicalPath())
   var maxKb = this._num("ingestmaxfilekb", 512)
+  var maxOfficeKb = this._num("ingestmaxofficefilekb", maxKb)
   var out = []
   var skippedLarge = [], present = {}, errors = [], complete = true, visited = {}
   var inspected = 0
@@ -229,10 +230,15 @@ MiniAIngest.prototype._discover = function(resolved) {
         return
       }
       var kb = Number(f.size || 0) / 1024
-      if (kb > maxKb) {
+      var office = __miniAIsOfficeDocument(rel)
+      var limit = office ? maxOfficeKb : maxKb
+      if (kb > limit) {
         // skip rather than silently truncate: a half-read document distills into a lie
         present[rel].ignored = true; present[rel].reason = "oversized"
-        skippedLarge.push(rel + " (" + Math.round(kb) + "KB > ingestmaxfilekb=" + maxKb + ")")
+        var setting = office && maxOfficeKb !== maxKb ? "ingestmaxofficefilekb" : "ingestmaxfilekb"
+        var guidance = office && self._args.ingestofficerequiresparts === true ? ". Set Office extraction to auto to import larger Office files." : ""
+        var detail = self._args.ingeststudiosource === true ? f.size + " bytes exceeds the " + limit * 1024 + " byte import limit" : Math.round(kb) + "KB > " + setting + "=" + limit
+        skippedLarge.push(rel + " (" + detail + ")" + guidance)
         return
       }
       out.push({ id: rel, path: full, rel: rel, size: Number(f.size || 0) })
@@ -1097,7 +1103,10 @@ MiniAIngest.prototype.run = function() {
     var origin = String(a.ingestsourceid || resolved.origin || resolved.root || source)
     var scope = sha1(self._destinationIdentity(wm) + "|" + resolved.type + "|" + origin + "|" + section)
     result.scope = { id: scope, origin: origin, type: resolved.type, section: section }; result.section = section
-    var discoveryConfig = sha1(stringify({ include: this._csv("ingestinclude"), exclude: this._csv("ingestexclude"), maxKb: this._num("ingestmaxfilekb", 512), defaults: _INGEST_DEFAULT_EXCLUDES }, __, ""))
+    var discoveryOptions = { include: this._csv("ingestinclude"), exclude: this._csv("ingestexclude"), maxKb: this._num("ingestmaxfilekb", 512), defaults: _INGEST_DEFAULT_EXCLUDES }
+    var maxOfficeKb = this._num("ingestmaxofficefilekb", discoveryOptions.maxKb)
+    if (maxOfficeKb !== discoveryOptions.maxKb) discoveryOptions.maxOfficeKb = maxOfficeKb
+    var discoveryConfig = sha1(stringify(discoveryOptions, __, ""))
     var mode = this._ingestMode(), modelValue = a.model || this._getEnv("OAF_MODEL"), modelRaw = isMap(modelValue) ? stringify(modelValue, __, "") : String(modelValue), model = {}
     try { model = modelRaw.charAt(0) === "{" ? af.fromJson(modelRaw) : af.fromSLON(modelRaw) } catch(ignoreModel) {}
     var publicModel = {}; ["type", "model", "temperature", "url", "maxTokens"].forEach(function(k) { if (isDef(model[k])) publicModel[k] = model[k] })
@@ -1134,7 +1143,7 @@ MiniAIngest.prototype.run = function() {
       observed[src.id] = { hash: "" }
       var key = sha1(scope + "|" + src.id), oldKey = sha1(resolved.type + "|" + (resolved.origin || resolved.root || "") + "|" + src.id)
       src.sourceKey = key
-      var office = officeMode !== "off" && /\.(xlsx?|docx?|pptx?)$/i.test(src.rel)
+      var office = officeMode !== "off" && __miniAIsOfficeDocument(src.rel)
       var structured = office && (officeMode === "always" || src.size > 8388608 || manifest.sources[key] && manifest.sources[key].officeParent === key)
       var sourceText = structured ? __ : self._readSource(src)
       if (structured || office && src._officeTruncated) {
@@ -1415,6 +1424,7 @@ MiniAIngest.prototype.run = function() {
     }
     result.ok = !incomplete; result.sync_complete = !incomplete && (result.missing_sources.length === 0 || prune && !Object.keys(manifest.sources).some(function(k) { return manifest.sources[k].scopeId === scope && result.missing_sources.indexOf(manifest.sources[k].source) >= 0 })) && result.unresolved.length === 0
     if (result.skipped_model && result.skipped_model.length > 0) result.sync_complete = false
+    if (a.ingeststudiosource === true && result.skipped_oversized.length > 0) result.sync_complete = false
     result.status = incomplete ? result.written.length || result.removed.length ? "partial" : "blocked" : result.written.length || result.removed.length || migration || result.recovered || result.serving_recovered ? "complete" : "noop"
     return result
   } catch(e) {
@@ -1627,7 +1637,9 @@ MiniAIngest.prototype._readSource = function(src) {
       loadLib(__miniAPath("js/core/mini-a-utils.js"))
       var file = new java.io.File(String(src.path)).getCanonicalFile()
       var tool = new MiniUtilsTool({ root: String(file.getParent()), readwrite: false })
-      var maxBytes = Math.max(1, Math.floor(this._num("ingestmaxfilekb", 512) * 1024))
+      var maxKb = this._num("ingestmaxfilekb", 512)
+      if (__miniAIsOfficeDocument(rel)) maxKb = this._num("ingestmaxofficefilekb", maxKb)
+      var maxBytes = Math.max(1, Math.floor(maxKb * 1024))
       var title = String(src.rel || file.getName()).replace(/\.[^.]+$/, "").replace(/[-_]/g, " ")
       var output
       if (/\.(png|jpe?g)$/i.test(rel)) {
@@ -1642,11 +1654,11 @@ MiniAIngest.prototype._readSource = function(src) {
       }
       output = tool.readDocument({ path: String(file), maxBytes: maxBytes, maxChars: 1000000 })
       if (isString(output)) throw new Error(output)
-      if (!isString(output.text) || !output.text.trim()) throw new Error(output.message || "no text extracted")
       if (output.truncated === true) {
         src._officeTruncated = true
         throw new Error("document text was truncated")
       }
+      if (!isString(output.text) || !output.text.trim()) throw new Error(output.message || "no text extracted")
       return "# " + title + "\n\n" + output.text
     } catch(e) {
       this._log("[ingest] Extraction failed for " + rel + ": " + __miniAErrMsg(e))

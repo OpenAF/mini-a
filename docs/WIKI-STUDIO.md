@@ -237,9 +237,8 @@ an older import under `files` (or `expanded` for ZIPs), explicitly use that sect
 Stage first, then choose Preview or Apply; filenames never select a destination.
 Preview is the ingestion engine's dry run, not a guaranteed model-generated diff.
 Auto/normalize/raw/distill, source/flat layout, section, include/exclude, prune and
-explicit semantic settings map to the existing bounded engine. `maxfilesize` is
-translated to HEAD's `ingestmaxfilekb`; selected file-count limits are checked by
-Studio before dispatch. Studio defaults to **Normalize** when the main model is
+explicit semantic settings map to the existing bounded engine. Studio checks
+the file-count limit against original source files before dispatch. Studio defaults to **Normalize** when the main model is
 unavailable. **Raw** also skips distillation. For a mixed source, the preview lists
 images that require a vision model. **Import eligible files** preserves existing
 pages for skipped files and keeps a partially imported ad-hoc source available
@@ -252,22 +251,26 @@ individual files, from a folder, or in one ZIP. Office, RTF and PDF text extract
 uses the Tika oPack on the Studio server. Preinstall it with `opack install Tika`
 for offline use. Scanned PDFs require OCR, which is disabled during ingestion.
 
-Uploads stream one file per request to disk. The default per-source file quota
-is 8 MiB. To raise it, restart Studio with a launch argument such as
-`studiomaxsourcebytes=33554432` (32 MiB), then set **Maximum file size (bytes)**
-under the import workflow's **Advanced options**. Save the workflow defaults
-to reuse that value for the wiki. The launch argument applies to individual
-uploads, ZIP members and local source snapshots. Set `studiomaxbatchbytes`
-to raise the 64 MiB total for an upload, expanded ZIP, or local snapshot.
-Raise both launch settings to admit a single source larger than 64 MiB.
-These launch settings govern intake. The import workflow still applies its
-selected maximum file size and the document extractor’s text limits.
+Uploads stream one file per request to disk. Studio defaults to 128 MiB per
+Word, Excel or PowerPoint file and 8 MiB per other file, with 256 MiB per
+upload, expanded ZIP, or local snapshot. The same limits apply to worker
+revalidation. To change the ceilings, restart Studio with
+`studiomaxsourcebytes`, `studiomaxofficesourcebytes`, or `studiomaxbatchbytes`
+in bytes. An explicit `studiomaxsourcebytes` also sets the Office ceiling
+unless `studiomaxofficesourcebytes` is set.
+
+The import inherits those per-format limits by default. **File size override
+(bytes)** in **Advanced options** applies an explicit limit to all original
+files, subject to their server ceilings. Existing saved overrides still apply.
+Clear the field to use the inherited limits for one run, or clear it and save
+the wiki defaults to use those limits for future imports.
 
 For Excel, Word and PowerPoint documents, **Office extraction** in Advanced
 options defaults to `auto`. It stages parts for Office files above 8 MiB or
 when the ordinary text extractor reaches its character limit. Select `always`
 for small documents you want to browse as an index with child pages. Select
-`off` to use ordinary extraction. The CLI accepts the same `officeparts`
+`off` to use ordinary extraction. Office files that need the larger automatic
+allowance are skipped in that mode. The CLI accepts the same `officeparts`
 option. Structured pages preserve the original text and source locations and use
 normalization for the Office parts.
 Run Preview to inspect the proposed index and parts before applying.
@@ -279,7 +282,7 @@ default staging budget is 256 MiB per import. Change it with
 `studiomaxstagebytes` in Studio or `maxstagebytes` on the CLI. Some legacy
 documents can exceed the reader heap before it emits their text.
 
-ZIP limits include 20 MiB per archive, 2,000 entries, a 64 MiB expanded batch by default,
+ZIP limits include 20 MiB per archive, 2,000 entries, a 256 MiB expanded batch by default,
 depth 16 and expansion ratio 100.
 ZIP preflight rejects encrypted/special/symlink entries, traversal, duplicate
 case-folded paths, unsupported members, ZIP64 and multipart archives. Extraction

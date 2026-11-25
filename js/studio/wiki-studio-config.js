@@ -65,18 +65,22 @@ var wikiStudioConfig = function(args, base) {
     directories=directories.map(function(d){WikiStudio.fields(d,["id","path"]);WikiStudio.name(d.id);WikiStudio.assert(!seen[d.id],400,"invalid_config","Duplicate directory ID");seen[d.id]=true;WikiStudio.noLinks(d.path);var path=WikiStudio.canonical(d.path);WikiStudio.assert(new java.io.File(path).isDirectory()&&!WikiStudio.inside(path,home)&&path.split("/").length>3&&!/(?:^|\/)\.[^/]+/.test(path),400,"invalid_config","Choose a dedicated visible source directory");return{id:d.id,path:path,identity:WikiStudio.identity(path)}})
   }
   // Keep quota arithmetic within the exact JavaScript integer range.
-  var maxBatchBytes = Number(isDef(args.studiomaxbatchbytes) ? args.studiomaxbatchbytes : 67108864)
+  var maxBatchBytes = Number(isDef(args.studiomaxbatchbytes) ? args.studiomaxbatchbytes : 268435456)
   WikiStudio.assert(maxBatchBytes >= 1 && maxBatchBytes <= 9007199254740991 && Math.floor(maxBatchBytes) === maxBatchBytes,
     400, "invalid_config", "studiomaxbatchbytes must be a positive safe integer")
   var maxSourceBytes = Number(isDef(args.studiomaxsourcebytes) ? args.studiomaxsourcebytes : 8388608)
   WikiStudio.assert(maxSourceBytes >= 1 && maxSourceBytes <= 9007199254740991 && Math.floor(maxSourceBytes) === maxSourceBytes,
     400, "invalid_config", "studiomaxsourcebytes must be a positive safe integer")
+  var officeDefault = isDef(args.studiomaxsourcebytes) ? maxSourceBytes : 134217728
+  var maxOfficeSourceBytes = Number(isDef(args.studiomaxofficesourcebytes) ? args.studiomaxofficesourcebytes : officeDefault)
+  WikiStudio.assert(maxOfficeSourceBytes >= 1 && maxOfficeSourceBytes <= 9007199254740991 && Math.floor(maxOfficeSourceBytes) === maxOfficeSourceBytes,
+    400, "invalid_config", "studiomaxofficesourcebytes must be a positive safe integer")
   var maxStageBytes = Number(isDef(args.studiomaxstagebytes) ? args.studiomaxstagebytes : 268435456)
   WikiStudio.assert(maxStageBytes >= 1 && maxStageBytes <= 9007199254740991 && Math.floor(maxStageBytes) === maxStageBytes,
     400, "invalid_config", "studiomaxstagebytes must be a positive safe integer")
-  var c = { maxSourceBytes: maxSourceBytes, maxBatchBytes: maxBatchBytes, maxStageBytes: maxStageBytes, home: home, roots: roots, host: host, origin: origin, port: port, token: token, openBrowser: !(args.openbrowser === false || String(args.openbrowser) === "false"), graphNonce: WikiStudio.id(), maxPageBytes: 1048576, maxBodyBytes: 2097152, workers: 2, base: __miniAPath(".", base) }
+  var c = { maxSourceBytes: maxSourceBytes, maxOfficeSourceBytes: maxOfficeSourceBytes, maxBatchBytes: maxBatchBytes, maxStageBytes: maxStageBytes, home: home, roots: roots, host: host, origin: origin, port: port, token: token, openBrowser: !(args.openbrowser === false || String(args.openbrowser) === "false"), graphNonce: WikiStudio.id(), maxPageBytes: 1048576, maxBodyBytes: 2097152, workers: 2, base: __miniAPath(".", base) }
   c.directories=directories
   ;["sources", "jobs", "backups", "graph-cache", "locks", "audit"].forEach(function(d) { WikiStudio.privateDir(home + "/" + d) })
-  WikiStudio.atomic(home + "/config.json", { version: 1, host: c.host, port: port, roots: roots, maxPageBytes: c.maxPageBytes, maxSourceBytes: c.maxSourceBytes, maxBatchBytes: c.maxBatchBytes, maxStageBytes: c.maxStageBytes, workers: c.workers })
+  WikiStudio.atomic(home + "/config.json", { version: 1, host: c.host, port: port, roots: roots, maxPageBytes: c.maxPageBytes, maxSourceBytes: c.maxSourceBytes, maxOfficeSourceBytes: c.maxOfficeSourceBytes, maxBatchBytes: c.maxBatchBytes, maxStageBytes: c.maxStageBytes, workers: c.workers })
   return c
 }

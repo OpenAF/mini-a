@@ -189,12 +189,12 @@ MiniAAdvanced.prototype._get = function(uuid) {
     validateOption: function(key) {
       if (self.isServerOption(key)) throw new Error(key + " is controlled by the server/session and requires server configuration")
     },
-    ask: function(type, label, choices, value) {
+    ask: function(type, label, choices, value, privatePrompt) {
       var runToken = global.__runTokens[uuid]
       state.askLock.lock()
       try {
         if (state.cancelled || state.closed || isDef(runToken) && global.__runTokens[uuid] !== runToken) throw new Error("Command cancelled")
-        var pending = { id: genUUID(), type: type, label: label, choices: choices || [], value: value || "", runId: runToken }
+        var pending = { id: genUUID(), type: type, label: label, choices: choices || [], value: value || "", private: privatePrompt === true, runId: runToken }
         function active() {
           var agent = state.runtime.agent()
           return !state.cancelled && !state.closed && (!isObject(agent) || agent._stopRequested !== true) &&
@@ -204,7 +204,7 @@ MiniAAdvanced.prototype._get = function(uuid) {
         try {
           if (!active()) throw new Error("Command cancelled")
           state.pending = pending
-          emit("interaction", pending)
+          if (privatePrompt !== true) emit("interaction", pending)
         } finally { state.lock.unlock() }
         while (state.pending === pending && active()) sleep(100)
         if (!active()) { if (state.pending === pending) state.pending = null; throw new Error("Command cancelled") }
@@ -380,7 +380,7 @@ MiniAAdvanced.prototype.snapshot = function(state, after) {
   var definitions = state.runtime.definitions, defaults = state.runtime.defaultOptions(), options = state.runtime.options(), inherited = this.inheritedOptions(), self = this
   return {
     uuid: state.uuid, runId: global.__runTokens[state.uuid] || null, sequence: state.sequence, busy: !!global.__busy[state.uuid], closed: state.closed,
-    operation: state.operation, operationView: state.operationView, kind: state.kind, pending: state.pending ? this.safe(state.pending) : null,
+    operation: state.operation, operationView: state.operationView, kind: state.kind, pending: state.pending ? (state.pending.private ? state.pending : this.safe(state.pending)) : null,
     subagents: state.runtime.agent() && state.runtime.agent()._subtaskManager && state.runtime.agent()._subtaskManager.progress().length ? this.safe(state.runtime.agent()._subtaskManager.progress()) : state.subagentProgress || [],
     commandMetadata: state.runtime.commandMetadata(), commands: state.runtime.commands(), completions: state.runtime.completions(), events: this.events(state, after, 100),
     settings: Object.keys(definitions).sort().map(function(key) {

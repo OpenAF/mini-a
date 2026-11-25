@@ -62,6 +62,7 @@ if (!global.__miniAMemoryProcessOwner) global.__miniAMemoryProcessOwner = new ja
 
 var MiniA = function() {
   this._userInputFn = __
+  this._mcpContinuation = new java.lang.ThreadLocal()
   this._isInitialized = false
   this._isInitializing = false
   this._id = sha384(nowNano()).substr(0, 8)
@@ -771,6 +772,7 @@ loadLib(__miniABundleRoot + "/js/core/mini-a-capabilities.js", true)
 loadLib(__miniABundleRoot + "/js/core/mini-a-decision.js", true)
 loadLib(__miniABundleRoot + "/js/core/mini-a-fork-policy.js", true)
 loadLib(__miniABundleRoot + "/js/core/mini-a-policy.js", true)
+loadLib(__miniABundleRoot + "/js/core/mini-a-mcp-features.js", true)
 
 MiniA.prototype._stopAgentResources = function() {
   // This is invoked both by the console finalizer and by the OpenAF shutdown
@@ -871,6 +873,11 @@ MiniA.prototype.requestStop = function(reason, options) {
 
   if (firstRequest && opts.quiet !== true) {
     this.fnI("stop", stopReason)
+  }
+
+  if (this._activeMcpTasks) {
+    var tasks = this._activeMcpTasks.values().iterator()
+    while (tasks.hasNext()) this._cancelMcpTask(tasks.next())
   }
 
   if (opts.releaseResources !== false) {
@@ -2674,7 +2681,9 @@ MiniA.prototype._writeRunState = function() {
   this._runState.state.updated_at = (new Date()).toISOString()
   var run = this._runState
   sync(function() {
-    var temporary = run.statePath + "." + genUUID() + ".tmp"
+    var temporary = isArray(run.state.mcp_tasks)
+      ? String(java.nio.file.Files.createTempFile(new java.io.File(run.runDir).toPath(), "state-", ".tmp"))
+      : run.statePath + "." + genUUID() + ".tmp"
     try { io.writeFileJSON(temporary, run.state); io.mv(temporary, run.statePath) }
     finally { if (io.fileExists(temporary)) io.rm(temporary) }
   }, run.statePath)
@@ -2742,6 +2751,7 @@ MiniA.prototype.getRunStatus = function(runId, args) {
   var statePath = root + "/" + runId + "/state.json"
   if (!io.fileExists(statePath)) return { ok: false, error: "run not found", run_id: runId }
   var state = io.readFileJSON(statePath)
+  delete state.mcp_tasks
   return { ok: true, run_id: runId, state: state, trace: root + "/" + runId + "/trace.jsonl" }
 }
 
@@ -2758,6 +2768,7 @@ MiniA.prototype._beginRun = function(args) {
   if (resumed && !isObject(state)) throw "Run not found: " + runId
   if (!isObject(state)) state = { version: 1, run_id: runId, parent_run_id: isString(args.parentrunid) ? args.parentrunid : __, goal: this._runSafeValue(args.goal || ""), status: "running", created_at: (new Date()).toISOString(), tasks: {}, checkpoints: 0, resume_count: 0 }
   if (resumed) {
+    if (!args.goal && isString(state.goal)) args.goal = state.goal
     if (state.status === "complete") throw "Run is already complete: " + runId
     state.resume_count = (isNumber(state.resume_count) ? state.resume_count : 0) + 1
     if (state.supervised) {
@@ -9607,6 +9618,10 @@ MiniA.prepareWebSession = function(uuid) {
     var agent = new MiniA()
     global.__preparedConversations[uuid] = agent
     global.__lastActivity[uuid] = now()
+    if (state) {
+      args.__interaction_source = "mini-a-web"
+      args.__mcpPromptPrewarm = true
+    }
     agent.prepareSession(args)
     return { prepared: true }
   } finally { global.__sessionLock.unlock() }
@@ -9748,7 +9763,7 @@ MiniA.prototype.prepareSession = function(args) {
       })
     } catch(ignoreWikiPreparation) { /* foreground init reports configuration errors */ }
   }
-  var mcp = { kind: "mcp", entries: [] }
+  var mcp = { kind: "mcp", entries: [], interactionArgs: snapshot }
   try {
     var normalized = this._normalizeMcpJobPaths(snapshot.mcp, [String(new java.io.File(".").getCanonicalPath()), snapshot._agentBaseDir, getOPackPath("mini-a")])
     var configs = isString(normalized.mcp) ? af.fromJSSLON(normalized.mcp) : (normalized.mcp || [])
@@ -9798,7 +9813,7 @@ MiniA.prototype._scheduleStartupMcp = function(batch) {
         try {
           if (batch.closed || parent._resourcesStopped) { entry.closed = true; continue }
           entry.hooks = {}
-          entry.client = parent._newStartupMcpClient(entry.config, entry.hooks)
+          entry.client = parent._newStartupMcpClient(entry.config, entry.hooks, batch.interactionArgs)
           entry.client.initialize()
           entry.client.__miniAPreinitialized = true
         } catch(e) {
@@ -9825,14 +9840,16 @@ MiniA.prototype._scheduleStartupMcp = function(batch) {
   }
 }
 
-MiniA.prototype._newStartupMcpClient = function(config, hooks) {
-  var client = $mcp(merge(config, {
+MiniA.prototype._newStartupMcpClient = function(config, hooks, interactionArgs) {
+  var external = ["dummy", "ojob"].indexOf(String(config.type || "").toLowerCase()) < 0
+  var options = external ? merge({ protocolVersion: "auto", tasks: true }, config) : config
+  var client = $mcp(merge(options, {
     shared: false,
     preFn: function(t, a) { if (isFunction(hooks.preFn)) hooks.preFn(t, a) },
     posFn: function(t, a, r) { if (isFunction(hooks.posFn)) hooks.posFn(t, a, r) }
   }))
   client.__miniAStartupHooks = hooks
-  return client
+  return external ? this._configureMcpClient(client, config, interactionArgs) : client
 }
 
 MiniA.prototype._takeStartupMcp = function(config, hooks) {
@@ -9861,6 +9878,7 @@ MiniA.prototype._takeStartupMcp = function(config, hooks) {
     entry.client = __ // ownership transfers to the agent/proxy cleanup paths
   }, batch.lock)
   if (!client) return __
+  if (client.__miniAMcpIdentity) client.__miniAMcpIdentity = this._mcpServerIdentity(config)
   if (hooks) {
     client.__miniAStartupHooks.preFn = hooks.preFn
     client.__miniAStartupHooks.posFn = hooks.posFn
@@ -13529,8 +13547,12 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
             toolPayload = merge({}, payload)
             toolPayload._renderArgs = renderArgs
           }
-          var result = parent._runRawOutputGuarded(function() { return fileTool[name](toolPayload) })
-          if (name === "skills" || name === "skill") {
+          var skillTool = name === "skills" || name === "skill"
+          var remoteSkill = skillTool && isString(payload.name) && payload.name.indexOf("mcp:") === 0
+          var result = remoteSkill ? parent._remoteSkillToolResult(payload) :
+            parent._runRawOutputGuarded(function() { return fileTool[name](toolPayload) })
+          if (skillTool && !remoteSkill) {
+            result = parent._remoteSkillToolResult(payload, result)
             _logSkillSourceUsage(payload, result)
             if (isMap(result) && !result.error) parent._recordSkillContent("local:" + result.name, result)
           }
@@ -14532,7 +14554,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         if (!isObject(entry)) return
         if (!isObject(entry.client) || typeof entry.client.listTools !== "function") return
         try {
-          var listResult = entry.client.listTools()
+          var listResult = parent._listMcpToolCatalog(entry.client)
           var extracted = helpers.extractTools(listResult)
           entry.tools = extracted.tools
           parent._registerToolCacheClient("proxy:" + id, entry.client, entry.tools)
@@ -14578,7 +14600,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         if (forceFreshClient === true && isObject(existing) && isObject(existing.client) && typeof existing.client.destroy === "function") {
           try { existing.client.destroy() } catch(ignoreDestroyExisting) {}
         }
-        client = $mcp(merge(configObject, { shared: true }))
+        client = parent._newStartupMcpClient(configObject, {})
         try {
           client.initialize()
         } catch(e) {
@@ -14588,7 +14610,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
 
       var listResult
       try {
-        listResult = client.listTools()
+        listResult = parent._listMcpToolCatalog(client)
         if (!isMap(listResult) || !isArray(listResult.tools)) throw new Error("Invalid MCP catalog")
       } catch(e) {
         if (isObject(client) && typeof client.destroy === "function") {
@@ -14596,10 +14618,10 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         }
         if (client.__miniAPreinitialized !== true) throw new Error("Failed to list tools for MCP connection #" + (index + 1) + " in proxy: " + e.message)
         if (parent._startupTimings) parent._startupTimings.mcp_reused--
-        client = $mcp(merge(configObject, { shared: true }))
+        client = parent._newStartupMcpClient(configObject, {})
         try {
           client.initialize()
-          listResult = client.listTools()
+          listResult = parent._listMcpToolCatalog(client)
         } catch(reconnectError) {
           try { client.destroy() } catch(ignoreReconnectClose) {}
           throw reconnectError
@@ -14608,6 +14630,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
 
       var extracted = helpers.extractTools(listResult)
       parent._registerToolCacheClient("proxy:" + connectionId, client, extracted.tools)
+      parent._describeMcpFeatures(client, args)
       var alias = helpers.ensureAlias(connectionId)
 
       state.connections[connectionId] = {
@@ -15826,6 +15849,11 @@ MiniA.prototype._invokeMcpTool = function(connectionId, client, toolInfo, params
   var capabilityKey = connectionId + ":" + toolName
   var capabilityFailures = this._runtime ? (this._runtime.capabilityFailures || (this._runtime.capabilityFailures = {})) : {}
   if (capabilityFailures[capabilityKey] >= 2) return { error: "Repeated capability failure for " + toolName + ". Use a different permitted tool or report the unavailable capability; equivalent calls are stopped for this run.", blocked: true, retryable: false }
+  var fingerprint = isString(client.__miniAMcpIdentity)
+    ? sha256(this._stableStringify([client.__miniAMcpIdentity, toolName, params])) : __
+  if (this._recoveredMcpTasks && isDef(this._recoveredMcpTasks[fingerprint])) {
+    return this._recoveredMcpTasks[fingerprint]
+  }
   var cacheConfig = this._computeToolCacheSettings(toolInfo, this._toolCacheDefaultTtl)
   var shouldCache = !this._supervised && opts.proxyEnvelope !== true &&
     ["userInput", "question"].indexOf(toolName) < 0 && !MiniA._isCommsTool(toolName, params) && cacheConfig.enabled === true
@@ -15864,7 +15892,9 @@ MiniA.prototype._invokeMcpTool = function(connectionId, client, toolInfo, params
       if (opts.initialize === true) parent._ensureConnectionInitialized(connectionId)
       try {
         var call = client.__miniAOriginalCallTool || client.callTool
-        return call.call(client, toolName, params, opts.meta)
+        return parent._withMcpPromptOwner(client, function() {
+          return call.call(client, toolName, params, opts.meta)
+        })
       } catch(err) {
         if (opts.singleAttempt === true || (!hints.readOnly && !hints.idempotent)) {
           var message = "MCP '" + toolName + "' response was lost after dispatch; the operation may have completed. " + __miniAErrMsg(err)
@@ -15885,6 +15915,15 @@ MiniA.prototype._invokeMcpTool = function(connectionId, client, toolInfo, params
         if (isObject(category) && category.type === "transient") parent._recordCircuitFailure(connectionId, { tool: toolName, message: err && err.message })
       }
     })
+    if (__miniAMcpPending(result)) {
+      shouldCache = false
+      var owner = __miniAMcpCallingAgent.get() || this
+      result = isMap(opts.meta) && Object.keys(opts.meta).length > 0
+        ? __miniAMcpFailure("MCP continuation requires the connection's configured transport options.")
+        : owner._resolveMcpPending(client, toolName, params, result, fingerprint, callContext)
+      var hooks = client.__miniAStartupHooks
+      if (hooks && isFunction(hooks.posFn)) hooks.posFn(toolName, params, result)
+    }
   } catch(e) {
     this._logToolUsage(toolName, params, { error: __miniAErrMsg(e) }, { connectionId: connectionId, fromCache: false, error: true })
     throw e
@@ -19477,6 +19516,7 @@ MiniA.prototype.init = function(args) {
       this._mcpConnectionAliasToId = {}
     }
     var aggregatedMcpConfigs = []
+    this._mcpInteractionArgs = args
     if (needMCPInit) {
       if (isDef(args.mcp)) {
         var parsedMcpConfigs = af.fromJSSLON(args.mcp)
@@ -19594,6 +19634,7 @@ MiniA.prototype.init = function(args) {
                 }
               },
               posFn : (t, a, r) => {
+                if (__miniAMcpPending(r) || parent._mcpContinuation.get() !== null) return
                 var hasError = isMap(r) && (isDef(r.error) || r.isError === true)
                 var isProxyDispatch = isEmbeddedProxy && t === "proxy-dispatch"
                 var statsName = t
@@ -19659,7 +19700,7 @@ MiniA.prototype.init = function(args) {
 
           var tools
           try {
-            tools = this._timeStartup("mcp_catalog", function() { return mcp.listTools() })
+            tools = this._timeStartup("mcp_catalog", function() { return parent._listMcpToolCatalog(mcp) })
             if (!isMap(tools) || !isArray(tools.tools)) throw new Error("Invalid MCP catalog")
           } catch(catalogError) {
             if (mcp.__miniAPreinitialized !== true) throw catalogError
@@ -19669,7 +19710,7 @@ MiniA.prototype.init = function(args) {
             this._mcpConnections[id] = mcp
             if (this._startupTimings) this._startupTimings.mcp_reused--
             this._timeStartup("mcp_initialize", function() { mcp.initialize() })
-            tools = this._timeStartup("mcp_catalog", function() { return mcp.listTools() })
+            tools = this._timeStartup("mcp_catalog", function() { return parent._listMcpToolCatalog(mcp) })
           }
           mcp.__miniAPreinitialized = false
           if (this._resourcesStopped) {
@@ -19691,6 +19732,7 @@ MiniA.prototype.init = function(args) {
             throw new Error(`MCP connection ${index + 1} failed or returned no tools.`)
           }
           
+          this._describeMcpFeatures(mcp, args)
           this._registerToolCacheClient(id, mcp, tools)
 
           // Store connection and map tools to this connection
@@ -20275,6 +20317,7 @@ MiniA.prototype.startUnlocked = function(args) {
     this._executionRepairChecks = {}
     this._executionReconcileReviews = {}
     this._lastStartArgs = args
+    this._recoveredMcpTasks = __
     var sessionStartTime = now()
     var runResult = __
     var runStatus = "failed"
@@ -21277,6 +21320,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
 
     this._timeStartup("goal_tools", function() { this._registerMcpToolsForGoal(args) }.bind(this))
+    var recoveredMcpTasks = this._recoverMcpTasks(args)
     var skillBlocked = this._timeStartup("skills", function() {
       return this._consultSkillsForRun(args, { beforeCall: addCall, afterCall: registerCallUsage })
     }.bind(this))
@@ -21877,6 +21921,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
     runtime.advisorTrace = []
     runtime.hardDecisionMode = hardDecisionMode
+    recoveredMcpTasks.forEach(function(task) {
+      var normalized = this._normalizeToolResult(task.result)
+      runtime.context.push("[RECOVERED MCP TOOL RESULT] " + task.tool + " (" + task.id + ")\n" + normalized.display)
+    }, this)
     runtime.hardDecisionCheckpoints = []
     runtime.evidenceGate = { enabled: evidenceGateEnabled, strictness: evidenceGateStrictness }
 

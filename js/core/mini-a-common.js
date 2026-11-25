@@ -4,7 +4,12 @@
 
 // Document extensions accepted by wiki ingestion through the Tika oPack.
 function __miniAIsTikaDocument(path) {
-  return /\.(docx?|xlsx?|pptx?|rtf|pdf)$/i.test(path)
+  return __miniAIsOfficeDocument(path) || /\.(rtf|pdf)$/i.test(path)
+}
+
+// Office formats with a structured ingestion reader.
+function __miniAIsOfficeDocument(path) {
+  return /\.(docx?|xlsx?|pptx?)$/i.test(path)
 }
 
 // Per-instance policy: never install a process-global IO hook (web sessions share a JVM).

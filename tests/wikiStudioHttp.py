@@ -82,7 +82,7 @@ env["STUDIO_TOKEN"] = token
 for variable in ("OAF_MODEL", "OAF_LC_MODEL", "OAF_DECIDE_MODEL", "OAF_VISUAL_MODEL", "OAF_EMBED_MODEL"):
     env.pop(variable, None)
 log = open(temp / "server.log", "w")
-proc = subprocess.Popen([shutil.which("ojob") or "ojob", str(base / "mini-a-wiki-studio.yaml"), f"onport={port}", f"studiohome={temp / 'state'}", "studioallowroots=" + json.dumps([str(root)]), "studiomaxsourcebytes=69206016", "studiomaxbatchbytes=70254592", "openbrowser=false"], cwd=temp, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+proc = subprocess.Popen([shutil.which("ojob") or "ojob", str(base / "mini-a-wiki-studio.yaml"), f"onport={port}", f"studiohome={temp / 'state'}", "studioallowroots=" + json.dumps([str(root)]), "openbrowser=false"], cwd=temp, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 try:
     deadline = time.monotonic() + 40
     while True:
@@ -107,11 +107,12 @@ try:
     request("session", headers={"Origin": "https://evil.invalid"}, status=403)
     for name in ["a", "b"]:
         request("wikis", "POST", {"id": name, "name": name.upper(), "root": str(root / name), "access": "rw"})
-    # A raised quota must pass settings validation, upload and source inventory.
+    # The default Office quota reaches Preview and Apply without model credentials.
     settings_path = "wikis/a/settings/ingestion"
     settings = request(settings_path)
     assert settings["effective"]["maxfilesize"] == 8388608
-    assert settings["limits"]["maxfilesize"] == 69206016
+    assert settings["maxfilesizeInherited"]
+    assert settings["limits"] == {"maxfilesize": 134217728, "ordinaryBytes": 8388608, "officeBytes": 134217728}
     large_workbook = io.BytesIO()
     sample = base / "tests" / "fixtures" / "documents" / "sample.xlsx"
     with zipfile.ZipFile(sample) as original, zipfile.ZipFile(large_workbook, "w") as enlarged:
@@ -121,6 +122,11 @@ try:
                 content = content.replace(b"</Types>", b'<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>')
             if name == "xl/_rels/workbook.xml.rels":
                 content = content.replace(b"</Relationships>", b'<Relationship Id="rId99" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>')
+            if name == "xl/worksheets/sheet1.xml":
+                rows = [f'<row r="{i}"><c r="A{i}" t="s"><v>{i - 1}</v></c></row>' for i in range(1, 257)]
+                rows.append('<row r="257"><c r="A257" t="inlineStr"><is><t>Glacierledger</t></is></c></row>')
+                content = ('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' +
+                           ''.join(rows) + '</sheetData></worksheet>').encode()
             enlarged.writestr(name, content)
         with enlarged.open("xl/sharedStrings.xml", "w") as strings:
             strings.write(b'<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">')
@@ -130,19 +136,37 @@ try:
     payload = large_workbook.getvalue()
     large_workbook.close()
     large_size = len(payload)
-    assert 64 * 1024 * 1024 < large_size < 69206016
-    settings = request(settings_path, "PUT", {"maxfilesize": large_size})
-    assert settings["effective"]["maxfilesize"] == large_size
-    request(settings_path, "PUT", {"maxfilesize": 69206017}, status=400)
+    assert 65 * 1024 * 1024 < large_size < 67 * 1024 * 1024
+    request(settings_path, "PUT", {"maxfilesize": 134217729}, status=400)
+    settings = request(settings_path, "PUT", {"concurrency": 2})
+    assert settings["maxfilesizeInherited"]
     large_id = str(uuid.uuid4())
     uploaded = request("uploads", "POST", headers={"X-Upload-ID": large_id, "X-Upload-Path": "large.xlsx"}, raw=payload)
     assert uploaded["checksum"] == hashlib.sha256(payload).hexdigest()
     del payload
-    request("uploads", "POST", headers={"X-Upload-ID": large_id, "X-Upload-Path": "over-batch.md"},
-            raw=b" " * (70254592 - large_size + 1), status=413)
-    request("wikis/a/sources", "POST", {"id": "large", "name": "Large", "type": "upload", "uploadId": large_id, "adhoc": True})
-    preview = job("wikis/a/ingestions", {"sourceId": "large", "revision": large_id, "preview": True, "options": {"mode": "normalize"}})
-    assert preview["result"]["office_documents"][0]["source"] == "large.xlsx"
+    request("uploads", "POST", headers={"X-Upload-ID": large_id, "X-Upload-Path": "oversized.md"},
+            raw=b" " * (8388608 + 1), status=413)
+    request("wikis/a/sources", "POST", {"id": "large", "name": "Large", "type": "upload", "uploadId": large_id})
+    large_run = {"sourceId": "large", "revision": large_id, "preview": True, "options": {"maxfiles": 1}}
+    preview = job("wikis/a/ingestions", large_run)["result"]
+    assert preview["office_documents"][0]["source"] == "large.xlsx"
+    assert preview["office_documents"][0]["parts"] > 1
+    large_apply = job("wikis/a/ingestions", dict(large_run, preview=False))
+    assert large_apply["result"]["written"] == preview["planned_writes"]
+    assert "Reusing staged Office parts" in request("jobs/" + large_apply["id"] + "/events")
+    large_hits = request("wikis/a/search?q=Glacierledger")["results"]
+    assert any(hit.get("sourceFile") == "large.xlsx" and "257" in hit.get("sourceLocation", "") for hit in large_hits)
+    assert job("wikis/a/ingestions", dict(large_run, preview=False))["result"]["skipped_unchanged"] == 1
+    settings = request(settings_path, "PUT", {"maxfilesize": 8388608})
+    assert not settings["maxfilesizeInherited"]
+    assert job("wikis/a/ingestions", large_run)["result"]["skipped_oversized"]
+    override = dict(large_run, options={"tuning": {"maxfilesize": None}})
+    assert job("wikis/a/ingestions", override)["result"]["office_documents"]
+    run_limit = dict(large_run, options={"maxfilesize": large_size - 1})
+    assert job("wikis/a/ingestions", run_limit)["result"]["skipped_oversized"]
+    assert request(settings_path, "PUT", {"maxfilesize": None})["maxfilesizeInherited"]
+    disabled = dict(large_run, options={"officeparts": "off"})
+    assert "Set Office extraction to auto" in job("wikis/a/ingestions", disabled)["result"]["skipped_oversized"][0]
     request(settings_path, "PUT", {})
     # Structured imports preserve original source names and reuse the preview's parts.
     office_id = str(uuid.uuid4())
@@ -170,6 +194,22 @@ try:
     assert any("-parts/" in hit["path"] and hit.get("sourceFile") == "sample.docx" and hit.get("sourceLocation") for hit in office_hits["results"])
     office_again = job("wikis/a/ingestions", dict(office_run, preview=False))["result"]
     assert office_again["skipped_unchanged"] == 2
+    # A small document still falls back if ordinary extraction truncates its text.
+    long_document = io.BytesIO()
+    with zipfile.ZipFile(base / "tests/fixtures/documents/sample.docx") as original, zipfile.ZipFile(long_document, "w") as expanded:
+        for name in original.namelist():
+            content = original.read(name)
+            if name == "word/document.xml":
+                paragraph = b"<w:p><w:r><w:t>" + b"Readable paragraph text. " * 40 + b"</w:t></w:r></w:p>"
+                content = (b'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+                           paragraph * 1050 + b"</w:body></w:document>")
+            expanded.writestr(name, content)
+    assert long_document.tell() < 8388608
+    long_id = str(uuid.uuid4())
+    request("uploads", "POST", headers={"X-Upload-ID": long_id, "X-Upload-Path": "long.docx"}, raw=long_document.getvalue())
+    request("wikis/a/sources", "POST", {"id": "long", "name": "Long document", "type": "upload", "uploadId": long_id})
+    long_result = job("wikis/a/ingestions", {"sourceId": "long", "revision": long_id})["result"]
+    assert long_result["office_documents"][0]["parts"] > 1
     page = request("wikis/a/pages", "POST", {"path": "first.md", "content": "---\r\ntitle: 'First' # keep\r\n---\r\n# First\r\n[[next]]\r\n", "expectedRevision": None})
     assert "# keep\r\n" in page["content"]
     request("wikis/a/page?path=first.md", "PUT", {"content": "# Conflict", "expectedRevision": "old"}, status=409)
@@ -307,7 +347,7 @@ try:
     second_root = temp / "team wikis"
     second_root.mkdir()
     slon_roots = f'["{root}" | "{second_root}"]'
-    proc = subprocess.Popen([shutil.which("ojob") or "ojob", str(base / "mini-a-wiki-studio.yaml"), f"onport={port}", f"studiohome={temp / 'state'}", "studioallowroots=" + slon_roots, "openbrowser=false"], cwd=temp, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    proc = subprocess.Popen([shutil.which("ojob") or "ojob", str(base / "mini-a-wiki-studio.yaml"), f"onport={port}", f"studiohome={temp / 'state'}", "studioallowroots=" + slon_roots, "studiomaxstagebytes=32", "openbrowser=false"], cwd=temp, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     deadline = time.monotonic() + 40
     while True:
         try:
@@ -341,6 +381,11 @@ try:
     only_image = job("wikis/a/ingestions", dict(mixed, options={"include": "figure.png"}))
     assert only_image["result"]["eligible_sources"] == [] and len(only_image["result"]["skipped_model"]) == 1
 
+    # An Office staging failure during reimport preserves the last applied pages.
+    prior_pages = {name: (root / "a" / name).read_bytes() for name in large_apply["result"]["written"]}
+    stage_failure = job("wikis/a/ingestions", dict(large_run, preview=False), expected="recovery-required")["result"]
+    assert any(item["source"] == "large.xlsx" and "staging" in item["error"] for item in stage_failure["failed"]), stage_failure
+    assert prior_pages == {name: (root / "a" / name).read_bytes() for name in prior_pages}
 
     print(f"PASS: {checks} HTTP assertions; real isolated worker, raw ingest, plan, graph, indexes, backup and restore; no model/network")
 finally:

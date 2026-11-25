@@ -8531,7 +8531,11 @@ function MiniAInteractiveSession(args, adapter) {
       stopDream: function() { if (activeDream) activeDream.requestStop() },
       attach: function(agent) {
         activeAgent = agent
-        if (isFunction(agent.setUserInputFn)) agent.setUserInputFn(function(request) { return adapter.ask("input", "Input requested", request.fields) })
+        if (isFunction(agent.setUserInputFn)) agent.setUserInputFn(function(request) {
+          if (request.private === true) return adapter.ask(isArray(request.choices) ? "choice" : "text",
+            request.label, request.choices, request.url ? { url: request.url } : __, true)
+          return adapter.ask("input", "Input requested", request.fields)
+        })
         agent.setHookFn(function(event, vars) { return runHooks(event, vars) })
         agent.setConfirmFn(function(label, choices) { return adapter.ask("choice", label, choices) })
       },

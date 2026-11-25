@@ -1,0 +1,56 @@
+# Run with a modern OpenAF and oJob-common. Use a private taskStore per endpoint.
+include:
+- oJobMCP.yaml
+
+ojob:
+  logToConsole: false
+
+todo:
+- (stdioMCP):
+    serverInfo:
+      name: mini-a-report-preview
+      version: "1"
+  ((modern)): true
+  ((taskStore)): report-preview.mv
+  ((fns)):
+    report_preview: Request report format
+  ((workflows)):
+    report_preview:
+      mode: managed
+      elicitation: true
+      resume: Render report preview
+  ((skills)):
+  - name: report-preview
+    files:
+      SKILL.md: |
+        ---
+        name: report-preview
+        description: Create a report preview from bundled sample data.
+        ---
+        Call the report_preview tool. Wait for the user to select a report format.
+        Present the completed preview. If needed, read references/sample-data.md.
+      references/sample-data.md: |
+        The sample includes 12 received requests, of which 9 are complete and 3 are pending.
+
+jobs:
+- name: Request report format
+  exec: |
+    args.mcpResult = {
+      status: "input_required",
+      form: {
+        message: "Which report format would you like?",
+        requestedSchema: {
+          type: "object",
+          properties: { format: { type: "string", enum: ["summary", "detailed"], default: "summary" } },
+          required: ["format"]
+        }
+      }
+    }
+
+- name: Render report preview
+  exec: |
+    var answer = Object.values(args.mcp.inputResponses)[0]
+    args.text = answer.action !== "accept" ? "Report preview skipped." :
+      answer.content.format === "detailed" ?
+        "Report preview\nReceived: 12\nCompleted: 9\nPending: 3" :
+        "Report preview: 9 of 12 requests completed."
