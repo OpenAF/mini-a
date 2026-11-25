@@ -315,6 +315,20 @@ try {
   waitInput(function(){return inputDone})
   check(isUnDef(secretDescriptor.answer),'public request descriptor never holds plaintext replies')
   check(io.readFileString(inputState.journal).indexOf('transport-secret-fixture')<0,'plaintext replies never enter interaction journal')
+  // MCP prompt details are available only from the owning live session.
+  inputDone=false
+  var privateLabel = 'private-mcp-review'
+  $doV(function() { inputResult=inputFn({private:true,label:privateLabel,choices:['Continue','Cancel'],url:'https://example.test/authorize'});inputDone=true })
+  waitInput(function(){return !!inputState.pending})
+  var privatePrompt = advanced.snapshot(inputState,0).pending
+  check(privatePrompt.label===privateLabel && privatePrompt.value.url==='https://example.test/authorize','owning session can render the private MCP link')
+  check(io.readFileString(inputState.journal).indexOf(privateLabel)<0,'private MCP prompt is absent from the interaction journal')
+  var crossSessionReply = false
+  try { advanced.request({uuid:'input-other',action:'reply',id:privatePrompt.id,answer:0}) } catch(e) { crossSessionReply=true }
+  check(crossSessionReply && !inputDone,'another session cannot answer the MCP prompt')
+  advanced.request({uuid:'input-fixture',action:'reply',id:privatePrompt.id,answer:0})
+  waitInput(function(){return inputDone})
+  check(inputResult===0,'the owning session can continue the MCP prompt')
   inputDone=false
   $doV(function(){try { inputFn({fields:[{type:'text',label:'Stop from Simple',choices:[]}]}) } catch(e) {inputResult=String(e)};inputDone=true})
   waitInput(function(){return !!inputState.pending})

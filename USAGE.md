@@ -2307,7 +2307,24 @@ mini-a goal="check remote server" \
   mcp="(type: remote, url: 'http://localhost:8888/mcp')"
 ```
 
-#### OAuth2 authentication for remote MCP servers
+### MCP Tasks, Elicitation, and Skills
+
+Mini-A automatically discovers the protocol revision and features for external MCP connections. Set `protocolVersion` in a connection descriptor to pin a revision. Tasks and Skills require an OpenAF runtime whose `$mcp` exposes `getTask` and `listSkills`. Elicitation requires `onElicitationRequest`. URL prompts require protocol revision `2025-11-25` or later.
+
+- **Tasks** display progress in the current goal. Use the session's Stop action to request cancellation. When Mini-A receives a task handle, it saves recovery state and prints a run ID. Use `resumerun=<id>` with the same MCP configuration and run root to recover the original operation. Restarting checks the saved task with the original server. Local stdio tasks can also use their checkpointed result after the server expires the handle.
+- **Elicitation** prompts in interactive console, TUI, and web sessions. Review form values before submitting. URL requests show the destination before you can continue to the external site. Unattended workers omit elicitation support.
+- **Skills** use `useskills=true`. Use the existing `skills` tool (or its `skill` alias) to list server-qualified names and read approved instructions or references. Use `$mcp:<server-id>:<skill-id>` in a goal to select a listed skill. For an unlisted skill, use `$mcp:<server-id>:<resource-uri>`. The IDs are those printed in the skill list. Approval applies to the displayed manifest and source. Web approvals belong to the current session. Local approvals are stored for the operating-system user.
+
+To try all three together, run the standalone report-preview example with the current OpenAF and an oJob-common that supports `modern`, `workflows`, and `skills`. The pilot was verified with OpenAF source at `588e9fa8` and oJob-common at `eda15ca`.
+
+```sh
+mini-a 'mcp=[(id: report, type: stdio, cmd: "ojob examples/mcp-report-preview.yaml")]' useskills=true
+```
+
+Enter `$report-preview Generate a preview` as the goal. Approve the skill, choose a report format, then submit the form. The example uses a private `report-preview.mv` state file alongside the YAML. Use a separate copy of the example for each concurrently running endpoint.
+
+
+### OAuth2 authentication for remote MCP servers
 
 Mini-A passes the `auth` map in `mcp=` to OpenAF's `$mcp` client. Generic OAuth2 is supported directly; it is not limited to WorkIQ. These options require an OpenAF runtime containing the corresponding `$mcp` OAuth2 implementation (including callback and token-store support for the example below).
 

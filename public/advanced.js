@@ -610,7 +610,19 @@ window.MiniAAdvancedUI = function(bridge) {
         finally { submit.disabled = false; }
       };
       form.append(error, submit); dialog.append(form);
-    } else if (pending.type === 'choice') pending.choices.forEach((choice,index) => dialog.append(button(asText(choice), () => reply(index))));
+    } else if (pending.type === 'choice') {
+      if (pending.value?.url) {
+        const url = new URL(pending.value.url);
+        if (url.protocol === 'https:') {
+          const link = el('a', 'Open ' + url.host);
+          link.href = url.href;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          dialog.append(link);
+        }
+      }
+      pending.choices.forEach((choice,index) => dialog.append(button(asText(choice), () => reply(index))));
+    }
     else {
       const field = el('textarea'); field.value = pending.value || ''; field.setAttribute('aria-label', pending.label);
       const preview = el('div');

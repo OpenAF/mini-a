@@ -170,7 +170,7 @@ function __miniAInstallSkillRuntime() {
     var content = isString(result.rendered) ? result.rendered : result.body
     if (!isString(content) || content.trim().length === 0) return
     if (result.truncated === true && result.progressive !== true && !isArray(result.pendingSections)) { this._skillRuntime.event("incomplete", { ref: ref }); return }
-    if (isArray(result.referencedFiles) && result.referencedFiles.length) content += "\nSupporting references (load with skills operation=read, name and reference): " + result.referencedFiles.map(function(item) { return item.relativePath || item.path }).join(", ")
+    if (isArray(result.referencedFiles) && result.referencedFiles.length) content += "\nSupporting references (load with skills operation=read, name=" + ref + " and reference): " + result.referencedFiles.map(function(item) { return item.relativePath || item.path }).join(", ")
     var old = this._skillRuntime.records[ref]
     var revision = result.revision || result.fingerprint || ""
     if (old && revision && old.revision && revision !== old.revision) {
@@ -192,7 +192,7 @@ function __miniAInstallSkillRuntime() {
       revision: revision || old && old.revision || "",
       userSelected: candidate && candidate.userSelected === true || old && old.userSelected === true, args: result.args || old && old.args, referenceRevisions: references, pendingSections: pending, candidate: candidate || old && old.candidate
     }
-    if (this._historyVm && this._historyVm.contextVirtualization && !this._historyVm.degraded) this._historyVm.upsertContextSource("skill", ref, this._skillRuntime.records[ref].content, { type: "active_skill", explicitPin: true, provenance: { source: ref, revision: revision } })
+    if ((!candidate || candidate.source !== "mcp") && this._historyVm && this._historyVm.contextVirtualization && !this._historyVm.degraded) this._historyVm.upsertContextSource("skill", ref, this._skillRuntime.records[ref].content, { type: "active_skill", explicitPin: true, provenance: { source: ref, revision: revision } })
     this._skillRuntime.event("active", { ref: ref, partial: result.truncated === true, revision: revision, sections: result.sections || [], pendingSections: pending, references: (result.referencedFiles || []).map(function(item) { return item.relativePath || item.path }) })
     this._syncSkillContext(this._runtime)
   }
@@ -284,16 +284,17 @@ function __miniAInstallSkillRuntime() {
     if (args.useskills !== true && args.useskillswiki !== true && !(isArray(args._skillHandoff) && args._skillHandoff.length)) return []
     runtime.event("consultation_start", { localEnabled: !!localEnabled, wikiEnabled: !!wikiEnabled, automatic: args.skillsautosearch !== false, roots: localEnabled ? utils._skillsRoots || [] : [], hint: "Only explicit requests outside Markdown code are considered." })
     var local = localEnabled ? utils._listSkills({}).map(function(item) { item.id = "local:" + item.name; item.source = "local"; return item }) : []
+    var remote = args.useskills === true ? this._remoteSkillCatalog() : []
     var provider
     if (wikiEnabled) {
       if (typeof MiniAWikiSkillProvider !== "function") loadLib(__miniAPath("js/skills/mini-a-skills.js"))
       provider = new MiniAWikiSkillProvider(this._skillWikiManager, {})
     }
     var requestText = __miniASkillRequestText(args.goal)
-    var explicit = [], mentions = requestText.match(/(?:^|[\s([{])\$([a-z][a-z0-9_:@/.-]*)/ig) || []
+    var explicit = [], mentions = requestText.match(/(?:^|[\s([{])\$(mcp:[^\s]+|[a-z][a-z0-9_:@/.-]*)/ig) || []
     var slash = requestText.match(/^\/([a-z0-9][a-z0-9_-]*)(?=\s|$)/i)
     if (slash) mentions.push("$" + slash[1])
-    mentions = mentions.map(function(value) { var name = value.substring(value.indexOf("$") + 1); return name.indexOf("wiki:") === 0 ? name : name.toLowerCase() })
+    mentions = mentions.map(function(value) { var name = value.substring(value.indexOf("$") + 1); return (name.indexOf("wiki:") === 0 || name.indexOf("mcp:") === 0) ? name : name.toLowerCase() })
     ;(isArray(args._skillHandoff) ? args._skillHandoff : []).forEach(function(item) { if (item && isString(item.ref)) mentions.push(item.ref) })
     runtime.event("requests", { requests: mentions, origin: "goal-or-handoff" })
     var wikiCandidates = []
@@ -302,7 +303,11 @@ function __miniAInstallSkillRuntime() {
       catch(e) { runtime.event("unavailable", { ref: "wiki", reason: __miniAErrMsg(e) }); if (mentions.some(function(value) { return value.indexOf("wiki:") === 0 })) runtime.block("wiki", __miniAErrMsg(e)) }
     }
     mentions.forEach(function(name) {
-      var matches = local.concat(wikiCandidates).filter(function(item) { return item.id === name || item.name === name })
+      var matches = local.concat(wikiCandidates, remote).filter(function(item) { return item.id === name || item.name === name })
+      if (args.useskills === true && name.indexOf("mcp:") === 0 && !matches.length) {
+        var remoteSkill = parent._lookupRemoteSkill(name)
+        if (remoteSkill) matches = [remoteSkill]
+      }
       if (name.indexOf("wiki:") === 0 && provider && !matches.length) {
         var descriptor
         try { descriptor = provider.open(name, { cacheTtlMs: 0 }) }
@@ -311,7 +316,7 @@ function __miniAInstallSkillRuntime() {
       }
       if (matches.length !== 1) {
         var required = (args._skillHandoff || []).some(function(entry) { return entry.ref === name && entry.required === true })
-        var details = { available: local.concat(wikiCandidates).map(function(item) { return item.id }), hint: matches.length ? "Use $local:name or $wiki:path.md to disambiguate." : "Check enabled skill sources and discovery roots." }
+        var details = { available: local.concat(wikiCandidates, remote).map(function(item) { return item.id }), hint: matches.length ? "Use $local:name or $wiki:path.md to disambiguate." : "Check enabled skill sources and discovery roots." }
         if (matches.length || required) runtime.block(name, matches.length ? "ambiguous-skill-use-source-qualified-id" : "requested-skill-unavailable", details)
         else runtime.event("ignored", merge(details, { ref: name, reason: "requested-skill-unavailable", origin: "goal", hint: "No matching skill; continuing the task." }))
       }
@@ -353,7 +358,7 @@ function __miniAInstallSkillRuntime() {
     }
     wikiCandidates = lexicalWikiCandidates.concat(wikiCandidates.filter(function(item) { return semanticSkillIds.indexOf(item.id) >= 0 && !lexicalWikiCandidates.some(function(existing) { return existing.id === item.id }) }))
     var disabledCount = local.filter(function(item) { return parent._skillDisablesModelInvocation(item) }).length
-    var candidates = local.filter(function(item) { return !parent._skillDisablesModelInvocation(item) && (parent._scoreSkillForPrompt(item, args.goal, args.hookcontext) > 1 || semanticSkillIds.indexOf(item.id) >= 0) }).sort(function(a, b) { return parent._scoreSkillForPrompt(b, args.goal, args.hookcontext) - parent._scoreSkillForPrompt(a, args.goal, args.hookcontext) })
+    var candidates = local.concat(remote).filter(function(item) { return item.disableModelInvocation !== true && !parent._skillDisablesModelInvocation(item) && (parent._scoreSkillForPrompt(item, args.goal, args.hookcontext) > 1 || semanticSkillIds.indexOf(item.id) >= 0) }).sort(function(a, b) { return parent._scoreSkillForPrompt(b, args.goal, args.hookcontext) - parent._scoreSkillForPrompt(a, args.goal, args.hookcontext) })
     wikiCandidates = wikiCandidates.filter(function(item) {
       try { var meta = provider.open(item.ref, { cacheTtlMs: 0 }); return meta && !meta.error && !meta.disableModelInvocation }
       catch(e) { runtime.event("unavailable", { ref: item.ref, reason: __miniAErrMsg(e) }); return false }
@@ -416,6 +421,7 @@ function __miniAInstallSkillRuntime() {
         }
         var result
         if (item.source === "local") result = utils.skills({ operation: "render", name: item.name, args: item.invocationArgs || "", progressive: true, maxChars: args.skillcontextchars || 8000, _userSelected: explicit.indexOf(item) >= 0 })
+        else if (item.source === "mcp") result = parent._loadRemoteSkill(item, { maxChars: args.skillcontextchars })
         else {
           var descriptor = utils.skillwiki({ operation: "open", ref: item.ref, cacheTtlMs: 0 })
           if (descriptor.error) throw new Error(descriptor.error)
@@ -425,7 +431,12 @@ function __miniAInstallSkillRuntime() {
         if (!isMap(result) || result.error || !isString(result.rendered) || !result.rendered.trim()) throw new Error(isMap(result) && result.error || "empty-skill-guidance")
         if (item.expectedRevision && (result.fingerprint || result.revision) !== item.expectedRevision) throw new Error("skill-source-revision-changed")
         parent._recordSkillContent(item.id, result, item)
-      } catch(e) { runtime.block(item.id, __miniAErrMsg(e)) }
+      } catch(e) {
+        var reason = __miniAErrMsg(e)
+        if (item.source === "mcp" && explicit.indexOf(item) < 0 && /^remote-skill-(needs-approval|approval-denied)$/.test(reason)) {
+          runtime.event("ignored", { ref: item.id, reason: reason })
+        } else runtime.block(item.id, reason)
+      }
     })
     return runtime.blocked
   }
@@ -435,7 +446,7 @@ function __miniAInstallSkillRuntime() {
     var records = this._skillRuntime.records, parent = this
     return Object.keys(records).filter(function(key) {
       var record = records[key]
-      return record.state === "active" && record.candidate && (parent._scoreSkillForPrompt(record.candidate, goal, "") > 1 || record.candidate.semanticGoal === String(goal))
+      return record.state === "active" && record.candidate && record.candidate.source !== "mcp" && (parent._scoreSkillForPrompt(record.candidate, goal, "") > 1 || record.candidate.semanticGoal === String(goal))
     }).map(function(key) { return { ref: key, revision: records[key].revision, args: records[key].args && records[key].args.raw || "", required: true } })
   }
 
