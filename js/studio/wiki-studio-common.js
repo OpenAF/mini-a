@@ -142,7 +142,8 @@ WikiStudio.scan = function(root, all, metadataOnly, maxFileBytes, maxTotalBytes)
         // Hidden internal files are still fingerprinted and backed up, but they do not count toward the content limits
         if (!WikiStudio.internalPath(rel)) {
           total += Number(f.length())
-          WikiStudio.assert(count < 20000 && total <= maxTotalBytes && f.length() <= maxFileBytes, 413, "inventory_limit", "Wiki inventory exceeds Studio limits")
+          var fileLimit = isFunction(maxFileBytes) ? maxFileBytes(rel) : maxFileBytes
+          WikiStudio.assert(count < 20000 && total <= maxTotalBytes && f.length() <= fileLimit, 413, "inventory_limit", "Wiki inventory exceeds Studio limits")
           count++
         }
         files[rel] = { size: Number(f.length()) }

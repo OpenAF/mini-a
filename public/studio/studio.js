@@ -838,6 +838,29 @@ function metricChart(parent, title, values, unit = "Count") {
 function destroyDetachedCharts() { for (const chart of charts) if (!chart.canvas?.isConnected) { chart.destroy(); charts.delete(chart); } }
 function outcome(parent, result) {
   if (!result) return;
+  // Surface Office parts and skipped sources before the technical result.
+  if (result.office_documents?.length) {
+    var office = el("section", undefined, parent)
+    el("h4", "Office documents split into parts", office)
+    var documents = el("ul", undefined, office)
+    result.office_documents.slice(0, 100).forEach(function(item) {
+      el("li", item.source + " · " + item.parts + " " + (item.parts === 1 ? "part" : "parts") + " · " + item.index, documents)
+    })
+  }
+  if (result.dryrun && result.office_documents?.length && result.planned_writes?.length) {
+    var proposed = el("disclosure", undefined, parent)
+    el("disclosure-toggle", "Proposed pages (" + result.planned_writes.length + ")", proposed)
+    var pages = el("ul", undefined, proposed)
+    result.planned_writes.slice(0, 100).forEach(path => el("li", path, pages))
+    if (result.planned_writes.length > 100) el("li", "See Technical details for the full list.", pages)
+  }
+  if (result.skipped_oversized?.length || result.failed?.length) {
+    var issues = el("section", undefined, parent)
+    el("h4", "Files that could not be processed", issues)
+    var failures = el("ul", undefined, issues)
+    ;(result.skipped_oversized || []).slice(0, 100).forEach(item => el("li", item, failures))
+    ;(result.failed || []).slice(0, 100).forEach(item => el("li", item.source + " · " + item.error, failures))
+  }
   if (result.skipped_model?.length) {
     const section = el("section", undefined, parent)
     el("h4", result.skipped_model.length + " skipped · Vision model required", section)
@@ -1482,19 +1505,32 @@ async function workflowTuning(parent, workflow, labels, wikiId) {
   }
   var settings = await request("GET")
   var inputs = {}
+  // Display inherited file limits separately from the optional override.
+  function inputValue(data, key) {
+    if (key === "maxfilesize" && (data === settings.defaults || settings.maxfilesizeInherited === true && data === settings.effective)) return ""
+    return data[key] === undefined ? "" : String(data[key])
+  }
+
   Object.keys(labels).forEach(function(key) {
     var value = settings.effective[key]
     var input = key === "contextguard" ? check(box, labels[key]) : field(box, labels[key])
     if (key === "contextguard") input.checked = value === true
     else {
       input.type = "number"
-      input.value = value === undefined ? "" : String(value)
+      input.value = inputValue(settings.effective, key)
     }
     if (input.type === "number") {
       input.min = key === "wikiingestbudget" ? "-1" : ["wikiingestmaxcalls", "wikimaxprompttokens"].includes(key) ? "0" : "1"
       input.step = "1"
       if (key === "maxfiles") input.max = "2000"
-      if (key === "maxfilesize" && settings.limits) input.max = String(settings.limits.maxfilesize)
+      if (key === "maxfilesize" && settings.limits) {
+        input.max = String(settings.limits.maxfilesize)
+        input.placeholder = "Automatic"
+        if (settings.limits.ordinaryBytes !== undefined) {
+          var hint = el("span", "Automatic allows " + bytes(settings.limits.ordinaryBytes) + " per ordinary file and " + bytes(settings.limits.officeBytes) + " per Office file.", input.parentElement)
+          hint.className = "muted"
+        }
+      }
       if (key === "dreammaxsteps") input.max = "100"
       if (key === "limit") input.max = "200"
     }
@@ -1512,7 +1548,7 @@ async function workflowTuning(parent, workflow, labels, wikiId) {
           throw new Error("Enter a whole number for " + labels[key] + " (minimum " + input.min + (input.max ? ", maximum " + input.max : "") + ")")
         }
         out[key] = Number(input.value)
-      }
+      } else if (key === "maxfilesize" && inputValue(settings.effective, key) !== "") out[key] = null
     })
     return out
   }
@@ -1520,7 +1556,7 @@ async function workflowTuning(parent, workflow, labels, wikiId) {
   function customized() {
     var changed = Object.keys(inputs).some(function(key) {
       var input = inputs[key]
-      return key === "contextguard" ? input.checked !== settings.effective[key] : input.value !== String(settings.effective[key] === undefined ? "" : settings.effective[key])
+      return key === "contextguard" ? input.checked !== settings.effective[key] : input.value !== inputValue(settings.effective, key)
     })
     toggle.textContent = "Advanced options" + (changed ? " · Customized" : "")
   }
@@ -1528,13 +1564,14 @@ async function workflowTuning(parent, workflow, labels, wikiId) {
   function apply(data) {
     Object.keys(inputs).forEach(function(key) {
       if (key === "contextguard") inputs[key].checked = data[key] === true
-      else inputs[key].value = data[key] === undefined ? "" : String(data[key])
+      else inputs[key].value = inputValue(data, key)
     })
     customized()
   }
   button(box, "Reset to saved defaults", function() { apply(settings.effective) })
   disable(button(box, "Save defaults for this wiki", async function() {
     settings = await request("PUT", values())
+    apply(settings.effective)
     message("Defaults saved")
   }), writeReason())
   button(box, "Restore built-in defaults", function() { apply(settings.defaults) })
@@ -1824,7 +1861,7 @@ async function sourcesView(content) {
     if (modelOption(mode, "distill", "distill")) mode.value = "normalize"
     modelOption(importReconcile, "hybrid", "embeddings")
     modelOption(importValidation, "auto", "relationshipValidation")
-    var tuning = await workflowTuning(advanced, "ingestion", { maxfiles: "Maximum files", maxfilesize: "Maximum file size (bytes)", wikiingestmaxcalls: "Distillation calls per source (0 disables split recovery)", wikiingestbudget: "Estimated operation tokens (-1 unlimited; 0 defers model work)", wikimaxprompttokens: "Prompt tokens (0 automatic)", chunkchars: "Chunk characters", concurrency: "Concurrent distillations" })
+    var tuning = await workflowTuning(advanced, "ingestion", { maxfiles: "Maximum files", maxfilesize: "File size override (bytes)", wikiingestmaxcalls: "Distillation calls per source (0 disables split recovery)", wikiingestbudget: "Estimated operation tokens (-1 unlimited; 0 defers model work)", wikimaxprompttokens: "Prompt tokens (0 automatic)", chunkchars: "Chunk characters", concurrency: "Concurrent distillations" })
     var officeParts = field(tuning.box, "Office extraction", ["auto", "always", "off"], "auto")
     var force = check(tuning.box, "Force reprocessing")
     const actions=row(body),result=el("div",undefined,body);let approved=null,expectedModelSkips,working=false;
@@ -1840,16 +1877,18 @@ async function sourcesView(content) {
       try {const job=await queue("ingestions",{sourceId:source.id,revision:source.revision,preview:true,options:options(),confirmation:{acknowledgePrune:prune.checked}});const finished=await job.finished;
         result.replaceChildren();outcome(result,finished.result);
         const skipped = finished.result?.skipped_model || []
+        const oversized = finished.result?.skipped_oversized || []
         const eligible = finished.result?.eligible_sources
+        const noEligible = (skipped.length || oversized.length) && !eligible?.length
         expectedModelSkips = Array.isArray(eligible) ? skipped.map(item => item.path) : undefined
-        if (finished.status === "completed" && requested === signature() && !(skipped.length && !eligible?.length)) {
+        if (finished.status === "completed" && requested === signature() && !noEligible) {
           approved = requested
           apply.disabled = !!writeReason()
-          apply.textContent = skipped.length ? "Import eligible files" : "4. Import into wiki"
+          apply.textContent = skipped.length || oversized.length ? "Import eligible files" : "4. Import into wiki"
           el("p", "Preview ready. Review the result, then import.", result)
         } else {
           approved = null
-          el("p", skipped.length && !eligible?.length ? "Every selected file requires a vision model." : "Preview is unavailable or options changed. Run Preview changes again.", result)
+          el("p", noEligible ? "No files are eligible for import. Review the skipped files and preview again." : "Preview is unavailable or options changed. Run Preview changes again.", result)
         }
       }finally{working=false;if(preview.isConnected)preview.disabled=!!writeReason();}
     });disable(preview,writeReason());
@@ -1858,7 +1897,7 @@ async function sourcesView(content) {
       const latest=await allItems(wikiPath("sources"));if(latest.find(x=>x.id===source.id)?.revision!==source.revision){approved=null;apply.disabled=true;throw new Error("Source revision changed. Select the current source from the library and preview again.");}
       if(prune.checked&&!(await askConfirmation("Remove source-owned pages missing from this revision? Engine conflict checks still protect manual edits.")))return;
       apply.disabled=true;const job=await queue("ingestions",{sourceId:source.id,revision:source.revision,preview:false,options:options(),expectedModelSkips,confirmation:{acknowledgePrune:prune.checked}});approved=null;
-      const finished=await job.finished;if(result.isConnected){result.replaceChildren();el("h4",human(finished.status),result);outcome(result,finished.result);button(result,"Inspect activity",()=>jobDetail(job.id));if(source.adhoc&&finished.status==="completed"&&!finished.result?.skipped_model?.length)el("p","Ad-hoc source discarded; it is no longer in the library.",result).className="muted";}
+      const finished=await job.finished;if(result.isConnected){result.replaceChildren();el("h4",human(finished.status),result);outcome(result,finished.result);button(result,"Inspect activity",()=>jobDetail(job.id));if(source.adhoc&&finished.status==="completed"&&!finished.result?.skipped_model?.length&&!finished.result?.skipped_oversized?.length)el("p","Ad-hoc source discarded; it is no longer in the library.",result).className="muted";}
     });apply.disabled=true;
     // Any destination or option change refreshes the expected paths and requires a new preview
     var changed = function() {

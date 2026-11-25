@@ -32,15 +32,22 @@ WikiStudioServer.prototype.sourceOperation = function(w, route, body) {
     })
     try { this.manager(w, false, function(wm) { return wm.graphBuildSettings(graphOverrides) }) }
     catch(error) { WikiStudio.fail(400, "invalid_options", String(error.message || error)) }
-    var tuning = this.resolveTuning(w, "ingestion", o.tuning || {})
-    var directLimits = {}
+    var overrides = clone(o.tuning || {})
     ;["maxfiles", "maxfilesize"].forEach(function(key) {
-      if (isDef(o[key])) directLimits[key] = o[key]
+      if (Object.prototype.hasOwnProperty.call(o, key)) overrides[key] = o[key]
     })
-    tuning = merge(tuning, WikiStudio.validateTuning("ingestion", directLimits, this.config.maxSourceBytes))
+    var tuning = this.resolveTuning(w, "ingestion", overrides)
+    var ordinaryBytes = this.config.maxSourceBytes
+    var officeBytes = this.config.maxOfficeSourceBytes || ordinaryBytes
+    var officeParts = o.officeparts || "auto"
+    var inherited = isUnDef(tuning.maxfilesize)
+    var fileBytes = inherited ? ordinaryBytes : Math.min(tuning.maxfilesize, ordinaryBytes)
+    var officeFileBytes = inherited ? officeBytes : Math.min(tuning.maxfilesize, officeBytes)
+    var officeRequiresParts = inherited && officeParts === "off" && officeFileBytes > fileBytes
+    if (officeRequiresParts) officeFileBytes = fileBytes
     WikiStudio.assert(isUnDef(o.force) || isBoolean(o.force), 400, "invalid_options", "Force must be boolean")
     if(o.prune===true) WikiStudio.assert(body.confirmation&&body.confirmation.acknowledgePrune===true,400,"confirmation_required","Explicit prune confirmation required; empty-source authorization is not available")
-    return {operation:"ingest.run",params:{graphOverrides:graphOverrides,sourceId:source.id,revision:source.revision,staging:source.staging,inventoryChecksum:source.inventoryChecksum,dryrun:body.preview!==false,mode:o.mode || (models.distill ? "auto" : "normalize"),expectedModelSkips:modelSkips,layout:o.layout||"source",section:section,include:o.include||"",exclude:o.exclude||"",prune:o.prune===true,semantic:o.semantic===true,tuning:tuning,force:o.force===true,officeparts:o.officeparts || "auto",maxfiles:tuning.maxfiles,maxfilesize:tuning.maxfilesize}}
+    return {operation:"ingest.run",params:{graphOverrides:graphOverrides,sourceId:source.id,revision:source.revision,staging:source.staging,inventoryChecksum:source.inventoryChecksum,dryrun:body.preview!==false,mode:o.mode || (models.distill ? "auto" : "normalize"),expectedModelSkips:modelSkips,layout:o.layout||"source",section:section,include:o.include||"",exclude:o.exclude||"",prune:o.prune===true,semantic:o.semantic===true,tuning:tuning,force:o.force===true,officeparts:officeParts,maxfiles:tuning.maxfiles,maxfilesize:fileBytes,maxofficefilesize:officeFileBytes,officeRequiresParts:officeRequiresParts}}
   }
   if(route==="absorptions") {
     WikiStudio.fields(body,["action","sourceWikiIds","paths","tags","topic","exclude","planId","confirmation","tuning"])
@@ -83,7 +90,7 @@ WikiStudio.executeSource = function(config,w,job,logFn,backup,isCancelled) {
   Object.keys(p.tuning || {}).forEach(function(key) { if (/^(wiki|absorb)/.test(key)) a[key] = p.tuning[key] })
   if(op==="ingest.run") {
     WikiStudio.assert(WikiStudio.inside(p.staging,config.home+"/sources/uploads"),400,"invalid_source","Source staging leaves trusted area")
-    var inventory = WikiStudio.scan(p.staging, true, false, config.maxSourceBytes, config.maxBatchBytes || 67108864)
+    var inventory = WikiStudio.scanSource(config, p.staging, false, false)
     WikiStudio.assert(WikiStudio.fingerprint(inventory)===p.inventoryChecksum,409,"source_changed","Immutable staging revision changed; upload it again")
     WikiStudio.assert(Object.keys(inventory).length<=p.maxfiles,413,"source_limit","Source exceeds selected file-count limit")
     var server = new WikiStudioServer(config)
@@ -91,6 +98,8 @@ WikiStudio.executeSource = function(config,w,job,logFn,backup,isCancelled) {
     var graph = WikiStudio.availableGraphOptions(effective)
     ;["reconcile", "reconcileLlm", "modelHelp"].forEach(function(key) { a["wikigraph" + key.toLowerCase()] = graph[key] })
     params={studiosource:true,visionavailable:WikiStudio.modelAvailability().actions.vision,expectedmodelskips:p.expectedModelSkips,source:p.staging,sourceid:w.id+"--"+p.sourceId,mode:p.mode,layout:p.layout,section:p.section,dryrun:p.dryrun,include:p.include,exclude:p.exclude,prune:p.prune,maxfilekb:p.maxfilesize/1024,chunkchars:p.tuning?p.tuning.chunkchars:24000,concurrency:p.tuning?p.tuning.concurrency:4,force:p.force===true,officeparts:p.officeparts || "auto",maxstagebytes:config.maxStageBytes || 268435456}
+    if (isNumber(p.maxofficefilesize)) params.maxofficefilekb = p.maxofficefilesize / 1024
+    if (p.officeRequiresParts === true) params.officerequiresparts = true
   } else if(/^ingest\.(recovery|resume|discard)$/.test(op))params=p.id?{id:p.id}:{}
   else if(op.indexOf("absorb.")===0) {
     params=p.spec?{spec:p.spec}:p.id?{id:p.id}:{}
@@ -117,13 +126,14 @@ WikiStudioServer.prototype.sourceUpdateRun = function(w, job, result) {
     if (!record || record.revision !== p.revision) return false
 
     // A successful ad-hoc import is done with its source: discard it instead of keeping it
-    if (record.adhoc === true && !p.dryrun && isMap(result) && result.ok !== false && !(result.skipped_model || []).length) {
+    var skipped = (result.skipped_model || []).length || (result.skipped_oversized || []).length
+    if (record.adhoc === true && !p.dryrun && isMap(result) && result.ok !== false && !skipped) {
       self.sourcePurge(w, record)
       return true
     }
 
     record.lastRun = job.id
-    record.lastStatus = result.status === "cancelled" ? "cancelled" : result.ok === false ? "failed" : p.dryrun ? "previewed" : (result.skipped_model || []).length ? "partially-imported" : "ingested"
+    record.lastStatus = result.status === "cancelled" ? "cancelled" : result.ok === false ? "failed" : p.dryrun ? "previewed" : skipped ? "partially-imported" : "ingested"
     record.lastInventoryChecksum = p.inventoryChecksum
     WikiStudio.atomic(self.sourcePath(w, p.sourceId), record)
     return true

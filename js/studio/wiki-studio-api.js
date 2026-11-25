@@ -92,17 +92,26 @@ WikiStudioServer.prototype.dispatch = function(req) {
       var workflow = p[5]
       WikiStudio.assert(isDef(WikiStudio.tuningDefaults[workflow]), 404, "not_found", "Unknown workflow")
       var defaults = clone(WikiStudio.tuningDefaults[workflow])
-      if (workflow === "ingestion") defaults.maxfilesize = Math.min(defaults.maxfilesize, c.maxSourceBytes)
+      if (workflow === "ingestion") defaults.maxfilesize = c.maxSourceBytes
       return WikiStudio.lock(c.home, "settings-" + w.id, function() {
         var file = c.home + "/settings/" + w.id + ".json"
         var saved = WikiStudio.json(file, {})
         if (saved.identity !== w.identity) saved = { identity: w.identity, workflows: {} }
         if (!read) {
           WikiStudio.authorize(role, "admin", w)
-          saved.workflows[workflow] = WikiStudio.validateTuning(workflow, body, c.maxSourceBytes)
+          var preferences = WikiStudio.validateTuning(workflow, body, Math.max(c.maxSourceBytes, c.maxOfficeSourceBytes || c.maxSourceBytes))
+          if (preferences.maxfilesize === null) delete preferences.maxfilesize
+          saved.workflows[workflow] = preferences
           WikiStudio.atomic(file, saved)
         }
-        return { defaults: defaults, effective: self.resolveTuning(w, workflow), limits: workflow === "ingestion" ? { maxfilesize: c.maxSourceBytes } : {} }
+        var response = { defaults: defaults, effective: self.resolveTuning(w, workflow), limits: {} }
+        if (workflow === "ingestion") {
+          var officeBytes = c.maxOfficeSourceBytes || c.maxSourceBytes
+          response.limits = { maxfilesize: Math.max(c.maxSourceBytes, officeBytes), ordinaryBytes: c.maxSourceBytes, officeBytes: officeBytes }
+          response.maxfilesizeInherited = isUnDef(response.effective.maxfilesize)
+          if (response.maxfilesizeInherited) response.effective.maxfilesize = defaults.maxfilesize
+        }
+        return response
       })
     }
     if (p.length === 5 && p[4] === "test" && req.method === "POST") return this.testWiki(w, body, role)
@@ -258,7 +267,7 @@ WikiStudioServer.prototype.testWiki = function(w, body, role) {
 
 // Workflow defaults contain only engine-supported tuning, never approvals or secrets.
 WikiStudio.tuningDefaults = {
-  ingestion: { maxfiles: 2000, maxfilesize: 8388608, wikiingestmaxcalls: 32, wikiingestbudget: -1, wikimaxprompttokens: 0, chunkchars: 24000, concurrency: 4 },
+  ingestion: { maxfiles: 2000, wikiingestmaxcalls: 32, wikiingestbudget: -1, wikimaxprompttokens: 0, chunkchars: 24000, concurrency: 4 },
   absorption: { absorbmaxpages: 100, absorbmaxtokens: 100000 },
   reorg: { dreammaxsteps: 40, maxcontext: 24000, contextguard: true, toolresultmaxinline: 4096, readresultmaxmatches: 20 },
   auto: { dreammaxsteps: 40 },
@@ -270,9 +279,11 @@ WikiStudio.tuningDefaults = {
 WikiStudio.validateTuning = function(workflow, values, maxSourceBytes) {
   var defaults = WikiStudio.tuningDefaults[workflow]
   var fields = workflow === "test" ? ["maxsteps", "maxcontext"] : Object.keys(defaults)
+  if (workflow === "ingestion") fields.push("maxfilesize")
   WikiStudio.fields(values, fields)
   Object.keys(values).forEach(function(key) {
     var value = values[key]
+    if (key === "maxfilesize" && value === null) return
     if (key === "contextguard") {
       WikiStudio.assert(isBoolean(value), 400, "invalid_options", "Expected boolean: " + key)
       return
@@ -290,7 +301,11 @@ WikiStudioServer.prototype.resolveTuning = function(w, workflow, values) {
   var preferences = saved.identity === w.identity ? (saved.workflows || {})[workflow] || {} : {}
   var effective = merge(clone(WikiStudio.tuningDefaults[workflow]), preferences)
 
-  // Apply the active quota to defaults and preferences saved before a quota change.
-  if (workflow === "ingestion") effective.maxfilesize = Math.min(effective.maxfilesize, this.config.maxSourceBytes)
-  return merge(effective, WikiStudio.validateTuning(workflow, values || {}, this.config.maxSourceBytes))
+  // Preserve explicit preferences while allowing an import to use inherited limits.
+  var maximum = Math.max(this.config.maxSourceBytes, this.config.maxOfficeSourceBytes || this.config.maxSourceBytes)
+  if (isNumber(effective.maxfilesize)) effective.maxfilesize = Math.min(effective.maxfilesize, maximum)
+  var overrides = WikiStudio.validateTuning(workflow, values || {}, maximum)
+  Object.keys(overrides).forEach(function(key) { effective[key] = overrides[key] })
+  if (effective.maxfilesize === null) delete effective.maxfilesize
+  return effective
 }

@@ -10,9 +10,23 @@ WikiStudio.isSourceFile = function(path) {
   return /\.(md|markdown|txt|png|jpe?g)$/i.test(path) || __miniAIsTikaDocument(path)
 }
 
+// Apply the same per-file policy to every snapshot and to worker revalidation.
+WikiStudio.sourceByteLimit = function(config, path, allowZip) {
+  if (allowZip && /\.zip$/i.test(path)) return 20971520
+  if (__miniAIsOfficeDocument(path)) return config.maxOfficeSourceBytes || config.maxSourceBytes || 134217728
+  return config.maxSourceBytes || 8388608
+}
+
+// Inventory source bytes before extraction, using their original paths.
+WikiStudio.scanSource = function(config, root, metadataOnly, allowZip) {
+  return WikiStudio.scan(root, true, metadataOnly, function(path) {
+    return WikiStudio.sourceByteLimit(config, path, allowZip)
+  }, config.maxBatchBytes || 268435456)
+}
+
 WikiStudioServer.prototype.streamUpload = function(req, input) {
   WikiStudio.authorize(req.role, "admin")
-  var c = this.config, maxBatchBytes = c.maxBatchBytes || 67108864, id = req.headers["x-upload-id"], relative
+  var c = this.config, maxBatchBytes = c.maxBatchBytes || 268435456, id = req.headers["x-upload-id"], relative
   WikiStudio.assert(isString(id) && /^[a-f0-9-]{36}$/.test(id), 400, "invalid_upload", "Supply a UUID in X-Upload-ID")
   try { relative = decodeURIComponent(req.headers["x-upload-path"] || "") } catch(e) { WikiStudio.fail(400, "invalid_upload", "Invalid upload path") }
   WikiStudio.pagePath(relative, false)
@@ -23,13 +37,17 @@ WikiStudioServer.prototype.streamUpload = function(req, input) {
     WikiStudio.privateDir(dir + "/files")
     var file = WikiStudio.safeFile(dir + "/files", relative, false)
     WikiStudio.assert(!io.fileExists(file), 409, "duplicate_upload", "Duplicate file path")
-    var existing = WikiStudio.scan(dir + "/files", true, true, Math.max(c.maxSourceBytes, 20971520), maxBatchBytes), total = Object.keys(existing).reduce(function(n,k) { return n + existing[k].size }, 0)
+    var existing = WikiStudio.scanSource(c, dir + "/files", true, true)
+    var total = Object.keys(existing).reduce(function(n,k) { return n + existing[k].size }, 0)
+    var fileLimit = WikiStudio.sourceByteLimit(c, relative, true)
     WikiStudio.assert(!Object.keys(existing).some(function(p){return p.toLowerCase()===relative.toLowerCase()}),409,"duplicate_upload","Duplicate case-insensitive file path")
     WikiStudio.assert(Object.keys(existing).length < 2000, 413, "upload_count", "Upload file limit exceeded")
     var temp = dir + "/incoming-" + WikiStudio.id(), out = new java.io.FileOutputStream(temp), size = 0, n, buf = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 8192)
     try {
       while ((n = input.read(buf)) !== -1) {
-        size += n; WikiStudio.assert(size <= (/\.zip$/i.test(relative)?20971520:c.maxSourceBytes) && size <= maxBatchBytes - total, 413, "upload_limit", "Upload byte limit exceeded")
+        size += n
+        WikiStudio.assert(size <= fileLimit, 413, "upload_limit", relative + " exceeds the " + fileLimit + " byte file limit")
+        WikiStudio.assert(size <= maxBatchBytes - total, 413, "upload_limit", "Upload exceeds the " + maxBatchBytes + " byte batch limit")
         out.write(buf, 0, n)
       }
       out.getFD().sync(); out.close(); out = null
@@ -41,9 +59,9 @@ WikiStudioServer.prototype.streamUpload = function(req, input) {
 }
 // ZIP metadata is checked before any member is written. JDK ZipEntry does not
 // expose Unix mode/encryption flags, so inspect the central directory as well.
-WikiStudio.validateZip = function(file, maxSourceBytes, maxBatchBytes) {
-  if (isUnDef(maxSourceBytes)) maxSourceBytes = 8388608
-  if (isUnDef(maxBatchBytes)) maxBatchBytes = 67108864
+WikiStudio.validateZip = function(file, config) {
+  config = config || {}
+  var maxBatchBytes = config.maxBatchBytes || 268435456
   WikiStudio.noLinks(file)
   var raf = new java.io.RandomAccessFile(file, "r"), size = Number(raf.length()), eocd = -1
   function u16() { return raf.readUnsignedByte() | raf.readUnsignedByte() << 8 }
@@ -73,16 +91,16 @@ WikiStudio.validateZip = function(file, maxSourceBytes, maxBatchBytes) {
       names[name.toLowerCase()] = true
       WikiStudio.assert(entry.isDirectory() || WikiStudio.isSourceFile(name), 415, "unsupported_zip_file", "ZIP may contain Markdown, text, Word, Excel, PowerPoint, RTF, PDF, PNG and JPEG sources")
       total += Number(entry.getSize())
-      WikiStudio.assert(total <= maxBatchBytes && entry.getSize() >= 0 && entry.getSize() <= maxSourceBytes, 413, "zip_limit", "Uncompressed ZIP limit exceeded")
+      WikiStudio.assert(total <= maxBatchBytes && entry.getSize() >= 0 && entry.getSize() <= WikiStudio.sourceByteLimit(config, name), 413, "zip_limit", "Uncompressed ZIP limit exceeded at " + name)
       entries.push(name)
     }
   } finally { zip.close() }
   return entries
 }
-WikiStudio.extractZip = function(file, destination, maxSourceBytes, maxBatchBytes) {
-  if (isUnDef(maxSourceBytes)) maxSourceBytes = 8388608
-  if (isUnDef(maxBatchBytes)) maxBatchBytes = 67108864
-  WikiStudio.validateZip(file, maxSourceBytes, maxBatchBytes)
+WikiStudio.extractZip = function(file, destination, config) {
+  config = config || {}
+  var maxBatchBytes = config.maxBatchBytes || 268435456
+  WikiStudio.validateZip(file, config)
   var zip = new java.util.zip.ZipFile(file), en = zip.entries(), total = 0
   WikiStudio.privateDir(destination)
   try {
@@ -93,7 +111,14 @@ WikiStudio.extractZip = function(file, destination, maxSourceBytes, maxBatchByte
       WikiStudio.assert(!io.fileExists(path), 400, "unsafe_zip", "ZIP member collision")
       var input = zip.getInputStream(entry), output = new java.io.FileOutputStream(path), digest = new java.util.zip.CRC32(), n, bytes = 0, buffer = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 8192)
       try {
-        while ((n = input.read(buffer)) !== -1) { bytes += n; total += n; WikiStudio.assert(bytes <= maxSourceBytes && total <= maxBatchBytes, 413, "zip_limit", "ZIP extraction limit exceeded"); digest.update(buffer,0,n); output.write(buffer,0,n) }
+        var fileLimit = WikiStudio.sourceByteLimit(config, name)
+        while ((n = input.read(buffer)) !== -1) {
+          bytes += n
+          total += n
+          WikiStudio.assert(bytes <= fileLimit && total <= maxBatchBytes, 413, "zip_limit", "ZIP extraction limit exceeded at " + name)
+          digest.update(buffer, 0, n)
+          output.write(buffer, 0, n)
+        }
         WikiStudio.assert(bytes === entry.getSize() && Number(digest.getValue()) === Number(entry.getCrc()), 400, "corrupt_zip", "ZIP member checksum mismatch")
         output.getFD().sync()
       } finally { output.close(); input.close() }
@@ -176,7 +201,7 @@ WikiStudioServer.prototype.sourceAdd = function(w, body) {
     WikiStudio.assert(WikiStudio.identity(selected.path)===selected.identity,409,"source_changed","Source directory identity changed; restart after review")
     var uploadId=WikiStudio.id(),stage=this.config.home+"/sources/uploads/"+uploadId+"/files"
     WikiStudio.privateDir(stage)
-    var count = 0, total = 0, maxSourceBytes = this.config.maxSourceBytes, maxBatchBytes = this.config.maxBatchBytes || 67108864
+    var count = 0, total = 0, config = this.config, maxBatchBytes = config.maxBatchBytes || 268435456
     // Snapshot supported source files with their paths relative to the configured root.
     var copy = function(dir, depth) {
       WikiStudio.assert(depth < 16, 413, "source_limit", "Source depth exceeded")
@@ -192,7 +217,7 @@ WikiStudioServer.prototype.sourceAdd = function(w, body) {
         count++
         var bytes = Number(new java.io.File(f.filepath).length())
         total += bytes
-        WikiStudio.assert(count <= 2000 && total <= maxBatchBytes && bytes <= maxSourceBytes, 413, "source_limit", "Source byte/count limit exceeded")
+        WikiStudio.assert(count <= 2000 && total <= maxBatchBytes && bytes <= WikiStudio.sourceByteLimit(config, f.filename), 413, "source_limit", "Source byte/count limit exceeded at " + f.filename)
         var rel = String(f.filepath).substring(selected.path.length + 1)
         var dest = WikiStudio.safeFile(stage, rel, false)
         WikiStudio.privateDir(String(new java.io.File(dest).getParent()))
@@ -211,17 +236,15 @@ WikiStudioServer.prototype.sourceAdd = function(w, body) {
       WikiStudio.assert(!adhoc || !existing || existing.adhoc === true, 409, "source_exists", "A library source already uses this ID; choose another ID for an ad-hoc import")
       WikiStudio.assert(!io.fileExists(dir + "/sealed.json"), 409, "upload_sealed", "Upload is already sealed")
       WikiStudio.assert(io.fileExists(dir + "/files"), 404, "upload_not_found", "Upload not found")
-      var inventory = WikiStudio.scan(dir + "/files", true, false, Math.max(self.config.maxSourceBytes, 20971520), self.config.maxBatchBytes || 67108864), zips = Object.keys(inventory).filter(function(p) { return /\.zip$/i.test(p) }), staging = dir + "/files"
-      if (!zips.length) {
-        WikiStudio.assert(Object.keys(inventory).every(function(path) { return inventory[path].size <= self.config.maxSourceBytes }),
-          413, "source_limit", "Source file exceeds the configured per-file limit")
-      }
+      var staging = dir + "/files"
+      var inventory = WikiStudio.scanSource(self.config, staging, false, true)
+      var zips = Object.keys(inventory).filter(function(p) { return /\.zip$/i.test(p) })
       if (zips.length) {
         WikiStudio.assert(zips.length === 1 && Object.keys(inventory).length === 1, 400, "mixed_zip", "Submit a single ZIP separately from directory uploads")
         staging = dir + "/expanded"
         WikiStudio.assert(!io.fileExists(staging), 409, "staging_exists", "Failed extraction remains; use a new upload UUID")
-        try { WikiStudio.extractZip(dir + "/files/" + zips[0], staging, self.config.maxSourceBytes, self.config.maxBatchBytes) } catch(e) { if (io.fileExists(staging)) io.rm(staging); throw e }
-        inventory = WikiStudio.scan(staging, true, false, self.config.maxSourceBytes, self.config.maxBatchBytes || 67108864)
+        try { WikiStudio.extractZip(dir + "/files/" + zips[0], staging, self.config) } catch(e) { if (io.fileExists(staging)) io.rm(staging); throw e }
+        inventory = WikiStudio.scanSource(self.config, staging, false, false)
       }
       var source = { id: body.id, wikiId: w.id, name: body.name, type: sourceType, origin: origin, revision: body.uploadId, inventoryChecksum: WikiStudio.fingerprint(inventory), staging: staging, createdAt: WikiStudio.now(), lineage: existing ? (existing.lineage || []).concat([existing.revision]).slice(-100) : [], files: inventory, status: "staged" }
       if (adhoc) source.adhoc = true

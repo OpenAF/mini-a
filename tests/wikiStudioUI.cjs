@@ -45,8 +45,16 @@ const find=(root,tag,text)=>descendants(root).find(n=>n.tagName===tag.toUpperCas
 const field=(root,name)=>descendants(root).find(n=>n.tagName==='LABEL'&&n._text===name)?.children.find(n=>['INPUT','SELECT'].includes(n.tagName));
 const click=async(root,title)=>{const b=find(root,'button',title);assert(b,'Missing button: '+title);assert(!b.disabled,'Disabled button: '+title);await b.fire('click');};
 const calls=[];
+let savedImportLimit;
 context.api=async(path,method='GET',body)=>{
   calls.push({path,method,body});
+  if (path.endsWith('/settings/ingestion')) {
+    if (method === 'PUT') savedImportLimit = body.maxfilesize ?? undefined;
+    const defaults = {maxfilesize:8388608, concurrency:4};
+    return {defaults, effective:{...defaults, maxfilesize:savedImportLimit ?? defaults.maxfilesize},
+      maxfilesizeInherited:savedImportLimit === undefined,
+      limits:{maxfilesize:134217728, ordinaryBytes:8388608, officeBytes:134217728}};
+  }
   if(path.includes('/settings/')) { const defaults = path.endsWith('/search') ? {limit:100} : {}; return {defaults,effective:defaults}; }
   if(path==='session')return {canTestWiki:false,adapters:{directory:[]}};
   if(path.includes('/children')) {const q=new URLSearchParams(path.split('?')[1]);return q.get('path')==='Guides'?{items:[{name:'intro.md',path:'Guides/intro.md',kind:'page'}]}:{items:[{name:'Guides',path:'Guides',kind:'folder'},{name:'index.md',path:'index.md',kind:'page'}]};}
@@ -178,13 +186,31 @@ run('StudioApi.request=api;StudioApi.background=api;studioSession={canTestWiki:f
   const sourceName=field(view,'Source name');sourceName.value='Team notes';await sourceName.fire('input');assert.equal(field(view,'Stable source ID').value,'team-notes');
   await run('navigate("Activity")');await run('navigate("Import")');assert.equal(field(view,'Source name').value,'Team notes','Import draft survives navigation');
   // A prepared source requires a preview. Changing options invalidates approval.
-  video.value='sample-video';let resolvePreview;
-  context.queueFixture=async()=>({id:'preview-job',finished:new Promise(resolve=>{resolvePreview=resolve;})});
+  video.value='sample-video';let resolvePreview, previewBody;
+  context.queueFixture=async(path,body)=>{
+    previewBody=body;
+    return {id:'preview-job',finished:new Promise(resolve=>{resolvePreview=resolve;})};
+  };
   run('queue=queueFixture;');await click(view,'Download captions');
   assert.equal(field(view,'Import into folder').value,'team-notes','Destination defaults to the stable source ID');
+  const override=field(view,'File size override (bytes)');
+  assert.equal(override.value,'','The 8 MiB ordinary default is not an active override');
+  assert.match(view.textContent,/8 MiB per ordinary file and 128 MiB per Office file/);
+  field(view,'Concurrent distillations').value='2';
+  await click(view,'Save defaults for this wiki');
+  assert.equal(calls.at(-1).body.maxfilesize,undefined,'Saving an unrelated option preserves inheritance');
+  override.value='8388608';
+  await click(view,'Save defaults for this wiki');
+  assert.equal(savedImportLimit,8388608,'An explicit 8 MiB cap can be saved');
+  override.value='';
+  await click(view,'Save defaults for this wiki');
+  assert.equal(calls.at(-1).body.maxfilesize,null,'Clearing the saved cap resets inheritance');
   assert(find(view,'button','4. Import into wiki').disabled,'Import starts disabled');
   const preview=click(view,'Preview changes');await new Promise(resolve=>setImmediate(resolve));
-  resolvePreview({status:'completed',result:{ok:true,changes:[]}});await preview;
+  assert.equal(previewBody.options.tuning.maxfilesize,undefined,'Preview inherits the Office allowance');
+  resolvePreview({status:'completed',result:{ok:true,dryrun:true,office_documents:[{source:'Workbook.xlsx',parts:2,index:'team-notes/workbook.md'}],planned_writes:['team-notes/workbook-parts/rows.md']}});await preview;
+  assert.match(view.textContent,/Workbook\.xlsx · 2 parts/);
+  assert(find(view,'button','Proposed pages (1)'),'Structured preview exposes proposed pages');
   assert(!find(view,'button','4. Import into wiki').disabled,'Successful preview enables import');
   const mode=field(view,'Processing');mode.value='raw';await mode.parentElement.parentElement.fire('input');
   assert(find(view,'button','4. Import into wiki').disabled,'Changed processing invalidates the preview');

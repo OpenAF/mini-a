@@ -256,6 +256,16 @@
         return wikiStudioConfig({ studiohome: s.config.home, studioallowroots: JSON.stringify([root]) })
       }
 
+      // Explicit launch quotas survive the change to Office defaults.
+      var launch = { studiohome: s.config.home }
+      var builtIn = wikiStudioConfig(launch)
+      assert([builtIn.maxSourceBytes, builtIn.maxOfficeSourceBytes, builtIn.maxBatchBytes], [8388608, 134217728, 268435456], "Built-in Studio quotas")
+      var legacy = wikiStudioConfig(merge(launch, { studiomaxsourcebytes: 12345, studiomaxbatchbytes: 23456 }))
+      assert([legacy.maxOfficeSourceBytes, legacy.maxBatchBytes], [12345, 23456], "Explicit legacy quotas")
+      var office = wikiStudioConfig(merge(launch, { studiomaxsourcebytes: 12345, studiomaxofficesourcebytes: 34567 }))
+      assert([office.maxSourceBytes, office.maxOfficeSourceBytes], [12345, 34567], "Explicit Office ceiling overrides the legacy value")
+      rejects(function() { wikiStudioConfig(merge(launch, { studiomaxofficesourcebytes: 0 })) }, "invalid_config")
+
       if (java.nio.file.Files.isSymbolicLink(WikiStudio.path("/data"))) {
         rejects(function() { configure("/data") }, "unsafe_path")
       } else if (new java.io.File("/data").isDirectory()) {
@@ -508,6 +518,47 @@
     WikiStudio.extractZip(documents, t + "/expanded-documents")
     assert(io.readFileString(t + "/expanded-documents/folder/notes.rtf"), "safe content", "Extract document members for ingestion")
     rejects(function() { WikiStudio.validateZip(archive("unsupported.zip", "folder/tool.bin")) }, "unsupported_zip_file")
+    var quotas = { maxSourceBytes: 8, maxOfficeSourceBytes: 16, maxBatchBytes: 32 }
+    WikiStudio.extractZip(archive("office.zip", "folder/REPORT.PPTX"), t + "/expanded-office", quotas)
+    assert(io.readFileString(t + "/expanded-office/folder/REPORT.PPTX"), "safe content", "ZIP uses the Office limit for matching members")
+    rejects(function() { WikiStudio.validateZip(archive("plain.zip", "notes.txt"), quotas) }, "zip_limit")
+
+    // Verify byte boundaries without allocating the listed file contents.
+    var limits = t + "/limits"
+    WikiStudio.privateDir(limits)
+    function setSize(path, size) {
+      var file = new java.io.RandomAccessFile(limits + "/" + path, "rw")
+      try { file.setLength(size) } finally { file.close() }
+    }
+    ;["doc", "docx", "xls", "xlsx", "ppt", "pptx"].forEach(function(ext) {
+      assert(WikiStudio.sourceByteLimit({}, "file." + ext.toUpperCase()), 134217728, "Office allowance for " + ext)
+    })
+    setSize("one.XLSX", 134217728)
+    setSize("two.ppt", 125829120)
+    setSize("three.pdf", 8388608)
+    assert(Object.keys(WikiStudio.scanSource({}, limits, true)).length, 3, "Admit a mixed batch at exactly 256 MiB")
+    setSize("one.XLSX", 134217729)
+    rejects(function() { WikiStudio.scanSource({ maxBatchBytes: 536870912 }, limits, true) }, "inventory_limit")
+    setSize("one.XLSX", 134217728)
+    setSize("two.ppt", 125829121)
+    rejects(function() { WikiStudio.scanSource({}, limits, true) }, "inventory_limit")
+    setSize("two.ppt", 1)
+    setSize("three.pdf", 8388609)
+    rejects(function() { WikiStudio.scanSource({}, limits, true) }, "inventory_limit")
+
+    // Local snapshots use the same format policy as uploads and archives.
+    var sourceDir = t + "/local-source"
+    WikiStudio.privateDir(sourceDir)
+    io.writeFileString(sourceDir + "/local.DOC", "safe content")
+    s.config.directories = [{ id: "local", path: sourceDir, identity: WikiStudio.identity(sourceDir) }]
+    s.config.maxSourceBytes = 8
+    s.config.maxOfficeSourceBytes = 16
+    var snapshot = s.sourceAdd(w, { id: "local", name: "Local", type: "directory", directoryId: "local" })
+    assert(snapshot.files["local.DOC"].size, 12, "Local snapshot accepts an Office file over the ordinary limit")
+    io.writeFileString(sourceDir + "/local.txt", "safe content")
+    rejects(function() { s.sourceAdd(w, { id: "local", name: "Local", type: "directory", directoryId: "local" }) }, "source_limit")
+    s.config.maxSourceBytes = 8388608
+    delete s.config.maxOfficeSourceBytes
     req.headers["x-upload-id"]=WikiStudio.id();req.headers["x-upload-path"]="..%2Fescape.md"
     rejects(function(){s.streamUpload(req,new java.io.ByteArrayInputStream(WikiStudio.bytes("x")))},"unsafe_path")
     req.headers["x-upload-path"] = "tool.bin"
