@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20261125'
+version: '20261126'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -146,6 +146,7 @@ files:
 - js/core/mini-a-fork-policy.js
 - js/core/mini-a-launcher.js
 - js/core/mini-a-mcp-features.js
+- js/core/mini-a-mcp-helpers.js
 - js/core/mini-a-orchestration.js
 - js/core/mini-a-policy.js
 - js/core/mini-a-progcall.js
@@ -320,14 +321,14 @@ filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENT-CHEATSHEET.md: 38a09d995d38b824a4c68397162040b15c425996
   AGENTS.md: 194e4ea471d918d76b2f91e8c077ab53122828b3
-  CHEATSHEET.md: 01a54153a48df71019ca35dcb3bf2f739ea9bfcf
+  CHEATSHEET.md: 4126bd6715e0457ecbfabd8e4733b9a57606bf9f
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: 3c2b6d37d6c672b17795f0e9ddc9cea117d522c1
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   METRICS.md: 7dd872f40105f3c2156a64f15bdf0bfa8ac5661b
-  README.md: e6a3f4d21eb4c9e8ef34b589928d857d5a98f6e2
+  README.md: c70950a5f63f15a0f20a1d89acb0747e182ea668
   RELEASE_NOTES.md: fabd2aca0502fdae5b84d3180310daf74c27f2e6
-  USAGE.md: af41fbc1c277a358a9c5c4dfedd34da732cd695a
+  USAGE.md: 6f3df8adef2d9fd762576af464e0d14700831ce4
   clean.yaml: c19639b07dfe6ae22032aff24c8997ab9860ad33
   docs/ABSORB.md: 31bbe919b680e78b369772608d10dda78d1e015e
   docs/ADAPTIVE-ROUTER.md: c453ee985ce8c633a5af892393970d4b9c003bef
@@ -403,8 +404,9 @@ filesHash:
   js/core/mini-a-decision.js: 8ea3a49c2e7af5e05886add649dbe25c823bcf35
   js/core/mini-a-eval.js: 1bc03d9f34a132cedd97a54fe152a6e60eac4759
   js/core/mini-a-fork-policy.js: 5da8a44ba71493fe0dfacfe1baf6fcd1973c53cd
-  js/core/mini-a-launcher.js: 75f5231a9e9d1e0af2fe02b5c18626352157c5e0
-  js/core/mini-a-mcp-features.js: 168119b49e43be591800e23341a094cd0fd9055a
+  js/core/mini-a-launcher.js: 672c65cd50510f47a7e6dbfe7a41a60f262b64dc
+  js/core/mini-a-mcp-features.js: 5f734c1dfd30d2da1327910157c23cbd404772aa
+  js/core/mini-a-mcp-helpers.js: a8131b4f3647cc5feb29466994f5a0c433718bc8
   js/core/mini-a-orchestration.js: 77b8f4006fc14d78724b5cf696d899f290bd0bc3
   js/core/mini-a-policy.js: d763df1cf0d7fb1a75d38408a4064f55b556da29
   js/core/mini-a-progcall.js: f6c609ec9732f92de56ff19f7bba7d080d192ea8
@@ -423,10 +425,10 @@ filesHash:
   js/memory/mini-a-reflection-queue.js: 207c26239123305b482eb051b05f537dc420d437
   js/mini-a-paths.js: 6c5e5d6f2680d19df511e6260cf1a7b1a2e949a5
   js/session/mini-a-con.js: 4da47ef436bd75196c0d9039de691cbbe70f05f3
-  js/session/mini-a-mcptest.js: bd2e471261bdfb63e75e6a6dc5e1463969db9107
+  js/session/mini-a-mcptest.js: 92a66f7c7a09e2416e946045569c9218bc1b402b
   js/session/mini-a-memoryman.js: b897ad32e55fdc844cbe7f014729ec2ec62d67d9
   js/session/mini-a-modelman.js: 940c03c9d13d5fc0476117b2eb9cf822cf518bc6
-  js/session/mini-a-session.js: 8aa23b232be62b15d1ad6520af646b1ae478754d
+  js/session/mini-a-session.js: 45de631fbdcf57312cd9406c0d61b2bffcbd769e
   js/session/mini-a-wikiman.js: 207f9ae2252dc807553d9d10fbed69275ede2ee5
   js/skills/mini-a-mcp-skills.js: 36b3790c0303922ae5742bacbf887295300ff285
   js/skills/mini-a-plugin-acquisition.js: fe01bd9962e8e04764ffd8031cf061720a91f693
