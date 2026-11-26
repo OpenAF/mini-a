@@ -12,6 +12,7 @@ var args = isDef(global._args) ? global._args : processExpr(" ")
 // Initialize OAF module
 __initializeCon()
 loadLib(__miniAPath("js/core/mini-a-common.js"))
+loadLib(__miniAPath("js/core/mini-a-mcp-helpers.js"))
 
 // Load additional libraries if specified
 if (isDef(args.libs) && args.libs.length > 0) {
@@ -541,6 +542,7 @@ function callMCPTool(mcpClient, tool, params, sessionOptions) {
 
         var startTime = now()
         var result = mcpClient.callTool(tool.name, params)
+        result = resolveMCPResult(mcpClient, tool, params, result, sessionOptions)
         if (sessionOptions.showtimeelapsed) {
             printElapsedTime(startTime, "Call tool '" + tool.name + "'")
         }
@@ -595,6 +597,438 @@ function callMCPTool(mcpClient, tool, params, sessionOptions) {
     }
 }
 
+// Connect with protocol negotiation. The handler is registered before initialize so elicitation is advertised.
+function connectMCP(config, sessionOptions, factory) {
+  var raw = clone(config)
+  var external = ["dummy", "ojob"].indexOf(__miniAMcpType(config)) < 0
+  var opts = external ? merge({ protocolVersion: "auto", tasks: true }, config) : config
+  var startTime = now()
+  var client = isFunction(factory) ? factory(opts) : $mcp(opts)
+  var registered = false
+  if (isFunction(client.onElicitationRequest)) {
+    client.onElicitationRequest(function(request) { return testerElicitationHandler(request, sessionOptions) }, { form: {}, url: {} })
+    registered = true
+  }
+  client.initialize()
+  client.__miniATesterPrompt = registered
+  if (sessionOptions.showtimeelapsed) printElapsedTime(startTime, "Initialize MCP connection")
+  return { client: client, config: opts, raw: raw }
+}
+
+// Describe one feature given whether the runtime and the server support it.
+function describeMCPFeature(runtimeOk, serverOk, fnName) {
+  if (runtimeOk && serverOk) return "available"
+  if (!runtimeOk && serverOk) return "advertised by the server, but this OpenAF runtime lacks " + fnName
+  if (runtimeOk && !serverOk) return "not advertised by the server"
+  return "unavailable (runtime lacks " + fnName + " and the server does not advertise it)"
+}
+
+// Build one row per feature with its negotiated state.
+function mcpFeatureRows(client) {
+  var summary = __miniAMcpFeatureSummary(client, { prompt: client.__miniATesterPrompt === true })
+  var version = summary.version
+  var elicitation
+  if (!summary.elicitation.runtime) elicitation = "unavailable (runtime lacks onElicitationRequest)"
+  else if (version < "2025-06-18") elicitation = "not supported by protocol version " + (version || "(unknown)")
+  else elicitation = version >= "2025-11-25" ? "form and URL" : "form"
+  return {
+    version: version,
+    server: summary.server,
+    rows: [
+      { feature: "tasks", state: describeMCPFeature(summary.tasks.runtime, summary.tasks.server, "getTask") },
+      { feature: "elicitation", state: elicitation },
+      { feature: "skills", state: describeMCPFeature(summary.skills.runtime, summary.skills.server, "listSkills") },
+      { feature: "resources", state: describeMCPFeature(summary.resources.runtime, summary.resources.server, "listResources") },
+      { feature: "prompts", state: describeMCPFeature(summary.prompts.runtime, summary.prompts.server, "listPrompts") },
+      { feature: "tools", state: describeMCPFeature(summary.tools.runtime, summary.tools.server, "listTools") }
+    ]
+  }
+}
+
+// Print the negotiated capabilities.
+function printMCPCapabilities(client) {
+  var info = mcpFeatureRows(client)
+  print("\n" + ansiColor("BOLD", "🧭 MCP capabilities"))
+  print(ansiColor("FAINT", "─────────────────────"))
+  var name = isString(info.server.name) ? __miniAMcpLabel(info.server.name) : "(unnamed server)"
+  print(ansiColor("FG(248)", "Server: ") + name + ansiColor("FG(248)", "  Protocol: ") + (info.version || "(unknown)"))
+  info.rows.forEach(function(row) {
+    var ok = row.state === "available" || row.state.indexOf("form") === 0
+    print("  " + ansiColor(ok ? "FG(41)" : "FG(248)", row.feature + repeat(12 - row.feature.length, " ")) + row.state)
+  })
+  print()
+}
+
+// Ask for one menu choice and return the zero-based index, or -1 on cancel.
+function chooseMCPItem(label, items, size) {
+  return normalizeChoiceIndex(askChoose(label, items.concat(["🔙 Back"]), size || 8), items.length)
+}
+
+// Answer a server elicitation request (form or URL) interactively, mirroring the agent's URL safety rules.
+function testerElicitationHandler(request, sessionOptions) {
+  try {
+    if (sessionOptions.__noninteractive === true || !isMap(request)) return { action: "cancel" }
+    print("\n" + ansiColor("BOLD", "🙋 Server input request") + (isDef(request.mode) ? " (" + request.mode + ")" : ""))
+    print(__miniAMcpLabel(request.message))
+
+    if (request.mode === "url") {
+      var uri = new java.net.URI(request.url)
+      if (String(uri.getScheme()).toLowerCase() !== "https" || uri.getHost() === null || uri.getUserInfo() !== null) {
+        print(ansiColor("FG(196)", "!! Declined: only plain https URLs are accepted."))
+        return { action: "decline" }
+      }
+      var host = String(uri.getHost()) + (uri.getPort() < 0 ? "" : ":" + uri.getPort())
+      var consent = normalizeChoiceIndex(askChoose("Destination: " + host, ["Allow navigation", "Decline", "Cancel"]), 3)
+      if (consent !== 0) return { action: consent === 1 ? "decline" : "cancel" }
+      print("Open: " + String(uri.toASCIIString()))
+      var next = normalizeChoiceIndex(askChoose("Complete the interaction, then continue.", ["Continue", "Cancel"]), 2)
+      return { action: next === 0 ? "accept" : "cancel" }
+    }
+    if (isDef(request.mode) && request.mode !== "form") return { action: "decline" }
+
+    var schema = request.requestedSchema
+    if (!isMap(schema) || schema.type !== "object" || !isMap(schema.properties)) {
+      print(ansiColor("FG(196)", "!! Declined: unsupported form schema."))
+      return { action: "decline" }
+    }
+    print(ansiColor("FAINT", "Requested schema: ") + af.toCSLON(schema))
+    var keys = Object.keys(schema.properties)
+    var fields = keys.map(function(key) { return __miniAMcpField(schema.properties[key]) })
+    var required = isArray(schema.required) ? schema.required : []
+    var values = {}
+
+    // Test mode: take the schema defaults without prompting.
+    if (sessionOptions.autoacceptelicitation === true) {
+      keys.forEach(function(key) {
+        if (isDef(schema.properties[key].default)) values[key] = schema.properties[key].default
+      })
+      return required.every(function(key) { return isDef(values[key]) }) ? { action: "accept", content: values } : { action: "decline" }
+    }
+
+    while (true) {
+      keys.forEach(function(key, index) {
+        var prop = schema.properties[key]
+        var field = fields[index]
+        var isReq = required.indexOf(key) >= 0
+        var label = __miniAMcpLabel(prop.title || key) + (prop.description ? " (" + __miniAMcpLabel(prop.description) + ")" : "") + (isReq ? " *" : "")
+        var initial = isDef(values[key]) ? values[key] : prop.default
+        if (prop.type === "array") {
+          var picked = askChooseMultiple(label + ": ", field.labels, 12)
+          if (!isArray(picked)) throw new Error("cancelled")
+          values[key] = picked.map(function(item) { return isNumber(item) ? field.choices[item] : field.choices[field.labels.indexOf(item)] })
+        } else if (isDef(field.choices)) {
+          var labels = field.labels.slice()
+          if (!isReq) labels.push("(skip)")
+          var selected = normalizeChoiceIndex(askChoose(label + ": ", labels, 12), labels.length)
+          if (selected < 0) throw new Error("cancelled")
+          if (selected < field.choices.length) values[key] = field.choices[selected]
+          else delete values[key]
+        } else {
+          var raw = ask(label + (isDef(initial) ? " [" + initial + "]" : "") + ": ")
+          if (raw === "" && isDef(initial)) raw = String(initial)
+          if (raw === "") delete values[key]
+          else if (prop.type === "string") values[key] = raw
+          else if (isNaN(Number(raw))) {
+            print(ansiColor("FG(196)", "!! Not a number: " + raw))
+            delete values[key]
+          } else values[key] = Number(raw)
+        }
+      })
+      var missing = required.filter(function(key) { return isUnDef(values[key]) })
+      print(ansiColor("FAINT", "Response: ") + af.toCSLON(values) + (missing.length > 0 ? ansiColor("FG(196)", "  Missing: " + missing.join(", ")) : ""))
+      var choices = missing.length > 0 ? ["Edit", "Decline", "Cancel"] : ["Submit", "Edit", "Decline", "Cancel"]
+      var review = choices[normalizeChoiceIndex(askChoose("Review response: ", choices), choices.length)]
+      if (review === "Submit") return { action: "accept", content: values }
+      if (review === "Edit") continue
+      return { action: review === "Decline" ? "decline" : "cancel" }
+    }
+  } catch(e) {
+    print(ansiColor("FG(196)", "!! Input request ended: " + __miniAMcpLabel(e.message)))
+    return { action: "cancel" }
+  }
+}
+
+// Follow a task handle until it reaches a terminal state, answering any input it requests.
+function pollMCPTask(client, handle, sessionOptions) {
+  if (!isFunction(client.getTask)) {
+    print(ansiColor("FG(196)", "!! This OpenAF runtime cannot follow tasks (no getTask). Handle: ") + af.toCSLON(handle))
+    return handle
+  }
+  var taskId = handle.taskId
+  var next = handle
+  var status
+  var expires = Infinity
+  var failures = 0
+  var sent = {}
+  print(ansiColor("FG(248)", "⏳ Task " + taskId + " started"))
+  while (true) {
+    if (now() >= expires) return __miniAMcpFailure("MCP task expired before a terminal result was available.")
+    if (isUnDef(next) || next.resultType === "task" && next.status !== "working") {
+      try {
+        next = client.getTask(taskId)
+      } catch(e) {
+        if (++failures >= 3) return __miniAMcpFailure("MCP task could not be reached: " + __miniAMcpLabel(e.message))
+        sleep(250 * failures)
+        continue
+      }
+      failures = 0
+    }
+    if (!isMap(next) || next.taskId !== taskId) return __miniAMcpFailure("MCP task returned an invalid status or is inaccessible.")
+    if (isNumber(next.ttlMs) && next.ttlMs >= 0) expires = now() + next.ttlMs
+    if (next.status !== status) {
+      status = next.status
+      print(ansiColor("FG(248)", "   status: ") + status + (next.statusMessage ? " · " + __miniAMcpLabel(next.statusMessage) : ""))
+    }
+    if (status === "completed" && isMap(next.result)) return next.result
+    if (status === "failed") return __miniAMcpFailure("MCP task failed" + (isMap(next.error) && isNumber(next.error.code) ? " (code " + next.error.code + ")" : "") + ".")
+    if (status === "cancelled") return __miniAMcpFailure("MCP task was cancelled.")
+    if (status !== "working" && status !== "input_required") return __miniAMcpFailure("MCP task returned an unsupported status: " + status)
+    if (status === "input_required" && isMap(next.inputRequests)) {
+      var responses = {}
+      Object.keys(next.inputRequests).forEach(function(key) {
+        if (sent[key]) return
+        var request = next.inputRequests[key]
+        responses[key] = isMap(request) && request.method === "elicitation/create" ? testerElicitationHandler(request.params, sessionOptions) : { action: "cancel" }
+        sent[key] = true
+      })
+      if (Object.keys(responses).length > 0) {
+        if (isFunction(client.updateTask)) {
+          try { client.updateTask(taskId, responses) } catch(e) { print(ansiColor("FG(196)", "!! Task input update failed: " + __miniAMcpLabel(e.message))) }
+        } else print(ansiColor("FG(196)", "!! This runtime lacks updateTask; the task input could not be sent."))
+      }
+    }
+    if (sessionOptions.taskprompt === true) {
+      var step = normalizeChoiceIndex(askChoose("Task " + taskId + " is " + status + ".", ["Keep waiting", "Cancel task"]), 2)
+      if (step !== 0) {
+        if (isFunction(client.cancelTask)) {
+          try { client.cancelTask(taskId); print("🛑 Cancellation requested.") } catch(e) { print(ansiColor("FG(196)", "!! Cancel failed: " + __miniAMcpLabel(e.message))) }
+        } else print(ansiColor("FG(196)", "!! This runtime lacks cancelTask."))
+        if (step < 0 || step === 1) { next = __; sleep(250); continue }
+      }
+    }
+    var interval = isNumber(next.pollIntervalMs) && next.pollIntervalMs > 0 ? next.pollIntervalMs : 1000
+    if (sessionOptions.taskpollms > 0) interval = sessionOptions.taskpollms
+    sleep(Math.min(interval, Math.max(1, expires - now())))
+    next = __
+  }
+}
+
+// Continue input_required results and follow task handles after a tool call.
+function resolveMCPResult(client, tool, params, result, sessionOptions) {
+  var rounds = 0
+  while (isMap(result) && result.resultType === "input_required") {
+    if (++rounds > 16) return __miniAMcpFailure("Server kept requesting input after 16 rounds.")
+    if (!isFunction(client.continueRequest)) {
+      print(ansiColor("FG(196)", "!! The server needs input but this runtime lacks continueRequest."))
+      return result
+    }
+    print(ansiColor("FG(248)", "↪ Server requested input (round " + rounds + ")"))
+    try {
+      result = client.continueRequest("tools/call", { name: tool.name, arguments: params }, result)
+    } catch(e) {
+      return __miniAMcpFailure("Continuation failed: " + __miniAMcpLabel(e.message))
+    }
+  }
+  if (isMap(result) && result.resultType === "task") result = pollMCPTask(client, result, sessionOptions)
+  return result
+}
+
+// Extract a list from a client reply that is either an array or a map holding it.
+function mcpListOf(reply, key) {
+  if (isArray(reply)) return reply
+  return isMap(reply) && isArray(reply[key]) ? reply[key] : []
+}
+
+// Print text content, summarizing binary blobs.
+function printMCPContents(response) {
+  var contents = isMap(response) && isArray(response.contents) ? response.contents : []
+  if (contents.length === 0) print(ansiColor("FAINT", "(no contents)"))
+  contents.forEach(function(item) {
+    print(ansiColor("FAINT", (item.uri || "") + (item.mimeType ? " · " + item.mimeType : "")))
+    if (isString(item.text)) print(item.text)
+    else if (isString(item.blob)) print(ansiColor("FAINT", "(binary content, " + item.blob.length + " base64 characters)"))
+  })
+}
+
+// Verify every file of one skill against its manifest digests and sizes.
+function verifyMCPSkill(client, entry) {
+  var report = { name: isMap(entry.frontmatter) ? entry.frontmatter.name : "", uri: entry.uri, ok: true, files: 0, failures: [] }
+  var verified
+  try {
+    verified = __miniAMcpVerifySkillManifest(entry)
+  } catch(e) {
+    report.ok = false
+    report.failures.push("manifest: " + e.message)
+    return report
+  }
+  Object.keys(verified.files).forEach(function(uri) {
+    report.files++
+    try {
+      var response = client.readResource(uri)
+      var resource = isMap(response) && isArray(response.contents) && response.contents.length === 1 ? response.contents[0] : __
+      var text = __miniAMcpVerifySkillResource(verified.files[uri], resource, uri)
+      if (uri === entry.uri) __miniAMcpCheckSkillFrontmatter(entry, report.name, text)
+    } catch(e) {
+      report.ok = false
+      report.failures.push(uri + ": " + e.message)
+    }
+  })
+  return report
+}
+
+// Interactive skills browser.
+function skillsMenu(client, sessionOptions) {
+  if (!isFunction(client.listSkills)) {
+    print(ansiColor("FG(196)", "!! This OpenAF runtime lacks listSkills.") + "\n")
+    return
+  }
+  var entries
+  try {
+    entries = mcpListOf(client.listSkills(), "skills")
+  } catch(e) {
+    print(ansiColor("FG(196)", "!! Failed to list skills: " + __miniAMcpLabel(e.message)) + "\n")
+    return
+  }
+  if (entries.length === 0) {
+    print("\n📭 No skills published by this server.\n")
+    return
+  }
+  while (true) {
+    var names = entries.map(function(entry) {
+      var meta = isMap(entry.frontmatter) ? entry.frontmatter : {}
+      return __miniAMcpLabel(meta.name || entry.uri) + (meta.description ? " — " + __miniAMcpLabel(meta.description).substring(0, 70) : "")
+    })
+    var index = chooseMCPItem("Choose a skill: ", names, sessionOptions.toolchoosesize)
+    if (index < 0) return
+    var entry = entries[index]
+    var meta = isMap(entry.frontmatter) ? entry.frontmatter : {}
+    print("\n" + ansiColor("BOLD,FG(41)", "Skill: " + __miniAMcpLabel(meta.name)))
+    print(ansiColor("FG(248)", "URI: ") + entry.uri + ansiColor("FG(248)", "  Files: ") + (isArray(entry.resources) ? entry.resources.length : 0) +
+      (toBoolean(meta["disable-model-invocation"]) === true ? ansiColor("FG(248)", "  (model invocation disabled)") : ""))
+    var action = normalizeChoiceIndex(askChoose("Skill action: ", ["✅ Verify all files", "📖 Read SKILL.md", "📎 Read a reference", "🔙 Back"]), 4)
+    if (action === 0) {
+      var report = verifyMCPSkill(client, entry)
+      print(report.ok ? ansiColor("FG(82)", "✅ " + report.files + " file(s) verified") : ansiColor("FG(196)", "!! Verification failed"))
+      report.failures.forEach(function(failure) { print("   " + ansiColor("FG(196)", failure)) })
+      print()
+    } else if (action === 1) {
+      try { printMCPContents(client.readResource(entry.uri)) } catch(e) { print(ansiColor("FG(196)", "!! " + __miniAMcpLabel(e.message))) }
+      print()
+    } else if (action === 2) {
+      var refs = (isArray(entry.resources) ? entry.resources : []).map(function(file) { return file.uri }).filter(function(uri) { return uri !== entry.uri })
+      var refIndex = chooseMCPItem("Choose a reference: ", refs, 12)
+      if (refIndex >= 0) {
+        try { printMCPContents(client.readResource(refs[refIndex])) } catch(e) { print(ansiColor("FG(196)", "!! " + __miniAMcpLabel(e.message))) }
+        print()
+      }
+    }
+  }
+}
+
+// Interactive resources browser.
+function resourcesMenu(client, sessionOptions) {
+  if (!isFunction(client.listResources)) {
+    print(ansiColor("FG(196)", "!! This OpenAF runtime lacks listResources.") + "\n")
+    return
+  }
+  try {
+    var resources = mcpListOf(client.listResources(), "resources")
+    var templates = isFunction(client.listResourceTemplates) ? mcpListOf(client.listResourceTemplates(), "resourceTemplates") : []
+    if (resources.length === 0 && templates.length === 0) {
+      print("\n📭 No resources published by this server.\n")
+      return
+    }
+    templates.forEach(function(template) {
+      print(ansiColor("FAINT", "template: " + (template.uriTemplate || "") + (template.name ? " (" + template.name + ")" : "")))
+    })
+    var index = chooseMCPItem("Choose a resource to read: ", resources.map(function(item) { return item.name ? item.name + " — " + item.uri : item.uri }), sessionOptions.toolchoosesize)
+    if (index >= 0) {
+      printMCPContents(client.readResource(resources[index].uri))
+      print()
+    }
+  } catch(e) {
+    print(ansiColor("FG(196)", "!! Resources failed: " + __miniAMcpLabel(e.message)) + "\n")
+  }
+}
+
+// Interactive prompts browser.
+function promptsMenu(client, sessionOptions) {
+  if (!isFunction(client.listPrompts)) {
+    print(ansiColor("FG(196)", "!! This OpenAF runtime lacks listPrompts.") + "\n")
+    return
+  }
+  try {
+    var prompts = mcpListOf(client.listPrompts(), "prompts")
+    if (prompts.length === 0) {
+      print("\n📭 No prompts published by this server.\n")
+      return
+    }
+    var index = chooseMCPItem("Choose a prompt: ", prompts.map(function(item) { return item.name + (item.description ? " — " + __miniAMcpLabel(item.description).substring(0, 70) : "") }), sessionOptions.toolchoosesize)
+    if (index < 0) return
+    var promptArgs = {}
+    ;(isArray(prompts[index].arguments) ? prompts[index].arguments : []).forEach(function(argument) {
+      var value = ask(argument.name + (argument.required ? " *" : "") + (argument.description ? " (" + __miniAMcpLabel(argument.description) + ")" : "") + ": ")
+      if (value !== "") promptArgs[argument.name] = value
+    })
+    print(printTree(client.getPrompt(prompts[index].name, promptArgs)))
+    print()
+  } catch(e) {
+    print(ansiColor("FG(196)", "!! Prompts failed: " + __miniAMcpLabel(e.message)) + "\n")
+  }
+}
+
+// Look up, list or cancel tasks by ID.
+function tasksMenu(client) {
+  if (!isFunction(client.getTask)) {
+    print(ansiColor("FG(196)", "!! This OpenAF runtime lacks getTask.") + "\n")
+    return
+  }
+  var action = normalizeChoiceIndex(askChoose("Tasks: ", ["🔎 Get task status", "📜 List tasks", "🛑 Cancel task", "🔙 Back"]), 4)
+  try {
+    if (action === 0 || action === 2) {
+      var id = ask("Task ID: ")
+      if (isUnDef(id) || id.trim() === "") return
+      if (action === 0) print(printTree(client.getTask(id.trim())))
+      else if (isFunction(client.cancelTask)) print(printTree(client.cancelTask(id.trim())))
+      else print(ansiColor("FG(196)", "!! This runtime lacks cancelTask."))
+    } else if (action === 1) {
+      if (isFunction(client.listTasks)) print(printTree(client.listTasks()))
+      else print(ansiColor("FG(196)", "!! This runtime lacks listTasks."))
+    }
+  } catch(e) {
+    print(ansiColor("FG(196)", "!! Task request failed: " + __miniAMcpLabel(e.message)))
+  }
+  print()
+}
+
+// Build the non-interactive report for a connected client.
+function buildMCPReport(client, config) {
+  var info = mcpFeatureRows(client)
+  var report = { server: isString(info.server.name) ? __miniAMcpLabel(info.server.name) : "", protocol: info.version, ok: true, features: {}, counts: {}, skills: [] }
+  info.rows.forEach(function(row) { report.features[row.feature] = row.state })
+  function count(key, fn, listKey) {
+    try { report.counts[key] = mcpListOf(fn(), listKey).length } catch(e) { report.counts[key] = "unavailable: " + __miniAMcpLabel(e.message) }
+  }
+  count("tools", function() { return client.listTools() }, "tools")
+  var caps = isFunction(client.getCapabilities) ? client.getCapabilities() : {}
+  if (isFunction(client.listResources) && isMap(caps.resources)) count("resources", function() { return client.listResources() }, "resources")
+  if (isFunction(client.listPrompts) && isMap(caps.prompts)) count("prompts", function() { return client.listPrompts() }, "prompts")
+  if (isFunction(client.listSkills)) {
+    try {
+      var entries = mcpListOf(client.listSkills(), "skills")
+      report.counts.skills = entries.length
+      entries.forEach(function(entry) {
+        var result = verifyMCPSkill(client, entry)
+        report.skills.push(result)
+        if (!result.ok) report.ok = false
+      })
+    } catch(e) {
+      report.counts.skills = "unavailable: " + __miniAMcpLabel(e.message)
+    }
+  }
+  return report
+}
+
 // Main MCP tester
 function mainMCPTest(args) {
     var accentColor  = "FG(218)"
@@ -615,7 +1049,10 @@ function mainMCPTest(args) {
         toolchoosesize: { type: "number", default: 8, description: "Number of items to display in tool selection menus" },
         debug: { type: "boolean", default: false, description: "Enable debug mode for MCP connections" },
         showtimeelapsed: { type: "boolean", default: false, description: "Show elapsed time for MCP operations (list tools, call tools, etc.)" },
-        showlimitcallanswer: { type: "number", default: 0, description: "Limit the printed string length of call tool results (0 = no limit)" }
+        showlimitcallanswer: { type: "number", default: 0, description: "Limit the printed string length of call tool results (0 = no limit)" },
+        taskpollms: { type: "number", default: 0, description: "Override the task polling interval in milliseconds (0 = use the server's pollIntervalMs)" },
+        taskprompt: { type: "boolean", default: false, description: "Ask whether to keep waiting or cancel at every task poll" },
+        autoacceptelicitation: { type: "boolean", default: false, description: "Answer server input requests with the schema defaults without prompting (for tests)" }
     }
 
     // Initialize session options with defaults
@@ -683,12 +1120,7 @@ function mainMCPTest(args) {
                     if (isDef(_currentConfigRaw)) _currentConfigRaw.debug = false
                 }
                 print("🔌 Connecting to MCP server: " + summarizeMCPConfig(_currentConfig))
-                _mcpClient = $mcp(_currentConfig)
-                var startTime = now()
-                _mcpClient.initialize()
-                if (sessionOptions.showtimeelapsed) {
-                    printElapsedTime(startTime, "Initialize MCP connection")
-                }
+                _mcpClient = connectMCP(_currentConfig, sessionOptions).client
                 print("✅ Connected successfully!\n")
             } catch(e) {
                 print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Connection failed: " + mcpConnectionError(e), errorColor) + "\n")
@@ -732,12 +1164,7 @@ function mainMCPTest(args) {
                     if (isDef(_currentConfigRaw)) _currentConfigRaw.debug = false
                 }
                 print("🔌 Connecting to MCP server: " + summarizeMCPConfig(_currentConfig))
-                _mcpClient = $mcp(_currentConfig)
-                var startTime = now()
-                _mcpClient.initialize()
-                if (sessionOptions.showtimeelapsed) {
-                    printElapsedTime(startTime, "Initialize MCP connection")
-                }
+                _mcpClient = connectMCP(_currentConfig, sessionOptions).client
                 print("✅ Connected successfully!\n")
             } catch(e) {
                 print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Connection failed: " + mcpConnectionError(e), errorColor) + "\n")
@@ -777,8 +1204,10 @@ function mainMCPTest(args) {
 
     const miniaLogo = ` ._ _ ${ansiColor(promptColor, "o")}._ ${ansiColor(promptColor, "o")}   _
  | | ||| ||~~(_|`
-    print(ansiColor("BOLD", miniaLogo) + ansiColor(accentColor, " MCP Tester"))
-    print()
+    if (toBoolean(args.mcptestreport) !== true) {
+        print(ansiColor("BOLD", miniaLogo) + ansiColor(accentColor, " MCP Tester"))
+        print()
+    }
 
     var _shouldExit = false
     var _mcpClient = __
@@ -793,6 +1222,30 @@ function mainMCPTest(args) {
         }
     })
 
+    // Non-interactive report mode: connect, print the report and exit with a status code
+    if (toBoolean(args.mcptestreport) === true) {
+        sessionOptions.__noninteractive = true
+        var _reportOk = false
+        try {
+            if (isUnDef(args.mcp)) throw new Error("mcptestreport=true requires mcp=<config>")
+            var _reportConfig = isString(args.mcp) ? af.fromJSSLON(args.mcp) : args.mcp
+            if (isArray(_reportConfig)) {
+                if (_reportConfig.length !== 1) throw new Error("mcptestreport=true needs exactly one MCP connection")
+                _reportConfig = _reportConfig[0]
+            }
+            var _reportConn = connectMCP(_reportConfig, sessionOptions)
+            _mcpClient = _reportConn.client
+            var _report = buildMCPReport(_mcpClient, _reportConn.config)
+            _reportOk = _report.ok
+            $o(_report, { __format: args.format || args.__format || "cyaml" })
+        } catch(e) {
+            print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Report failed: " + mcpConnectionError(e), errorColor))
+        }
+        try { if (isDef(_mcpClient)) _mcpClient.destroy() } catch(ignoreClose) {}
+        global.__miniAMcpTestExitCode = _reportOk ? 0 : 1
+        return
+    }
+
     // Check if mcp parameter was provided
     if (isDef(args.mcp)) {
         var config = __
@@ -805,17 +1258,13 @@ function mainMCPTest(args) {
                 } else {
                     config.debug = false
                 }
-                var _rawSnapshot = clone(config)
                 print("🔌 Connecting to MCP server from mcp= parameter: " + summarizeMCPConfig(config))
-                _mcpClient = $mcp(config)
-                var startTime = now()
-                _mcpClient.initialize()
-                if (sessionOptions.showtimeelapsed) {
-                    printElapsedTime(startTime, "Initialize MCP connection")
-                }
-                _currentConfig = config
-                _currentConfigRaw = _rawSnapshot
+                var _conn = connectMCP(config, sessionOptions)
+                _mcpClient = _conn.client
+                _currentConfig = _conn.config
+                _currentConfigRaw = _conn.raw
                 print("✅ Connected successfully!\n")
+                printMCPCapabilities(_mcpClient)
             }
         } catch(e) {
             print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Connection failed: " + mcpConnectionError(e), errorColor) + "\n")
@@ -842,6 +1291,11 @@ function mainMCPTest(args) {
             _options = [
                 "📋 List tools",
                 "🖥️  Show MCP server info",
+                "🧭 Show capabilities",
+                "⏳ Tasks",
+                "🧩 Skills",
+                "📚 Resources",
+                "💬 Prompts",
                 "🔧 Call a tool",
                 "🔍 Show tool details",
                 "🔤 Show mcp= parameter string",
@@ -879,18 +1333,14 @@ function mainMCPTest(args) {
                 var config = buildMCPConfig(args)
                 if (isDef(config)) {
                     config = merge(config, { debug: sessionOptions.debug })
-                    var _rawSnapshot = clone(config)
                     print("\n🔌 Connecting to MCP server: " + summarizeMCPConfig(config))
                     try {
-                        _mcpClient = $mcp(config)
-                        var startTime = now()
-                        _mcpClient.initialize()
-                        if (sessionOptions.showtimeelapsed) {
-                            printElapsedTime(startTime, "Initialize MCP connection")
-                        }
-                        _currentConfig = config
-                        _currentConfigRaw = _rawSnapshot
+                        var _conn2 = connectMCP(config, sessionOptions)
+                        _mcpClient = _conn2.client
+                        _currentConfig = _conn2.config
+                        _currentConfigRaw = _conn2.raw
                         print("✅ Connected successfully!\n")
+                        printMCPCapabilities(_mcpClient)
                     } catch(e) {
                         print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Connection failed: " + mcpConnectionError(e), errorColor) + "\n")
                         _mcpClient = __
@@ -910,6 +1360,16 @@ function mainMCPTest(args) {
                 } else {
                     showMCPServerInfo(_mcpClient, sessionOptions.showtimeelapsed)
                 }
+            } else if (optionText.indexOf("Show capabilities") >= 0) {
+                printMCPCapabilities(_mcpClient)
+            } else if (optionText.indexOf("Tasks") >= 0) {
+                tasksMenu(_mcpClient)
+            } else if (optionText.indexOf("Skills") >= 0) {
+                skillsMenu(_mcpClient, sessionOptions)
+            } else if (optionText.indexOf("Resources") >= 0) {
+                resourcesMenu(_mcpClient, sessionOptions)
+            } else if (optionText.indexOf("Prompts") >= 0) {
+                promptsMenu(_mcpClient, sessionOptions)
             } else if (optionText.indexOf("Call a tool") >= 0) {
                 if (isUnDef(_mcpClient)) {
                     print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" No MCP connection. Please create a new connection first.", errorColor) + "\n")
@@ -1049,5 +1509,5 @@ function mainMCPTest(args) {
     }
 }
 
-// Run the main tester
-mainMCPTest(args)
+// Run the main tester (tests set __miniAMcpTestNoMain to call the functions directly)
+if (!global.__miniAMcpTestNoMain) mainMCPTest(args)

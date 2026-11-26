@@ -506,7 +506,7 @@ function MiniAInteractiveSession(args, adapter) {
       // Start MCP test mode
       global._args = args
       loadLib(__miniAPath("mini-a-mcptest.js"), true)
-      exit(0, true)
+      exit(isNumber(global.__miniAMcpTestExitCode) ? global.__miniAMcpTestExitCode : 0, true)
     } else if (toBoolean(args.memoryman) === true) {
       // Start memory management mode
       global._args = args
@@ -1144,6 +1144,7 @@ function MiniAInteractiveSession(args, adapter) {
     wikiquery      : { type: "boolean", default: false, description: "Query a local wiki read-only in the console, with onport=/web=true or goal= (runs utils/wikiQuery.yaml; alias --wiki-query)." },
     modelman       : { type: "boolean", default: false, description: "Start the model manager UI instead of the console." },
     mcptest        : { type: "boolean", default: false, description: "Start the MCP test mode instead of the console." },
+    mcptestreport  : { type: "boolean", default: false, description: "With mcptest=true and mcp=, print a non-interactive feature report (negotiated protocol, tasks, elicitation, skills, resources, prompts) and exit non-zero on failure." },
     memoryman      : { type: "boolean", default: false, description: "Start the memory manager UI instead of the console." },
     dream          : { type: "boolean", default: false, description: "Run a dream (sleep) pass — LLM-powered memory and/or wiki consolidation — instead of the console." },
     dreammode      : { type: "string", description: "Dream mode selector for dream=true: memory, wiki, or both (default auto: memory when memory is configured, otherwise wiki)." },
@@ -1257,7 +1258,7 @@ function MiniAInteractiveSession(args, adapter) {
     { category: "Models and execution", subcategory: "Prompt and tool routing", names: "adaptiverouting promptprofile routerallow routerdeny routerorder routerproxythreshold systempromptbudget".split(" ") },
     { category: "Tools and permissions", subcategory: "Shell and sandbox", names: "checkall readwrite sandboxnonetwork sandboxprofile shell shellallow shellallowpipes shellbanextra shellguard shellguardask shellguarddeny shellguardtimeout shellbatch shellmaxbytes shellprefix shelltimeout usesandbox useshell".split(" ") },
     { category: "Tools and permissions", subcategory: "Tools and utilities", names: "toolargcheck toolargrepair toolresultmaxinline readresultmaxmatches capabilitylimit capabilityselection fileallow policy policyfile toolcachettl toolfallback usejsonschema usejsontool usestdutils usetools usetoolslc useutils utilsallow utilsdeny utilsroot".split(" ") },
-    { category: "Tools and permissions", subcategory: "MCP connections", names: "mcp mcpdynamic sessionprewarm mcplazy mcptest nosetmcpwd".split(" ") },
+    { category: "Tools and permissions", subcategory: "MCP connections", names: "mcp mcpdynamic sessionprewarm mcplazy mcptest mcptestreport nosetmcpwd".split(" ") },
     { category: "Tools and permissions", subcategory: "MCP proxy and programmatic calls", names: "mcpproxyallow mcpproxydeny mcpproxynative mcpprogcall mcpprogcallbatchmax mcpprogcallmaxbytes mcpprogcallport mcpprogcallresultttl mcpprogcalltools mcpproxy mcpproxythreshold mcpproxytoon".split(" ") },
     { category: "Tools and permissions", subcategory: "Skills and extensions", names: "extracommands extrahooks extraskills mini-a-docs miniadocs plugins pluginsroot pluginsroots skillcontextchars skillmanifestchars skillmaxautoload skillsautolimit skillsautosearch skillsmaxchars skillsmaxloaded skillwikibackend skillwikimounts skillwikiroot useskills useskillswiki".split(" ") },
     { category: "Memory and knowledge", subcategory: "Memory stores and retention", names: "memoryartifactttldays memoryindexttldays memoryinject memoryrelevantcap usememorywrite memorywritemax memorymd memoryreflect memoryreflectmode acceptancereview acceptanceoptimization proxyargrepair memoryreflectmodel memoryreflectmin memorycandidatedays memorybudget memorysearchbudget memorysessionmaxdays memorypersistevery memorych memorycompactevery memorydedup memoryman memorymaxentries memorymaxpersection memorypromote memoryscope memorysessionch memorysessionheader memorysessionid memorystaledays memoryuser memoryusersession usememory".split(" ") },
@@ -1310,6 +1311,7 @@ function MiniAInteractiveSession(args, adapter) {
       { option: "wikiquery=true", description: "Query a local wiki read-only: wikiroot=<dir> [onport=<port>|goal=<text>] (also --wiki-query)." },
       { option: "modelman=true", description: "Start the model manager instead of the console experience." },
       { option: "mcptest=true", description: "Start the MCP test client instead of the console experience." },
+      { option: "mcptestreport=true", description: "With mcptest=true mcp=<config>: print a non-interactive MCP feature report and exit." },
       { option: "memoryman=true", description: "Start the memory manager UI for global/session stores." },
       { option: "dream=true", description: "Run a dream (sleep) pass: LLM-powered memory/wiki consolidation." },
       { option: "workermode=true", description: "Start the headless worker API server (mini-a-worker.yaml)." },

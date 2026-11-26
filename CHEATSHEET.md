@@ -2231,6 +2231,7 @@ These grouped tables complete the parameter entries above. `unset` means no expl
 | Parameter | Type | Default / fallback | Description |
 | --- | --- | --- | --- |
 | `mcptest` | boolean | `false` | Start the MCP test mode instead of the console. |
+| `mcptestreport` | boolean | `false` | With `mcptest=true mcp=...`, print a non-interactive MCP feature report and exit non-zero on failure. |
 | `sessionprewarm` | boolean | `true` | Prepare wiki and external MCP resources while composing a prompt |
 
 ### Tools and permissions — MCP proxy and programmatic calls

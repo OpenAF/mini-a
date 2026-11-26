@@ -1,26 +1,8 @@
 // Retain the initiating agent through the synchronous embedded proxy dispatch.
 var __miniAMcpCallingAgent = new java.lang.ThreadLocal()
 
-// Keep protocol control responses out of tool output, caches and traces.
-function __miniAMcpPending(result) {
-  return isMap(result) && ["task", "input_required"].indexOf(result.resultType) >= 0
-}
-
-// Return an actionable error without echoing protocol state or elicitation data.
-function __miniAMcpFailure(message) {
-  return { error: message, content: [{ type: "text", text: message }], isError: true, retryable: false }
-}
-
-// Display server-supplied text as plain text without terminal control sequences.
-function __miniAMcpLabel(value) {
-  return String(value || "").replace(/[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g, " ").substring(0, 1200)
-}
-
-// Match OpenAF's transport default for descriptors containing only a URL.
-function __miniAMcpType(config) {
-  var type = String(config.type || "stdio").toLowerCase()
-  return type === "stdio" && isDef(config.url) && isUnDef(config.cmd) ? "remote" : type
-}
+// Pure helpers are shared with the MCP tester.
+loadLib(__miniABundleRoot + "/js/core/mini-a-mcp-helpers.js", true)
 
 // Bind interaction callbacks to this Mini-A instance before negotiation.
 MiniA.prototype._configureMcpClient = function(client, config, interactionArgs) {
@@ -51,14 +33,13 @@ MiniA.prototype._listMcpToolCatalog = function(client) {
 // Summarize negotiated features without exposing transport or authentication details.
 MiniA.prototype._describeMcpFeatures = function(client, args) {
   if (!client.__miniAMcpIdentity || !isFunction(client.getCapabilities)) return
-  var info = isFunction(client.getInfo) ? client.getInfo() : {}
-  var server = info && info.serverInfo
-  if (server && isString(server.name) && client.__miniAMcpLabel === "MCP server") client.__miniAMcpLabel = __miniAMcpLabel(server.name)
-  var caps = client.getCapabilities(), extensions = caps && caps.extensions || {}
-  var tasks = isFunction(client.getTask) && isMap(extensions["io.modelcontextprotocol/tasks"])
-  var skills = isFunction(client.listSkills) && isMap(extensions["io.modelcontextprotocol/skills"])
-  var version = info && info.protocolVersion || ""
-  var prompt = client.__miniAMcpPromptLock && version >= "2025-06-18"
+  var summary = __miniAMcpFeatureSummary(client, { prompt: client.__miniAMcpPromptLock })
+  var server = summary.server
+  if (isString(server.name) && client.__miniAMcpLabel === "MCP server") client.__miniAMcpLabel = __miniAMcpLabel(server.name)
+  var tasks = summary.tasks.runtime && summary.tasks.server
+  var skills = summary.skills.runtime && summary.skills.server
+  var version = summary.version
+  var prompt = summary.elicitation.enabled && version >= "2025-06-18"
   if (!tasks && !skills && !prompt && version < "2026-07-28") return
   this.fnI("mcp", client.__miniAMcpLabel + " · " + version + " · tasks " + (tasks ? "available" : "unavailable") +
     " · elicitation " + (prompt ? version >= "2025-11-25" ? "form and URL" : "form" : "unavailable") +
@@ -119,28 +100,6 @@ MiniA.prototype._mcpPrompt = function(label, choices, url) {
     return ask(label + " ")
   }
   return isString(parent._terminalInputLock) ? syncFn(read, parent._terminalInputLock) : read()
-}
-
-// Decode one supported flat-schema field, preserving typed and optional values.
-function __miniAMcpField(schema) {
-  var choices, labels
-  var list = schema.type === "array" ? schema.items : schema
-  if (isMap(list) && isArray(list.enum)) {
-    choices = list.enum
-    labels = choices.map(String)
-  } else if (isMap(list) && isArray(schema.type === "array" ? list.anyOf : list.oneOf)) {
-    var items = schema.type === "array" ? list.anyOf : list.oneOf
-    choices = items.map(function(item) { return item.const })
-    labels = items.map(function(item) { return __miniAMcpLabel(item.title || item.const) })
-  } else if (schema.type === "boolean") {
-    choices = [true, false]
-    labels = ["Yes", "No"]
-  }
-  if (["string", "boolean", "number", "integer", "array"].indexOf(schema.type) < 0 ||
-      schema.type === "array" && (!choices || choices.some(function(value) { return !isString(value) }))) {
-    throw new Error("Unsupported MCP form field")
-  }
-  return { choices: choices, labels: labels }
 }
 
 // Handle form and URL requests without passing the question or answer to a model.
@@ -417,8 +376,7 @@ MiniA.prototype._remoteSkillCatalog = function() {
 MiniA.prototype._remoteSkillCandidate = function(client, entry) {
   if (!isMap(entry) || !isString(entry.uri) || !isMap(entry.frontmatter) ||
       !isString(entry.frontmatter.name) || !isString(entry.frontmatter.description)) return __
-  var origin = client.__miniAMcpIdentity.substring(0, 12)
-  var id = "mcp:" + origin + ":" + sha256(entry.uri).substring(0, 16)
+  var id = __miniAMcpSkillId(client.__miniAMcpIdentity, entry.uri)
   return { id: id, name: entry.frontmatter.name, description: entry.frontmatter.description,
     source: "mcp", origin: client.__miniAMcpLabel, client: client, entry: entry,
     disableModelInvocation: toBoolean(entry.frontmatter["disable-model-invocation"]) === true }
@@ -465,17 +423,10 @@ MiniA.prototype._approveRemoteSkill = function(item, manifest, approval) {
 // Read a single verified text resource within the approved manifest.
 MiniA.prototype._loadRemoteSkill = function(item, params) {
   var runtime = this._skillRuntime, entry = item.entry, client = item.client
+  var verified = __miniAMcpVerifySkillManifest(entry, this._stableStringify.bind(this))
   var manifest = entry.resources
-  if (!isArray(manifest) || !manifest.length || manifest.length > 512) throw new Error("remote-skill-manifest-required")
-  var total = 0, files = Object.create(null)
-  manifest.forEach(function(file) {
-    if (!isMap(file) || !isString(file.uri) || files[file.uri] || !/^sha256:[a-f0-9]{64}$/.test(file.digest) ||
-        !isNumber(file.size) || file.size < 0 || Math.floor(file.size) !== file.size) throw new Error("invalid-remote-skill-manifest")
-    files[file.uri] = file
-    total += file.size
-  })
-  if (total > 16 * 1024 * 1024 || !files[entry.uri]) throw new Error("invalid-remote-skill-manifest")
-  var revision = sha256(this._stableStringify(Object.keys(files).sort().map(function(uri) { return files[uri] })))
+  var files = verified.files
+  var revision = verified.revision
   var active = runtime.records[item.id]
   if (active && active.revision !== revision) {
     runtime.block(item.id, "skill-source-revision-changed")
@@ -498,26 +449,19 @@ MiniA.prototype._loadRemoteSkill = function(item, params) {
   var response = client.readResource(target)
   var resource = response && isArray(response.contents) && response.contents.length === 1 ? response.contents[0] : __
   if (!isMap(resource) || resource.uri !== target || !isString(resource.text)) throw new Error("remote-skill-text-resource-unavailable")
-  var bytes = new java.lang.String(resource.text).getBytes("UTF-8")
-  if (bytes.length !== files[target].size || "sha256:" + sha256(bytes) !== files[target].digest) {
+  var body
+  try {
+    body = __miniAMcpVerifySkillResource(files[target], resource, target)
+  } catch(integrityError) {
     // Refresh metadata for the next activation. The rejected bytes never enter context.
     try { client.getSkill(entry.uri) } catch(ignoreRefreshFailure) {}
     if (active) {
       runtime.block(item.id, "remote-skill-integrity-check-failed")
       this._syncSkillContext(this._runtime)
     }
-    throw new Error("remote-skill-integrity-check-failed")
+    throw integrityError
   }
-  var body = resource.text
-  if (target === entry.uri) {
-    var head = body.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)
-    if (!head || this._stableStringify(af.fromYAML(head[1])) !== this._stableStringify(entry.frontmatter) ||
-        String(uri.getPath()).split("/").slice(-2).join("/") !== item.name + "/SKILL.md" &&
-        !(String(uri.getPath()) === "/SKILL.md" && String(uri.getHost()) === item.name)) {
-      throw new Error("remote-skill-frontmatter-mismatch")
-    }
-    body = body.substring(head[0].length)
-  }
+  if (target === entry.uri) body = __miniAMcpCheckSkillFrontmatter(entry, item.name, body, this._stableStringify.bind(this))
   var limit = Math.max(0, Math.min(runtime.maxChars - runtime.chars, Number(params.maxChars) || 8000))
   var page = __miniASkillPage(body, limit, params.section)
   if (page.error) throw new Error(page.error)

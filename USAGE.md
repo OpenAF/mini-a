@@ -2350,7 +2350,7 @@ mini-a goal="List the available remote tools" \
 
 For servers publishing OAuth Protected Resource Metadata and Authorization Server Metadata, OpenAF can discover omitted `authURL`/`tokenURL` values. A `clientId` is still required. Discovered endpoints require HTTPS except loopback addresses or explicit `allowHTTP: true`. Optional `audience`, `resource` and `extraParams` customize provider requests; `sendResource: false` omits the OAuth resource parameter for providers that do not accept it.
 
-You can inspect the connection with `mini-a mcptest=true mcp="..."` using the same configuration. Agent Plugin `mcp.json` import currently converts bearer headers only; configure OAuth2 through `mcp=` directly. For Microsoft WorkIQ's dedicated login/status/logout workflow, see [WorkIQ setup](docs/WORKIQ.md).
+You can inspect the connection with `mini-a mcptest=true mcp="..."` using the same configuration. The tester shows the negotiated features, follows tasks, answers elicitation, and lists and verifies skills; `mcptestreport=true` prints that as a non-interactive report. Agent Plugin `mcp.json` import currently converts bearer headers only; configure OAuth2 through `mcp=` directly. For Microsoft WorkIQ's dedicated login/status/logout workflow, see [WorkIQ setup](docs/WORKIQ.md).
 
 ### Multiple MCP Orchestration
 
@@ -5072,6 +5072,7 @@ Console parameters appear in `mini-a --help` and interactive `/set` completion. 
 | Parameter | Type | Default / fallback | Description |
 | --- | --- | --- | --- |
 | `mcptest` | boolean | `false` | Start the MCP test mode instead of the console. |
+| `mcptestreport` | boolean | `false` | With `mcptest=true mcp=...`, print a non-interactive MCP feature report and exit non-zero on failure. |
 
 ### Tools and permissions — MCP proxy and programmatic calls
 

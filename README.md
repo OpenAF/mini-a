@@ -375,6 +375,12 @@ For SSE-based MCP servers:
 mini-a mcptest=true mcp="(type: sse, url: 'http://localhost:9090/mcp')"
 ```
 
+The tester negotiates the protocol revision automatically and reports whether tasks, elicitation, skills, resources and prompts are available (with the reason when they are not). Use **Show capabilities**, **Tasks**, **Skills** (list, read and verify file digests), **Resources** and **Prompts** from the menu. Tool calls follow task handles and answer server input requests (forms and URLs) interactively. For automation, add `mcptestreport=true` to print a feature report, verify every skill manifest and exit non-zero on failure:
+
+```bash
+mini-a mcptest=true mcptestreport=true mcp="(cmd: 'ojob examples/mcp-report-preview.yaml')"
+```
+
 Remote MCP connections also support OpenAF OAuth2 through `auth: (type: oauth2, ...)`, including client credentials and browser authorization-code login with optional protected token persistence. See [remote MCP OAuth2 configuration](USAGE.md#oauth2-authentication-for-remote-mcp-servers) for complete examples and runtime requirements.
 
 ### MCP Tester Features
