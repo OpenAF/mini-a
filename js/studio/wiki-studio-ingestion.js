@@ -83,7 +83,9 @@ WikiStudio.executeSource = function(config,w,job,logFn,backup,isCancelled) {
   if(op==="backup.snapshot") return {ok:true,backupId:WikiStudio.snapshot(config,w,job.id).id}
   if(op==="backup.restore") return WikiStudio.restore(config,w,job,backup)
   if(op==="wiki.export") return WikiStudio.exportWiki(config,w,job,logFn)
-  var a={wikiroot:w.root,wikiaccess:"rw",usewikigraph:w.graph.enabled,wikigraphsemantic:p.semantic===true,wikiretrievalv2:true},params={}
+  var a = { wikiroot: w.root, wikiaccess: "rw", usewikigraph: w.graph.enabled,
+    wikigraphsemantic: p.semantic === true, wikiretrievalv2: true, wikilexical: WikiStudio.writerLexicalConfig(w) }
+  var params = {}
   Object.keys(p.graphOverrides || {}).forEach(function(key) {
     if (Object.prototype.hasOwnProperty.call(MiniAGraphBuild.reconcileDefaults, key)) a["wikigraph" + key.toLowerCase()] = p.graphOverrides[key]
   })

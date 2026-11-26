@@ -4774,20 +4774,30 @@ function __miniAWikiSearchHits(result) {
   return hits
 }
 
+// Keep the source name and incompatible analysis fields in console errors.
 function __miniAWikiRequireSearchHits(result) {
   if (isArray(result)) return result
   var reasons = []
+  var mismatches = []
   if (isMap(result)) {
     if (isString(result.error) && result.error.length > 0) reasons.push(result.error)
     ;(isArray(result.sources) ? result.sources : []).forEach(function(source) {
-      if (isMap(source) && isString(source.reason) && source.reason.length > 0 && reasons.indexOf(source.reason) < 0) reasons.push(source.reason)
+      if (!isMap(source)) return
+      if (isString(source.reason) && source.reason.length > 0 && reasons.indexOf(source.reason) < 0) reasons.push(source.reason)
+      if (source.reason === "incompatible-generation" && isMap(source.analysis) &&
+          isArray(source.analysis.differingFields) && source.analysis.differingFields.length > 0) {
+        mismatches.push((source.wiki || "primary") + " differs in " + source.analysis.differingFields.join(", "))
+      }
     })
     ;(isArray(result.stopReasons) ? result.stopReasons : []).forEach(function(reason) {
       if (isString(reason) && reason.length > 0 && reasons.indexOf(reason) < 0) reasons.push(reason)
     })
     if (reasons.length === 0 && isString(result.outcome) && result.outcome.length > 0) reasons.push(result.outcome)
   }
-  throw new Error("wiki-search-unavailable" + (reasons.length > 0 ? ": " + reasons.join(", ") : ""))
+  var message = "wiki-search-unavailable"
+  if (reasons.length > 0) message += ": " + reasons.join(", ")
+  if (mismatches.length > 0) message += " (" + mismatches.join(" / ") + ")"
+  throw new Error(message)
 }
 
 MiniAWikiManager.prototype.search = function(query, options) {

@@ -1024,6 +1024,42 @@ MiniAWikiRetrievalV2.prototype._retainValidatedSnapshot = function(snapshot) {
     snapshot._managed=true;self.serving.push(snapshot); return true
   })
 }
+// Read serving metadata through the same pointer and path checks for readers and maintenance.
+MiniAWikiRetrievalV2._readGenerationPointer = function(path) {
+  if (java.nio.file.Files.isSymbolicLink(new java.io.File(path).toPath())) throw new Error("unsafe-generation-pointer")
+  var pointer
+  try { pointer = af.fromJson(io.readFileString(path)) } catch(e) { throw new Error("invalid-generation-pointer") }
+  if (!pointer || pointer.schema !== 1 || !/^[a-f0-9-]{36}$/.test(pointer.generation)) throw new Error("invalid-generation-pointer")
+  return pointer
+}
+
+// Bind the metadata to the published pointer before using its contents.
+MiniAWikiRetrievalV2._readGenerationManifest = function(root, pointer) {
+  var dir = root + "/" + pointer.generation
+  var path = dir + "/manifest.json"
+  if (java.nio.file.Files.isSymbolicLink(new java.io.File(dir).toPath()) ||
+      java.nio.file.Files.isSymbolicLink(new java.io.File(path).toPath()) ||
+      String(new java.io.File(dir).getCanonicalPath()).indexOf(String(new java.io.File(root).getCanonicalPath()) + "/") !== 0) throw new Error("unsafe-generation-path")
+  if (!io.fileExists(path) || MiniAWikiRetrievalV2.digest(path) !== pointer.checksum) throw new Error("generation-integrity-failure")
+  return af.fromJson(io.readFileString(path))
+}
+
+// Recover the configured index options without opening Lucene segments from an older runtime.
+MiniAWikiRetrievalV2.publishedLexicalConfig = function(root) {
+  var pointerPath = root + "/current.json"
+  if (!io.fileExists(pointerPath)) return __
+  var pointer = MiniAWikiRetrievalV2._readGenerationPointer(pointerPath)
+  var manifest = MiniAWikiRetrievalV2._readGenerationManifest(root, pointer)
+  if (!isMap(manifest) || manifest.schema !== 3 || manifest.generation !== pointer.generation ||
+      !/^[a-f0-9]{64}$/.test(manifest.merkle || "") ||
+      MiniAWikiRetrievalV2.manifestMerkle(manifest) !== manifest.merkle) return __
+  var lexical = manifest.lexical
+  if (!isMap(lexical) || __MINI_A_WIKI_LEXICAL_LANGUAGES.indexOf(lexical.language) < 0 ||
+      !isBoolean(lexical.shingles) || !isBoolean(lexical.ngrams)) return __
+  return { language: lexical.language, shingles: lexical.shingles, ngrams: lexical.ngrams }
+}
+
+// Pin a validated current or fallback generation for the life of the request.
 MiniAWikiRetrievalV2.prototype.acquire = function(deadline, preferPrevious, options) {
   var self = this
   return this._guard(function() {
@@ -1043,10 +1079,7 @@ MiniAWikiRetrievalV2.prototype.acquire = function(deadline, preferPrevious, opti
     for (var candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
       var candidate = candidates[candidateIndex]
       try {
-        if (java.nio.file.Files.isSymbolicLink(new java.io.File(candidate.path).toPath())) throw new Error("unsafe-generation-pointer")
-        var pointer
-        try { pointer = af.fromJson(io.readFileString(candidate.path)) } catch(pointerError) { throw new Error("invalid-generation-pointer") }
-        if (!pointer || pointer.schema !== 1 || !/^[a-f0-9-]{36}$/.test(pointer.generation)) throw new Error("invalid-generation-pointer")
+        var pointer = MiniAWikiRetrievalV2._readGenerationPointer(candidate.path)
         var generationDir = self.root + "/" + pointer.generation
         var cached = self.serving.filter(function(s) { return s.generation === pointer.generation && s.dir === generationDir && !s._closePending })[0]
         if (cached && cached.manifestChecksum !== pointer.checksum) throw new Error("generation-checksum-mismatch")
@@ -1054,10 +1087,10 @@ MiniAWikiRetrievalV2.prototype.acquire = function(deadline, preferPrevious, opti
           // Never evict a pinned reader. Retain at most two open generations.
           for (var i = self.serving.length - 1; i >= 0; i--) if (!self.serving[i].refs && self.serving.length >= 2) { self._closeSnapshot(self.serving[i]); self.serving.splice(i, 1) }
           if (self.serving.length >= 2) throw new Error("generation-reader-budget")
-          var dir = generationDir, manifestPath = dir + "/manifest.json"
-          if (java.nio.file.Files.isSymbolicLink(new java.io.File(dir).toPath()) || java.nio.file.Files.isSymbolicLink(new java.io.File(manifestPath).toPath()) || String(new java.io.File(dir).getCanonicalPath()).indexOf(String(new java.io.File(self.root).getCanonicalPath()) + "/") !== 0) throw new Error("unsafe-generation-path")
-          if (!io.fileExists(manifestPath) || MiniAWikiRetrievalV2.digest(manifestPath) !== pointer.checksum) throw new Error("generation-integrity-failure")
-          var manifest = af.fromJson(io.readFileString(manifestPath)), analysis = self._resolveAnalysis(manifest), catalog = self._validateStructural(dir, manifest, analysis)
+          var dir = generationDir
+          var manifest = MiniAWikiRetrievalV2._readGenerationManifest(self.root, pointer)
+          var analysis = self._resolveAnalysis(manifest)
+          var catalog = self._validateStructural(dir, manifest, analysis)
           cached = self._openSnapshot(dir, manifest, catalog, analysis); cached._managed = true; cached.recoveredPointer = candidate.fallback === true; self.serving.push(cached)
         }
         cached.recoveredPointer = candidate.fallback === true

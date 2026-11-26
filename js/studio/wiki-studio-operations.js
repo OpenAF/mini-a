@@ -246,7 +246,8 @@ var wikiStudioExecute = function(config, w, job, logFn, backup) {
   if (operation === "dream.rebuild") params.rebuild = p.rebuild
   if (operation === "dream.reorg") { params.instructions = p.instructions; params.organize = p.organize }
   if (operation === "wiki.folderMove" || operation === "wiki.folderDelete") {
-    var wm = new MiniAWikiManager({root:w.root,backend:"fs",access:"rw",skipBootstrap:true,usegraph:w.graph.enabled,wikiretrievalv2:w.retrieval.v2 !== false})
+    var wm = new MiniAWikiManager({ root: w.root, backend: "fs", access: "rw", skipBootstrap: true,
+      usegraph: w.graph.enabled, wikiretrievalv2: w.retrieval.v2 !== false, wikilexical: WikiStudio.writerLexicalConfig(w) })
     try {
       var folderOptions = {expectedRevision:p.expectedRevision,confirmation:p.confirmation,onProgress:logFn,snapshot:function() {
         var info = WikiStudio.snapshot(config,w,job.id)
@@ -257,7 +258,8 @@ var wikiStudioExecute = function(config, w, job, logFn, backup) {
     } finally { wm.close() }
   }
   if (operation === "wiki.selectionMove" || operation === "wiki.selectionDelete") {
-    var sm = new MiniAWikiManager({root:w.root,backend:"fs",access:"rw",skipBootstrap:true,usegraph:w.graph.enabled,wikiretrievalv2:w.retrieval.v2 !== false})
+    var sm = new MiniAWikiManager({ root: w.root, backend: "fs", access: "rw", skipBootstrap: true,
+      usegraph: w.graph.enabled, wikiretrievalv2: w.retrieval.v2 !== false, wikilexical: WikiStudio.writerLexicalConfig(w) })
     try {
       var selectionOptions = {expectedRevision:p.expectedRevision,confirmation:p.confirmation,onProgress:logFn,snapshot:function() {
         var info = WikiStudio.snapshot(config,w,job.id)
@@ -272,6 +274,7 @@ var wikiStudioExecute = function(config, w, job, logFn, backup) {
     return WikiStudio.executeSource(config, w, job, logFn, backup, function() { return sourceJobs.get(job.id).cancelRequested === true })
   }
   WikiStudio.assert(/^graph\.(build|reconcile|upgrade|resume|embeddings)$/.test(operation) || /^dream\.(plan|apply|repair|reindex|rebuild|graph|indexes|auto|reorg)$/.test(operation), 400, "invalid_operation", "Worker operation is not allowlisted")
+  if (a.wikiaccess === "rw" && isUnDef(a.wikilexical)) a.wikilexical = WikiStudio.writerLexicalConfig(w)
   var runner = new MiniAWikiOps(a,logFn)
   if (operation.indexOf("graph.") === 0 || operation === "dream.rebuild" || operation === "dream.graph") {
     var jobs = new WikiStudioJobs(config)

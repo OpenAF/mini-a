@@ -210,6 +210,35 @@
     s.registry.add({ id: "beta", name: "Beta", root: t + "/wikis/other", access: "rw" })
     rejects(function() { s.registry.update("alpha", { root: t + "/wikis/other" }, false) }, "duplicate_wiki")
   }) }
+  // Repeated maintenance must keep the active generation readable by a matching writable console.
+  exports.testReindexPreservesLexicalAnalysis = function() { fixture(function(s, temp) {
+    var w = add(s, temp)
+    var lexical = { language: "english", shingles: true, ngrams: true, queryExpansion: true, pseudoRelevanceFeedback: true }
+    // Open a fresh reader with the same runtime options a writable console passes to the wiki.
+    var openConsoleWiki = function() {
+      return new MiniAWikiManager({ backend: "fs", root: w.root, access: "rw", wikiretrievalv2: true, wikilexical: lexical })
+    }
+    var consoleWiki = openConsoleWiki()
+    try {
+      io.writeFileString(w.root + "/sofia.md", "# Sofia\nSearchable by both Studio and the console.")
+      assert(consoleWiki.reindex().ok, true, "Console publishes the enhanced search index")
+    } finally { consoleWiki.close() }
+
+    var published = WikiStudio.writerLexicalConfig(w)
+    assert(published, { language: "english", shingles: true, ngrams: true }, "Studio uses only the published index options")
+    var spec = s.sourceOperation(w, "maintenance", { action: "reindex" })
+    var rebuilt = wikiStudioExecute(s.config, w, spec, function() {})
+    assert(rebuilt.ok, true, "Studio maintenance publishes a new generation")
+    var rebuiltAgain = wikiStudioExecute(s.config, w, spec, function() {})
+    assert(rebuiltAgain.ok, true, "Repeated maintenance succeeds")
+    consoleWiki = openConsoleWiki()
+    try {
+      var hits = __miniAWikiRequireSearchHits(consoleWiki.search("sofia"))
+      assert(hits[0].path, "sofia.md", "Writable console opens the generation rebuilt by Studio")
+      assert(hits.sources[0].analysis.generation, rebuiltAgain.generation, "Search uses the latest generation")
+    } finally { consoleWiki.close() }
+  }) }
+
   // Index, graph and combined search modes, including graph-unavailable coverage and the all-wikis fan-out.
   exports.testSearchModes = function() { fixture(function(s, t) {
     var w = add(s, t)

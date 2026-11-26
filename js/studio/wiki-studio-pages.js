@@ -2,12 +2,33 @@
 if (typeof __miniAPath !== "function") loadLib(String(new java.io.File(String(__loadedfrom)).getCanonicalFile().getParentFile().getParent()) + "/mini-a-paths.js")
 
 loadLib(__miniAPath("js/wiki/mini-a-wikiops.js"))
+
+// Keep the wiki's published index options unless the operator configured a replacement.
+WikiStudio.writerLexicalConfig = function(w) {
+  if (w.retrieval.v2 === false || isString(getEnv("OAF_MINI_A_WIKI_LEXICAL"))) return __
+  try {
+    return MiniAWikiRetrievalV2.publishedLexicalConfig(w.root + "/.mini-a-wiki-serving")
+  } catch(e) {
+    // Keep maintenance available when the published metadata itself needs repair.
+    return __
+  }
+}
+
+// Open a short-lived manager after verifying the wiki and its file boundaries.
 WikiStudioServer.prototype.manager = function(w, write, fn, options) {
   this.registry.verify(w)
   // Scan before giving a manager permission to write other pages (logs, backlinks,
   // indexes); do not let hidden symlinks or aliases redirect engine writes.
   WikiStudio.scan(w.root, true)
-  var wm = new MiniAWikiManager({ skipBootstrap: options && options.skipBootstrap === true, backend: "fs", root: w.root, access: write ? "rw" : "ro", usegraph: w.graph.enabled === true, wikiretrievalv2: w.retrieval.v2 !== false })
+  var wm = new MiniAWikiManager({
+    skipBootstrap: options && options.skipBootstrap === true,
+    backend: "fs",
+    root: w.root,
+    access: write ? "rw" : "ro",
+    usegraph: w.graph.enabled === true,
+    wikiretrievalv2: w.retrieval.v2 !== false,
+    wikilexical: write ? WikiStudio.writerLexicalConfig(w) : __
+  })
   try { return fn(wm) } finally { wm.close() }
 }
 WikiStudioServer.prototype.checkPage = function(w, path) {

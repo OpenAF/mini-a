@@ -41,6 +41,16 @@ directory. Libraries and assets are anchored to that job's bundle, even when a
 different Mini-A version is installed. Updating the oPack requires restarting
 Studio and reopening the browser; do not replace production files under workers.
 
+For V2 wikis with a readable serving manifest, Studio keeps the published
+language, shingles and character n-gram settings when writing or reindexing.
+Set `OAF_MINI_A_WIKI_LEXICAL` in Studio's environment to select different
+settings or to configure a new wiki. Studio's workers inherit that variable.
+If a console opened with `wikiaccess=rw` reports `incompatible-generation`,
+run `/wiki context` to see which fields differ. Run `/wiki reindex` from a
+writable console started with your intended lexical settings to republish the
+index. A difference in `analysisVersion` identifies a Lucene major or minor
+version mismatch between the publisher and the console.
+
 Open `http://127.0.0.1:8890`. A fresh 256-bit bearer token is printed once at
 startup and is valid for that process. For a stable token, configure the trusted
 `STUDIO_TOKEN` environment variable with at least 32 high-entropy characters.

@@ -48,6 +48,9 @@ jobs:
 - name: Studio search modes
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testSearchModes
+- name: Studio reindex lexical analysis
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testReindexPreservesLexicalAnalysis
 - name: Studio authorization
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testAuth
@@ -115,6 +118,7 @@ todo:
 - Studio root browse
 - Studio change root
 - Studio search modes
+- Studio reindex lexical analysis
 - Studio authorization
 - Studio paths
 - Studio allowroot configuration
