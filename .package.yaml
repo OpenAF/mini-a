@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20261126'
+version: '20261127'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -356,7 +356,7 @@ filesHash:
   docs/WIKI-QUICKSTART.md: e44a15892c3032da3bec349ff4ea7e63fbd2510f
   docs/WIKI-RETRIEVAL-V2.md: 460b2bcd3b42d43fa68dc5ce2ec105da500cf86c
   docs/WIKI-STUDIO-IMPLEMENTATION.md: 763c1ce0e6268f1853823fb1e904b65be651bb5c
-  docs/WIKI-STUDIO.md: 824c728aaa833819f1589f8f31a89a95dc3153c0
+  docs/WIKI-STUDIO.md: 11512eec9ad7514a36961d876c489542a5635e59
   docs/WIKI.md: 74b6ee3127ee6e4800120404cc6a191646e0ade0
   docs/WORKERS-QUICKSTART.md: 8090219ee3eb7d281bd1029c8f1dfb91ee52159a
   docs/WORKIQ.md: 9d2a64d6e06e148775a77b8c4df40427ffb16524
@@ -442,11 +442,11 @@ filesHash:
   js/studio/wiki-studio-common.js: b76a5b545d10d6633c659d3c5ba8579803d385aa
   js/studio/wiki-studio-config.js: 8aa2ececf8cc9552564f170d163e263d98083855
   js/studio/wiki-studio-graph.js: 10955546c41707073e8a465b055c4690d4e32d77
-  js/studio/wiki-studio-ingestion.js: 1cb37464924dec0d3a71af5725999a75d348177a
+  js/studio/wiki-studio-ingestion.js: cbee94491146c3174d446f208ae181214db8aad9
   js/studio/wiki-studio-jobs.js: 155dcc7e78ce604abcbaa13495f303a6b7792322
-  js/studio/wiki-studio-operations.js: 47c0dde191996fe1e9c9a23f81362e66f2605728
+  js/studio/wiki-studio-operations.js: cf0978fc25c5d6f24fa2ff83a0e0237fdc006b7a
   js/studio/wiki-studio-outbound.js: d86a20b91903266438a393b2a5d11f90fe07d191
-  js/studio/wiki-studio-pages.js: 070f75de760711101bb61b3704b58920250fa525
+  js/studio/wiki-studio-pages.js: c684e1ee944285f98e8c22f392fdf0931a0df14a
   js/studio/wiki-studio-registry.js: 8d96e3a5241d64522c15fc96a932619ae4204856
   js/studio/wiki-studio-sources.js: ef3892be08fd12a0a83f7b092e990b791b6c423c
   js/web/mini-a-advanced.js: 661b14935d10151cf909b9a02ae1abed50fd2b38
@@ -463,14 +463,14 @@ filesHash:
   js/wiki/mini-a-graph.js: f3d9ac62d1243be30665c004c4a024463ee2d149
   js/wiki/mini-a-ingest.js: 9421f244692ce13f5c96ba8eacbf98edb8aefb14
   js/wiki/mini-a-mcp-wiki.js: a535147a30ee46e163fae37853146419dd9b93f2
-  js/wiki/mini-a-office-parts.js: cdd22b1caaef9d31241048b137fa1d86d396a967
+  js/wiki/mini-a-office-parts.js: dfd5b4fc961138655c39fead708e028308659113
   js/wiki/mini-a-wiki-embeddings.js: 258805ed2e05b125c6d48081869036f09fc75070
   js/wiki/mini-a-wiki-export.js: 2c43e40d61eba88146a28dd07829190bd088a0ca
   js/wiki/mini-a-wiki-folders.js: d22e361f8ef7f0e32f09c466e169283d4796b50a
   js/wiki/mini-a-wiki-knowledge.js: 7eb6d8b1bc7db9a29b703a01fa75b87e3ed546c6
   js/wiki/mini-a-wiki-maintenance.js: 91eac65b125a9e7ad910606bdab77e73af028357
-  js/wiki/mini-a-wiki-retrieval.js: 4c1d9eb440d22b77b0db7c670136dc99e8195aa2
-  js/wiki/mini-a-wiki.js: b5d3732d88df5f046db898476a5b14900344ec6f
+  js/wiki/mini-a-wiki-retrieval.js: f74e01dad0c9af24b7c279f98164a8a6a8c7b8bd
+  js/wiki/mini-a-wiki.js: 140e84767bfd673d031d69c6f986ddf4c9fc57d9
   js/wiki/mini-a-wikiops.js: 444db6bfa9fd34e60804139ce621e301e679cc5e
   mcps/CREATING.md: 96bae262502f3fc47b4431a4234253f03cc3366a
   mcps/EXTERNAL-MCPS.md: 152d0db701bc3ee259d4184f08fdce3ca2b0d332
