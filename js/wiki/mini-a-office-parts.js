@@ -1,3 +1,29 @@
+// Report parser failures without exposing server paths or workbook contents from stderr.
+function __miniAOfficeParserError(failure, exitCode) {
+  var exceptionLine = /^(?:Exception in thread "[^"\r\n]+" |[ \t]*Caused by: )([\w.$]+)(?::[^\r\n]*)?\r?$/gm
+  var causes = [], errors = [], match
+  while ((match = exceptionLine.exec(failure)) !== null) {
+    causes.push(match[1])
+    errors.push(match[0].trim())
+  }
+  var detail = errors.join("\n")
+  if (causes.indexOf("java.lang.OutOfMemoryError") >= 0) return "Office parser exceeded its 256 MiB heap"
+  if (/staging (byte|part) limit exceeded/.test(detail)) return "Office staging limit exceeded"
+  if (causes.indexOf("org.apache.poi.EncryptedDocumentException") >= 0 || /: Encrypted spreadsheet$/m.test(detail)) return "Office document is encrypted"
+  if (/Module jdk\.compiler (?:not found|not in boot Layer)|JDK source launcher not available/.test(failure)) {
+    return "Office parser requires a Java 17 or newer JDK with the jdk.compiler module"
+  }
+  if (causes.some(function(cause) {
+    return /^java\.lang\.(?:ClassNotFoundException|NoClassDefFoundError|NoSuchMethodError|NoSuchFieldError|UnsupportedClassVersionError)$/.test(cause)
+  }) || /^error: compilation failed\r?$/im.test(failure)) {
+    return "Office parser could not load its Java dependencies. Check the Studio server's Java, OpenAF and Tika oPack versions" +
+      (causes.length ? " (" + causes[causes.length - 1] + ")" : "")
+  }
+  if (/: Office document yielded no text$/m.test(detail)) return "Office document contains no extractable text"
+  if (/: Zip bomb detected!/m.test(detail)) return "Office parser rejected an unusually compressed document entry"
+  return "Cannot extract Office document (" + (causes.length ? causes[causes.length - 1] + ", " : "") + "parser exit " + exitCode + ")"
+}
+
 // Read large Office sources in a bounded parser process and keep completed parts for Preview and Apply.
 MiniAIngest.prototype._officeStage = function(src, maximum) {
   var self = this, files = java.nio.file.Files
@@ -73,12 +99,10 @@ MiniAIngest.prototype._officeStage = function(src, maximum) {
           self._log("[ingest] Office staging for " + src.rel + ": " + used + " bytes")
         }
       }
-      if (process.exitValue() !== 0) {
+      var exitCode = Number(process.exitValue())
+      if (exitCode !== 0) {
         var failure = logFile.length() <= 65536 ? io.readFileString(String(logFile)) : ""
-        if (/OutOfMemoryError/.test(failure)) throw new Error("Office parser exceeded its 256 MiB heap")
-        if (/staging (byte|part) limit exceeded/.test(failure)) throw new Error("Office staging limit exceeded")
-        if (/Encrypted|password/i.test(failure)) throw new Error("Office document is encrypted")
-        throw new Error("Cannot extract Office document. Check that it opens and that the installed Tika oPack supports the format")
+        throw new Error(__miniAOfficeParserError(failure, exitCode))
       }
       if (digest() !== hash) throw new Error("Office source changed while extracting")
       success = true

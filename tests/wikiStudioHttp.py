@@ -387,6 +387,23 @@ try:
     assert any(item["source"] == "large.xlsx" and "staging" in item["error"] for item in stage_failure["failed"]), stage_failure
     assert prior_pages == {name: (root / "a" / name).read_bytes() for name in prior_pages}
 
+    # Parser failures show their exception type without leaking workbook values.
+    with io.BytesIO() as workbook:
+        with zipfile.ZipFile(sample) as original, zipfile.ZipFile(workbook, "w") as broken:
+            for name in original.namelist():
+                data = original.read(name)
+                if name == "xl/worksheets/sheet1.xml":
+                    data = data.replace(b'<row r="1"', b'<row r="private-password-marker"', 1)
+                broken.writestr(name, data)
+        broken_id = str(uuid.uuid4())
+        broken_file = "Broken workbook.xlsx"
+        request("uploads", "POST", headers={"X-Upload-ID": broken_id, "X-Upload-Path": broken_file}, raw=workbook.getvalue())
+    request("wikis/a/sources", "POST", {"id": "broken-office", "name": "Broken Office", "type": "upload", "uploadId": broken_id})
+    broken_run = {"sourceId": "broken-office", "revision": broken_id, "options": {"officeparts": "always"}}
+    broken_result = job("wikis/a/ingestions", broken_run, expected="recovery-required")["result"]
+    assert broken_result["failed"] == [{"source": broken_file, "error": "Cannot extract Office document (java.lang.NumberFormatException, parser exit 1)"}]
+    assert not broken_result["planned_writes"]
+
     print(f"PASS: {checks} HTTP assertions; real isolated worker, raw ingest, plan, graph, indexes, backup and restore; no model/network")
 finally:
     try:
