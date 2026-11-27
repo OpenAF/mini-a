@@ -3767,9 +3767,27 @@
         let scale = 1;
         let x = 0;
         let y = 0;
+        picture.addEventListener('load', refreshPngLabels)
         const pointers = new Map();
         function apply() {
             picture.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+            refreshPngLabels()
+        }
+
+        // Measure the fitted image inside its full-screen box, including zoom.
+        function displayedWidth() {
+            const rect = picture.getBoundingClientRect()
+            if (!picture.naturalWidth || !picture.naturalHeight) return 0
+            return Math.min(rect.width, rect.height * picture.naturalWidth / picture.naturalHeight)
+        }
+
+        // Use the export viewport's aspect ratio for the PNG labels.
+        function refreshPngLabels() {
+            const bounds = (originalViewBoxAttr || '').trim().split(/[\s,]+/).map(Number)
+            const rect = svg.getBoundingClientRect()
+            const width = typeof svgText === 'string' ? picture.naturalWidth : Math.round(bounds[2] || rect.width)
+            const height = typeof svgText === 'string' ? picture.naturalHeight : Math.round(bounds[3] || rect.height)
+            updateDiagramPngLabels(controls, width, height, displayedWidth())
         }
         function zoom(factor, anchorX = 0, anchorY = 0) {
             const nextScale = Math.max(0.35, Math.min(12, scale * factor));
@@ -3822,8 +3840,8 @@
             if (!button) return;
             const action = button.getAttribute('data-action');
             if (action.startsWith('download-')) {
-                if (typeof svgText === 'string') exportSvgDiagram(svgText, action, button, exportStatus, kind === 'Mermaid' ? 'mermaid' : 'diagram');
-                else exportMermaidDiagram(svg, originalViewBoxAttr, originalPreserveAspectRatio, action, button, exportStatus);
+                if (typeof svgText === 'string') exportSvgDiagram(svgText, action, button, exportStatus, kind === 'Mermaid' ? 'mermaid' : 'diagram', scale, displayedWidth());
+                else exportMermaidDiagram(svg, originalViewBoxAttr, originalPreserveAspectRatio, action, button, exportStatus, scale, displayedWidth());
                 return;
             }
             if (action === 'close') { dialog.close(); return; }
@@ -3851,7 +3869,7 @@
         return status;
     }
 
-    async function exportMermaidDiagram(svg, originalViewBox, originalAspectRatio, action, button, status) {
+    async function exportMermaidDiagram(svg, originalViewBox, originalAspectRatio, action, button, status, zoom = 1, displayWidth = 0) {
         if (button.disabled) return;
         button.disabled = true; status.textContent = '';
         try {
@@ -3872,8 +3890,8 @@
             copy.style.fontFamily = style.fontFamily; copy.style.fontSize = style.fontSize;
             copy.style.color = style.color;
             const text = new XMLSerializer().serializeToString(copy);
-            if (action === 'download-png') await downloadSvgAsPng(text, 'mermaid.png');
-            else downloadDiagramBlob(new Blob([text], { type: 'image/svg+xml;charset=utf-8' }), 'mermaid.svg');
+            if (action.startsWith('download-png')) await downloadSvgAsPng(text, 'mermaid.png', zoom, displayWidth, action === 'download-png-4x' ? 4 : 2)
+            else downloadVectorDiagram(text, 'mermaid')
         } catch (_) {
             status.textContent = 'Diagram export failed. Try again or download the SVG.';
         } finally {
@@ -3890,14 +3908,14 @@
         }
         const actions = [
             ['zoom-out', 'Zoom out'], ['zoom-in', 'Zoom in'], ['reset', 'Reset view'],
-            ['download-svg', 'Download SVG'], ['download-png', 'Download PNG'],
+            ['download-svg', 'Download SVG'], ['download-png', 'Download PNG (2×)'], ['download-png-4x', 'Download PNG (4×)'],
             fullscreen ? ['close', 'Close full screen'] : ['fullscreen', 'Open full screen']
         ];
         menu.innerHTML = (fullscreen ? '' : '<summary aria-label="Mermaid actions" title="Mermaid actions">⋯</summary>') +
             '<div class="mermaid-control-group">' +
             actions.map(([action, label]) => '<button type="button" class="mermaid-control-btn" data-action="' +
                 action + '" aria-label="' + label + '" title="' + label + '">' +
-                diagramActionIcon(action) + '<span class="diagram-action-label">' + label + '</span></button>').join('') + '</div>';
+                diagramActionIcon(action === 'download-png-4x' ? 'download-png' : action) + '<span class="diagram-action-label">' + label + '</span></button>').join('') + '</div>';
         if (!fullscreen) bindDiagramMenu(menu);
         return menu;
     }
@@ -3958,9 +3976,17 @@
             return { x: 0, y: 0, width: 1000, height: 1000 };
         }
 
+        let baseViewBox = null
+
+        // Measure the full diagram at the current viewBox zoom.
+        function diagramZoom() {
+            return baseViewBox && viewBox ? baseViewBox.width / viewBox.width : 1
+        }
+
         function ensureViewBox() {
             if (viewBox) return;
             viewBox = getViewBoxFromSvg();
+            baseViewBox = { ...viewBox }
             svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
             applyViewBox();
         }
@@ -3970,6 +3996,14 @@
             svg.setAttribute('viewBox', viewBox.x + ' ' + viewBox.y + ' ' + viewBox.width + ' ' + viewBox.height);
         }
 
+        controls.addEventListener('toggle', () => {
+            if (!controls.open) return
+            const rect = svg.getBoundingClientRect()
+            const bounds = parseViewBox(originalViewBoxAttr)
+            updateDiagramPngLabels(controls, Math.round(bounds?.width || rect.width),
+                Math.round(bounds?.height || rect.height), rect.width * diagramZoom())
+        })
+
         function clampScale(value) {
             return Math.min(maxScale, Math.max(minScale, value));
         }
@@ -3977,7 +4011,6 @@
         function zoomAt(factor, centerX, centerY) {
             ensureViewBox();
             if (!viewBox) return;
-            const baseViewBox = parseViewBox(originalViewBoxAttr) || viewBox;
             const currentScale = baseViewBox.width / viewBox.width;
             const nextScale = clampScale(currentScale * factor);
             if (nextScale === currentScale) return;
@@ -3998,6 +4031,7 @@
         function resetView() {
             if (originalViewBoxAttr) {
                 viewBox = parseViewBox(originalViewBoxAttr);
+                baseViewBox = { ...viewBox }
                 applyViewBox();
             } else {
                 viewBox = null;
@@ -4023,7 +4057,7 @@
             const action = btn.getAttribute('data-action');
 
             if (action.startsWith('download-')) {
-                exportMermaidDiagram(svg, originalViewBoxAttr, originalPreserveAspectRatio, action, btn, exportStatus);
+                exportMermaidDiagram(svg, originalViewBoxAttr, originalPreserveAspectRatio, action, btn, exportStatus, diagramZoom(), svg.getBoundingClientRect().width * diagramZoom());
             } else if (action === 'fullscreen') {
                 openMermaidFullscreen(svg, originalViewBoxAttr, originalPreserveAspectRatio);
             } else if (action === 'zoom-in') {
@@ -4296,6 +4330,7 @@
 
     // Shared by Simple and Advanced. Export only the validated preview bytes.
     function addSvgDownloadControl(container, svgText, kind = 'SVG') {
+        let scale = 1
         const filename = kind === 'Mermaid' ? 'mermaid' : 'diagram';
         if (container.querySelector('.svg-download-button')) return;
         const control = document.createElement('button');
@@ -4304,16 +4339,14 @@
         control.title = 'Download SVG';
         control.setAttribute('aria-label', 'Download SVG');
         control.innerHTML = diagramActionIcon('download-svg') + '<span>Download SVG</span>';
-        control.addEventListener('click', () => {
-            downloadDiagramBlob(new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' }), filename + '.svg');
-        });
+        control.addEventListener('click', () => exportSvgDiagram(svgText, 'download-svg', control, status, filename, scale))
         const controls = document.createElement('div');
         controls.className = 'svg-controls';
         controls.setAttribute('role', 'group');
         controls.setAttribute('aria-label', kind + ' controls');
         const image = container.querySelector('img');
         if (image) {
-            let scale = 1, baseWidth = 0;
+            let baseWidth = 0
             const resizeButton = (label, icon, action) => {
                 const button = document.createElement('button');
                 button.type = 'button'; button.className = 'svg-resize-button';
@@ -4340,23 +4373,22 @@
             });
         }
         controls.appendChild(control);
-        const png = document.createElement('button');
-        png.type = 'button'; png.className = 'svg-png-button';
-        png.innerHTML = diagramActionIcon('download-png') + '<span>Download PNG</span>'; png.title = 'Download PNG (2×, transparent)';
-        png.setAttribute('aria-label', png.title);
-        const status = document.createElement('span');
-        status.className = 'svg-export-status'; status.setAttribute('role', 'status');
-        png.addEventListener('click', async () => {
-            png.disabled = true; status.textContent = '';
-            try {
-                await downloadSvgAsPng(svgText, filename + '.png');
-            } catch (_) {
-                status.textContent = 'PNG export failed. Try again or download the SVG.';
-            } finally {
-                png.disabled = false;
-            }
-        });
-        controls.appendChild(png);
+        const status = document.createElement('span')
+        status.className = 'svg-export-status'
+        status.setAttribute('role', 'status')
+        for (var density of [2, 4]) {
+            const action = density === 4 ? 'download-png-4x' : 'download-png'
+            const png = document.createElement('button')
+            const label = 'Download PNG (' + density + '×)'
+            png.type = 'button'
+            png.className = 'svg-png-button'
+            png.title = label
+            png.dataset.action = action
+            png.setAttribute('aria-label', label)
+            png.innerHTML = diagramActionIcon('download-png') + '<span>' + label + '</span>'
+            png.addEventListener('click', () => exportSvgDiagram(svgText, action, png, status, filename, scale, image?.getBoundingClientRect().width))
+            controls.appendChild(png)
+        }
         const fullscreen = document.createElement('button');
         fullscreen.type = 'button'; fullscreen.title = 'Open full screen';
         fullscreen.setAttribute('aria-label', 'Open full screen');
@@ -4375,6 +4407,12 @@
         trigger.setAttribute('aria-label', kind + ' actions');
         menu.appendChild(trigger); menu.appendChild(controls);
         bindDiagramMenu(menu);
+        controls.addEventListener('focusin', () => {
+            if (image) updateDiagramPngLabels(controls, image.naturalWidth, image.naturalHeight, image.getBoundingClientRect().width)
+        })
+        menu.addEventListener('toggle', () => {
+            if (menu.open && image) updateDiagramPngLabels(controls, image.naturalWidth, image.naturalHeight, image.getBoundingClientRect().width)
+        })
         controls.addEventListener('click', event => {
             if (event.target.closest('button') && event.target.closest('button') !== fullscreen) { menu.open = false; trigger.focus(); }
         });
@@ -4441,17 +4479,53 @@
         return '<svg class="diagram-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="' + paths[action] + '"/></svg>';
     }
 
-    async function exportSvgDiagram(svgText, action, button, status, filename = 'diagram') {
+    async function exportSvgDiagram(svgText, action, button, status, filename = 'diagram', scale = 1, displayWidth = 0) {
         if (button.disabled) return;
         button.disabled = true; status.textContent = '';
         try {
-            if (action === 'download-png') await downloadSvgAsPng(svgText, filename + '.png');
-            else downloadDiagramBlob(new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' }), filename + '.svg');
+            if (action.startsWith('download-png')) await downloadSvgAsPng(svgText, filename + '.png', scale, displayWidth, action === 'download-png-4x' ? 4 : 2)
+            else downloadVectorDiagram(svgText, filename)
         } catch (_) {
             status.textContent = 'Diagram export failed. Try again or download the SVG.';
         } finally {
             button.disabled = false;
         }
+    }
+
+    // Show the final limited dimensions as soon as the export controls are available.
+    function updateDiagramPngLabels(controls, width, height, displayWidth) {
+        if (!width || !height || !displayWidth) return
+        for (var density of [2, 4]) {
+            var action = density === 4 ? 'download-png-4x' : 'download-png'
+            var button = controls.querySelector('[data-action="' + action + '"]')
+            var size = diagramPngSize(width, height, displayWidth * density)
+            var label = 'PNG ' + density + '× · ' + size.width + ' × ' + size.height
+            button.querySelector('span').textContent = label
+            button.title = 'Download ' + label
+            button.setAttribute('aria-label', button.title)
+        }
+    }
+
+    // Bound raster dimensions while retaining the diagram's aspect ratio.
+    function diagramPngSize(width, height, targetWidth) {
+        var scale = Math.min(targetWidth / width, 8192 / width, 8192 / height, Math.sqrt(16777216 / width / height))
+        return { width: Math.max(1, Math.floor(width * scale)), height: Math.max(1, Math.floor(height * scale)) }
+    }
+
+    // Load SVG as an image so Mermaid's HTML labels can render on the canvas.
+    async function loadDiagramImage(svgText) {
+        var image = new Image()
+        await new Promise((resolve, reject) => {
+            image.onload = resolve
+            image.onerror = () => reject(new Error('Unable to load SVG'))
+            image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgText)
+        })
+        return image
+    }
+
+    // Preserve the source viewport and vector content in the SVG download.
+    function downloadVectorDiagram(svgText, filename) {
+        downloadDiagramBlob(new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' }), filename + '.svg')
     }
 
     function downloadDiagramBlob(blob, filename) {
@@ -4466,23 +4540,28 @@
         }
     }
 
-    async function downloadSvgAsPng(svgText, filename) {
-        const raster = new Image();
-        await new Promise((resolve, reject) => {
-            raster.onload = resolve;
-            raster.onerror = () => reject(new Error('Unable to load SVG'));
-            // Data URLs also allow browser rasterization of Mermaid HTML labels.
-            raster.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgText);
-        });
-        const width = raster.naturalWidth, height = raster.naturalHeight;
-        if (!width || !height) throw new Error('SVG has no dimensions');
-        const scale = Math.min(2, 8192 / width, 8192 / height, Math.sqrt(16777216 / width / height));
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, Math.floor(width * scale));
-        canvas.height = Math.max(1, Math.floor(height * scale));
+    // Give the browser the final viewport before rasterizing the export copy.
+    async function downloadSvgAsPng(svgText, filename, zoom = 1, displayWidth = 0, density = 2) {
+        var source = await loadDiagramImage(svgText)
+        var width = source.naturalWidth
+        var height = source.naturalHeight
+        if (!width || !height) throw new Error('SVG has no dimensions')
+        var size = diagramPngSize(width, height, (displayWidth || width * zoom) * density)
+        var svg = new DOMParser().parseFromString(svgText, 'image/svg+xml').documentElement
+        if (!svg.getAttribute('viewBox')) svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height)
+        svg.setAttribute('width', size.width)
+        svg.setAttribute('height', size.height)
+        svg.style.setProperty('width', size.width + 'px', 'important')
+        svg.style.setProperty('height', size.height + 'px', 'important')
+        svg.style.setProperty('max-width', 'none', 'important')
+        svg.style.setProperty('max-height', 'none', 'important')
+        var raster = await loadDiagramImage(new XMLSerializer().serializeToString(svg))
+        var canvas = document.createElement('canvas')
+        canvas.width = size.width
+        canvas.height = size.height
         const context = canvas.getContext('2d');
         if (!context) throw new Error('Canvas unavailable');
-        context.drawImage(raster, 0, 0, canvas.width, canvas.height);
+        context.drawImage(raster, 0, 0)
         const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
         if (!blob) throw new Error('PNG encoding failed');
         downloadDiagramBlob(blob, filename);

@@ -4,11 +4,11 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../public/index.md'), 'utf8');
 function element(tag) {
-  return { tag, style: {}, children: [], attributes: [], listeners: {},
+  return { tag, style: {}, dataset: {}, children: [], attributes: [], listeners: {},
     insertBefore(n) { this.children.unshift(n); },
     appendChild(n) { this.children.push(n); },
     querySelector(selector) { for (const child of this.children) { if (selector === 'img' ? child.tag === 'img' : child.className === selector.slice(1)) return child; const match = child.querySelector(selector); if (match) return match; } },
-    getBoundingClientRect() { return { width: 200 }; },
+    getBoundingClientRect() { return { width: parseFloat(this.style.width) || 200 }; },
     setAttribute(name, value) { this.attributes.push({name,value}); },
     addEventListener(name, fn) { this.listeners[name] = fn; },
     contains(node) { return node === this || this.children.includes(node); },
@@ -36,7 +36,7 @@ assert.equal(menu.open, true, 'Safari blur leaves the action available for its p
 menu.listeners.focusout({relatedTarget: body});
 assert.equal(menu.open, false);
 const toolbar=wrapper.children[1].children[1];
-const [smaller, larger, reset, button, png, fullscreen] = toolbar.children;
+const [smaller, larger, reset, button, png, png4x, fullscreen] = toolbar.children;
 for (const action of toolbar.children) assert.match(action.innerHTML, /class="diagram-action-icon"/);
 let fullscreenArgs;
 ctx.DOMParser = class { parseFromString(text) {
@@ -56,18 +56,27 @@ assert.equal(picture.style.width,'50px'); assert.equal(smaller.disabled,true);
 reset.listeners.click(); assert.equal(picture.style.width,''); assert.equal(picture.style.maxWidth,'100%');
 assert.equal(smaller.disabled,false); assert.equal(larger.disabled,false);
 assert.equal(button.attributes.find(a=>a.name==='aria-label').value,'Download SVG');
-button.listeners.click();
-assert.equal(blob.type,'image/svg+xml;charset=utf-8');
-const link=body.children[0];
-assert.equal(link.download,'diagram.svg');assert.equal(link.href,'blob:svg');
-assert.ok(link.clicked && link.removed);assert.equal(revoked,undefined);timer();assert.equal(revoked,'blob:svg');
-(async()=>{
-  assert.equal(await blob.text(),safe,'Export uses the exact sanitized preview, including Unicode and dimensions');
+const exportRoot = {
+  style: { setProperty() {} }, attrs: { viewBox: '0 0 10 10' }, viewBox: { baseVal: { width: 10, height: 10 } },
+  width: { baseVal: { unitType: 2 } }, height: { baseVal: { unitType: 2 } },
+  getAttribute(name) { return this.attrs[name] },
+  setAttribute(name, value) { this.attrs[name] = value }
+}
+ctx.DOMParser = class { parseFromString(text) { assert.equal(text, safe); return { documentElement: exportRoot } } }
+ctx.XMLSerializer = class { serializeToString(root) { assert.equal(root, exportRoot); return safe } }
+;(async()=>{
   let canvas, failLoad = false, failEncode = false;
   ctx.Image = class {
     constructor() { this.naturalWidth = 400; this.naturalHeight = 200; }
     set src(value) { failLoad ? this.onerror() : this.onload(); }
   };
+  await button.listeners.click();
+  assert.deepEqual(exportRoot.attrs, { viewBox: '0 0 10 10' })
+  assert.equal(blob.type,'image/svg+xml;charset=utf-8');
+  const link=body.children[0];
+  assert.equal(link.download,'diagram.svg');assert.equal(link.href,'blob:svg');
+  assert.ok(link.clicked && link.removed);assert.equal(revoked,undefined);timer();assert.equal(revoked,'blob:svg');
+  assert.equal(await blob.text(),safe,'Export downloads the serialized SVG');
   ctx.document.createElement = tag => {
     const node = element(tag);
     if (tag === 'canvas') {
@@ -78,26 +87,41 @@ assert.ok(link.clicked && link.removed);assert.equal(revoked,undefined);timer();
     return node;
   };
   await png.listeners.click();
-  assert.equal(canvas.width, 800); assert.equal(canvas.height, 400);
+  assert.equal(canvas.width, 400)
+  assert.equal(canvas.height, 200)
   assert.equal(blob.type, 'image/png');
   assert.equal(body.children.at(-1).download, 'diagram.png');
   assert.equal(png.disabled, false);
   assert.equal(wrapper.children.at(-1).textContent, '');
+  larger.listeners.click()
+  await png.listeners.click()
+  assert.deepEqual([canvas.width, canvas.height], [500, 250])
+  assert.deepEqual(canvas.drawArgs.slice(1), [0, 0])
+  assert.deepEqual(exportRoot.attrs, { viewBox: '0 0 10 10', width: 500, height: 250 })
+  await png4x.listeners.click()
+  assert.deepEqual([canvas.width, canvas.height], [1000, 500])
+  smaller.listeners.click()
+  smaller.listeners.click()
+  await png.listeners.click()
+  assert.deepEqual([canvas.width, canvas.height], [300, 150])
+  reset.listeners.click()
+  await png.listeners.click()
+  assert.deepEqual([canvas.width, canvas.height], [400, 200])
   failLoad = true;
   await png.listeners.click();
-  assert.match(wrapper.children.at(-1).textContent, /PNG export failed/);
+  assert.match(wrapper.children.at(-1).textContent, /Diagram export failed/);
   assert.equal(png.disabled, false);
   failLoad = false; failEncode = true;
   await png.listeners.click();
-  assert.match(wrapper.children.at(-1).textContent, /PNG export failed/);
+  assert.match(wrapper.children.at(-1).textContent, /Diagram export failed/);
   failEncode = false;
   ctx.Image = class {
     constructor() { this.naturalWidth = 20000; this.naturalHeight = 10000; }
     set src(value) { this.onload(); }
   };
-  await png.listeners.click();
+  await ctx.downloadSvgAsPng(safe, "diagram.png", 3, 20000, 4);
   assert.ok(canvas.width <= 8192 && canvas.height <= 8192);
-  assert.ok(canvas.width * canvas.height <= 16785000);
+  assert.ok(canvas.width * canvas.height <= 16777216);
   // Supply parsed XML nodes to exercise policy after the compatibility preprocessor.
   const attr=(name,value)=>({name,localName:name.split(':').pop(),value});
   function parsed(attributes=[], children=[]) {

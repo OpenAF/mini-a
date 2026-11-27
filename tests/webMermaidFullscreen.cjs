@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const page = fs.readFileSync(require('node:path').join(__dirname, '../public/index.md'), 'utf8');
 class Element {
   constructor(tag) { this.tag = tag; this.children = []; this.style = {}; this.attrs = {}; this.events = {}; this.isConnected = true; }
+  getAttribute(key) { return this.attrs[key] }
   setAttribute(key, value) { this.attrs[key] = value; }
   removeAttribute(key) { delete this.attrs[key]; }
   append(...children) { this.children.push(...children); }
@@ -15,7 +16,7 @@ class Element {
   getBoundingClientRect() { return { left: 0, top: 0, width: 400, height: 800 }; }
   setPointerCapture() {}
   contains(node) { return node === this || this.children.includes(node); }
-  querySelector() { return { focus() {} }; }
+  querySelector() { return { focus() {}, querySelector() { return {} }, setAttribute() {} }; }
   focus() { this.focused = true; }
   showModal() { this.modal = true; }
   close() { this.emit('close'); }
@@ -45,7 +46,7 @@ assert.equal(svg.attrs.viewBox, '10 20 50 50', 'Inline view is untouched');
 assert.equal(controls.tag, 'div');
 assert.equal(controls.attrs.role, 'toolbar');
 assert.doesNotMatch(controls.innerHTML, /<summary/);
-assert.equal((controls.innerHTML.match(/class="diagram-action-icon"/g) || []).length, 6);
+assert.equal((controls.innerHTML.match(/class="diagram-action-icon"/g) || []).length, 7);
 assert.match(controls.innerHTML, /data-action="close"/);
 const inlineMenu = context.createMermaidActionMenu(false);
 assert.match(inlineMenu.innerHTML, /data-action="fullscreen"/);
@@ -76,6 +77,12 @@ assert.deepEqual(transform(), [70, 30, 1.5], 'Lifting one finger continues panni
 pointer('pointercancel', 1);
 pointer('pointermove', 1, 200, 500);
 assert.deepEqual(transform(), [70, 30, 1.5], 'Cancelled pointers stop moving the image');
+const exportMermaid = context.exportMermaidDiagram
+let exportZoom
+context.exportMermaidDiagram = (...args) => { exportZoom = args.at(-2) }
+action('download-png')
+assert.equal(exportZoom, 1.5)
+context.exportMermaidDiagram = exportMermaid
 action('reset');
 assert.equal(controls.attrs.role, 'toolbar', 'Actions leave the full-screen toolbar available');
 assert.deepEqual(transform(), [0, 0, 1]);
@@ -101,6 +108,11 @@ console.log('Mermaid full-screen gesture and lifecycle checks passed.');
 
 (async () => {
   let exported, pngSource;
+  context.Image = class {
+    constructor() { this.naturalWidth = 300; this.naturalHeight = 150 }
+    set src(value) { this.onload() }
+  }
+  context.DOMParser = class { parseFromString() { return { documentElement: exported } } }
   context.getComputedStyle = () => ({fontFamily: 'Arial', fontSize: '16px', color: 'rgb(10, 20, 30)'});
   context.XMLSerializer = class {
     serializeToString(copy) {
@@ -111,7 +123,7 @@ console.log('Mermaid full-screen gesture and lifecycle checks passed.');
   context.downloadDiagramBlob = async (blob, filename) => {
     exported.filename = filename; exported.blob = blob;
   };
-  context.downloadSvgAsPng = async (text, filename) => { pngSource = {text, filename}; };
+  context.downloadSvgAsPng = async (text, filename, zoom, width, density) => { pngSource = {text, filename, density}; };
   const status = new Element('span');
   const button = new Element('button');
   await context.exportMermaidDiagram(svg, '0 0 300 150', 'xMidYMid meet', 'download-svg', button, status);
@@ -124,7 +136,12 @@ console.log('Mermaid full-screen gesture and lifecycle checks passed.');
   assert.match(await exported.blob.text(), /Olá/);
   assert.equal(svg.attrs.viewBox, '10 20 50 50', 'Export does not mutate the visible diagram');
   await context.exportMermaidDiagram(svg, '0 0 300 150', null, 'download-png', button, status);
+  assert.equal(exported.attrs.width, 300)
+  assert.equal(exported.attrs.height, 150)
   assert.equal(pngSource.filename, 'mermaid.png');
+  assert.equal(pngSource.density, 2)
+  await context.exportMermaidDiagram(svg, '0 0 300 150', null, 'download-png-4x', button, status)
+  assert.equal(pngSource.density, 4)
   assert.match(pngSource.text, /<style>/, 'PNG source retains Mermaid theme CSS');
   context.downloadSvgAsPng = async () => { throw new Error('Canvas failure'); };
   await context.exportMermaidDiagram(svg, '0 0 300 150', null, 'download-png', button, status);

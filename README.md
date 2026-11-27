@@ -900,10 +900,11 @@ Simple and Advanced display supported SVG answer blocks as images. A compact
 “⋯” menu in the top-right corner of each graphic contains shrink/enlarge/reset
 controls, SVG and PNG download buttons, and a full-screen action. Each menu
 option has a small icon. In full screen, all controls remain available in a
-floating toolbar with tooltips. Resizing affects the preview only. SVG downloads preserve the
-sanitized preview dimensions and Unicode text. PNG downloads use a transparent
-background at 2× resolution, capped at 8192 pixels per side and approximately
-16 megapixels for large diagrams. Both exports run entirely in the browser. This does not
+floating toolbar with tooltips. SVG downloads preserve the sanitized source
+viewport and Unicode text. PNG downloads render the complete diagram at 2×
+or 4× its displayed width at the current zoom, with a transparent background.
+The menu shows the output dimensions after applying the 8192-pixel side limit
+and approximately 16-megapixel area limit. Both exports run entirely in the browser. This does not
 require `usesandbox` and does not read files from the server. Invalid or unsupported
 SVG remains available as source. Active elements, external resources, embedded
 HTML, animation and stylesheet blocks are not supported; passive inline
@@ -911,8 +912,8 @@ presentation styles are preserved.
 
 Mermaid diagrams provide the same SVG and PNG download options in their “⋯”
 menu, including in full-screen mode. Exports include the complete diagram with
-its current theme, regardless of preview zoom or pan. PNG uses the same 2×
-transparent-background default and size limits described above.
+its current theme. PNG dimensions follow preview zoom, and panning does not
+crop either export.
 
 Chart.js response charts also have a collapsed “⋯” menu with zoom in/out,
 reset, PNG download and full-screen controls. Zoom enlarges the chart within a

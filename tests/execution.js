@@ -14,6 +14,100 @@
     m._startWatchdog = function() {}; m._startLocalSubtask = function() {}
     try { fn(a, m) } finally { m.destroy() }
   }
+  // Acceptance keeps original passages through unrelated status traffic.
+  exports.testSourcePassagesSurvivePolling = function() { fixture(function(a) {
+    var proof = "Lean checked the formal proof steps marked by the agents."
+    var permissions = "The coding agent created a temporary file without setting permissions."
+    var answer = "<svg><text>Lean checked proof steps and an analyzer caught insecure temporary file permissions.</text></svg> @personal/proof.md @personal/analysis.md"
+    var checks = [{ id: "sources", method: "semantic", requirement: "Support the proof and temporary file claims with both wiki notes" }]
+    var record = function(path, text) {
+      a._rememberExecutionRead("proxy:mini-a-utils", "wiki", { operation: "read", path: path },
+        { content: [{ type: "text", text: stringify({ content: text, lineStart: 1 }, __, "") }] })
+    }
+    record("@personal/proof.md", proof)
+    record("@personal/analysis.md", "Unrelated opening.\n".repeat(155))
+    for (var i = 0; i < 70; i++) {
+      a._trace("tool_result", { name: "subtask-status", params: { subtaskId: String(i) }, result: { status: "running" } })
+      a._runtime.context.push("[OBS subtask-status] " + i)
+    }
+    var reviewed = []
+    a._lastStartArgs.acceptancereview = true
+    a._runtime.toolsUsed = { wiki: true }
+    a._supervisedClientFactory = function() { return { promptJSONWithStats: function(prompt) {
+      reviewed.push(prompt)
+      var input = jsonParse(prompt.substring(prompt.indexOf("\n") + 1))
+      var complete = prompt.indexOf(proof) >= 0 && prompt.indexOf(permissions) >= 0
+      return { response: { checks: [{ id: input.criteria[0].id, outcome: complete ? "met" : "insufficient_evidence", reason: "Missing permissions passage" }] }, stats: {} }
+    } } }
+    assert(a._executionSourcePassages(answer, checks).join("").indexOf(proof) >= 0, true, "Proof passage survives polling")
+    assert(a._considerFinalCandidate(answer, a._lastStartArgs, a._runtime), false, "Missing source cannot pass")
+    assert(a._considerFinalCandidate("Cosmetic rewrite", a._lastStartArgs, a._runtime), false, "Unchanged source does not trigger review")
+    assert(reviewed.length, 1, "Status and rewrite did not trigger a second review")
+    record("@personal/analysis.md", "Unrelated opening.\n".repeat(155) + permissions)
+    assert(a._considerFinalCandidate("Another rewrite", a._lastStartArgs, a._runtime), true, "New evidence repairs acceptance")
+    assert(a._latestAnswerCandidate, answer, "The original SVG is retained")
+    assert(reviewed.length, 2, "The new passage triggers one review")
+  }) }
+
+  // An unavailable citation produces a partial result without repeated semantic review.
+  exports.testMissingSourceRepairStopsWithOriginalCandidate = function() { fixture(function(a) {
+    var args = { goal: "Return a cited finding", delegationmaxrepairs: 2, format: "md" }
+    var reviews = 0
+    a._executionFinal = function() {
+      reviews++
+      a._autoFinalCheck = { reason: "Missing evidence from wiki page", checks: [{ outcome: "insufficient_evidence", reason: "Missing wiki passage" }] }
+      return false
+    }
+    a._considerFinalCandidate("Original diagram", args, a._runtime)
+    a._considerFinalCandidate("First rewrite", args, a._runtime)
+    assert(a._partialSynthesisReady, false, "One repair remains")
+    a._considerFinalCandidate("Second rewrite", args, a._runtime)
+    assert(a._partialSynthesisReady, true, "Bounded repair ends when no source changes")
+    assert(reviews, 1, "No additional reviewer requests")
+    var partial = a._executionPartialAnswer("Evidence unavailable", args)
+    assert(/Original diagram/.test(partial) && /Missing evidence from wiki page/.test(partial), true, "Partial response retains the diagram and blocker")
+  }) }
+
+  // MCP eligibility comes from the effective tool's metadata, including for cache hits.
+  exports.testReadEvidenceUsesActualMcpContract = function() { fixture(function(a) {
+    var client = { callTool: function(name) { return { structuredContent: { rows: [{ value: name + "-marker" }] } } } }
+    a._invokeMcpTool("external", client, { name: "lookup", annotations: { readOnlyHint: true } }, {})
+    a._invokeMcpTool("external", client, { name: "mixed", annotations: { readOnlyHint: true }, metadata: { destructiveHint: true } }, {})
+    a._invokeMcpTool("external", client, { name: "unknown" }, {})
+    a._invokeMcpTool("external", { callTool: function() { return { isError: true, content: [{ text: "failed-marker" }] } } },
+      { name: "failed", annotations: { readOnlyHint: true } }, {})
+    var evidence = a._executionSourcePassages("lookup-marker").join("")
+    assert(evidence.indexOf("lookup-marker") >= 0, true, "Structured rows retained from read-only tool")
+    assert(/mixed-marker|unknown-marker|failed-marker/.test(evidence), false, "Ambiguous or failed results excluded")
+    assert(MiniA._wikiReadOperation("move"), false, "Writing wiki operations stay outside research")
+    assert(MiniA._wikiReadOperation("read"), true, "Wiki read is classified by operation")
+    a._researchOnly = true
+    var wiki = { name: "wiki" }
+    var read = a._invokeMcpTool("proxy:mini-a-utils", client, wiki, { operation: "read", path: "@personal/proof.md" })
+    assert(isDef(read.structuredContent), true, "Research can use the built-in wiki read through the proxy")
+    assert(a._invokeMcpTool("proxy:mini-a-utils", client, wiki, { operation: "write" }).blocked, true, "Research cannot invoke the mixed tool's write operation")
+    assert(a._invokeMcpTool("external", client, wiki, { operation: "read" }).blocked, true, "An unrelated tool with the same name needs its own metadata")
+  }) }
+
+  // Large stored results remain reviewable while their run-owned file is available.
+  exports.testReadEvidenceFromSpilledResult = function() { fixture(function(a) {
+    var passage = "The amber marker establishes the observed outcome."
+    var result = { content: "a".repeat(270000) + "\n" + passage, lineStart: 1 }
+    var serialized = stringify(result, __, "")
+    var path = String(java.nio.file.Files.createTempFile("mini-a-evidence-fixture-", ".json").toAbsolutePath())
+    try {
+      io.writeFileString(path, serialized)
+      a._registerOwnedResultFile(path)
+      a._rememberExecutionRead("proxy:mini-a-utils", "wiki", { operation: "read", path: "@personal/large.md" },
+        result, { path: path, hash: sha256(serialized), format: "json" })
+      var evidence = a._executionSourcePassages(passage).join("")
+      assert(evidence.indexOf(passage) >= 0, true, "Passage survives the inline storage bound")
+      io.rm(path)
+      evidence = a._executionSourcePassages(passage).join("")
+      assert(evidence.indexOf(passage), -1, "Expired file cannot provide a missing passage")
+    } finally { if (io.fileExists(path)) io.rm(path) }
+  }) }
+
   // New evidence must release dependency-blocked queues without accepting descendants.
   exports.testRepairFinishedDependency = function() { fixture(function(a, m) {
     a._execution.put(task("upstream"))
