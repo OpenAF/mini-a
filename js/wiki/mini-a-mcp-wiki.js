@@ -676,6 +676,125 @@ function __miniAMcpWikiBuildLoggerFn(auditEnabled, logPrefix) {
   }
 }
 
+// Resolve explicitly configured guides within each successfully attached wiki.
+function __miniAMcpWikiGuides(manager, primaryGuide) {
+  var guides = Object.create(null)
+  manager.resolveWikiSelection("*").targets.forEach(function(target) {
+    var value = target.mounted ? target.manager._config.wikiguide : primaryGuide
+    if (isUnDef(value)) return
+    try {
+      var folder = isString(value) && /[\\/]$/.test(value.trim())
+      var path = __miniAWikiNormalizePath(value, { allowDirectory: folder, requireMarkdown: !folder })
+      if (target.manager._catalog || target.manager._isHiddenPath(path) || path.split("/").some(function(part) { return part.startsWith(".") })) {
+        throw new Error("expected a visible path in a configured wiki")
+      }
+      var entry = folder ? path + "/SKILL.md" : path
+      guides[target.name] = { manager: target.manager, folder: folder ? path : __, entry: entry, path: (target.mounted ? target.mount.prefix : "") + entry }
+    } catch(e) {
+      printErrnl("[mcp-wiki] Invalid wikiguide for " + target.name + ": " + __miniAErrMsg(e))
+    }
+  })
+  return guides
+}
+
+// Static HTTP exports can carry a V2 catalogue without a legacy Lucene index.
+function __miniAMcpWikiGuidePaths(manager, prefix) {
+  if (manager._backendType === "http") {
+    manager._refreshRetrievalMode()
+    var retrieval = manager._retrievalV2
+    if (retrieval) {
+      var snapshot = retrieval.acquire()
+      try {
+        return Object.keys(retrieval._resolveCatalogue(snapshot.dir, snapshot.manifest).pages)
+      } finally {
+        retrieval.release(snapshot)
+      }
+    }
+  }
+  return manager._safeListPages(prefix)
+}
+
+// Snapshot visible Markdown from the selected folder for OpenAF's skill manifest.
+function __miniAMcpWikiGuideSkill(guide, mcp) {
+  var prefix = guide.folder + "/"
+  var paths = __miniAMcpWikiGuidePaths(guide.manager, prefix).filter(function(path) {
+    return path.startsWith(prefix) && !path.substring(prefix.length).split("/").some(function(part) { return part.startsWith(".") })
+  })
+  if (paths.indexOf(guide.entry) < 0) {
+    if (guide.manager._backend.type === "fs") throw new Error("SKILL.md is missing from the selected folder")
+    paths.unshift(guide.entry)
+  }
+  if (paths.length > 512) throw new Error("skill exceeds the file limit")
+  var files = Object.create(null)
+  var remaining = mcp.skillFileLimit
+  paths.forEach(function(path) {
+    if (__miniAWikiNormalizePath(path, { requireMarkdown: true }) !== path) throw new Error("invalid skill path")
+    var raw = guide.manager._backend.read(path)
+    if (!isString(raw)) throw new Error("could not read " + path.substring(prefix.length))
+    remaining -= af.fromString2Bytes(raw, "UTF-8").length
+    if (remaining < 0) throw new Error("skill exceeds the byte limit")
+    files[path.substring(prefix.length)] = raw
+  })
+  var metadata = mcp.parseSkillFrontmatter(af.fromString2Bytes(files["SKILL.md"], "UTF-8"), guide.folder)
+  if (!isMap(metadata)) throw new Error("invalid SKILL.md frontmatter")
+  var name = metadata.name
+  if (!isString(name) || name.length > 64 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) throw new Error("invalid SKILL.md name")
+  if (!isString(metadata.description) || !metadata.description.trim() || metadata.description.length > 1024) {
+    throw new Error("invalid SKILL.md description")
+  }
+  return { name: name, files: files }
+}
+
+// Serve the descriptor's own skills only when both MCP layers support publishing.
+function __miniAMcpWikiSkills(args, info, safe) {
+  info.skills = []
+  var modern = isDef(args.modern) ? args.modern : getEnv("OJOB_MCP_MODERN")
+  if (toBoolean(modern) !== true || toBoolean(args.wikimcpskills) === false) return
+  ow.loadServer()
+  var mcp = ow.server.mcp
+  if (!isFunction(mcp.createSkillCatalog) || !isMap(ow.oJob.getJob("Prepare MCP Skills"))) return
+  if (safe) {
+    var name = "mini-a-wiki-safe-retrieval"
+    var procedure = info.restriction.enabled
+      ? "Search using specific terms, names or aliases. Choose a relevant hit and promptly pass its opaque reference to read once. Read returns a bounded excerpt. If the result is incomplete, expired or budget-limited, explain what evidence is missing. Cite the returned title when it identifies the evidence."
+      : "Search using specific terms, names or aliases. Pass the returned page path to read. Read the relevant section or line range and cite that page. Report any gaps in the retrieved evidence."
+    info.skills.push({ name: name, files: { "SKILL.md": [
+      "---", "name: " + name, "description: Answer questions with the wiki search and read tools.",
+      "---", "", "# Look up evidence", "", "Use the tool names advertised by this connection.", "", procedure, ""
+    ].join("\n") } })
+    return
+  }
+  var generic = "mini-a-wiki-retrieval"
+  info.skills.push(__miniAPath("skills/" + generic))
+  var names = Object.create(null)
+  names[generic] = true
+  Object.keys(info.guides).forEach(function(wiki) {
+    var guide = info.guides[wiki]
+    if (isUnDef(guide.folder)) return
+    try {
+      var source = __miniAMcpWikiGuideSkill(guide, mcp)
+      if (names[source.name]) throw new Error("duplicate skill name " + source.name)
+      names[source.name] = true
+      info.skills.push(source)
+    } catch(e) {
+      printErrnl("[mcp-wiki] Could not publish guide for " + wiki + " (" + guide.folder + "): " + __miniAErrMsg(e))
+    }
+  })
+}
+
+// Add guide pointers to the reader's ordinary context response.
+function __miniAMcpWikiContext(args) {
+  var result = global.__wikiTool.wiki({ operation: "context", wiki: args.wiki, path: args.path })
+  var guides = global.__miniAMcpWiki.guides
+  if (isMap(result) && isArray(result.wikis)) {
+    result.wikis.forEach(function(wiki) {
+      if (guides[wiki.name]) wiki.guidePath = guides[wiki.name].path
+    })
+  }
+  return result
+}
+
+// Initialize the selected wiki manager, tool and retrieval profile.
 function __miniAMcpWikiInit(args, options) {
   args = isMap(args) ? args : {}
   options = isMap(options) ? options : {}

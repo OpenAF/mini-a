@@ -3767,11 +3767,9 @@
         let scale = 1;
         let x = 0;
         let y = 0;
-        picture.addEventListener('load', refreshPngLabels)
         const pointers = new Map();
         function apply() {
             picture.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
-            refreshPngLabels()
         }
 
         // Measure the fitted image inside its full-screen box, including zoom.
@@ -3781,14 +3779,6 @@
             return Math.min(rect.width, rect.height * picture.naturalWidth / picture.naturalHeight)
         }
 
-        // Use the export viewport's aspect ratio for the PNG labels.
-        function refreshPngLabels() {
-            const bounds = (originalViewBoxAttr || '').trim().split(/[\s,]+/).map(Number)
-            const rect = svg.getBoundingClientRect()
-            const width = typeof svgText === 'string' ? picture.naturalWidth : Math.round(bounds[2] || rect.width)
-            const height = typeof svgText === 'string' ? picture.naturalHeight : Math.round(bounds[3] || rect.height)
-            updateDiagramPngLabels(controls, width, height, displayedWidth())
-        }
         function zoom(factor, anchorX = 0, anchorY = 0) {
             const nextScale = Math.max(0.35, Math.min(12, scale * factor));
             const ratio = nextScale / scale;
@@ -3995,14 +3985,6 @@
             if (!viewBox) return;
             svg.setAttribute('viewBox', viewBox.x + ' ' + viewBox.y + ' ' + viewBox.width + ' ' + viewBox.height);
         }
-
-        controls.addEventListener('toggle', () => {
-            if (!controls.open) return
-            const rect = svg.getBoundingClientRect()
-            const bounds = parseViewBox(originalViewBoxAttr)
-            updateDiagramPngLabels(controls, Math.round(bounds?.width || rect.width),
-                Math.round(bounds?.height || rect.height), rect.width * diagramZoom())
-        })
 
         function clampScale(value) {
             return Math.min(maxScale, Math.max(minScale, value));
@@ -4407,12 +4389,6 @@
         trigger.setAttribute('aria-label', kind + ' actions');
         menu.appendChild(trigger); menu.appendChild(controls);
         bindDiagramMenu(menu);
-        controls.addEventListener('focusin', () => {
-            if (image) updateDiagramPngLabels(controls, image.naturalWidth, image.naturalHeight, image.getBoundingClientRect().width)
-        })
-        menu.addEventListener('toggle', () => {
-            if (menu.open && image) updateDiagramPngLabels(controls, image.naturalWidth, image.naturalHeight, image.getBoundingClientRect().width)
-        })
         controls.addEventListener('click', event => {
             if (event.target.closest('button') && event.target.closest('button') !== fullscreen) { menu.open = false; trigger.focus(); }
         });
@@ -4489,20 +4465,6 @@
             status.textContent = 'Diagram export failed. Try again or download the SVG.';
         } finally {
             button.disabled = false;
-        }
-    }
-
-    // Show the final limited dimensions as soon as the export controls are available.
-    function updateDiagramPngLabels(controls, width, height, displayWidth) {
-        if (!width || !height || !displayWidth) return
-        for (var density of [2, 4]) {
-            var action = density === 4 ? 'download-png-4x' : 'download-png'
-            var button = controls.querySelector('[data-action="' + action + '"]')
-            var size = diagramPngSize(width, height, displayWidth * density)
-            var label = 'PNG ' + density + '× · ' + size.width + ' × ' + size.height
-            button.querySelector('span').textContent = label
-            button.title = 'Download ' + label
-            button.setAttribute('aria-label', button.title)
         }
     }
 

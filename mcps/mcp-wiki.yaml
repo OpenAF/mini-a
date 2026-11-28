@@ -99,7 +99,7 @@ help:
     example  : "Team wiki"
     mandatory: true
   - name     : wikimounts
-    desc     : "SLON/JSON array of read-only wiki mounts: [{name, label?, description?, backend, root|bucket|prefix|url|...}]. name is the stable MCP wiki selector."
+    desc     : "SLON/JSON array of read-only wiki mounts: [{name, label?, description?, wikiguide?, backend, root|bucket|prefix|url|...}]. name is the stable MCP wiki selector."
     example  : "[{name: 'team', label: 'Team docs', description: 'Curated team knowledge', backend: 'fs', root: './team-wiki'}]"
     mandatory: false
   - name     : wikimountshint
@@ -217,6 +217,19 @@ help:
     example  : "false"
     mandatory: false
 
+  - name     : modern
+    desc     : Enable modern MCP alongside the legacy protocol. Also settable with OJOB_MCP_MODERN.
+    example  : "true"
+    mandatory: false
+  - name     : wikimcpskills
+    desc     : Set false to disable skill publication on a modern MCP connection.
+    example  : "false"
+    mandatory: false
+  - name     : wikiguide
+    desc     : "Optional wiki-relative Markdown page or folder ending in /. A folder's SKILL.md is the guide entry, and modern MCP can publish its Markdown files as a skill."
+    example  : "team-handbook-guide/"
+    mandatory: false
+
 todo:
 - Init
 - (if    ): "isDef(args.onport)"
@@ -224,7 +237,7 @@ todo:
   - (httpdStart   ): "${onport:-8080}"
   - (httpdHealthz ): "${onport:-8080}"
   - (httpdMetrics ): "${onport:-8080}"
-  - (httpdMCP     ): "${onport:-8080}"
+  - (wikiHttpMCP     ): "${onport:-8080}"
     ((toolPrefix )): "${toolPrefix:-}"
     ((tplDesc    )): true
     ((description)): &MCPSERVER
@@ -235,7 +248,7 @@ todo:
     ((fnsMeta)): &MCPFNSMETA
       context:
         name       : context
-        description: "[ORIENTATION] Get a compact overview of {{label}}, including available wiki names for the wiki selector. Call once before searching when the relevant knowledge source is unknown.{{{$wikiMountsHint}}}"
+        description: "[ORIENTATION] Get a compact overview of {{label}}, including available wiki names for the wiki selector and any configured guidePath. Call once before searching when the relevant knowledge source is unknown.{{{$wikiMountsHint}}}"
         inputSchema:
           type      : object
           properties:
@@ -505,7 +518,7 @@ todo:
           readOnlyHint  : true
           idempotentHint: true
 
-    ((fns    )): &MCPFNS
+    ((fns)): &MCPFNS
       context  : Wiki context overview
       search   : Wiki search pages
       read     : Wiki read page
@@ -518,7 +531,7 @@ todo:
       backlinks: Wiki backlinks
       list     : Wiki list pages
   ((else)):
-  - (stdioMCP  ): *MCPSERVER
+  - (wikiStdioMCP  ): *MCPSERVER
     ((toolPrefix)): "${toolPrefix:-}"
     ((tplDesc   )): true
     ((fnsMeta   )): *MCPFNSMETA
@@ -541,6 +554,37 @@ include:
 - oJobMCP.yaml
 
 jobs:
+- name: Start Wiki HTTP MCP
+  typeArgs:
+    shortcut:
+      name  : wikiHttpMCP
+      keyArg: port
+      args  :
+        description: description
+        toolPrefix : toolPrefix
+        tplDesc    : tplDesc
+        fnsMeta    : fnsMeta
+        fns        : fns
+  from: Set Wiki MCP Skills
+  to  : HTTP MCP Server
+
+- name: Start Wiki STDIO MCP
+  typeArgs:
+    shortcut:
+      name  : wikiStdioMCP
+      keyArg: description
+      args  :
+        toolPrefix : toolPrefix
+        tplDesc    : tplDesc
+        fnsMeta    : fnsMeta
+        fns        : fns
+  from: Set Wiki MCP Skills
+  to  : STDIO MCP Server
+
+- name: Set Wiki MCP Skills
+  exec: | #js
+    args.skills = global.__miniAMcpWiki.skills
+
 - name : Init
   check:
     in:
@@ -597,18 +641,20 @@ jobs:
     loadLib(miniALibraryRoot + "/js/mini-a-paths.js")
     __miniAPackageRoot = __miniAResolvePackageRoot(miniALibraryRoot)
     loadLib(__miniAPath("js/wiki/mini-a-mcp-wiki.js"))
-    __miniAMcpWikiInit(args, {
+    var info = __miniAMcpWikiInit(args, {
       access   : "ro",
       readonly : true,
       agenticRetrieval: true,
       logPrefix: "mcp-wiki"
     })
+    info.guides = __miniAMcpWikiGuides(global.__wikiManager, args.wikiguide)
+    __miniAMcpWikiSkills(args, info, false)
 
 - name : Wiki context overview
   check:
     in: {}
   exec : | #js
-    return global.__wikiTool.wiki({ operation: "context", wiki: args.wiki, path: args.path })
+    return __miniAMcpWikiContext(args)
 
 - name : Wiki list pages
   check:

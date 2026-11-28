@@ -90,6 +90,76 @@ batch commands and exactly what each operation changes.
 - Unexpected model activity: inspect graph semantic settings and Dream mode;
   reorganization is model-driven, while ordinary search reindexing is model-free.
 
+## Serve a new wiki over MCP
+
+Use a local copy of the starter to try search, page reads, and a navigation skill.
+Run these commands from the Mini-A checkout with OpenAF and oJob-common installed.
+
+```sh
+MINIA_ROOT="$(pwd -P)"
+TEAM_WIKI="$(mktemp -d)"
+cp -R "$MINIA_ROOT/examples/wiki-mcp-starter/wiki/." "$TEAM_WIKI/"
+
+ojob "$MINIA_ROOT/utils/wikiOps.yaml" operation=wiki.reindex \
+  "wikiroot=$TEAM_WIKI" wikiaccess=rw confirm=true
+ojob "$MINIA_ROOT/mcps/mcp-wiki.yaml" "wikiroot=$TEAM_WIKI" \
+  'label=Team Handbook' wikiguide=team-handbook-guide/ modern=true \
+  onport=8888 host=127.0.0.1
+```
+
+Connect a client to `http://127.0.0.1:8888/mcp`, or let it launch the
+same descriptor over STDIO by omitting `onport` and `host`.
+See the [client setup examples](../mcps/README.md#client-configuration-examples)
+for Mini-A, VS Code, Claude, and Codex, or go directly to
+[OpenCode V2 setup](../mcps/README.md#opencode-v2).
+
+To start with an empty wiki, create a new directory and open it with
+`mini-a usewiki=true wikiaccess=rw "wikiroot=$TEAM_WIKI"`. Run `/wiki init`
+in the console. Add your own pages and copy the starter's
+`team-handbook-guide/` into the wiki. Change the guide's name, description,
+vocabulary, and links to match your wiki. Then run the reindex and serving
+commands above. The MCP reader opens the wiki read-only.
+
+- Set `wikiguide=team-handbook-guide/SKILL.md` to try the single-page form.
+  It appears as `guidePath` on the corresponding `context` wiki entry.
+  The generic skill can point clients to that page.
+- Use a trailing slash for a skill folder. Its root `SKILL.md` needs YAML
+  frontmatter with a lowercase, hyphenated `name` and a `description`. Link
+  to optional nested Markdown files with relative links, for example
+  `references/terminology.md`. Each published skill name must be unique on
+  the server. Select a folder containing only files you intend to publish.
+- Add `wikiguide` to a mount entry to give that wiki its own guide. For a
+  mount-only endpoint serving the starter as `handbook`, run:
+
+  ```sh
+  ojob "$MINIA_ROOT/mcps/mcp-wiki.yaml" 'label=Team Wikis' modern=true \
+    "wikimounts=[{name:'handbook',backend:'fs',root:'$TEAM_WIKI',wikiguide:'team-handbook-guide/'}]" \
+    onport=8889 host=127.0.0.1
+  ```
+
+  The `handbook` entry in `context` reports
+  `@handbook/team-handbook-guide/SKILL.md`.
+
+A client that supports the MCP skills extension can list
+`mini-a-wiki-retrieval` and `team-handbook-guide`, then open the guide's
+`references/terminology.md`. A client using wiki tools can call `context`
+and pass the returned `guidePath` to `read`. Ask **“Where do I check a delayed
+dispatch?”** The guide supplies the search term *scheduler*. The answer
+should cite `operations/scheduler.md`.
+
+Skill publishing requires `modern=true` (or `OJOB_MCP_MODERN=true`) and
+versions of OpenAF and oJob-common that implement Skills over MCP. Use
+`wikimcpskills=false` to turn publishing off. If a guide appears in
+`context` but is absent from a client's skills list, check the trailing
+slash, the server startup messages, and the client's extension support.
+Ordinary wiki reads follow the backend's refresh rules. Reindex after editing
+a wiki served with Retrieval V2, and restart the MCP server after changing
+the published guide or its references so it rebuilds the skill manifest.
+For a static HTTP wiki, include the guide and references in the published
+wiki index so the server can discover the folder's files.
+The [restricted reader](../mcps/README.md#mcp-wiki-safe) publishes a generic
+search and read skill without wiki-specific resources.
+
 ## Backends and access
 
 | Backend | Configuration | Read/write | Notes |

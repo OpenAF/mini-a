@@ -2,7 +2,7 @@
 
 Use the schema exposed by the active connection; some deployments expose fewer operations.
 
-- `context`: inspect configured knowledge sources and access modes.
+- `context`: inspect configured knowledge sources and access modes. When present on a wiki entry, `guidePath` is a path for `read`. Follow relevant Markdown links using the returned paths or the wiki navigation tools. Use the guide to find evidence sources.
 - `search`: supply `query`; `wiki` can select `primary`, a mount name, `*`, or an array of names. `path` scopes to one page. Retrieval v2 has request budgets such as `maxBytes`, `maxCandidates`, and `maxMillis`; an unavailable/incompatible index is not proof of no matching knowledge.
 - `open`: supply the returned `path` to inspect headings and deterministic boundaries without fetching the body.
 - `read`: supply `path` and `section`, or 1-based `startLine`/`endLine`. `countLines=true` inspects length first. Mounted paths use `@name/path.md`; an explicit `wiki` selector must agree with the path.

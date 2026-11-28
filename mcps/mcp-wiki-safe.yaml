@@ -147,6 +147,15 @@ help:
     example  : "false"
     mandatory: false
 
+  - name     : modern
+    desc     : Enable modern MCP alongside the legacy protocol. Also settable with OJOB_MCP_MODERN.
+    example  : "true"
+    mandatory: false
+  - name     : wikimcpskills
+    desc     : Set false to disable skill publication on a modern MCP connection.
+    example  : "false"
+    mandatory: false
+
 todo:
 - Init
 - (if    ): "isDef(args.onport)"
@@ -154,7 +163,7 @@ todo:
   - (httpdStart   ): "${onport:-8080}"
   - (httpdHealthz ): "${onport:-8080}"
   - (httpdMetrics ): "${onport:-8080}"
-  - (httpdMCP     ): "${onport:-8080}"
+  - (wikiHttpMCP     ): "${onport:-8080}"
     ((toolPrefix )): "${toolPrefix:-}"
     ((tplDesc    )): true
     ((description)): &MCPSERVER
@@ -165,32 +174,32 @@ todo:
     ((fnsMeta)): &MCPFNSMETA
       search:
         name       : search
-        description: "[START HERE] Search {{label}} for a targeted answer. This is lexical keyword retrieval, not semantic question answering: use specific keywords, names, aliases, and short phrases. A compatible Lucene index is used when available; otherwise the permitted wiki scope is scanned. When explicitly enabled, graph-related pages may be returned only as opaque supplemental references. With compatible passage artifacts, relevance selects the private excerpt used by read. Always call this before read. Returns bounded title+description metadata and an opaque, short-lived read reference per match; it never returns page paths or full content. Unpublished wikis retain legacy retrieval with an operator warning; existing incompatible or corrupt V2 publications remain unavailable. Safe-mode policy caps results and disables broad/scoped/regex/context searches."
+        description: '{{#if ($wikiRestricted)}}[START HERE] Search {{label}} for a targeted answer. This is lexical keyword retrieval, not semantic question answering: use specific keywords, names, aliases, and short phrases. A compatible Lucene index is used when available; otherwise the permitted wiki scope is scanned. When explicitly enabled, graph-related pages may be returned only as opaque supplemental references. With compatible passage artifacts, relevance selects the private excerpt used by read. Always call this before read. Returns bounded title+description metadata and an opaque, short-lived read reference per match; it never returns page paths or full content. Unpublished wikis retain legacy retrieval with an operator warning; existing incompatible or corrupt V2 publications remain unavailable. Safe-mode policy caps results and disables broad/scoped/regex/context searches.{{else}}Search {{label}} with specific terms, names or aliases. Returns ordinary page paths. Read the relevant page or section.{{/if}}'
         inputSchema:
           type      : object
           properties:
             query:
               type       : string
-              description: "Lexical keyword query for page metadata/body. Prefer exact terms, names, aliases, and short phrases; this is not a semantic natural-language question-answering field. Must meet the configured minimum length."
+              description: '{{#if ($wikiRestricted)}}Lexical keyword query for page metadata/body. Prefer exact terms, names, aliases, and short phrases; this is not a semantic natural-language question-answering field. Must meet the configured minimum length.{{else}}Lexical keyword query for page metadata or body.{{/if}}'
             limit:
               type       : integer
-              description: Maximum results requested; safe-mode policy applies its lower configured cap.
+              description: '{{#if ($wikiRestricted)}}Maximum results requested; safe-mode policy applies its lower configured cap.{{else}}Maximum results requested.{{/if}}'
               default    : 20
             caseSensitive:
               type       : boolean
-              description: Accepted for compatibility; safe mode always uses case-insensitive matching.
+              description: '{{#if ($wikiRestricted)}}Accepted for compatibility; safe mode always uses case-insensitive matching.{{else}}Enable case-sensitive matching.{{/if}}'
               default    : false
             regex:
               type       : boolean
-              description: Accepted for compatibility; safe mode never enables regular-expression matching.
+              description: '{{#if ($wikiRestricted)}}Accepted for compatibility; safe mode never enables regular-expression matching.{{else}}Treat the query as a regular expression.{{/if}}'
               default    : false
             contextLines:
               type       : integer
-              description: Accepted for compatibility; safe mode returns bounded metadata instead of line snippets.
+              description: '{{#if ($wikiRestricted)}}Accepted for compatibility; safe mode returns bounded metadata instead of line snippets.{{else}}Number of context lines around each match.{{/if}}'
               default    : 0
             path:
               type       : string
-              description: Accepted for compatibility; safe mode searches the permitted wiki scope rather than a caller-supplied path.
+              description: '{{#if ($wikiRestricted)}}Accepted for compatibility; safe mode searches the permitted wiki scope rather than a caller-supplied path.{{else}}Optional page path to scope the search.{{/if}}'
           required  : [ query ]
         annotations:
           title         : search
@@ -199,32 +208,32 @@ todo:
 
       read:
         name       : read
-        description: "Read a bounded excerpt from {{label}} using the opaque reference returned by search. References are single-use and short-lived. In v2 the server selects passages and includes complete prerequisite/warning/header context when it fits the same disclosure caps; incomplete:true means required support was omitted. Legacy references may select a section or valid line range within the configured caps."
+        description: '{{#if ($wikiRestricted)}}Read a bounded excerpt from {{label}} using the opaque reference returned by search. References are single-use and short-lived. In v2 the server selects passages and includes complete prerequisite/warning/header context when it fits the same disclosure caps; incomplete:true means required support was omitted. Legacy references may select a section or valid line range within the configured caps.{{else}}Read a page or section from {{label}} using the path returned by search.{{/if}}'
         inputSchema:
           type      : object
           properties:
             path:
               type       : string
-              description: "Opaque reference returned by search, not a wiki page path. \"reference\" is also accepted as an alias for this same value."
+              description: '{{#if ($wikiRestricted)}}Opaque reference returned by search, not a wiki page path. "reference" is also accepted as an alias for this same value.{{else}}Page path returned by search.{{/if}}'
             reference:
               type       : string
-              description: Alias for "path" -- the opaque reference returned by search. Provide either this or "path", not both.
+              description: '{{#if ($wikiRestricted)}}Alias for "path" -- the opaque reference returned by search. Provide either this or "path", not both.{{else}}Alias for path. Provide either this or path.{{/if}}'
             startLine:
               type       : integer
-              description: Optional 1-based excerpt start line; the requested range must fit within the safe-mode line cap.
+              description: '{{#if ($wikiRestricted)}}Optional 1-based excerpt start line; the requested range must fit within the safe-mode line cap.{{else}}Optional 1-based start line.{{/if}}'
             endLine:
               type       : integer
-              description: Optional 1-based excerpt end line; the requested range must fit within the safe-mode line cap.
+              description: '{{#if ($wikiRestricted)}}Optional 1-based excerpt end line; the requested range must fit within the safe-mode line cap.{{else}}Optional 1-based end line.{{/if}}'
             section:
               type       : string
-              description: Read only the body under this heading name, subject to the safe-mode excerpt caps.
+              description: '{{#if ($wikiRestricted)}}Read only the body under this heading name, subject to the safe-mode excerpt caps.{{else}}Read the body under this heading.{{/if}}'
             countLines:
               type       : boolean
-              description: Accepted for compatibility but unavailable in safe mode, because it would disclose page structure.
+              description: '{{#if ($wikiRestricted)}}Accepted for compatibility but unavailable in safe mode, because it would disclose page structure.{{else}}Return the total number of lines.{{/if}}'
               default    : false
             compact:
               type       : boolean
-              description: Accepted for compatibility; safe mode returns bounded content, with incomplete:true when required v2 support cannot fit.
+              description: '{{#if ($wikiRestricted)}}Accepted for compatibility; safe mode returns bounded content, with incomplete:true when required v2 support cannot fit.{{else}}Return compact output.{{/if}}'
               default    : false
           anyOf:
           - required: [ path ]
@@ -234,11 +243,11 @@ todo:
           readOnlyHint  : true
           idempotentHint: false
 
-    ((fns    )): &MCPFNS
+    ((fns)): &MCPFNS
       search: Wiki search pages
       read  : Wiki read page
   ((else)):
-  - (stdioMCP  ): *MCPSERVER
+  - (wikiStdioMCP  ): *MCPSERVER
     ((toolPrefix)): "${toolPrefix:-}"
     ((tplDesc   )): true
     ((fnsMeta   )): *MCPFNSMETA
@@ -261,6 +270,37 @@ include:
 - oJobMCP.yaml
 
 jobs:
+- name: Start Wiki HTTP MCP
+  typeArgs:
+    shortcut:
+      name  : wikiHttpMCP
+      keyArg: port
+      args  :
+        description: description
+        toolPrefix : toolPrefix
+        tplDesc    : tplDesc
+        fnsMeta    : fnsMeta
+        fns        : fns
+  from: Set Wiki MCP Skills
+  to  : HTTP MCP Server
+
+- name: Start Wiki STDIO MCP
+  typeArgs:
+    shortcut:
+      name  : wikiStdioMCP
+      keyArg: description
+      args  :
+        toolPrefix : toolPrefix
+        tplDesc    : tplDesc
+        fnsMeta    : fnsMeta
+        fns        : fns
+  from: Set Wiki MCP Skills
+  to  : STDIO MCP Server
+
+- name: Set Wiki MCP Skills
+  exec: | #js
+    args.skills = global.__miniAMcpWiki.skills
+
 - name : Init
   check:
     in:
@@ -322,6 +362,8 @@ jobs:
       allowRestrictedGraphHints: args.usewikigraph === true,
       logPrefix               : "mcp-wiki-safe"
     })
+    ow.template.addHelper("$wikiRestricted", function() { return info.restriction.enabled })
+    __miniAMcpWikiSkills(args, info, true)
     if (restrictOff) {
       if (isMap(info.restriction) && info.restriction.enabled === true) throw "mcp-wiki-safe: restricted retrieval failed to deactivate"
       printErrnl("[mcp-wiki-safe] WARNING: restricted retrieval disabled (profile: off) -- serving raw, unbounded search/read; only expose this to trusted clients")

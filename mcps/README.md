@@ -82,13 +82,16 @@ mini-a goal="..." \
 
 #### mcp-wiki
 
-`mcp-wiki` exposes a Mini-A wiki through read-friendly tools. External clients should start with `tree` or `browse`, then call `read` only for specific pages. Folders with `index.md` act as section sub-wikis.
+`mcp-wiki` exposes a Mini-A wiki through read-friendly tools. Start a targeted lookup with `search`. Use `context` to find a wiki and its optional guide, or `tree` and `browse` to explore its structure. Folders with `index.md` act as section sub-wikis.
 
 Read and discovery tools include: `context` (compact overview), `search` (full-text search), `read` (page content and frontmatter), `open` (read with link validation), `navigate` (link-relative traversal), `grep` (regex search), `related` (related pages), `browse` (section structure), `tree` (full folder hierarchy), `backlinks` (incoming page links), and `list` (enumerate pages).
 
 To serve several wikis (and a skill library via `mcp-skills`) from containers, see [Serving wikis and skills from containers](../docs/WIKI-CONTAINERS.md).
 
 `audit=true` (or `OJOB_MCP_AUDIT=true`) logs every MCP tool call (tool name plus its call arguments — page paths, search queries, and so on) via OpenAF's `log()` function. It is off by default. See [Auditing MCP tool calls](#auditing-mcp-tool-calls) below — this works the same way for every MCP in this catalog, not just `mcp-wiki`/`mcp-wiki-safe`.
+
+See the [wiki MCP quickstart](../docs/WIKI.md#serve-a-new-wiki-over-mcp) to create a wiki,
+publish a navigation skill, and try it with a client.
 
 #### mcp-wiki-safe
 
@@ -102,7 +105,7 @@ ojob mcps/mcp-wiki-safe.yaml onport=8888 label="Team wiki" wikiroot=./wiki \
 
 Restricted retrieval defaults are controlled by `wikirestrictprofile` (`tight`, `moderate`, `relaxed`, or `off`, case-insensitive). `tight` is the default and preserves the previous behavior exactly. The `tight`/`moderate`/`relaxed` profiles change disclosure limits only; they do not make the server writable, disable opaque/single-use references, or expose any tools beyond `search` and `read`. Existing individual settings still override the selected profile, and hard ceilings remain enforced independently of profile choice (including `wikirestrictsearchlimit <= 10`, `wikirestrictreadlines <= 100`, and `wikirestrictreadchars <= 16000`). Use a persistent ledger outside `wikiroot` for HTTP deployments; protect it with normal filesystem permissions and share it between processes that must share a budget. Authentication, TLS, network ACLs, and backend permissions remain necessary.
 
-`wikirestrictprofile=off` is different in kind: it turns restricted retrieval off entirely — raw, unbounded `search`/`read`, no opaque references, no per-window budgets, no page cooldowns — making `mcp-wiki-safe` behave the same as the unrestricted `mcp-wiki` server (still read-only). All individual `wikirestrict*` settings are ignored in this mode since there is no restriction state to apply them to. Only use it for clients you already trust; it defeats the purpose of running the "safe" server in the first place.
+`wikirestrictprofile=off` is different in kind: it turns restricted retrieval off entirely — raw, unbounded `search`/`read`, no opaque references, no per-window budgets, no page cooldowns — leaving a read-only server with unrestricted `search` and `read`. All individual `wikirestrict*` settings are ignored in this mode since there is no restriction state to apply them to. Only use it for clients you already trust; it defeats the purpose of running the "safe" server in the first place.
 
 | Profile | searchlimit | minquerychars | metachars | readlines | readchars | refttl | maxsearches | maxreads | maxchars | window | pagecooldown |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -965,48 +968,219 @@ command-line arguments (and therefore out of `ps` output and other jobs' args).
 
 ### Client configuration examples
 
-- **Claude Code**:
-  ```bash
-  claude mcp add --transport http files http://host:8080/mcp \
-    --header "Authorization: Bearer s3cr3t"
-  ```
-- **VS Code** (`.vscode/mcp.json`):
-  ```json
-  {
-    "servers": {
-      "files": {
-        "type": "http",
-        "url": "http://host:8080/mcp",
-        "headers": { "Authorization": "Bearer ${input:token}" }
-      }
-    }
-  }
-  ```
-- **Codex** (`~/.codex/config.toml`) — Codex has a dedicated key for reading the token from the
-  environment rather than the config file:
-  ```toml
-  [mcp_servers.files]
-  url = "http://host:8080/mcp"
-  bearer_token_env_var = "MCP_FILES_TOKEN"
-  ```
-- **opencode** (`opencode.json`):
-  ```json
-  {
-    "mcp": {
-      "files": {
-        "type": "remote",
-        "url": "http://host:8080/mcp",
-        "headers": { "Authorization": "Bearer {env:MCP_FILES_TOKEN}" }
-      }
-    }
-  }
-  ```
-- **Mini-A** — `$mcp`/`mcp=` already support bearer auth directly, no extra client-side work needed:
-  ```bash
-  mini-a goal="..." mcp="(type: remote, url: 'http://host:8080/mcp', auth: (type: bearer, token: 's3cr3t'))"
-  ```
+Start the server in the [wiki quickstart](../docs/WIKI.md#serve-a-new-wiki-over-mcp)
+for HTTP, or use the STDIO launch arguments below and let the client start it.
+Replace `/absolute/path/to/ojob`, `/absolute/path/to/mini-a`, and
+`/absolute/path/to/team-wiki` with your paths. Use `command -v ojob` in your
+shell to find the launcher. Select either transport for the `team-wiki` entry.
+For the restricted reader, use `mcp-wiki-safe.yaml` and omit `wikiguide`.
 
-The above bearer-token setting describes authentication on the bundled MCP **server**. For outbound connections, Mini-A also supports generic OAuth2 through OpenAF's `$mcp` client; see [remote MCP OAuth2 configuration](../USAGE.md#oauth2-authentication-for-remote-mcp-servers).
+**Mini-A.** Connect by URL and inspect the server and its skill manifests.
+
+```sh
+mini-a mcptest=true mcptestreport=true \
+  "mcp=(type: remote, url: 'http://127.0.0.1:8888/mcp')"
+mini-a useskills=true "mcp=(type: remote, url: 'http://127.0.0.1:8888/mcp')"
+```
+
+For authenticated HTTP, add `auth: (type: bearer, token: 'YOUR_TOKEN')`
+to the remote connection map.
+
+For STDIO, pass the executable and arguments as an array.
+
+```sh
+mini-a useskills=true 'mcp=[(id: "team-wiki", type: stdio, cmd: ["/absolute/path/to/ojob", "/absolute/path/to/mini-a/mcps/mcp-wiki.yaml", "wikiroot=/absolute/path/to/team-wiki", "label=Team Handbook", "wikiguide=team-handbook-guide/", "modern=true"])]'
+```
+
+List the MCP skills, select the server-qualified `team-handbook-guide`, and
+approve the manifest when prompted. Use `/skills remote team-handbook-guide`
+to find the ID, then put `$` followed by that ID at the start of the goal.
+Ask it to consult
+`references/terminology.md` for the delayed-dispatch question.
+
+**VS Code with GitHub Copilot.** Use **MCP: Add Server** in the Command
+Palette. Choose HTTP and enter `http://127.0.0.1:8888/mcp`, or choose Command
+(STDIO) and enter the launcher and arguments from the example below. Select
+the configuration destination for your Copilot session. The guided flow can
+write Copilot Global or workspace-root `.mcp.json` where available. For an
+editor-managed workspace configuration, use `.vscode/mcp.json` with a
+`servers` map. These are two transport examples for that map.
+
+```json
+{
+  "servers": {
+    "team-wiki": {
+      "type": "stdio",
+      "command": "/absolute/path/to/ojob",
+      "args": ["/absolute/path/to/mini-a/mcps/mcp-wiki.yaml", "wikiroot=/absolute/path/to/team-wiki", "label=Team Handbook", "wikiguide=team-handbook-guide/", "modern=true"]
+    }
+  }
+}
+```
+
+For HTTP, use `"team-wiki": {"type": "http", "url": "http://127.0.0.1:8888/mcp"}`
+inside `servers`. For shared bearer authentication, add
+`"headers": {"Authorization": "Bearer ${input:wiki-token}"}` and a matching
+password input with ID `wiki-token` in the top-level `inputs` array.
+Check **Agent Customizations → MCP Servers** for the connection. VS Code
+1.147 enables Skills over MCP by default. Approve this server's skills when
+prompted and check **Agent Customizations → Skills** for the guide.
+[VS Code setup](https://code.visualstudio.com/docs/agent-customization/mcp-servers) ·
+[Configuration reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration) ·
+[Skills over MCP](https://code.visualstudio.com/updates/v1_147/)
+
+**Claude Code.** Choose one command and verify the connection with `/mcp`.
+
+```sh
+claude mcp add --transport http team-wiki http://127.0.0.1:8888/mcp
+claude mcp add --transport stdio team-wiki -- /absolute/path/to/ojob \
+  /absolute/path/to/mini-a/mcps/mcp-wiki.yaml \
+  wikiroot=/absolute/path/to/team-wiki 'label=Team Handbook' \
+  wikiguide=team-handbook-guide/ modern=true
+```
+
+For authenticated HTTP, add `--header "Authorization: Bearer $MCP_WIKI_TOKEN"`
+using your token. Claude Code documents MCP skills for supported sessions as
+of v2.1.331. Check its account, model, and organization requirements if
+`/team-wiki:team-handbook-guide` is missing. [Claude Code MCP and skills](https://code.claude.com/docs/en/mcp#use-skills-from-mcp-servers)
+
+**Claude Desktop.** For a local server, open **Settings → Developer → Edit Config**
+(`claude_desktop_config.json`) and merge the following entry. Restart the app
+and check for the wiki tools. Use `context` and `read` to consult the guide.
+
+```json
+{
+  "mcpServers": {
+    "team-wiki": {
+      "command": "/absolute/path/to/ojob",
+      "args": ["/absolute/path/to/mini-a/mcps/mcp-wiki.yaml", "wikiroot=/absolute/path/to/team-wiki", "label=Team Handbook", "wikiguide=team-handbook-guide/", "modern=true"]
+    }
+  }
+}
+```
+
+For a remote custom connector, enter the server's reachable HTTPS URL in
+**Customize → Connectors**. Claude connects from Anthropic's cloud, so a
+loopback URL is only suitable for clients connecting from your machine.
+[Local Desktop setup](https://modelcontextprotocol.io/docs/develop/connect-local-servers) ·
+[Remote connectors](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)
+
+**Codex.** Choose one command. Check `codex mcp list` and ask Codex to search
+the wiki to verify tool access.
+
+```sh
+codex mcp add team-wiki --url http://127.0.0.1:8888/mcp
+codex mcp add team-wiki -- /absolute/path/to/ojob \
+  /absolute/path/to/mini-a/mcps/mcp-wiki.yaml \
+  wikiroot=/absolute/path/to/team-wiki 'label=Team Handbook' \
+  wikiguide=team-handbook-guide/ modern=true
+```
+
+The equivalent HTTP entry in `~/.codex/config.toml` is below. Set
+`bearer_token_env_var = "MCP_WIKI_TOKEN"` there for an authenticated server.
+For STDIO use `command` and `args` with the same values as the CLI command.
+
+```toml
+[mcp_servers.team-wiki]
+url = "http://127.0.0.1:8888/mcp"
+```
+
+[Codex MCP setup](https://developers.openai.com/learn/docs-mcp)
+
+#### OpenCode V2
+
+Run `opencode --version` to confirm you are using 2.x. From your OpenCode
+project, choose one command. For HTTP, start the server from the wiki
+quickstart first. For STDIO, OpenCode starts the server.
+
+```sh
+opencode mcp add team-wiki --url http://127.0.0.1:8888/mcp
+
+opencode mcp add team-wiki -- /absolute/path/to/ojob \
+  /absolute/path/to/mini-a/mcps/mcp-wiki.yaml \
+  wikiroot=/absolute/path/to/team-wiki 'label=Team Handbook' \
+  wikiguide=team-handbook-guide/ modern=true
+```
+
+The CLI adds the server to your project configuration. Add `--global` before
+the URL option or the `--` separator for a user-wide entry. To configure a
+project manually, merge one of the following examples into `opencode.json`
+or `opencode.jsonc`. [OpenCode V2 CLI](https://opencode.ai/docs/cli/commands#mcp)
+
+**Streamable HTTP**
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "team-wiki": {
+        "type": "remote",
+        "url": "http://127.0.0.1:8888/mcp",
+        "protocol": "auto"
+      }
+    }
+  }
+}
+```
+
+**STDIO**
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "team-wiki": {
+        "type": "local",
+        "command": [
+          "/absolute/path/to/ojob",
+          "/absolute/path/to/mini-a/mcps/mcp-wiki.yaml",
+          "wikiroot=/absolute/path/to/team-wiki",
+          "label=Team Handbook",
+          "wikiguide=team-handbook-guide/",
+          "modern=true"
+        ],
+        "protocol": "auto"
+      }
+    }
+  }
+}
+```
+
+If you used the CLI, add `"protocol": "auto"` to the generated server
+entry to try the 2026-07-28 protocol with legacy fallback. For HTTP bearer
+authentication, add `"oauth": false` and
+`"headers": {"Authorization": "Bearer {env:MCP_WIKI_TOKEN}"}` to the server
+entry. Set `MCP_WIKI_TOKEN` in the environment that launches OpenCode.
+[OpenCode V2 MCP configuration](https://opencode.ai/docs/mcp-servers/)
+
+Run `opencode mcp list` and look for `team-wiki` marked **connected**.
+OpenCode's protocol setting controls the connection revision. Native
+MCP skill discovery depends on the client. To use the guide through wiki
+tools, ask OpenCode to call `context`, read its `guidePath`, then follow
+`references/terminology.md`. When the server publishes skill resources, you
+can also ask OpenCode to list its MCP resources and open
+`skill://team-handbook-guide/references/terminology.md`.
+[OpenCode V2 MCP resources](https://opencode.ai/docs/mcp-servers/#resources)
+
+#### OpenCode V1
+
+OpenCode V1 uses server entries directly below `mcp`. Omit `protocol` in V1
+and use the wiki tools to open the guide.
+[OpenCode V1 setup](https://opencode.ai/v1/docs/mcp-servers/)
+
+#### Try the wiki
+
+**Try it in any client.** Ask “Where do I check a delayed dispatch?” with
+the `team-wiki` tools enabled. To test native MCP skill support, check whether
+the client lists `team-handbook-guide` and can open
+`references/terminology.md`. If it only lists tools, ask it to call
+`context`, read the returned `guidePath` and its terminology reference,
+then search for *scheduler* and cite the runbook. For the restricted reader,
+use `search` followed by `read` with the returned reference.
+
+The shared bearer token authenticates requests to the bundled MCP server. For outbound connections, Mini-A also supports generic OAuth2 through OpenAF's `$mcp` client; see [remote MCP OAuth2 configuration](../USAGE.md#oauth2-authentication-for-remote-mcp-servers).
 
 For production deployments of these bundled servers beyond a single shared token (mTLS, per-user OAuth, IP allowlisting), put
 a reverse proxy (e.g. Caddy, nginx, oauth2-proxy) in front of the MCP port instead.
