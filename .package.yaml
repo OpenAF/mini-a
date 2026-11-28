@@ -364,7 +364,7 @@ filesHash:
   docs/WIKI-QUICKSTART.md: e44a15892c3032da3bec349ff4ea7e63fbd2510f
   docs/WIKI-RETRIEVAL-V2.md: 460b2bcd3b42d43fa68dc5ce2ec105da500cf86c
   docs/WIKI-STUDIO-IMPLEMENTATION.md: 763c1ce0e6268f1853823fb1e904b65be651bb5c
-  docs/WIKI-STUDIO.md: 08a6abadcccab90a9171126f569006af5eef8344
+  docs/WIKI-STUDIO.md: 431c89c839ea6cfb4f796562af6d7abb6de6532a
   docs/WIKI.md: 83fdeea8be8907820b0a2856ca4ba9bae4f338c5
   docs/WORKERS-QUICKSTART.md: 8090219ee3eb7d281bd1029c8f1dfb91ee52159a
   docs/WORKIQ.md: 9d2a64d6e06e148775a77b8c4df40427ffb16524
@@ -407,7 +407,7 @@ filesHash:
   examples/wiki-mcp-starter/wiki/team-handbook-guide/SKILL.md: 36b1d7b5cb057ac2cb2d06d65a539743617918f9
   examples/wiki-mcp-starter/wiki/team-handbook-guide/references/terminology.md: 6265dacb85076a332610cd0f029cc58c494d3973
   examples/wiki-mcp-starter/wiki/team-handbook-guide/references/workflows/finding-current-procedures.md: 816a6b447955fd85fae56fb04f5565dcf8bfec0d
-  examples/wiki-studio/README.md: 4e06c3a9a1dfaef975b46474713a00bfef7180e9
+  examples/wiki-studio/README.md: 87f06b118e0e6b2003cb73ab8da453e3502fd59b
   examples/wiki-studio/alpha.md: 2cb6822fbb17a4d75691d71f3284f254ff184902
   examples/wiki-studio/beta.md: e26b434de10df30c06cdb2af6746f1684b36af75
   examples/wiki-studio/source/lesson.md: 5ad4f0d89460cccc8905e199ab8c5c9a501357d6
@@ -456,10 +456,10 @@ filesHash:
   js/studio/wiki-studio-common.js: b76a5b545d10d6633c659d3c5ba8579803d385aa
   js/studio/wiki-studio-config.js: 7501be537fa897a132b6008f6d83939363de2995
   js/studio/wiki-studio-graph.js: 10955546c41707073e8a465b055c4690d4e32d77
-  js/studio/wiki-studio-ingestion.js: cbee94491146c3174d446f208ae181214db8aad9
+  js/studio/wiki-studio-ingestion.js: e8708a3320da560d1381db11e51494b166c77f58
   js/studio/wiki-studio-jobs.js: 3afa72583dcbfdc427f3e65e5e49b2e44a3d89cb
   js/studio/wiki-studio-mcp.js: d08be79762936fed2f69a896082117e0609a7a11
-  js/studio/wiki-studio-operations.js: cf0978fc25c5d6f24fa2ff83a0e0237fdc006b7a
+  js/studio/wiki-studio-operations.js: 82ef30b330f5b85334723c044c36c2f962b81caa
   js/studio/wiki-studio-outbound.js: d86a20b91903266438a393b2a5d11f90fe07d191
   js/studio/wiki-studio-pages.js: c684e1ee944285f98e8c22f392fdf0931a0df14a
   js/studio/wiki-studio-registry.js: 8d96e3a5241d64522c15fc96a932619ae4204856
@@ -553,10 +553,10 @@ filesHash:
   public/favicon.ico: 7d62af53ff8c43ba32d022107153e6877567ba75
   public/index.md: c600b5c1800e1df241a24783547640d31515b916
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
-  public/studio/index.html: ef175b52dc7b9e99dc5afb578788231df1098093
+  public/studio/index.html: e97f1ff43e16e3bff8cfe3053a6e3340d94dda98
   public/studio/studio-mcp.js: 16a314838585e41e8e2b073593d328cb99279e34
-  public/studio/studio.css: 35940c660cee34af639a9ca28a7c10d43bb9947f
-  public/studio/studio.js: 6dd82075a641378b9805caf3f91feb42879897d0
+  public/studio/studio.css: 3c382b467ec10b4db482f1f414eb0cc517bb0e25
+  public/studio/studio.js: 0c7baf469f20de5a72f9ff7293508656d2e7b253
   skills/mini-a-contract-authoring/SKILL.md: 0d98a31839edfbe86463893816dfd258e5261de7
   skills/mini-a-contract-authoring/references/CONTRACT.md: 58d482c7a033e0c03e7b0fe40d037bcd99e663c9
   skills/mini-a-decisions/SKILL.md: 2f5f011baacbf1bf7d1d37c6268eb78113e62524
@@ -587,7 +587,7 @@ filesHash:
   utils/indexStats.yaml: 7fc4b114655146b3b3f94813949867485917bacd
   utils/wikiCompact.yaml: bec7795ef9992245afbe11510857d23a5a08fbe4
   utils/wikiDream.yaml: 1e40aef42ef47fe5fd16b28e9d3cfe0e7e144550
-  utils/wikiGraph.yaml: 4a660c8a57e892fa647ace1c77a9d79ccef83006
+  utils/wikiGraph.yaml: 71bc4bed7b76550b1f2fcff3a5c915a81e4470e3
   utils/wikiHydrate.yaml: c8e600a07c744dc7cce24b565964a5f7a7081377
   utils/wikiJobsLib.js: 008b46652d5e8f7b35367bd7f5462effd23f7fad
   utils/wikiOps.yaml: 5aea90e8312815463ad8f9c049227335d1dcf8b3
