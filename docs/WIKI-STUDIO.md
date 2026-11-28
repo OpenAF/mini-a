@@ -120,7 +120,7 @@ does not initialize existing content. Creation calls Mini-A's supported init.
 Symlinks, hard-linked files, root identity changes and hidden page paths are
 rejected. Use canonical paths on macOS (for example `/private/tmp`, not `/tmp`).
 
-Next to **Absolute root**, **Browse…** opens a folder picker limited to the
+Existing registrations appear first, with their server folder and access. Expand **Add wiki** to register another. Next to **Absolute root**, **Browse…** opens a folder picker limited to the
 configured `studioallowroots`. It shows only visible, non-linked sub-folders.
 Folders already registered (or overlapping a registered wiki) are badged and
 cannot be picked, and folders that already contain `index.md` are marked. **New
@@ -144,7 +144,7 @@ root never counts as an overlap, and new (virtual) folders are not offered.
 
 ### Search modes
 
-The Pages view's **Search with** selector works for one wiki or all registered
+Under **Pages → Advanced options**, the **Search with** selector works for one wiki or all registered
 wikis:
 
 - **Index**: the full-text search index (`wiki.search`), as before.
@@ -653,6 +653,12 @@ reorganization and live remote downloads require separate configured checks.
 
 Graph exposes structural/semantic extraction, off/automatic model assistance, incremental/full/resume strategy, force, presets, custom budgets, and shared saved defaults. See [Graph builds](GRAPH-BUILDS.md). Semantic extraction works without models. `GET /graph/settings` displays effective defaults; `PUT /graph/settings` saves them for a writable wiki. `POST /graph/rebuild` accepts the shared build options. Graph cancellation checkpoints completed work and stops scheduling calls; an in-flight request uses its configured timeout.
 
+Opening a wiki shows the last selected page in this session, or its root index when available. On phones, **Back to pages** returns to the Explorer and the current search. The desktop reader keeps the Explorer alongside the page.
+
+**Overview → Review wiki health** opens the finding groups. In **Activity**, previews and imports identify the source. Open **Details** to inspect changed paths, or **Manage history** to select eligible records for cleanup. In **Import from another wiki**, select a saved plan to inspect it or see its available actions.
+
+**Pages → Graph** opens the available visualization. **Build or update graph** reveals the build controls. On phones use **Filters** and **Node details** to open or close either panel. Select a document node and choose **Open page** to read it.
+
 ## Organizing pages and folders
 
 The Pages explorer works like a file manager:
@@ -660,7 +666,7 @@ The Pages explorer works like a file manager:
 - **New folder** creates a section (`<folder>/index.md`), so it appears in tree and browse on every backend. Use the toolbar, the folder panel, the context menu or the picker's *New folder here…*.
 - **Select** pages and folders with the checkboxes, Ctrl/Cmd-click (toggle), Shift-click (range), Space (toggle), Ctrl/Cmd+A (siblings) and Esc (clear). `index.md` pages are never selectable; selecting a folder covers its content. A selection bar offers **Move to…**, **Delete…** and **Clear**.
 - **Move to…** opens a folder picker. You can also **drag** the focused or selected items onto a folder (or the *wiki root* strip that appears while dragging), or use **Move N selected here** in a folder panel.
-- **Right-click**, Shift+F10, the Menu key or the `⋯` button open a context menu: Open, New page/folder here, Rename / move…, Move to…, Delete…. Rename / move, Move to folder… and Delete are also available while reading a page.
+- **Right-click**, Shift+F10, the Menu key or the `⋯` button open a context menu: Open, New page/folder here, Rename / move…, Move to…, Delete…. The reader groups rename, move and delete under **Page actions**.
 - A **single page** uses the page endpoints (any writable backend). **Several items, or anything containing a folder,** run one previewed selection job: `selection/preview` lists every `from → to`, the surviving incoming links and a revision; `selection/move` and `selection/delete` need that revision (deletion also needs the typed confirmation `delete N items`), take a verified recovery snapshot, rewrite links once and publish indexes once. Selection jobs need a local filesystem wiki and an administrator, like folder jobs.
 
 ## Recursive folder operations

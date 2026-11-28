@@ -257,3 +257,61 @@ aside button{width:auto;display:inline-flex;margin:0}.page-tree{min-width:180px;
 .mcp-source select { max-width: 100%; }
 .mcp-source .mcp-field .mcp-field { margin-inline-start: 1em; }
 .mcp-preview { max-height: 28em; overflow: auto; overflow-wrap: anywhere; }
+
+/* Keep fields and selections recognizable in both OS appearances. */
+:root { --field-edge: #87988c; --chart: #52816b }
+@media (prefers-color-scheme: dark) {
+  :root { --field-edge: #718477; --chart: #79a890 }
+}
+input, select, textarea { border-color: var(--field-edge) }
+button[aria-pressed=true], .page-tree [role=treeitem][aria-selected=true] > .tree-label {
+  background: var(--accent-bg);
+  color: var(--accent);
+  box-shadow: inset 3px 0 var(--accent);
+}
+.wiki-library { max-width: 960px }
+.wiki-entry { margin: 0; padding: 10px 0; border-bottom: 1px solid var(--line) }
+.wiki-root { overflow-wrap: anywhere }
+.metrics > button {
+  display: grid;
+  gap: 4px;
+  justify-content: start;
+  text-align: left;
+  padding: 16px;
+  background: var(--panel);
+}
+#view .metrics > button { margin: 0 }
+.pages-view .page-preview { line-height: 1.65 }
+.page-preview p, .page-preview li { max-width: 78ch }
+.page-preview button, article[aria-label="Safe Markdown preview"] p button {
+  display: inline;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-decoration: underline;
+  color: var(--accent);
+  font: inherit;
+}
+.page-preview button .studio-icon { display: none }
+.back-to-explorer, .back-to-tasks { display: none }
+@media (max-width: 1000px) {
+  .dream-layout .dream-details { display: none }
+  .task-open .dream-groups, .task-open .dream-suggestions-panel { display: none }
+  .task-open .dream-details { display: block }
+  .back-to-tasks { display: inline-flex }
+}
+@media (max-width: 800px) {
+  .pages-view.reading > :not(.split), .pages-view.reading .split > aside,
+  .pages-view.reading .desktop-only { display: none }
+  .pages-view.reading .back-to-explorer { display: inline-flex }
+  .pages-view:not(.reading) .split > aside { height: auto; max-height: none; resize: none }
+  .pages-view.reading .split .breadcrumbs { margin-block: 6px }
+  .activity-table, .activity-table tbody, .activity-table tr, .activity-table td { display: block; width: 100% }
+  .activity-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%) }
+  .activity-table tr { padding: 12px 0; border-bottom: 1px solid var(--line) }
+  .activity-table td { border: 0; padding: 3px 0 }
+  .activity-table td.job-time { display: none }
+  .activity-table td:last-child { min-width: 0 }
+}

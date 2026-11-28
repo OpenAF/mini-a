@@ -1,3 +1,37 @@
+// Combine the engine's saved files with Studio's persisted approval records.
+WikiStudioServer.prototype.savedPlans = function(w, jobs, query) {
+  var base = w.root + "/.mini-a-wiki-absorb", dir = base + "/plans"
+  WikiStudio.noLinks(dir)
+  var entries = io.fileExists(dir) ? io.listFiles(dir).files.filter(function(file) {
+    return file.isFile && /^[a-f0-9]{64}\.json$/.test(file.filename)
+  }) : []
+  entries.sort(function(a, b) { return Number(b.lastModified) - Number(a.lastModified) || a.filename.localeCompare(b.filename) })
+  var page = WikiStudioServer.paginate(entries, query)
+  if (!page.items.length) return page
+  var journal = WikiStudio.json(base + "/journal.json", null)
+  var pending = WikiStudio.pending(w.root).length > 0
+  var approved = {}
+  jobs.list().filter(function(job) {
+    return job.wikiId === w.id && job.operation === "absorb.plan" && job.status === "completed" && job.rootIdentity === w.identity
+  }).forEach(function(job) {
+    var result = WikiStudio.json(jobs.dir(job.id) + "/result.json", {})
+    if (result.id && result.plan) approved[result.id] = true
+  })
+  page.items = page.items.map(function(file) {
+    var id = file.filename.slice(0, -5), plan = WikiStudio.json(dir + "/" + file.filename).plan
+    var approval = WikiStudio.json(jobs.planReceiptPath(w.id, id), {})
+    var reviewed = approved[id] || approval.wikiId === w.id && approval.rootIdentity === w.identity
+    var receipt = WikiStudio.json(base + "/receipts/" + id + ".json", null)
+    var resumable = journal && journal.id === id
+    var actions = ["show"]
+    if (resumable && reviewed) actions.push("resume")
+    if (!pending && !receipt && reviewed && plan.status === "planned") actions.push("apply")
+    if (!pending) actions.push("delete")
+    return { id: id, createdAt: plan.created, status: resumable ? "Recovery pending" : receipt ? "Applied" : plan.status, actions: actions }
+  })
+  return page
+}
+
 // Only trusted source registrations and registered wiki roots reach engine args.
 WikiStudioServer.prototype.sourceOperation = function(w, route, body) {
   if (route === "ingestions") {
@@ -47,7 +81,7 @@ WikiStudioServer.prototype.sourceOperation = function(w, route, body) {
     if (officeRequiresParts) officeFileBytes = fileBytes
     WikiStudio.assert(isUnDef(o.force) || isBoolean(o.force), 400, "invalid_options", "Force must be boolean")
     if(o.prune===true) WikiStudio.assert(body.confirmation&&body.confirmation.acknowledgePrune===true,400,"confirmation_required","Explicit prune confirmation required; empty-source authorization is not available")
-    return {operation:"ingest.run",params:{graphOverrides:graphOverrides,sourceId:source.id,revision:source.revision,staging:source.staging,inventoryChecksum:source.inventoryChecksum,dryrun:body.preview!==false,mode:o.mode || (models.distill ? "auto" : "normalize"),expectedModelSkips:modelSkips,layout:o.layout||"source",section:section,include:o.include||"",exclude:o.exclude||"",prune:o.prune===true,semantic:o.semantic===true,tuning:tuning,force:o.force===true,officeparts:officeParts,maxfiles:tuning.maxfiles,maxfilesize:fileBytes,maxofficefilesize:officeFileBytes,officeRequiresParts:officeRequiresParts}}
+    return {operation:"ingest.run",params:{graphOverrides:graphOverrides,sourceId:source.id,sourceName:source.name,revision:source.revision,staging:source.staging,inventoryChecksum:source.inventoryChecksum,dryrun:body.preview!==false,mode:o.mode || (models.distill ? "auto" : "normalize"),expectedModelSkips:modelSkips,layout:o.layout||"source",section:section,include:o.include||"",exclude:o.exclude||"",prune:o.prune===true,semantic:o.semantic===true,tuning:tuning,force:o.force===true,officeparts:officeParts,maxfiles:tuning.maxfiles,maxfilesize:fileBytes,maxofficefilesize:officeFileBytes,officeRequiresParts:officeRequiresParts}}
   }
   if(route==="absorptions") {
     WikiStudio.fields(body,["action","sourceWikiIds","paths","tags","topic","exclude","planId","confirmation","tuning"])

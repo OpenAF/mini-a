@@ -89,6 +89,9 @@ run('StudioApi.request=api;StudioApi.background=api;studioSession={canTestWiki:f
   assert.equal(disclosure.open,true,'Parent disclosure remains open');
   await run('openWiki({id:"a",name:"Alpha",access:"rw"})');
   assert.equal(history.state.view,'Pages','Wiki starts in Pages');
+  assert(find(document.body,'button','Page actions'),'The landing page opens with secondary actions in a menu');
+  assert.equal(run('jobTitle({operation:"ingest.run",status:"completed",params:{dryrun:true,sourceId:"old-source"}})'), 'Previewed old-source');
+  assert.equal(run('jobTitle({operation:"ingest.run",status:"completed",params:{dryrun:false,sourceName:"Team notes"}})'), 'Imported Team notes');
   const view=document.getElementById('view');
   await run('SummaryCache.load("a")');
   const scans = () => calls.filter(c => /\/(overview|lint|graph\/stats)$/.test(c.path)).length;
@@ -96,6 +99,8 @@ run('StudioApi.request=api;StudioApi.background=api;studioSession={canTestWiki:f
   await run('navigate("Overview")');
   assert.equal(scans(),gathered,'Overview reuses the background snapshot');
   assert(view.textContent.includes('Cached for this session'),'Cached data is labelled');
+  await click(view,'Review wiki health');
+  assert.equal(history.state.pane,'Health','Overview opens the findings subview directly');
   await run('navigate("Maintenance")');
   assert(view.textContent.includes('Start Dream · check wiki'),'Maintenance defaults to Dream tasks');
   assert.equal(scans(),gathered,'Maintenance navigation does not rescan the wiki');
@@ -212,7 +217,24 @@ run('StudioApi.request=api;StudioApi.background=api;studioSession={canTestWiki:f
   assert.match(view.textContent,/Workbook\.xlsx · 2 parts/);
   assert(find(view,'button','Proposed pages (1)'),'Structured preview exposes proposed pages');
   assert(!find(view,'button','4. Import into wiki').disabled,'Successful preview enables import');
+  // Recheck options after the inventory response, including a second activation while waiting.
+  let finishInventory, inventoryReads = 0;
+  context.delayedInventory = () => {
+    inventoryReads++;
+    return new Promise(resolve => { finishInventory = resolve; });
+  };
+  run('StudioApi.request=delayedInventory');
+  const apply = find(view,'button','4. Import into wiki');
+  const applying = apply.fire('click');
+  assert(apply.disabled && find(view,'button','Preview changes').disabled,'Apply locks both controls before checking the revision');
+  await apply.fire('click');
+  assert.equal(inventoryReads,1,'Repeated submission shares the outstanding revision check');
   const mode=field(view,'Processing');mode.value='raw';await mode.parentElement.parentElement.fire('input');
+  finishInventory({items:[{id:'team-notes',revision:'revision-2'}]});
+  await applying;
+  assert.equal(previewBody.preview,true,'Changing options during validation prevents a write');
+  assert(!find(view,'button','Preview changes').disabled,'A fresh preview is available after cancellation');
+  run('StudioApi.request=api');
   assert(find(view,'button','4. Import into wiki').disabled,'Changed processing invalidates the preview');
   await run('navigate("Pages")');assert.equal(view.querySelector('[role="treeitem"]').getAttribute('aria-expanded'),'true','Expanded folders survive navigation');
   // Typing and repeated keyboard saves during an outstanding request retain the buffer.
@@ -374,7 +396,7 @@ run('StudioApi.request=api;StudioApi.background=api;studioSession={canTestWiki:f
   run('StudioApi.request=removalApi;studioDialog=removalDialog;dashboard=refreshDashboard;studioSession={role:"admin"};');
   const brokenHost = new Element('div');document.body.append(brokenHost);context.brokenHost=brokenHost;
   run('dashboardWiki(brokenHost,{id:"gone",name:"Gone wiki",access:"rw",root:"/wikis/gone",rootState:"missing"})');
-  assert(find(brokenHost,'button','Gone wiki · rw').disabled,'Missing wiki cannot be opened');
+  assert(find(brokenHost,'button','Gone wiki · Editable').disabled,'Missing wiki cannot be opened');
   assert(find(brokenHost,'button','Change root…'),'Repair remains available');
   await click(brokenHost,'Unregister…');
   assert.equal(removals.length,0,'Cancel preserves registration');

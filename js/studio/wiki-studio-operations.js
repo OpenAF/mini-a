@@ -4,6 +4,10 @@ if (typeof __miniAPath !== "function") loadLib(String(new java.io.File(String(__
 loadLib(__miniAPath("js/wiki/mini-a-wikiops.js"))
 WikiStudioServer.prototype.jobWikiRoute = function(req, w, parts, role) {
   var route = parts.join("/"), body = req.body || {}, self = this, jobs = this.jobs || new WikiStudioJobs(this.config)
+  if (route === "absorptions" && req.method === "GET") {
+    WikiStudio.authorize(role, "viewer")
+    return this.savedPlans(w, jobs, req.query || {})
+  }
   if (route === "sources") {
     if (req.method === "GET") return WikiStudioServer.paginate(this.sourceList(w).map(WikiStudioServer.publicSource), req.query || {})
     if (req.method === "POST") { WikiStudio.authorize(role, "admin", w); return this.sourceAdd(w, body) }
@@ -217,12 +221,13 @@ var wikiStudioRunWorker = function(config, id) {
         if (graphResult.resumable === true) finalMessage += "; enrichment can be resumed"
       }
       finalMessage += ". Changed Markdown paths: " + diff.changedPageCount
-      jobs.update(id, { status: status, phase: status, completedAt: WikiStudio.now(), changedPageCount: diff.changedPageCount })
+      // Activity stops polling at terminal status, so publish its final log entry first.
       jobs.event(id, status, finalMessage)
+      jobs.update(id, { status: status, phase: status, completedAt: WikiStudio.now(), changedPageCount: diff.changedPageCount })
     })
   } catch(e) {
-    jobs.update(id, {status: started ? "recovery-required" : "failed",phase:"failed",completedAt:WikiStudio.now(),error: e.code || "engine_error",warning: e.status ? WikiStudio.redact(e.message) : "Worker failed. Inspect engine recovery; partial writes may remain."})
     jobs.event(id,"failed",e.status ? e.message : "Engine failed; inspect recovery artifacts", "error")
+    jobs.update(id, {status: started ? "recovery-required" : "failed",phase:"failed",completedAt:WikiStudio.now(),error: e.code || "engine_error",warning: e.status ? WikiStudio.redact(e.message) : "Worker failed. Inspect engine recovery; partial writes may remain."})
   }
 }
 var wikiStudioExecute = function(config, w, job, logFn, backup) {

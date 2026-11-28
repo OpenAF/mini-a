@@ -854,10 +854,16 @@
     try { planned = run({action:"plan",sourceWikiIds:["beta"]},"absorb-plan-123") }
     finally { MiniAIngest.prototype._buildLlm = original; WikiStudio.modelAvailability = availability }
     assert(planned.job.status,"completed","Real saved plan with injected model: "+JSON.stringify(planned.result))
+    function listPlans() {
+      return s.wikiRoute({ method: "GET", query: {} }, w, ["absorptions"], "viewer").items
+    }
+    assert(listPlans()[0].actions.join(","), "show,apply,delete", "Reviewed plan offers apply and cleanup")
     s.jobs.removeHistory(w,[planned.job.id])
+    assert(listPlans()[0].actions.indexOf("apply") >= 0, true, "Review receipt preserves plan selection after cleanup")
     assert(s.jobs.list().length,0,"Plan history removed before application")
     var applied=run({action:"apply",planId:planned.result.id,confirmation:{applySavedPlan:true}},"absorb-apply-123")
     assert(applied.job.status,"completed","Saved plan applies without another model: "+JSON.stringify(applied.result))
+    assert(listPlans()[0].actions.join(","), "show,delete", "Applied plans remain inspectable")
     assert(io.fileExists(w.root+"/knowledge.md"),true,"Transferred page exists")
     assert(WikiStudio.fingerprint(WikiStudio.scan(source.root,true)),sourceBefore,"Source wiki remains unchanged")
   }) }

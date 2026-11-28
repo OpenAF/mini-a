@@ -113,17 +113,17 @@ const StudioApi = {
       catch (error) { if (!(error.status === 423 || isTransientNetworkError(error)) || attempt >= 3) throw error; }
     }
   },
-  async raw(path, options = {}, consume) {
+  async raw(path, options = {}, consume, queued = false) {
     const { silent = false, ...fetchOptions } = options;
     return this.perform(path, options.method || "GET", options, async signal => {
       const response = await fetch("/api/v1/" + path, { ...fetchOptions, signal, headers: { ...fetchOptions.headers, Authorization: "Bearer " + this.token } });
       if (!response.ok) throw new Error((await response.json()).error?.message || "Request failed");
       const result = consume ? await consume(response) : response;
       signal.throwIfAborted();
-      return result;
-    });
+      return result
+    }, queued)
   },
-  async graphHtml(wikiId) { return this.raw("wikis/" + encodeURIComponent(wikiId) + "/graph/html", {}, response => response.text()); },
+  async graphHtml(wikiId) { return this.raw("wikis/" + encodeURIComponent(wikiId) + "/graph/html", {}, response => response.text(), true); },
   async events(jobId, cursor, options = {}) { return this.raw("jobs/" + encodeURIComponent(jobId) + "/events", { ...options, headers: { "Last-Event-ID": String(cursor) } }, response => response.text()); },
   async upload(uploadId, path, file) { return this.raw("uploads", { method: "POST", headers: { "X-Upload-ID": uploadId, "X-Upload-Path": encodeURIComponent(path) }, body: file }, response => response.json()); },
   wikis(offset = 0) { return this.request("wikis?limit=100&offset=" + offset); },
@@ -313,19 +313,28 @@ async function dashboard(offset = 0) {
   const host = document.getElementById("workspace"); host.hidden = false; host.replaceChildren();
   const wikis = await StudioApi.wikis(offset);
   withIcon(el("h2", "Your wikis", host), "logo");
-  button(host, "Build web command", () => webCommandWizard(), "open");
+  var list = el("div", undefined, host)
+  list.className = "wiki-library"
   if (!wikis.items.length) el("p", "Register an existing wiki or create one in an operator-allowlisted directory.", host);
-  wikis.items.forEach(wiki => dashboardWiki(host, wiki));
+  wikis.items.forEach(wiki => dashboardWiki(list, wiki))
   if (offset) button(host,"Previous wikis",()=>dashboard(Math.max(0,offset-100)));
   if (wikis.truncated) button(host,"Next wikis",()=>dashboard(offset+100));
-  addWikiForm(host);
+  var registration = host
+  if (wikis.items.length) {
+    registration = el("disclosure", undefined, host)
+    el("disclosure-toggle", "Add wiki", registration)
+  }
+  addWikiForm(registration)
+  button(host, "Build web command", () => webCommandWizard(), "open")
 }
 
 // Offer registry repair and removal directly beside an inaccessible wiki.
 function dashboardWiki(host, wiki) {
   var broken = wiki.rootState && wiki.rootState !== "ok"
-  var entry = broken ? row(host) : host
-  var open = withIcon(el("button", wiki.name + " · " + wiki.access, entry), wiki.access === "rw" ? "edit" : "lock")
+  var entry = row(host)
+  entry.classList.add("wiki-entry")
+  var open = withIcon(el("button", wiki.name + " · " + (wiki.access === "rw" ? "Editable" : "Read-only"), entry), wiki.access === "rw" ? "edit" : "lock")
+  el("span", wiki.root, entry).className = "wiki-root muted"
   if (!broken) {
     open.onclick = safely(() => openWiki(wiki))
     return
@@ -369,7 +378,7 @@ async function changeRoot(wiki, reopen = false) {
   if (!(await askConfirmation("Point " + wiki.name + " at " + picked.path + "? " + summary + warning + " Files are not moved or copied."))) return;
   await StudioApi.request("wikis/" + encodeURIComponent(wiki.id), "PATCH", { root: picked.path });
   // Settings reopens the wiki; the dashboard just refreshes. The message goes last so navigation keeps it.
-  if (reopen) await openWiki(await StudioApi.request("wikis/" + encodeURIComponent(wiki.id)));
+  if (reopen) await openWiki(await StudioApi.request("wikis/" + encodeURIComponent(wiki.id)), "Settings", false)
   else await dashboard();
   message("Root changed for " + wiki.name + " to " + picked.path);
 }
@@ -392,13 +401,6 @@ function addWikiForm(host) {
   form.className = "card add-wiki";
   withIcon(el("h3", "Add wiki", form), "add");
   const fields = {};
-  for (const [key, title] of [["id", "Stable ID"], ["name", "Display name"]]) {
-    const label = el("label", title, form);
-    fields[key] = el("input", undefined, label);
-    fields[key].required = true;
-  }
-  fields.id.title = "Lower-case letters, digits, underscores or hyphens";
-
   // Root path with a Browse button and a live status line.
   const rootLabel = el("label", "Absolute root", form);
   const rootRow = row(rootLabel);
@@ -418,10 +420,17 @@ function addWikiForm(host) {
   status.className = "muted root-status";
   status.setAttribute("role", "status");
 
+  for (const [key, title] of [["id", "Stable ID"], ["name", "Display name"]]) {
+    const label = el("label", title, form);
+    fields[key] = el("input", undefined, label);
+    fields[key].required = true;
+  }
+  fields.id.title = "Lower-case letters, digits, underscores or hyphens";
+
   const accessLabel = el("label", "Access", form);
   fields.access = el("select", undefined, accessLabel);
   ["rw", "ro"].forEach(value => {
-    const option = el("option", value, fields.access);
+    const option = el("option", value === "rw" ? "Editable" : "Read-only", fields.access)
     option.value = value;
   });
   withIcon(el("button", "Add wiki", form), "add");
@@ -450,7 +459,7 @@ function addWikiForm(host) {
       status.textContent = lead + describeContents(info.contents) + empty;
     }
     else {
-      status.textContent = "New folder: it will be created and initialized as a wiki (requires rw).";
+      status.textContent = "New folder: it will be created and initialized as a wiki (requires editable access).";
       roOption.disabled = true;
       fields.access.value = "rw";
     }
@@ -836,12 +845,36 @@ function metricChart(parent, title, values, unit = "Count") {
   const frame = el("div", undefined, section); frame.className = "chart-frame";
   const canvas = el("canvas", undefined, frame); canvas.setAttribute("role", "img"); canvas.setAttribute("aria-label", title + ". Exact values in the accompanying table.");
   const color = key => getComputedStyle(document.documentElement).getPropertyValue(key).trim();
-  try { const chart = new window.Chart(canvas, {type:"bar", data:{labels:entries.map(([k])=>human(k)),datasets:[{label:unit,data:entries.map(([,v])=>v),backgroundColor:color("--green")}]}, options:{indexAxis:"y",responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{display:false}},scales:{x:{beginAtZero:true,ticks:{color:color("--ink")},grid:{color:color("--line")}},y:{ticks:{color:color("--ink")},grid:{display:false}}}}}); charts.add(chart); } catch (_) { frame.remove(); valuesNode.open = true; }
+  try { const chart = new window.Chart(canvas, {type:"bar", data:{labels:entries.map(([k])=>human(k)),datasets:[{label:unit,data:entries.map(([,v])=>v),backgroundColor:color("--chart")}]}, options:{indexAxis:"y",responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{display:false}},scales:{x:{beginAtZero:true,ticks:{color:color("--ink")},grid:{color:color("--line")}},y:{ticks:{color:color("--ink")},grid:{display:false}}}}}); charts.add(chart); } catch (_) { frame.remove(); valuesNode.open = true; }
 }
+// Canvas colors must follow the live system appearance along with the surrounding CSS.
+matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", function() {
+  var palette = getComputedStyle(document.documentElement)
+  charts.forEach(function(chart) {
+    chart.data.datasets[0].backgroundColor = palette.getPropertyValue("--chart").trim()
+    chart.options.scales.x.ticks.color = palette.getPropertyValue("--ink").trim()
+    chart.options.scales.y.ticks.color = chart.options.scales.x.ticks.color
+    chart.options.scales.x.grid.color = palette.getPropertyValue("--line").trim()
+    chart.update("none")
+  })
+})
 function destroyDetachedCharts() { for (const chart of charts) if (!chart.canvas?.isConnected) { chart.destroy(); charts.delete(chart); } }
 function outcome(parent, result) {
   if (!result) return;
   // Surface Office parts and skipped sources before the technical result.
+  if (typeof result.dryrun === "boolean") {
+    var writes = result.dryrun ? result.planned_writes : result.written
+    var removals = result.dryrun ? result.planned_removals : result.removed
+    if (Array.isArray(writes)) {
+      var summaryText = result.dryrun ? "Estimated changes" : "Import result"
+      el("h4", summaryText, parent)
+      el("p", writes.length + (writes.length === 1 ? " page" : " pages") + (result.dryrun ? " to write" : " written") + " · " +
+        (removals?.length || 0) + (result.dryrun ? " to remove" : " removed") +
+        (result.section ? " · Folder " + result.section : ""), parent)
+    }
+    if (result.skipped_unchanged) el("p", result.skipped_unchanged + " unchanged source files skipped.", parent)
+    if (removals?.length) technical(removals, parent, "Pages to remove (" + removals.length + ")")
+  }
   if (result.office_documents?.length) {
     var office = el("section", undefined, parent)
     el("h4", "Office documents split into parts", office)
@@ -850,7 +883,7 @@ function outcome(parent, result) {
       el("li", item.source + " · " + item.parts + " " + (item.parts === 1 ? "part" : "parts") + " · " + item.index, documents)
     })
   }
-  if (result.dryrun && result.office_documents?.length && result.planned_writes?.length) {
+  if (result.dryrun && result.planned_writes?.length) {
     var proposed = el("disclosure", undefined, parent)
     el("disclosure-toggle", "Proposed pages (" + result.planned_writes.length + ")", proposed)
     var pages = el("ul", undefined, proposed)
@@ -861,7 +894,7 @@ function outcome(parent, result) {
     var issues = el("section", undefined, parent)
     el("h4", "Files that could not be processed", issues)
     var failures = el("ul", undefined, issues)
-    ;(result.skipped_oversized || []).slice(0, 100).forEach(item => el("li", item, failures))
+    ;(result.skipped_oversized || []).slice(0, 100).forEach(item => el("li", (item.path || item.source || item) + " · File size limit exceeded", failures))
     ;(result.failed || []).slice(0, 100).forEach(item => el("li", item.source + " · " + item.error, failures))
   }
   if (result.skipped_model?.length) {
@@ -882,7 +915,7 @@ function outcome(parent, result) {
   // Summary fields (ok, status, dryrun, discovered, ...) render as one nJSMap table instead of loose lines
   var scalar = Object.entries(result)
                      .filter(([k, v]) => ["string", "number", "boolean"].includes(typeof v) && !/^(?:id|version)$/.test(k))
-  if (scalar.length > 0) {
+  if (scalar.length > 0 && typeof result.dryrun !== "boolean") {
     var summary = jsonView(Object.fromEntries(scalar.map(([k, v]) => [human(k), v])), parent)
     summary.classList.add("outcome-summary")
   }
@@ -913,10 +946,11 @@ function button(parent, title, action, icon) { const b = el("button", title, par
 function navButton(nav, name, action) { return button(nav, name, action, VIEW_ICONS[name]); }
 function wikiPath(suffix = "") { return "wikis/" + encodeURIComponent(currentWiki.id) + (suffix ? "/" + suffix : ""); }
 StudioApi.wiki = function(suffix, method, body) { return this.request(wikiPath(suffix), method, body); };
-async function openWiki(wiki, target = "Pages", record = true) {
+async function openWiki(wiki, target = "Pages", record = true, path, pane) {
   if (navigating) return;
   if (!(await mayLeave())) return;
   currentWiki = wiki; activePage = null; dirty = false; editing = false;
+  delete pageState().searchOrigin
   const host = document.getElementById("workspace"); host.replaceChildren();
   const heading = row(host); button(heading, "All wikis", async () => { if (!navigating && await mayLeave()) { dirty = false; history.pushState({dashboard:true}, "", location.pathname); await dashboard(); } });
   withIcon(el("h2", wiki.name, heading), wiki.access === "rw" ? "edit" : "lock"); el("span",wiki.access === "rw" ? "Editable wiki" : "Read-only wiki",heading).className="badge";
@@ -924,22 +958,25 @@ async function openWiki(wiki, target = "Pages", record = true) {
   const alerts = el("div",undefined,host); alerts.id="wiki-alerts";
   const content = el("div", undefined, host); content.id = "view";
   for (const name of ["Overview", "Pages", "Import", "Maintenance", "Activity", "Settings"]) { const b=navButton(nav,name,()=>navigate(name)); b.dataset.view=name; }
-  await navigate(target,record);
+  await navigate(target, record, path, pane)
   SummaryCache.load(wiki.id);
 }
-async function navigate(name, record = true, path) {
+async function navigate(name, record = true, path, pane) {
   if (navigating || !(await mayLeave())) return;
   navigating=true;
   try {
   dirty = false; editing = false; activePage = null; activeView = name;
   const version = ++navigationVersion, wikiId = currentWiki.id, content = document.getElementById("view");
   if (graphBlob) { URL.revokeObjectURL(graphBlob); graphBlob = null; }
-  content.replaceChildren(); destroyDetachedCharts(); message("");
-  document.querySelectorAll("#wiki-nav button").forEach(b => { b.classList.toggle("selected",b.dataset.view===name); if (b.dataset.view===name) b.setAttribute("aria-current","page"); else b.removeAttribute("aria-current"); });
-  if (record) history.pushState({wikiId,view:name,path},"", "#wiki="+encodeURIComponent(wikiId)+"&view="+encodeURIComponent(name)+(path?"&page="+encodeURIComponent(path):""));
-  await showView(name,content);
+  content.replaceChildren()
+  content.className = ""
+  destroyDetachedCharts()
+  message("")
+  document.querySelectorAll("#wiki-nav button").forEach(b => { b.classList.toggle("selected",b.dataset.view===(name === "Graph" ? "Pages" : name)); if (b.dataset.view===(name === "Graph" ? "Pages" : name)) b.setAttribute("aria-current","page"); else b.removeAttribute("aria-current"); });
+  if (record) history.pushState({wikiId,view:name,path,pane},"", "#wiki="+encodeURIComponent(wikiId)+"&view="+encodeURIComponent(name)+(path?"&page="+encodeURIComponent(path):"")+(pane?"&pane="+encodeURIComponent(pane):""));
+  await showView(name, content, pane, path)
   if (version!==navigationVersion) return;
-  if (path && name==="Pages") await loadPage(path,false);
+
   const alerts=document.getElementById("wiki-alerts");
   const entry = SummaryCache.entry(wikiId);
   const updateAlerts = () => {
@@ -947,7 +984,7 @@ async function navigate(name, record = true, path) {
     alerts.replaceChildren();
     if (report?.status === "fulfilled" && report.value.studio.pendingRecovery?.length) {
       el("p","This wiki needs recovery before edits or imports can continue.",alerts).className="error";
-      button(alerts,"Review recovery",()=>navigate("Maintenance"));
+      button(alerts, "Review recovery", () => navigate("Maintenance", true, undefined, "Recovery"))
     }
   };
   // The alert host survives navigation within a wiki; replace its old subscription.
@@ -961,24 +998,32 @@ window.addEventListener("popstate",safely(async event=>{
   dirty=false;
   if(!event.state?.wikiId){await dashboard();return;}
   const wiki=await StudioApi.request("wikis/"+encodeURIComponent(event.state.wikiId));
-  await openWiki(wiki,event.state.view||"Pages",false);
-  if(event.state.path)await loadPage(event.state.path,false);
+  await openWiki(wiki, event.state.view || "Pages", false, event.state.path, event.state.pane)
 }));
-async function showView(name, content) {
+async function showView(name, content, pane, path) {
   withIcon(el("h3", name, content), VIEW_ICONS[name]);
-  if (name === "Pages") return pagesView(content);
+  if (name === "Pages") return pagesView(content, path, pane)
   if (name === "Import") {
+    if (pane === "plans") {
+      button(content, "Source library", () => navigate("Import"))
+      return absorbView(content)
+    }
     if (importPanes.has(currentWiki.id)) { content.append(importPanes.get(currentWiki.id)); return; }
-    const pane=el("div",undefined,content);importPanes.set(currentWiki.id,pane);return sourcesView(pane);
+    const form = el("div", undefined, content)
+    importPanes.set(currentWiki.id, form)
+    return sourcesView(form)
   }
   if (name === "Activity") return jobsView(content);
-  if (name === "Maintenance") return maintenanceView(content);
+  if (name === "Maintenance") return maintenanceView(content, pane)
   if (name === "Overview" || name === "Health") {
+    await summaryView(content, name === "Health")
     if (name === "Overview") {
-      button(content, "Build web command", () => webCommandWizard(currentWiki.id), "open");
+      var test = el("disclosure", undefined, content)
+      el("disclosure-toggle", "Test this wiki", test)
+      button(test, "Build web command", () => webCommandWizard(currentWiki.id), "open")
       const session = studioSession || await StudioApi.request("session");
       if (session.canTestWiki) {
-        const test = el("section", undefined, content); el("h4", "Test this wiki", test);
+
         el("p", "Chat with this wiki in Mini-A Web. The wiki opens read-only; shell access is disabled. Test servers stop when Studio exits.", test);
         const servers = el("div", undefined, test);
         async function refreshTestServers() {
@@ -1006,22 +1051,45 @@ async function showView(name, content) {
           catch(error) { tab.close(); throw error; }
         }, "open");
       } else {
-        const test = el("section", undefined, content)
-        el("h4", "Test this wiki", test)
+
         disable(button(test, "Open wiki test in new tab", () => {}, "open"), modelReason("test"))
       }
     }
-    await summaryView(content, name === "Health");
+
     return;
   }
   if (name === "Settings") {
-    el("p", "Manage how this wiki is registered in Studio.", content);
-    technical(currentWiki, content);
-    button(content, "Build web command", () => webCommandWizard(currentWiki.id), "open");
-    button(content, "Change root…", () => changeRoot(currentWiki, true), "folder");
-    button(content, "Rename display name", async () => { const name = await askText("Display name", currentWiki.name); if (name) { await StudioApi.wiki("", "PATCH", { name }); currentWiki.name = name; await openWiki(currentWiki); } }, "edit");
-    button(content, currentWiki.access === "rw" ? "Make read-only" : "Enable writes", async () => { const access = currentWiki.access === "rw" ? "ro" : "rw"; await StudioApi.wiki("", "PATCH", { access }); currentWiki.access = access; importPanes.delete(currentWiki.id); await openWiki(currentWiki); }, currentWiki.access === "rw" ? "lock" : "unlock");
-    button(content, "Unregister (keep all files)", async () => { if (await askConfirmation("Remove this registry entry? Wiki files will remain.")) { await StudioApi.wiki("", "DELETE"); await dashboard(); } });
+    // Keep each registration value beside its own control.
+    var wiki = currentWiki
+    var registration = el("section", undefined, content)
+    async function updateRegistration(changes) {
+      await StudioApi.wiki("", "PATCH", changes)
+      importPanes.delete(wiki.id)
+      await openWiki(await StudioApi.request("wikis/" + encodeURIComponent(wiki.id)), "Settings", false)
+    }
+    function setting(label, value, action, edit, icon) {
+      var line = row(registration)
+      el("strong", label, line)
+      el("span", value, line)
+      button(line, action, edit, icon)
+    }
+    setting("Display name", wiki.name, "Rename", async function() {
+      var name = await askText("Display name", wiki.name)
+      if (name) await updateRegistration({ name })
+    }, "edit")
+    setting("Server folder", wiki.root, "Change root…", () => changeRoot(wiki, true), "folder")
+    var editable = wiki.access === "rw"
+    setting("Access", editable ? "Editable" : "Read-only", editable ? "Make read-only" : "Enable writes",
+      () => updateRegistration({ access: editable ? "ro" : "rw" }), "lock")
+    var graphEnabled = wiki.graph?.enabled === true
+    setting("Knowledge graph", graphEnabled ? "Enabled" : "Disabled", graphEnabled ? "Disable graph" : "Enable graph",
+      () => updateRegistration({ graph: { enabled: !graphEnabled } }), "graph")
+    button(content, "Build web command", () => webCommandWizard(wiki.id), "open")
+    technical(wiki, content)
+    var removal = el("section", undefined, content)
+    el("h4", "Remove registration", removal)
+    el("p", "Unregistering this wiki keeps its files on the server.", removal)
+    button(removal, "Unregister wiki", () => unregisterWiki(wiki), "trash")
     return;
   }
   if (window.studioToolsView) return window.studioToolsView(name, content);
@@ -1215,14 +1283,17 @@ function showMenu(anchor, entries) {
   menu.style.left = Math.max(4, Math.min(box.left, window.innerWidth - 240)) + "px"; menu.style.top = Math.max(4, Math.min(box.bottom, window.innerHeight - menu.offsetHeight - 4)) + "px";
   (menu.querySelector("button:not(:disabled)") || menu).focus();
 }
-async function pagesView(content) {
+async function pagesView(content, requestedPath, pane) {
+  content.classList.add("pages-view")
   const state=pageState(), toolbar=row(content), kinds=new Map();
   const search=field(toolbar,"Search pages"); search.type="search";
-  const scope=field(toolbar,"Search in",["This wiki","All registered wikis"]);
+  button(toolbar, "Search", () => searchPages())
+  var searchTuning = await workflowTuning(content, "search", { limit: "Results per page (1–200)" })
+  const scope=field(searchTuning.box,"Search in",["This wiki","All registered wikis"]);
   // Index = full-text search index; Graph = pages grounded in the knowledge graph; Combined = both, rank-fused.
-  const mode=field(toolbar,"Search with",["Index","Graph","Combined"]);
+  const mode=field(searchTuning.box,"Search with",["Index","Graph","Combined"]);
   mode.title="Index: full-text search index. Graph: pages linked to matching graph concepts and metadata. Combined: both, merged by rank.";
-  var searchTuning = await workflowTuning(content, "search", { limit: "Results per page (1–200)" });
+
   el("p", "All-wiki search examines at most 100 hits per wiki.", searchTuning.box).className = "muted";
   const graphOff=currentWiki.graph?.enabled!==true;
   function syncModes(){
@@ -1231,8 +1302,9 @@ async function pagesView(content) {
     if([...mode.children].find(option => option.value === mode.value)?.disabled)mode.value="Index";
     mode.title=local&&graphOff?"Graph is disabled for this wiki in Settings; only index search is available.":"Index: full-text search index. Graph: pages linked to matching graph concepts and metadata. Combined: both, merged by rank.";
   }
-  scope.onchange=syncModes;syncModes();
-  button(toolbar,"Graph",()=>showGraph(content),"graph");
+  scope.onchange = syncModes
+  syncModes()
+  button(toolbar, "Graph", () => navigate("Graph"), "graph")
   const split=el("div",undefined,content);split.className="split";
   const aside=el("aside",undefined,split);aside.setAttribute("aria-label","Page explorer");
   const bar=el("div",undefined,aside);bar.className="selection-bar";bar.hidden=true;bar.setAttribute("role","toolbar");bar.setAttribute("aria-label","Selection actions");const rootDrop=el("div","Drop here to move to the wiki root",aside);rootDrop.className="root-drop";rootDrop.hidden=true;const tree=el("div",undefined,aside);tree.setAttribute("aria-multiselectable","true");tree.className="page-tree";tree.setAttribute("role","tree");tree.setAttribute("aria-label","Folders and pages");tree.id="page-list";
@@ -1339,6 +1411,7 @@ async function pagesView(content) {
   }
   function openMenu(item,anchor){
     const path=item.dataset.path,folder=item.dataset.kind==="folder",group=state.marked.has(path),targets=group?effective():[path],n=targets.length,ro=writeReason(),where=folder?path:parentOf(path);
+    if (ro) return
     showMenu(anchor,[
       {label:"Open",action:()=>item.studioActivate()},"-",
       {label:"New page here",disabled:ro,action:()=>newPageAt(where)},
@@ -1360,20 +1433,20 @@ async function pagesView(content) {
       const item=el("div",undefined,parent);item.setAttribute("role","treeitem");item.setAttribute("aria-level",String(level));item.setAttribute("aria-selected",String(state.selected===entry.path));item.tabIndex=lastFocus?-1:0;lastFocus=lastFocus||item;item.dataset.path=entry.path;
       const label=el("div",undefined,item);label.className="tree-label";label.title=entry.path;
       const folder=entry.kind==="folder", arrow=el("span",undefined,label);if(folder)arrow.append(chevronIcon());arrow.className="tree-arrow";arrow.setAttribute("aria-hidden","true");kinds.set(entry.path,entry.kind);item.dataset.kind=entry.kind;
-      let check=null;if(folder||!/^index\.md$/i.test(entry.name)){check=el("input",undefined,label);check.type="checkbox";check.className="tree-check";check.tabIndex=-1;check.setAttribute("aria-label","Select "+entry.path);check.checked=state.marked.has(entry.path);check.onclick=event=>event.stopPropagation();check.onchange=()=>toggleMark(entry.path,check.checked);}
+      let check=null;if(!writeReason() && (folder||!/^index\.md$/i.test(entry.name))){check=el("input",undefined,label);check.type="checkbox";check.className="tree-check";check.tabIndex=-1;check.setAttribute("aria-label","Select "+entry.path);check.checked=state.marked.has(entry.path);check.onclick=event=>event.stopPropagation();check.onchange=()=>toggleMark(entry.path,check.checked);}
       withIcon(el("span",entry.name,label),folder?"folder":"pages");
-      const more=el("button","⋯",label);more.type="button";more.className="tree-menu-btn";more.tabIndex=-1;more.setAttribute("aria-label","Actions for "+entry.path);more.onclick=event=>{event.stopPropagation();openMenu(item,more);};
+      const more=el("button","⋯",label);more.type="button";more.className="tree-menu-btn";more.hidden = !!writeReason();more.tabIndex=-1;more.setAttribute("aria-label","Actions for "+entry.path);more.onclick=event=>{event.stopPropagation();openMenu(item,more);};
       let group,loaded=false;
       async function expand(open) {
         item.setAttribute("aria-expanded",String(open));group.hidden=!open;
         if(open){state.expanded.add(entry.path);if(!loaded){await branch(group,entry.path,level+1);loaded=true;paintMarks();}}else state.expanded.delete(entry.path);
       }
       if(folder){group=el("div",undefined,item);group.setAttribute("role","group");group.hidden=true;item.setAttribute("aria-expanded","false");arrow.onclick=safely(async event=>{event.stopPropagation();focus(item);await expand(group.hidden);});}
-      const activate=async()=>{if(!(await mayLeave()))return;dirty=false;editing=false;focus(item);select(item,entry.path);if(folder){state.folder=entry.path;activePage=null;editor.replaceChildren();el("h4",entry.path,editor);el("p","Expand this folder to select a page. Its index.md file is its landing page.",editor);folderActions(entry.path);await expand(true);}else{state.folder=entry.path.includes("/")?entry.path.slice(0,entry.path.lastIndexOf("/")):"";await loadPage(entry.path);}};
+      const activate=async()=>{if(!(await mayLeave()))return;dirty=false;editing=false;focus(item);select(item,entry.path);if(folder){document.getElementById("view").classList.toggle("reading", false);state.folder=entry.path;activePage=null;editor.replaceChildren();el("h4",entry.path,editor);el("p","Expand this folder to select a page. Its index.md file is its landing page.",editor);folderActions(entry.path);await expand(true);}else{state.folder=entry.path.includes("/")?entry.path.slice(0,entry.path.lastIndexOf("/")):"";await loadPage(entry.path);}};
       item.studioActivate=activate;
       label.onclick=safely(async event=>{if((event.metaKey||event.ctrlKey)&&check){event.preventDefault();toggleMark(entry.path,!state.marked.has(entry.path));return;}if(event.shiftKey&&check){event.preventDefault();rangeMark(item);return;}await activate();});
       label.oncontextmenu=event=>{event.preventDefault();openMenu(item,{x:event.clientX,y:event.clientY});};
-      label.draggable=true;label.addEventListener("dragstart",event=>startDrag(event,entry.path));label.addEventListener("dragend",endDrag);
+      label.draggable=!writeReason();label.addEventListener("dragstart",event=>startDrag(event,entry.path));label.addEventListener("dragend",endDrag);
       if(folder){label.addEventListener("dragover",event=>dragOver(event,entry.path,label));label.addEventListener("dragleave",()=>label.classList.remove("drop-target"));label.addEventListener("drop",safely(event=>dropOn(event,entry.path,label)));}
       item.addEventListener("keydown",safely(async event=>{
         if(event.target!==item)return;
@@ -1420,6 +1493,7 @@ async function pagesView(content) {
       else {await refresh();el("h4",currentWiki.name,editor);el("p","Folder deleted. Select a page or folder in Explorer.",editor);}
   }
   function folderActions(source) {
+    if (writeReason()) return
     const actions=row(editor),reason=writeReason()||(studioSession?.role!=="admin"?"Folder operations require an administrator":"");
     disable(button(actions,"Move/rename folder",()=>changeFolder(source,false)),reason);
     disable(button(actions,"Delete folder",()=>changeFolder(source,true)),reason);
@@ -1432,46 +1506,130 @@ async function pagesView(content) {
   tree.studioRefresh=refresh;tree.studioTransfer=transfer;tree.studioMoveTo=moveTo;tree.studioRename=path=>renameItem(path,false);
   tree.reveal=async path=>{const parts=path.split("/");for(let i=1;i<parts.length;i++)state.expanded.add(parts.slice(0,i).join("/"));state.selected=path;await refresh();const item=[...tree.querySelectorAll('[role="treeitem"]')].find(n=>n.dataset.path===path);if(item){focus(item);item.scrollIntoView({block:"nearest"});}else message("This folder has more entries. Use Load more to reveal the selected page.");};
   button(toolbar,"Refresh",refresh);
-  const newPage=button(toolbar,"New page",()=>newPageAt(state.folder));disable(newPage,writeReason());disable(button(toolbar,"New folder",()=>newFolderAt(state.folder),"folder"),writeReason());
+  if (!writeReason()) {
+    button(toolbar, "New page", () => newPageAt(state.folder))
+    button(toolbar, "New folder", () => newFolderAt(state.folder), "folder")
+  }
+  var searchVersion = 0
   async function searchPages(offset=0){
+    const version = ++searchVersion
+    Object.assign(state, { query: search.value, scope: scope.value, mode: mode.value, offset })
     const query=search.value.trim();results.replaceChildren();results.hidden=!query;if(!query)return;
     el("h4","Search results",results);
     const modeParam=mode.value==="Index"?"":"&mode="+mode.value.toLowerCase();
     const response=await StudioApi.request((scope.value==="All registered wikis"?"search":wikiPath("search"))+"?q="+encodeURIComponent(query)+"&limit="+searchTuning.values().limit+"&offset="+offset+modeParam);
+    if (version !== searchVersion || !results.isConnected) return
     if(response.warning)el("p",response.warning,results);if(response.coverage)technical(response.coverage,results,"Search coverage");
     const items=response.results||response.items||[];
     for(const hit of items){const r=row(results);r.classList.add("search-hit");
       // Graph and combined hits say which engine matched and why.
       if(hit.matchedBy){const tag=el("span",hit.matchedBy.length>1?"index + graph":hit.matchedBy[0],r);tag.className="badge";if(hit.explanations?.length)tag.title=hit.explanations.join("; ");}
-      button(r,(hit.wikiId?hit.wikiId+" / ":"")+hit.path,async()=>{if(!(await mayLeave()))return;dirty=false;if(hit.wikiId&&hit.wikiId!==currentWiki.id){await openWiki(await StudioApi.request("wikis/"+hit.wikiId));}await loadPage(hit.path);});button(r,"Reveal in tree",async()=>{if(hit.wikiId&&hit.wikiId!==currentWiki.id){await openWiki(await StudioApi.request("wikis/"+hit.wikiId));}await document.getElementById("page-list").reveal(hit.path);});}
+      button(r, (hit.wikiId ? hit.wikiId + " / " : "") + hit.path, async function() {
+        if (!(await mayLeave())) return
+        dirty = false
+        if (hit.wikiId && hit.wikiId !== currentWiki.id) {
+          var origin = currentWiki
+          state.browseScroll = window.scrollY
+          var destination = await StudioApi.request("wikis/" + encodeURIComponent(hit.wikiId))
+          await openWiki(destination, "Pages", true, hit.path)
+          pageState().searchOrigin = origin.id
+        } else {
+          await loadPage(hit.path)
+        }
+      })
+      button(r,"Reveal in tree",async()=>{if(hit.wikiId&&hit.wikiId!==currentWiki.id){await openWiki(await StudioApi.request("wikis/"+hit.wikiId));}await document.getElementById("page-list").reveal(hit.path);});}
     if(!items.length)el("p","No matching pages in the reported search coverage.",results);
     if(offset)button(results,"Previous results",()=>searchPages(Math.max(0,offset-searchTuning.values().limit)));if(response.truncated)button(results,"More results",()=>searchPages(offset+searchTuning.values().limit));
   }
-  button(toolbar,"Search",()=>searchPages());search.onkeydown=safely(async e=>{if(e.key==="Enter"){e.preventDefault();await searchPages();}});search.oninput=()=>{if(!search.value)results.hidden=true;};
-  await refresh();aside.scrollTop=state.scroll;aside.onscroll=()=>{state.scroll=aside.scrollTop;};
-  if(state.selected.endsWith(".md")){try{await loadPage(state.selected,false);}catch(e){message(e.message,true);}}
+  search.onkeydown=safely(async e=>{if(e.key==="Enter"){e.preventDefault();await searchPages();}});search.oninput = function() {
+    searchVersion++
+    state.query = search.value
+    if (!search.value) results.hidden = true
+  }
+  const savedScroll = state.scroll
+  await refresh()
+  if (state.query) {
+    search.value = state.query
+    scope.value = state.scope
+    mode.value = state.mode
+    syncModes()
+    await searchPages(state.offset)
+  }
+  aside.scrollTop = savedScroll
+  aside.onscroll = () => { state.scroll = aside.scrollTop }
+  const landing = treeItems().find(item => item.dataset.path === "index.md")
+  var path = requestedPath || (state.selected.endsWith(".md") ? state.selected : landing?.dataset.path)
+  if (path && pane !== "browse") {
+    try {
+      await loadPage(path, false)
+    } catch (error) {
+      message(error.message, true)
+    }
+  } else if (pane === "browse") {
+    window.scrollTo?.(0, state.browseScroll || 0)
+  }
 }
-async function showGraph(content){if(!(await mayLeave()))return;dirty=false;content.replaceChildren();destroyDetachedCharts();button(content,"Back to pages",()=>navigate("Pages"));await window.studioToolsView("Graph",content);}
 async function loadPage(path, record = true) {
   const wikiId=currentWiki.id, target=document.getElementById("page-editor");
+  if (!target) return
+  target.pendingPath = path
+  if (!document.getElementById("view").classList.contains("reading")) pageState().browseScroll = window.scrollY
   const page=await StudioApi.wiki("page?path="+encodeURIComponent(path));
-  if(currentWiki.id!==wikiId||!target?.isConnected)return;
+  if(currentWiki.id!==wikiId||!target.isConnected||target.pendingPath!==path)return;
   activePage=page;dirty=false;editing=false;pageState().selected=path;
   document.querySelectorAll('#page-list [role="treeitem"]').forEach(n=>n.setAttribute("aria-selected",String(n.dataset.path===path)));
   if(record)history.pushState({wikiId,view:"Pages",path},"","#wiki="+encodeURIComponent(wikiId)+"&view=Pages&page="+encodeURIComponent(path));
-  drawEditor();
+  drawEditor()
+  if (matchMedia("(max-width: 800px)").matches) {
+    target.tabIndex = -1
+    target.focus({ preventScroll: true })
+    window.scrollTo(0, 0)
+  }
 }
 function drawEditor() {
   const editor = document.getElementById("page-editor"); if (!editor) return;
   editor.replaceChildren(); const page = activePage, wikiId = currentWiki.id;
+  var view = document.getElementById("view")
+  view.classList.add("reading")
+  var back = button(editor, "Back to pages", async function() {
+    if (!(await mayLeave())) return
+    dirty = false
+    var state = pageState()
+    if (state.searchOrigin) {
+      var origin = await StudioApi.request("wikis/" + encodeURIComponent(state.searchOrigin))
+      delete state.searchOrigin
+      await openWiki(origin, "Pages", true, undefined, "browse")
+      return
+    }
+    // Retain the mounted query, result list and tree when returning from the reader.
+    editing = false
+    activePage = null
+    editor.replaceChildren()
+    view.classList.toggle("reading", false)
+    history.pushState({ wikiId, view: "Pages", pane: "browse" }, "", "#wiki=" + encodeURIComponent(wikiId) + "&view=Pages&pane=browse")
+    var explorer = document.getElementById("page-list")
+    var focus = view.querySelector(".search-hit button") || explorer?.querySelector('[aria-selected="true"]') || view.querySelector('input[type="search"]')
+    focus?.focus({ preventScroll: true })
+    window.scrollTo?.(0, state.browseScroll || 0)
+  }, "tree")
+  back.className = "back-to-explorer"
   const crumbs=row(editor);crumbs.classList.add("breadcrumbs");
-  button(crumbs,currentWiki.name,()=>document.getElementById("page-list").reveal(page.path),"folder");el("span",page.path,crumbs);
+  button(crumbs, currentWiki.name, () => document.getElementById("page-list").reveal(page.path), "folder").classList.add("desktop-only")
+  el("span", page.path, crumbs)
   if(!editing) {
-    const toolbar=row(editor);disable(button(toolbar,"Edit",()=>{editing=true;drawEditor();},"edit"),writeReason());
-    button(toolbar,"Reveal in tree",()=>document.getElementById("page-list").reveal(page.path),"tree");
-    {const list=document.getElementById("page-list"),ro=writeReason(),lock=b=>{if(ro){b.disabled=true;b.title=ro;}return b;};
-      lock(button(toolbar,"Rename / move",()=>list.studioRename(page.path),"move"));lock(button(toolbar,"Move to folder…",()=>list.studioMoveTo([page.path]),"folder"));lock(button(toolbar,"Delete",()=>list.studioTransfer([page.path],null)));
-      if(ro)el("small",ro,toolbar).className="muted control-reason";}
+    const toolbar = row(editor)
+    if (!writeReason()) button(toolbar, "Edit", () => { editing = true; drawEditor() }, "edit")
+    const list = document.getElementById("page-list")
+    var reveal = button(toolbar, "Reveal in tree", () => list.reveal(page.path), "tree")
+    reveal.classList.add("desktop-only")
+    if (!writeReason()) {
+      var more = button(toolbar, "Page actions", () => showMenu(more, [
+        { label: "Rename / move", action: () => list.studioRename(page.path) },
+        { label: "Move to folder…", action: () => list.studioMoveTo([page.path]) },
+        { label: "Delete", danger: true, action: () => list.studioTransfer([page.path], null) }
+      ]), "pages")
+      more.setAttribute("aria-haspopup", "menu")
+    }
     const article=el("article",undefined,editor);article.className="page-preview";renderMarkdown(page.content,article);
     technical({metadata:page.metadata,links:page.links,sourceIds:page.sourceIds,warnings:page.warnings},editor,"Page details and provenance");
     StudioApi.wiki("backlinks?path="+encodeURIComponent(page.path)).then(result=>{if(article.isConnected)technical(result,editor,"Incoming links");}).catch(e=>message(e.message,true));
@@ -1483,7 +1641,15 @@ function drawEditor() {
   const columns = el("div", undefined, editor); columns.className = "editor";
   const source = el("textarea", undefined, columns); source.setAttribute("aria-label", "Complete raw Markdown including frontmatter"); source.value = page.content; source.readOnly = currentWiki.access !== "rw";
   const modes=row(editor);editor.insertBefore(modes,columns);
-  for(const mode of ["Source and preview","Source","Preview"])button(modes,mode,()=>{columns.className="editor"+(mode==="Source and preview"?"":" single");source.hidden=mode==="Preview";preview.hidden=mode==="Source";});
+  for (const mode of ["Source and preview", "Source", "Preview"]) {
+    var control = button(modes, mode, function() {
+      columns.className = "editor" + (mode === "Source and preview" ? "" : " single")
+      source.hidden = mode === "Preview"
+      preview.hidden = mode === "Source"
+      modes.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.textContent === mode)))
+    })
+    control.setAttribute("aria-pressed", String(mode === "Source and preview"))
+  }
   const preview = el("article", undefined, columns); preview.setAttribute("aria-label", "Safe Markdown preview"); renderMarkdown(source.value, preview);
   let editVersion = 0, pendingSave = null;
   source.oninput = () => { editVersion++; dirty = true; message("Unsaved changes"); renderMarkdown(source.value, preview); };
@@ -1515,39 +1681,78 @@ function drawEditor() {
     return pendingSave;
   }
   button(toolbar, "Save ⌘/Ctrl+S", save).disabled = currentWiki.access !== "rw";
-  button(toolbar, "Cancel editing", async () => { if (await mayLeave()) { if(page.creating){dirty=false;editing=false;activePage=null;editor.replaceChildren();}else await loadPage(page.path); } });
+  button(toolbar, "Cancel editing", async () => { if (await mayLeave()) { if(page.creating){dirty=false;editing=false;activePage=null;await navigate("Pages", true, undefined, "browse");}else await loadPage(page.path); } });
   button(toolbar, "Move / rename", async () => { if (dirty) throw new Error("Save or revert before moving"); const destination = await askText("Destination Markdown path", page.path); if (destination && destination !== page.path) { const moved = await StudioApi.wiki("pages/move", "POST", { source: page.path, destination, expectedRevision: page.revision }); if (!editor.isConnected || currentWiki.id !== wikiId || activePage !== page) return; activePage=moved; pageState().selected=activePage.path; await document.getElementById("page-list")?.studioRefresh?.(); drawEditor(); } }).disabled = currentWiki.access !== "rw" || page.creating;
-  button(toolbar, "Delete", async () => { if (await askConfirmation("Delete " + page.path + "?")) { await StudioApi.wiki("page?path=" + encodeURIComponent(page.path), "DELETE", { expectedRevision: page.revision, confirmation: page.path }); if (!editor.isConnected || currentWiki.id !== wikiId || activePage !== page) return; dirty = false; activePage = null; editor.replaceChildren(); pageState().selected=""; await document.getElementById("page-list")?.studioRefresh?.(); message("Deleted"); } }).disabled = currentWiki.access !== "rw" || page.creating;
+  button(toolbar, "Delete", async () => { if (await askConfirmation("Delete " + page.path + "?")) { await StudioApi.wiki("page?path=" + encodeURIComponent(page.path), "DELETE", { expectedRevision: page.revision, confirmation: page.path }); if (!editor.isConnected || currentWiki.id !== wikiId || activePage !== page) return; dirty = false; activePage = null; editor.replaceChildren(); pageState().selected=""; await document.getElementById("page-list")?.studioRefresh?.(); await navigate("Pages", true, undefined, "browse"); message("Deleted"); } }).disabled = currentWiki.access !== "rw" || page.creating;
   source.onkeydown = safely(async event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); await save(); } });
   const metadata = el("disclosure", undefined, editor); el("disclosure-toggle", "Frontmatter, outgoing links and provenance", metadata); jsonView({ metadata: page.metadata, links: page.links, sourceIds: page.sourceIds, warnings: page.warnings }, metadata);
   if (!page.creating) StudioApi.wiki("backlinks?path=" + encodeURIComponent(page.path)).then(result => { const details = el("disclosure", undefined, editor); el("disclosure-toggle", "Incoming backlinks", details); jsonView(result, details); }).catch(e => message(e.message, true));
 }
 window.addEventListener("beforeunload", event => { if (dirty) { event.preventDefault(); event.returnValue = ""; } });
 async function graphView(content) {
-  const stats = await StudioApi.wiki("graph/stats"); el("p", stats.source + " · " + stats.freshness, content);
-  var diagnostic = el("div", undefined, content)
-  button(content, "Inspect meaningful connectivity", async function() {
-    diagnostic.replaceChildren()
-    var detailed = await StudioApi.wiki("graph/stats?detailed=true")
-    jsonView(detailed.stats.connectivity || detailed, diagnostic)
+  var wikiId = currentWiki.id
+  button(content, "Back to pages", () => navigate("Pages"), "back")
+  var viewer = el("div", undefined, content)
+  var status = el("p", "Opening graph…", viewer)
+  status.setAttribute("role", "status")
+  var build = el("disclosure", undefined, content)
+  var toggle = el("disclosure-toggle", "Build or update graph", build)
+  var controls = el("div", undefined, build)
+  var loaded = false
+
+  // Load the builder only when requested; viewing works independently of the build settings.
+  toggle.addEventListener("click", safely(async function() {
+    if (!build.open || loaded) return
+    loaded = true
+    try {
+      await graphBuildControls(controls)
+      button(controls, "Inspect meaningful connectivity", async function() {
+        var detailed = await StudioApi.wiki("graph/stats?detailed=true")
+        technical(detailed.stats.connectivity || detailed, controls, "Connectivity")
+      })
+    } catch (error) {
+      loaded = false
+      controls.replaceChildren()
+      throw error
+    }
+  }))
+
+  // Ignore a response if the operator left this wiki while the graph was exporting.
+  async function open() {
+    try {
+      var html = await StudioApi.graphHtml(wikiId)
+      if (!viewer.isConnected) return
+      graphBlob = URL.createObjectURL(new Blob([html], { type: "text/html" }))
+      var frame = el("iframe", undefined, viewer)
+      frame.title = "Wiki graph with search, filters and node details"
+      frame.setAttribute("sandbox", "allow-scripts allow-downloads")
+      status.id = "graph-ready-status"
+      status.textContent = "Loading graph viewer…"
+      frame.src = graphBlob
+      var download = el("a", "Download offline HTML", viewer)
+      download.href = graphBlob
+      download.download = wikiId + "-graph.html"
+      setTimeout(function() {
+        if (frame.isConnected && !frame.dataset.ready) status.textContent = "Viewer unavailable? Download the graph or return to Pages."
+      }, 8000)
+    } catch (error) {
+      if (!viewer.isConnected) return
+      status.textContent = error.message
+      button(viewer, "Retry graph", function() { return navigate("Graph", false) })
+    }
+  }
+  open()
+  StudioApi.background(wikiPath("graph/stats")).then(function(stats) {
+    if (viewer.isConnected) viewer.insertBefore(el("p", stats.freshness), status)
+  }).catch(function(error) {
+    if (viewer.isConnected) el("p", "Graph status unavailable · " + error.message, viewer)
   })
-  button(content, "Open graph", async () => {
-    const html = await StudioApi.graphHtml(currentWiki.id);
-    if (graphBlob) URL.revokeObjectURL(graphBlob);
-    graphBlob = URL.createObjectURL(new Blob([html], { type: "text/html" }));
-    let frame = content.querySelector("iframe"); if (!frame) frame = el("iframe", undefined, content);
-    frame.title = "Wiki graph; accessible filters and node list inside"; frame.setAttribute("sandbox", "allow-scripts allow-downloads"); frame.src = graphBlob;
-    const notice = el("p", "Waiting for the isolated renderer…", content); notice.id = "graph-ready-status";
-    button(content, "Download offline HTML", () => { const a = el("a", undefined, content); a.href = graphBlob; a.download = currentWiki.id + "-graph.html"; a.click(); a.remove(); });
-    setTimeout(() => { if (notice.isConnected && !frame.dataset.ready) notice.textContent = "This browser did not report renderer readiness. It may block sandboxed Blob frames. Download the self-contained HTML or use the Pages list."; }, 8000);
-  });
-  el("p", "Graph opens with no network or parent DOM access. Pages remains an accessible list alternative.", content);
 }
 window.addEventListener("message", safely(async event => {
   const frame = document.querySelector("#view iframe"), d = event.data;
-  if (frame && event.source === frame.contentWindow && event.origin === "null" && d?.type === "mini-a-wiki-graph-ready" && d.version === 1) { frame.dataset.ready = "true"; const status = document.getElementById("graph-ready-status"); if (status) status.textContent = "Isolated renderer ready"; return; }
+  if (frame && event.source === frame.contentWindow && event.origin === "null" && d?.type === "mini-a-wiki-graph-ready" && d.version === 1) { frame.dataset.ready = "true"; const status = document.getElementById("graph-ready-status"); if (status) status.hidden = true; return; }
   if (!frame || event.source !== frame.contentWindow || event.origin !== "null" || !d || d.type !== "mini-a-wiki-graph-node" || d.version !== 1 || typeof d.path !== "string" || d.nodeId !== "doc:" + d.path || d.path.length > 512 || /[\\%:\x00-\x1f?#]/.test(d.path) || !/\.md$/i.test(d.path) || d.path.split("/").some(p => !p || p === "." || p === ".." || p.startsWith(".") || /^AGENTS\.md$/i.test(p))) return;
-  if (!(await mayLeave())) return; dirty = false; const view = document.getElementById("view"); view.replaceChildren(); await pagesView(view); await loadPage(d.path);
+  await navigate("Pages", true, d.path)
 }));
 function field(parent, name, choices, initial) {
   const label = el("label", name, parent), input = el(choices ? "select" : "input", undefined, label);
@@ -1644,7 +1849,31 @@ async function workflowTuning(parent, workflow, labels, wikiId) {
 }
 
 function check(parent, title) { const label = el("label", title, parent), input = el("input", undefined, label); label.className="check-field"; input.type = "checkbox"; label.prepend(input); return input; }
-const trackedJobs = new Map();
+const trackedJobs = new Map()
+const liveJobs = new Map()
+
+// Persisted job parameters also identify previews created by earlier Studio versions.
+function jobTitle(job) {
+  if (job.operation !== "ingest.run") return human(job.operation)
+  var preview = job.params?.dryrun === true
+  var verb = job.status === "completed" ? (preview ? "Previewed" : "Imported") : (preview ? "Preview" : "Import")
+  return verb + " " + (job.params?.sourceName || job.params?.sourceId || "source")
+}
+
+// Keep one compact status for concurrent jobs. All outcomes remain in Activity.
+function renderLiveJobs() {
+  var host = document.getElementById("background-jobs")
+  host.replaceChildren()
+  if (!liveJobs.size) return
+  var jobs = Array.from(liveJobs.values())
+  var job = jobs[jobs.length - 1]
+  var line = row(host)
+  line.classList.add("background-job")
+  var description = jobTitle(job) + " · " + human(job.phase || job.status)
+  if (jobs.length > 1) description += " · " + (jobs.length - 1) + " more active"
+  el("span", description, line)
+  button(line, "View activity", () => jobDetail(job.id), "jobs")
+}
 function jobCancelButton(parent, id) {
   const cancel = button(parent, "Request cancellation", async () => {
     cancel.disabled = true; cancel.pending = true;
@@ -1658,23 +1887,37 @@ function jobCancelButton(parent, id) {
 }
 async function queue(suffix, body) {
   const wikiId=currentWiki.id, job=await StudioApi.wiki(suffix,"POST",body);
-  message(human(job.operation)+" started");
-  const host=document.getElementById("background-jobs");
-  const status=row(host);status.classList.add("background-job");const text=el("span",human(job.operation)+" · Queued",status);
-  button(status,"View activity",()=>jobDetail(job.id),"jobs");
-  const cancel=jobCancelButton(status,job.id);
+  liveJobs.set(job.id, job)
+  renderLiveJobs()
   // Automatic refreshes have their own progress UI; do not toggle the page banner.
   // The job runs server-side regardless of this poll, so transient network
   // failures only pause status updates (bounded at ~10 minutes of failures).
   let networkFailures=0;
   async function poll(){
-    try {const latest=await StudioApi.request("jobs/"+job.id,"GET",undefined,{silent:true});networkFailures=0;trackedJobs.set(job.id,latest);text.textContent=human(latest.operation)+" · "+human(latest.status)+(latest.phase!==latest.status?" · "+human(latest.phase):"");
-      cancel.disabled=!!(cancel.pending||cancel.requested||latest.cancelRequested||terminalStates.includes(latest.status));
-      if(terminalStates.includes(latest.status)){if(["failed","partial","recovery-required","interrupted"].includes(latest.status))status.classList.add("error");button(status,"Dismiss",()=>status.remove(),"cross");return latest;}
-    }catch(e){
-      if(!isTransientNetworkError(e)||++networkFailures>120){text.textContent=e.message;button(status,"Dismiss",()=>status.remove(),"cross");return {status:"unavailable"};}
-      text.textContent=human(job.operation)+" · Reconnecting… (the job keeps running on the server)";
-      return new Promise(resolve=>setTimeout(()=>resolve(poll()),Math.min(5000,1500*networkFailures)));
+    try {
+      const latest = await StudioApi.request("jobs/" + job.id, "GET", undefined, { silent: true })
+      networkFailures = 0
+      trackedJobs.set(job.id, latest)
+      if (terminalStates.includes(latest.status)) {
+        liveJobs.delete(job.id)
+        renderLiveJobs()
+        if (currentWiki?.id === wikiId && latest.status !== "completed") {
+          message(jobTitle(latest) + " · " + human(latest.status) + ". See Activity for details.", true)
+        }
+        return latest
+      }
+      liveJobs.set(job.id, latest)
+      renderLiveJobs()
+    } catch (error) {
+      if (!isTransientNetworkError(error) || ++networkFailures > 120) {
+        liveJobs.delete(job.id)
+        renderLiveJobs()
+        message(error.message, true)
+        return { status: "unavailable" }
+      }
+      liveJobs.set(job.id, { ...job, phase: "Reconnecting" })
+      renderLiveJobs()
+      return new Promise(resolve => setTimeout(() => resolve(poll()), Math.min(5000, 1500 * networkFailures)))
     }
     return new Promise(resolve=>setTimeout(()=>resolve(poll()),1500));
   }
@@ -1682,8 +1925,7 @@ async function queue(suffix, body) {
 }
 window.studioToolsView = async function(name, content) {
   if (name === "Graph") {
-    await graphBuildControls(content);
-    await graphView(content); return;
+    return graphView(content)
   }
   if (name === "Jobs") return jobsView(content);
   if (name === "Sources") return sourcesView(content);
@@ -1703,19 +1945,60 @@ async function jobsView(content) {
     if(!(await askConfirmation("Delete history for "+eligible.length+" jobs in "+currentWiki.name+"? Logs and results will be removed permanently. Wiki pages, sources, snapshots and saved plans remain."+(blocked.length?"\nExcluded "+blocked.length+" jobs:\n"+explanation:""))))return;
     await StudioApi.request("jobs","DELETE",{wikiId,ids:eligible.map(j=>j.id),confirmation:"delete-history"});await navigate("Activity");
   }
-  button(toolbar,"Delete selected",()=>remove([...selection]),"trash");button(toolbar,"Clear eligible history",()=>remove(jobs.map(j=>j.id)),"trash");
+  var cleanup = false
+  var manage = button(toolbar, "Manage history", function() {
+    cleanup = !cleanup
+    selection.clear()
+    manage.setAttribute("aria-pressed", String(cleanup))
+    clear.hidden = !cleanup
+    draw()
+  })
+  var clear = button(toolbar, "Clear eligible history", () => remove(jobs.map(j => j.id)), "trash")
+  clear.hidden = true
+  manage.disabled = !jobs.length
   function draw(){
-    tableHost.replaceChildren();const body=dataTable(tableHost,["Select","Operation","Status","Started","Duration","Outcome","Actions"]);
-    const matching=jobs.filter(j=>(filter.value==="All"||j.status===filter.value)&&human(j.operation).toLowerCase().includes(search.value.toLowerCase()));
-    for(const j of matching){const r=el("tr",undefined,body),cell=el("td",undefined,r),box=check(cell,"Select "+human(j.operation));box.checked=selection.has(j.id);box.onchange=()=>box.checked?selection.add(j.id):selection.delete(j.id);
-      el("td",human(j.operation),r);const status=el("td",undefined,r);el("span",human(j.status),status).className="badge";
-      el("td",date(j.createdAt),r);el("td",j.completedAt?Math.max(0,Math.round((Date.parse(j.completedAt)-Date.parse(j.createdAt))/1000))+" s":"—",r);el("td",j.warning|| (j.changedPageCount!==undefined?j.changedPageCount+" pages changed":"—"),r);
-      const actions=el("td",undefined,r);button(actions,"Details",()=>jobDetail(j.id),"info");const del=button(actions,"Delete history",()=>remove([j.id]),"trash");disable(del,j.deletion?.allowed?"":j.deletion?.reason||"Unavailable");
+    tableHost.replaceChildren()
+    var matching = jobs.filter(j => (filter.value === "All" || j.status === filter.value)
+      && jobTitle(j).toLowerCase().includes(search.value.toLowerCase()))
+    if (!matching.length) {
+      el("p", jobs.length ? "No matching jobs." : "No activity yet.", tableHost)
+      return
     }
-    if(!matching.length)el("p","No matching jobs.",tableHost);
+    var removeSelected
+    if (cleanup) {
+      removeSelected = button(tableHost, "Delete selected", () => remove([...selection]), "trash")
+      removeSelected.disabled = !selection.size
+    }
+    var body = dataTable(tableHost, [...(cleanup ? ["Select"] : []), "Operation", "Status", "Started", "Duration", "Outcome", "Actions"])
+    body.parentElement.classList.add("activity-table")
+    for (const j of matching) {
+      var line = el("tr", undefined, body)
+      if (cleanup) {
+        const box = check(el("td", undefined, line), "Select " + jobTitle(j))
+        box.disabled = !j.deletion?.allowed
+        box.title = j.deletion?.reason || ""
+        box.checked = selection.has(j.id)
+        box.onchange = function() {
+          if (box.checked) selection.add(j.id)
+          else selection.delete(j.id)
+          removeSelected.disabled = !selection.size
+        }
+      }
+      el("td", jobTitle(j), line)
+      var status = el("span", human(j.status), el("td", undefined, line))
+      status.className = "badge"
+      status.dataset.state = j.status
+      el("td", date(j.createdAt), line).className = "job-time"
+      el("td", j.completedAt ? Math.max(0, Math.round((Date.parse(j.completedAt) - Date.parse(j.createdAt)) / 1000)) + " s" : "—", line).className = "job-time"
+      el("td", j.warning || (j.changedPageCount !== undefined ? j.changedPageCount + " pages changed" : "—"), line)
+      var actions = el("td", undefined, line)
+      button(actions, "Details", () => jobDetail(j.id), "info")
+      if (cleanup) disable(button(actions, "Delete history", () => remove([j.id]), "trash"), j.deletion?.allowed ? "" : j.deletion?.reason || "Unavailable")
+    }
   }
   filter.onchange=draw;search.oninput=draw;draw();
-  const counts={};jobs.forEach(j=>counts[j.status]=(counts[j.status]||0)+1);metricChart(content,"Outcomes in retained job history",counts);
+  const counts={};jobs.forEach(j=>counts[j.status]=(counts[j.status]||0)+1);if (Object.keys(counts).length > 1) metricChart(content, "Outcomes in retained job history", counts)
+  else if (jobs.length) el("p", jobs.length + " " + jobs[0].status, content).className = "muted"
 }
 async function jobDetail(id) {
   const previous=document.activeElement, dialog=el("dialog",undefined,document.body);dialog.className="job-dialog";
@@ -1738,10 +2021,11 @@ async function jobDetail(id) {
     if(!dialog.isConnected)return;
     try {
       const job=await StudioApi.request("jobs/"+id,"GET",undefined,{silent:true});networkFailures=0;if(!dialog.isConnected)return;
-      updateText(title,human(job.operation));updateText(state,human(job.status)+" · "+date(job.createdAt));
+      updateText(title,jobTitle(job));updateText(state,human(job.status)+" · "+date(job.createdAt));
       warning.hidden=!job.warning;updateText(warning,job.warning||"");
       changed.hidden=job.changedPageCount===undefined;updateText(changed,job.changedPageCount===undefined?"":job.changedPageCount+" pages changed");
       const finished=terminalStates.includes(job.status);cancel.disabled=!!(finished||job.cancelRequested||cancel.pending||cancel.requested);
+      cancel.hidden = finished
       progress.hidden=finished;phase.hidden=finished;
       updateText(phase,human(job.phase)+". Updates automatically.");
       const gp=job.progress;graphProgress.hidden=!gp;
@@ -1752,10 +2036,10 @@ async function jobDetail(id) {
       do {received=0;for(const frame of (await StudioApi.events(id,cursor,{silent:true})).split("\n\n")){const line=frame.split("\n").find(l=>l.startsWith("data: "));if(!line)continue;const event=JSON.parse(line.slice(6));if(event.seq<=cursor)continue;cursor=event.seq;received++;events.textContent=(events.textContent+date(event.time)+" · "+event.message+"\n").slice(-100000);}}while(received===200&&dialog.isConnected);
       if(finished){
         outcome(summary,job.result);
-        if(job.backupId)button(summary,"View recovery snapshots",async()=>{dialog.close();if(currentWiki.id!==job.wikiId)await openWiki(await StudioApi.request("wikis/"+job.wikiId));await navigate("Maintenance");const host=document.getElementById("view");host.replaceChildren();await backupsView(host);},"snapshot");
+        if(job.backupId)button(summary,"View recovery snapshots",async()=>{dialog.close();if(currentWiki.id!==job.wikiId)await openWiki(await StudioApi.request("wikis/"+job.wikiId));await navigate("Maintenance", true, undefined, "Backups");},"snapshot");
         const changes=await StudioApi.request("wikis/"+encodeURIComponent(job.wikiId)+"/changes?jobId="+id);
         if(!dialog.isConnected)return;
-        for(const change of changes.changes||[]){const r=row(summary);el("span",human(change.type||change.action)+" · "+change.path,r);if(change.path&&!/delete|removed/i.test(change.type||change.action||""))button(r,"Open page",async()=>{if(!(await mayLeave()))return;dirty=false;dialog.close();if(currentWiki.id!==job.wikiId)await openWiki(await StudioApi.request("wikis/"+job.wikiId));await navigate("Pages",true,change.path);});}
+        for(const change of changes.changes||[]){const r=row(summary);el("span",(job.result?.written?.includes(change.path) ? "Imported page" : job.operation === "ingest.run" ? "Other wiki change" : human(change.kind || change.type || change.action))+" · "+change.path,r);if(change.path&&!/delete|removed/i.test(change.kind||change.type||change.action||""))button(r,"Open page",async()=>{if(!(await mayLeave()))return;dirty=false;dialog.close();if(currentWiki.id!==job.wikiId)await openWiki(await StudioApi.request("wikis/"+job.wikiId));await navigate("Pages",true,change.path);});}
         technical(changes,summary,"Before and after changes");
         if(["partial","interrupted","recovery-required"].includes(job.status)&&!job.recoveryReviewedAt){el("p","Resolve engine recovery or restore a snapshot before marking this job reviewed. This action does not undo changes or remove journals.",summary);button(summary,"Mark recovery reviewed",async()=>{if(!(await askConfirmation("Have you resolved and checked recovery for this job? This acknowledges recovery; it does not repair the wiki.")))return;await StudioApi.request("jobs/"+id+"/review-recovery","POST",{confirmation:id});dialog.close();message("Recovery reviewed. History is eligible for cleanup when no journals remain.");});}
       }else setTimeout(refresh,1500);
@@ -1767,23 +2051,53 @@ async function jobDetail(id) {
   await refresh();
 }
 async function sourcesView(content) {
-  content.replaceChildren();el("p","Add content to "+currentWiki.name+". Review changes before importing them into your wiki.",content);
+  const editable = currentWiki.access === "rw"
+  content.replaceChildren()
+  el("p", editable ? "Add content to " + currentWiki.name + ". Review changes before importing them into your wiki." : "Browse the sources registered for this read-only wiki.", content)
   const nav=row(content),body=el("div",undefined,content);
-  button(nav,"Source library",()=>library());button(nav,"Add source",()=>prepare());button(nav,"Import from another wiki",async()=>{body.replaceChildren();await absorbView(body);});
+  function selectPane(title) {
+    nav.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.textContent === title)))
+  }
+  button(nav, "Source library", () => library())
+  if (editable) button(nav, "Add source", () => prepare())
+  if (editable) button(nav, "Import from another wiki", async function() {
+    selectPane("Import from another wiki")
+    body.replaceChildren()
+    var pane = el("div", undefined, body)
+    await absorbView(pane)
+  })
   async function library(){
+    selectPane("Source library")
     body.replaceChildren()
     var libraryView = el("div", undefined, body)
     var sources = await allItems(wikiPath("sources"))
     if (libraryView.parentElement !== body) return
     if (!sources.length) {
       el("p", "No sources yet.", libraryView)
-      button(libraryView, "Add your first source", () => prepare())
+      if (editable) button(libraryView, "Add your first source", () => prepare())
       return
     }
     var table = dataTable(libraryView, ["Source", "Revision", "Status", "Actions"])
-    for(const source of sources){const r=el("tr",undefined,table);el("td",source.name,r);el("td",String(source.revision).slice(0,12),r);el("td",human(source.lastStatus||source.status)+(source.adhoc?" · ad-hoc (not kept)":""),r);const actions=el("td",undefined,r);button(actions,"Preview and import",()=>review(source));button(actions,"Update source",()=>prepare(source));button(actions,"Details",()=>{body.replaceChildren();button(body,"Back to sources",library);technical(source,body,"Inventory and revision lineage").open=true;});button(actions,"Delete",()=>removeSource(source));}
+    for (const source of sources) {
+      var item = el("tr", undefined, table)
+      el("td", source.name, item)
+      el("td", String(source.revision).slice(0, 12), item)
+      el("td", human(source.lastStatus || source.status) + (source.adhoc ? " · ad-hoc (not kept)" : ""), item)
+      var actions = el("td", undefined, item)
+      if (editable) {
+        button(actions, "Preview and import", () => review(source))
+        button(actions, "Update source", () => prepare(source))
+      }
+      button(actions, "Details", function() {
+        body.replaceChildren()
+        button(body, "Back to sources", library)
+        technical(source, body, "Inventory and revision lineage").open = true
+      })
+      if (editable) button(actions, "Delete", () => removeSource(source))
+    }
   }
   async function prepare(existing){
+    selectPane("Add source")
     body.replaceChildren();el("h4",existing?"Update source: "+existing.name:"1. Choose a source",body);
     var method = field(body, "Source method", ["Files or ZIP", "Folder", "Webpage", "YouTube captions", "Local directory / checkout", "MCP tool call"])
     if (existing?.type === "mcp") method.value = "MCP tool call"
@@ -1797,7 +2111,10 @@ async function sourcesView(content) {
     const panel=el("section",undefined,body);
     function draw(){
       panel.replaceChildren();el("h4","2. Prepare "+method.value.toLowerCase(),panel);
-      const identity=row(panel),name=field(identity,"Source name",null,existing?.name||""),id=field(identity,"Stable source ID",null,existing?.id||"");id.readOnly=!!existing;
+      const identity = row(panel), name = field(identity, "Source name", null, existing?.name || "")
+      var advancedIdentity = advancedOptions(panel)
+      const id = field(advancedIdentity, "Stable source ID", null, existing?.id || "")
+      id.readOnly = !!existing
       el("p",existing?"This creates a new revision of the existing source.":"Use a descriptive name. The source ID identifies future updates.",panel).className="muted";
       let idEdited=!!existing;id.oninput=()=>{idEdited=true;};name.oninput=()=>{if(!idEdited)id.value=name.value.toLowerCase().replace(/[^a-z0-9_-]+/g,"-").replace(/^-|-$/g,"").slice(0,64);};
       const inputRow=row(panel),status=el("p","",panel);status.setAttribute("role","status");let submit;
@@ -1890,6 +2207,7 @@ async function sourcesView(content) {
     await library();
   }
   async function review(source){
+    const wikiId = currentWiki.id
     body.replaceChildren();el("h4","3. Preview changes · "+source.name,body);
     el("p","Review this source revision before importing. Preview reports engine estimates; application revalidates the current source.",body);
     if (source.adhoc) el("p", "Ad-hoc import: this source is discarded after a successful import and will not appear in the library.", body).className = "muted"
@@ -1942,9 +2260,10 @@ async function sourcesView(content) {
     modelOption(importReconcile, "hybrid", "embeddings")
     modelOption(importValidation, "auto", "relationshipValidation")
     var tuning = await workflowTuning(advanced, "ingestion", { maxfiles: "Maximum files", maxfilesize: "File size override (bytes)", wikiingestmaxcalls: "Distillation calls per source (0 disables split recovery)", wikiingestbudget: "Estimated operation tokens (-1 unlimited; 0 defers model work)", wikimaxprompttokens: "Prompt tokens (0 automatic)", chunkchars: "Chunk characters", concurrency: "Concurrent distillations" })
+    if (!advanced.isConnected || currentWiki?.id !== wikiId) return
     var officeParts = field(tuning.box, "Office extraction", ["auto", "always", "off"], "auto")
     var force = check(tuning.box, "Force reprocessing")
-    const actions=row(body),result=el("div",undefined,body);let approved=null,expectedModelSkips,working=false;
+    const actions=row(body),result=el("div",undefined,body),approval=row(body);let approved=null,expectedModelSkips,working=false;
     var options = function() {
       var selected = { mode: mode.value, layout: layout.value, section: folder(), include: include.value, exclude: exclude.value, semantic: semantic.checked, prune: prune.checked, officeparts: officeParts.value, tuning: tuning.values(), force: force.checked }
       if (importReconcile.value !== "saved") selected.reconcile = importReconcile.value
@@ -1953,32 +2272,67 @@ async function sourcesView(content) {
     }
     const signature=()=>JSON.stringify(options());
     const preview=button(actions,"Preview changes",async()=>{
-      working=true;preview.disabled=true;apply.disabled=true;const requested=signature();result.replaceChildren();el("p","Preparing preview…",result);
+      working=true;approved=null;preview.disabled=true;apply.disabled=true;const requested=signature();result.replaceChildren();el("p","Preparing preview…",result);
       try {const job=await queue("ingestions",{sourceId:source.id,revision:source.revision,preview:true,options:options(),confirmation:{acknowledgePrune:prune.checked}});const finished=await job.finished;
-        result.replaceChildren();outcome(result,finished.result);
+        result.replaceChildren();el("h4", source.name, result);outcome(result,finished.result);
         const skipped = finished.result?.skipped_model || []
         const oversized = finished.result?.skipped_oversized || []
         const eligible = finished.result?.eligible_sources
         const noEligible = (skipped.length || oversized.length) && !eligible?.length
         expectedModelSkips = Array.isArray(eligible) ? skipped.map(item => item.path) : undefined
-        if (finished.status === "completed" && requested === signature() && !noEligible) {
+        if (finished.status === "completed" && !finished.result?.truncated && requested === signature() && !noEligible) {
           approved = requested
           apply.disabled = !!writeReason()
           apply.textContent = skipped.length || oversized.length ? "Import eligible files" : "4. Import into wiki"
           el("p", "Preview ready. Review the result, then import.", result)
         } else {
           approved = null
-          el("p", noEligible ? "No files are eligible for import. Review the skipped files and preview again." : "Preview is unavailable or options changed. Run Preview changes again.", result)
+          el("p", finished.result?.truncated ? "The preview exceeded the result limit. Preview fewer files before importing." : noEligible ? "No files are eligible for import. Review the skipped files and preview again." : "Preview is unavailable or options changed. Run Preview changes again.", result)
         }
       }finally{working=false;if(preview.isConnected)preview.disabled=!!writeReason();}
     });disable(preview,writeReason());
-    const apply=button(actions,"4. Import into wiki",async()=>{
-      if(!approved||approved!==signature())throw new Error("Run a fresh preview first");
-      const latest=await allItems(wikiPath("sources"));if(latest.find(x=>x.id===source.id)?.revision!==source.revision){approved=null;apply.disabled=true;throw new Error("Source revision changed. Select the current source from the library and preview again.");}
-      if(prune.checked&&!(await askConfirmation("Remove source-owned pages missing from this revision? Engine conflict checks still protect manual edits.")))return;
-      apply.disabled=true;const job=await queue("ingestions",{sourceId:source.id,revision:source.revision,preview:false,options:options(),expectedModelSkips,confirmation:{acknowledgePrune:prune.checked}});approved=null;
-      const finished=await job.finished;if(result.isConnected){result.replaceChildren();el("h4",human(finished.status),result);outcome(result,finished.result);button(result,"Inspect activity",()=>jobDetail(job.id));if(source.adhoc&&finished.status==="completed"&&!finished.result?.skipped_model?.length&&!finished.result?.skipped_oversized?.length)el("p","Ad-hoc source discarded; it is no longer in the library.",result).className="muted";}
-    });apply.disabled=true;
+    const apply = button(approval, "4. Import into wiki", async function() {
+      if (working) return
+      if (!approved || approved !== signature()) throw new Error("Run a fresh preview first")
+      working = true
+      preview.disabled = true
+      apply.disabled = true
+      try {
+        const latest = await allItems(wikiPath("sources"))
+        if (!apply.isConnected || currentWiki?.id !== wikiId) return
+        if (latest.find(item => item.id === source.id)?.revision !== source.revision) {
+          approved = null
+          throw new Error("Source revision changed. Select the current source from the library and preview again.")
+        }
+        if (prune.checked && !(await askConfirmation("Remove source-owned pages missing from this revision? Engine conflict checks still protect manual edits."))) return
+        if (!apply.isConnected || currentWiki?.id !== wikiId) return
+        if (!approved || approved !== signature()) throw new Error("Options changed. Run a fresh preview first.")
+        const job = await queue("ingestions", {
+          sourceId: source.id, revision: source.revision, preview: false, options: options(),
+          expectedModelSkips, confirmation: { acknowledgePrune: prune.checked }
+        })
+        approved = null
+        const finished = await job.finished
+        if (!result.isConnected || currentWiki?.id !== wikiId) return
+        result.replaceChildren()
+        el("h4", human(finished.status), result)
+        outcome(result, finished.result)
+        for (const path of (finished.result?.written || []).slice(0, 8)) {
+          button(result, "Open " + path, () => navigate("Pages", true, path), "pages")
+        }
+        button(result, "Inspect activity", () => jobDetail(job.id))
+        if (source.adhoc && finished.status === "completed" && !finished.result?.skipped_model?.length && !finished.result?.skipped_oversized?.length) {
+          el("p", "Ad-hoc source discarded after import.", result).className = "muted"
+        }
+      } finally {
+        working = false
+        if (apply.isConnected && currentWiki?.id === wikiId) {
+          preview.disabled = !!writeReason()
+          apply.disabled = !approved || approved !== signature() || !!writeReason()
+        }
+      }
+    })
+    apply.disabled = true
     // Any destination or option change refreshes the expected paths and requires a new preview
     var changed = function() {
       showDestination()
@@ -2003,17 +2357,65 @@ async function absorbView(content) {
   const advanced = advancedOptions(content);
   const paths = field(advanced, "Paths (comma-separated; empty means all)"), tags = field(advanced, "Tags (comma-separated)"), topic = field(advanced, "Topic"), exclude = field(advanced, "Exclusions (comma-separated)");
   var budgets = await workflowTuning(advanced, "absorption", { absorbmaxpages: "Maximum pages", absorbmaxtokens: "Estimated aggregate model input tokens" });
-  button(content, "Generate saved plan", async () => {
-    const body = { action: "plan", tuning: budgets.values(), sourceWikiIds: selected.filter(([, box]) => box.checked).map(([id]) => id) };
-    for (const [k, input] of [["paths", paths], ["tags", tags], ["exclude", exclude]]) if (input.value.trim()) body[k] = input.value.split(",").map(s => s.trim()).filter(Boolean);
-    if (topic.value) body.topic = topic.value; await queue("absorptions", body);
-  }).disabled = currentWiki.access !== "rw" || !!modelReason("absorb");
-  if(modelReason("absorb"))el("p","Configure OAF_MODEL to generate a plan. Existing saved plans can still be applied.",content).className="muted";
-  const plan = field(content, "Saved plan ID");
-  for (const action of ["status", "show", "apply", "resume", "delete", "cancel"]) button(content, action, async () => {
-    if (["apply", "resume", "delete", "cancel"].includes(action) && !(await askConfirmation(action + " saved plan " + plan.value + "? Deleting a plan does not undo applied pages."))) return;
-    await queue("absorptions", { action, planId: plan.value, confirmation: { applySavedPlan: true } });
-  }).disabled = currentWiki.access !== "rw";
+  var generate = button(content, "Generate saved plan", async function() {
+    generate.disabled = true
+    try {
+      var body = { action: "plan", tuning: budgets.values(), sourceWikiIds: selected.filter(([, box]) => box.checked).map(([id]) => id) }
+      for (const [key, input] of [["paths", paths], ["tags", tags], ["exclude", exclude]]) {
+        if (input.value.trim()) body[key] = input.value.split(",").map(value => value.trim()).filter(Boolean)
+      }
+      if (topic.value) body.topic = topic.value
+      var job = await queue("absorptions", body)
+      var finished = await job.finished
+      if (content.isConnected) await listPlans(finished.result?.id)
+    } finally {
+      syncGenerate()
+    }
+  })
+  function syncGenerate() {
+    generate.disabled = !!writeReason("absorb") || !selected.some(([, box]) => box.checked)
+  }
+  selected.forEach(([, box]) => { box.onchange = syncGenerate })
+  syncGenerate()
+  if (modelReason("absorb")) el("p", "Configure OAF_MODEL to generate a new plan.", content).className = "muted"
+  var library = el("section", undefined, content)
+  // Use the server inventory so plans survive restarts and job-history cleanup.
+  async function listPlans(preferred) {
+    var plans = await allItems(wikiPath("absorptions"))
+    if (!content.isConnected) return
+    library.replaceChildren()
+    el("h4", "Saved plans", library)
+    button(library, "Refresh plans", () => listPlans())
+    if (!plans.length) {
+      el("p", "No saved plans for this wiki.", library)
+      return
+    }
+    var picker = field(library, "Saved plan", [])
+    el("option", "Choose a plan", picker).value = ""
+    for (const plan of plans) {
+      el("option", date(plan.createdAt) + " · " + plan.status + " · " + plan.id.slice(0, 12), picker).value = plan.id
+    }
+    picker.value = preferred || ""
+    var actions = row(library)
+    function draw() {
+      actions.replaceChildren()
+      var plan = plans.find(item => item.id === picker.value)
+      if (!plan) return
+      for (const action of plan.actions) {
+        button(actions, human(action) + " plan", async function() {
+          if (action !== "show" && !(await askConfirmation(human(action) + " saved plan " + plan.id + "?"))) return
+          var job = await queue("absorptions", { action, planId: plan.id, confirmation: { applySavedPlan: true } })
+          var finished = await job.finished
+          if (!content.isConnected) return
+          if (action === "show" || finished.status !== "completed") await jobDetail(job.id)
+          await listPlans(plan.id)
+        }).disabled = !!writeReason()
+      }
+    }
+    picker.onchange = draw
+    draw()
+  }
+  await listPlans()
 }
 function summaryView(content, health = false) {
   const wikiId = currentWiki.id, entry = SummaryCache.entry(wikiId);
@@ -2040,11 +2442,22 @@ function renderSummary(content, health, snapshot) {
   reports.forEach((report,index)=>{if(report.status==="rejected")el("p",["Wiki context","Health check","Graph status"][index]+": "+report.reason.message,content).className="error";});
   const info=reports[0].status==="fulfilled"?reports[0].value:{studio:{pageCount:"Unavailable",pendingRecovery:[]}},lint=reports[1].status==="fulfilled"?reports[1].value:{issues:[],total_issues:"Unavailable"},graph=reports[2].status==="fulfilled"?reports[2].value:{freshness:"Graph status unavailable"};
   const metrics=row(content);metrics.classList.add("metrics");
-  for(const [label,value] of [["Pages",info.studio.pageCount],["Findings",lint.total_issues ?? lint.issues?.length ?? 0],["Pending recovery",info.studio.pendingRecovery.length]]){const card=el("section",undefined,metrics);el("strong",String(value),card);el("span",label,card);}
+  for (var [label, value, target, pane] of [
+    ["Pages", info.studio.pageCount, "Pages"],
+    ["Findings", lint.total_issues ?? lint.issues?.length ?? 0, "Maintenance", "Health"],
+    ["Pending recovery", info.studio.pendingRecovery.length, "Maintenance", "Recovery"]
+  ]) {
+    const viewName = target, subview = pane
+    var card = el("button", undefined, metrics)
+    card.type = "button"
+    card.onclick = safely(() => navigate(viewName, true, undefined, subview))
+    el("strong", String(value), card)
+    el("span", label, card)
+  }
   if(info.studio.pendingRecovery.length)el("p","Recovery needs attention before further edits or imports.",content).className="error";
   if(health){
     const findings=lint.issues||[],counts={};findings.forEach(issue=>{const k=issue.type||issue.code||issue.kind||"Other";counts[k]=(counts[k]||0)+1;});
-    metricChart(content,lint.truncated?"Issue categories (loaded findings only)":"Issue categories",counts);
+
     const groups={};
     for(const issue of findings){const type=issue.type||issue.code||issue.kind||"Other";(groups[type] ||= []).push(issue);}
     for(const [type,issues] of Object.entries(groups)){
@@ -2060,6 +2473,7 @@ function renderSummary(content, health, snapshot) {
       }
     }
     if(lint.truncated){el("p","More findings are available.",content);button(content,"Load all findings",async()=>{let offset=findings.length,next;do{next=await StudioApi.wiki("lint?limit=100&offset="+offset);(next.issues||[]).forEach(issue=>{const section=el("section",undefined,content);el("p",issue.message||issue.path||human(issue.type),section);technical(issue,section);});offset+=(next.issues||[]).length;}while(next.truncated&&next.issues?.length);});}
+    if (findings.length) metricChart(content, lint.truncated ? "Issue categories (loaded findings only)" : "Issue categories", counts)
     if(!findings.length&&reports[1].status==="fulfilled")el("p","No findings in the reported check coverage.",content);
   }else{
     const jobs=snapshot.jobs.status==="fulfilled"?snapshot.jobs.value.items:[];
@@ -2068,12 +2482,12 @@ function renderSummary(content, health, snapshot) {
     if(snapshot.jobs.status==="rejected")el("p","Activity unavailable: "+snapshot.jobs.reason.message,content).className="error";
     else if(!active.length)el("p","No running jobs in this snapshot.",content);
 active.forEach(j=>button(content,human(j.operation)+" · "+human(j.status),()=>jobDetail(j.id)));
-    button(content,"Review wiki health",()=>navigate("Maintenance"));
+    button(content, "Review wiki health", () => navigate("Maintenance", true, undefined, "Health"))
   }
   el("p",graph.freshness,content);technical(info,content,"Wiki context");technical(graph,content,"Graph details");technical(lint,content,"Complete check result");
 }
 // Maintenance: Dream tasks plus health, backups, export and recovery tabs
-async function maintenanceView(content) {
+async function maintenanceView(content, selected) {
   el("p", "Mini-A’s Dream feature checks, repairs and reorganizes your wiki. Dream tasks suggests what to run based on the latest health check.", content)
   var tabs = row(content)
   var panel = el("div", undefined, content)
@@ -2086,7 +2500,8 @@ async function maintenanceView(content) {
   }
 
   // Replace the panel with the named tab
-  async function openTab(label) {
+  async function openTab(label, record = true) {
+    if (record) return navigate("Maintenance", true, undefined, label)
     tabButtons.forEach((b, name) => b.classList.toggle("selected", name === label))
     panel.replaceChildren()
     destroyDetachedCharts()
@@ -2095,7 +2510,7 @@ async function maintenanceView(content) {
 
   var tabButtons = new Map()
   Object.keys(renderers).forEach(label => tabButtons.set(label, button(tabs, label, () => openTab(label))))
-  await openTab("Dream tasks")
+  await openTab(Object.hasOwn(renderers, selected) ? selected : "Dream tasks", false)
 }
 // Dream task catalogue: what each engine mode does, when to choose it and what it touches
 var DREAM_TASKS = {
@@ -2336,6 +2751,7 @@ async function dreamsView(content, openTab) {
         option.type = "button"
         option.className = "dream-task"
         option.setAttribute("aria-pressed", String(mode === selectedMode))
+        option.dataset.mode = mode
         option.onclick = () => select(mode, true)
         var top = el("span", undefined, option)
         top.className = "dream-task-title"
@@ -2350,7 +2766,17 @@ async function dreamsView(content, openTab) {
   async function select(mode, fromList) {
     selectedMode = mode
     drawGroups()
+    // A dedicated detail screen gives the mobile task a visible return path.
+    if (fromList && matchMedia("(max-width: 1000px)").matches) {
+      content.classList.add("task-open")
+      optionsPanel.scrollIntoView({ block: "start" })
+    }
     optionsPanel.replaceChildren()
+    var back = button(optionsPanel, "Back to tasks", function() {
+      content.classList.toggle("task-open", false)
+      groupsHost.querySelector('[data-mode="' + selectedMode + '"]')?.focus()
+    }, "back")
+    back.className = "back-to-tasks"
     var task = DREAM_TASKS[mode]
     var title = task.title
 
@@ -2465,7 +2891,7 @@ async function dreamsView(content, openTab) {
     actions.classList.add("dream-actions")
     disable(button(actions, (mode === "compact" ? "Start " : "Start Dream · ") + title.toLowerCase(), start), writeReason(mode === "reorg"))
     technical({ engineMode: mode }, optionsPanel)
-    if (fromList && window.matchMedia("(max-width: 1000px)").matches) optionsPanel.scrollIntoView({ behavior: "smooth", block: "start" })
+
   }
 
   // Refresh suggestions whenever the shared health snapshot changes
@@ -2486,22 +2912,69 @@ async function dreamsView(content, openTab) {
   await select(selectedMode)
   SummaryCache.load(wikiId)
 }
-async function recoveryView(content){
-  el("p","Review engine recovery before retrying partial work. Cancelling a job does not roll back changes.",content);
-  button(content,"Inspect ingestion recovery",()=>queue("ingestions",{action:"recovery"}));const recovery=field(content,"Ingestion recovery ID");
-  for(const action of ["resume","discard"])disable(button(content,human(action)+" ingestion recovery",async()=>{if(await askConfirmation(human(action)+" this recovery journal? Discarding a journal does not undo imported pages."))await queue("ingestions",{action,recoveryId:recovery.value});}),writeReason());
-  el("p","For absorption, use the saved plan controls in Import from another wiki. Backups can restore a verified earlier state.",content);button(content,"Open activity",()=>navigate("Activity"));
+// Show actionable journal identities only after the engine has inspected them.
+async function recoveryView(content) {
+  var overview = await StudioApi.wiki("overview")
+  var pending = overview.studio.pendingRecovery
+  el("h4", "Recovery journals", content)
+  if (!pending.length) el("p", "No pending recovery journals.", content)
+  for (const item of pending) el("p", human(item.kind) + " · " + human(item.phase), content)
+  if (pending.some(item => item.kind === "ingest")) {
+    var journals = el("div", undefined, content)
+    var inspect = button(content, "Inspect ingestion recovery", async function() {
+      inspect.disabled = true
+      try {
+        var job = await queue("ingestions", { action: "recovery" })
+        var finished = await job.finished
+        journals.replaceChildren()
+        var entries = finished.result?.recoveries
+        if (!Array.isArray(entries)) {
+          button(journals, "Inspect activity", () => jobDetail(job.id))
+          return
+        }
+        if (!entries.length) el("p", "No pending ingestion journals.", journals)
+        for (const entry of entries) {
+          var line = row(journals)
+          el("strong", entry.scope?.section || entry.id, line)
+          el("span", entry.error || human(entry.phase), line)
+          if (entry.invalid) continue
+          for (const action of ["resume", "discard"]) {
+            button(line, human(action), async function() {
+              if (!(await askConfirmation(human(action) + " journal " + entry.id + "? Discarding a journal keeps any pages already written."))) return
+              var next = await queue("ingestions", { action, recoveryId: entry.id })
+              await next.finished
+              if (content.isConnected) await navigate("Maintenance", false, undefined, "Recovery")
+            })
+          }
+        }
+      } finally {
+        inspect.disabled = !!writeReason()
+      }
+    })
+    disable(inspect, writeReason())
+  }
+  if (pending.some(item => item.kind === "absorb")) {
+    el("p", "Use the saved plan in Import from another wiki to resume absorption.", content)
+    button(content, "Open saved plans", () => navigate("Import", true, undefined, "plans"))
+  }
+  button(content, "Open activity", () => navigate("Activity"))
 }
 async function exportsView(content) {
   const section=el("section",undefined,content);el("h4","Export wiki",section);
   el("p","Create a ZIP with every page plus the search index and graph, ready to use on another Mini-A instance — for example unzip it and upload all files to an S3 bucket prefix. The wiki is not changed.",section);
-  const loose=check(section,"Keep index folders loose (do not create mini-a-wiki-index.zip)");
-  el("small","Default: pages plus a single mini-a-wiki-index.zip for S3 or HTTP hosting. Loose: the index folders are stored directly inside the ZIP.",section).className="muted";
+  const advanced = advancedOptions(section)
+  const loose=check(advanced,"Keep index folders loose (do not create mini-a-wiki-index.zip)");
+  el("small","Default: pages plus a single mini-a-wiki-index.zip for S3 or HTTP hosting. Loose: the index folders are stored directly inside the ZIP.",advanced).className="muted";
   const refresh=async()=>{content.replaceChildren();destroyDetachedCharts();await exportsView(content);};
   button(section,"Create export",async()=>{const job=await queue("exports",{nobundle:loose.checked});await job.finished;if(section.isConnected)await refresh();},"download");
   button(section,"Refresh",refresh);
-  const items=await allItems(wikiPath("exports")),table=dataTable(section,["Created","Layout","Pages","Size","Actions"]);
-  if(!items.length)el("p","No exports yet. The five most recent exports are kept.",section);
+  section.append(advanced)
+  const items = await allItems(wikiPath("exports"))
+  if (!items.length) {
+    el("p", "No exports yet. The five most recent exports are kept.", section)
+    return
+  }
+  const table = dataTable(section, ["Created", "Layout", "Pages", "Size", "Actions"])
   for(const item of items){const r=el("tr",undefined,table);el("td",date(item.createdAt),r);el("td",item.mode==="folders"?"Loose index folders":"Nested mini-a-wiki-index.zip",r);el("td",String(item.pages),r);el("td",bytes(item.size),r);const actions=el("td",undefined,r);
     button(actions,"Download",async()=>{const blob=await StudioApi.raw(wikiPath("exports/"+item.id+"/download"),{},response=>response.blob()),url=URL.createObjectURL(blob),a=el("a",undefined,actions);a.href=url;a.download=currentWiki.id+"-"+String(item.createdAt).slice(0,10)+".zip";a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);},"download");
     button(actions,"Delete",async()=>{if(!(await askConfirmation("Delete the export from "+date(item.createdAt)+" ("+bytes(item.size)+")?")))return;await StudioApi.wiki("exports/"+item.id,"DELETE",{confirmation:item.id});await refresh();});
@@ -2512,7 +2985,14 @@ async function backupsView(content) {
   el("p","Verification checks snapshot integrity automatically. Manual and automatic snapshots can be removed when no active work or recovery depends on them.",section);
   disable(button(section,"Create snapshot",async()=>{const job=await queue("backups",{});await job.finished;if(section.isConnected){content.replaceChildren();destroyDetachedCharts();await backupsView(content);}}),writeReason());
   button(section,"Refresh",async()=>{content.replaceChildren();destroyDetachedCharts();await backupsView(content);});
-  const backups=await allItems(wikiPath("backups"));
+  const backups = await allItems(wikiPath("backups"))
+  if (!backups.length) {
+    el("p", "No restore points yet. Create a snapshot to save this wiki.", section)
+    return
+  }
+  var latest = backups.filter(b => b.verified).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+  var status = el("p", latest ? "Latest verified restore point · " + date(latest.createdAt) : "No verified restore point.", section)
+  section.insertBefore(status, section.children[1])
 
   // Reload the tab after a change
   async function reload(){content.replaceChildren();destroyDetachedCharts();await backupsView(content);}
@@ -2546,7 +3026,7 @@ async function backupsView(content) {
   all.onchange=()=>{for(const [id,box] of boxes){if(box.disabled)continue;box.checked=all.checked;all.checked?selection.add(id):selection.delete(id);}sync();};
 
   const table=dataTable(section,["Select","Created","Origin","Size","Verification","Actions"]);
-  if(!backups.length)el("p","No snapshots yet.",section);
+
   for(const backup of backups){const r=el("tr",undefined,table),cell=el("td",undefined,r),box=check(cell,"Select "+date(backup.createdAt));
     box.disabled=!!writeReason()||!backup.deletion?.allowed;box.title=box.disabled?(writeReason()||backup.deletion?.reason||"Unavailable"):"";
     box.onchange=()=>{box.checked?selection.add(backup.id):selection.delete(backup.id);sync();};boxes.push([backup.id,box]);

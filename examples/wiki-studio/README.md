@@ -15,9 +15,9 @@ ojob mini-a-wiki-studio.yaml studiohome=/private/tmp/studio-demo/state \
 2. Open Alpha → Pages, open `alpha.md`, edit and Save. Frontmatter comments stay
    intact. Beta's file remains independent. A second editor with an old revision
    receives a conflict instead of overwriting newer content.
-3. Open Graph → Open graph. With no snapshot, the existing exporter shows Markdown
+3. Open Pages → Graph. With no snapshot, the existing exporter shows Markdown
    links. Download offline HTML if the browser blocks sandboxed Blob frames.
-   Queue a rebuild with semantic unchecked, then reopen after Jobs completes.
+   Expand Build or update graph and queue a structural rebuild, then reopen after Jobs completes.
 4. Sources → upload the `examples/wiki-studio/source` directory (or ZIP containing
    its Markdown file), source ID `lessons`. Review the staged inventory. Choose
    `raw` and Preview, then Apply. Inspect job logs and the created pages. Upload
