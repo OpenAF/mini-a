@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20261127'
+version: '20261128'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -133,6 +133,12 @@ files:
 - examples/planning-demo.sh
 - examples/summary.agent.md
 - examples/summary.yaml
+- examples/wiki-mcp-starter/README.md
+- examples/wiki-mcp-starter/wiki/index.md
+- examples/wiki-mcp-starter/wiki/operations/scheduler.md
+- examples/wiki-mcp-starter/wiki/team-handbook-guide/SKILL.md
+- examples/wiki-mcp-starter/wiki/team-handbook-guide/references/terminology.md
+- examples/wiki-mcp-starter/wiki/team-handbook-guide/references/workflows/finding-current-procedures.md
 - examples/wiki-studio/README.md
 - examples/wiki-studio/alpha.md
 - examples/wiki-studio/beta.md
@@ -357,7 +363,7 @@ filesHash:
   docs/WIKI-RETRIEVAL-V2.md: 460b2bcd3b42d43fa68dc5ce2ec105da500cf86c
   docs/WIKI-STUDIO-IMPLEMENTATION.md: 763c1ce0e6268f1853823fb1e904b65be651bb5c
   docs/WIKI-STUDIO.md: 11512eec9ad7514a36961d876c489542a5635e59
-  docs/WIKI.md: 74b6ee3127ee6e4800120404cc6a191646e0ade0
+  docs/WIKI.md: 83fdeea8be8907820b0a2856ca4ba9bae4f338c5
   docs/WORKERS-QUICKSTART.md: 8090219ee3eb7d281bd1029c8f1dfb91ee52159a
   docs/WORKIQ.md: 9d2a64d6e06e148775a77b8c4df40427ffb16524
   docs/examples/embed-parent.html: 424f23db52096d9c01155656e8c607a20878ed04
@@ -393,6 +399,12 @@ filesHash:
   examples/planning-demo.sh: 05c0ef0a5f2452466a01e80158434de0ed29a9a3
   examples/summary.agent.md: 0b905903b83399d995f54f81d139dbc82ac9f6ff
   examples/summary.yaml: 335a9a581b5bb0561b2d5db19d39f04830f31209
+  examples/wiki-mcp-starter/README.md: 3bc3a0f0a3eecdafe94f1a922d0b9d35c1856767
+  examples/wiki-mcp-starter/wiki/index.md: b4bca81c872781872be28f4af81043949f59caeb
+  examples/wiki-mcp-starter/wiki/operations/scheduler.md: 40716adf5d55305d050c98eefeaa9950dc323d7e
+  examples/wiki-mcp-starter/wiki/team-handbook-guide/SKILL.md: 36b1d7b5cb057ac2cb2d06d65a539743617918f9
+  examples/wiki-mcp-starter/wiki/team-handbook-guide/references/terminology.md: 6265dacb85076a332610cd0f029cc58c494d3973
+  examples/wiki-mcp-starter/wiki/team-handbook-guide/references/workflows/finding-current-procedures.md: 816a6b447955fd85fae56fb04f5565dcf8bfec0d
   examples/wiki-studio/README.md: 4e06c3a9a1dfaef975b46474713a00bfef7180e9
   examples/wiki-studio/alpha.md: 2cb6822fbb17a4d75691d71f3284f254ff184902
   examples/wiki-studio/beta.md: e26b434de10df30c06cdb2af6746f1684b36af75
@@ -462,7 +474,7 @@ filesHash:
   js/wiki/mini-a-graph-upgrade.js: b9818939ddeaf5b40e570d23238a35d10077c2ae
   js/wiki/mini-a-graph.js: f3d9ac62d1243be30665c004c4a024463ee2d149
   js/wiki/mini-a-ingest.js: 9421f244692ce13f5c96ba8eacbf98edb8aefb14
-  js/wiki/mini-a-mcp-wiki.js: a535147a30ee46e163fae37853146419dd9b93f2
+  js/wiki/mini-a-mcp-wiki.js: ccf827fd69c71532abfa77df5becab891a237c4f
   js/wiki/mini-a-office-parts.js: dfd5b4fc961138655c39fead708e028308659113
   js/wiki/mini-a-wiki-embeddings.js: 258805ed2e05b125c6d48081869036f09fc75070
   js/wiki/mini-a-wiki-export.js: 2c43e40d61eba88146a28dd07829190bd088a0ca
@@ -474,7 +486,7 @@ filesHash:
   js/wiki/mini-a-wikiops.js: 444db6bfa9fd34e60804139ce621e301e679cc5e
   mcps/CREATING.md: 96bae262502f3fc47b4431a4234253f03cc3366a
   mcps/EXTERNAL-MCPS.md: 152d0db701bc3ee259d4184f08fdce3ca2b0d332
-  mcps/README.md: b9a8d802d10e775c7c8667bf50b75d9940ae1ee5
+  mcps/README.md: f36580e9662145517692bf11749584a6c7e6e48a
   mcps/mcp-a2a.yaml: 9601fe0562cf9b0ead111d9e2d2c00764192e86a
   mcps/mcp-aws-athena.yaml: 93d863b3c49f58194610367c2b73d6a2fe73e6b1
   mcps/mcp-ch.yaml: 4f9c7c4529904a68cfe59bdc402b418d5b43ff0c
@@ -507,8 +519,8 @@ filesHash:
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: e28dfa9ffdb60853dc941c18f6a82d763e25b3c2
   mcps/mcp-wiki-ops.yaml: cffaf7d2f609f82a732e5eaef57000683da0d587
-  mcps/mcp-wiki-safe.yaml: de83dfb563e062b2aab5aee7be8c6c3ca71cc3b5
-  mcps/mcp-wiki.yaml: ef67e076bab80dfb10d1d26aeb8138f258aef2ab
+  mcps/mcp-wiki-safe.yaml: fdda0579e961345e8cb2bb27dd09d0ac71a00b6b
+  mcps/mcp-wiki.yaml: 1be5c33fb1a9298aacb263558115a17755b5177e
   mcps/mcp-workiq.yaml: 10709d2dccf1032ac4826e8cb512cfb88bf4d14a
   mini-a-absorb.yaml: ea97adb587d515113bfd2b021c2e928e042fe49e
   mini-a-artifact-worker.yaml: 771cdffc2e30d885f145eb47e39c9d485d30a752
@@ -536,7 +548,7 @@ filesHash:
   public/embed-context.js: 5a0be6f139672eabbbd12f28efe2e749dfa43c44
   public/embed.js: 7e81a9dcab2e516a9939bce26cae967505de31fa
   public/favicon.ico: 7d62af53ff8c43ba32d022107153e6877567ba75
-  public/index.md: 31c3709f6887cbea3c087aa60db15ee3327e0751
+  public/index.md: c600b5c1800e1df241a24783547640d31515b916
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   public/studio/index.html: ef96bd8d898269d8394b3d6ce67c5056b2b85a3f
   public/studio/studio.css: a93f70472efd51b44733023124723865c8a47125
@@ -565,8 +577,8 @@ filesHash:
   skills/mini-a-visual-output/references/mermaid-planning.md: cce5b9f1d745c90747aa34adb4fc0a4d26cd84e4
   skills/mini-a-visual-output/references/mermaid-structure.md: 7ae4c89213ef10ba2dadf27bbc92eb486176477a
   skills/mini-a-visual-output/references/mermaid.md: e9591dfc9cc1d1d2e9bca66af424da958e3ec653
-  skills/mini-a-wiki-retrieval/SKILL.md: b3492e2955cb4cd2aa45189be57e9ed940e697c9
-  skills/mini-a-wiki-retrieval/references/retrieval.md: 5a89fd51b99ceaa598ac9116479f7f9d0a86c2b3
+  skills/mini-a-wiki-retrieval/SKILL.md: d2ad34d1dc5dd9f04c8474ab7e1f218ba2a34a83
+  skills/mini-a-wiki-retrieval/references/retrieval.md: 0986348c8e8705182edba2f1e3663e025145c674
   utils/graphStats.yaml: 2aa4f5c29889857033d4eb634bce68b8e62e3635
   utils/indexStats.yaml: 7fc4b114655146b3b3f94813949867485917bacd
   utils/wikiCompact.yaml: bec7795ef9992245afbe11510857d23a5a08fbe4
