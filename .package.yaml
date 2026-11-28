@@ -326,7 +326,7 @@ filesHash:
   CONTRIBUTING.md: 3c2b6d37d6c672b17795f0e9ddc9cea117d522c1
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   METRICS.md: 7dd872f40105f3c2156a64f15bdf0bfa8ac5661b
-  README.md: c70950a5f63f15a0f20a1d89acb0747e182ea668
+  README.md: c6cef3012b8f5d0561f68579d1d2d3912a08068f
   RELEASE_NOTES.md: fabd2aca0502fdae5b84d3180310daf74c27f2e6
   USAGE.md: 6f3df8adef2d9fd762576af464e0d14700831ce4
   clean.yaml: c19639b07dfe6ae22032aff24c8997ab9860ad33
@@ -413,11 +413,11 @@ filesHash:
   js/core/mini-a-response.js: 8670172ba964e0a30d70ed0458889b2dc3b81967
   js/core/mini-a-router.js: 381d0f2d34864fdca03d5d4f528fa0f827bbed48
   js/core/mini-a-sandbox.js: d2cb513e2bcde93fe9b9ba235e6fd5d7fb3743f5
-  js/core/mini-a-subtask.js: 27f69fb3e17aab40bee24d1c98e9ecb8a31e64ba
+  js/core/mini-a-subtask.js: 51c9bc0d4bced8ddf07dbdd8e1b1d20b075bdd91
   js/core/mini-a-supervised.js: f7aee934432fc16da7dcf9c9372afb0c5acbe11c
   js/core/mini-a-tool-selection.js: d0f59644dfd87d5228eaa36902873121b667c537
   js/core/mini-a-utils.js: c62230f4e3a4d5edb84529bd2ab75d350e237e9a
-  js/core/mini-a.js: fcbc4fb65389ed4e693d4af62102b3408566dc9b
+  js/core/mini-a.js: c2e7b945db994f09097f9de3b33827da6645c5d5
   js/memory/mini-a-dreams.js: 577ea92da3d1003c6634e06222d3de14700cb660
   js/memory/mini-a-embeddings.js: b2ae391628a2afd4305ccea473cd35158cdaae7e
   js/memory/mini-a-history-vm.js: 62cc32c14658dc25b0387c7d40402551d8837e7d
@@ -536,7 +536,7 @@ filesHash:
   public/embed-context.js: 5a0be6f139672eabbbd12f28efe2e749dfa43c44
   public/embed.js: 7e81a9dcab2e516a9939bce26cae967505de31fa
   public/favicon.ico: 7d62af53ff8c43ba32d022107153e6877567ba75
-  public/index.md: 82fc2b942e5293c2469e5fce6c2d4589a5ec0f6c
+  public/index.md: 31c3709f6887cbea3c087aa60db15ee3327e0751
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   public/studio/index.html: ef96bd8d898269d8394b3d6ce67c5056b2b85a3f
   public/studio/studio.css: a93f70472efd51b44733023124723865c8a47125
