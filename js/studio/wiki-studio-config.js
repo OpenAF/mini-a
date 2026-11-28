@@ -79,6 +79,8 @@ var wikiStudioConfig = function(args, base) {
   WikiStudio.assert(maxStageBytes >= 1 && maxStageBytes <= 9007199254740991 && Math.floor(maxStageBytes) === maxStageBytes,
     400, "invalid_config", "studiomaxstagebytes must be a positive safe integer")
   var c = { maxSourceBytes: maxSourceBytes, maxOfficeSourceBytes: maxOfficeSourceBytes, maxBatchBytes: maxBatchBytes, maxStageBytes: maxStageBytes, home: home, roots: roots, host: host, origin: origin, port: port, token: token, openBrowser: !(args.openbrowser === false || String(args.openbrowser) === "false"), graphNonce: WikiStudio.id(), maxPageBytes: 1048576, maxBodyBytes: 2097152, workers: 2, base: __miniAPath(".", base) }
+  // Only the listener owns MCP transports. Worker configuration is persisted separately.
+  c.mcpOptions = { mode: args.mode, mcp: args.mcp, plugins: args.plugins, pluginsroot: args.pluginsroot, pluginsroots: args.pluginsroots, homedir: args.homedir, fileallow: args.fileallow, agentDir: args._agentBaseDir }
   c.directories=directories
   ;["sources", "jobs", "backups", "graph-cache", "locks", "audit"].forEach(function(d) { WikiStudio.privateDir(home + "/" + d) })
   WikiStudio.atomic(home + "/config.json", { version: 1, host: c.host, port: port, roots: roots, maxPageBytes: c.maxPageBytes, maxSourceBytes: c.maxSourceBytes, maxOfficeSourceBytes: c.maxOfficeSourceBytes, maxBatchBytes: c.maxBatchBytes, maxStageBytes: c.maxStageBytes, workers: c.workers })

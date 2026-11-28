@@ -3,6 +3,9 @@ include:
 ojob:
   logToConsole: false
 jobs:
+- name: Studio MCP captures
+  to: oJob Test
+  exec: args.func = require("tests/wikiStudio.js").testMcpCapture
 - name: Studio full rebuild
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testFullRebuild
@@ -94,6 +97,7 @@ jobs:
   to: oJob Test
   exec: args.func = require("tests/wikiStudio.js").testAbsorption
 todo:
+- Studio MCP captures
 - Studio workflow settings
 - Studio source migration and isolation
 - Studio inventory and lock namespaces

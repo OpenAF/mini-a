@@ -130,6 +130,7 @@ WikiStudioServer.prototype.dispatch = function(req) {
         return {items:items}
       })
     }
+    if (p.length === 6 && p[4] === "mcp") return this.mcpSourceRoute(req, w, p[5], role)
     if (this.wikiRoute) return this.wikiRoute(req, w, p.slice(4), role)
   }
   if (this.extraRoute) return this.extraRoute(req, p, role)
@@ -153,6 +154,7 @@ WikiStudioServer.prototype.start = function() {
   server.createContext("/", new com.sun.net.httpserver.HttpHandler({ handle: function(ex) { self.handle(ex) } }))
   this._httpExecutor=java.util.concurrent.Executors.newFixedThreadPool(8)
   server.setExecutor(this._httpExecutor); this.http = server
+  if (this.startMcpSources) this.startMcpSources()
   if (this.startJobs) this.startJobs()
   server.start()
   var url = c.origin || "http://127.0.0.1:" + c.port
@@ -190,7 +192,16 @@ WikiStudioServer.prototype.handle = function(ex) {
     while (iterator.hasNext()) { var item = iterator.next(); WikiStudio.assert(item.getValue().size() === 1, 400, "duplicate_header", "Duplicate headers are not accepted"); headers[String(item.getKey()).toLowerCase()] = String(item.getValue().get(0)) }
     if (path.indexOf("/api/") !== 0) {
       WikiStudio.assert(method === "GET", 405, "method_not_allowed", "Method not allowed")
-      var assets = { "/": ["index.html", "text/html"], "/studio.js": ["studio.js", "text/javascript"], "/studio.css": ["studio.css", "text/css"], "/js/openafsigil.js": ["js/openafsigil.js", "text/javascript", 1], "/js/chart.js": ["js/chart.js", "text/javascript", 1], "/js/njsmap.js": ["js/njsmap.js", "text/javascript", 1] }, asset = assets[path]
+      var assets = {
+        "/": ["index.html", "text/html"],
+        "/studio.js": ["studio.js", "text/javascript"],
+        "/studio-mcp.js": ["studio-mcp.js", "text/javascript"],
+        "/studio.css": ["studio.css", "text/css"],
+        "/js/openafsigil.js": ["js/openafsigil.js", "text/javascript", 1],
+        "/js/chart.js": ["js/chart.js", "text/javascript", 1],
+        "/js/njsmap.js": ["js/njsmap.js", "text/javascript", 1]
+      }
+      var asset = assets[path]
       WikiStudio.assert(asset, 404, "not_found", "Asset not found")
       mime = asset[1] + "; charset=utf-8"; result = asset[2] ? io.readFileString(getOpenAFJar() + "::" + asset[0]) : io.readFileString(c.base + "/public/studio/" + asset[0])
     } else {

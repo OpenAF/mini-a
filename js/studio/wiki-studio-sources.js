@@ -168,7 +168,7 @@ WikiStudioServer.prototype.migrateSources = function() {
     return report
   })
 }
-WikiStudioServer.prototype.sourceAdd = function(w, body) {
+WikiStudioServer.prototype.sourceAdd = function(w, body, mcpSource) {
   WikiStudio.fields(body, ["id", "name", "type", "uploadId", "directoryId", "url", "video", "lang", "filename", "adhoc"]); WikiStudio.name(body.id)
 
   // Ad-hoc sources are imported once and then discarded instead of kept in the library
@@ -182,7 +182,8 @@ WikiStudioServer.prototype.sourceAdd = function(w, body) {
     fileName = WikiStudio.markdownFileName(body.filename)
   }
 
-  var sourceType=body.type, origin
+  var sourceType = mcpSource ? "mcp" : body.type
+  var origin = mcpSource ? mcpSource.origin : __
   if(body.type==="web"||body.type==="youtube") {
     WikiStudio.assert(isString(body.name)&&body.name.length<=120,400,"invalid_source","Provide a source display name")
     var fetched=body.type==="web"?(WikiStudio.assert(isString(body.url)&&body.url.length<=2048,400,"invalid_url","Provide a URL"),WikiStudioOutbound.webpage(body.url)):(WikiStudio.assert(isString(body.video),400,"invalid_video","Provide a YouTube URL or video ID"),WikiStudioOutbound.youtube(body.video,body.lang))
@@ -233,6 +234,9 @@ WikiStudioServer.prototype.sourceAdd = function(w, body) {
   return WikiStudio.sourceLock(this.config.home, w.id, body.id, function() {
     return WikiStudio.lock(self.config.home, "upload-" + body.uploadId, function() {
       var existing = self.sourceGet(w, body.id)
+      // A staged MCP update can only replace the revision the operator reviewed.
+      if (mcpSource) WikiStudio.assert((existing ? existing.revision : null) === mcpSource.expectedRevision,
+        409, "source_changed", "Source revision changed. Reopen the source library before staging.")
       WikiStudio.assert(!adhoc || !existing || existing.adhoc === true, 409, "source_exists", "A library source already uses this ID; choose another ID for an ad-hoc import")
       WikiStudio.assert(!io.fileExists(dir + "/sealed.json"), 409, "upload_sealed", "Upload is already sealed")
       WikiStudio.assert(io.fileExists(dir + "/files"), 404, "upload_not_found", "Upload not found")

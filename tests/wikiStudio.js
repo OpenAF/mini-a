@@ -18,6 +18,43 @@
   var assert = function(actual, expected, note) { ow.test.assert(actual, expected, note) }
   function rejects(fn, code) { var error; try { fn() } catch(e) { error = e.code } assert(error, code, "Expected rejection: " + code) }
   function add(s, temp, access) { return s.registry.add({ id: "alpha", name: "Alpha", root: temp + "/wikis/existing", access: access || "rw" }) }
+  // Expiry and quota tests use a disposable Studio and a captured result without waiting for a timer.
+  exports.testMcpCapture = function() { fixture(function(server, temp) {
+    loadLib(__miniAPath("js/core/mini-a-launcher.js"))
+    loadLib(__miniAPath("js/studio/wiki-studio-mcp.js"))
+    var w = add(server, temp)
+    server.config.maxBatchBytes = 8192
+    server.config.maxSourceBytes = 8192
+    server.config.mcpOptions = { homedir: temp, mode: " ", mcp: [] }
+    server.startMcpSources()
+    assert(Object.keys(server.mcpConnections).length, 0, "Empty launch catalog")
+    var session = WikiStudio.id()
+    var body = { connection: "test", tool: "fixture" }
+    var result = server.captureMcpSource(w, session, body, "hello")
+    var req = { method: "POST", headers: { "x-studio-session": session }, body: { resultId: result.resultId, selection: null } }
+    assert(server.mcpSourceRoute(req, w, "preview", "admin").markdown, "hello", "Active capture")
+    server.mcpCaptures.get(result.resultId).expires = Date.now() - 1
+    rejects(function() { server.mcpSourceRoute(req, w, "preview", "admin") }, "capture_expired")
+    server.expireMcpCaptures()
+    assert(server.mcpCaptures.size, 0, "Expired payload released")
+
+    // Labels can identify a connection before discovery without disclosing its transport secrets.
+    assert(WikiStudio.mcpConnectionLabel({ url: "https://user:secret@example.test:8443/private?token=secret" }, 0), "example.test:8443", "Remote label uses host and port")
+    assert(WikiStudio.mcpConnectionLabel({ cmd: ["/opt/bin/ticket-mcp", "--key", "secret"] }, 0), "ticket-mcp", "Command label uses only the executable")
+    assert(WikiStudio.mcpConnectionLabel({ id: "reports", description: "Ticket reports" }, 0), "reports · Ticket reports", "Configured description identifies the connection")
+
+    // A result that expands beyond the byte limit can still supply a smaller document.
+    var values = []
+    for (var i = 0; i < 200; i++) {
+      var row = {}
+      row["field" + i] = 0
+      values.push(row)
+    }
+    result = server.captureMcpSource(w, session, body, { structuredContent: { title: "Report", values: values } })
+    assert(isString(result.warning), true, "Oversized formatted result needs a field selection")
+    req.body = { resultId: result.resultId, selection: [[0, "title"]] }
+    assert(server.mcpSourceRoute(req, w, "preview", "admin").markdown.indexOf("Report") > 0, true, "Small projection fits the quota")
+  }) }
   exports.testSourceIsolationAndMigration = function() { fixture(function(s,t) {
     var w = add(s,t), other = merge(w,{id:"alpha--part"})
     function upload(text) { var id=WikiStudio.id();s.streamUpload({role:"admin",headers:{"x-upload-id":id,"x-upload-path":"doc.md"}},new java.io.ByteArrayInputStream(WikiStudio.bytes(text)));return id }

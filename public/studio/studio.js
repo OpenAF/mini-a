@@ -88,7 +88,9 @@ const StudioApi = {
     });
   },
   async send(path, method = "GET", body, signal) {
-    const response = await fetch("/api/v1/" + path, { method, signal, headers: { Authorization: "Bearer " + this.token, "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() }, body: body === undefined ? undefined : JSON.stringify(body) });
+    var headers = { Authorization: "Bearer " + this.token, "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() }
+    if (/\/mcp\//.test(path)) headers["X-Studio-Session"] = this.mcpSession
+    const response = await fetch("/api/v1/" + path, { method, signal, headers, body: body === undefined ? undefined : JSON.stringify(body) })
     const result = await response.json();
     signal?.throwIfAborted();
     if (!response.ok) { const error = new Error(result.error?.message || "Request failed"); error.details = result.error?.details; error.status = response.status; throw error; }
@@ -298,6 +300,7 @@ const STATE_ICONS = { completed: "check", succeeded: "check", done: "check", fai
 const message = (text, error = false) => { const node = document.getElementById("message"); node.textContent = text; node.className = error ? "error" : ""; };
 const safely = fn => async (...args) => { try { await fn(...args); } catch (error) { message(error.message, error.name !== "AbortError"); } };
 async function unlock(token) {
+  StudioApi.mcpSession = crypto.randomUUID()
   StudioApi.token = token; studioSession = await StudioApi.request("session");
   showModelAvailability();
   document.getElementById("token").value = ""; document.getElementById("login").hidden = true; await dashboard();
@@ -1027,14 +1030,76 @@ async function showView(name, content) {
 // A deliberately small DOM renderer: raw HTML is always text. No innerHTML,
 // embedded media, remote images or executable links enter the Studio origin.
 function renderMarkdown(raw, parent) {
-  parent.replaceChildren();
-  const text = raw.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, ""); let code = false, pre;
-  for (const line of text.split(/\r?\n/)) {
-    if (/^```|^~~~/.test(line)) { code = !code; if (code) pre = el("pre", "", parent); continue; }
-    if (code) { pre.textContent += line + "\n"; continue; }
-    const heading = line.match(/^(#{1,6})\s+(.+)/); const block = el(heading ? "h" + heading[1].length : "p", undefined, parent);
-    const body = heading ? heading[2] : line; let last = 0;
-    const re = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]|\[([^\]]+)\]\(([^\s)]+)\)/g; let m;
+  parent.replaceChildren()
+  var lines = raw.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "").split(/\r?\n/)
+  var fence, pre, list
+
+  // Split OpenAF's Markdown table cells while preserving escaped pipes and backslashes.
+  function cells(line) {
+    var values = [""]
+    var text = line.trim().slice(1, -1)
+    for (var i = 0; i < text.length; i++) {
+      if (text[i] === "|") values.push("")
+      else if (text[i] === "\\" && i + 1 < text.length) values[values.length - 1] += text[i] + text[++i]
+      else values[values.length - 1] += text[i]
+    }
+    return values
+  }
+
+  // Insert cell content as text. Only the formatter's line break marker receives special treatment.
+  function tableRow(group, values, tag) {
+    var row = el("tr", undefined, group)
+    values.forEach(function(value) {
+      var cell = el(tag, undefined, row)
+      if (tag === "th") cell.scope = "col"
+      value.trim().replace(/\\([\\|])/g, "$1").split("<br>").forEach(function(part, index) {
+        if (index) cell.append(document.createElement("br"))
+        cell.append(document.createTextNode(part))
+      })
+    })
+  }
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i]
+    if (fence) {
+      if (line.trimEnd().startsWith(fence) && /^(`+|~+)\s*$/.test(line)) fence = ""
+      else pre.append(document.createTextNode(line + "\n"))
+      continue
+    }
+    var opening = line.match(/^(`{3,}|~{3,})/)
+    if (opening) {
+      fence = opening[1]
+      list = null
+      pre = el("pre", "", parent)
+      continue
+    }
+    if (!/^- /.test(line)) list = null
+    if (/^\|.*\|\s*$/.test(line) && /^\|(?:\s*:?-{3,}:?\s*\|)+\s*$/.test(lines[i + 1] || "")) {
+      var scroll = el("div", undefined, parent)
+      scroll.className = "table-scroll"
+      var table = el("table", undefined, scroll)
+      table.className = "studio-table"
+      tableRow(el("thead", undefined, table), cells(line), "th")
+      var tbody = el("tbody", undefined, table)
+      i++
+      while (i + 1 < lines.length && /^\|.*\|\s*$/.test(lines[i + 1])) {
+        tableRow(tbody, cells(lines[++i]), "td")
+      }
+      continue
+    }
+    var heading = line.match(/^(#{1,6})\s+(.+)/)
+    var body = heading ? heading[2] : line
+    var block
+    if (/^- /.test(line)) {
+      if (!list) list = el("ul", undefined, parent)
+      block = el("li", undefined, list)
+      body = line.slice(2)
+    } else {
+      block = el(heading ? "h" + heading[1].length : "p", undefined, parent)
+    }
+    var last = 0
+    var re = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]|\[([^\]]+)\]\(([^\s)]+)\)/g
+    var m
     while ((m = re.exec(body))) {
       block.append(document.createTextNode(body.slice(last, m.index))); const target = m[1] || m[4], label = m[2] || m[3] || m[1], wikiLink = !!m[1];
       if (/^https?:\/\//i.test(target)) { const a = el("a", label, block); a.href = target; a.target = "_blank"; a.rel = "noopener noreferrer"; }
@@ -1706,14 +1771,22 @@ async function sourcesView(content) {
   const nav=row(content),body=el("div",undefined,content);
   button(nav,"Source library",()=>library());button(nav,"Add source",()=>prepare());button(nav,"Import from another wiki",async()=>{body.replaceChildren();await absorbView(body);});
   async function library(){
-    body.replaceChildren();const sources=await allItems(wikiPath("sources"));
-    if(!sources.length){el("p","No sources yet. Add files, a webpage or video captions to begin.",body);button(body,"Add your first source",()=>prepare());return;}
-    const table=dataTable(body,["Source","Revision","Status","Actions"]);
+    body.replaceChildren()
+    var libraryView = el("div", undefined, body)
+    var sources = await allItems(wikiPath("sources"))
+    if (libraryView.parentElement !== body) return
+    if (!sources.length) {
+      el("p", "No sources yet.", libraryView)
+      button(libraryView, "Add your first source", () => prepare())
+      return
+    }
+    var table = dataTable(libraryView, ["Source", "Revision", "Status", "Actions"])
     for(const source of sources){const r=el("tr",undefined,table);el("td",source.name,r);el("td",String(source.revision).slice(0,12),r);el("td",human(source.lastStatus||source.status)+(source.adhoc?" · ad-hoc (not kept)":""),r);const actions=el("td",undefined,r);button(actions,"Preview and import",()=>review(source));button(actions,"Update source",()=>prepare(source));button(actions,"Details",()=>{body.replaceChildren();button(body,"Back to sources",library);technical(source,body,"Inventory and revision lineage").open=true;});button(actions,"Delete",()=>removeSource(source));}
   }
   async function prepare(existing){
     body.replaceChildren();el("h4",existing?"Update source: "+existing.name:"1. Choose a source",body);
-    const method=field(body,"Source method",["Files or ZIP","Folder","Webpage","YouTube captions","Local directory / checkout"]);
+    var method = field(body, "Source method", ["Files or ZIP", "Folder", "Webpage", "YouTube captions", "Local directory / checkout", "MCP tool call"])
+    if (existing?.type === "mcp") method.value = "MCP tool call"
 
     // Ad-hoc imports go straight to preview and import, and are discarded once imported
     var adhoc = null
@@ -1732,6 +1805,13 @@ async function sourcesView(content) {
         if(!name.value.trim()||!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id.value))throw new Error("Enter a source name and a valid lower-case source ID.");
         if(!existing){const known=await allItems(wikiPath("sources"));if(known.some(source=>source.id===id.value))throw new Error("That source ID already exists. Choose Update source from the library.");}
         const source=await StudioApi.wiki("sources","POST",{id:id.value,name:name.value.trim(),...payload,...(adhoc?.checked?{adhoc:true}:{})});await review(source);
+      }
+      if (method.value === "MCP tool call") {
+        var mcpPanel = el("div", undefined, panel)
+        renderMcpSource(mcpPanel, existing, name, id, adhoc, review).catch(function(error) {
+          if (mcpPanel.isConnected) status.textContent = error.message
+        })
+        return
       }
       if(method.value==="Webpage"){
         const url=field(inputRow,"Webpage URL");url.type="url";url.placeholder="https://example.com/article";

@@ -251,3 +251,9 @@ aside button{width:auto;display:inline-flex;margin:0}.page-tree{min-width:180px;
 @media (prefers-color-scheme: dark) {
   #model-availability { --model-warning: #ffd166; }
 }
+
+.mcp-source fieldset { min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
+.mcp-source textarea { min-height: 6em; }
+.mcp-source select { max-width: 100%; }
+.mcp-source .mcp-field .mcp-field { margin-inline-start: 1em; }
+.mcp-preview { max-height: 28em; overflow: auto; overflow-wrap: anywhere; }

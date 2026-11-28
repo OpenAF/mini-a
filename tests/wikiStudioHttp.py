@@ -22,6 +22,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--base", default=str(Path(__file__).resolve().parents[1]))
 args = parser.parse_args()
 base = Path(args.base).resolve()
+fixtures = Path(__file__).resolve().parent / "fixtures" / "documents"
 temp = Path(tempfile.mkdtemp(prefix="wiki-studio-http-", dir="/private/tmp"))
 token = "disposable-integration-token-" + uuid.uuid4().hex
 with socket.socket() as s:
@@ -94,7 +95,7 @@ try:
                 raise AssertionError((temp / "server.log").read_text())
             time.sleep(0.3)
     # Static assets must come from the selected package even from an unrelated cwd.
-    for route, relative in [("/", "index.html"), ("/studio.js", "studio.js"), ("/studio.css", "studio.css")]:
+    for route, relative in [("/", "index.html"), ("/studio.js", "studio.js"), ("/studio-mcp.js", "studio-mcp.js"), ("/studio.css", "studio.css")]:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}" + route, timeout=30) as response:
             assert response.status == 200
             assert response.read() == (base / "public/studio" / relative).read_bytes()
@@ -114,7 +115,7 @@ try:
     assert settings["maxfilesizeInherited"]
     assert settings["limits"] == {"maxfilesize": 134217728, "ordinaryBytes": 8388608, "officeBytes": 134217728}
     large_workbook = io.BytesIO()
-    sample = base / "tests" / "fixtures" / "documents" / "sample.xlsx"
+    sample = fixtures / "sample.xlsx"
     with zipfile.ZipFile(sample) as original, zipfile.ZipFile(large_workbook, "w") as enlarged:
         for name in original.namelist():
             content = original.read(name)
@@ -172,7 +173,7 @@ try:
     office_id = str(uuid.uuid4())
     for suffix in ("docx", "xlsx"):
         filename = "sample." + suffix
-        fixture = base / "tests" / "fixtures" / "documents" / filename
+        fixture = fixtures / filename
         request("uploads", "POST", headers={"X-Upload-ID": office_id, "X-Upload-Path": filename}, raw=fixture.read_bytes())
     request("wikis/a/sources", "POST", {"id": "office", "name": "Office", "type": "upload", "uploadId": office_id})
     office_run = {"sourceId": "office", "revision": office_id, "preview": True, "options": {"mode": "normalize", "officeparts": "always"}}
@@ -196,7 +197,7 @@ try:
     assert office_again["skipped_unchanged"] == 2
     # A small document still falls back if ordinary extraction truncates its text.
     long_document = io.BytesIO()
-    with zipfile.ZipFile(base / "tests/fixtures/documents/sample.docx") as original, zipfile.ZipFile(long_document, "w") as expanded:
+    with zipfile.ZipFile(fixtures / "sample.docx") as original, zipfile.ZipFile(long_document, "w") as expanded:
         for name in original.namelist():
             content = original.read(name)
             if name == "word/document.xml":
@@ -332,6 +333,23 @@ try:
     request("wikis/gone", "DELETE")
     assert "gone" not in {w["id"] for w in request("wikis")["items"]}
     assert not (root / "gone").exists()
+    # Check the parser diagnostic before the restart lowers the Office staging quota to 32 bytes.
+    with io.BytesIO() as workbook:
+        with zipfile.ZipFile(sample) as original, zipfile.ZipFile(workbook, "w") as broken:
+            for name in original.namelist():
+                data = original.read(name)
+                if name == "xl/worksheets/sheet1.xml":
+                    data = data.replace(b'<row r="1"', b'<row r="private-password-marker"', 1)
+                broken.writestr(name, data)
+        broken_id = str(uuid.uuid4())
+        broken_file = "Broken workbook.xlsx"
+        request("uploads", "POST", headers={"X-Upload-ID": broken_id, "X-Upload-Path": broken_file}, raw=workbook.getvalue())
+    request("wikis/a/sources", "POST", {"id": "broken-office", "name": "Broken Office", "type": "upload", "uploadId": broken_id})
+    broken_run = {"sourceId": "broken-office", "revision": broken_id, "options": {"officeparts": "always"}}
+    broken_result = job("wikis/a/ingestions", broken_run, expected="recovery-required")["result"]
+    assert broken_result["failed"] == [{"source": broken_file, "error": "Cannot extract Office document (java.lang.NumberFormatException, parser exit 1)"}], broken_result["failed"]
+    assert not broken_result["planned_writes"]
+
     # Simulate an abrupt crash; no active engine is being interrupted here.
     os.killpg(proc.pid, signal.SIGKILL)
     proc.wait(timeout=10)
@@ -386,23 +404,6 @@ try:
     stage_failure = job("wikis/a/ingestions", dict(large_run, preview=False), expected="recovery-required")["result"]
     assert any(item["source"] == "large.xlsx" and "staging" in item["error"] for item in stage_failure["failed"]), stage_failure
     assert prior_pages == {name: (root / "a" / name).read_bytes() for name in prior_pages}
-
-    # Parser failures show their exception type without leaking workbook values.
-    with io.BytesIO() as workbook:
-        with zipfile.ZipFile(sample) as original, zipfile.ZipFile(workbook, "w") as broken:
-            for name in original.namelist():
-                data = original.read(name)
-                if name == "xl/worksheets/sheet1.xml":
-                    data = data.replace(b'<row r="1"', b'<row r="private-password-marker"', 1)
-                broken.writestr(name, data)
-        broken_id = str(uuid.uuid4())
-        broken_file = "Broken workbook.xlsx"
-        request("uploads", "POST", headers={"X-Upload-ID": broken_id, "X-Upload-Path": broken_file}, raw=workbook.getvalue())
-    request("wikis/a/sources", "POST", {"id": "broken-office", "name": "Broken Office", "type": "upload", "uploadId": broken_id})
-    broken_run = {"sourceId": "broken-office", "revision": broken_id, "options": {"officeparts": "always"}}
-    broken_result = job("wikis/a/ingestions", broken_run, expected="recovery-required")["result"]
-    assert broken_result["failed"] == [{"source": broken_file, "error": "Cannot extract Office document (java.lang.NumberFormatException, parser exit 1)"}]
-    assert not broken_result["planned_writes"]
 
     print(f"PASS: {checks} HTTP assertions; real isolated worker, raw ingest, plan, graph, indexes, backup and restore; no model/network")
 finally:

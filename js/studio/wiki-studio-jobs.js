@@ -81,6 +81,7 @@ WikiStudioServer.prototype.startJobs = function() {
   $doV(function() {
     while (self.http) {
       try {
+        if (self.expireMcpCaptures) self.expireMcpCaptures()
         var queued = self.jobs.list().filter(function(j) { return j.status === "queued" }).reverse(), selected = {}
         queued.forEach(function(j) {
           if (self._running.get() >= c.workers || selected[j.wikiId]) return

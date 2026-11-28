@@ -336,6 +336,24 @@ empty-source destructive authorization is not exposed. No force-overwrite option
 is exposed. Ingestion recovery list/resume/discard is available through the
 ingestions endpoint with `action` and optional `recoveryId`; discard is not rollback.
 
+### Import an MCP tool result
+
+In **Import → Add source**, choose **MCP tool call**. Studio lists the connections supplied with `mcp=` and servers from enabled Mini-A plugins. For example, start Studio with `mcp='(id:math,type:ojob,options:(job:mcps/mcp-math.yaml))'`. The picker shows the configured name, job filename or another connection hint. Selecting a connection adds its advertised server title or name when available. Give connections stable IDs so saved sources can find them after a configuration change.
+
+Choose a connection and tool, fill in the required arguments, and tick **Include** for each optional argument you want to send. **Call tool** runs immediately and can affect the connected system. After a timeout, check the connected system before calling again.
+
+Choose the whole result or tick fields to keep. Selecting fields beneath a list applies that selection to every item in order. Structured results use the same Markdown formatting as oafp’s `out=md`, with headings, lists and tables. In a table, a blank cell represents a missing field or an empty string, while `null` is shown explicitly. **Use this result** stages one Markdown file named for the source ID (reserved names get a `source-` prefix) and opens the normal import review. Preview and import reuse that document. Studio holds unused captures in memory for 15 minutes. A library update restores the connection, tool and field selection and prompts for fresh arguments. For a one-time import, enable the existing ad-hoc option.
+
+For API clients, the wiki-scoped base is `/api/v1/wikis/<wiki-id>/mcp/`. Use the Studio bearer token and reuse one random UUID in `X-Studio-Session` for the three POST operations.
+
+| Request | Purpose |
+| --- | --- |
+| `GET connections` | List connection IDs and display labels. |
+| `GET tools?connection=<id>` | List tool names, descriptions and input schemas. |
+| `POST call` | Send `connection`, `tool` and an `arguments` object. A successful call returns a `resultId`, available field paths and a Markdown preview. |
+| `POST preview` | Send `resultId` and `selection`. Use `null` for the whole result or a list of paths from `fields` for a projection. |
+| `POST stage` | Send the same selection, source `id`, display `name`, optional `adhoc`, and `expectedRevision`. Use `null` for a new source or the current revision for an update. Successful staging consumes the capture. |
+
 ## Absorption
 
 Absorb selects other registered fs wikis and optional paths/tags/topic/exclusions.

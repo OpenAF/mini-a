@@ -18299,53 +18299,7 @@ MiniA.prototype._resolveAgentProfilePath = function(rawAgent) {
   return __
 }
 
-MiniA.prototype._inspectMcpJobPath = function(jobPath, searchDirs) {
-  var result = { jobPath: jobPath, defaultDir: __ }
-  if (!isString(jobPath)) return result
-
-  var candidate = jobPath.trim()
-  if (candidate.length === 0 || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(candidate)) return result
-
-  var normalizedDirs = []
-  if (isArray(searchDirs)) {
-    searchDirs.forEach(function(dir) {
-      if (!isString(dir) || dir.trim().length === 0) return
-      try {
-        normalizedDirs.push(String(new java.io.File(dir.trim()).getCanonicalPath()))
-      } catch(ignoreDirError) { }
-    })
-  }
-
-  var fileCandidate = new java.io.File(candidate)
-  if (fileCandidate.isAbsolute()) {
-    try {
-      var canonicalCandidate = String(fileCandidate.getCanonicalPath())
-      for (var ai = 0; ai < normalizedDirs.length; ai++) {
-        var baseDir = normalizedDirs[ai]
-        var prefix = baseDir.endsWith(String(java.io.File.separator)) ? baseDir : baseDir + String(java.io.File.separator)
-        if (canonicalCandidate.indexOf(prefix) === 0) {
-          result.jobPath = canonicalCandidate.substring(prefix.length)
-          result.defaultDir = baseDir
-          return result
-        }
-      }
-    } catch(ignoreAbsoluteError) { }
-    return result
-  }
-
-  for (var i = 0; i < normalizedDirs.length; i++) {
-    try {
-      var resolved = String(new java.io.File(normalizedDirs[i], candidate).getCanonicalPath())
-      if (io.fileExists(resolved) && io.fileInfo(resolved).isFile === true) {
-        result.jobPath = candidate
-        result.defaultDir = normalizedDirs[i]
-        return result
-      }
-    } catch(ignoreResolveError) { }
-  }
-
-  return result
-}
+MiniA.prototype._inspectMcpJobPath = MiniALauncher.inspectMcpJobPath
 
 MiniA.prototype._normalizeMcpJobPaths = function(mcp, searchDirs) {
   var current = mcp
